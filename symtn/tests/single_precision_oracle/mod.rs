@@ -31,7 +31,7 @@ use symtn::typed::{GradedSpace, Runtime};
 pub const K: f64 = 32.0;
 
 pub fn runtime() -> Runtime {
-    Runtime::builder().dense_threads(1).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 /// Payload values that a single-precision tensor and its double-precision twin
@@ -115,16 +115,16 @@ pub fn minus_one<D: Parts>() -> D {
 /// `from_subblock_fn` for both instantiations.
 #[macro_export]
 macro_rules! twin {
-    ($rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
+    ($engine:ident, $rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
         let mut state = $seed;
         let narrow: symtn::typed::TensorMap<_, $narrow> =
-            symtn::typed::TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, _| {
+            symtn::typed::TensorMap::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
                 $crate::single_precision_oracle::draw_parts(&mut state)
             })
             .unwrap();
         let mut state = $seed;
         let wide: symtn::typed::TensorMap<_, $wide> =
-            symtn::typed::TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, _| {
+            symtn::typed::TensorMap::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
                 $crate::single_precision_oracle::draw_parts(&mut state)
             })
             .unwrap();
@@ -140,20 +140,31 @@ macro_rules! twin {
 /// single-precision one entry by entry.
 #[macro_export]
 macro_rules! twin_with {
-    ($rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $entry:expr) => {{
+    ($engine:ident, $rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $entry:expr) => {{
         let entry = $entry;
         let narrow: symtn::typed::TensorMap<_, $narrow> =
-            symtn::typed::TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, index| {
-                let (re, im) = entry(index);
-                <$narrow as $crate::single_precision_oracle::Parts>::parts(re, im)
-            })
+            symtn::typed::TensorMap::from_subblock_fn(
+                $engine,
+                $rt,
+                $codomain,
+                $domain,
+                |_, index| {
+                    let (re, im) = entry(index);
+                    <$narrow as $crate::single_precision_oracle::Parts>::parts(re, im)
+                },
+            )
             .unwrap();
-        let wide: symtn::typed::TensorMap<_, $wide> =
-            symtn::typed::TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, index| {
+        let wide: symtn::typed::TensorMap<_, $wide> = symtn::typed::TensorMap::from_subblock_fn(
+            $engine,
+            $rt,
+            $codomain,
+            $domain,
+            |_, index| {
                 let (re, im) = entry(index);
                 <$wide as $crate::single_precision_oracle::Parts>::parts(re, im)
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         (narrow, wide)
     }};
 }

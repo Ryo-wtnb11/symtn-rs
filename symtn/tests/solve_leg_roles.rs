@@ -9,6 +9,7 @@ use symtn::typed::{Error, GradedSpace, Runtime, SectorSpectrum, TensorMap};
 
 #[test]
 fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Isolated: the completed-transformer counters are process-global.
     if run_isolated_or_return(
@@ -17,10 +18,10 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let a: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, ij| {
             if ij[0] == ij[1] && ij[2] == ij[3] {
                 2.0
             } else {
@@ -29,7 +30,7 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         })
         .unwrap();
     let b: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, ij| {
             (1 + ij[0] + 2 * ij[1] + 3 * ij[2] + 4 * ij[3]) as f64
         })
         .unwrap();
@@ -37,14 +38,16 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
     let a_cols = &[1, 3];
     let b_rows = &[1, 3];
     let b_cols = &[0, 2];
-    let actual = a.solve(a_rows, a_cols, &b, b_rows, b_cols).unwrap();
-    let pa = a.permute(a_rows, a_cols).unwrap();
-    let pb = b.permute(b_rows, b_cols).unwrap();
-    let expected = pa.solve(&[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3]).unwrap();
+    let actual = a.solve(engine, a_rows, a_cols, &b, b_rows, b_cols).unwrap();
+    let pa = a.permute(engine, a_rows, a_cols).unwrap();
+    let pb = b.permute(engine, b_rows, b_cols).unwrap();
+    let expected = pa
+        .solve(engine, &[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3])
+        .unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(actual.codomain(), pa.domain());
     assert_eq!(actual.domain(), pb.domain());
-    let rebuilt = pa.compose(&actual).unwrap();
+    let rebuilt = pa.compose(engine, &actual).unwrap();
     for (&x, &y) in rebuilt
         .dense_data()
         .unwrap()
@@ -54,17 +57,22 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         assert!((x - y).abs() < 1e-11);
     }
 
-    let ac = a.convert::<Complex64>();
+    let ac = a.convert::<Complex64>(engine).unwrap();
     let bc = b
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, 0.5))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, 0.5))
         .unwrap();
-    let actual = ac.solve(a_rows, a_cols, &bc, b_rows, b_cols).unwrap();
-    let pa = ac.permute(a_rows, a_cols).unwrap();
-    let pb = bc.permute(b_rows, b_cols).unwrap();
-    let expected = pa.solve(&[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3]).unwrap();
+    let actual = ac
+        .solve(engine, a_rows, a_cols, &bc, b_rows, b_cols)
+        .unwrap();
+    let pa = ac.permute(engine, a_rows, a_cols).unwrap();
+    let pb = bc.permute(engine, b_rows, b_cols).unwrap();
+    let expected = pa
+        .solve(engine, &[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3])
+        .unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
-    let rebuilt = pa.compose(&actual).unwrap();
+    let rebuilt = pa.compose(engine, &actual).unwrap();
     for (&x, &y) in rebuilt
         .dense_data()
         .unwrap()
@@ -75,15 +83,15 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
     }
 
     assert!(
-        matches!(a.solve(&[0, 0], &[1, 3], &b, b_rows, b_cols), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(a.solve(engine, &[0, 0], &[1, 3], &b, b_rows, b_cols), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
     assert!(
-        matches!(a.solve(a_rows, a_cols, &b, &[0, 0], &[1, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(a.solve(engine, a_rows, a_cols, &b, &[0, 0], &[1, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
 
     let before = completed_transformers();
     assert!(matches!(
-        a.solve(a_rows, a_cols, b.adjoint_view(), b_rows, b_cols),
+        a.solve(engine, a_rows, a_cols, b.adjoint_view(), b_rows, b_cols),
         Err(Error::Unsupported {
             operation: "solve",
             ..
@@ -95,21 +103,30 @@ fn solve_roles_equal_explicit_permutation_and_reconstruct_rhs() {
         after.hits() + after.misses()
     );
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let other_b: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&other_runtime, [&leg, &leg], [&leg, &leg], 8).unwrap();
+        TensorMap::rand_with_seed(engine, &other_runtime, [&leg, &leg], [&leg, &leg], 8).unwrap();
     assert!(matches!(
-        a.solve(a_rows, a_cols, other_b.adjoint_view(), b_rows, b_cols),
+        a.solve(
+            engine,
+            a_rows,
+            a_cols,
+            other_b.adjoint_view(),
+            b_rows,
+            b_cols
+        ),
         Err(Error::RuntimeMismatch)
     ));
 }
 
 #[test]
 fn compact_divisor_keeps_the_identity_path() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let divisor: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -118,35 +135,44 @@ fn compact_divisor_keeps_the_identity_path() {
         }],
     )
     .unwrap();
-    let rhs = divisor.scale(2.0).unwrap();
-    let solution = divisor.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
-    assert!(solution.map_diagonal(|x| x).is_ok());
+    let rhs = divisor.scale(engine, 2.0).unwrap();
+    let solution = divisor.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
+    assert!(solution.map_diagonal(engine, |x| x).is_ok());
     assert_eq!(
-        solution.materialize().unwrap().dense_data().unwrap(),
+        solution.materialize(engine).unwrap().dense_data().unwrap(),
         [2.0, 0.0, 0.0, 2.0]
     );
 }
 
 #[test]
 fn nonabelian_and_fermionic_dual_roles_match_composition() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     macro_rules! check {
-        ($left:expr, $right:expr) => {{
-            let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        ($engine:ident, $left:expr, $right:expr) => {{
+            let runtime = Runtime::builder().build().unwrap();
             let (left, right) = ($left, $right);
             let a: TensorMap<_, f64> =
-                TensorMap::isomorphism(&runtime, [&left, &right], [&left, &right]).unwrap();
+                TensorMap::isomorphism($engine, &runtime, [&left, &right], [&left, &right])
+                    .unwrap();
             let b: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&runtime, [&left, &right], [&left, &right], 19).unwrap();
+                TensorMap::rand_with_seed($engine, &runtime, [&left, &right], [&left, &right], 19)
+                    .unwrap();
             let rows = &[1, 0];
             let cols = &[3, 2];
-            let actual = a.solve(rows, cols, &b, rows, cols).unwrap();
-            let pa = a.permute(rows, cols).unwrap();
-            let pb = b.permute(rows, cols).unwrap();
-            let expected = pa.solve(&[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3]).unwrap();
+            let actual = a.solve($engine, rows, cols, &b, rows, cols).unwrap();
+            let pa = a.permute($engine, rows, cols).unwrap();
+            let pb = b.permute($engine, rows, cols).unwrap();
+            let expected = pa
+                .solve($engine, &[0, 1], &[2, 3], &pb, &[0, 1], &[2, 3])
+                .unwrap();
             assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
-            let rebuilt = pa.compose(&actual).unwrap();
-            let delta = rebuilt.axpby(1.0, &pb, -1.0).unwrap().norm(2.0).unwrap();
+            let rebuilt = pa.compose($engine, &actual).unwrap();
+            let delta = rebuilt
+                .axpby($engine, 1.0, &pb, -1.0)
+                .unwrap()
+                .norm($engine, 2.0)
+                .unwrap();
             assert!(delta < 1e-10, "residual {delta}");
         }};
     }
@@ -157,7 +183,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         .unwrap()
         .try_dual()
         .unwrap();
-    check!(v, w);
+    check!(engine, v, w);
 
     let fermion = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -169,7 +195,7 @@ fn nonabelian_and_fermionic_dual_roles_match_composition() {
         .unwrap()
         .try_dual()
         .unwrap();
-    check!(v, w);
+    check!(engine, v, w);
 }
 
 /// The process-global completed-transformer cache (`symtn::cache`).

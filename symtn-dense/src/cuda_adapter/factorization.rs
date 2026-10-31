@@ -1,11 +1,5 @@
 use super::*;
 
-fn with_cuda_linalg<R: Send>(
-    backend: &mut CudaBackend,
-    f: impl FnOnce(&mut dyn BackendSession) -> tenferro_tensor::Result<R> + Send,
-) -> tenferro_tensor::Result<R> {
-    backend.with_backend_session(f)
-}
 /// A factorization's real spectrum (singular values or eigenvalues), still
 /// device-resident in the payload's real lane.
 ///
@@ -22,7 +16,7 @@ fn with_cuda_linalg<R: Send>(
 /// port — is recorded in `docs/backend_policy.md#device-validation`.
 pub struct CudaSpectrum {
     pub(super) tensor: Tensor,
-    pub(super) device: usize,
+    pub(super) device: CudaPlacement,
 }
 impl CudaSpectrum {
     /// Number of values.
@@ -38,7 +32,7 @@ impl CudaSpectrum {
 /// Rejects a context on another device than any of `spectra`, empty ones
 /// included, before the caller submits or allocates anything.
 pub(super) fn ensure_spectra_device(
-    ctx_device: usize,
+    ctx_device: CudaPlacement,
     op: &'static str,
     spectra: &[CudaSpectrum],
 ) -> Result<(), DenseError> {
@@ -65,7 +59,6 @@ pub fn cuda_download_spectra<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
     spectra: &[CudaSpectrum],
 ) -> Result<Vec<Vec<f64>>, DenseError> {
-    use tenferro_tensor::TensorIndexing;
     const OP: &str = "cuda_download_spectra";
     ensure_spectra_device(ctx.device, OP, spectra)?;
     let parts: Vec<&Tensor> = spectra
@@ -166,10 +159,9 @@ pub fn cuda_svd_region<D: CudaScalar>(
     ensure_cuda_device(ctx.device, "cuda_svd", &[("src", src.device)])?;
     let view = src.region_view::<D>(rows, cols, rows, offset)?;
     record(|stats| stats.solver_calls += 1);
-    let (u, s, vt) = with_cuda_linalg(&mut ctx.backend, |exec| {
-        TensorRead::from_view(view).svd_read(exec)
-    })
-    .map_err(|err| cuda_error("cuda_svd", err))?;
+    let (u, s, vt) = TensorRead::from_view(view)
+        .svd_read(&mut *ctx.backend)
+        .map_err(|err| cuda_error("cuda_svd", err))?;
     let vt = CudaDenseStorage::from_tensor::<D>("cuda_svd", vt, ctx.device)?;
     let s = CudaSpectrum {
         tensor: s,
@@ -188,7 +180,7 @@ pub fn cuda_svd_region<D: CudaScalar>(
 pub struct CudaSvdGaugeWeights {
     tensor: Tensor,
     len: usize,
-    device: usize,
+    device: CudaPlacement,
 }
 impl CudaSvdGaugeWeights {
     /// Uploads the `max_rows` weights: one H2D of `8 * max_rows` bytes.
@@ -200,8 +192,7 @@ impl CudaSvdGaugeWeights {
             .map_err(|_| cuda_error(OP, "row count does not fit in i64"))?;
         let host =
             Tensor::from_vec_col_major(vec![max_rows], data).map_err(|err| cuda_error(OP, err))?;
-        let tensor =
-            upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(OP, err))?;
+        let tensor = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(OP, err))?;
         record_h2d(max_rows * std::mem::size_of::<i64>());
         Ok(Self {
             tensor,
@@ -219,7 +210,7 @@ impl CudaSvdGaugeWeights {
 pub struct CudaSvdPhases {
     phase: Tensor,
     k: usize,
-    device: usize,
+    device: CudaPlacement,
 }
 const SVD_GAUGE_OP: &str = "cuda_svd_gauge";
 /// One counted Tenferro op of the SVD gauge.
@@ -283,16 +274,29 @@ pub fn cuda_svd_gauge_phases<D: CudaScalar>(
     let backend = &mut ctx.backend;
     let maxima = {
         let hits = {
-            let magnitude = gauge_op(backend.abs(&u.tensor))?;
-            let largest = gauge_op(backend.reduce_max(&magnitude, &[0]))?;
-            let largest = gauge_op(backend.broadcast_in_dim(&largest, &shape, &[1]))?;
-            gauge_op(backend.compare(&magnitude, &largest, &CompareDir::Eq))?
+            let magnitude = gauge_op(backend.abs_read(TensorRead::from_tensor(&u.tensor)))?;
+            let largest =
+                gauge_op(backend.reduce_max_read(TensorRead::from_tensor(&magnitude), &[0]))?;
+            let largest = gauge_op(backend.broadcast_in_dim_read(
+                TensorRead::from_tensor(&largest),
+                &shape,
+                &[1],
+            ))?;
+            gauge_op(backend.compare_read(
+                TensorRead::from_tensor(&magnitude),
+                TensorRead::from_tensor(&largest),
+                &CompareDir::Eq,
+            ))?
         };
         gauge_op(backend.cast(&hits, tenferro_tensor::DType::I64))?
     };
     let score = {
         let row_weights = if rows == weights.len {
-            gauge_op(backend.broadcast_in_dim(&weights.tensor, &shape, &[0]))?
+            gauge_op(backend.broadcast_in_dim_read(
+                TensorRead::from_tensor(&weights.tensor),
+                &shape,
+                &[0],
+            ))?
         } else {
             let prefix = weights
                 .tensor
@@ -303,13 +307,21 @@ pub fn cuda_svd_gauge_phases<D: CudaScalar>(
                 .map_err(|err| cuda_error(OP, err))?;
             gauge_op(backend.broadcast_in_dim_read(TensorRead::from_view(prefix), &shape, &[0]))?
         };
-        gauge_op(backend.mul(&maxima, &row_weights))?
+        gauge_op(backend.mul_read(
+            TensorRead::from_tensor(&maxima),
+            TensorRead::from_tensor(&row_weights),
+        ))?
     };
     drop(maxima);
     let first_hit = {
-        let best = gauge_op(backend.reduce_max(&score, &[0]))?;
-        let best = gauge_op(backend.broadcast_in_dim(&best, &shape, &[1]))?;
-        gauge_op(backend.compare(&score, &best, &CompareDir::Eq))?
+        let best = gauge_op(backend.reduce_max_read(TensorRead::from_tensor(&score), &[0]))?;
+        let best =
+            gauge_op(backend.broadcast_in_dim_read(TensorRead::from_tensor(&best), &shape, &[1]))?;
+        gauge_op(backend.compare_read(
+            TensorRead::from_tensor(&score),
+            TensorRead::from_tensor(&best),
+            &CompareDir::Eq,
+        ))?
     };
     drop(score);
     let first = gauge_op(backend.cast(&first_hit, D::dtype()))?;
@@ -318,14 +330,18 @@ pub fn cuda_svd_gauge_phases<D: CudaScalar>(
     // complex warp-plane `reduce_sum` kernel fails NVRTC compilation
     // (`__shfl_xor_sync` has no `cuDoubleComplex` overload).
     let column_dot = DotGeneralConfig {
-        lhs_contracting_dims: vec![0],
-        rhs_contracting_dims: vec![0],
-        lhs_batch_dims: vec![1],
-        rhs_batch_dims: vec![1],
+        lhs_contracting_dims: [0].into_iter().collect(),
+        rhs_contracting_dims: [0].into_iter().collect(),
+        lhs_batch_dims: [1].into_iter().collect(),
+        rhs_batch_dims: [1].into_iter().collect(),
     };
-    let pivot = gauge_op(backend.dot_general(&u.tensor, &first, &column_dot))?;
+    let pivot = gauge_op(backend.dot_general_read(
+        TensorRead::from_tensor(&u.tensor),
+        TensorRead::from_tensor(&first),
+        &column_dot,
+    ))?;
     drop(first);
-    let phase = gauge_op(backend.sign(&pivot))?;
+    let phase = gauge_op(backend.sign_read(TensorRead::from_tensor(&pivot)))?;
     Ok(CudaSvdPhases {
         phase,
         k,
@@ -342,7 +358,7 @@ impl CudaSvdPhases {
     ) -> Result<T, DenseError> {
         ensure_cuda_device(ctx.device, SVD_GAUGE_OP, &[("phases", self.device)])?;
         if D::IS_COMPLEX {
-            let conjugated = gauge_op(ctx.backend.conj(&self.phase))?;
+            let conjugated = gauge_op(ctx.backend.conj_read(TensorRead::from_tensor(&self.phase)))?;
             body(ctx, &conjugated)
         } else {
             body(ctx, &self.phase)
@@ -377,8 +393,15 @@ impl CudaSvdPhases {
         self.checked_factor::<D>(u, [rows, self.k])?;
         let k = self.k;
         self.with_left_phase::<D, _>(ctx, |ctx, phase| {
-            let phase = gauge_op(ctx.backend.broadcast_in_dim(phase, &[rows, k], &[1]))?;
-            let scaled = gauge_op(ctx.backend.mul(&u.tensor, &phase))?;
+            let phase = gauge_op(ctx.backend.broadcast_in_dim_read(
+                TensorRead::from_tensor(phase),
+                &[rows, k],
+                &[1],
+            ))?;
+            let scaled = gauge_op(ctx.backend.mul_read(
+                TensorRead::from_tensor(&u.tensor),
+                TensorRead::from_tensor(&phase),
+            ))?;
             CudaDenseStorage::from_tensor::<D>(SVD_GAUGE_OP, scaled, ctx.device)
         })
     }
@@ -396,11 +419,15 @@ impl CudaSvdPhases {
             &[("phases", self.device), ("vh", vh.device)],
         )?;
         self.checked_factor::<D>(vh, [self.k, cols])?;
-        let phase = gauge_op(
-            ctx.backend
-                .broadcast_in_dim(&self.phase, &[self.k, cols], &[0]),
-        )?;
-        let scaled = gauge_op(ctx.backend.mul(&phase, &vh.tensor))?;
+        let phase = gauge_op(ctx.backend.broadcast_in_dim_read(
+            TensorRead::from_tensor(&self.phase),
+            &[self.k, cols],
+            &[0],
+        ))?;
+        let scaled = gauge_op(ctx.backend.mul_read(
+            TensorRead::from_tensor(&phase),
+            TensorRead::from_tensor(&vh.tensor),
+        ))?;
         CudaDenseStorage::from_tensor::<D>(SVD_GAUGE_OP, scaled, ctx.device)
     }
 
@@ -469,10 +496,9 @@ pub fn cuda_qr_region<D: CudaScalar>(
     let view = src.region_view::<D>(rows, cols, rows, offset)?;
     let options = QrOptions::default().gauge(QrGauge::PositiveDiagonal);
     record(|stats| stats.solver_calls += 1);
-    let (q, r) = with_cuda_linalg(&mut ctx.backend, |exec| {
-        TensorRead::from_view(view).qr_with_options_read(options, exec)
-    })
-    .map_err(|err| cuda_error("cuda_qr", err))?;
+    let (q, r) = TensorRead::from_view(view)
+        .qr_with_options_read(options, &mut *ctx.backend)
+        .map_err(|err| cuda_error("cuda_qr", err))?;
     let r = CudaDenseStorage::from_tensor::<D>("cuda_qr", r, ctx.device)?;
     let q = CudaDenseStorage::from_tensor::<D>("cuda_qr", q, ctx.device)?;
     validate_qr_factor_shapes(q.tensor.shape(), r.tensor.shape(), rows, cols)?;
@@ -509,10 +535,9 @@ pub fn cuda_eigh_region<D: CudaScalar>(
     ensure_cuda_device(ctx.device, "cuda_eigh", &[("src", src.device)])?;
     let view = src.region_view::<D>(n, n, n, offset)?;
     record(|stats| stats.solver_calls += 1);
-    let (values, vectors) = with_cuda_linalg(&mut ctx.backend, |exec| {
-        TensorRead::from_view(view).eigh_read(exec)
-    })
-    .map_err(|err| cuda_error("cuda_eigh", err))?;
+    let (values, vectors) = TensorRead::from_view(view)
+        .eigh_read(&mut *ctx.backend)
+        .map_err(|err| cuda_error("cuda_eigh", err))?;
     let vectors = CudaDenseStorage::from_tensor::<D>("cuda_eigh", vectors, ctx.device)?;
     let values = CudaSpectrum {
         tensor: values,
@@ -553,22 +578,21 @@ pub fn cuda_eigh_region_batched<D: CudaScalar>(
         region.offset_isize()?,
     )?;
     record(|stats| stats.solver_calls += 1);
-    let (values, vectors) = with_cuda_linalg(&mut ctx.backend, |exec| {
-        TensorRead::from_view(view).eigh_read(exec)
-    })
-    .map_err(|err| {
-        // The solver's own status (cuSOLVER `info > 0`) is a numerical
-        // failure of some member; everything else is the call's.
-        if err.kind() == tenferro_tensor::ErrorKind::NumericalFailure {
-            DenseError::NumericalFailure {
-                backend: DenseBackend::Cuda,
-                op: OP,
-                message: err.to_string(),
+    let (values, vectors) = TensorRead::from_view(view)
+        .eigh_read(&mut *ctx.backend)
+        .map_err(|err| {
+            // The solver's own status (cuSOLVER `info > 0`) is a numerical
+            // failure of some member; everything else is the call's.
+            if err.kind() == tenferro_tensor::ErrorKind::NumericalFailure {
+                DenseError::NumericalFailure {
+                    backend: DenseBackend::Cuda,
+                    op: OP,
+                    message: err.to_string(),
+                }
+            } else {
+                cuda_error(OP, err)
             }
-        } else {
-            cuda_error(OP, err)
-        }
-    })?;
+        })?;
     if values.shape() != [n, members] || vectors.shape() != [n, n, members] {
         return Err(cuda_error(
             OP,
@@ -713,11 +737,11 @@ pub fn cuda_gather_columns_batched_into<D: CudaScalar>(
     }
     let host =
         i64::into_tensor(vec![columns.len(), 2], indices).map_err(|err| cuda_error(OP, err))?;
-    let indices = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(OP, err))?;
+    let indices = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(OP, err))?;
     record_h2d(2 * columns.len() * std::mem::size_of::<i64>());
     let config = tenferro_tensor::GatherConfig {
-        offset_dims: vec![0],
-        collapsed_slice_dims: vec![1, 2],
+        offset_dims: [0].into_iter().collect(),
+        collapsed_slice_dims: [1, 2].into_iter().collect(),
         start_index_map: vec![1, 2],
         index_vector_dim: 1,
         slice_sizes: vec![n, 1, 1],

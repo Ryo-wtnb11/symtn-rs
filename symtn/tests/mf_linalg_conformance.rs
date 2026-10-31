@@ -32,16 +32,16 @@ use crate::fixtures;
 use fixtures::host_runtime;
 
 macro_rules! assert_close {
-    ($actual:expr, $expected:expr) => {{
+    ($engine:ident, $actual:expr, $expected:expr) => {{
         let actual = $actual;
         let expected = $expected;
         let error = actual
-            .axpby(1.0, expected, -1.0)
+            .axpby($engine, 1.0, expected, -1.0)
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(
-            error <= 1e-9 * (1.0 + expected.norm(2.0).unwrap()),
+            error <= 1e-9 * (1.0 + expected.norm($engine, 2.0).unwrap()),
             "residual {error}"
         );
     }};
@@ -79,7 +79,7 @@ macro_rules! assert_provider {
 /// larger block.  This makes both null directions and polar isometry laws
 /// observable without pinning a dense-factor gauge.
 macro_rules! factor_conformance {
-    ($name:expr, $rule:expr, $pairs:expr) => {{
+    ($engine:ident, $name:expr, $rule:expr, $pairs:expr) => {{
         let rt = host_runtime();
         let provider = Arc::new($rule);
         let pairs = $pairs;
@@ -95,7 +95,7 @@ macro_rules! factor_conformance {
         let tall_space = GradedSpace::try_new(Arc::clone(&provider), tall_pairs).unwrap();
         let wide_space = GradedSpace::try_new(Arc::clone(&provider), wide_pairs).unwrap();
         let tall: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&rt, [&tall_space], [&wide_space], |_, index| {
+            TensorMap::from_subblock_fn($engine, &rt, [&tall_space], [&wide_space], |_, index| {
                 if index[0] == index[1] {
                     [4.0, 2.0][index[0]]
                 } else {
@@ -104,7 +104,7 @@ macro_rules! factor_conformance {
             })
             .unwrap();
         let wide: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&rt, [&wide_space], [&tall_space], |_, index| {
+            TensorMap::from_subblock_fn($engine, &rt, [&wide_space], [&tall_space], |_, index| {
                 if index[0] == index[1] {
                     [4.0, 2.0][index[0]]
                 } else {
@@ -113,26 +113,26 @@ macro_rules! factor_conformance {
             })
             .unwrap();
 
-        let Svd { u, s, vh } = tall.svd_compact(&[0], &[1]).unwrap();
+        let Svd { u, s, vh } = tall.svd_compact($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; u, s, vh);
-        assert_close!(&u.compose(&s).unwrap().compose(&vh).unwrap(), &tall);
-        let Svd { u, s, vh } = tall.svd_full(&[0], &[1]).unwrap();
+        assert_close!($engine, &u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap(), &tall);
+        let Svd { u, s, vh } = tall.svd_full($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; u, s, vh);
-        assert_close!(&u.compose(&s).unwrap().compose(&vh).unwrap(), &tall);
+        assert_close!($engine, &u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap(), &tall);
         // Truncated SVD: svd_compact -> diagview -> find_truncated -> restrict.
-        let Svd { u, s, vh } = tall.svd_compact(&[0], &[1]).unwrap();
+        let Svd { u, s, vh } = tall.svd_compact($engine, &[0], &[1]).unwrap();
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), &Truncation::rank(1))
+            .find_truncated(&s.diagview($engine).unwrap(), &Truncation::rank(1))
             .unwrap();
-        let u = u.restrict_leg(&[(u.codomain_rank(), &found.selection)]).unwrap();
-        let s = s.restrict_leg(&[(0, &found.selection), (1, &found.selection)]).unwrap();
-        let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
+        let u = u.restrict_leg($engine, &[(u.codomain_rank(), &found.selection)]).unwrap();
+        let s = s.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)]).unwrap();
+        let vh = vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap();
         assert_provider!(provider; u, s, vh);
-        let reconstructed = u.compose(&s).unwrap().compose(&vh).unwrap();
-        let error = reconstructed.axpby(1.0, &tall, -1.0).unwrap().norm(2.0).unwrap();
+        let reconstructed = u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap();
+        let error = reconstructed.axpby($engine, 1.0, &tall, -1.0).unwrap().norm($engine, 2.0).unwrap();
         assert!((error - found.error).abs() <= 1e-9 * (1.0 + found.error));
         assert!(found.error > 0.0, $name);
-        let singular_values = tall.svd_vals(&[0], &[1]).unwrap();
+        let singular_values = tall.svd_vals($engine, &[0], &[1]).unwrap();
         assert!(singular_values
             .iter()
             .all(|entry| entry.values == [4.0, 2.0]));
@@ -145,189 +145,199 @@ macro_rules! factor_conformance {
                     * entry.values.iter().map(|value| value * value).sum::<f64>()
             })
             .sum();
-        assert!((tall.norm(2.0).unwrap().powi(2) - weighted_norm_squared).abs() <= 1e-9);
+        assert!((tall.norm($engine, 2.0).unwrap().powi(2) - weighted_norm_squared).abs() <= 1e-9);
 
-        let Qr { q, r } = tall.qr_compact(&[0], &[1]).unwrap();
+        let Qr { q, r } = tall.qr_compact($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; q, r);
-        assert_close!(&q.compose(&r).unwrap(), &tall);
-        let id = TensorMap::isomorphism(&rt, q.domain().iter(), q.domain().iter()).unwrap();
-        assert_close!(&q.adjoint().unwrap().compose(&q).unwrap(), &id);
-        let Qr { q, r } = tall.qr_full(&[0], &[1]).unwrap();
+        assert_close!($engine, &q.compose($engine, &r).unwrap(), &tall);
+        let id = TensorMap::isomorphism($engine, &rt, q.domain().iter(), q.domain().iter()).unwrap();
+        assert_close!($engine, &q.adjoint($engine).unwrap().compose($engine, &q).unwrap(), &id);
+        let Qr { q, r } = tall.qr_full($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; q, r);
-        assert_close!(&q.compose(&r).unwrap(), &tall);
-        let id = TensorMap::isomorphism(&rt, q.domain().iter(), q.domain().iter()).unwrap();
-        assert_close!(&q.adjoint().unwrap().compose(&q).unwrap(), &id);
+        assert_close!($engine, &q.compose($engine, &r).unwrap(), &tall);
+        let id = TensorMap::isomorphism($engine, &rt, q.domain().iter(), q.domain().iter()).unwrap();
+        assert_close!($engine, &q.adjoint($engine).unwrap().compose($engine, &q).unwrap(), &id);
 
-        let Lq { l, q } = wide.lq_compact(&[0], &[1]).unwrap();
+        let Lq { l, q } = wide.lq_compact($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; l, q);
-        assert_close!(&l.compose(&q).unwrap(), &wide);
-        let id = TensorMap::isomorphism(&rt, q.codomain().iter(), q.codomain().iter()).unwrap();
-        assert_close!(&q.compose(&q.adjoint().unwrap()).unwrap(), &id);
-        let Lq { l, q } = wide.lq_full(&[0], &[1]).unwrap();
+        assert_close!($engine, &l.compose($engine, &q).unwrap(), &wide);
+        let id = TensorMap::isomorphism($engine, &rt, q.codomain().iter(), q.codomain().iter()).unwrap();
+        let q_adjoint = &q.adjoint($engine).unwrap();
+        assert_close!($engine, &q.compose($engine, q_adjoint).unwrap(), &id);
+        let Lq { l, q } = wide.lq_full($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; l, q);
-        assert_close!(&l.compose(&q).unwrap(), &wide);
-        let id = TensorMap::isomorphism(&rt, q.codomain().iter(), q.codomain().iter()).unwrap();
-        assert_close!(&q.compose(&q.adjoint().unwrap()).unwrap(), &id);
+        assert_close!($engine, &l.compose($engine, &q).unwrap(), &wide);
+        let id = TensorMap::isomorphism($engine, &rt, q.codomain().iter(), q.codomain().iter()).unwrap();
+        let q_adjoint = &q.adjoint($engine).unwrap();
+        assert_close!($engine, &q.compose($engine, q_adjoint).unwrap(), &id);
 
-        let left = tall.left_null(&[0], &[1]).unwrap();
+        let left = tall.left_null($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; left);
         assert!(
-            left.adjoint()
+            left.adjoint($engine)
                 .unwrap()
-                .compose(&tall)
+                .compose($engine, &tall)
                 .unwrap()
-                .norm(2.0)
+                .norm($engine, 2.0)
                 .unwrap()
                 <= 1e-9,
             $name
         );
-        let left_id = TensorMap::isomorphism(&rt, left.domain().iter(), left.domain().iter()).unwrap();
-        assert_close!(&left.adjoint().unwrap().compose(&left).unwrap(), &left_id);
-        let right = wide.right_null(&[0], &[1]).unwrap();
+        let left_id = TensorMap::isomorphism($engine, &rt, left.domain().iter(), left.domain().iter()).unwrap();
+        assert_close!($engine, &left.adjoint($engine).unwrap().compose($engine, &left).unwrap(), &left_id);
+        let right = wide.right_null($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; right);
+        let right_adjoint = &right.adjoint($engine).unwrap();
         assert!(
-            wide.compose(&right.adjoint().unwrap())
+            wide.compose($engine, right_adjoint)
                 .unwrap()
-                .norm(2.0)
+                .norm($engine, 2.0)
                 .unwrap()
                 <= 1e-9,
             $name
         );
-        let right_id = TensorMap::isomorphism(&rt, right.codomain().iter(), right.codomain().iter()).unwrap();
-        assert_close!(
-            &right.compose(&right.adjoint().unwrap()).unwrap(),
+        let right_id = TensorMap::isomorphism($engine, &rt, right.codomain().iter(), right.codomain().iter()).unwrap();
+        let right_adjoint = &right.adjoint($engine).unwrap();
+        assert_close!($engine,
+            &right.compose($engine, right_adjoint).unwrap(),
             &right_id
         );
 
-        let LeftPolar { w, p } = tall.left_polar(&[0], &[1]).unwrap();
+        let LeftPolar { w, p } = tall.left_polar($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; w, p);
-        assert_close!(&w.compose(&p).unwrap(), &tall);
-        let id = TensorMap::isomorphism(&rt, w.domain().iter(), w.domain().iter()).unwrap();
-        assert_close!(&w.adjoint().unwrap().compose(&w).unwrap(), &id);
-        assert!(is_hermitian!(p, 1e-10));
+        assert_close!($engine, &w.compose($engine, &p).unwrap(), &tall);
+        let id = TensorMap::isomorphism($engine, &rt, w.domain().iter(), w.domain().iter()).unwrap();
+        assert_close!($engine, &w.adjoint($engine).unwrap().compose($engine, &w).unwrap(), &id);
+        assert!(is_hermitian!($engine, p, 1e-10));
         assert!(p
-            .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap()
             .iter()
             .flat_map(|s| &s.values)
             .all(|&x| x >= -1e-10));
-        let RightPolar { p, wh: w } = wide.right_polar(&[0], &[1]).unwrap();
+        let RightPolar { p, wh: w } = wide.right_polar($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; p, w);
-        assert_close!(&p.compose(&w).unwrap(), &wide);
-        let id = TensorMap::isomorphism(&rt, w.codomain().iter(), w.codomain().iter()).unwrap();
-        assert_close!(&w.compose(&w.adjoint().unwrap()).unwrap(), &id);
-        assert!(is_hermitian!(p, 1e-10));
+        assert_close!($engine, &p.compose($engine, &w).unwrap(), &wide);
+        let id = TensorMap::isomorphism($engine, &rt, w.codomain().iter(), w.codomain().iter()).unwrap();
+        let w_adjoint = &w.adjoint($engine).unwrap();
+        assert_close!($engine, &w.compose($engine, w_adjoint).unwrap(), &id);
+        assert!(is_hermitian!($engine, p, 1e-10));
         assert!(p
-            .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap()
             .iter()
             .flat_map(|s| &s.values)
             .all(|&x| x >= -1e-10));
 
         let h: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&rt, [&endo_space], [&endo_space], |_, index| {
+            TensorMap::from_subblock_fn($engine, &rt, [&endo_space], [&endo_space], |_, index| {
                 [[3.0, 1.0], [1.0, 3.0]][index[0]][index[1]]
             })
             .unwrap();
-        let Eigh { d, v } = h.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+        let Eigh { d, v } = h.eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT).unwrap();
         assert_provider!(provider; d, v);
-        assert_close!(
-            &v.compose(&d)
+        let v_adjoint = &v.adjoint($engine).unwrap();
+        assert_close!($engine,
+            &v.compose($engine, &d)
                 .unwrap()
-                .compose(&v.adjoint().unwrap())
+                .compose($engine, v_adjoint)
                 .unwrap(),
             &h
         );
         assert!(h
-            .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap()
             .iter()
             .all(|entry| entry.values == [2.0, 4.0]));
         let found = d.domain()[0]
-            .find_truncated(&d.diagview().unwrap(), &Truncation::rank(1))
+            .find_truncated(&d.diagview($engine).unwrap(), &Truncation::rank(1))
             .unwrap();
-        let trunc_d = d.restrict_leg(&[(0, &found.selection), (1, &found.selection)]).unwrap();
-        let trunc_v = v.restrict_leg(&[(v.codomain_rank(), &found.selection)]).unwrap();
+        let trunc_d = d.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)]).unwrap();
+        let trunc_v = v.restrict_leg($engine, &[(v.codomain_rank(), &found.selection)]).unwrap();
         assert_provider!(provider; trunc_d, trunc_v);
+        let trunc_v_adjoint = &trunc_v.adjoint($engine).unwrap();
         let reconstructed = trunc_v
-            .compose(&trunc_d)
+            .compose($engine, &trunc_d)
             .unwrap()
-            .compose(&trunc_v.adjoint().unwrap())
+            .compose($engine, trunc_v_adjoint)
             .unwrap();
-        let error = reconstructed.axpby(1.0, &h, -1.0).unwrap().norm(2.0).unwrap();
+        let error = reconstructed.axpby($engine, 1.0, &h, -1.0).unwrap().norm($engine, 2.0).unwrap();
         assert!((error - found.error).abs() <= 1e-9 * (1.0 + found.error));
         assert!(found.error > 0.0, $name);
 
         let g: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&rt, [&endo_space], [&endo_space], |_, index| {
+            TensorMap::from_subblock_fn($engine, &rt, [&endo_space], [&endo_space], |_, index| {
                 [[3.0, 1.0], [0.0, 1.0]][index[0]][index[1]]
             })
             .unwrap();
-        let Eig { d, v } = g.eig_full(&[0], &[1]).unwrap();
+        let Eig { d, v } = g.eig_full($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; d, v);
+        let v_inv = &v.inv($engine, &[0], &[1]).unwrap();
         assert_complex_close!(
-            &v.compose(&d).unwrap().compose(&v.inv(&[0], &[1]).unwrap()).unwrap(),
-            &g.convert::<Complex64>()
+            &v.compose($engine, &d).unwrap().compose($engine, v_inv).unwrap(),
+            &g.convert::<Complex64>($engine).unwrap()
         );
         assert!(g
-            .eig_vals(&[0], &[1])
+            .eig_vals($engine, &[0], &[1])
             .unwrap()
             .iter()
             .all(|entry| entry.values == [1.0.into(), 3.0.into()]));
         let found = d.domain()[0]
-            .find_truncated(&d.diagview().unwrap(), &Truncation::rank(1))
+            .find_truncated(&d.diagview($engine).unwrap(), &Truncation::rank(1))
             .unwrap();
-        let trunc_d = d.restrict_leg(&[(0, &found.selection), (1, &found.selection)]).unwrap();
-        let trunc_v = v.restrict_leg(&[(v.codomain_rank(), &found.selection)]).unwrap();
+        let trunc_d = d.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)]).unwrap();
+        let trunc_v = v.restrict_leg($engine, &[(v.codomain_rank(), &found.selection)]).unwrap();
         assert_provider!(provider; trunc_d, trunc_v);
         assert_complex_close!(
-            &g.convert::<Complex64>().compose(&trunc_v).unwrap(),
-            &trunc_v.compose(&trunc_d).unwrap()
+            &g.convert::<Complex64>($engine).unwrap().compose($engine, &trunc_v).unwrap(),
+            &trunc_v.compose($engine, &trunc_d).unwrap()
         );
         assert!(found.error > 0.0, $name);
 
-        let id = TensorMap::isomorphism(&rt, h.domain().iter(), h.domain().iter()).unwrap();
-        let inverse = h.inv(&[0], &[1]).unwrap();
+        let id = TensorMap::isomorphism($engine, &rt, h.domain().iter(), h.domain().iter()).unwrap();
+        let inverse = h.inv($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; inverse);
-        assert_close!(&h.compose(&inverse).unwrap(), &id);
-        let exponential = h.exp(&[0], &[1]).unwrap();
+        assert_close!($engine, &h.compose($engine, &inverse).unwrap(), &id);
+        let exponential = h.exp($engine, &[0], &[1]).unwrap();
         assert_provider!(provider; exponential);
-        assert_close!(
-            &h.scale(-1.0).unwrap()
-                .exp(&[0], &[1])
+        assert_close!($engine,
+            &h.scale($engine, -1.0).unwrap()
+                .exp($engine, &[0], &[1])
                 .unwrap()
-                .compose(&exponential)
+                .compose($engine, &exponential)
                 .unwrap(),
             &id
         );
-        let solved = h.solve(&[0], &[1], &id, &[0], &[1]).unwrap();
+        let solved = h.solve($engine, &[0], &[1], &id, &[0], &[1]).unwrap();
         assert_provider!(provider; solved);
-        assert_close!(&solved, &inverse);
+        assert_close!($engine, &solved, &inverse);
+        let id_adjoint = &id.adjoint($engine).unwrap();
         let solved_right = h
-            .adjoint()
+            .adjoint($engine)
             .unwrap()
-            .solve(&[0], &[1], &id.adjoint().unwrap(), &[0], &[1])
+            .solve($engine, &[0], &[1], id_adjoint, &[0], &[1])
             .unwrap()
-            .adjoint()
+            .adjoint($engine)
             .unwrap();
         assert_provider!(provider; solved_right);
-        assert_close!(&solved_right, &inverse);
-        let pseudo = tall.pinv(&[0], &[1], 1e-12).unwrap();
+        assert_close!($engine, &solved_right, &inverse);
+        let pseudo = tall.pinv($engine, &[0], &[1], 1e-12).unwrap();
         assert_provider!(provider; pseudo);
-        assert_close!(
-            &tall.compose(&pseudo).unwrap().compose(&tall).unwrap(),
+        assert_close!($engine,
+            &tall.compose($engine, &pseudo).unwrap().compose($engine, &tall).unwrap(),
             &tall
         );
-        let aa_plus = tall.compose(&pseudo).unwrap();
-        let a_plus_a = pseudo.compose(&tall).unwrap();
-        assert_close!(&a_plus_a.compose(&pseudo).unwrap(), &pseudo);
-        assert_close!(&aa_plus.adjoint().unwrap(), &aa_plus);
-        assert_close!(&a_plus_a.adjoint().unwrap(), &a_plus_a);
-        let left_projector = left.compose(&left.adjoint().unwrap()).unwrap();
-        let id = TensorMap::isomorphism(&rt, tall.codomain().iter(), tall.codomain().iter()).unwrap();
-        assert_close!(&left_projector.axpby(1.0, &aa_plus, 1.0).unwrap(), &id);
+        let aa_plus = tall.compose($engine, &pseudo).unwrap();
+        let a_plus_a = pseudo.compose($engine, &tall).unwrap();
+        assert_close!($engine, &a_plus_a.compose($engine, &pseudo).unwrap(), &pseudo);
+        assert_close!($engine, &aa_plus.adjoint($engine).unwrap(), &aa_plus);
+        assert_close!($engine, &a_plus_a.adjoint($engine).unwrap(), &a_plus_a);
+        let left_adjoint = &left.adjoint($engine).unwrap();
+        let left_projector = left.compose($engine, left_adjoint).unwrap();
+        let id = TensorMap::isomorphism($engine, &rt, tall.codomain().iter(), tall.codomain().iter()).unwrap();
+        assert_close!($engine, &left_projector.axpby($engine, 1.0, &aa_plus, 1.0).unwrap(), &id);
         let diagonal: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&rt, [&endo_space], [&endo_space], |_, index| {
+            TensorMap::from_subblock_fn($engine, &rt, [&endo_space], [&endo_space], |_, index| {
                 if index[0] == index[1] {
                     [4.0, 9.0][index[0]]
                 } else {
@@ -335,35 +345,39 @@ macro_rules! factor_conformance {
                 }
             })
             .unwrap();
-        assert!(diagonal.map_diagonal(f64::sqrt).is_err());
+        assert!(diagonal.map_diagonal($engine, f64::sqrt).is_err());
+        let diagonal_diagview = diagonal.diagview($engine).unwrap();
         let compact =
-            TensorMap::diagonal(&rt, &endo_space, diagonal.diagview().unwrap()).unwrap();
-        let root = compact.map_diagonal(f64::sqrt).unwrap();
+            TensorMap::diagonal($engine, &rt, &endo_space, diagonal_diagview).unwrap();
+        let root = compact.map_diagonal($engine, f64::sqrt).unwrap();
         assert_provider!(provider; root);
-        assert!(root.materialize().unwrap().dense_data().unwrap().iter().any(|&value| value == 2.0));
-        assert!(root.materialize().unwrap().dense_data().unwrap().iter().any(|&value| value == 3.0));
+        assert!(root.materialize($engine).unwrap().dense_data().unwrap().iter().any(|&value| value == 2.0));
+        assert!(root.materialize($engine).unwrap().dense_data().unwrap().iter().any(|&value| value == 3.0));
         assert!(root
-            .materialize().unwrap().dense_data().unwrap()
+            .materialize($engine).unwrap().dense_data().unwrap()
             .iter()
             .all(|&value| value == 0.0 || value == 2.0 || value == 3.0));
-        assert_close!(&root.compose(&root).unwrap(), &diagonal);
+        assert_close!($engine, &root.compose($engine, &root).unwrap(), &diagonal);
         let before = tall.dense_data().unwrap().to_vec();
-        assert!(tall.pinv(&[0], &[1], -1.0).is_err());
+        assert!(tall.pinv($engine, &[0], &[1], -1.0).is_err());
         assert_eq!(tall.dense_data().unwrap(), before.as_slice());
     }};
 }
 
 #[test]
 fn public_multiplicity_free_linalg_conformance() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     factor_conformance!(
+        engine,
         "U(1)",
         U1FusionRule,
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]
     );
     let z3 = ZNFusionRule::new(3).unwrap();
     let z3_pairs = [(z3.irrep(0), 2), (z3.irrep(1), 2)];
-    factor_conformance!("Z3", z3, z3_pairs);
+    factor_conformance!(engine, "Z3", z3, z3_pairs);
     factor_conformance!(
+        engine,
         "CU1 vacuum/pseudo/charged",
         symtn::sector::CU1FusionRule,
         [
@@ -372,13 +386,20 @@ fn public_multiplicity_free_linalg_conformance() {
             (symtn::sector::CU1Irrep::from_twice_charge(1), 2),
         ]
     );
-    factor_conformance!("fZ2 odd", FermionParityFusionRule, [(Z2Irrep::ODD, 2)]);
     factor_conformance!(
+        engine,
+        "fZ2 odd",
+        FermionParityFusionRule,
+        [(Z2Irrep::ODD, 2)]
+    );
+    factor_conformance!(
+        engine,
         "SU2 nonzero spin",
         SU2FusionRule,
         [(SU2Irrep::from_twice_spin(1), 2)]
     );
     factor_conformance!(
+        engine,
         "fZ2xU1",
         Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         [
@@ -387,6 +408,7 @@ fn public_multiplicity_free_linalg_conformance() {
         ]
     );
     factor_conformance!(
+        engine,
         "fZ2xU1xSU2",
         Fz2U1Su2Rule::try_new(
             Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),

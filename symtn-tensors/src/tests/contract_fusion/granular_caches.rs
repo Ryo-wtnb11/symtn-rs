@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn tensorcontract_fusion_granular_caches_handle_block_structure_variants() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: per-layout cache counters describe one uninterrupted cache generation.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -84,13 +85,14 @@ fn tensorcontract_fusion_granular_caches_handle_block_structure_variants() {
         let mut expected =
             TestTensor::<f64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space.clone())
                 .unwrap();
-        fusion_contract_into(&rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
+        fusion_contract_into(engine, &rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
 
         let mut actual =
             TestTensor::<f64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space.clone())
                 .unwrap();
         if case_index == 2 {
             context_contract_into(
+                engine,
                 &mut context,
                 &rule,
                 &mut actual,
@@ -106,6 +108,7 @@ fn tensorcontract_fusion_granular_caches_handle_block_structure_variants() {
             assert!(context.last_resolution_orientation().is_some());
         } else {
             context_contract_into(
+                engine,
                 &mut context,
                 &rule,
                 &mut actual,
@@ -130,6 +133,7 @@ fn tensorcontract_fusion_granular_caches_handle_block_structure_variants() {
 
 #[test]
 fn tensorcontract_fusion_granular_caches_handle_output_axes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -174,8 +178,9 @@ fn tensorcontract_fusion_granular_caches_handle_output_axes() {
         let mut actual =
             TestTensor::<f64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space).unwrap();
 
-        fusion_contract_into(&rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
+        fusion_contract_into(engine, &rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
         context_contract_into(
+            engine,
             &mut context,
             &rule,
             &mut actual,
@@ -199,6 +204,7 @@ fn tensorcontract_fusion_granular_caches_handle_output_axes() {
 
 #[test]
 fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -284,8 +290,9 @@ fn tensorcontract_fusion_granular_caches_distinguish_source_conjugation() {
             TestTensor::<Complex64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space)
                 .unwrap();
 
-        fusion_contract_into(&rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
+        fusion_contract_into(engine, &rule, &mut expected, &lhs, &rhs, axes, alpha, beta).unwrap();
         context_contract_into(
+            engine,
             &mut context,
             &rule,
             &mut actual,

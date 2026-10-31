@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_traits::Zero;
 use symtn_core::{
@@ -522,10 +523,12 @@ where
     /// transaction (it needs no context).
     pub fn plan_beyond_core<X: ExecCaps>(
         &mut self,
+        engine: &mut dyn Engine,
         miss: CoreMiss,
     ) -> Result<StorageContractResolution<f64>, CheckedGenericPlanError<P::Error>> {
         // The checked planner never reads the context's planning state.
         staged_plan_beyond_core::<X, P, CheckedContractStage<'a, P>>(
+            engine,
             self,
             miss,
             &mut TreeTransformPlanning::default(),
@@ -575,6 +578,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn tensorcontract_checked_generic_in<P>(
         &mut self,
+        engine: &mut dyn Engine,
         (lhs_space, lhs, lhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
         (rhs_space, rhs, rhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
         (lhs_axes, rhs_axes, output_order): (&[usize], &[usize], OutputAxisOrder<'_>),
@@ -584,6 +588,7 @@ where
         P: CheckedGenericRigidSymbols<Scalar = f64>,
     {
         self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
+            engine,
             (lhs_space, lhs, lhs_data),
             (rhs_space, rhs, rhs_data),
             ContractRequest::Contract {
@@ -611,6 +616,7 @@ where
     #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     pub fn tensorcontract_into_checked_generic_in<'d, P, E>(
         &mut self,
+        engine: &mut dyn Engine,
         (lhs_space, lhs, lhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
         (rhs_space, rhs, rhs_data): (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
         (lhs_axes, rhs_axes, output_order): (&[usize], &[usize], OutputAxisOrder<'_>),
@@ -626,6 +632,7 @@ where
         D: 'd,
     {
         self.tensorcontract_into_in::<CheckedContractStage<'_, P>, P, E>(
+            engine,
             (lhs_space, lhs, lhs_data),
             (rhs_space, rhs, rhs_data),
             ContractRequest::Contract {
@@ -663,13 +670,19 @@ where
     #[allow(clippy::type_complexity)]
     pub fn tensorcompose_checked_generic_in<P>(
         &mut self,
+        engine: &mut dyn Engine,
         lhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
         rhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
     ) -> CheckedContractResult<P, D>
     where
         P: CheckedGenericRigidSymbols<Scalar = f64>,
     {
-        self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(lhs, rhs, ContractRequest::Compose)
+        self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
+            engine,
+            lhs,
+            rhs,
+            ContractRequest::Compose,
+        )
     }
 }
 
@@ -943,6 +956,7 @@ mod tests {
 
         fn tensorcontract_structure_into_raw(
             &mut self,
+            _engine: &mut dyn Engine,
             _workspace: &mut Self::Workspace,
             _structure: &TensorContractStructure<f64>,
             _dst_structure: &Arc<BlockStructure>,
@@ -959,6 +973,7 @@ mod tests {
 
         fn matmul_rank2_into_raw(
             &mut self,
+            engine: &mut dyn Engine,
             workspace: &mut Self::Workspace,
             dst_data: &mut [f64],
             lhs_data: &[f64],
@@ -968,12 +983,13 @@ mod tests {
             cols: usize,
         ) -> Result<(), OperationError> {
             self.matmul_rank2_axpby_into_raw(
-                workspace, dst_data, lhs_data, rhs_data, rows, contracted, cols, 1.0, 0.0,
+                engine, workspace, dst_data, lhs_data, rhs_data, rows, contracted, cols, 1.0, 0.0,
             )
         }
 
         fn matmul_rank2_axpby_into_raw(
             &mut self,
+            engine: &mut dyn Engine,
             workspace: &mut Self::Workspace,
             dst_data: &mut [f64],
             lhs_data: &[f64],
@@ -993,6 +1009,7 @@ mod tests {
             }
             TensorContractBackend::<f64, f64>::matmul_rank2_axpby_into_raw(
                 &mut self.inner,
+                engine,
                 workspace,
                 dst_data,
                 lhs_data,
@@ -1010,6 +1027,7 @@ mod tests {
         #[allow(clippy::too_many_arguments)]
         fn matmul_rank2_batch_with_ops_axpby_into_raw(
             &mut self,
+            engine: &mut dyn Engine,
             workspace: &mut Self::Workspace,
             dst_data: &mut [f64],
             lhs_data: &[f64],
@@ -1024,7 +1042,7 @@ mod tests {
             use symtn_operations::fusion_replay::MatrixOp;
             if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
                 return self.matmul_rank2_batch_axpby_into_raw(
-                    workspace, dst_data, lhs_data, rhs_data, jobs, runs, alpha, beta,
+                    engine, workspace, dst_data, lhs_data, rhs_data, jobs, runs, alpha, beta,
                 );
             }
             let first = self.jobs;
@@ -1039,6 +1057,7 @@ mod tests {
             }
             TensorContractBackend::<f64, f64>::matmul_rank2_batch_with_ops_axpby_into_raw(
                 &mut self.inner,
+                engine,
                 workspace,
                 dst_data,
                 lhs_data,
@@ -1073,6 +1092,7 @@ mod tests {
 
     /// One public checked contraction on a fresh default context.
     fn contract(
+        engine: &mut dyn Engine,
         (lhs, lhs_data): (&SpySpace, &[f64]),
         (rhs, rhs_data): (&SpySpace, &[f64]),
         axes: TensorContractSpec<'_>,
@@ -1080,6 +1100,7 @@ mod tests {
     ) -> CheckedContractResult<CheckedGenericSpy, f64> {
         let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
         context.tensorcontract_checked_generic_in(
+            engine,
             direct_side(lhs, lhs_data),
             direct_side(rhs, rhs_data),
             entry_axes(axes),
@@ -1167,6 +1188,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_compose_plans_the_core_route_without_provider_events_after_staging() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_COMPOSE_EVENTS_ISOLATED";
         if std::env::var_os(ISOLATED).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -1194,6 +1216,7 @@ mod tests {
         left.fail.set(Some(Query::Channel));
         let error = context
             .tensorcompose_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
             )
@@ -1221,6 +1244,7 @@ mod tests {
             right.reset();
             let (output, data) = context
                 .tensorcompose_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                 )
@@ -1271,6 +1295,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_plans_the_core_route_without_provider_events_after_staging() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated(
             "checked_contraction_plans_the_core_route_without_provider_events_after_staging",
         ) {
@@ -1285,6 +1310,7 @@ mod tests {
         left.fail.set(Some(Query::Channel));
         let error = context
             .tensorcontract_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
                 entry_axes(axes()),
@@ -1315,6 +1341,7 @@ mod tests {
             right.reset();
             let (output, data) = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -1340,6 +1367,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_rejects_local_errors_before_provider_queries() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let (left, lhs, right, rhs) = bound_pair(1, 1);
         // A parent whose adjoint is not `lhs`: rank 3 against rank 2.
         let (_, parent, _, _) = bound_pair(2, 1);
@@ -1372,6 +1400,7 @@ mod tests {
             let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
             let error = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     lhs_side,
                     direct_side(&rhs, rhs_data),
                     entry_axes(axes),
@@ -1393,6 +1422,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_executes_one_transforming_candidate() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("checked_contraction_executes_one_transforming_candidate") {
             return;
         }
@@ -1404,6 +1434,7 @@ mod tests {
         crate::probe::take_completed_transformer_activity();
         let (output, data) = context
             .tensorcontract_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
                 entry_axes(TensorContractSpec::with_default_output_order(
@@ -1480,6 +1511,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_preserves_late_provider_and_shape_errors_on_every_route() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("checked_contraction_preserves_late_provider_and_shape_errors_on_every_route")
         {
             return;
@@ -1496,7 +1528,7 @@ mod tests {
                 right.reset();
                 left.fail.set(Some(query));
                 crate::probe::take_completed_transformer_activity();
-                match contract((&lhs, &lhs_data), (&rhs, &rhs_data), axes(), nout) {
+                match contract(engine, (&lhs, &lhs_data), (&rhs, &rhs_data), axes(), nout) {
                     Err(error) => {
                         failed += 1;
                         assert!(
@@ -1524,8 +1556,8 @@ mod tests {
                 symtn_core::clear_structure_caches();
                 left.reset();
                 left.malformed.set(Some(Query::R));
-                let error =
-                    contract((&lhs, &lhs_data), (&rhs, &rhs_data), axes(), nout).unwrap_err();
+                let error = contract(engine, (&lhs, &lhs_data), (&rhs, &rhs_data), axes(), nout)
+                    .unwrap_err();
                 assert!(
                     matches!(
                         error,
@@ -1541,11 +1573,12 @@ mod tests {
     /// What: each fixture plans its route, and the GEMM failing on the first
     /// or a later job of the replay returns the error without publishing:
     /// no layout, transformer, composed coefficient or output, so a failed
-    /// call leaves nothing behind (#2063). The pooled scratch a warm call
+    /// call leaves nothing behind (#2063). The context scratch a warm call
     /// sized is reused, not grown, by a failing call.
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_backend_failure_publishes_nothing_and_keeps_retained_scratch() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated(
             "checked_contraction_backend_failure_publishes_nothing_and_keeps_retained_scratch",
         ) {
@@ -1563,6 +1596,7 @@ mod tests {
             let mut context = failing_context(Some(0));
             let error = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -1586,6 +1620,7 @@ mod tests {
             context.contract_backend_mut().fail_at = None;
             let reference = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -1600,6 +1635,7 @@ mod tests {
             backend.fail_at = Some(backend.jobs + (jobs - 1) / 2);
             let error = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -1618,6 +1654,7 @@ mod tests {
             context.contract_backend_mut().fail_at = None;
             let repeat = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -1638,12 +1675,14 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_success_commits_once() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("checked_contraction_success_commits_once") {
             return;
         }
         let (left, lhs, right, rhs) = bound_pair(1, 1);
         symtn_core::clear_structure_caches();
         let (output, _) = contract(
+            engine,
             (&lhs, &vec![1.0; lhs.space().required_len().unwrap()]),
             (&rhs, &vec![2.0; rhs.space().required_len().unwrap()]),
             TensorContractSpec::with_default_output_order(&[1], &[0]),
@@ -1668,6 +1707,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_publishes_composed_coefficients_only_after_its_commit() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("checked_contraction_publishes_composed_coefficients_only_after_its_commit") {
             return;
         }
@@ -1676,9 +1716,10 @@ mod tests {
         let lhs_data = vec![1.0; lhs.space().required_len().unwrap()];
         let rhs_data = vec![2.0; rhs.space().required_len().unwrap()];
         let axes = || fixture_axes(&[3, 1], &[0, 3], Some(&[2, 0, 3, 1]));
-        let run = |fail_at| {
+        let mut run = |fail_at| {
             let mut context = failing_context(fail_at);
             let result = context.tensorcontract_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
                 entry_axes(axes()),
@@ -1760,6 +1801,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn intermediates_sharing_a_homspace_converge_on_one_id_within_the_call() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("intermediates_sharing_a_homspace_converge_on_one_id_within_the_call") {
             return;
         }
@@ -1771,6 +1813,7 @@ mod tests {
         let mut run = || {
             let result = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(fixture_axes(&[3, 1], &[0, 3], Some(&[2, 0, 3, 1]))),
@@ -1814,6 +1857,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_contraction_requires_bosonic_braiding_and_compose_does_not() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         for braiding in [BraidingStyleKind::Fermionic, BraidingStyleKind::Anyonic] {
             let (left, lhs, right, rhs) = bound_pair(1, 1);
             left.braiding.set(braiding);
@@ -1821,6 +1865,7 @@ mod tests {
             let lhs_data = vec![1.0; lhs.space().required_len().unwrap()];
             let rhs_data = vec![2.0; rhs.space().required_len().unwrap()];
             let error = contract(
+                engine,
                 (&lhs, &lhs_data),
                 (&rhs, &rhs_data),
                 TensorContractSpec::with_default_output_order(&[1], &[0]),
@@ -1845,6 +1890,7 @@ mod tests {
             let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
             let (_, data) = context
                 .tensorcompose_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                 )
@@ -1859,6 +1905,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_declined_staged_space_is_not_published() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("a_declined_staged_space_is_not_published") {
             return;
         }
@@ -1888,6 +1935,7 @@ mod tests {
         let preview = destination.preview();
         let mut txn = CheckedContractTxn::new();
         let resolution = plan_contract_in::<HostEagerExecutor, CheckedGenericAdmissionMode, _>(
+            engine,
             &mut txn,
             PlanTarget::checked(authority, &preview),
             FusionOperand::direct(lhs.space()),
@@ -1940,12 +1988,17 @@ mod tests {
     /// the owned materialization through the eager storage-mapped transform
     /// (its own oracles in `tree_transform_plan::checked_generic`), which no
     /// contraction route reads.
-    fn adjoint_of(parent: &SpySpace, data: &[f64]) -> (SpySpace, SpySpace, Vec<f64>) {
+    fn adjoint_of(
+        engine: &mut dyn Engine,
+        parent: &SpySpace,
+        data: &[f64],
+    ) -> (SpySpace, SpySpace, Vec<f64>) {
         let logical = crate::adjoint_bound_space_dyn_generic_checked(parent).unwrap();
         let (nout, rank) = (logical.space().nout(), logical.space().rank());
         let (owned, owned_data) =
             crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                 .tree_transform_owned_checked_generic_in(
+                    engine,
                     &logical,
                     Some(parent),
                     data,
@@ -1981,6 +2034,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_adjoint_operands_take_every_route_and_match_the_materialized_parent() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("checked_adjoint_operands_take_every_route_and_match_the_materialized_parent")
         {
             return;
@@ -1989,8 +2043,8 @@ mod tests {
             let (_left, lhs, _right, rhs) = bound_pair(n, n);
             let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
             let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
-            let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(&lhs, &lhs_data);
-            let (rhs_logical, rhs_owned, rhs_owned_data) = adjoint_of(&rhs, &rhs_data);
+            let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(engine, &lhs, &lhs_data);
+            let (rhs_logical, rhs_owned, rhs_owned_data) = adjoint_of(engine, &rhs, &rhs_data);
             let axes = || fixture_axes(lhs_axes, rhs_axes, output);
             let mut transformers = Vec::new();
             for (lazy_lhs, lazy_rhs) in [(false, false), (true, false), (false, true), (true, true)]
@@ -2022,7 +2076,13 @@ mod tests {
                     TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
                 crate::probe::take_completed_transformer_activity();
                 let (space, data) = context
-                    .tensorcontract_checked_generic_in(lhs_side, rhs_side, entry_axes(axes()), nout)
+                    .tensorcontract_checked_generic_in(
+                        engine,
+                        lhs_side,
+                        rhs_side,
+                        entry_axes(axes()),
+                        nout,
+                    )
                     .unwrap();
                 let activity = crate::probe::take_completed_transformer_activity();
                 transformers.push(activity.builds + activity.hits);
@@ -2030,12 +2090,16 @@ mod tests {
                 if route == Route::DynamicTree {
                     continue;
                 }
-                let (expected_space, expected) = TensorContractFusionExecutionContext::<
-                    f64,
-                    RuleIdentity,
-                >::default()
-                .tensorcontract_checked_generic_in(lhs_oracle, rhs_oracle, entry_axes(axes()), nout)
-                .unwrap();
+                let (expected_space, expected) =
+                    TensorContractFusionExecutionContext::<f64, RuleIdentity>::default()
+                        .tensorcontract_checked_generic_in(
+                            engine,
+                            lhs_oracle,
+                            rhs_oracle,
+                            entry_axes(axes()),
+                            nout,
+                        )
+                        .unwrap();
                 assert_close(&what, (&space, &data), (&expected_space, &expected));
             }
             if name == "lhs_only" {
@@ -2050,7 +2114,7 @@ mod tests {
         let (_left, lhs, _right, rhs) = bound_pair(1, 1);
         let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
         let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
-        let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(&lhs, &lhs_data);
+        let (lhs_logical, lhs_owned, lhs_owned_data) = adjoint_of(engine, &lhs, &lhs_data);
         let lazy: Side<'_> = (&lhs_logical, FusionOperand::adjoint(lhs.space()), &lhs_data);
         let owned = direct_side(&lhs_owned, &lhs_owned_data);
         for (what, actual, expected) in [
@@ -2072,12 +2136,12 @@ mod tests {
         ] {
             let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
             let (space, data) = context
-                .tensorcompose_checked_generic_in(actual.0, actual.1)
+                .tensorcompose_checked_generic_in(engine, actual.0, actual.1)
                 .unwrap();
             assert_eq!(last_route(&context), Route::Core, "{what}");
             let (expected_space, expected) =
                 TensorContractFusionExecutionContext::<f64, RuleIdentity>::default()
-                    .tensorcompose_checked_generic_in(expected.0, expected.1)
+                    .tensorcompose_checked_generic_in(engine, expected.0, expected.1)
                     .unwrap();
             assert_close(what, (&space, &data), (&expected_space, &expected));
         }
@@ -2090,6 +2154,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn checked_adjoint_operand_failure_publishes_nothing_and_a_warm_repeat_builds_nothing() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated(
             "checked_adjoint_operand_failure_publishes_nothing_and_a_warm_repeat_builds_nothing",
         ) {
@@ -2102,8 +2167,9 @@ mod tests {
             symtn_core::clear_structure_caches();
             let logical = crate::adjoint_bound_space_dyn_generic_checked(&lhs).unwrap();
             let axes = || fixture_axes(lhs_axes, rhs_axes, output);
-            let run = |context: &mut FailingContext| {
+            let mut run = |context: &mut FailingContext| {
                 context.tensorcontract_checked_generic_in(
+                    engine,
                     (&logical, FusionOperand::adjoint(lhs.space()), &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(axes()),
@@ -2161,6 +2227,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_warm_checked_generic_contraction_converts_at_most_one_pack_per_stage() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // Isolated: a concurrent cache clear would force a rebuild.
         const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_CONTRACT_PACKS_ISOLATED";
         if std::env::var_os(ISOLATED).is_none() {
@@ -2197,6 +2264,7 @@ mod tests {
         let mut run = || {
             let (_, data) = context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(TensorContractSpec::new(
@@ -2246,6 +2314,7 @@ mod tests {
     }
 
     fn assert_inactive_sector_zero_and_active_product<D>(
+        engine: &mut dyn Engine,
         one: D,
         two: D,
         six: D,
@@ -2269,6 +2338,7 @@ mod tests {
         let mut context = TensorContractFusionExecutionContext::<D, RuleIdentity>::default();
         let (output, data) = context
             .tensorcontract_checked_generic_in(
+                engine,
                 direct_side(&lhs, &lhs_data),
                 direct_side(&rhs, &rhs_data),
                 entry_axes(TensorContractSpec::with_default_output_order(&[1], &[0])),
@@ -2292,8 +2362,12 @@ mod tests {
 
     #[test]
     fn owned_checked_generic_contract_leaves_inactive_sectors_exactly_zero() {
-        assert_inactive_sector_zero_and_active_product::<f64>(1.0, 2.0, 6.0, |v| v.to_bits() == 0);
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        assert_inactive_sector_zero_and_active_product::<f64>(engine, 1.0, 2.0, 6.0, |v| {
+            v.to_bits() == 0
+        });
         assert_inactive_sector_zero_and_active_product::<num_complex::Complex64>(
+            engine,
             num_complex::Complex64::new(1.0, 0.0),
             num_complex::Complex64::new(2.0, 0.0),
             num_complex::Complex64::new(6.0, 0.0),
@@ -2304,6 +2378,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_reset_straddling_the_publication_leaves_nothing_resident() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_CONTRACT_RESET_STRADDLE_ISOLATED";
         if std::env::var_os(ISOLATED).is_none() {
             let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -2337,6 +2412,7 @@ mod tests {
         let mut run = || {
             context
                 .tensorcontract_checked_generic_in(
+                    engine,
                     direct_side(&lhs, &lhs_data),
                     direct_side(&rhs, &rhs_data),
                     entry_axes(TensorContractSpec::new(
@@ -2374,13 +2450,16 @@ mod tests {
 
     /// One owned checked transform on a fresh default context.
     fn transform(
+        engine: &mut dyn Engine,
         logical: &SpySpace,
         adjoint_of: Option<&SpySpace>,
         data: &[f64],
         operation: &crate::TreeTransformOperation,
     ) -> Result<(SpySpace, Vec<f64>), CheckedGenericPlanError<SpyError>> {
         crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(logical, adjoint_of, data, operation, 1.0)
+            .tree_transform_owned_checked_generic_in(
+                engine, logical, adjoint_of, data, operation, 1.0,
+            )
     }
 
     /// What (#2154): a warm owned checked permute, braid or transpose, of a
@@ -2392,6 +2471,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_warm_checked_transform_reads_only_its_identity_and_styles() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("a_warm_checked_transform_reads_only_its_identity_and_styles") {
             return;
         }
@@ -2419,9 +2499,10 @@ mod tests {
                     Some(lazy) => (lazy, Some(&parent)),
                     None => (&parent, None),
                 };
-                let run = || {
+                let mut run = || {
                     provider.reset();
-                    let (space, out) = transform(logical, adjoint_of, &data, operation).unwrap();
+                    let (space, out) =
+                        transform(engine, logical, adjoint_of, &data, operation).unwrap();
                     (space, out, provider.events.borrow().clone())
                 };
                 let (cold_space, cold_data, _) = run();
@@ -2450,6 +2531,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_memo_hit_with_a_new_operation_runs_the_preflight_in_the_build() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("a_memo_hit_with_a_new_operation_runs_the_preflight_in_the_build") {
             return;
         }
@@ -2468,9 +2550,9 @@ mod tests {
                 }
                 provider.braiding.set(braiding);
                 let data = ramp(space.space().required_len().unwrap(), 0.5, -1.0);
-                transform(&space, None, &data, &braid).unwrap();
+                transform(engine, &space, None, &data, &braid).unwrap();
                 provider.reset();
-                let result = transform(&space, None, &data, &permute)
+                let result = transform(engine, &space, None, &data, &permute)
                     .map(|(space, out)| (space.space().clone(), folded_bits(&out)));
                 let events = provider.events.borrow().clone();
                 (result, events)
@@ -2536,6 +2618,7 @@ mod tests {
     #[test]
     #[allow(clippy::arc_with_non_send_sync)]
     fn a_warm_checked_contraction_derives_no_staged_operand() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         if !isolated("a_warm_checked_contraction_derives_no_staged_operand") {
             return;
         }
@@ -2596,13 +2679,14 @@ mod tests {
                     Some(logical) => (logical, FusionOperand::adjoint(lhs.space()), &lhs_data[..]),
                     None => direct_side(&lhs, &lhs_data),
                 };
-                let run = || {
+                let mut run = || {
                     left.reset();
                     right.reset();
                     let mut context =
                         TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
                     let (space, out) = context
                         .tensorcontract_checked_generic_in(
+                            engine,
                             lhs_side,
                             direct_side(&rhs, &rhs_data),
                             entry_axes(fixture_axes(lhs_axes, rhs_axes, *output)),

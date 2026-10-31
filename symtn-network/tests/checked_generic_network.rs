@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Debug};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::LieGroupFusionRule;
 use symtn::sector::SectorId;
@@ -124,8 +125,12 @@ fn authority_provider<D>(
     authorities[&planned.plan().steps().last().unwrap().result()]
 }
 
-fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: Vec<i64>) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(
+    engine: &mut dyn Engine,
+    n: usize,
+    label: Vec<i64>,
+) {
+    let runtime = Runtime::builder().build().unwrap();
     let lhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let rhs_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
     let tail_provider = Arc::new(symtn_core::testing::su_lie_rule(n));
@@ -133,6 +138,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
     let rhs_leg = GradedSpace::try_new(Arc::clone(&rhs_provider), [(label.clone(), 1)]).unwrap();
     let tail_leg = GradedSpace::try_new(Arc::clone(&tail_provider), [(label.clone(), 1)]).unwrap();
     let lhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&lhs_leg, &lhs_leg],
         [&lhs_leg],
@@ -147,14 +153,20 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
             .any(|vertex| vertex.get() == 2)
     }));
     let middle: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&rhs_leg], [&rhs_leg], |_, _| D::value(17)).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&rhs_leg], [&rhs_leg], |_, _| {
+            D::value(17)
+        })
+        .unwrap();
     let tail: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&tail_leg], [&tail_leg], |_, _| D::value(17))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&tail_leg], [&tail_leg], |_, _| {
+            D::value(17)
+        })
+        .unwrap();
     assert!(!std::ptr::eq(lhs.provider(), middle.provider()));
 
     let chain = lhs
         .contract(
+            engine,
             &middle,
             &ContractSpec {
                 lhs: &[2],
@@ -165,6 +177,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
         )
         .unwrap()
         .contract(
+            engine,
             &tail,
             &ContractSpec {
                 lhs: &[2],
@@ -174,7 +187,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
             },
         )
         .unwrap();
-    let expected = chain.permute(&[1, 0], &[2]).unwrap();
+    let expected = chain.permute(engine, &[1, 0], &[2]).unwrap();
     let network = Network::new(
         vec![vec!["a", "b", "c"], vec!["c", "d"], vec!["d", "e"]],
         vec![false; 3],
@@ -195,7 +208,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
     for planned in [&explicit, &greedy] {
         let authority = authority_provider(planned, &tensors);
         for _ in 0..2 {
-            let actual = planned.execute(&tensors, &mut workspace).unwrap();
+            let actual = planned.execute(engine, &tensors, &mut workspace).unwrap();
             assert_eq!(actual.provider() as *const _, authority);
             assert_same(&actual, &expected);
         }
@@ -203,11 +216,11 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
     let mut separate_a = NetworkExecutionWorkspace::default();
     let mut separate_b = NetworkExecutionWorkspace::default();
     assert_same(
-        &explicit.execute(&tensors, &mut separate_a).unwrap(),
+        &explicit.execute(engine, &tensors, &mut separate_a).unwrap(),
         &expected,
     );
     assert_same(
-        &explicit.execute(&tensors, &mut separate_b).unwrap(),
+        &explicit.execute(engine, &tensors, &mut separate_b).unwrap(),
         &expected,
     );
 
@@ -221,6 +234,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
     let drift_tail_leg =
         GradedSpace::try_new(Arc::clone(&drift_tail_provider), [(label, 1)]).unwrap();
     let drift_lhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&drift_lhs_leg, &drift_lhs_leg],
         [&drift_lhs_leg],
@@ -228,19 +242,25 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
     )
     .unwrap();
     let drift_middle: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&drift_middle_leg],
         [&drift_middle_leg],
         |_, _| D::value(17),
     )
     .unwrap();
-    let drift_tail: TensorMap<_, D> =
-        TensorMap::from_subblock_fn(&runtime, [&drift_tail_leg], [&drift_tail_leg], |_, _| {
-            D::value(17)
-        })
-        .unwrap();
+    let drift_tail: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&drift_tail_leg],
+        [&drift_tail_leg],
+        |_, _| D::value(17),
+    )
+    .unwrap();
     let drift_refs = [&drift_lhs, &drift_middle, &drift_tail];
-    let drift = explicit.execute(&drift_refs, &mut separate_a).unwrap();
+    let drift = explicit
+        .execute(engine, &drift_refs, &mut separate_a)
+        .unwrap();
     assert_eq!(
         drift.provider() as *const _,
         authority_provider(&explicit, &drift_refs)
@@ -256,7 +276,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
         &["b", "a"],
         &["e"],
     )
-    .contract(&[&lhs, &middle, &tail])
+    .contract(engine, &[&lhs, &middle, &tail])
     .unwrap();
     let cached_replay = net(
         &[
@@ -267,7 +287,7 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
         &["b", "a"],
         &["e"],
     )
-    .contract(&[&lhs, &middle, &tail])
+    .contract(engine, &[&lhs, &middle, &tail])
     .unwrap();
     assert_eq!(
         cached_first.provider() as *const _,
@@ -286,9 +306,9 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
         &["b"],
         &["a", "e"],
     )
-    .contract(&[&lhs, &middle, &tail])
+    .contract(engine, &[&lhs, &middle, &tail])
     .unwrap();
-    assert_same(&moved, &chain.permute(&[1], &[0, 2]).unwrap());
+    assert_same(&moved, &chain.permute(engine, &[1], &[0, 2]).unwrap());
 
     let planned = Arc::new(greedy);
     let operands = [Arc::new(lhs), Arc::new(middle), Arc::new(tail)];
@@ -297,8 +317,10 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
             let planned = Arc::clone(&planned);
             let operands = operands.clone();
             std::thread::spawn(move || {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 planned
                     .execute(
+                        engine,
                         &[&operands[0], &operands[1], &operands[2]],
                         &mut Default::default(),
                     )
@@ -313,24 +335,26 @@ fn assert_sun_network<D: OracleScalar + Send + Sync + 'static>(n: usize, label: 
 
 #[test]
 fn sun_checked_generic_network_matches_manual_explicit_greedy_cached_and_replay() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: provider-neutral SU(N) conformance over μ=2 keys, both payload
     // dtypes, three operands, nontrivial final order, replay, and concurrency.
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        assert_sun_network::<f64>(n, label.clone());
-        assert_sun_network::<Complex64>(n, label);
+        assert_sun_network::<f64>(engine, n, label.clone());
+        assert_sun_network::<Complex64>(engine, n, label);
     }
 }
 
 #[test]
 fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(symtn_core::testing::su_lie_rule(3));
     let label = vec![1, 1];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 2)]).unwrap();
     let lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, indices| {
             Complex64::value(20_000 + marker(trees, indices))
         })
         .unwrap();
@@ -342,7 +366,7 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
             .any(|vertex| vertex.get() == 2)
     }));
     let rhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
             Complex64::value(30_000 + marker(trees, indices))
         })
         .unwrap();
@@ -361,7 +385,9 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
     .unwrap();
     let tensors = [&lhs, &rhs];
     let planned = network.plan(&tensors, &GreedyDenseOptimizer).unwrap();
-    let expected = planned.execute(&tensors, &mut Default::default()).unwrap();
+    let expected = planned
+        .execute(engine, &tensors, &mut Default::default())
+        .unwrap();
     let ir = NetworkIR::from_labels(inputs, output).unwrap();
     let cost = DenseCostModel::from_network(
         &ir,
@@ -384,7 +410,7 @@ fn sun_checked_generic_mixed_slice_preserves_outer_multiplicity_keys() {
         .lower_symmetric_sliced_plan(&tensors, dense)
         .unwrap();
     let (actual, stats) = network
-        .execute_symmetric_sliced(&tensors, sliced, usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
         .unwrap();
     assert!(stats.peak_total_bytes() > 0);
     assert_eq!(actual.provider() as *const _, provider.as_ref() as *const _);
@@ -537,7 +563,8 @@ fn assert_optimizer_does_not_retry_provider_failure(
     optimizer: Optimizer,
     failure: PlanningFailure,
 ) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     configure_plan_cache(
         &runtime,
         PlanCacheConfig {
@@ -546,7 +573,7 @@ fn assert_optimizer_does_not_retry_provider_failure(
         },
     );
     let provider = Arc::new(InjectedGeneric::new());
-    let tensors = injected_chain(&runtime, &provider);
+    let tensors = injected_chain(engine, &runtime, &provider);
     provider.dual_calls.store(0, Ordering::SeqCst);
     match failure {
         PlanningFailure::Dual => provider.fail_dual.store(true, Ordering::SeqCst),
@@ -566,7 +593,7 @@ fn assert_optimizer_does_not_retry_provider_failure(
         &["a", "b"],
         &["f"],
     )
-    .contract(&[first, second, third, fourth])
+    .contract(engine, &[first, second, third, fourth])
     .unwrap_err();
     match failure {
         PlanningFailure::Dual => {
@@ -698,18 +725,19 @@ impl TypedSectorAdmission for InjectedGeneric {
 }
 
 fn injected_chain(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     provider: &Arc<InjectedGeneric>,
 ) -> Vec<TensorMap<InjectedGeneric, f64>> {
     let leg = GradedSpace::try_new(Arc::clone(provider), [(vec![1, 1], 1)]).unwrap();
     vec![
-        TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap(),
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| 2.0).unwrap(),
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| 3.0).unwrap(),
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| 4.0).unwrap(),
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 2.0).unwrap(),
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 3.0).unwrap(),
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| 4.0).unwrap(),
     ]
 }
 
@@ -736,6 +764,7 @@ fn injected_network(operands: usize, permute_output: bool) -> Network {
 }
 
 fn assert_injected_recovery(
+    engine: &mut dyn Engine,
     provider: &InjectedGeneric,
     planned: &PlannedNetwork,
     tensors: &[&TensorMap<InjectedGeneric, f64>],
@@ -747,13 +776,15 @@ fn assert_injected_recovery(
     symtn::cache::clear();
     provider.arm_symbol(ordinal);
     assert!(matches!(
-        planned.execute(tensors, &mut workspace),
+        planned.execute(engine, tensors, &mut workspace),
         Err(GenericTensorError::Plan(_))
     ));
     provider.reset_symbols();
-    let recovered = planned.execute(tensors, &mut workspace).unwrap();
+    let recovered = planned.execute(engine, tensors, &mut workspace).unwrap();
     provider.reset_symbols();
-    let expected = planned.execute(tensors, &mut Default::default()).unwrap();
+    let expected = planned
+        .execute(engine, tensors, &mut Default::default())
+        .unwrap();
     assert_eq!(recovered.subblock_count(), expected.subblock_count());
     for (&actual, &want) in recovered
         .dense_data()
@@ -766,6 +797,7 @@ fn assert_injected_recovery(
 }
 
 fn injected_plan_case(
+    engine: &mut dyn Engine,
     operands: usize,
     permute_output: bool,
 ) -> (
@@ -773,9 +805,9 @@ fn injected_plan_case(
     Vec<TensorMap<InjectedGeneric, f64>>,
     PlannedNetwork,
 ) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
-    let tensors = injected_chain(&runtime, &provider);
+    let tensors = injected_chain(engine, &runtime, &provider);
     let refs = tensors.iter().take(operands).collect::<Vec<_>>();
     let planned = injected_network(operands, permute_output)
         .plan(
@@ -791,19 +823,22 @@ fn injected_plan_case(
     (provider, tensors, planned)
 }
 
-fn cold_query_count(operands: usize, permute_output: bool) -> usize {
-    let (provider, tensors, planned) = injected_plan_case(operands, permute_output);
+fn cold_query_count(engine: &mut dyn Engine, operands: usize, permute_output: bool) -> usize {
+    let (provider, tensors, planned) = injected_plan_case(engine, operands, permute_output);
     let refs = tensors.iter().take(operands).collect::<Vec<_>>();
     // Each spy has the same semantic identity, so measure after discarding a
     // layout an earlier fixture may legitimately have published.
     symtn::cache::clear();
     provider.reset_symbols();
-    planned.execute(&refs, &mut Default::default()).unwrap();
+    planned
+        .execute(engine, &refs, &mut Default::default())
+        .unwrap();
     provider.symbol_calls.load(Ordering::SeqCst)
 }
 
 #[test]
 fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_NETWORK_FAILURES_ISOLATED";
     if std::env::var_os(ISOLATED).is_none() {
@@ -825,7 +860,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
         return;
     }
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
 
     provider.fail_encode.store(true, Ordering::SeqCst);
@@ -835,7 +870,7 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
     ));
     provider.fail_encode.store(false, Ordering::SeqCst);
 
-    let tensors = injected_chain(&runtime, &provider);
+    let tensors = injected_chain(engine, &runtime, &provider);
     let refs = tensors.iter().collect::<Vec<_>>();
     provider.fail_dual.store(true, Ordering::SeqCst);
     assert!(matches!(
@@ -844,10 +879,10 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
     ));
     provider.fail_dual.store(false, Ordering::SeqCst);
 
-    let first_end = cold_query_count(2, false);
-    let middle_end = cold_query_count(3, false);
-    let final_end = cold_query_count(4, false);
-    let permutation_end = cold_query_count(4, true);
+    let first_end = cold_query_count(engine, 2, false);
+    let middle_end = cold_query_count(engine, 3, false);
+    let final_end = cold_query_count(engine, 4, false);
+    let permutation_end = cold_query_count(engine, 4, true);
     assert!([first_end, middle_end, final_end, permutation_end]
         .into_iter()
         .all(|queries| queries > 0));
@@ -858,26 +893,30 @@ fn checked_generic_failures_stay_typed_and_workspace_recovers_at_every_step() {
         (4, false, final_end),
         (4, true, permutation_end),
     ] {
-        let (case_provider, case_tensors, case_plan) = injected_plan_case(operands, permute);
+        let (case_provider, case_tensors, case_plan) =
+            injected_plan_case(engine, operands, permute);
         let case_refs = case_tensors.iter().take(operands).collect::<Vec<_>>();
-        assert_injected_recovery(&case_provider, &case_plan, &case_refs, ordinal);
+        assert_injected_recovery(engine, &case_provider, &case_plan, &case_refs, ordinal);
     }
 }
 
 #[test]
 fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 2)]).unwrap();
-    let lhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
-        (1 + ij[0] + 3 * ij[1]) as f64
-    })
-    .unwrap();
-    let rhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
-        (2 + 2 * ij[0] + ij[1]) as f64
-    })
-    .unwrap();
+    let lhs: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            (1 + ij[0] + 3 * ij[1]) as f64
+        })
+        .unwrap();
+    let rhs: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
+            (2 + 2 * ij[0] + ij[1]) as f64
+        })
+        .unwrap();
     let inputs = vec![
         ["a", "x"].map(TemporaryLabel::from).to_vec(),
         ["x", "c"].map(TemporaryLabel::from).to_vec(),
@@ -928,16 +967,16 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
     // two-rectangle run has the same bind/compile/first-job sequence and
     // strictly more decode calls.
     network
-        .execute_symmetric_sliced(&tensors, multi.clone(), usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
         .unwrap();
     provider.reset_decodes();
     network
-        .execute_symmetric_sliced(&tensors, single, usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, single, usize::MAX)
         .unwrap();
     let first_rectangle_end = provider.decode_calls.load(Ordering::SeqCst);
     provider.reset_decodes();
     let (expected, _) = network
-        .execute_symmetric_sliced(&tensors, multi.clone(), usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
         .unwrap();
     let all_jobs_end = provider.decode_calls.load(Ordering::SeqCst);
     assert!(first_rectangle_end > 0);
@@ -945,7 +984,7 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
 
     provider.arm_decode(first_rectangle_end + 1);
     let error = network
-        .execute_symmetric_sliced(&tensors, multi.clone(), usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, multi.clone(), usize::MAX)
         .unwrap_err();
     assert!(matches!(
         error,
@@ -960,7 +999,7 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
 
     provider.reset_decodes();
     let (recovered, _) = network
-        .execute_symmetric_sliced(&tensors, multi, usize::MAX)
+        .execute_symmetric_sliced(engine, &tensors, multi, usize::MAX)
         .unwrap();
     assert_eq!(
         recovered.dense_data().unwrap(),
@@ -970,17 +1009,18 @@ fn checked_generic_sliced_late_provider_failure_is_typed_and_recovers() {
 
 #[test]
 fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a provider error inside `trace_pairs`, the first step of the
     // two-step trace-then-network form, returns the typed provider error,
     // and the same trace succeeds once the provider recovers.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
     provider.arm_symbol(1);
-    let error = tensor.trace_pairs(&[(0, 1)]).unwrap_err();
+    let error = tensor.trace_pairs(engine, &[(0, 1)]).unwrap_err();
     assert!(
         matches!(
             error,
@@ -990,22 +1030,24 @@ fn checked_generic_trace_provider_failure_stays_typed_and_recovers() {
     );
 
     provider.reset_symbols();
-    let traced = tensor.trace_pairs(&[(0, 1)]).unwrap();
+    let traced = tensor.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(traced.provider() as *const _, provider.as_ref() as *const _);
 }
 
 #[test]
 fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary_ops() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [], |_, _| 2.0).unwrap();
     let rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [], [&leg], |_, _| 5.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [], [&leg], |_, _| 5.0).unwrap();
     let scalar = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[0],
@@ -1021,7 +1063,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
         .unwrap();
     assert_eq!(
         scalar_plan
-            .execute(&[&scalar], &mut Default::default())
+            .execute(engine, &[&scalar], &mut Default::default())
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -1037,10 +1079,11 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
     .unwrap()
     .plan(&[&lhs, &rhs], &GreedyDenseOptimizer)
     .unwrap()
-    .execute(&[&lhs, &rhs], &mut Default::default())
+    .execute(engine, &[&lhs, &rhs], &mut Default::default())
     .unwrap();
     let expected_outer = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[],
@@ -1056,7 +1099,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
     );
 
     let rank_three: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
@@ -1070,12 +1113,12 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
     .unwrap()
     .plan(&[&rank_three], &GreedyDenseOptimizer)
     .unwrap()
-    .execute(&[&rank_three], &mut Default::default())
+    .execute(engine, &[&rank_three], &mut Default::default())
     .unwrap();
     assert_eq!(
         permuted.dense_data().unwrap(),
         rank_three
-            .permute(&[1, 0], &[2])
+            .permute(engine, &[1, 0], &[2])
             .unwrap()
             .dense_data()
             .unwrap()
@@ -1086,7 +1129,7 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
         std::iter::empty::<(Vec<i64>, usize)>(),
     )
     .unwrap();
-    let zero: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&empty], []).unwrap();
+    let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&empty], []).unwrap();
     let zero_outer = Network::new(
         vec![vec!["a"], vec!["b"]],
         vec![false; 2],
@@ -1097,40 +1140,46 @@ fn checked_generic_scalar_empty_outer_product_and_single_permute_follow_ordinary
     .unwrap()
     .plan(&[&zero, &zero], &GreedyDenseOptimizer)
     .unwrap()
-    .execute(&[&zero, &zero], &mut Default::default())
+    .execute(engine, &[&zero, &zero], &mut Default::default())
     .unwrap();
     assert!(zero_outer.dense_data().unwrap().is_empty());
 }
 
 #[test]
 fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_authority() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(InjectedGeneric::new());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], 1)]).unwrap();
     let a64: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
     let b64: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 3.0).unwrap();
     let ac: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| Complex64::new(2.0, 1.0))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
+            Complex64::new(2.0, 1.0)
+        })
+        .unwrap();
     let bc: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| Complex64::new(3.0, -1.0))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
+            Complex64::new(3.0, -1.0)
+        })
+        .unwrap();
     let first = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a64, &b64])
+        .contract(engine, &[&a64, &b64])
         .unwrap();
     let second = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a64, &b64])
+        .contract(engine, &[&a64, &b64])
         .unwrap();
     let complex = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&ac, &bc])
+        .contract(engine, &[&ac, &bc])
         .unwrap();
     assert_eq!(first.dense_data().unwrap(), second.dense_data().unwrap());
     assert_eq!(
         complex.dense_data().unwrap(),
         ac.contract(
+            engine,
             &bc,
             &ContractSpec {
                 lhs: &[1],
@@ -1156,11 +1205,11 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
         },
     );
     let uncached = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
-        .contract(&[&a64, &b64])
+        .contract(engine, &[&a64, &b64])
         .unwrap();
     assert_eq!(uncached.dense_data().unwrap(), first.dense_data().unwrap());
 
-    let lazy = a64.adjoint().unwrap();
+    let lazy = a64.adjoint(engine).unwrap();
     let network = Network::new(
         vec![vec!["i", "j"], vec!["j", "k"]],
         vec![false; 2],
@@ -1171,6 +1220,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
     .unwrap();
     let planned = network.plan(&[&lazy, &b64], &GreedyDenseOptimizer).unwrap();
     let direct = lazy.contract(
+        engine,
         &b64,
         &ContractSpec {
             lhs: &[1],
@@ -1179,15 +1229,16 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
             domain: &[1],
         },
     );
-    let replay = planned.execute(&[&lazy, &b64], &mut Default::default());
+    let replay = planned.execute(engine, &[&lazy, &b64], &mut Default::default());
     // A checked lazy adjoint is a storage-conjugate operand (#1865): the
     // replay and a conjugated network leg agree with the direct contraction
     // and with the materialized adjoint, and the lazy input stays lazy.
     let direct = direct.unwrap();
     let expected = lazy
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .contract(
+            engine,
             &b64,
             &ContractSpec {
                 lhs: &[1],
@@ -1217,7 +1268,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
     .unwrap()
     .plan(&[&a64, &b64], &GreedyDenseOptimizer)
     .unwrap()
-    .execute(&[&a64, &b64], &mut Default::default());
+    .execute(engine, &[&a64, &b64], &mut Default::default());
     assert_eq!(
         conjugated.unwrap().dense_data().unwrap(),
         direct.dense_data().unwrap()
@@ -1226,6 +1277,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
 
 #[test]
 fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a checked Generic replay that overwrites its retained step
     // destinations (`contract_into`) gives the eager chain's values and the
@@ -1235,7 +1287,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     fn fill(seed: usize) -> impl Fn(&[usize]) -> f64 {
         move |indices| (1 + seed + 7 * indices[0] + 3 * indices[1]) as f64 / 16.0
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let network = net(
         &[op(&["a"], &["b"]), op(&["b"], &["c"]), op(&["a"], &["d"])],
         &["c"],
@@ -1263,6 +1315,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
         .map(|(seed, &(rows, cols))| {
             let value = fill(seed);
             TensorMap::from_subblock_fn(
+                engine,
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
@@ -1282,14 +1335,18 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
         &checked_tensors[2],
     ];
     let expected = checked_tensors[0]
-        .contract(&checked_tensors[1], &first)
+        .contract(engine, &checked_tensors[1], &first)
         .unwrap()
-        .contract(&checked_tensors[2], &second)
+        .contract(engine, &checked_tensors[2], &second)
         .unwrap();
     let checked_plan = network.plan(&checked_refs, &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
-    let cold = checked_plan.execute(&checked_refs, &mut workspace).unwrap();
-    let warm = checked_plan.execute(&checked_refs, &mut workspace).unwrap();
+    let cold = checked_plan
+        .execute(engine, &checked_refs, &mut workspace)
+        .unwrap();
+    let warm = checked_plan
+        .execute(engine, &checked_refs, &mut workspace)
+        .unwrap();
     assert_same(&cold, &expected);
     assert_same(&warm, &expected);
 
@@ -1302,6 +1359,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
         .map(|(seed, &(rows, cols))| {
             let value = fill(seed);
             TensorMap::from_subblock_fn(
+                engine,
                 &runtime,
                 // The third operand's `a` leg pairs with the first one's.
                 [&if seed == 2 {
@@ -1318,8 +1376,14 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
     let mf_refs = [&mf_tensors[0], &mf_tensors[1], &mf_tensors[2]];
     let mf_plan = network.plan(&mf_refs, &GreedyDenseOptimizer).unwrap();
     let mut mf_workspace = NetworkExecutionWorkspace::default();
-    drop(mf_plan.execute(&mf_refs, &mut mf_workspace).unwrap());
-    let mf_warm = mf_plan.execute(&mf_refs, &mut mf_workspace).unwrap();
+    drop(
+        mf_plan
+            .execute(engine, &mf_refs, &mut mf_workspace)
+            .unwrap(),
+    );
+    let mf_warm = mf_plan
+        .execute(engine, &mf_refs, &mut mf_workspace)
+        .unwrap();
     let (checked_data, mf_data) = (warm.dense_data().unwrap(), mf_warm.dense_data().unwrap());
     assert_eq!(checked_data.len(), mf_data.len());
     for (index, (&lhs, &rhs)) in checked_data.iter().zip(mf_data).enumerate() {
@@ -1332,6 +1396,7 @@ fn checked_warm_replay_matches_eager_chain_and_multiplicity_free_su2() {
 
 #[test]
 fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_replay() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: overwriting the kept step destinations (`contract_into`) stages
     // the same contractions as the returning replay, so a replay through a
@@ -1357,19 +1422,21 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
         return;
     }
 
-    let (provider, tensors, planned) = injected_plan_case(4, true);
+    let (provider, tensors, planned) = injected_plan_case(engine, 4, true);
     let refs = tensors.iter().collect::<Vec<_>>();
     let mut kept = NetworkExecutionWorkspace::default();
-    drop(planned.execute(&refs, &mut kept).unwrap());
+    drop(planned.execute(engine, &refs, &mut kept).unwrap());
     // Both measured replays start from empty structure caches, so each one
     // stages its contractions from provider queries.
     symtn::cache::clear();
     provider.reset_symbols();
-    let fresh = planned.execute(&refs, &mut Default::default()).unwrap();
+    let fresh = planned
+        .execute(engine, &refs, &mut Default::default())
+        .unwrap();
     let fresh_calls = provider.symbol_calls.load(Ordering::SeqCst);
     symtn::cache::clear();
     provider.reset_symbols();
-    let reused = planned.execute(&refs, &mut kept).unwrap();
+    let reused = planned.execute(engine, &refs, &mut kept).unwrap();
     let reused_calls = provider.symbol_calls.load(Ordering::SeqCst);
     assert!(fresh_calls > 0);
     assert!(
@@ -1390,10 +1457,10 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
     // asks no more symbols than the same call with the cache disabled.
     let runtime = tensors[0].runtime().clone();
     let network = injected_network(4, true);
-    drop(network.contract(&refs).unwrap());
+    drop(network.contract(engine, &refs).unwrap());
     symtn::cache::clear();
     provider.reset_symbols();
-    let leased = network.contract(&refs).unwrap();
+    let leased = network.contract(engine, &refs).unwrap();
     let leased_calls = provider.symbol_calls.load(Ordering::SeqCst);
     assert_eq!(plan_cache_stats(&runtime).workspace_reuses, 1);
     configure_plan_cache(
@@ -1405,7 +1472,7 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
     );
     symtn::cache::clear();
     provider.reset_symbols();
-    let uncached = network.contract(&refs).unwrap();
+    let uncached = network.contract(engine, &refs).unwrap();
     let uncached_calls = provider.symbol_calls.load(Ordering::SeqCst);
     assert!(
         leased_calls <= uncached_calls,
@@ -1423,6 +1490,7 @@ fn checked_destination_reuse_queries_no_more_provider_symbols_than_a_fresh_repla
 
 #[test]
 fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a checked destination parked by the plan-cache pool keeps no
     // provider, is re-attached to the current call's provider on the next
@@ -1430,38 +1498,41 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
     use symtn::typed::{__network, Error};
     use symtn_network::plan_cache_stats;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let chain = |provider: &Arc<LieGroupFusionRule>, seed: u64| {
+    let runtime = Runtime::builder().build().unwrap();
+    let chain = |engine: &mut dyn Engine, provider: &Arc<LieGroupFusionRule>, seed: u64| {
         let leg = GradedSpace::try_new(Arc::clone(provider), [(vec![1], 3)]).unwrap();
         let tensors: Vec<TensorMap<LieGroupFusionRule, f64>> = (0..3)
-            .map(|index| TensorMap::rand_with_seed(&runtime, [&leg], [&leg], seed + index).unwrap())
+            .map(|index| {
+                TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], seed + index).unwrap()
+            })
             .collect();
         tensors
     };
-    let contract = |tensors: &[TensorMap<LieGroupFusionRule, f64>]| {
+    let contract = |engine: &mut dyn Engine, tensors: &[TensorMap<LieGroupFusionRule, f64>]| {
         net(
             &[op(&["a"], &["b"]), op(&["b"], &["c"]), op(&["c"], &["d"])],
             &["a"],
             &["d"],
         )
-        .contract(&[&tensors[0], &tensors[1], &tensors[2]])
+        .contract(engine, &[&tensors[0], &tensors[1], &tensors[2]])
         .unwrap()
     };
 
     let first_provider = Arc::new(symtn_core::testing::su_lie_rule(2));
     let first_weak = Arc::downgrade(&first_provider);
-    let first = chain(&first_provider, 20);
-    drop(contract(&first));
+    let first = chain(engine, &first_provider, 20);
+    drop(contract(engine, &first));
     drop((first, first_provider));
     assert!(first_weak.upgrade().is_none());
 
     let current_provider = Arc::new(symtn_core::testing::su_lie_rule(2));
-    let current = chain(&current_provider, 30);
-    let output = contract(&current);
+    let current = chain(engine, &current_provider, 30);
+    let output = contract(engine, &current);
     assert!(std::ptr::eq(output.provider(), current_provider.as_ref()));
     assert_eq!(plan_cache_stats(&runtime).workspace_reuses, 1);
     let expected = current[0]
         .contract(
+            engine,
             &current[1],
             &ContractSpec {
                 lhs: &[1],
@@ -1472,6 +1543,7 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
         )
         .unwrap()
         .contract(
+            engine,
             &current[2],
             &ContractSpec {
                 lhs: &[1],
@@ -1483,7 +1555,7 @@ fn parked_checked_workspace_releases_provider_and_reattaches_only_to_its_runtime
         .unwrap();
     assert_same(&output, &expected);
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let parked = __network::detach_runtime(output.clone()).map(|_| ());
     assert!(parked.is_none(), "a shared destination is never parked");
     let authority = current[0].clone();

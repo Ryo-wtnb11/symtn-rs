@@ -16,7 +16,7 @@
 //! Each `filter` must equal one field of `symmetry,dtype,case,op` for a row
 //! to run (`U1 c64 qr_compact`). `LEDGER_THREADS` selects the thread layout:
 //!
-//! - `one` (default): `Runtime::builder().dense_threads(1)`, a runtime CPU
+//! - `one` (default): `Runtime::builder()`, a runtime CPU
 //!   pool of one worker for all of its Host work;
 //! - `default`: no thread configuration at all (the pool uses the process's
 //!   available parallelism).
@@ -199,7 +199,7 @@ fn run_op<T>(config: &Config, prefix: &str, op: &str, call: impl FnMut() -> T) {
 /// a generic function: the public methods' dispatch bounds differ per method
 /// and naming them all would only restate the facade.
 macro_rules! ledger {
-    ($config:expr, $runtime:expr, $symmetry:literal, $provider:expr, $dtype:ty, $dname:literal,
+    ($engine:ident, $config:expr, $runtime:expr, $symmetry:literal, $provider:expr, $dtype:ty, $dname:literal,
      $labels:expr, $one:expr) => {{
         for case in CASES {
             let sectors: Vec<_> = ($labels)(case.sectors);
@@ -210,32 +210,37 @@ macro_rules! ledger {
             let codomain = vec![&leg; case.nc];
             let domain = vec![&leg; case.nd];
             let a = TensorMap::<_, $dtype>::rand_with_seed(
+                $engine,
                 $runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
                 1,
             )?;
             let a2 = TensorMap::<_, $dtype>::rand_with_seed(
+                $engine,
                 $runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
                 2,
             )?;
             let square = TensorMap::<_, $dtype>::rand_with_seed(
+                $engine,
                 $runtime,
                 domain.iter().copied(),
                 domain.iter().copied(),
                 3,
             )?;
-            let matrix = TensorMap::<_, $dtype>::rand_with_seed($runtime, [&leg], [&leg], 4)?;
+            let matrix =
+                TensorMap::<_, $dtype>::rand_with_seed($engine, $runtime, [&leg], [&leg], 4)?;
             let on_adjoint = TensorMap::<_, $dtype>::rand_with_seed(
+                $engine,
                 $runtime,
                 domain.iter().copied(),
                 codomain.iter().copied(),
                 5,
             )?;
-            let hermitian = square.adjoint()?.compose(&square)?;
-            let lazy = a.adjoint()?;
+            let hermitian = square.adjoint($engine)?.compose($engine, &square)?;
+            let lazy = a.adjoint($engine)?;
             // Leg roles of `a` (`codomain <- domain`) and of the square
             // `domain <- domain` matrices: each factorization acts on the
             // tensor's own split.
@@ -283,62 +288,72 @@ macro_rules! ledger {
             // `black_box(&a)`: the receiver is loop-invariant, so an inlined pure
             // operation (`norm`) could otherwise be hoisted out of the timed loop.
             run_op(config, &prefix, "compose", || {
-                black_box(&a).compose(&square).unwrap()
+                black_box(&a).compose($engine, &square).unwrap()
             });
             run_op(config, &prefix, "contract", || {
-                black_box(&a).contract(&matrix, &one_leg).unwrap()
+                black_box(&a).contract($engine, &matrix, &one_leg).unwrap()
             });
             run_op(config, &prefix, "permute", || {
-                black_box(&a).permute(perm_codomain, perm_domain).unwrap()
+                black_box(&a)
+                    .permute($engine, perm_codomain, perm_domain)
+                    .unwrap()
             });
             run_op(config, &prefix, "repartition", || {
-                black_box(&a).repartition(repartition_to).unwrap()
+                black_box(&a).repartition($engine, repartition_to).unwrap()
             });
             run_op(config, &prefix, "qr_compact", || {
-                black_box(&a).qr_compact(&rows, &cols).unwrap()
+                black_box(&a).qr_compact($engine, &rows, &cols).unwrap()
             });
             run_op(config, &prefix, "svd_compact", || {
-                black_box(&a).svd_compact(&rows, &cols).unwrap()
+                black_box(&a).svd_compact($engine, &rows, &cols).unwrap()
             });
             run_op(config, &prefix, "lq_compact", || {
-                black_box(&a).lq_compact(&rows, &cols).unwrap()
+                black_box(&a).lq_compact($engine, &rows, &cols).unwrap()
             });
             run_op(config, &prefix, "left_null", || {
-                black_box(&a).left_null(&rows, &cols).unwrap()
+                black_box(&a).left_null($engine, &rows, &cols).unwrap()
             });
             run_op(config, &prefix, "eigh_full", || {
                 black_box(&hermitian)
-                    .eigh_full(&square_rows, &square_cols, HermitianTol::DEFAULT)
+                    .eigh_full($engine, &square_rows, &square_cols, HermitianTol::DEFAULT)
                     .unwrap()
             });
             run_op(config, &prefix, "restrict_leg", || {
-                black_box(&a).restrict_leg(&[(0, &selection)]).unwrap()
+                black_box(&a)
+                    .restrict_leg($engine, &[(0, &selection)])
+                    .unwrap()
             });
             run_op(config, &prefix, "scale", || {
-                black_box(&a).scale(one + one).unwrap()
+                black_box(&a).scale($engine, one + one).unwrap()
             });
             run_op(config, &prefix, "add", || {
-                black_box(&a).axpby(one, &a2, one).unwrap()
+                black_box(&a).axpby($engine, one, &a2, one).unwrap()
             });
-            run_op(config, &prefix, "norm", || black_box(&a).norm(2.0).unwrap());
+            run_op(config, &prefix, "norm", || {
+                black_box(&a).norm($engine, 2.0).unwrap()
+            });
             run_op(config, &prefix, "add_adjoint", || {
-                black_box(&lazy).axpby(one, &on_adjoint, one).unwrap()
+                black_box(&lazy)
+                    .axpby($engine, one, &on_adjoint, one)
+                    .unwrap()
             });
             run_op(config, &prefix, "adjoint_data", || {
                 black_box(&a)
-                    .adjoint()
+                    .adjoint($engine)
                     .unwrap()
-                    .materialize()
+                    .materialize($engine)
                     .unwrap()
                     .dense_data()
                     .unwrap()
                     .len()
             });
             run_op(config, &prefix, "contract_conj", || {
-                black_box(&lazy).contract(&matrix, &one_leg).unwrap()
+                black_box(&lazy)
+                    .contract($engine, &matrix, &one_leg)
+                    .unwrap()
             });
             run_op(config, &prefix, "compose_conj", || {
-                black_box(&lazy).compose(&a2).unwrap()
+                black_box(&lazy).compose($engine, &a2).unwrap()
             });
         }
     }};
@@ -352,9 +367,11 @@ fn centered(count: usize) -> impl Iterator<Item = i32> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Serial: these rows time per-call overhead and single-thread kernels.
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let threads = std::env::var("LEDGER_THREADS").unwrap_or_else(|_| "one".to_string());
     let builder = match threads.as_str() {
-        "one" => Runtime::builder().dense_threads(1),
+        "one" => Runtime::builder(),
         "default" => Runtime::builder(),
         other => return Err(format!("unknown LEDGER_THREADS={other}").into()),
     };
@@ -398,8 +415,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let su2 = |n: usize| (0..n).map(SU2Irrep::from_twice_spin).collect::<Vec<_>>();
     let fz2u1_rule = || Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
 
-    ledger!(&config, &runtime, "U1", U1FusionRule, f64, "f64", u1, 1.0);
     ledger!(
+        engine,
+        &config,
+        &runtime,
+        "U1",
+        U1FusionRule,
+        f64,
+        "f64",
+        u1,
+        1.0
+    );
+    ledger!(
+        engine,
         &config,
         &runtime,
         "U1",
@@ -410,6 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Complex64::new(1.0, 0.0)
     );
     ledger!(
+        engine,
         &config,
         &runtime,
         "fZ2xU1",
@@ -420,6 +449,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1.0
     );
     ledger!(
+        engine,
         &config,
         &runtime,
         "fZ2xU1",
@@ -430,6 +460,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Complex64::new(1.0, 0.0)
     );
     ledger!(
+        engine,
         &config,
         &runtime,
         "SU2",
@@ -440,6 +471,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         1.0
     );
     ledger!(
+        engine,
         &config,
         &runtime,
         "SU2",

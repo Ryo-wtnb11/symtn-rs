@@ -29,13 +29,17 @@ use symtn::typed::{
 };
 
 fn check_signed_core<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
     space: &GradedSpace<R>,
     swapped: bool,
 ) {
     let dual = space.try_dual().unwrap();
-    let a = TensorMap::<R, D>::from_subblock_fn(runtime, [space], [&dual], fill(201)).unwrap();
-    let b = TensorMap::<R, D>::from_subblock_fn(runtime, [&dual], [space], fill(202)).unwrap();
+    let a =
+        TensorMap::<R, D>::from_subblock_fn(engine, runtime, [space], [&dual], fill(201)).unwrap();
+    let b =
+        TensorMap::<R, D>::from_subblock_fn(engine, runtime, [&dual], [space], fill(202)).unwrap();
     let base = Case {
         name: "signed CUDA core",
         lhs: if swapped { b.clone() } else { a.clone() },
@@ -47,18 +51,13 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
     };
     let first_lhs = StackedTensorMap::pack(&[&base.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let first_rhs = StackedTensorMap::pack(&[&base.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&first_lhs, &first_rhs, &base.spec()).unwrap();
-    let reserved_before = runtime
-        .cuda_plan_cache_stats()
-        .unwrap()
-        .unwrap()
-        .reserved_entries;
+    let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &base.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut other = plan.workspace().unwrap();
     let mut expected_gemms = None;
@@ -68,11 +67,11 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
                 name: base.name,
                 lhs: base
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap(),
                 rhs: base
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap(),
                 lhs_axes: base.lhs_axes.clone(),
                 rhs_axes: base.rhs_axes.clone(),
@@ -82,23 +81,29 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
             .collect();
         let left: Vec<_> = members.iter().map(|m| &m.lhs).collect();
         let right: Vec<_> = members.iter().map(|m| &m.rhs).collect();
-        let lhs = StackedTensorMap::pack(&left).unwrap().to_cuda().unwrap();
-        let rhs = StackedTensorMap::pack(&right).unwrap().to_cuda().unwrap();
-        let (_, cold) = observe(|| plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+        let lhs = StackedTensorMap::pack(&left)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
+        let rhs = StackedTensorMap::pack(&right)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
+        let (_, cold) = observe(|| plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap());
         assert!(cold.cuda.h2d_calls >= 1);
         assert_eq!(
             cold.cuda.gemm_calls, 3,
             "three signed structural jobs for this fixture"
         );
         let (_, warm) = observe(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         });
         assert_eq!(warm.cuda.h2d_calls, 0);
         assert_eq!(warm.cuda.d2h_calls, 0);
         let result = plan
-            .execute(&lhs, &rhs, &mut workspace)
+            .execute(cuda, &lhs, &rhs, &mut workspace)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
         let gemms = warm.cuda.gemm_calls;
         assert_eq!(
@@ -110,11 +115,13 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
         }
         expected_gemms = Some(gemms);
         for (i, member) in members.iter().enumerate() {
-            let twist = |tensor: &TensorMap<R, D>, legs: &[usize]| {
-                tensor.twist(legs, Direction::Forward).unwrap()
+            let twist = |engine: &mut dyn symtn::typed::Engine,
+                         tensor: &TensorMap<R, D>,
+                         legs: &[usize]| {
+                tensor.twist(engine, legs, Direction::Forward).unwrap()
             };
             let role = if swapped { TwistRole::A } else { TwistRole::B };
-            let oracle = fermionic_blas_contract_oracle_partitioned(member, role, 1, twist);
+            let oracle = fermionic_blas_contract_oracle_partitioned(engine, member, role, 1, twist);
             let selected = if swapped {
                 Case {
                     name: "selected signed swapped dispatch",
@@ -136,10 +143,20 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
                     dense: false,
                 }
             };
-            let selected_oracle =
-                fermionic_blas_contract_oracle_partitioned(&selected, TwistRole::B, 1, twist);
-            let untwisted =
-                fermionic_blas_contract_oracle_partitioned(&selected, TwistRole::None, 1, twist);
+            let selected_oracle = fermionic_blas_contract_oracle_partitioned(
+                engine,
+                &selected,
+                TwistRole::B,
+                1,
+                twist,
+            );
+            let untwisted = fermionic_blas_contract_oracle_partitioned(
+                engine,
+                &selected,
+                TwistRole::None,
+                1,
+                twist,
+            );
             let expected = oracle.dense_data().unwrap();
             numerics::assert_nonzero_slices_close(
                 base.name,
@@ -163,123 +180,133 @@ fn check_signed_core<R: DeviceRule, D: DevicePayload>(
             );
             numerics::assert_nonzero_slices_close(
                 base.name,
-                result.member(i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
                 expected,
                 member.terms(),
             );
+            let rhs_device = member.rhs.to_cuda(cuda).unwrap();
             let eager = member
                 .lhs
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
-                .contract(&member.rhs.to_cuda().unwrap(), &member.spec())
+                .contract(cuda, &rhs_device, &member.spec())
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap();
             numerics::assert_nonzero_slices_close(
                 base.name,
-                result.member(i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
                 eager.dense_data().unwrap(),
                 member.terms(),
             );
         }
-        let poisoned: Vec<_> = members.iter().map(poisoned_destination).collect();
+        let poisoned: Vec<_> = members
+            .iter()
+            .map(|case| poisoned_destination(engine, case))
+            .collect();
         let mut dst = StackedTensorMap::pack(&poisoned.iter().collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         // The first `execute_into` at a new high-water B reserves the zero
         // template of its inactive-block fills, which `execute` never reads.
         let mut reserve = StackedTensorMap::pack(&poisoned.iter().collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let (_, first_into) = observe(|| {
-            plan.execute_into(&lhs, &rhs, &mut reserve, &mut other)
+            plan.execute_into(cuda, &lhs, &rhs, &mut reserve, &mut other)
                 .unwrap()
         });
-        let (_, into) = observe(|| plan.execute_into(&lhs, &rhs, &mut dst, &mut other).unwrap());
+        let (_, into) = observe(|| {
+            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                .unwrap()
+        });
         assert_eq!(into.cuda.h2d_calls, 0);
         assert_eq!(into.cuda.d2h_calls, 0);
         assert_eq!(into.cuda.gemm_calls, first_into.cuda.gemm_calls);
         assert!(into.cuda.gemm_calls >= gemms);
-        let written = dst.to_host().unwrap();
+        let written = dst.to_host(cuda).unwrap();
         for (i, member) in members.iter().enumerate() {
             numerics::assert_nonzero_slices_close(
                 base.name,
-                written.member(i).unwrap().dense_data().unwrap(),
-                result.member(i).unwrap().dense_data().unwrap(),
+                written.member(engine, i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
                 member.terms(),
             );
         }
         if count == 2 {
-            let before = payload_snapshot(&dst);
-            let short_rhs = rhs.select(&[0]).unwrap();
+            let before = payload_snapshot(engine, cuda, &dst);
+            let short_rhs = rhs.select(cuda, &[0]).unwrap();
             assert!(plan
-                .execute_into(&lhs, &short_rhs, &mut dst, &mut other)
+                .execute_into(cuda, &lhs, &short_rhs, &mut dst, &mut other)
                 .is_err());
-            assert_eq!(payload_snapshot(&dst), before);
-            let mut wrong_dst = dst.select(&[0]).unwrap();
-            let wrong_before = payload_snapshot(&wrong_dst);
+            assert_eq!(payload_snapshot(engine, cuda, &dst), before);
+            let mut wrong_dst = dst.select(cuda, &[0]).unwrap();
+            let wrong_before = payload_snapshot(engine, cuda, &wrong_dst);
             assert!(plan
-                .execute_into(&lhs, &rhs, &mut wrong_dst, &mut other)
+                .execute_into(cuda, &lhs, &rhs, &mut wrong_dst, &mut other)
                 .is_err());
-            assert_eq!(payload_snapshot(&wrong_dst), wrong_before);
-            assert_eq!(payload_snapshot(&dst), before);
+            assert_eq!(payload_snapshot(engine, cuda, &wrong_dst), wrong_before);
+            assert_eq!(payload_snapshot(engine, cuda, &dst), before);
         }
         let role = if swapped { TwistRole::A } else { TwistRole::B };
         check_changed_input_reuse(
+            engine,
+            cuda,
             &plan,
             &members,
             &mut [&mut workspace, &mut other],
-            |member| {
-                fermionic_blas_contract_oracle_partitioned(member, role, 1, |tensor, legs| {
-                    tensor.twist(legs, Direction::Forward).unwrap()
-                })
+            |engine, member| {
+                fermionic_blas_contract_oracle_partitioned(
+                    engine,
+                    member,
+                    role,
+                    1,
+                    |engine, tensor, legs| tensor.twist(engine, legs, Direction::Forward).unwrap(),
+                )
             },
         );
     }
     drop(plan);
     drop(workspace);
     drop(other);
-    assert_eq!(
-        runtime
-            .cuda_plan_cache_stats()
-            .unwrap()
-            .unwrap()
-            .reserved_entries,
-        reserved_before
-    );
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn signed_core_and_swapped_core_all_device_dtypes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! cases {
-        ($dtype:ty) => {
+        ($engine:ident, $dtype:ty) => {
             for swapped in [false, true] {
-                check_signed_core::<_, $dtype>(&runtime, &fermion_u1(), swapped);
-                check_signed_core::<_, $dtype>(&runtime, &fermion_su2(), swapped);
+                check_signed_core::<_, $dtype>(engine, cuda, &runtime, &fermion_u1(), swapped);
+                check_signed_core::<_, $dtype>(engine, cuda, &runtime, &fermion_su2(), swapped);
             }
         };
     }
-    cases!(f32);
-    cases!(num_complex::Complex32);
-    cases!(f64);
-    cases!(Complex64);
+    cases!(engine, f32);
+    cases!(engine, num_complex::Complex32);
+    cases!(engine, f64);
+    cases!(engine, Complex64);
 }
 
 #[test]
 fn signed_fixture_twist_is_nonvacuous_without_a_device() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     for space in [fermion_u1()] {
         let dual = space.try_dual().unwrap();
         let a =
-            TensorMap::<_, f64>::from_subblock_fn(&runtime, [&space], [&dual], fill(201)).unwrap();
+            TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&space], [&dual], fill(201))
+                .unwrap();
         let b =
-            TensorMap::<_, f64>::from_subblock_fn(&runtime, [&dual], [&space], fill(202)).unwrap();
+            TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&dual], [&space], fill(202))
+                .unwrap();
         for swapped in [false, true] {
             let case = Case {
                 name: "signed fixture",
@@ -290,8 +317,10 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
                 output_axes: if swapped { vec![1, 0] } else { vec![0, 1] },
                 dense: false,
             };
-            let twist = |tensor: &TensorMap<_, f64>, legs: &[usize]| {
-                tensor.twist(legs, Direction::Forward).unwrap()
+            let twist = |engine: &mut dyn symtn::typed::Engine,
+                         tensor: &TensorMap<_, f64>,
+                         legs: &[usize]| {
+                tensor.twist(engine, legs, Direction::Forward).unwrap()
             };
             let selected = if swapped {
                 Case {
@@ -306,10 +335,20 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
             } else {
                 case
             };
-            let actual =
-                fermionic_blas_contract_oracle_partitioned(&selected, TwistRole::B, 1, twist);
-            let absent =
-                fermionic_blas_contract_oracle_partitioned(&selected, TwistRole::None, 1, twist);
+            let actual = fermionic_blas_contract_oracle_partitioned(
+                engine,
+                &selected,
+                TwistRole::B,
+                1,
+                twist,
+            );
+            let absent = fermionic_blas_contract_oracle_partitioned(
+                engine,
+                &selected,
+                TwistRole::None,
+                1,
+                twist,
+            );
             assert!(
                 actual
                     .dense_data()
@@ -335,18 +374,22 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
     let dual = odd.try_dual().unwrap();
     let case = Case {
         name: "negative-only signed core",
-        lhs: TensorMap::<_, f64>::from_subblock_fn(&runtime, [&odd], [&dual], |_, _| 1.0).unwrap(),
-        rhs: TensorMap::<_, f64>::from_subblock_fn(&runtime, [&dual], [&odd], |_, _| 1.0).unwrap(),
+        lhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&odd], [&dual], |_, _| 1.0)
+            .unwrap(),
+        rhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&dual], [&odd], |_, _| 1.0)
+            .unwrap(),
         lhs_axes: vec![1],
         rhs_axes: vec![0],
         output_axes: vec![0, 1],
         dense: false,
     };
-    let twist = |tensor: &TensorMap<_, f64>, legs: &[usize]| {
-        tensor.twist(legs, Direction::Forward).unwrap()
-    };
-    let signed = fermionic_blas_contract_oracle_partitioned(&case, TwistRole::B, 1, twist);
-    let absent = fermionic_blas_contract_oracle_partitioned(&case, TwistRole::None, 1, twist);
+    let twist =
+        |engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<_, f64>, legs: &[usize]| {
+            tensor.twist(engine, legs, Direction::Forward).unwrap()
+        };
+    let signed = fermionic_blas_contract_oracle_partitioned(engine, &case, TwistRole::B, 1, twist);
+    let absent =
+        fermionic_blas_contract_oracle_partitioned(engine, &case, TwistRole::None, 1, twist);
     assert!(signed
         .dense_data()
         .unwrap()
@@ -355,7 +398,7 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
         .any(|(&x, &y)| (x - y).abs() > 1e-10));
     numerics::assert_nonzero_slices_close(
         case.name,
-        case.host().dense_data().unwrap(),
+        case.host(engine).dense_data().unwrap(),
         signed.dense_data().unwrap(),
         case.terms(),
     );
@@ -364,8 +407,10 @@ fn signed_fixture_twist_is_nonvacuous_without_a_device() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn signed_core_zeroes_inactive_blocks_after_poisoning() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -390,49 +435,51 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
     let wd = w.try_dual().unwrap();
     let case = Case {
         name: "signed inactive",
-        lhs: TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&wd], fill(201)).unwrap(),
-        rhs: TensorMap::<_, f64>::from_subblock_fn(&runtime, [&wd], [&v], fill(202)).unwrap(),
+        lhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&wd], fill(201))
+            .unwrap(),
+        rhs: TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&wd], [&v], fill(202))
+            .unwrap(),
         lhs_axes: vec![1],
         rhs_axes: vec![0],
         output_axes: vec![0, 1],
         dense: false,
     };
-    let oracle = case.host();
+    let oracle = case.host(engine);
     let expected = oracle.dense_data().unwrap();
     assert!(expected.contains(&0.0));
     assert!(expected.iter().any(|&x| x != 0.0));
     let lhs = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let rhs = StackedTensorMap::pack(&[&case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    let poison = poisoned_destination(&case);
+    let poison = poisoned_destination(engine, &case);
     for count in [1, 2, 17] {
         let lhs = StackedTensorMap::pack(&vec![&case.lhs; count])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let rhs = StackedTensorMap::pack(&vec![&case.rhs; count])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         for _ in 0..2 {
             let mut dst = StackedTensorMap::pack(&vec![&poison; count])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap();
-            let result = dst.to_host().unwrap();
+            let result = dst.to_host(cuda).unwrap();
             for i in 0..count {
                 numerics::assert_nonzero_slices_close(
                     case.name,
-                    result.member(i).unwrap().dense_data().unwrap(),
+                    result.member(engine, i).unwrap().dense_data().unwrap(),
                     expected,
                     case.terms(),
                 );
@@ -449,20 +496,32 @@ fn signed_core_zeroes_inactive_blocks_after_poisoning() {
                 dense: case.dense,
             })
             .collect();
-        check_changed_input_reuse(&plan, &members, &mut [&mut workspace], |member| {
-            member.host()
-        });
+        check_changed_input_reuse(
+            engine,
+            cuda,
+            &plan,
+            &members,
+            &mut [&mut workspace],
+            |engine, member| member.host(engine),
+        );
     }
 }
 
 fn payload_snapshot<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     stack: &StackedTensorMap<R, D, CudaStorage<D>>,
 ) -> String {
-    let host = stack.to_host().unwrap();
+    let host = stack.to_host(cuda).unwrap();
     format!(
         "{:?}",
         (0..host.len())
-            .map(|i| host.member(i).unwrap().dense_data().unwrap().to_vec())
+            .map(|i| host
+                .member(engine, i)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec())
             .collect::<Vec<_>>()
     )
 }
@@ -475,10 +534,12 @@ fn payload_snapshot<R: DeviceRule, D: DevicePayload>(
 /// Host operands. A stale output or scratch value would still have the old
 /// value, which has the opposite sign.
 fn check_changed_input_reuse<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     plan: &ContractPlan<R, D, CudaStorage<D>>,
     members: &[Case<R, D>],
     workspaces: &mut [&mut ContractWorkspace<R, D, CudaStorage<D>>],
-    oracle: impl Fn(&Case<R, D>) -> TensorMap<R, D>,
+    oracle: impl Fn(&mut dyn symtn::typed::Engine, &Case<R, D>) -> TensorMap<R, D>,
 ) {
     let changed: Vec<_> = members
         .iter()
@@ -487,11 +548,11 @@ fn check_changed_input_reuse<R: DeviceRule, D: DevicePayload>(
             name: member.name,
             lhs: member
                 .lhs
-                .scale(D::entry(-0.5 - i as f64 / 64.0, i as f64 / 32.0))
+                .scale(engine, D::entry(-0.5 - i as f64 / 64.0, i as f64 / 32.0))
                 .unwrap(),
             rhs: member
                 .rhs
-                .scale(D::entry(1.25 + i as f64 / 16.0, 0.0))
+                .scale(engine, D::entry(1.25 + i as f64 / 16.0, 0.0))
                 .unwrap(),
             lhs_axes: member.lhs_axes.clone(),
             rhs_axes: member.rhs_axes.clone(),
@@ -499,32 +560,36 @@ fn check_changed_input_reuse<R: DeviceRule, D: DevicePayload>(
             dense: member.dense,
         })
         .collect();
-    let stack = |pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
+    let stack = |cuda: &mut dyn symtn::typed::Engine, pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
         StackedTensorMap::pack(&changed.iter().map(pick).collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap()
     };
-    let (lhs, rhs) = (stack(|m| &m.lhs), stack(|m| &m.rhs));
-    let expected: Vec<_> = changed.iter().map(&oracle).collect();
-    let poison: Vec<_> = changed.iter().map(poisoned_destination).collect();
+    let (lhs, rhs) = (stack(cuda, |m| &m.lhs), stack(cuda, |m| &m.rhs));
+    let expected: Vec<_> = changed.iter().map(|case| oracle(engine, case)).collect();
+    let poison: Vec<_> = changed
+        .iter()
+        .map(|case| poisoned_destination(engine, case))
+        .collect();
     for workspace in workspaces.iter_mut() {
         let returned = plan
-            .execute(&lhs, &rhs, workspace)
+            .execute(cuda, &lhs, &rhs, workspace)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
         let mut dst = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, workspace).unwrap();
-        let written = dst.to_host().unwrap();
+        plan.execute_into(cuda, &lhs, &rhs, &mut dst, workspace)
+            .unwrap();
+        let written = dst.to_host(cuda).unwrap();
         for (i, (member, expected)) in changed.iter().zip(&expected).enumerate() {
             for actual in [&returned, &written] {
                 numerics::assert_nonzero_slices_close(
                     member.name,
-                    actual.member(i).unwrap().dense_data().unwrap(),
+                    actual.member(engine, i).unwrap().dense_data().unwrap(),
                     expected.dense_data().unwrap(),
                     member.terms(),
                 );
@@ -584,16 +649,20 @@ fn observe<T>(run: impl FnOnce() -> T) -> (T, Observation) {
     )
 }
 
-fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
+fn check<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    case: Case<R, D>,
+) {
     let first_lhs = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let first_rhs = StackedTensorMap::pack(&[&case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&first_lhs, &first_rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut second = plan.workspace().unwrap();
     let mut warm_gemms = None;
@@ -602,36 +671,47 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
             .map(|i| {
                 let lhs = case
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap();
                 let rhs = case
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap();
                 (lhs, rhs)
             })
             .collect();
         let left: Vec<_> = members.iter().map(|(lhs, _)| lhs).collect();
         let right: Vec<_> = members.iter().map(|(_, rhs)| rhs).collect();
-        let lhs = StackedTensorMap::pack(&left).unwrap().to_cuda().unwrap();
-        let rhs = StackedTensorMap::pack(&right).unwrap().to_cuda().unwrap();
+        let lhs = StackedTensorMap::pack(&left)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
+        let rhs = StackedTensorMap::pack(&right)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
         let cold_before = cuda_transfer_stats();
-        let device_output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let device_output = plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         let cold_after = cuda_transfer_stats();
         let cold_h2d = cold_after.h2d_calls - cold_before.h2d_calls;
         let cold_bytes = cold_after.h2d_bytes - cold_before.h2d_bytes;
         let cold_gemms = cold_after.gemm_calls - cold_before.gemm_calls;
         assert!(cold_h2d >= 1, "new B needs #740 output zero upload");
         assert!(cold_gemms > 0, "direct core must submit work");
-        let output = device_output.to_host().unwrap();
+        let output = device_output.to_host(cuda).unwrap();
         assert!(
             cold_bytes
-                >= (output.member(0).unwrap().dense_data().unwrap().len()
+                >= (output
+                    .member(engine, 0)
+                    .unwrap()
+                    .dense_data()
+                    .unwrap()
+                    .len()
                     * count
                     * std::mem::size_of::<D>()) as u64
         );
         let warm_before = cuda_transfer_stats();
-        plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         let warm_after = cuda_transfer_stats();
         assert_eq!(warm_after.h2d_calls - warm_before.h2d_calls, 0);
         assert_eq!(warm_after.d2h_calls - warm_before.d2h_calls, 0);
@@ -652,15 +732,16 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
                 output_axes: case.output_axes.clone(),
                 dense: case.dense,
             };
-            let oracle = blas_contract_oracle(&member_case);
+            let oracle = blas_contract_oracle(engine, &member_case);
+            let right_device = right.to_cuda(cuda).unwrap();
             let eager = left
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
-                .contract(&right.to_cuda().unwrap(), &case.spec())
+                .contract(cuda, &right_device, &case.spec())
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap();
-            let actual = output.member(i).unwrap();
+            let actual = output.member(engine, i).unwrap();
             assert_eq!(actual.codomain_rank(), eager.codomain_rank());
             numerics::assert_nonzero_slices_close(
                 case.name,
@@ -675,34 +756,39 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
                 case.terms(),
             );
         }
-        let poison: Vec<_> = (0..count).map(|_| poisoned_destination(&case)).collect();
-        let mut dst = StackedTensorMap::pack(&poison).unwrap().to_cuda().unwrap();
+        let poison: Vec<_> = (0..count)
+            .map(|_| poisoned_destination(engine, &case))
+            .collect();
+        let mut dst = StackedTensorMap::pack(&poison)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
         let before = cuda_transfer_stats();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut second)
+        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut second)
             .unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(after.h2d_calls - before.h2d_calls, 0);
         assert_eq!(after.d2h_calls - before.d2h_calls, 0);
         assert_eq!(after.gemm_calls - before.gemm_calls, submitted);
         assert_eq!(after.copy_calls - before.copy_calls, 0);
-        let result = dst.to_host().unwrap();
+        let result = dst.to_host(cuda).unwrap();
         for i in 0..count {
             numerics::assert_nonzero_slices_close(
                 case.name,
-                result.member(i).unwrap().dense_data().unwrap(),
-                output.member(i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
+                output.member(engine, i).unwrap().dense_data().unwrap(),
                 case.terms(),
             );
         }
         let wrong_indices: &[usize] = if count == 1 { &[0, 0] } else { &[0] };
-        let mut wrong_dst = dst.select(wrong_indices).unwrap();
+        let mut wrong_dst = dst.select(cuda, wrong_indices).unwrap();
         assert_ne!(wrong_dst.len(), count);
-        let before = payload_snapshot(&wrong_dst);
+        let before = payload_snapshot(engine, cuda, &wrong_dst);
         assert!(matches!(
-            plan.execute_into(&lhs, &rhs, &mut wrong_dst, &mut second),
+            plan.execute_into(cuda, &lhs, &rhs, &mut wrong_dst, &mut second),
             Err(Error::InvalidArgument(_))
         ));
-        assert_eq!(payload_snapshot(&wrong_dst), before);
+        assert_eq!(payload_snapshot(engine, cuda, &wrong_dst), before);
         assert!(workspace.retained_bytes() > 0);
         let member_cases: Vec<_> = members
             .iter()
@@ -717,6 +803,8 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
             })
             .collect();
         check_changed_input_reuse(
+            engine,
+            cuda,
             &plan,
             &member_cases,
             &mut [&mut workspace, &mut second],
@@ -731,26 +819,28 @@ fn check<R: DeviceRule, D: DevicePayload>(case: Case<R, D>) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn public_core_and_swapped_core_match_independent_oracle() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    for (case, _) in candidate_core_probes::<_, f64>(&runtime, &u1_non_self_dual()) {
+    let runtime = Runtime::builder().build().unwrap();
+    for (case, _) in candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual()) {
         if matches!(case.name, "C1" | "C2") {
-            check(case);
+            check(engine, cuda, case);
         }
     }
-    for (case, _) in candidate_core_probes::<_, Complex64>(&runtime, &u1_non_self_dual()) {
+    for (case, _) in candidate_core_probes::<_, Complex64>(engine, &runtime, &u1_non_self_dual()) {
         if matches!(case.name, "C1" | "C2") {
-            check(case);
+            check(engine, cuda, case);
         }
     }
-    for (case, _) in candidate_core_probes::<_, f64>(&runtime, &su2()) {
+    for (case, _) in candidate_core_probes::<_, f64>(engine, &runtime, &su2()) {
         if matches!(case.name, "C1" | "C2") {
-            check(case);
+            check(engine, cuda, case);
         }
     }
-    for (case, _) in candidate_core_probes::<_, Complex64>(&runtime, &su2()) {
+    for (case, _) in candidate_core_probes::<_, Complex64>(engine, &runtime, &su2()) {
         if matches!(case.name, "C1" | "C2") {
-            check(case);
+            check(engine, cuda, case);
         }
     }
 }
@@ -758,13 +848,17 @@ fn public_core_and_swapped_core_match_independent_oracle() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn swapped_core_uses_rhs_stride_and_nondefault_split() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1(&[(0, 2), (1, 1)]);
     let w = u1(&[(0, 1), (1, 2)]);
     let x = u1(&[(0, 2), (1, 3)]);
-    let lhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&w], fill(171)).unwrap();
-    let rhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&x, &x], [&v], fill(172)).unwrap();
+    let lhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&w], fill(171)).unwrap();
+    let rhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&x, &x], [&v], fill(172)).unwrap();
     let spec = ContractSpec {
         lhs: &[0],
         rhs: &[2],
@@ -773,22 +867,22 @@ fn swapped_core_uses_rhs_stride_and_nondefault_split() {
     };
     let left = StackedTensorMap::pack(&[&lhs, &lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let right = StackedTensorMap::pack(&[&rhs, &rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+    let plan = ContractPlan::new(engine, &left, &right, &spec).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let actual = plan
-        .execute(&left, &right, &mut workspace)
+        .execute(cuda, &left, &right, &mut workspace)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
-    let oracle = rhs.compose(&lhs).unwrap();
+    let oracle = rhs.compose(engine, &lhs).unwrap();
     for i in 0..2 {
-        let member = actual.member(i).unwrap();
+        let member = actual.member(engine, i).unwrap();
         assert_eq!(member.codomain_rank(), 2);
         numerics::assert_nonzero_slices_close(
             "swapped stride",
@@ -802,47 +896,49 @@ fn swapped_core_uses_rhs_stride_and_nondefault_split() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let case = u1_inactive_cases::<f64>(&runtime)
+    let runtime = Runtime::builder().build().unwrap();
+    let case = u1_inactive_cases::<f64>(engine, &runtime)
         .into_iter()
         .next()
         .unwrap();
     let first_lhs = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let first_rhs = StackedTensorMap::pack(&[&case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&first_lhs, &first_rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    let oracle = blas_contract_oracle(&case);
+    let oracle = blas_contract_oracle(engine, &case);
     // Template uploads of the first `execute_into` per B on this fresh
-    // Runtime: zero and ones templates at B = 1, then the zero template's
+    // workspace: zero and ones templates at B = 1, then the zero template's
     // growth to each new high-water B. `execute` reserves none (#2123).
     for (count, template_uploads) in [(1, 2), (2, 1), (17, 1), (1, 0)] {
         let left = StackedTensorMap::pack(&vec![&case.lhs; count])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let right = StackedTensorMap::pack(&vec![&case.rhs; count])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
-        let poison = poisoned_destination(&case);
+        let poison = poisoned_destination(engine, &case);
         let mut dst = StackedTensorMap::pack(&vec![&poison; count])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let before = cuda_transfer_stats();
-        plan.execute(&left, &right, &mut workspace).unwrap();
+        plan.execute(cuda, &left, &right, &mut workspace).unwrap();
         let after = cuda_transfer_stats();
         let core_calls = after.gemm_calls - before.gemm_calls;
         assert!(core_calls > 0);
         let before = cuda_transfer_stats();
-        plan.execute(&left, &right, &mut workspace).unwrap();
+        plan.execute(cuda, &left, &right, &mut workspace).unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(
             after.gemm_calls - before.gemm_calls,
@@ -852,7 +948,7 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
         assert_eq!(after.h2d_calls - before.h2d_calls, 0);
         assert_eq!(after.d2h_calls - before.d2h_calls, 0);
         let before = cuda_transfer_stats();
-        plan.execute_into(&left, &right, &mut dst, &mut workspace)
+        plan.execute_into(cuda, &left, &right, &mut dst, &mut workspace)
             .unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(
@@ -862,11 +958,11 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
         );
         assert_eq!(after.h2d_calls - before.h2d_calls, template_uploads);
         assert_eq!(after.d2h_calls - before.d2h_calls, 0);
-        let actual = dst.to_host().unwrap();
+        let actual = dst.to_host(cuda).unwrap();
         for i in 0..count {
             numerics::assert_nonzero_slices_close(
                 case.name,
-                actual.member(i).unwrap().dense_data().unwrap(),
+                actual.member(engine, i).unwrap().dense_data().unwrap(),
                 oracle.dense_data().unwrap(),
                 case.terms(),
             );
@@ -882,112 +978,124 @@ fn inactive_core_zeroes_each_poisoned_member_with_one_extra_submission() {
                 dense: case.dense,
             })
             .collect();
-        check_changed_input_reuse(&plan, &members, &mut [&mut workspace], blas_contract_oracle);
+        check_changed_input_reuse(
+            engine,
+            cuda,
+            &plan,
+            &members,
+            &mut [&mut workspace],
+            blas_contract_oracle,
+        );
     }
 }
 
-/// Device bytes (#2123): a caller that only calls `execute` never fills the
-/// inactive core region of its born-zero output, so it pins no context zero
-/// or ones template for it; the first `execute_into`, which fills it, does.
+/// A workspace keeps its device state for the engine that created it: used
+/// with a second engine (another allocation domain on the same device), it
+/// rebuilds that state there instead of submitting the first engine's
+/// buffers, and returning to the first engine rebuilds again.
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn execute_only_caller_pins_no_core_zero_template() {
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let case = u1_inactive_cases::<f64>(&runtime)
+fn a_workspace_moved_to_another_engine_rebuilds_its_device_state() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let first = &mut crate::common::cuda_engine();
+    let second = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let case = u1_inactive_cases::<f64>(engine, &runtime)
         .into_iter()
         .next()
         .unwrap();
-    let stack = |tensor: &TensorMap<U1FusionRule, f64>, count| {
-        StackedTensorMap::pack(&vec![tensor; count])
-            .unwrap()
-            .to_cuda()
-            .unwrap()
+    let oracle = blas_contract_oracle(engine, &case);
+    let stacks = |cuda: &mut dyn symtn::typed::Engine| {
+        let mut pack = |tensor: &TensorMap<U1FusionRule, f64>| {
+            StackedTensorMap::pack(&[tensor, tensor])
+                .unwrap()
+                .to_cuda(cuda)
+                .unwrap()
+        };
+        (pack(&case.lhs), pack(&case.rhs))
     };
-    let plan = ContractPlan::new(&stack(&case.lhs, 1), &stack(&case.rhs, 1), &case.spec()).unwrap();
+    let poison = poisoned_destination(engine, &case);
+    let (lhs, rhs) = stacks(first);
+    let plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    let template_bytes = || {
-        runtime
-            .cuda_tree_transform_stats()
+    let mut run = |cuda: &mut dyn symtn::typed::Engine| {
+        let (lhs, rhs) = stacks(cuda);
+        let mut dst = StackedTensorMap::pack(&[&poison, &poison])
             .unwrap()
-            .context_scalar_operand_bytes
-    };
-    for count in [1, 2, 17, 1] {
-        let (lhs, rhs) = (stack(&case.lhs, count), stack(&case.rhs, count));
-        for _ in 0..2 {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
-            assert_eq!(template_bytes(), 0, "B = {count}");
+            .to_cuda(cuda)
+            .unwrap();
+        let before = cuda_transfer_stats();
+        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut workspace)
+            .unwrap();
+        let uploads = cuda_transfer_stats().h2d_calls - before.h2d_calls;
+        let written = dst.to_host(cuda).unwrap();
+        for i in 0..2 {
+            numerics::assert_nonzero_slices_close(
+                case.name,
+                written.member(engine, i).unwrap().dense_data().unwrap(),
+                oracle.dense_data().unwrap(),
+                case.terms(),
+            );
         }
-    }
-    let (lhs, rhs) = (stack(&case.lhs, 17), stack(&case.rhs, 17));
-    let mut dst = stack(&poisoned_destination(&case), 17);
-    plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
-        .unwrap();
-    assert!(template_bytes() > 0);
-    let oracle = blas_contract_oracle(&case);
-    let written = dst.to_host().unwrap();
-    for i in 0..17 {
-        numerics::assert_nonzero_slices_close(
-            case.name,
-            written.member(i).unwrap().dense_data().unwrap(),
-            oracle.dense_data().unwrap(),
-            case.terms(),
-        );
-    }
+        uploads
+    };
+    assert!(run(first) >= 1, "cold on the first engine");
+    assert_eq!(run(first), 0, "warm on the first engine");
+    assert!(run(second) >= 1, "the second engine rebuilds the templates");
+    assert_eq!(run(second), 0, "warm on the second engine");
+    assert!(run(first) >= 1, "back on the first engine rebuilds again");
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn invalid_bindings_preserve_poisoned_destination() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let other_runtime = Runtime::builder().cuda(0).build().unwrap();
-    let reserved_before = runtime
-        .cuda_plan_cache_stats()
-        .unwrap()
-        .unwrap()
-        .reserved_entries;
-    let case = candidate_core_probes::<_, f64>(&runtime, &u1_non_self_dual())
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
+    let case = candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual())
         .into_iter()
         .find(|(case, _)| case.name == "C1")
         .unwrap()
         .0;
     let lhs = StackedTensorMap::pack(&[&case.lhs, &case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let rhs = StackedTensorMap::pack(&[&case.rhs, &case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
-    let other = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
+    let other = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut foreign = other.workspace().unwrap();
-    let poison = poisoned_destination(&case);
+    let poison = poisoned_destination(engine, &case);
     let mut dst = StackedTensorMap::pack(&[&poison, &poison])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let before = payload_snapshot(&dst);
-    let short = lhs.select(&[0]).unwrap();
+    let before = payload_snapshot(engine, cuda, &dst);
+    let short = lhs.select(cuda, &[0]).unwrap();
     assert!(plan
-        .execute_into(&short, &rhs, &mut dst, &mut workspace)
+        .execute_into(cuda, &short, &rhs, &mut dst, &mut workspace)
         .is_err());
-    let other_case = candidate_core_probes::<_, f64>(&other_runtime, &u1_non_self_dual())
+    let other_case = candidate_core_probes::<_, f64>(engine, &other_runtime, &u1_non_self_dual())
         .into_iter()
         .find(|(case, _)| case.name == "C1")
         .unwrap()
         .0;
     let wrong_runtime = StackedTensorMap::pack(&[&other_case.lhs, &other_case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     assert!(plan
-        .execute_into(&wrong_runtime, &rhs, &mut dst, &mut workspace)
+        .execute_into(cuda, &wrong_runtime, &rhs, &mut dst, &mut workspace)
         .is_err());
     let other_space = u1(&[(0, 2)]);
     let wrong_tensor = TensorMap::<_, f64>::zeros(
+        engine,
         &runtime,
         [&other_space, &other_space],
         [&other_space, &other_space],
@@ -995,35 +1103,28 @@ fn invalid_bindings_preserve_poisoned_destination() {
     .unwrap();
     let wrong_signature = StackedTensorMap::pack(&[&wrong_tensor, &wrong_tensor])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     assert!(plan
-        .execute_into(&wrong_signature, &rhs, &mut dst, &mut workspace)
+        .execute_into(cuda, &wrong_signature, &rhs, &mut dst, &mut workspace)
         .is_err());
     assert!(plan
-        .execute_into(&lhs, &rhs, &mut dst, &mut foreign)
+        .execute_into(cuda, &lhs, &rhs, &mut dst, &mut foreign)
         .is_err());
-    assert_eq!(payload_snapshot(&dst), before);
+    assert_eq!(payload_snapshot(engine, cuda, &dst), before);
     drop(plan);
     drop(other);
     drop(workspace);
     drop(foreign);
-    assert_eq!(
-        runtime
-            .cuda_plan_cache_stats()
-            .unwrap()
-            .unwrap()
-            .reserved_entries,
-        reserved_before,
-        "workspaces return plan-ledger claims after the plan is dropped"
-    );
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn negative_only_signed_core_matches_literal_twist() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let odd = symtn::typed::GradedSpace::try_new(
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -1037,9 +1138,11 @@ fn negative_only_signed_core_matches_literal_twist() {
     .unwrap();
     let odd_dual = odd.try_dual().unwrap();
     let lhs =
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, [&odd], [&odd_dual], |_, _| 1.0).unwrap();
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&odd], [&odd_dual], |_, _| 1.0)
+            .unwrap();
     let rhs =
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, [&odd_dual], [&odd], |_, _| 1.0).unwrap();
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&odd_dual], [&odd], |_, _| 1.0)
+            .unwrap();
     let case = Case {
         name: "negative-only signed core",
         lhs,
@@ -1049,11 +1152,13 @@ fn negative_only_signed_core_matches_literal_twist() {
         output_axes: vec![0, 1],
         dense: false,
     };
-    let twist = |tensor: &TensorMap<_, f64>, legs: &[usize]| {
-        tensor.twist(legs, Direction::Forward).unwrap()
-    };
-    let oracle = fermionic_blas_contract_oracle_partitioned(&case, TwistRole::B, 1, twist);
-    let untwisted = fermionic_blas_contract_oracle_partitioned(&case, TwistRole::None, 1, twist);
+    let twist =
+        |engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<_, f64>, legs: &[usize]| {
+            tensor.twist(engine, legs, Direction::Forward).unwrap()
+        };
+    let oracle = fermionic_blas_contract_oracle_partitioned(engine, &case, TwistRole::B, 1, twist);
+    let untwisted =
+        fermionic_blas_contract_oracle_partitioned(engine, &case, TwistRole::None, 1, twist);
     let expected = oracle.dense_data().unwrap();
     assert!(expected
         .iter()
@@ -1061,27 +1166,27 @@ fn negative_only_signed_core_matches_literal_twist() {
         .any(|(&x, &y)| (x - y).abs() > 1e-10));
     numerics::assert_nonzero_slices_close(
         case.name,
-        case.host().dense_data().unwrap(),
+        case.host(engine).dense_data().unwrap(),
         expected,
         case.terms(),
     );
     let left = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let right = StackedTensorMap::pack(&[&case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let plan = ContractPlan::new(&left, &right, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &left, &right, &case.spec()).unwrap();
     let actual = plan
-        .execute(&left, &right, &mut plan.workspace().unwrap())
+        .execute(cuda, &left, &right, &mut plan.workspace().unwrap())
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     numerics::assert_nonzero_slices_close(
         case.name,
-        actual.member(0).unwrap().dense_data().unwrap(),
+        actual.member(engine, 0).unwrap().dense_data().unwrap(),
         expected,
         case.terms(),
     );
@@ -1090,12 +1195,19 @@ fn negative_only_signed_core_matches_literal_twist() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn copy_c_nonzero_single_public_admission() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    fn check<D: DevicePayload>() {
-        let runtime = Runtime::builder().cuda(0).build().unwrap();
+    fn check<D: DevicePayload>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
+    ) {
+        let runtime = Runtime::builder().build().unwrap();
         let v = su2();
-        let a = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v, &v], fill(3)).unwrap();
-        let b = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v, &v], fill(4)).unwrap();
+        let a = TensorMap::<_, D>::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], fill(3))
+            .unwrap();
+        let b = TensorMap::<_, D>::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], fill(4))
+            .unwrap();
         for (lhs_axes, rhs_axes, output) in [
             ([2, 3], [0, 1], [1, 0, 2, 3]),
             ([0, 1], [2, 3], [3, 2, 1, 0]),
@@ -1111,27 +1223,16 @@ fn copy_c_nonzero_single_public_admission() {
             };
             let first_lhs = StackedTensorMap::pack(&[&case.lhs])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
             let first_rhs = StackedTensorMap::pack(&[&case.rhs])
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
-            let plan = ContractPlan::new(&first_lhs, &first_rhs, &case.spec())
+            let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &case.spec())
                 .expect("nonzero Single CopyC must be admitted");
-            let reserved_before = runtime
-                .cuda_plan_cache_stats()
-                .unwrap()
-                .unwrap()
-                .reserved_entries;
             let mut workspace = plan.workspace().unwrap();
             let mut other = plan.workspace().unwrap();
-            let workspace_reservations = runtime
-                .cuda_plan_cache_stats()
-                .unwrap()
-                .unwrap()
-                .reserved_entries
-                - reserved_before;
             let mut expected_gemms = None;
             for count in [1, 2, 17] {
                 let members: Vec<_> = (0..count)
@@ -1139,11 +1240,11 @@ fn copy_c_nonzero_single_public_admission() {
                         name: case.name,
                         lhs: case
                             .lhs
-                            .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                            .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                             .unwrap(),
                         rhs: case
                             .rhs
-                            .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                            .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                             .unwrap(),
                         lhs_axes: case.lhs_axes.clone(),
                         rhs_axes: case.rhs_axes.clone(),
@@ -1154,17 +1255,17 @@ fn copy_c_nonzero_single_public_admission() {
                 let lhs =
                     StackedTensorMap::pack(&members.iter().map(|m| &m.lhs).collect::<Vec<_>>())
                         .unwrap()
-                        .to_cuda()
+                        .to_cuda(cuda)
                         .unwrap();
                 let rhs =
                     StackedTensorMap::pack(&members.iter().map(|m| &m.rhs).collect::<Vec<_>>())
                         .unwrap()
-                        .to_cuda()
+                        .to_cuda(cuda)
                         .unwrap();
-                let (_, cold) = observe(|| plan.execute(&lhs, &rhs, &mut workspace).unwrap());
+                let (_, cold) = observe(|| plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap());
                 assert!(cold.cuda.copy_calls > 0, "exact +1 moves remain copies");
                 let (_, warm) = observe(|| {
-                    plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+                    plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
                 });
                 assert_eq!(warm.cuda.copy_calls, cold.cuda.copy_calls);
                 assert_eq!(warm.cuda.h2d_calls, 0);
@@ -1174,34 +1275,28 @@ fn copy_c_nonzero_single_public_admission() {
                     assert_eq!(warm.cuda.gemm_calls, gemms);
                 }
                 expected_gemms = Some(warm.cuda.gemm_calls);
-                eprintln!(
-                    "CopyC {} swapped={} B={count} cold_host_submission={:?} warm_host_submission={:?} cold_host_allocs={}/{} warm_host_allocs={}/{} cold_cuda={:?} warm_cuda={:?} retained_workspace_bytes={} plans={:?}",
-                    D::NAME, lhs_axes == [0, 1], cold.elapsed, warm.elapsed,
-                    cold.host_calls, cold.host_bytes, warm.host_calls, warm.host_bytes,
-                    cold.cuda, warm.cuda, workspace.retained_bytes(),
-                    runtime.cuda_plan_cache_stats().unwrap().unwrap(),
-                );
                 let output = plan
-                    .execute(&lhs, &rhs, &mut workspace)
+                    .execute(cuda, &lhs, &rhs, &mut workspace)
                     .unwrap()
-                    .to_host()
+                    .to_host(cuda)
                     .unwrap();
                 for (i, member) in members.iter().enumerate() {
-                    let actual = output.member(i).unwrap();
-                    let oracle = blas_contract_oracle(member);
+                    let actual = output.member(engine, i).unwrap();
+                    let oracle = blas_contract_oracle(engine, member);
                     numerics::assert_nonzero_slices_close(
                         case.name,
                         actual.dense_data().unwrap(),
                         oracle.dense_data().unwrap(),
                         member.terms(),
                     );
+                    let rhs_device = member.rhs.to_cuda(cuda).unwrap();
                     let eager = member
                         .lhs
-                        .to_cuda()
+                        .to_cuda(cuda)
                         .unwrap()
-                        .contract(&member.rhs.to_cuda().unwrap(), &member.spec())
+                        .contract(cuda, &rhs_device, &member.spec())
                         .unwrap()
-                        .to_host()
+                        .to_host(cuda)
                         .unwrap();
                     numerics::assert_nonzero_slices_close(
                         case.name,
@@ -1210,30 +1305,37 @@ fn copy_c_nonzero_single_public_admission() {
                         member.terms(),
                     );
                     if member.dense {
-                        let (_, physical) = dense_oracle(member);
+                        let (_, physical) = dense_oracle(engine, member);
                         numerics::assert_nonzero_slices_close(
                             case.name,
-                            &actual.to_physical_dense().unwrap().data,
+                            &actual.to_physical_dense(engine).unwrap().data,
                             &physical,
                             member.terms(),
                         );
                     }
                 }
-                let poison: Vec<_> = members.iter().map(poisoned_destination).collect();
+                let poison: Vec<_> = members
+                    .iter()
+                    .map(|case| poisoned_destination(engine, case))
+                    .collect();
                 let mut dst = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
                     .unwrap()
-                    .to_cuda()
+                    .to_cuda(cuda)
                     .unwrap();
-                let (_, into) =
-                    observe(|| plan.execute_into(&lhs, &rhs, &mut dst, &mut other).unwrap());
+                let (_, into) = observe(|| {
+                    plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                        .unwrap()
+                });
                 assert_eq!(into.cuda.copy_calls, cold.cuda.copy_calls);
                 assert!(
                     into.cuda.h2d_calls >= 1,
                     "cold second workspace uploads its temporary"
                 );
                 assert_eq!(into.cuda.d2h_calls, 0);
-                let (_, warm_into) =
-                    observe(|| plan.execute_into(&lhs, &rhs, &mut dst, &mut other).unwrap());
+                let (_, warm_into) = observe(|| {
+                    plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                        .unwrap()
+                });
                 assert_eq!(warm_into.cuda.copy_calls, cold.cuda.copy_calls);
                 assert_eq!(warm_into.cuda.h2d_calls, 0);
                 assert_eq!(warm_into.cuda.d2h_calls, 0);
@@ -1241,15 +1343,15 @@ fn copy_c_nonzero_single_public_admission() {
                     .iter()
                     .map(|member| {
                         (
-                            member.lhs.to_cuda().unwrap(),
-                            member.rhs.to_cuda().unwrap(),
+                            member.lhs.to_cuda(cuda).unwrap(),
+                            member.rhs.to_cuda(cuda).unwrap(),
                             member.spec(),
                         )
                     })
                     .collect();
                 let (_, eager) = observe(|| {
                     for (left, right, spec) in &eager_inputs {
-                        black_box(left.contract(right, spec).unwrap());
+                        black_box(left.contract(cuda, right, spec).unwrap());
                     }
                 });
                 eprintln!(
@@ -1259,61 +1361,49 @@ fn copy_c_nonzero_single_public_admission() {
                     eager.host_calls, eager.host_bytes, into.cuda, warm_into.cuda, eager.cuda,
                     other.retained_bytes(),
                 );
-                let written = dst.to_host().unwrap();
+                let written = dst.to_host(cuda).unwrap();
                 for (i, member) in members.iter().enumerate() {
                     numerics::assert_nonzero_slices_close(
                         case.name,
-                        written.member(i).unwrap().dense_data().unwrap(),
-                        output.member(i).unwrap().dense_data().unwrap(),
+                        written.member(engine, i).unwrap().dense_data().unwrap(),
+                        output.member(engine, i).unwrap().dense_data().unwrap(),
                         member.terms(),
                     );
                 }
                 if count == 2 {
                     let mut invalid = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
                         .unwrap()
-                        .to_cuda()
+                        .to_cuda(cuda)
                         .unwrap();
-                    let before = payload_snapshot(&invalid);
-                    let short_rhs = rhs.select(&[0]).unwrap();
-                    let (rejected, metrics) =
-                        observe(|| plan.execute_into(&lhs, &short_rhs, &mut invalid, &mut other));
+                    let before = payload_snapshot(engine, cuda, &invalid);
+                    let short_rhs = rhs.select(cuda, &[0]).unwrap();
+                    let (rejected, metrics) = observe(|| {
+                        plan.execute_into(cuda, &lhs, &short_rhs, &mut invalid, &mut other)
+                    });
                     assert!(rejected.is_err());
                     assert_eq!(metrics.cuda.gemm_calls, 0);
                     assert_eq!(metrics.cuda.copy_calls, 0);
-                    assert_eq!(payload_snapshot(&invalid), before);
+                    assert_eq!(payload_snapshot(engine, cuda, &invalid), before);
                 }
                 check_changed_input_reuse(
+                    engine,
+                    cuda,
                     &plan,
                     &members,
                     &mut [&mut workspace, &mut other],
                     blas_contract_oracle,
                 );
             }
-            check_high_water(&plan, &case, &blas_contract_oracle);
-            let held_with_eager = runtime
-                .cuda_plan_cache_stats()
-                .unwrap()
-                .unwrap()
-                .reserved_entries;
+            check_high_water(engine, cuda, &plan, &case, &blas_contract_oracle);
             drop(other);
             drop(workspace);
             drop(plan);
-            assert_eq!(
-                runtime
-                    .cuda_plan_cache_stats()
-                    .unwrap()
-                    .unwrap()
-                    .reserved_entries
-                    + workspace_reservations,
-                held_with_eager,
-                "CopyC workspaces must release their own plan reservations"
-            );
         }
     }
-    check::<f32>();
-    check::<num_complex::Complex32>();
-    check::<f64>();
-    check::<Complex64>();
+    check::<f32>(engine, cuda);
+    check::<num_complex::Complex32>(engine, cuda);
+    check::<f64>(engine, cuda);
+    check::<Complex64>(engine, cuda);
 }
 
 /// Batch-independent submission counts of one warm call.
@@ -1328,11 +1418,17 @@ fn submissions(observation: &Observation) -> (u64, u64) {
 /// `physical` returns `(actual, expected)` physical-basis arrays where the
 /// provider has a physical basis.
 fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     case: &Case<R, D>,
-    oracle: impl Fn(&Case<R, D>) -> TensorMap<R, D>,
-    physical: impl Fn(&Case<R, D>, &TensorMap<R, D>) -> Option<(Vec<D>, Vec<D>)>,
+    oracle: impl Fn(&mut dyn symtn::typed::Engine, &Case<R, D>) -> TensorMap<R, D>,
+    physical: impl Fn(
+        &mut dyn symtn::typed::Engine,
+        &Case<R, D>,
+        &TensorMap<R, D>,
+    ) -> Option<(Vec<D>, Vec<D>)>,
 ) {
-    let stack = |members: &[Case<R, D>], lhs: bool| {
+    let stack = |cuda: &mut dyn symtn::typed::Engine, members: &[Case<R, D>], lhs: bool| {
         StackedTensorMap::pack(
             &members
                 .iter()
@@ -1340,7 +1436,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                 .collect::<Vec<_>>(),
         )
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
     };
     let one = [Case {
@@ -1352,8 +1448,13 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
         output_axes: case.output_axes.clone(),
         dense: case.dense,
     }];
-    let plan = ContractPlan::new(&stack(&one, true), &stack(&one, false), &case.spec())
-        .unwrap_or_else(|error| panic!("{}: DynamicTree must be admitted: {error:?}", case.name));
+    let plan = ContractPlan::new(
+        engine,
+        &stack(cuda, &one, true),
+        &stack(cuda, &one, false),
+        &case.spec(),
+    )
+    .unwrap_or_else(|error| panic!("{}: DynamicTree must be admitted: {error:?}", case.name));
     let mut workspace = plan.workspace().unwrap();
     let mut other = plan.workspace().unwrap();
     let mut warm_counts = None;
@@ -1364,11 +1465,11 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                 name: case.name,
                 lhs: case
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap(),
                 rhs: case
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap(),
                 lhs_axes: case.lhs_axes.clone(),
                 rhs_axes: case.rhs_axes.clone(),
@@ -1376,13 +1477,13 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                 dense: case.dense,
             })
             .collect();
-        let (lhs, rhs) = (stack(&members, true), stack(&members, false));
+        let (lhs, rhs) = (stack(cuda, &members, true), stack(cuda, &members, false));
         let (_, cold) = observe(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         });
         assert!(cold.cuda.gemm_calls > 0, "{}: core must submit", case.name);
         let (_, warm) = observe(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         });
         assert_eq!(
             (
@@ -1401,21 +1502,22 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
             case.name
         );
         let output = plan
-            .execute(&lhs, &rhs, &mut workspace)
+            .execute(cuda, &lhs, &rhs, &mut workspace)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
         for (i, member) in members.iter().enumerate() {
-            let actual = output.member(i).unwrap();
+            let actual = output.member(engine, i).unwrap();
+            let rhs_device = member.rhs.to_cuda(cuda).unwrap();
             let eager = member
                 .lhs
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap()
-                .contract(&member.rhs.to_cuda().unwrap(), &member.spec())
+                .contract(cuda, &rhs_device, &member.spec())
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap();
-            let expected = oracle(member);
+            let expected = oracle(engine, member);
             for reference in [&eager, &expected] {
                 assert_eq!(actual.codomain_rank(), reference.codomain_rank());
                 numerics::assert_nonzero_slices_close(
@@ -1425,7 +1527,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                     member.terms(),
                 );
             }
-            if let Some((actual, expected)) = physical(member, &actual) {
+            if let Some((actual, expected)) = physical(engine, member, &actual) {
                 numerics::assert_nonzero_slices_close(
                     case.name,
                     &actual,
@@ -1434,14 +1536,19 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
                 );
             }
         }
-        let poison: Vec<_> = members.iter().map(poisoned_destination).collect();
+        let poison: Vec<_> = members
+            .iter()
+            .map(|case| poisoned_destination(engine, case))
+            .collect();
         let mut dst = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut other).unwrap();
+        plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+            .unwrap();
         let (_, warm_into) = observe(|| {
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut other).unwrap();
+            plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut other)
+                .unwrap();
         });
         assert_eq!(
             (
@@ -1459,36 +1566,43 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
             "{}: into submissions independent of B",
             case.name
         );
-        let written = dst.to_host().unwrap();
+        let written = dst.to_host(cuda).unwrap();
         for (i, member) in members.iter().enumerate() {
             numerics::assert_nonzero_slices_close(
                 case.name,
-                written.member(i).unwrap().dense_data().unwrap(),
-                output.member(i).unwrap().dense_data().unwrap(),
+                written.member(engine, i).unwrap().dense_data().unwrap(),
+                output.member(engine, i).unwrap().dense_data().unwrap(),
                 member.terms(),
             );
         }
         if count == 2 {
             let mut invalid = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
-            let before = payload_snapshot(&invalid);
-            let short_rhs = rhs.select(&[0]).unwrap();
+            let before = payload_snapshot(engine, cuda, &invalid);
+            let short_rhs = rhs.select(cuda, &[0]).unwrap();
             let (rejected, metrics) =
-                observe(|| plan.execute_into(&lhs, &short_rhs, &mut invalid, &mut other));
+                observe(|| plan.execute_into(cuda, &lhs, &short_rhs, &mut invalid, &mut other));
             assert!(rejected.is_err());
             assert_eq!(submissions(&metrics), (0, 0));
-            assert_eq!(payload_snapshot(&invalid), before);
+            assert_eq!(payload_snapshot(engine, cuda, &invalid), before);
         }
-        check_changed_input_reuse(&plan, &members, &mut [&mut workspace, &mut other], &oracle);
+        check_changed_input_reuse(
+            engine,
+            cuda,
+            &plan,
+            &members,
+            &mut [&mut workspace, &mut other],
+            &oracle,
+        );
         let eager_inputs: Vec<_> = members
             .iter()
-            .map(|m| (m.lhs.to_cuda().unwrap(), m.rhs.to_cuda().unwrap()))
+            .map(|m| (m.lhs.to_cuda(cuda).unwrap(), m.rhs.to_cuda(cuda).unwrap()))
             .collect();
         let (_, eager) = observe(|| {
             for (left, right) in &eager_inputs {
-                black_box(left.contract(right, &case.spec()).unwrap());
+                black_box(left.contract(cuda, right, &case.spec()).unwrap());
             }
         });
         eprintln!(
@@ -1498,7 +1612,7 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
             workspace.retained_bytes()
         );
     }
-    check_high_water(&plan, case, &oracle);
+    check_high_water(engine, cuda, &plan, case, &oracle);
 }
 
 /// High-water member stacks across B changes (#1746): the DynamicTree
@@ -1511,14 +1625,18 @@ fn check_dynamic_tree<R: DeviceRule, D: DevicePayload>(
 /// water allocates and uploads nothing and keeps the retained bytes; through
 /// `execute` the only upload is the owned output of the new B (#740).
 fn check_high_water<R: DeviceRule, D: DevicePayload>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     plan: &ContractPlan<R, D, CudaStorage<D>>,
     case: &Case<R, D>,
-    oracle: &impl Fn(&Case<R, D>) -> TensorMap<R, D>,
+    oracle: &impl Fn(&mut dyn symtn::typed::Engine, &Case<R, D>) -> TensorMap<R, D>,
 ) {
-    let stack = |members: &[Case<R, D>], pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
+    let stack = |cuda: &mut dyn symtn::typed::Engine,
+                 members: &[Case<R, D>],
+                 pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
         StackedTensorMap::pack(&members.iter().map(pick).collect::<Vec<_>>())
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap()
     };
     for sequence in [[4, 2, 4], [1, 17, 3]] {
@@ -1532,14 +1650,17 @@ fn check_high_water<R: DeviceRule, D: DevicePayload>(
                     name: case.name,
                     lhs: case
                         .lhs
-                        .scale(D::entry(
-                            -0.75 - call / 8.0 + i as f64 / 64.0,
-                            (call + 1.0) / 16.0 - i as f64 / 128.0,
-                        ))
+                        .scale(
+                            engine,
+                            D::entry(
+                                -0.75 - call / 8.0 + i as f64 / 64.0,
+                                (call + 1.0) / 16.0 - i as f64 / 128.0,
+                            ),
+                        )
                         .unwrap(),
                     rhs: case
                         .rhs
-                        .scale(D::entry(1.5 + call / 4.0 + i as f64 / 32.0, 0.0))
+                        .scale(engine, D::entry(1.5 + call / 4.0 + i as f64 / 32.0, 0.0))
                         .unwrap(),
                     lhs_axes: case.lhs_axes.clone(),
                     rhs_axes: case.rhs_axes.clone(),
@@ -1547,30 +1668,37 @@ fn check_high_water<R: DeviceRule, D: DevicePayload>(
                     dense: case.dense,
                 })
                 .collect();
-            let (lhs, rhs) = (stack(&members, |m| &m.lhs), stack(&members, |m| &m.rhs));
+            let (lhs, rhs) = (
+                stack(cuda, &members, |m| &m.lhs),
+                stack(cuda, &members, |m| &m.rhs),
+            );
             let (_, owned) = observe(|| {
-                plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+                plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
             });
             let returned = plan
-                .execute(&lhs, &rhs, &mut workspace)
+                .execute(cuda, &lhs, &rhs, &mut workspace)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap();
-            let poison: Vec<_> = members.iter().map(poisoned_destination).collect();
+            let poison: Vec<_> = members
+                .iter()
+                .map(|case| poisoned_destination(engine, case))
+                .collect();
             let mut dst = StackedTensorMap::pack(&poison.iter().collect::<Vec<_>>())
                 .unwrap()
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
             let (_, written_metrics) = observe(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut into).unwrap();
+                plan.execute_into(cuda, &lhs, &rhs, &mut dst, &mut into)
+                    .unwrap();
             });
-            let written = dst.to_host().unwrap();
+            let written = dst.to_host(cuda).unwrap();
             for (i, member) in members.iter().enumerate() {
-                let expected = oracle(member);
+                let expected = oracle(engine, member);
                 for actual in [&returned, &written] {
                     numerics::assert_nonzero_slices_close(
                         case.name,
-                        actual.member(i).unwrap().dense_data().unwrap(),
+                        actual.member(engine, i).unwrap().dense_data().unwrap(),
                         expected.dense_data().unwrap(),
                         member.terms(),
                     );
@@ -1621,28 +1749,50 @@ fn check_high_water<R: DeviceRule, D: DevicePayload>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn dynamic_tree_single_transform_routes_are_admitted() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    fn bosonic<D: DevicePayload>(runtime: &Runtime) {
+    fn bosonic<D: DevicePayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+    ) {
         // The second inactive fixture has a source transform and is pinned as
         // DynamicTree by storage_contract_tests::each_way_a_device_overwrite;
         // u1_reordered adds an output transform.
-        let inactive = u1_inactive_cases::<D>(runtime).into_iter().nth(1).unwrap();
-        for case in [inactive, u1_reordered::<D>(runtime)] {
-            check_dynamic_tree(&case, blas_contract_oracle, |member, actual| {
-                member.dense.then(|| {
-                    (
-                        actual.to_physical_dense().unwrap().data,
-                        dense_oracle(member).1,
-                    )
-                })
-            });
+        let inactive = u1_inactive_cases::<D>(engine, runtime)
+            .into_iter()
+            .nth(1)
+            .unwrap();
+        for case in [inactive, u1_reordered::<D>(engine, runtime)] {
+            check_dynamic_tree(
+                engine,
+                cuda,
+                &case,
+                blas_contract_oracle,
+                |engine, member, actual| {
+                    member.dense.then(|| {
+                        (
+                            actual.to_physical_dense(engine).unwrap().data,
+                            dense_oracle(engine, member).1,
+                        )
+                    })
+                },
+            );
         }
     }
-    fn fermionic<D: DevicePayload>(runtime: &Runtime) {
-        let twist = |tensor: &TensorMap<FermionU1, D>, legs: &[usize]| {
-            tensor.twist(legs, Direction::Forward).unwrap()
+    fn fermionic<D: DevicePayload>(
+        cuda: &mut dyn symtn::typed::Engine,
+        engine: &mut dyn symtn::typed::Engine,
+        runtime: &Runtime,
+    ) {
+        let twist = |engine: &mut dyn symtn::typed::Engine,
+                     tensor: &TensorMap<FermionU1, D>,
+                     legs: &[usize]| {
+            tensor.twist(engine, legs, Direction::Forward).unwrap()
         };
         let roles = fermionic_twist_roles::<FermionU1, D>(
+            engine,
             runtime,
             &fermion_u1(),
             [
@@ -1657,6 +1807,7 @@ fn dynamic_tree_single_transform_routes_are_admitted() {
         .zip([TwistRole::A, TwistRole::A, TwistRole::B, TwistRole::A])
         .chain([(
             fermionic_canonical_nonuniform::<FermionU1, D>(
+                engine,
                 runtime,
                 &fermion_u1(),
                 "fZ2xU1 canonical nonuniform",
@@ -1666,56 +1817,64 @@ fn dynamic_tree_single_transform_routes_are_admitted() {
         )]);
         for (case, role) in roles {
             check_dynamic_tree(
+                engine,
+                cuda,
                 &case,
-                |member| fermionic_blas_contract_oracle(member, role, twist),
-                |_, _| None,
+                |engine, member| fermionic_blas_contract_oracle(engine, member, role, twist),
+                |_, _, _| None,
             );
         }
     }
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    bosonic::<f32>(&runtime);
-    bosonic::<num_complex::Complex32>(&runtime);
-    bosonic::<f64>(&runtime);
-    bosonic::<Complex64>(&runtime);
-    fermionic::<f32>(&runtime);
-    fermionic::<num_complex::Complex32>(&runtime);
-    fermionic::<f64>(&runtime);
-    fermionic::<Complex64>(&runtime);
+    let runtime = Runtime::builder().build().unwrap();
+    bosonic::<f32>(cuda, engine, &runtime);
+    bosonic::<num_complex::Complex32>(cuda, engine, &runtime);
+    bosonic::<f64>(cuda, engine, &runtime);
+    bosonic::<Complex64>(cuda, engine, &runtime);
+    fermionic::<f32>(cuda, engine, &runtime);
+    fermionic::<num_complex::Complex32>(cuda, engine, &runtime);
+    fermionic::<f64>(cuda, engine, &runtime);
+    fermionic::<Complex64>(cuda, engine, &runtime);
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn dynamic_tree_multi_transform_stays_unsupported() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let case = su2_bent::<f64>(&runtime);
+    let runtime = Runtime::builder().build().unwrap();
+    let case = su2_bent::<f64>(engine, &runtime);
     let left = StackedTensorMap::pack(&[&case.lhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let right = StackedTensorMap::pack(&[&case.rhs])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    assert!(matches!(ContractPlan::new(&left, &right, &case.spec()),
-    Err(Error::Operation(error)) if matches!(*error,
-        symtn::typed::OperationError::UnsupportedTensorContractScope {
-            message: "CUDA member transform requires unconjugated nonzero Single tasks"
-        })));
+    assert!(
+        matches!(ContractPlan::new(engine, &left, &right, &case.spec()),
+        Err(Error::Operation(error)) if matches!(*error,
+            symtn::typed::OperationError::UnsupportedTensorContractScope {
+                message: "CUDA member transform requires unconjugated nonzero Single tasks"
+            }))
+    );
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg =
         symtn::typed::GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)])
             .unwrap();
-    let tensor = TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg]).unwrap();
+    let tensor = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg]).unwrap();
     let stack = StackedTensorMap::pack(&[tensor])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let spec = ContractSpec {
         lhs: &[1],
@@ -1723,7 +1882,7 @@ fn nonsymmetric_braiding_is_rejected_before_cuda_execution() {
         codomain: &[0],
         domain: &[1],
     };
-    assert!(matches!(ContractPlan::new(&stack, &stack, &spec),
+    assert!(matches!(ContractPlan::new(engine, &stack, &stack, &spec),
     Err(Error::Operation(error)) if matches!(*error,
         symtn::typed::OperationError::UnsupportedTensorContractScope {
             message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED

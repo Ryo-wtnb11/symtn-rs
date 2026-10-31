@@ -105,8 +105,9 @@ where
     /// storage with a clone. Checked Generic reports these in
     /// [`GenericTensorError::Facade`] and staging failures in
     /// [`GenericTensorError::Plan`], as for [`Self::permute`]. On CUDA the
-    /// storage noun names the placement, and a payload on another device is
-    /// [`Error::PlacementMismatch`], checked first under the device lease.
+    /// storage noun names the placement, and a payload of another device or
+    /// engine is [`Error::PlacementMismatch`], checked first under the device
+    /// lease.
     ///
     /// # CUDA storage
     ///
@@ -120,17 +121,14 @@ where
     /// for `beta = 0`, which never reads the destination; nothing for
     /// `beta = 1`).
     ///
-    /// A warm call transfers nothing in either direction and allocates no
-    /// device buffer: 0 H2D, 0 D2H, 0 device allocations. Unlike the returning
-    /// [`Self::permute`] it pays no output initialisation. The first call for
-    /// a given structure uploads that structure's coefficient payload once,
-    /// may grow the pack/scatter workspace once, and reserves the context zero
-    /// template; that warm contract holds only while this Runtime's Host
-    /// transform store admits the structure, as for [`Self::permute`].
-    /// `alpha == 0` writes `beta * destination` over every written layout
-    /// through the same context zero template, so the first zero-scale call on
-    /// a context whose template is still short pays one upload — once per
-    /// context, not per call.
+    /// No payload crosses the host boundary and nothing is downloaded. Unlike
+    /// the returning [`Self::permute`] it pays no output initialisation. The
+    /// device state of the replay — the structure's coefficient payload, the
+    /// pack/scatter workspace, the one-element `1` and the zero template — is
+    /// created by each call on the caller's engine, as for every eager
+    /// operation: there is no workspace to keep it in. `alpha == 0` writes
+    /// `beta * destination` over every written layout through that zero
+    /// template, sized to the largest written layout.
     ///
     /// Numerics are [`Self::permute`]'s, with the caller scale applied as the
     /// executor's rule: a Single block rounds as `alpha * (c * x)` where the
@@ -148,6 +146,7 @@ where
     /// intact.
     pub fn permute_into(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         destination: &mut Self,
@@ -155,6 +154,7 @@ where
         beta: D,
     ) -> Result<(), FacadeError<R>> {
         self.tree_transform_into(
+            engine,
             destination,
             alpha,
             beta,
@@ -187,8 +187,10 @@ where
     /// validation (a backend or other execution error) the destination's
     /// contents are unspecified, while its space and block structure stay
     /// intact.
+    #[allow(clippy::too_many_arguments)]
     pub fn braid_into(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         levels: &[usize],
@@ -205,6 +207,7 @@ where
         )?;
         let probe_operation = operation.clone();
         self.tree_transform_into(
+            engine,
             destination,
             alpha,
             beta,
@@ -230,6 +233,7 @@ where
     /// intact.
     pub fn transpose_into(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         destination: &mut Self,
@@ -237,6 +241,7 @@ where
         beta: D,
     ) -> Result<(), FacadeError<R>> {
         self.tree_transform_into(
+            engine,
             destination,
             alpha,
             beta,
@@ -280,6 +285,7 @@ where
     /// intact.
     pub fn repartition_into(
         &self,
+        engine: &mut dyn Engine,
         destination: &mut Self,
         alpha: D,
         beta: D,
@@ -288,7 +294,7 @@ where
         let source_rank = self.rank();
         let destination_codomain_rank = destination.codomain_rank();
         let destination_rank = destination.rank();
-        self.tree_transform_into(
+        self.tree_transform_into(engine,
             destination,
             alpha,
             beta,
@@ -330,6 +336,7 @@ where
     /// stages, checks the destination's space and has the storage write.
     pub(super) fn tree_transform_into(
         &self,
+        engine: &mut dyn Engine,
         destination: &mut Self,
         alpha: D,
         beta: D,
@@ -353,6 +360,7 @@ where
         // Why the storage body: a lazy-adjoint source aliases its parent.
         destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
         <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_into(
+            engine,
             self,
             destination,
             alpha,
@@ -390,8 +398,8 @@ where
     /// Checked Generic providers report an axis misuse in
     /// [`GenericTensorError::Facade`] with the same [`Error`], and other
     /// failures in [`GenericTensorError::Plan`] with the concrete provider error
-    /// preserved as its source. On CUDA a payload on another device is
-    /// [`Error::PlacementMismatch`], before any device write.
+    /// preserved as its source. On CUDA a payload of another device or engine
+    /// is [`Error::PlacementMismatch`], before any device write.
     ///
     /// # CUDA storage
     ///
@@ -402,12 +410,13 @@ where
     /// lease is released before the device lease is taken, and nothing under
     /// the device lease leases again: one device lease per replay.
     ///
-    /// A warm call uploads no structure data and downloads nothing. Its only
-    /// transfer is the output initialisation (#740): exactly one H2D of
-    /// `required_len * size_of::<D>()` bytes, from one host `Vec` of that
-    /// size, and its only device allocation is the returned output. The first
-    /// call for a given structure additionally uploads that structure's
-    /// coefficient payload once and may grow the pack/scatter workspace once.
+    /// A call downloads nothing. It uploads the output initialisation (#740),
+    /// one H2D of `required_len * size_of::<D>()` bytes from one host `Vec` of
+    /// that size, the returned output being its allocation. An eager call
+    /// keeps no device state between calls, so every call also uploads the
+    /// structure's coefficient payload, the scalar templates its regions read,
+    /// and allocates its pack/scatter workspace; a prepared workspace is what
+    /// keeps them across calls.
     ///
     /// On device the replay runs in overwrite mode, so it also zero-fills
     /// every *inactive* destination layout on the device — redundant work over
@@ -436,6 +445,7 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
@@ -445,28 +455,33 @@ where
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
     /// )?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&w], 7)?;
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&w], 7)?;
     /// assert_eq!(t.leg_dims()?, [3, 2]);
     ///
-    /// let swapped = t.permute(&[1], &[0])?;
+    /// let swapped = t.permute(engine, &[1], &[0])?;
     /// assert_eq!(swapped.leg_dims()?, [2, 3]);
     /// // A bosonic two-leg swap is an involution: swapping back restores the
     /// // payload exactly.
-    /// assert_eq!(swapped.permute(&[1], &[0])?.dense_data()?, t.dense_data()?);
+    /// assert_eq!(swapped.permute(engine, &[1], &[0])?.dense_data()?, t.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn permute(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
-        self.tree_transform(TreeTransformOperation::permute(
-            codomain_axes.iter().copied(),
-            domain_axes.iter().copied(),
-        ))
+        self.tree_transform(
+            engine,
+            TreeTransformOperation::permute(
+                codomain_axes.iter().copied(),
+                domain_axes.iter().copied(),
+            ),
+        )
     }
 
     /// Runs `op` on the matrix view `permute(self, rows, cols)`: the leg roles
@@ -477,14 +492,16 @@ where
     /// (malformed axes, non-symmetric braiding) are returned before `op` runs.
     pub(super) fn with_leg_roles<T>(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
-        op: impl FnOnce(&Self) -> Result<T, FacadeError<R>>,
+        op: impl FnOnce(&Self, &mut dyn Engine) -> Result<T, FacadeError<R>>,
     ) -> Result<T, FacadeError<R>> {
         if self.axes_are_identity(rows, cols) {
-            return op(self);
+            return op(self, engine);
         }
-        op(&self.permute(rows, cols)?)
+        let permuted = self.permute(engine, rows, cols)?;
+        op(&permuted, engine)
     }
 
     /// TensorKit `braid`: re-arranges legs with an explicit braid, one level
@@ -520,6 +537,7 @@ where
     /// [`GenericTensorError::Plan`].
     pub fn braid(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         levels: &[usize],
@@ -535,15 +553,19 @@ where
             .into());
         }
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         let nout = self.codomain_rank();
-        self.tree_transform(TreeTransformOperation::braid(
-            codomain_axes.iter().copied(),
-            domain_axes.iter().copied(),
-            levels[..nout].iter().copied(),
-            levels[nout..].iter().copied(),
-        ))
+        self.tree_transform(
+            engine,
+            TreeTransformOperation::braid(
+                codomain_axes.iter().copied(),
+                domain_axes.iter().copied(),
+                levels[..nout].iter().copied(),
+                levels[nout..].iter().copied(),
+            ),
+        )
     }
 
     /// TensorKit `repartition(t, N₁, N₂)`: moves the planar boundary so the
@@ -566,11 +588,16 @@ where
     /// [`crate::typed::OperationError::InvalidPermutation`]. Checked Generic
     /// reports an axis misuse in [`GenericTensorError::Facade`] and other
     /// failures in [`GenericTensorError::Plan`].
-    pub fn repartition(&self, num_codomain: usize) -> Result<Self, FacadeError<R>> {
+    pub fn repartition(
+        &self,
+        engine: &mut dyn Engine,
+        num_codomain: usize,
+    ) -> Result<Self, FacadeError<R>> {
         if num_codomain == self.codomain_rank() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
-        self.planar(PlanarRequestKind::Repartition { num_codomain })
+        self.planar(engine, PlanarRequestKind::Repartition { num_codomain })
     }
 
     /// TensorKit `transpose(t, (p₁, p₂))`: the planar transpose with an
@@ -604,16 +631,21 @@ where
     /// facade the expert layer owns that validation; it is not repeated here.
     pub fn transpose(
         &self,
+        engine: &mut dyn Engine,
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
-        self.planar(PlanarRequestKind::Explicit {
-            codomain_axes,
-            domain_axes,
-        })
+        self.planar(
+            engine,
+            PlanarRequestKind::Explicit {
+                codomain_axes,
+                domain_axes,
+            },
+        )
     }
 
     /// Shared body of the three planar operations: derive the planar axis
@@ -621,7 +653,11 @@ where
     ///
     /// The shared axis derivation defines what "planar" means for each request
     /// kind; duplicating it here would allow the definitions to drift.
-    fn planar(&self, kind: PlanarRequestKind<'_>) -> Result<Self, FacadeError<R>> {
+    fn planar(
+        &self,
+        engine: &mut dyn Engine,
+        kind: PlanarRequestKind<'_>,
+    ) -> Result<Self, FacadeError<R>> {
         let operation = with_planar_axes(
             self.codomain_rank(),
             self.rank(),
@@ -638,7 +674,7 @@ where
             },
         )
         .map_err(FacadeError::<R>::from)?;
-        self.tree_transform(operation)
+        self.tree_transform(engine, operation)
     }
 
     /// The one body of every admitted permutation, braid and planar
@@ -646,24 +682,27 @@ where
     /// else one dense transform published as an owned tensor.
     pub(super) fn tree_transform(
         &self,
+        engine: &mut dyn Engine,
         operation: TreeTransformOperation,
     ) -> Result<Self, FacadeError<R>> {
         if let Some(host) = S::as_host(EXEC, self) {
-            if let Some(compact) = compact_arms::transform_rank_one_diagonal(host, &operation)? {
+            if let Some(compact) =
+                compact_arms::transform_rank_one_diagonal(engine, host, &operation)?
+            {
                 return Ok(S::from_host(EXEC, compact)?);
             }
         }
         if let TypedTensorRepr::Adjoint(_) = &self.repr {
             if let Some(lazy) =
                 <R::Mode as TypedTensorTransformDispatch<R, D>>::try_lazy_adjoint_transform(
-                    self, &operation,
+                    engine, self, &operation,
                 )?
             {
                 return Ok(lazy);
             }
         }
         let (space, data) =
-            <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(self, operation)?;
+            <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(engine, self, operation)?;
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::dense(space, data)),
@@ -716,13 +755,29 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 2)?;
-    /// assert_eq!(t.adjoint()?.adjoint()?.dense_data()?, t.dense_data()?);
+    /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
+    /// assert_eq!(t.adjoint(engine)?.adjoint(engine)?.dense_data()?, t.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn adjoint(&self) -> Result<Self, FacadeError<R>> {
+    pub fn adjoint(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
+        // A dense lazy view moves no payload, so it needs nothing of the
+        // engine; a compact spectrum is conjugated into a new one here, Host
+        // arithmetic the engine admits like any other.
+        if self
+            .owned_body()
+            .is_some_and(|body| matches!(body.data.as_ref(), TypedData::Diagonal(_)))
+        {
+            admit_host_engine(engine)?;
+        }
+        self.lazy_adjoint()
+    }
+
+    /// [`Self::adjoint`] without an engine: a lazy view or a compact
+    /// conjugate, never a payload pass.
+    pub(super) fn lazy_adjoint(&self) -> Result<Self, FacadeError<R>> {
         // Why not a lazy view of a compact diagonal: densifying its unstored
         // zeros through conjugation would publish them as `0-0i`.
         if let Some(adjoint) = self.compact_adjoint() {
@@ -758,7 +813,7 @@ where
             base: self,
             adjoint: Some(|tensor| {
                 tensor
-                    .adjoint()
+                    .lazy_adjoint()
                     .map_err(<R::Mode as TypedTensorModeDispatch<R>>::facade_error_into_error)
             }),
         }

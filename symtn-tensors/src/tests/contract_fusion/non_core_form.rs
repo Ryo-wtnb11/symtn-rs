@@ -2,7 +2,9 @@ use super::*;
 
 #[test]
 fn tensorcontract_fusion_non_core_form_su2_lhs_adjoint_prepared_plan_matches_reference_sequence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
+        engine,
         su2_three_to_one_homspace(false, false),
         su2_one_to_three_homspace(true, true),
         true,
@@ -12,7 +14,9 @@ fn tensorcontract_fusion_non_core_form_su2_lhs_adjoint_prepared_plan_matches_ref
 
 #[test]
 fn tensorcontract_fusion_non_core_form_su2_rhs_adjoint_prepared_plan_matches_reference_sequence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
+        engine,
         su2_three_to_one_homspace(false, true),
         su2_one_to_three_homspace(false, true),
         false,
@@ -22,7 +26,9 @@ fn tensorcontract_fusion_non_core_form_su2_rhs_adjoint_prepared_plan_matches_ref
 
 #[test]
 fn tensorcontract_fusion_non_core_form_su2_both_adjoint_prepared_plan_matches_reference_sequence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
+        engine,
         su2_three_to_one_homspace(false, false),
         su2_one_to_three_homspace(false, false),
         true,
@@ -31,6 +37,7 @@ fn tensorcontract_fusion_non_core_form_su2_both_adjoint_prepared_plan_matches_re
 }
 
 fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
+    engine: &mut dyn Engine,
     lhs_hom: FusionTreeHomSpace,
     rhs_hom: FusionTreeHomSpace,
     lhs_conjugate: bool,
@@ -190,6 +197,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     }
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut expected_dst,
         &lhs_core,
@@ -248,6 +256,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
     let mut context = TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
     crate::probe::take_completed_transformer_activity();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -275,6 +284,7 @@ fn assert_non_core_form_su2_adjoint_prepared_plan_matches_reference_sequence(
         .data_mut()
         .copy_from_slice(&initial_dst_for_context);
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -351,6 +361,7 @@ pub(super) fn su2_one_to_three_homspace(
 
 #[test]
 fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -442,6 +453,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut core_dst,
         &lhs_core,
@@ -461,7 +473,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     )
     .unwrap();
 
-    fusion_contract_into(&rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
 
     for (&actual, &expected) in dst.data().iter().zip(expected_dst.data()) {
         assert!(
@@ -478,6 +490,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
     .unwrap();
     let mut context = TensorContractFusionExecutionContext::<Complex64, _>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -499,6 +512,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         .data_mut()
         .copy_from_slice(&[Complex64::new(5.0, 1.0), Complex64::new(-2.0, 4.0)]);
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -514,6 +528,7 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su2_recoupling() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -579,7 +594,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     let beta = Complex64::new(-1.0, 0.5);
     let axes = TensorContractSpec::new(&[2], &[0], OutputAxisOrder::from_axes(&[0, 2, 1, 3]));
 
-    fusion_contract_into(&rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
 
     let expected = [
         Complex64::new(-29.12579386826373, -0.7876587736527441),
@@ -593,7 +608,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
     }
 
     let expected_structure = std::sync::Arc::clone(dst.structure());
-    let rebuild_and_contract = || {
+    let mut rebuild_and_contract = || {
         let lhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, lhs_hom.clone()).unwrap();
         let rhs_space = DynamicFusionMapSpace::from_final_homspace(&rule, rhs_hom.clone()).unwrap();
         let dst_space = DynamicFusionMapSpace::from_final_homspace(&rule, dst_hom.clone()).unwrap();
@@ -607,6 +622,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
             TestTensor::<Complex64>::from_vec_with_fusion_space(initial_dst.clone(), dst_space)
                 .unwrap();
         fusion_contract_into(
+            engine,
             &rule,
             &mut rebuilt_dst,
             &rebuilt_lhs,
@@ -635,6 +651,7 @@ fn tensorcontract_fusion_product_fz2_u1_su2_contracts_component_channels_with_su
 
 #[test]
 fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
         FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
@@ -669,6 +686,7 @@ fn tensorcontract_fusion_product_no_twist_identity_rhs_is_borrowed() {
     let rhs_before = rhs.data().to_vec();
     let mut context = TensorContractFusionExecutionContext::<f64, _>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut dst,

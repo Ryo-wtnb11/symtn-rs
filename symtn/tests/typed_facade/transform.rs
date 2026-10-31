@@ -4,6 +4,7 @@ use symtn::typed::SectorSpectrum;
 
 #[test]
 fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a non-identity permute of a runtime-rank multi-block external
     // provider tensor produces the reordered spaces, keeps the element count,
@@ -17,7 +18,7 @@ fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
     // leg of each shape across the codomain/domain split, so the degeneracies
     // pin which source leg landed where. Flags alone would not: they are
     // symmetric under swapping the split.
-    let permuted = tensor.permute(&[1, 2], &[3, 0]).unwrap();
+    let permuted = tensor.permute(engine, &[1, 2], &[3, 0]).unwrap();
 
     assert_eq!(permuted.codomain().len(), 2);
     assert_eq!(permuted.domain().len(), 2);
@@ -47,6 +48,7 @@ fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
 
 #[test]
 fn permute_round_trips_back_to_the_source_layout() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: permuting and permuting back is the identity on both the spaces and
     // the payload — a stronger statement than "the multiset survived", since it
@@ -55,8 +57,8 @@ fn permute_round_trips_back_to_the_source_layout() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let there = tensor.permute(&[1, 3], &[0, 2]).unwrap();
-    let back = there.permute(&[2, 0], &[3, 1]).unwrap();
+    let there = tensor.permute(engine, &[1, 3], &[0, 2]).unwrap();
+    let back = there.permute(engine, &[2, 0], &[3, 1]).unwrap();
 
     assert_eq!(back.dense_data().unwrap(), tensor.dense_data().unwrap());
     assert_eq!(back.subblock_count(), tensor.subblock_count());
@@ -70,22 +72,28 @@ fn permute_round_trips_back_to_the_source_layout() {
 
 #[test]
 fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: nothing in the typed transform is abelian- or real-specific; the
     // SU(2) recoupling coefficients reach a `Complex64` payload.
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
-    let tensor: TensorMap<ExternalSu2Rule, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |sectors, indices| {
+    let tensor: TensorMap<ExternalSu2Rule, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |sectors, indices| {
             Complex64::new(
                 sectors.coupled().twice_spin() as f64 + 1.0,
                 indices.iter().sum::<usize>() as f64 + 1.0,
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
-    let permuted = tensor.permute(&[0, 2], &[1, 3]).unwrap();
+    let permuted = tensor.permute(engine, &[0, 2], &[1, 3]).unwrap();
 
     assert_eq!(permuted.codomain().len(), 2);
     assert_eq!(permuted.domain().len(), 2);
@@ -99,6 +107,7 @@ fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
 
 #[test]
 fn permute_rejects_malformed_axes_without_panicking() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the expert layer's typed errors are the contract — an out-of-range
     // axis, a repeated axis and a wrong-length axis list all come back as `Err`.
@@ -107,18 +116,19 @@ fn permute_rejects_malformed_axes_without_panicking() {
     let tensor = z3_rank_four(&runtime, &provider);
 
     assert!(
-        matches!(tensor.permute(&[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.permute(engine, &[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
     assert!(
-        matches!(tensor.permute(&[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.permute(engine, &[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
     assert!(
-        matches!(tensor.permute(&[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.permute(engine, &[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
 }
 
 #[test]
 fn braid_rejects_a_wrong_length_levels_list() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the public pre-check — `levels` must name every source axis — in
     // both directions.
@@ -126,19 +136,22 @@ fn braid_rejects_a_wrong_length_levels_list() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let short = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2]).unwrap_err();
+    let short = tensor
+        .braid(engine, &[1, 2], &[3, 0], &[0, 1, 2])
+        .unwrap_err();
     let message = short.to_string();
     assert!(message.contains("one level per source axis"), "{message}");
     assert!(message.contains("expected 4"), "{message}");
-    assert!(tensor.braid(&[1, 2], &[3, 0], &[0; 5]).is_err());
+    assert!(tensor.braid(engine, &[1, 2], &[3, 0], &[0; 5]).is_err());
     // Malformed axes still come back from the expert layer, not from here.
     assert!(
-        matches!(tensor.braid(&[0, 0], &[2, 3], &[0, 1, 2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.braid(engine, &[0, 0], &[2, 3], &[0, 1, 2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
 }
 
 #[test]
 fn transpose_twice_returns_the_source_layout() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the planar transpose is an involution — it rotates every leg once
     // round the boundary, so applying it twice restores the source spaces,
@@ -147,8 +160,8 @@ fn transpose_twice_returns_the_source_layout() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let once = full_transpose!(tensor).unwrap();
-    let twice = full_transpose!(once).unwrap();
+    let once = full_transpose!(engine, tensor).unwrap();
+    let twice = full_transpose!(engine, once).unwrap();
 
     assert_ne!(once.dense_data().unwrap(), tensor.dense_data().unwrap());
     assert_eq!(typed_leg_shapes(&twice), typed_leg_shapes(&tensor));
@@ -164,6 +177,7 @@ fn transpose_twice_returns_the_source_layout() {
 
 #[test]
 fn transpose_rejects_malformed_axes_without_panicking() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: out-of-range axes, a wrong-length list and a non-planar
     // re-arrangement (a permute, which `transpose` must refuse rather than
@@ -173,13 +187,13 @@ fn transpose_rejects_malformed_axes_without_panicking() {
     let tensor = z3_rank_four(&runtime, &provider);
 
     assert!(
-        matches!(tensor.transpose(&[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.transpose(engine, &[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
     assert!(
-        matches!(tensor.transpose(&[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.transpose(engine, &[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
     assert!(
-        matches!(tensor.transpose(&[1, 2], &[3, 0]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
+        matches!(tensor.transpose(engine, &[1, 2], &[3, 0]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
     );
 }
 
@@ -189,6 +203,7 @@ fn transpose_rejects_malformed_axes_without_panicking() {
 
 #[test]
 fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: every split point of a rank-4 tensor map is reachable, reports the
     // requested codomain/domain sizes, and comes back to the source layout —
@@ -199,7 +214,7 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
     let tensor = z3_rank_four(&runtime, &provider);
 
     for num_codomain in 0..=4 {
-        let moved = tensor.repartition(num_codomain).unwrap();
+        let moved = tensor.repartition(engine, num_codomain).unwrap();
         assert_eq!(moved.codomain().len(), num_codomain);
         assert_eq!(moved.domain().len(), 4 - num_codomain);
         assert_eq!(
@@ -207,7 +222,7 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
             tensor.dense_data().unwrap().len()
         );
 
-        let back = moved.repartition(2).unwrap();
+        let back = moved.repartition(engine, 2).unwrap();
         assert_eq!(typed_leg_shapes(&back), typed_leg_shapes(&tensor));
         assert_eq!(back.dense_data().unwrap(), tensor.dense_data().unwrap());
         for index in 0..tensor.subblock_count() {
@@ -221,6 +236,7 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
 
 #[test]
 fn repartition_rejects_a_split_beyond_the_rank() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `num_codomain > rank` has no planar reading at all, so it is
     // rejected rather than clamped.
@@ -228,13 +244,14 @@ fn repartition_rejects_a_split_beyond_the_rank() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let error = tensor.repartition(5).unwrap_err();
+    let error = tensor.repartition(engine, 5).unwrap_err();
 
     assert!(error.to_string().contains("exceeds rank 4"), "{error}");
 }
 
 #[test]
 fn planar_transposes_bend_where_permute_braids_for_a_fermionic_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: for a provider whose braiding is not symmetric, a planar transpose
     // and a permute of the *same* axes are different morphisms — the permute
@@ -248,31 +265,43 @@ fn planar_transposes_bend_where_permute_braids_for_a_fermionic_provider() {
 
     // Full transpose: same element motion either way, opposite signs.
     assert_eq!(
-        full_transpose!(tensor).unwrap().dense_data().unwrap(),
+        full_transpose!(engine, tensor)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         [1.0, 2.0, 4.0, 3.0]
     );
     assert_eq!(
-        tensor.permute(&[2], &[1, 0]).unwrap().dense_data().unwrap(),
+        tensor
+            .permute(engine, &[2], &[1, 0])
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         [1.0, 2.0, -4.0, -3.0]
     );
 
     // The explicit form, on a different rotation of the planar order.
     assert_eq!(
         tensor
-            .transpose(&[1, 2], &[0])
+            .transpose(engine, &[1, 2], &[0])
             .unwrap()
             .dense_data()
             .unwrap(),
         [1.0, 4.0, 2.0, 3.0]
     );
     assert_eq!(
-        tensor.permute(&[1, 2], &[0]).unwrap().dense_data().unwrap(),
+        tensor
+            .permute(engine, &[1, 2], &[0])
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         [1.0, 4.0, -2.0, -3.0]
     );
 }
 
 #[test]
 fn repartition_is_sign_free_even_for_a_fermionic_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: moving the planar boundary never crosses two strands — the cyclic
     // order of the legs is what `repartition` preserves by definition — so
@@ -288,21 +317,21 @@ fn repartition_is_sign_free_even_for_a_fermionic_provider() {
     let tensor = fermionic_rank_three(&runtime);
 
     assert_eq!(
-        tensor.repartition(0).unwrap().dense_data().unwrap(),
+        tensor.repartition(engine, 0).unwrap().dense_data().unwrap(),
         [1.0, 4.0, 3.0, 2.0]
     );
     assert_eq!(
-        tensor.repartition(1).unwrap().dense_data().unwrap(),
+        tensor.repartition(engine, 1).unwrap().dense_data().unwrap(),
         [1.0, 4.0, 3.0, 2.0]
     );
     assert_eq!(
-        tensor.repartition(3).unwrap().dense_data().unwrap(),
+        tensor.repartition(engine, 3).unwrap().dense_data().unwrap(),
         [1.0, 2.0, 3.0, 4.0]
     );
     assert_eq!(
-        tensor.repartition(0).unwrap().dense_data().unwrap(),
+        tensor.repartition(engine, 0).unwrap().dense_data().unwrap(),
         tensor
-            .permute(&[], &[2, 1, 0])
+            .permute(engine, &[], &[2, 1, 0])
             .unwrap()
             .dense_data()
             .unwrap()
@@ -338,15 +367,17 @@ fn u1_cat_tensor(
     runtime: &Runtime,
     domain_pairs: &[(i32, usize)],
 ) -> TensorMap<symtn::sector::U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let l1 = u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let l2 = u1_leg(&provider, &[(0, 1), (1, 2)]).try_dual().unwrap();
     let lv = u1_leg(&provider, domain_pairs);
-    TensorMap::from_subblock_fn(runtime, [&l1, &l2], [&lv], u1_typed_fill).unwrap()
+    TensorMap::from_subblock_fn(engine, runtime, [&l1, &l2], [&lv], u1_typed_fill).unwrap()
 }
 
 #[test]
 fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the typed direct sum preserves the changed leg's duality, sector
     // union, degeneracies, and lhs-then-rhs slab order directly.
@@ -360,7 +391,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
         ],
     )
     .unwrap();
-    let build = |pairs: &[(u8, usize)]| {
+    let mut build = |pairs: &[(u8, usize)]| {
         let leg = GradedSpace::try_new(
             Arc::clone(&provider),
             pairs.iter().map(|&(parity, degeneracy)| {
@@ -377,7 +408,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
         .unwrap()
         .try_dual()
         .unwrap();
-        TensorMap::from_subblock_fn(&runtime, [&lw], [&leg], |sectors, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&lw], [&leg], |sectors, indices| {
             10.0 * f64::from(sectors.coupled().parity()) + indices[1] as f64
         })
         .unwrap()
@@ -385,7 +416,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
     let typed_lhs = build(&[(0, 2)]);
     let typed_rhs = build(&[(0, 1), (1, 2)]);
     let typed_joined: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed_lhs.cat(&typed_rhs, Side::Domain).unwrap();
+        typed_lhs.cat(engine, &typed_rhs, Side::Domain).unwrap();
     let changed = &typed_joined.domain()[0];
     assert!(changed.is_dual());
     assert_eq!(
@@ -401,6 +432,7 @@ fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
 
 #[test]
 fn typed_cat_pins_the_slab_order_by_value() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (gate 2): hand-computed payloads pin adjacent column slabs for
     // catdomain and adjacent
@@ -413,11 +445,15 @@ fn typed_cat_pins_the_slab_order_by_value() {
     let v2 = u1_leg(&provider, &[(0, 2)]);
 
     let a: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&w], [&v1], |_, i| (i[0] + 1) as f64).unwrap();
-    let b: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&w], [&v2], |_, i| (i[0] + 2 * i[1] + 3) as f64)
+        TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v1], |_, i| (i[0] + 1) as f64)
             .unwrap();
-    let joined: TensorMap<symtn::sector::U1FusionRule, f64> = a.cat(&b, Side::Domain).unwrap();
+    let b: TensorMap<symtn::sector::U1FusionRule, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v2], |_, i| {
+            (i[0] + 2 * i[1] + 3) as f64
+        })
+        .unwrap();
+    let joined: TensorMap<symtn::sector::U1FusionRule, f64> =
+        a.cat(engine, &b, Side::Domain).unwrap();
     // Column-major: lhs column [1, 2], then rhs columns [3, 4] and [5, 6].
     assert_eq!(
         joined.dense_data().unwrap(),
@@ -425,11 +461,15 @@ fn typed_cat_pins_the_slab_order_by_value() {
     );
 
     let at: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&v1], [&w], |_, i| (i[1] + 1) as f64).unwrap();
-    let bt: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&v2], [&w], |_, i| (i[0] + 2 * i[1] + 3) as f64)
+        TensorMap::from_subblock_fn(engine, &runtime, [&v1], [&w], |_, i| (i[1] + 1) as f64)
             .unwrap();
-    let stacked: TensorMap<symtn::sector::U1FusionRule, f64> = at.cat(&bt, Side::Codomain).unwrap();
+    let bt: TensorMap<symtn::sector::U1FusionRule, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&v2], [&w], |_, i| {
+            (i[0] + 2 * i[1] + 3) as f64
+        })
+        .unwrap();
+    let stacked: TensorMap<symtn::sector::U1FusionRule, f64> =
+        at.cat(engine, &bt, Side::Codomain).unwrap();
     // Row slabs: lhs row first within each column.
     assert_eq!(
         stacked.dense_data().unwrap(),
@@ -439,6 +479,7 @@ fn typed_cat_pins_the_slab_order_by_value() {
 
 #[test]
 fn typed_absorb_pins_the_common_prefix_by_value() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (gate 3): absorb's common-prefix semantics against a hand-computed
     // payload. Destination block is 2x3, source block is 3x2; the shared
@@ -446,6 +487,7 @@ fn typed_absorb_pins_the_common_prefix_by_value() {
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let destination: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&u1_leg(&provider, &[(0, 2)])],
         [&u1_leg(&provider, &[(0, 3)])],
@@ -453,6 +495,7 @@ fn typed_absorb_pins_the_common_prefix_by_value() {
     )
     .unwrap();
     let source: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&u1_leg(&provider, &[(0, 3)])],
         [&u1_leg(&provider, &[(0, 2)])],
@@ -462,7 +505,7 @@ fn typed_absorb_pins_the_common_prefix_by_value() {
     // destination (column-major 2x3): [11, 21, 12, 22, 13, 23]
     // source (column-major 3x2): [-11, -21, -31, -12, -22, -32]
     let absorbed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        destination.absorb(&source).unwrap();
+        destination.absorb(engine, &source).unwrap();
     assert_eq!(
         absorbed.dense_data().unwrap(),
         &[-11.0, -21.0, -12.0, -22.0, 13.0, 23.0]
@@ -471,53 +514,61 @@ fn typed_absorb_pins_the_common_prefix_by_value() {
 
 #[test]
 fn typed_absorb_is_total_for_disjoint_zero_extent_and_rank_zero() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let zero = u1_leg(&provider, &[(0, 2)]);
     let one = u1_leg(&provider, &[(1, 3)]);
     let destination: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&zero], [&zero], |_, i| (i[0] + 10 * i[1]) as f64)
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&zero], [&zero], |_, i| {
+            (i[0] + 10 * i[1]) as f64
+        })
+        .unwrap();
     let disjoint: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&one], [&one], |_, _| 7.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&one], [&one], |_, _| 7.0).unwrap();
     assert_eq!(
-        destination.absorb(&disjoint).unwrap().dense_data().unwrap(),
+        destination
+            .absorb(engine, &disjoint)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         destination.dense_data().unwrap()
     );
 
     let zero_extent = u1_leg(&provider, &[(0, 0)]);
     let empty: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::zeros(&runtime, [&zero_extent], [&zero_extent]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&zero_extent], [&zero_extent]).unwrap();
     assert!(empty
-        .absorb(&destination)
+        .absorb(engine, &destination)
         .unwrap()
         .dense_data()
         .unwrap()
         .is_empty());
 
     let vector: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&zero], [], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&zero], [], |_, _| 2.0).unwrap();
     let covector: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [], [&zero], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [], [&zero], |_, _| 3.0).unwrap();
     let source_vector: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&zero], [], |_, _| 5.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&zero], [], |_, _| 5.0).unwrap();
     let source_covector: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [], [&zero], |_, _| 7.0).unwrap();
-    let scalar_destination = covector.compose(&vector).unwrap();
-    let scalar_source = source_covector.compose(&source_vector).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [], [&zero], |_, _| 7.0).unwrap();
+    let scalar_destination = covector.compose(engine, &vector).unwrap();
+    let scalar_source = source_covector.compose(engine, &source_vector).unwrap();
     assert_eq!(
         scalar_destination
-            .absorb(&scalar_source)
+            .absorb(engine, &scalar_source)
             .unwrap()
-            .scalar()
+            .scalar(engine)
             .unwrap(),
-        scalar_source.scalar().unwrap()
+        scalar_source.scalar(engine).unwrap()
     );
 }
 
 #[test]
 fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: each operation keeps its own validation classes and order.
     let runtime = runtime();
@@ -541,6 +592,7 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
     // Wrong rank: a multi-leg changed side.
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let two_legs_typed: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [
             &u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]),
@@ -551,7 +603,9 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
     )
     .unwrap();
     assert_invalid(
-        typed_lhs.cat(&two_legs_typed, Side::Domain).unwrap_err(),
+        typed_lhs
+            .cat(engine, &two_legs_typed, Side::Domain)
+            .unwrap_err(),
         "exactly one domain leg",
     );
 
@@ -560,6 +614,7 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
     // spaces, so the codomain-equality check itself is what fires.
     let other_codomain_typed: TensorMap<symtn::sector::U1FusionRule, f64> =
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [
                 &u1_leg(&provider, &[(-1, 1), (0, 3), (1, 1)]),
@@ -571,7 +626,7 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
         .unwrap();
     assert_mismatch(
         typed_lhs
-            .cat(&other_codomain_typed, Side::Domain)
+            .cat(engine, &other_codomain_typed, Side::Domain)
             .unwrap_err(),
         "identical codomain product spaces",
     );
@@ -579,8 +634,9 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
     // Mismatched unchanged side, catcodomain: rank `1 <- 2` on both operands
     // (the one-codomain-leg check passes) with different domain product
     // spaces, so the domain-equality check itself is what fires.
-    let stack_pair = |domain1: &[(i32, usize)]| {
+    let mut stack_pair = |domain1: &[(i32, usize)]| {
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [&u1_leg(&provider, &[(0, 2), (1, 1)])],
             [
@@ -597,7 +653,7 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
         stack_pair(&[(0, 2), (1, 1)]);
     assert_mismatch(
         typed_stack_lhs
-            .cat(&typed_stack_rhs, Side::Codomain)
+            .cat(engine, &typed_stack_rhs, Side::Codomain)
             .unwrap_err(),
         "identical domain product spaces",
     );
@@ -605,6 +661,7 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
     // Duality mismatch on the changed leg: the direct sum refuses.
     let dual_domain_typed: TensorMap<symtn::sector::U1FusionRule, f64> =
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             [
                 &u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]),
@@ -615,26 +672,32 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
         )
         .unwrap();
     assert_mismatch(
-        typed_lhs.cat(&dual_domain_typed, Side::Domain).unwrap_err(),
+        typed_lhs
+            .cat(engine, &dual_domain_typed, Side::Domain)
+            .unwrap_err(),
         "opposite duality",
     );
 
     assert_invalid(
-        typed_lhs.absorb(&two_legs_typed).unwrap_err(),
+        typed_lhs.absorb(engine, &two_legs_typed).unwrap_err(),
         "equal codomain/domain ranks",
     );
     assert_invalid(
-        typed_lhs.absorb(&dual_domain_typed).unwrap_err(),
+        typed_lhs.absorb(engine, &dual_domain_typed).unwrap_err(),
         "equal duality",
     );
 
     // Runtime mismatch, for all three operations.
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let typed_other = u1_cat_tensor(&other_runtime, &[(0, 1), (1, 1)]);
     for error in [
-        typed_lhs.cat(&typed_other, Side::Domain).unwrap_err(),
-        typed_lhs.cat(&typed_other, Side::Codomain).unwrap_err(),
-        typed_lhs.absorb(&typed_other).unwrap_err(),
+        typed_lhs
+            .cat(engine, &typed_other, Side::Domain)
+            .unwrap_err(),
+        typed_lhs
+            .cat(engine, &typed_other, Side::Codomain)
+            .unwrap_err(),
+        typed_lhs.absorb(engine, &typed_other).unwrap_err(),
     ] {
         assert!(matches!(error, symtn::typed::Error::RuntimeMismatch));
     }
@@ -642,24 +705,25 @@ fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
 
 #[test]
 fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (gate 4): the rule-identity check fires before any space validation:
     // two providers of the same Rust type but different identities cannot be
     // concatenated or absorbed and report `RuleMismatch`.
     let runtime = runtime();
-    let build = |provider: &Arc<ExternalZ3Rule>| {
+    let mut build = |provider: &Arc<ExternalZ3Rule>| {
         let leg = GradedSpace::try_new(Arc::clone(provider), [(Z3Charge(0), 1), (Z3Charge(1), 1)])
             .unwrap();
         let tensor: TensorMap<ExternalZ3Rule, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
         tensor
     };
     let ours = build(&Arc::new(external_z3()));
     let theirs = build(&Arc::new(external_z3_tagged(7)));
     for error in [
-        ours.cat(&theirs, Side::Domain).unwrap_err(),
-        ours.cat(&theirs, Side::Codomain).unwrap_err(),
-        ours.absorb(&theirs).unwrap_err(),
+        ours.cat(engine, &theirs, Side::Domain).unwrap_err(),
+        ours.cat(engine, &theirs, Side::Codomain).unwrap_err(),
+        ours.absorb(engine, &theirs).unwrap_err(),
     ] {
         assert!(matches!(error, symtn::typed::Error::RuleMismatch));
     }
@@ -668,15 +732,21 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
     let foreign = Arc::new(external_z3_tagged(7));
     let foreign_leg =
         GradedSpace::try_new(Arc::clone(&foreign), [(Z3Charge(0), 1), (Z3Charge(1), 1)]).unwrap();
-    let foreign_runtime: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::from_subblock_fn(&other_runtime, [&foreign_leg], [&foreign_leg], |_, _| 1.0)
-            .unwrap();
+    let foreign_runtime: TensorMap<ExternalZ3Rule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &other_runtime,
+        [&foreign_leg],
+        [&foreign_leg],
+        |_, _| 1.0,
+    )
+    .unwrap();
     assert!(matches!(
-        ours.absorb(&foreign_runtime).unwrap_err(),
+        ours.absorb(engine, &foreign_runtime).unwrap_err(),
         symtn::typed::Error::RuleMismatch
     ));
 
     let foreign_bad_rank: TensorMap<ExternalZ3Rule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &other_runtime,
         [&foreign_leg, &foreign_leg],
         [&foreign_leg],
@@ -684,13 +754,14 @@ fn typed_cat_and_absorb_reject_a_foreign_rule_identity_first() {
     )
     .unwrap();
     assert!(matches!(
-        ours.absorb(&foreign_bad_rank).unwrap_err(),
+        ours.absorb(engine, &foreign_bad_rank).unwrap_err(),
         symtn::typed::Error::InvalidArgument(_)
     ));
 }
 
 #[test]
 fn external_z3_cat_and_absorb_hold_by_value() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (gate 6): typed-only law/value checks on the external Z3 provider.
     // The expected payloads are computed by hand rather than through another
@@ -704,17 +775,17 @@ fn external_z3_cat_and_absorb_hold_by_value() {
     let v2 =
         GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(1), 1), (Z3Charge(2), 1)]).unwrap();
     let a: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&w], [&v1], |sectors, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v1], |sectors, _| {
             1.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
     let b: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&w], [&v2], |sectors, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v2], |sectors, _| {
             10.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
 
-    let joined: TensorMap<ExternalZ3Rule, f64> = a.cat(&b, Side::Domain).unwrap();
+    let joined: TensorMap<ExternalZ3Rule, f64> = a.cat(engine, &b, Side::Domain).unwrap();
     // Blocks in coupled-sector order: charge 0 holds only the lhs value, the
     // shared charge 1 holds the lhs column then the rhs column; charge 2 has
     // no codomain sector, so the merged leg carries it without a block.
@@ -730,11 +801,11 @@ fn external_z3_cat_and_absorb_hold_by_value() {
     // exists. Then a non-shared key: absorb from a tensor whose only block is
     // charge 1.
     let c: TensorMap<ExternalZ3Rule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&w], [&v2], |sectors, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v2], |sectors, _| {
             100.0 + f64::from(sectors.coupled().0)
         })
         .unwrap();
-    let absorbed: TensorMap<ExternalZ3Rule, f64> = a.absorb(&c).unwrap();
+    let absorbed: TensorMap<ExternalZ3Rule, f64> = a.absorb(engine, &c).unwrap();
     // a's blocks: charge 0 -> 1.0, charge 1 -> 2.0; c has only charge 1
     // (value 101.0). The non-shared charge-0 block is untouched.
     assert_eq!(absorbed.dense_data().unwrap(), &[1.0, 101.0]);
@@ -744,6 +815,7 @@ fn external_z3_cat_and_absorb_hold_by_value() {
 fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
     let _serial = crate::counting_alloc::serial();
     fn compare<const R_SCALE: u8>(values: [f32; 2]) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = runtime();
         let leg = GradedSpace::try_new(
             Arc::new(RealBraidingProbe::<true, R_SCALE>),
@@ -751,6 +823,7 @@ fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
         )
         .unwrap();
         let compact: TensorMap<RealBraidingProbe<true, R_SCALE>, f32> = TensorMap::diagonal(
+            engine,
             &runtime,
             &leg,
             [symtn::typed::SectorSpectrum {
@@ -759,11 +832,11 @@ fn compact_braid_matches_dense_replay_when_r_overflows_or_underflows_f32() {
             }],
         )
         .unwrap();
-        let actual = compact.braid(&[1], &[0], &[0, 1]).unwrap();
+        let actual = compact.braid(engine, &[1], &[0], &[0, 1]).unwrap();
         let expected = compact
-            .materialize()
+            .materialize(engine)
             .unwrap()
-            .braid(&[1], &[0], &[0, 1])
+            .braid(engine, &[1], &[0], &[0, 1])
             .unwrap();
         if R_SCALE == 1 {
             assert!(expected
@@ -807,10 +880,12 @@ fn catcodomain_oracle<D: Copy>(lhs: &[D], lhs_rows: usize, rhs: &[D], rhs_rows: 
 
 #[test]
 fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg(&Arc::new(U1FusionRule), &[(0, 0), (1, 2)]);
     let diagonal: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -819,14 +894,15 @@ fn compact_cat_ignores_zero_degeneracy_bond_sectors() {
         }],
     )
     .unwrap();
-    let actual = diagonal.cat(&diagonal, Side::Domain).unwrap();
-    let dense = diagonal.materialize().unwrap();
-    let expected = dense.cat(&dense, Side::Domain).unwrap();
+    let actual = diagonal.cat(engine, &diagonal, Side::Domain).unwrap();
+    let dense = diagonal.materialize(engine).unwrap();
+    let expected = dense.cat(engine, &dense, Side::Domain).unwrap();
     assert_eq!(actual.dense_data(), expected.dense_data());
 }
 
 #[test]
 fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
@@ -835,24 +911,24 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
     let right = u1_leg(&provider, &[(0, 4)]);
 
     let lhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_001).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&left], [&common], 773_001).unwrap();
     let rhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_002).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&right], [&common], 773_002).unwrap();
     let lhs_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_003).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&common], [&left], 773_003).unwrap();
     let rhs_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_004).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&common], [&right], 773_004).unwrap();
 
-    let lhs_adjoint = lhs_parent.adjoint().unwrap();
-    let rhs_adjoint = rhs_parent.adjoint().unwrap();
+    let lhs_adjoint = lhs_parent.adjoint(engine).unwrap();
+    let rhs_adjoint = rhs_parent.adjoint(engine).unwrap();
     for (lhs, rhs, expected) in [
         (
             &lhs_adjoint,
             &rhs_owned,
             lhs_parent
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -870,9 +946,9 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
                 .iter()
                 .chain(
                     rhs_parent
-                        .adjoint()
+                        .adjoint(engine)
                         .unwrap()
-                        .materialize()
+                        .materialize(engine)
                         .unwrap()
                         .dense_data()
                         .unwrap(),
@@ -884,18 +960,18 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
             &lhs_adjoint,
             &rhs_adjoint,
             lhs_parent
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
                 .iter()
                 .chain(
                     rhs_parent
-                        .adjoint()
+                        .adjoint(engine)
                         .unwrap()
-                        .materialize()
+                        .materialize(engine)
                         .unwrap()
                         .dense_data()
                         .unwrap(),
@@ -905,30 +981,33 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
         ),
     ] {
         assert_eq!(
-            lhs.cat(rhs, Side::Domain).unwrap().dense_data().unwrap(),
+            lhs.cat(engine, rhs, Side::Domain)
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             expected
         );
     }
 
     let upper_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&left], 773_005).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&common], [&left], 773_005).unwrap();
     let lower_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&common], [&right], 773_006).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&common], [&right], 773_006).unwrap();
     let upper_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 773_007).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&left], [&common], 773_007).unwrap();
     let lower_owned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 773_008).unwrap();
-    let upper_adjoint = upper_parent.adjoint().unwrap();
-    let lower_adjoint = lower_parent.adjoint().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&right], [&common], 773_008).unwrap();
+    let upper_adjoint = upper_parent.adjoint(engine).unwrap();
+    let lower_adjoint = lower_parent.adjoint(engine).unwrap();
     for (upper, lower, expected) in [
         (
             &upper_adjoint,
             &lower_owned,
             catcodomain_oracle(
                 upper_parent
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .materialize()
+                    .materialize(engine)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -944,9 +1023,9 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
                 upper_owned.dense_data().unwrap(),
                 2,
                 lower_parent
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .materialize()
+                    .materialize(engine)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -958,17 +1037,17 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
             &lower_adjoint,
             catcodomain_oracle(
                 upper_parent
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .materialize()
+                    .materialize(engine)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
                 2,
                 lower_parent
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .materialize()
+                    .materialize(engine)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -978,7 +1057,7 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
     ] {
         assert_eq!(
             upper
-                .cat(lower, Side::Codomain)
+                .cat(engine, lower, Side::Codomain)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -989,6 +1068,7 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
 
 #[test]
 fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: an explicit braid with a full level assignment produces the same
     // reordered spaces a permute of the same axes does, and moves the payload.
@@ -999,8 +1079,10 @@ fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
     let provider = Arc::new(external_z3());
     let tensor = z3_rank_four(&runtime, &provider);
 
-    let braided = tensor.braid(&[1, 2], &[3, 0], &[0, 1, 2, 3]).unwrap();
-    let permuted = tensor.permute(&[1, 2], &[3, 0]).unwrap();
+    let braided = tensor
+        .braid(engine, &[1, 2], &[3, 0], &[0, 1, 2, 3])
+        .unwrap();
+    let permuted = tensor.permute(engine, &[1, 2], &[3, 0]).unwrap();
 
     assert_eq!(
         braided.dense_data().unwrap(),
@@ -1010,7 +1092,9 @@ fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
     assert_eq!(braided.codomain()[0].degeneracies(), &[1, 2, 4]);
     assert_eq!(braided.domain()[1].degeneracies(), &[2, 1, 3]);
     // A different level assignment is the same morphism for a bosonic rule.
-    let reversed = tensor.braid(&[1, 2], &[3, 0], &[3, 2, 1, 0]).unwrap();
+    let reversed = tensor
+        .braid(engine, &[1, 2], &[3, 0], &[3, 2, 1, 0])
+        .unwrap();
     assert_eq!(
         reversed.dense_data().unwrap(),
         braided.dense_data().unwrap()

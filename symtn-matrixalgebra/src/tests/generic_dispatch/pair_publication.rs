@@ -39,6 +39,7 @@ fn assert_generic_factor_close<R>(
 
 #[test]
 fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (padded_space, padded_data) =
         padded_generic_factorization_input(&canonical_space, &canonical_data);
@@ -54,9 +55,10 @@ fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
     assert_real_spectra_close(&padded_values, &canonical_values);
 
     let canonical_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &canonical).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &canonical)
+            .unwrap();
     let padded_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(&mut dense, &padded).unwrap();
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
     assert_generic_factor_close(&padded_svd.0, &canonical_svd.0);
     assert_generic_factor_close(&padded_svd.1, &canonical_svd.1);
     assert_real_spectra_close(&padded_svd.2, &canonical_svd.2);
@@ -69,19 +71,20 @@ fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
         &provider
     ));
 
-    let canonical_qr = qr_compact_dyn_checked_generic(&mut dense, &canonical).unwrap();
-    let padded_qr = qr_compact_dyn_checked_generic(&mut dense, &padded).unwrap();
+    let canonical_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &canonical).unwrap();
+    let padded_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
     assert_generic_factor_close(&padded_qr.q, &canonical_qr.q);
     assert_generic_factor_close(&padded_qr.r, &canonical_qr.r);
 
-    let canonical_lq = lq_compact_dyn_checked_generic(&mut dense, &canonical).unwrap();
-    let padded_lq = lq_compact_dyn_checked_generic(&mut dense, &padded).unwrap();
+    let canonical_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &canonical).unwrap();
+    let padded_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
     assert_generic_factor_close(&padded_lq.l, &canonical_lq.l);
     assert_generic_factor_close(&padded_lq.q, &canonical_lq.q);
 }
 
 #[test]
 fn generic_pair_publication_keeps_reordered_tree_scatter_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (reordered_space, reordered_data) =
         expert_generic_factorization_input(&canonical_space, &canonical_data, true);
@@ -90,7 +93,7 @@ fn generic_pair_publication_keeps_reordered_tree_scatter_fallback() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let generic_pair_rec = crate::probe::record();
-    let actual_qr = qr_compact_dyn_checked_generic(&mut dense, &reordered).unwrap();
+    let actual_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &reordered).unwrap();
     assert!(!actual_qr.q.data().is_empty());
     assert!(!actual_qr.r.data().is_empty());
     let probe = generic_pair_rec.generic_pair_publication();
@@ -106,7 +109,7 @@ fn generic_pair_publication_keeps_reordered_tree_scatter_fallback() {
     );
 
     let generic_pair_rec = crate::probe::record();
-    let actual_lq = lq_compact_dyn_checked_generic(&mut dense, &reordered).unwrap();
+    let actual_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &reordered).unwrap();
     assert!(!actual_lq.l.data().is_empty());
     assert!(!actual_lq.q.data().is_empty());
     let probe = generic_pair_rec.generic_pair_publication();
@@ -124,13 +127,15 @@ fn generic_pair_publication_keeps_reordered_tree_scatter_fallback() {
 
 #[test]
 fn checked_generic_pair_publication_reuses_one_sector_owners() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = one_sector_generic_factorization_input();
     let (provider, checked) = bind_checked_only(&source);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let generic_pair_rec = crate::probe::record();
 
-    let Qr { q: left, r: right } = qr_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let Qr { q: left, r: right } =
+        qr_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
     let probe = generic_pair_rec.generic_pair_publication();
     let blocks = left.space().space().structure().block_count()
@@ -214,6 +219,7 @@ fn assert_pair_reconstructs_checked_literal<R, D>(
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = one_sector_generic_factorization_input();
     let (padded_space, padded_data) = padded_generic_factorization_input(&source, &data);
     let (_, padded_space) = bind_checked_layout(&padded_space);
@@ -230,13 +236,13 @@ fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
     let generic_pair_rec = crate::probe::record();
     let one_sided_rec = crate::probe::record();
 
-    qr_compact_dyn_checked_generic(&mut dense, &padded).unwrap();
-    lq_compact_dyn_checked_generic(&mut dense, &padded).unwrap();
-    qr_compact_dyn_checked_generic(&mut dense, &checked_input).unwrap();
-    svd_compact_dyn_checked_generic(&mut dense, &checked_input).unwrap();
-    lq_compact_dyn_checked_generic(&mut dense, &checked_input).unwrap();
-    qr_full_dyn_checked_generic(&mut dense, &checked_input).unwrap();
-    lq_full_dyn_checked_generic(&mut dense, &checked_input).unwrap();
+    qr_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    lq_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    qr_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    svd_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    lq_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    qr_full_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
+    lq_full_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
 
     // Full QR/LQ publish each side through the side-aware builder (#1524).
     let one_sided = one_sided_rec.one_sided_publication();
@@ -268,13 +274,14 @@ fn assert_checked_generic_pair_publication_appends_multiple_literal_sectors<D>(c
 where
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (provider, space, data) = checked_svd_truncation_input::<D>(complex);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let generic_pair_rec = crate::probe::record();
     let one_sided_rec = crate::probe::record();
 
-    let qr = qr_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_pair_reconstructs_checked_literal(&qr.q, &qr.r, complex);
     let qr_probe = generic_pair_rec.generic_pair_publication();
     let qr_blocks = qr.q.space().space().structure().block_count()
@@ -286,12 +293,12 @@ where
         (qr_probe.fallback_row_lookups, qr_probe.fallback_col_lookups),
         (0, 0)
     );
-    svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
-    let lq = lq_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
+    let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_pair_reconstructs_checked_literal(&lq.l, &lq.q, complex);
-    let full_qr = qr_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full_qr = qr_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_pair_reconstructs_checked_literal(&full_qr.q, &full_qr.r, complex);
-    let full_lq = lq_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full_lq = lq_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_pair_reconstructs_checked_literal(&full_lq.l, &full_lq.q, complex);
 
     // Full QR/LQ publish each side through the side-aware builder (#1524).
@@ -343,6 +350,7 @@ const COMPACT_PAIR_RIGHT_LAST_CALL: usize = 6;
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_compact_pair_builder_failure_preserves_provider_context() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the last call of the left enumeration and the first call of the
     // right enumeration propagate their exact provider error without
     // publishing either factor or touching the input.
@@ -361,7 +369,7 @@ fn checked_generic_compact_pair_builder_failure_preserves_provider_context() {
         let checked = bind_to_spy(&source, &provider);
         let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
         let mut dense = ScriptedExecutor::<CountingDense>::default();
-        let result = qr_compact_dyn_checked_generic(&mut dense, &input);
+        let result = qr_compact_dyn_checked_generic(engine, &mut dense, &input);
         assert!(matches!(
             result,
             Err(CheckedGenericFactorPlanError::Provider(LateGenericError(call))) if call == fail_at
@@ -379,9 +387,12 @@ fn checked_generic_compact_pair_builder_failure_preserves_provider_context() {
     });
     let checked = bind_to_spy(&source, &provider);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let Qr { q, r } =
-        qr_compact_dyn_checked_generic(&mut ScriptedExecutor::<CountingDense>::default(), &input)
-            .unwrap();
+    let Qr { q, r } = qr_compact_dyn_checked_generic(
+        engine,
+        &mut ScriptedExecutor::<CountingDense>::default(),
+        &input,
+    )
+    .unwrap();
     assert_eq!(provider.calls.get(), COMPACT_PAIR_RIGHT_LAST_CALL);
     assert_eq!(checked_enumeration_calls(&q), COMPACT_PAIR_LEFT_LAST_CALL);
     assert_eq!(

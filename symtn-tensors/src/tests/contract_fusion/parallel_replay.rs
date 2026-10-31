@@ -11,6 +11,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
         R::Key: Clone + Eq + std::hash::Hash,
     {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
         let homspace = || {
             FusionTreeHomSpace::new(
@@ -67,6 +68,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
             TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; dst_len], dst_space()).unwrap();
         let mut serial_context = TensorContractFusionExecutionContext::<f64, R::Key>::default();
         context_contract_into(
+            engine,
             &mut serial_context,
             rule,
             &mut serial_dst,
@@ -81,12 +83,11 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         let mut parallel_dst =
             TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; dst_len], dst_space()).unwrap();
         let mut parallel_context = TensorContractFusionExecutionContext::<f64, R::Key>::default();
-        let backend = parallel_context.tree_context_mut().backend_mut();
-        backend.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
-        backend.set_transform_parallel_min_len(0);
+        let parallel_engine = &mut symtn_operations::host_pool::eager_test_engine(4);
         // Two runs: cold (structure compile + replay) and warm (replay only).
         for _ in 0..2 {
             context_contract_into(
+                parallel_engine,
                 &mut parallel_context,
                 rule,
                 &mut parallel_dst,
@@ -181,10 +182,10 @@ fn tensorcontract_fusion_parallel_replay_keeps_fermion_twist_reference() {
     let mut dst =
         TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; 5], space(false, false)).unwrap();
 
-    let mut backend = DenseTreeTransformOperations::default_executor();
-    backend.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
-    backend.set_transform_parallel_min_len(0);
+    let backend = DenseTreeTransformOperations::default_executor();
+    let parallel_engine = &mut symtn_operations::host_pool::eager_test_engine(4);
     context_contract_into(
+        parallel_engine,
         &mut TensorContractFusionExecutionContext::<f64, RuleIdentity>::new(
             DenseTreeTransformOperations::default_executor(),
             backend,

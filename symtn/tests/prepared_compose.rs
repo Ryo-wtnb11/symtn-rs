@@ -43,6 +43,7 @@ const MEMBER_COUNTS: [usize; 3] = [1, 2, 17];
 
 #[test]
 fn one_plan_has_isolated_workspaces_across_member_counts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let stacks = |count, seed| {
@@ -55,24 +56,29 @@ fn one_plan_has_isolated_workspaces_across_member_counts() {
     };
     let (lhs2, rhs2) = stacks(2, 10);
     let (lhs17, rhs17) = stacks(17, 20);
-    let plan = ComposePlan::new(&lhs2, &rhs2).unwrap();
+    let plan = ComposePlan::new(engine, &lhs2, &rhs2).unwrap();
     let mut first = plan.workspace().unwrap();
     let mut second = plan.workspace().unwrap();
 
     let first_values = plan
-        .execute(&lhs2, &rhs2, &mut first)
+        .execute(engine, &lhs2, &rhs2, &mut first)
         .unwrap()
-        .member(0)
+        .member(engine, 0)
         .unwrap()
         .dense_data()
         .unwrap()
         .to_vec();
     let first_bytes = first.retained_bytes();
-    assert_eq!(plan.execute(&lhs17, &rhs17, &mut second).unwrap().len(), 17);
     assert_eq!(
-        plan.execute(&lhs2, &rhs2, &mut first)
+        plan.execute(engine, &lhs17, &rhs17, &mut second)
             .unwrap()
-            .member(0)
+            .len(),
+        17
+    );
+    assert_eq!(
+        plan.execute(engine, &lhs2, &rhs2, &mut first)
+            .unwrap()
+            .member(engine, 0)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -84,22 +90,24 @@ fn one_plan_has_isolated_workspaces_across_member_counts() {
 
 #[test]
 fn one_plan_supports_concurrent_independent_workspaces() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let lhs =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 2, 30)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 2, 31)).unwrap();
-    let plan = std::sync::Arc::new(ComposePlan::new(&lhs, &rhs).unwrap());
+    let plan = std::sync::Arc::new(ComposePlan::new(engine, &lhs, &rhs).unwrap());
     std::thread::scope(|scope| {
         let mut threads = Vec::new();
         for _ in 0..2 {
             let plan = std::sync::Arc::clone(&plan);
             let (lhs, rhs) = (&lhs, &rhs);
             threads.push(scope.spawn(move || {
+                let engine = &mut symtn_dense::CpuEngine::serial();
                 let mut workspace = plan.workspace().unwrap();
-                plan.execute(lhs, rhs, &mut workspace)
+                plan.execute(engine, lhs, rhs, &mut workspace)
                     .unwrap()
-                    .member(0)
+                    .member(engine, 0)
                     .unwrap()
                     .dense_data()
                     .unwrap()
@@ -115,6 +123,7 @@ fn one_plan_supports_concurrent_independent_workspaces() {
 
 #[test]
 fn foreign_workspace_is_rejected_before_destination_write() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let lhs =
@@ -122,14 +131,14 @@ fn foreign_workspace_is_rejected_before_destination_write() {
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 2, 51)).unwrap();
     let mut dst =
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 2, f64::NAN)).unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
-    let foreign = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let foreign = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = foreign.workspace().unwrap();
     assert!(plan
-        .execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+        .execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
         .is_err());
     assert!(dst
-        .member(0)
+        .member(engine, 0)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -149,6 +158,7 @@ where
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _ = (Complex32::new(0.0, 0.0), Complex64::new(0.0, 0.0));
     let runtime = Runtime::builder().build().unwrap();
     for count in MEMBER_COUNTS {
@@ -157,14 +167,14 @@ where
         let b = members::<R, D>(&runtime, &[&w], &[&v], count, 2);
         let lhs = StackedTensorMap::pack(&a).unwrap();
         let rhs = StackedTensorMap::pack(&b).unwrap();
-        let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+        let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
         let mut ws = plan.workspace().unwrap();
 
         // `terms` = len(A), an upper bound on the inner dimension of a block.
         let terms = a[0].dense_data().unwrap().len();
         let mut oracles = Vec::new();
         for (x, y) in a.iter().zip(&b) {
-            let eager = x.compose(y).unwrap();
+            let eager = x.compose(engine, y).unwrap();
             let (oracle, unreached) = compose_oracle(x, y, &eager);
             assert!(unreached > 0, "{label}: fixture must have inactive blocks");
             assert!(
@@ -180,11 +190,11 @@ where
             oracles.push(oracle);
         }
 
-        let output = plan.execute(&lhs, &rhs, &mut ws).unwrap();
+        let output = plan.execute(engine, &lhs, &rhs, &mut ws).unwrap();
         assert_eq!(output.len(), count);
-        assert!(*output.signature() == a[0].compose(&b[0]).unwrap().structure_signature());
+        assert!(*output.signature() == a[0].compose(engine, &b[0]).unwrap().structure_signature());
         for (index, oracle) in oracles.iter().enumerate() {
-            let member = output.member(index).unwrap();
+            let member = output.member(engine, index).unwrap();
             numerics::assert_nonzero_slices_close(
                 &format!("{label}: member {index}"),
                 member.dense_data().unwrap(),
@@ -201,9 +211,10 @@ where
                 StackedTensorMap::pack(&filled::<R, D>(&runtime, &[&v, &v], &[&v], count, fill))
                     .unwrap();
             assert!(*dst.signature() == *plan.output_signature());
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut ws).unwrap();
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+                .unwrap();
             for (index, oracle) in oracles.iter().enumerate() {
-                let member = dst.member(index).unwrap();
+                let member = dst.member(engine, index).unwrap();
                 numerics::assert_nonzero_slices_close(
                     &format!("{label}: execute_into over {name}, member {index}"),
                     member.dense_data().unwrap(),
@@ -227,6 +238,7 @@ fn prepared_compose_equals_eager_and_the_tree_oracle_per_member() {
 
 #[test]
 fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let stacks = |count| {
@@ -237,14 +249,14 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
         )
     };
     let (lhs, rhs) = stacks(4);
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut ws = plan.workspace().unwrap();
     assert_eq!(ws.retained_bytes(), 0, "nothing is allocated before a call");
-    plan.execute(&lhs, &rhs, &mut ws).unwrap();
+    plan.execute(engine, &lhs, &rhs, &mut ws).unwrap();
     let cold = ws.retained_bytes();
     assert!(cold > 0);
     for _ in 0..3 {
-        plan.execute(&lhs, &rhs, &mut ws).unwrap();
+        plan.execute(engine, &lhs, &rhs, &mut ws).unwrap();
         assert_eq!(
             ws.retained_bytes(),
             cold,
@@ -252,7 +264,7 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
         );
     }
     let (wide_lhs, wide_rhs) = stacks(9);
-    plan.execute(&wide_lhs, &wide_rhs, &mut ws).unwrap();
+    plan.execute(engine, &wide_lhs, &wide_rhs, &mut ws).unwrap();
     assert!(ws.retained_bytes() > cold, "a larger B resizes the output");
 
     // `execute_into` across a change of B on the same workspace: the job list
@@ -272,18 +284,19 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
             f64::NAN,
         ))
         .unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut ws).unwrap();
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
+            .unwrap();
         for (index, (x, y)) in a.iter().zip(&b).enumerate() {
-            let (oracle, _) = compose_oracle(x, y, &x.compose(y).unwrap());
+            let (oracle, _) = compose_oracle(x, y, &x.compose(engine, y).unwrap());
             numerics::assert_nonzero_slices_close(
                 &format!("execute_into at B={count}, member {index}"),
-                dst.member(index).unwrap().dense_data().unwrap(),
+                dst.member(engine, index).unwrap().dense_data().unwrap(),
                 &oracle,
                 x.dense_data().unwrap().len(),
             );
         }
     }
-    plan.execute(&wide_lhs, &wide_rhs, &mut ws).unwrap();
+    plan.execute(engine, &wide_lhs, &wide_rhs, &mut ws).unwrap();
 
     let output = ws.take_output().unwrap();
     assert_eq!(output.len(), 9);
@@ -295,6 +308,7 @@ fn warm_replay_retains_the_same_bytes_and_a_new_member_count_resizes() {
 
 #[test]
 fn mismatched_stacks_are_typed_errors_before_any_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let other_runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
@@ -303,43 +317,43 @@ fn mismatched_stacks_are_typed_errors_before_any_work() {
     let short = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 2, 2)).unwrap();
     let foreign =
         StackedTensorMap::pack(&members::<_, f64>(&other_runtime, &[&w], &[&v], 3, 2)).unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut ws = plan.workspace().unwrap();
 
     assert_eq!(
-        ComposePlan::new(&lhs, &foreign).err(),
+        ComposePlan::new(engine, &lhs, &foreign).err(),
         Some(Error::RuntimeMismatch)
     );
     assert_eq!(
-        plan.execute(&rhs, &lhs, &mut ws).err(),
+        plan.execute(engine, &rhs, &lhs, &mut ws).err(),
         Some(Error::BatchSignatureMismatch {
             member: None,
             field: SignatureField::HomSpace
         })
     );
     assert_eq!(
-        plan.execute(&lhs, &foreign, &mut ws).err(),
+        plan.execute(engine, &lhs, &foreign, &mut ws).err(),
         Some(Error::BatchSignatureMismatch {
             member: None,
             field: SignatureField::Runtime
         })
     );
     assert!(matches!(plan
-        .execute(&lhs, &short, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts")));
+        .execute(engine, &lhs, &short, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts")));
     assert_eq!(ws.retained_bytes(), 0, "a rejected call allocates nothing");
 
     let mut wrong_dst =
         StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v], &[&v], 3, 3)).unwrap();
     assert!(matches!(
-        plan.execute_into(&lhs, &rhs, &mut wrong_dst, &mut ws),
+        plan.execute_into(engine, &lhs, &rhs, &mut wrong_dst, &mut ws),
         Err(Error::BatchSignatureMismatch { member: None, .. })
     ));
     let mut short_dst =
         StackedTensorMap::pack(&filled::<_, f64>(&runtime, &[&v, &v], &[&v], 2, 1.0)).unwrap();
     assert!(matches!(plan
-        .execute_into(&lhs, &rhs, &mut short_dst, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("destination member count differs")));
+        .execute_into(engine, &lhs, &rhs, &mut short_dst, &mut ws), Err(Error::InvalidArgument(m)) if m.contains("destination member count differs")));
     assert_eq!(
-        short_dst.member(0).unwrap().dense_data().unwrap()[0],
+        short_dst.member(engine, 0).unwrap().dense_data().unwrap()[0],
         1.0,
         "nothing was written"
     );
@@ -364,15 +378,16 @@ where
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_eq!(output.len(), a.len());
     a.iter()
         .zip(b)
         .enumerate()
         .map(|(index, (x, y))| {
-            let eager = x.compose(y).unwrap();
+            let eager = x.compose(engine, y).unwrap();
             let (oracle, _) = compose_oracle(x, y, &eager);
             let terms = x.dense_data().unwrap().len();
-            let member = output.member(index).unwrap();
+            let member = output.member(engine, index).unwrap();
             numerics::assert_nonzero_slices_close(
                 &format!("{label}: eager, member {index}"),
                 eager.dense_data().unwrap(),
@@ -392,12 +407,13 @@ where
 
 #[test]
 fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: `V <- W'` composed with `W' <- V` over fZ2 x U(1), whose rhs
     // codomain is a dual leg. `ComposePlan` is eager `compose` and TensorKit
     // `mul!` (no twist); `ContractPlan` over the same legs and output is
     // eager `contract`, which carries the supertrace sign: every block is
     // the composition's up to a sign, and the odd blocks flip.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         Fz2U1Rule::try_new(
             symtn::sector::FermionParityFusionRule,
@@ -427,18 +443,22 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
             StackedTensorMap::pack(&a).unwrap(),
             StackedTensorMap::pack(&b).unwrap(),
         );
-        let compose = ComposePlan::new(&lhs, &rhs).unwrap();
-        let contract = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let compose = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+        let contract = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
         assert!(*compose.output_signature() == *contract.output_signature());
         let mut compose_ws = compose.workspace().unwrap();
         let mut contract_ws = contract.workspace().unwrap();
-        let composed = compose.execute(&lhs, &rhs, &mut compose_ws).unwrap();
+        let composed = compose
+            .execute(engine, &lhs, &rhs, &mut compose_ws)
+            .unwrap();
         let eager = assert_members_compose(&label, composed, &a, &b);
-        let contracted = contract.execute(&lhs, &rhs, &mut contract_ws).unwrap();
+        let contracted = contract
+            .execute(engine, &lhs, &rhs, &mut contract_ws)
+            .unwrap();
         for (index, (x, y)) in a.iter().zip(&b).enumerate() {
             let mut flipped = 0;
-            let expected = x.contract(y, &spec).unwrap();
-            let member = contracted.member(index).unwrap();
+            let expected = x.contract(engine, y, &spec).unwrap();
+            let member = contracted.member(engine, index).unwrap();
             numerics::assert_nonzero_slices_close(
                 &format!("{label}: contract plan, member {index}"),
                 member.dense_data().unwrap(),
@@ -466,7 +486,8 @@ fn fermionic_composition_is_not_the_contraction_over_the_same_legs() {
 }
 
 fn non_symmetric_composition<const ANYONIC: bool>() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(RealBraidingProbe::<ANYONIC>);
     let v = GradedSpace::try_new(Arc::clone(&rule), [(ProbeSector, 2)]).unwrap();
     let w = GradedSpace::try_new(rule, [(ProbeSector, 3)]).unwrap();
@@ -478,9 +499,9 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
             StackedTensorMap::pack(&a).unwrap(),
             StackedTensorMap::pack(&b).unwrap(),
         );
-        let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+        let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
         let mut workspace = plan.workspace().unwrap();
-        let output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let output = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         assert_members_compose(&label, output, &a, &b);
         let mut dst = StackedTensorMap::pack(&filled::<_, f64>(
             &runtime,
@@ -490,7 +511,7 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
             f64::NAN,
         ))
         .unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
             .unwrap();
         assert_members_compose(&format!("{label} execute_into"), &dst, &a, &b);
         let spec = ContractSpec {
@@ -501,7 +522,7 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
         };
         assert!(
             matches!(
-                ContractPlan::new(&lhs, &rhs, &spec),
+                ContractPlan::new(engine, &lhs, &rhs, &spec),
                 Err(Error::Operation(error)) if matches!(
                     *error,
                     symtn::typed::OperationError::UnsupportedTensorContractScope {

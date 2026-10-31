@@ -77,9 +77,9 @@ fn assert_same<D: Payload>(what: &str, got: &[D], want: &[D]) {
 
 /// A tensor on `leg ⊗ leg ← leg` whose entries cycle through `values`.
 macro_rules! tensor {
-    ($runtime:expr, $leg:expr, $values:expr, $d:ty) => {{
+    ($engine:ident, $runtime:expr, $leg:expr, $values:expr, $d:ty) => {{
         let next = std::cell::Cell::new(0usize);
-        TensorMap::<_, $d>::from_subblock_fn($runtime, [$leg, $leg], [$leg], |_, _| {
+        TensorMap::<_, $d>::from_subblock_fn($engine, $runtime, [$leg, $leg], [$leg], |_, _| {
             let index = next.get();
             next.set(index + 1);
             let (re, im) = $values[index % $values.len()];
@@ -90,11 +90,11 @@ macro_rules! tensor {
 }
 
 macro_rules! check_dense {
-    ($label:expr, $leg:expr, $d:ty) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $label:expr, $leg:expr, $d:ty) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let leg = $leg;
-        let x = tensor!(&runtime, &leg, X, $d);
-        let y = tensor!(&runtime, &leg, Y, $d);
+        let x = tensor!($engine, &runtime, &leg, X, $d);
+        let y = tensor!($engine, &runtime, &leg, Y, $d);
         let combine = |alpha: f64, beta: f64| -> Vec<$d> {
             x.dense_data()
                 .unwrap()
@@ -109,11 +109,11 @@ macro_rules! check_dense {
             let want = combine(alpha, beta);
             assert_same(
                 &format!("{what} add"),
-                x.axpby(a, &y, b).unwrap().dense_data().unwrap(),
+                x.axpby($engine, a, &y, b).unwrap().dense_data().unwrap(),
                 &want,
             );
-            let mut assigned = x.materialize().unwrap();
-            y.axpby_into(&mut assigned, b, a).unwrap();
+            let mut assigned = x.materialize($engine).unwrap();
+            y.axpby_into($engine, &mut assigned, b, a).unwrap();
             assert_same(
                 &format!("{what} axpby_into"),
                 assigned.dense_data().unwrap(),
@@ -121,10 +121,10 @@ macro_rules! check_dense {
             );
             // The lazy adjoint route: `(x^H)^H` reads `x` in its logical
             // orientation.
-            let lazy = x.adjoint().unwrap().adjoint().unwrap();
+            let lazy = x.adjoint($engine).unwrap().adjoint($engine).unwrap();
             assert_same(
                 &format!("{what} lazy add"),
-                lazy.axpby(a, &y, b).unwrap().dense_data().unwrap(),
+                lazy.axpby($engine, a, &y, b).unwrap().dense_data().unwrap(),
                 &want,
             );
         }
@@ -145,14 +145,17 @@ macro_rules! check_dense {
             .map(|(&u, &v)| u * a + v * b)
             .collect();
         assert_eq!(
-            bits(x.axpby(a, &y, b).unwrap().dense_data().unwrap()),
+            bits(x.axpby($engine, a, &y, b).unwrap().dense_data().unwrap()),
             bits(&base)
         );
-        let mut assigned = x.materialize().unwrap();
-        y.axpby_into(&mut assigned, b, a).unwrap();
+        let mut assigned = x.materialize($engine).unwrap();
+        y.axpby_into($engine, &mut assigned, b, a).unwrap();
         assert_eq!(bits(assigned.dense_data().unwrap()), bits(&base));
         let base: Vec<$d> = x.dense_data().unwrap().iter().map(|&u| u * a).collect();
-        assert_eq!(bits(x.scale(a).unwrap().dense_data().unwrap()), bits(&base));
+        assert_eq!(
+            bits(x.scale($engine, a).unwrap().dense_data().unwrap()),
+            bits(&base)
+        );
         for factor in [0.0, 2.0] {
             let what = format!("{} factor = {factor}", $label);
             let want: Vec<$d> = x
@@ -164,11 +167,11 @@ macro_rules! check_dense {
             let f = real::<$d>(factor);
             assert_same(
                 &format!("{what} scale"),
-                x.scale(f).unwrap().dense_data().unwrap(),
+                x.scale($engine, f).unwrap().dense_data().unwrap(),
                 &want,
             );
-            let mut assigned = x.materialize().unwrap();
-            assigned.scale_assign(f).unwrap();
+            let mut assigned = x.materialize($engine).unwrap();
+            assigned.scale_assign($engine, f).unwrap();
             assert_same(
                 &format!("{what} scale_assign"),
                 assigned.dense_data().unwrap(),
@@ -204,24 +207,26 @@ fn fz2() -> GradedSpace<FermionParityFusionRule> {
 
 #[test]
 fn typed_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
-    check_dense!("U(1) f64", u1(), f64);
-    check_dense!("U(1) c64", u1(), Complex64);
-    check_dense!("SU(2) f64", su2(), f64);
-    check_dense!("SU(2) c64", su2(), Complex64);
-    check_dense!("fZ2 f64", fz2(), f64);
-    check_dense!("fZ2 c64", fz2(), Complex64);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_dense!(engine, "U(1) f64", u1(), f64);
+    check_dense!(engine, "U(1) c64", u1(), Complex64);
+    check_dense!(engine, "SU(2) f64", su2(), f64);
+    check_dense!(engine, "SU(2) c64", su2(), Complex64);
+    check_dense!(engine, "fZ2 f64", fz2(), f64);
+    check_dense!(engine, "fZ2 c64", fz2(), Complex64);
 }
 
 #[test]
 fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1();
-    let x = tensor!(&runtime, &leg, X, f64);
+    let x = tensor!(engine, &runtime, &leg, X, f64);
     for factor in [0.0, -0.0] {
         let expected = (0.0_f64 * factor).to_bits();
-        let scaled = x.scale(factor).unwrap();
-        let mut assigned = x.materialize().unwrap();
-        assigned.scale_assign(factor).unwrap();
+        let scaled = x.scale(engine, factor).unwrap();
+        let mut assigned = x.materialize(engine).unwrap();
+        assigned.scale_assign(engine, factor).unwrap();
         for result in [&scaled, &assigned] {
             assert!(result
                 .dense_data()
@@ -237,7 +242,8 @@ fn zero_scale_overwrites_nonfinite_entries_with_signed_zero() {
 /// operand.
 #[test]
 fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
@@ -256,10 +262,22 @@ fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
         ]
     };
     let inf = f64::INFINITY;
-    let x = TensorMap::diagonal(&runtime, &leg, spectra([[inf, 1.0], [f64::NAN, -2.0]])).unwrap();
-    let y = TensorMap::diagonal(&runtime, &leg, spectra([[3.0, f64::NAN], [0.5, 4.0]])).unwrap();
+    let x = TensorMap::diagonal(
+        engine,
+        &runtime,
+        &leg,
+        spectra([[inf, 1.0], [f64::NAN, -2.0]]),
+    )
+    .unwrap();
+    let y = TensorMap::diagonal(
+        engine,
+        &runtime,
+        &leg,
+        spectra([[3.0, f64::NAN], [0.5, 4.0]]),
+    )
+    .unwrap();
     let dense_y: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
             if ij[0] == ij[1] {
                 f64::NAN
             } else {
@@ -270,26 +288,26 @@ fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     for (alpha, beta) in [(0.0, 1.0), (1.0, 0.0), (0.0, 0.0)] {
         let what = format!("alpha = {alpha}, beta = {beta}");
         let want: Vec<f64> = x
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
-            .zip(y.materialize().unwrap().dense_data().unwrap())
+            .zip(y.materialize(engine).unwrap().dense_data().unwrap())
             .map(|(&a, &b)| scale(a, alpha) + scale(b, beta))
             .collect();
         assert_same(
             &format!("{what} spectra"),
-            x.axpby(alpha, &y, beta)
+            x.axpby(engine, alpha, &y, beta)
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
             &want,
         );
         let want: Vec<f64> = x
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -299,7 +317,7 @@ fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
             .collect();
         assert_same(
             &format!("{what} spectrum + dense"),
-            x.axpby(alpha, &dense_y, beta)
+            x.axpby(engine, alpha, &dense_y, beta)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -308,12 +326,12 @@ fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     }
     assert_same(
         "spectrum scale 0",
-        x.scale(0.0)
+        x.scale(engine, 0.0)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
-        &vec![0.0; x.materialize().unwrap().dense_data().unwrap().len()],
+        &vec![0.0; x.materialize(engine).unwrap().dense_data().unwrap().len()],
     );
 }

@@ -231,10 +231,10 @@ impl<B: Base, const TILTED: bool> SectorCodec for Embedded<B, TILTED> {
 /// The same operand for every rule sharing one label type: entries are a
 /// hash of the trees' and index's `Debug` text.
 macro_rules! operands {
-    ($runtime:expr, $rule:expr, $sectors:expr) => {{
+    ($engine:ident, $runtime:expr, $rule:expr, $sectors:expr) => {{
         let v = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
         let t: TensorMap<_, Complex64> =
-            TensorMap::from_subblock_fn($runtime, [&v, &v], [&v, &v], |trees, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [&v, &v], [&v, &v], |trees, index| {
                 let key = format!("{trees:?}{index:?}");
                 Complex64::new(
                     unit_interval(fnv1a(&key)),

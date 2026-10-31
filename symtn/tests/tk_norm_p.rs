@@ -122,27 +122,36 @@ fn typed_su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 
 #[test]
 fn typed_norm_p_matches_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (u1_v, u1_w) = typed_u1();
     let (su2_v, su2_w) = typed_su2();
 
     let u1_f64: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&u1_v], [&u1_w], |_, indices| real_fill(indices))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&u1_v], [&u1_w], |_, indices| {
+            real_fill(indices)
+        })
+        .unwrap();
     let u1_c64: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&u1_v], [&u1_w], |_, indices| complex_fill(indices))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&u1_v], [&u1_w], |_, indices| {
+            complex_fill(indices)
+        })
+        .unwrap();
     let su2_f64: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&su2_v], [&su2_w], |_, indices| real_fill(indices))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&su2_v], [&su2_w], |_, indices| {
+            real_fill(indices)
+        })
+        .unwrap();
     let su2_c64: TensorMap<SU2FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&su2_v], [&su2_w], |_, indices| complex_fill(indices))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&su2_v], [&su2_w], |_, indices| {
+            complex_fill(indices)
+        })
+        .unwrap();
 
     for (&p, &expected) in POWERS.iter().zip(&U1_F64) {
         numerics::assert_close(
             &format!("u1 f64 p={p}"),
-            u1_f64.norm(p).unwrap(),
+            u1_f64.norm(engine, p).unwrap(),
             expected,
             TERMS,
         );
@@ -150,7 +159,7 @@ fn typed_norm_p_matches_tensorkit() {
     for (&p, &expected) in POWERS.iter().zip(&U1_C64) {
         numerics::assert_close(
             &format!("u1 c64 p={p}"),
-            u1_c64.norm(p).unwrap(),
+            u1_c64.norm(engine, p).unwrap(),
             expected,
             TERMS,
         );
@@ -158,7 +167,7 @@ fn typed_norm_p_matches_tensorkit() {
     for (&p, &expected) in POWERS.iter().zip(&SU2_F64) {
         numerics::assert_close(
             &format!("su2 f64 p={p}"),
-            su2_f64.norm(p).unwrap(),
+            su2_f64.norm(engine, p).unwrap(),
             expected,
             TERMS,
         );
@@ -166,7 +175,7 @@ fn typed_norm_p_matches_tensorkit() {
     for (&p, &expected) in POWERS.iter().zip(&SU2_C64) {
         numerics::assert_close(
             &format!("su2 c64 p={p}"),
-            su2_c64.norm(p).unwrap(),
+            su2_c64.norm(engine, p).unwrap(),
             expected,
             TERMS,
         );
@@ -175,13 +184,15 @@ fn typed_norm_p_matches_tensorkit() {
 
 #[test]
 fn typed_norm_p_rejects_non_positive_and_non_finite_p() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (v, w) = typed_u1();
     let tensor: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&v], [&w], |_, indices| real_fill(indices)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |_, indices| real_fill(indices))
+            .unwrap();
     for p in [f64::NAN, f64::NEG_INFINITY, 0.0, -1.0, -0.5] {
         assert!(
-            matches!(tensor.norm(p), Err(Error::InvalidArgument(_))),
+            matches!(tensor.norm(engine, p), Err(Error::InvalidArgument(_))),
             "norm({p}) must be a typed error, not a panic and not a value"
         );
     }
@@ -193,25 +204,27 @@ fn typed_norm_p_rejects_non_positive_and_non_finite_p() {
 /// byte counting in `typed_diagonal_allocations.rs`; this is the value half.)
 #[test]
 fn compact_norm_p_equals_the_dense_answer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (v, w) = typed_su2();
     let dense: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&v], [&w], |_, indices| real_fill(indices)).unwrap();
-    let s = dense.svd_compact(&[0], &[1]).unwrap().s;
+        TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |_, indices| real_fill(indices))
+            .unwrap();
+    let s = dense.svd_compact(engine, &[0], &[1]).unwrap().s;
 
     // `0 * id + 1 * s` is a value-identical *dense* twin of `s`: `id` on the
     // bond space is dense, so the sum takes the dense route without disturbing
     // `s`'s own storage.
-    let twin = TensorMap::isomorphism(&rt, &s.domain(), &s.domain())
+    let twin = TensorMap::isomorphism(engine, &rt, &s.domain(), &s.domain())
         .unwrap()
-        .axpby(0.0, &s, 1.0)
+        .axpby(engine, 0.0, &s, 1.0)
         .unwrap();
 
     for p in [1.0, 2.0, 3.0, 0.5, f64::INFINITY] {
         numerics::assert_close(
             &format!("compact vs dense p={p}"),
-            s.norm(p).unwrap(),
-            twin.norm(p).unwrap(),
+            s.norm(engine, p).unwrap(),
+            twin.norm(engine, p).unwrap(),
             TERMS,
         );
     }
@@ -236,9 +249,10 @@ fn poisoned(trees: &symtn::typed::BlockFusionTrees<U1Irrep>) -> bool {
 }
 
 fn u1_real_with(value: f64) -> TensorMap<U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (v, w) = typed_u1();
-    TensorMap::from_subblock_fn(&rt, [&v], [&w], |trees, indices| {
+    TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |trees, indices| {
         if poisoned(trees) && indices == [0, 0] {
             value
         } else {
@@ -250,10 +264,11 @@ fn u1_real_with(value: f64) -> TensorMap<U1FusionRule, f64> {
 
 #[test]
 fn norm_inf_propagates_nan_hidden_in_the_imaginary_part() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (v, w) = typed_u1();
     let tensor: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&v], [&w], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |trees, indices| {
             if poisoned(trees) && indices == [0, 0] {
                 // Finite real part: only |z| = hypot(re, im) sees the NaN.
                 Complex64::new(1.0, f64::NAN)
@@ -263,16 +278,18 @@ fn norm_inf_propagates_nan_hidden_in_the_imaginary_part() {
         })
         .unwrap();
     assert!(
-        tensor.norm(f64::INFINITY).unwrap().is_nan(),
+        tensor.norm(engine, f64::INFINITY).unwrap().is_nan(),
         "c64 NaN in Im(z)"
     );
 }
 
 #[test]
 fn norm_inf_propagates_nan_through_compact_and_lazy_storage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (bond, _) = typed_u1();
     let compact = TensorMap::<_, f64>::diagonal(
+        engine,
         &rt,
         &bond,
         [
@@ -292,15 +309,15 @@ fn norm_inf_propagates_nan_through_compact_and_lazy_storage() {
     )
     .unwrap();
     assert!(
-        compact.norm(f64::INFINITY).unwrap().is_nan(),
+        compact.norm(engine, f64::INFINITY).unwrap().is_nan(),
         "the compact arm reads the stored spectrum and must fold it the same way"
     );
 
     // `adjoint` on dense storage is a lazy parent-backed view, and `norm(Inf)`
     // reads the parent payload without materializing it: a third fold site.
-    let lazy = u1_real_with(f64::NAN).adjoint().unwrap();
+    let lazy = u1_real_with(f64::NAN).adjoint(engine).unwrap();
     assert!(
-        lazy.norm(f64::INFINITY).unwrap().is_nan(),
+        lazy.norm(engine, f64::INFINITY).unwrap().is_nan(),
         "lazy adjoint arm"
     );
 }

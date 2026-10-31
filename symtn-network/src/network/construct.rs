@@ -1,5 +1,6 @@
 use super::*;
 use crate::ContractError;
+use symtn::typed::Engine;
 
 struct LoweredTypedNetwork<R> {
     ir: NetworkIR,
@@ -380,6 +381,7 @@ impl Network {
     )]
     pub fn execute_symmetric_sliced<R, D>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D>],
         plan: SymmetricSlicedPlan,
         measured_payload_ceiling: usize,
@@ -491,7 +493,7 @@ impl Network {
 
             let refs = owned.iter().collect::<Vec<_>>();
             let partial = planned
-                .execute_with_workspace_meter(&refs, &mut workspace, Some(&mut meter))
+                .execute_with_workspace_meter(engine, &refs, &mut workspace, Some(&mut meter))
                 .map_err(map_metered_network_error)?;
             #[cfg(test)]
             crate::probe::hit(crate::probe::Event::SliceJobCompleted);
@@ -506,10 +508,13 @@ impl Network {
                 .observe(&workspace.slots, &workspace.producers, &payloads)
                 .map_err(map_payload_error)?;
 
-            __network::network_scatter_add_assign(&mut accumulator, &partial, &scatter_ranges)
-                .map_err(|error| {
-                    SymmetricSliceExecutionError::Tensor(FacadeError::<R>::from(error))
-                })?;
+            __network::network_scatter_add_assign(
+                engine,
+                &mut accumulator,
+                &partial,
+                &scatter_ranges,
+            )
+            .map_err(|error| SymmetricSliceExecutionError::Tensor(FacadeError::<R>::from(error)))?;
         }
         Ok((accumulator, meter.stats()))
     }

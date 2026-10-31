@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Runtime;
@@ -27,7 +28,7 @@ fn allocations<T>(run: impl FnOnce() -> T) -> (u64, T) {
 
 /// `a: [v, v; w]`, `b: [w; v, v]` and `c: [w*; v, v]`, 8 U(1) sectors of
 /// degeneracy 2 per leg.
-fn u1_operands(runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
+fn u1_operands(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
     let provider = Arc::new(U1FusionRule);
     let space = |shift: i32| {
         GradedSpace::try_new(
@@ -38,9 +39,16 @@ fn u1_operands(runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
     };
     let (v, w) = (space(0), space(1));
     [
-        TensorMap::rand_with_seed(runtime, [&v, &v], [&w], 1_371_100).unwrap(),
-        TensorMap::rand_with_seed(runtime, [&w], [&v, &v], 1_371_101).unwrap(),
-        TensorMap::rand_with_seed(runtime, [&w.try_dual().unwrap()], [&v, &v], 1_371_102).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&v, &v], [&w], 1_371_100).unwrap(),
+        TensorMap::rand_with_seed(engine, runtime, [&w], [&v, &v], 1_371_101).unwrap(),
+        TensorMap::rand_with_seed(
+            engine,
+            runtime,
+            [&w.try_dual().unwrap()],
+            [&v, &v],
+            1_371_102,
+        )
+        .unwrap(),
     ]
 }
 
@@ -63,19 +71,20 @@ fn pair_network() -> Network {
 /// a caller-owned workspace is the baseline.
 #[test]
 fn a_warm_network_contract_allocates_no_more_than_its_replay() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let [a, b, c] = u1_operands(&runtime);
+    let runtime = Runtime::builder().build().unwrap();
+    let [a, b, c] = u1_operands(engine, &runtime);
     let network = pair_network();
     let planned = network.plan(&[&a, &b], &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
     for _ in 0..3 {
-        drop(network.contract(&[&a, &b]).unwrap());
-        drop(planned.execute(&[&a, &b], &mut workspace).unwrap());
+        drop(network.contract(engine, &[&a, &b]).unwrap());
+        drop(planned.execute(engine, &[&a, &b], &mut workspace).unwrap());
     }
-    let (by_replay, output) = allocations(|| planned.execute(&[&a, &b], &mut workspace));
+    let (by_replay, output) = allocations(|| planned.execute(engine, &[&a, &b], &mut workspace));
     drop(output.unwrap());
-    let (by_contract, output) = allocations(|| network.contract(&[&a, &b]));
+    let (by_contract, output) = allocations(|| network.contract(engine, &[&a, &b]));
     drop(output.unwrap());
     eprintln!("warm call: replay {by_replay}, Network::contract {by_contract} allocation calls");
     assert!(by_contract <= by_replay, "{by_contract} > {by_replay}");
@@ -94,12 +103,12 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
     let planned = conj_pair.plan(&[&b, &b], &GreedyDenseOptimizer).unwrap();
     let mut workspace = NetworkExecutionWorkspace::default();
     for _ in 0..3 {
-        drop(conj_pair.contract(&[&b, &b]).unwrap());
-        drop(planned.execute(&[&b, &b], &mut workspace).unwrap());
+        drop(conj_pair.contract(engine, &[&b, &b]).unwrap());
+        drop(planned.execute(engine, &[&b, &b], &mut workspace).unwrap());
     }
-    let (by_replay, output) = allocations(|| planned.execute(&[&b, &b], &mut workspace));
+    let (by_replay, output) = allocations(|| planned.execute(engine, &[&b, &b], &mut workspace));
     drop(output.unwrap());
-    let (by_contract, output) = allocations(|| conj_pair.contract(&[&b, &b]));
+    let (by_contract, output) = allocations(|| conj_pair.contract(engine, &[&b, &b]));
     drop(output.unwrap());
     eprintln!("warm conj call: replay {by_replay}, Network::contract {by_contract}");
     assert!(
@@ -109,7 +118,7 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
 
     // Non-vacuity: the same preflight rejects `c`, whose `m` leg has the
     // wrong duality.
-    let error = network.contract(&[&a, &c]).unwrap_err();
+    let error = network.contract(engine, &[&a, &c]).unwrap_err();
     assert!(
         error
             .to_string()
@@ -124,12 +133,15 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
 /// `contract` does to reject the same operands (the error itself).
 #[test]
 fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg =
         GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)]).unwrap();
-    let lhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 1_371_200).unwrap();
-    let rhs = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 1_371_201).unwrap();
+    let lhs =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 1_371_200).unwrap();
+    let rhs =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 1_371_201).unwrap();
     let tensors = [&lhs, &rhs];
     let labels = |names: &[&str]| {
         names
@@ -168,6 +180,7 @@ fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
 
     let (contract_count, contract) = allocations(|| {
         lhs.contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -180,8 +193,11 @@ fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
     });
     let contract = contract.unwrap_err().to_string();
 
-    let (count, error) =
-        allocations(|| planned.execute(&tensors, &mut Default::default()).map(drop));
+    let (count, error) = allocations(|| {
+        planned
+            .execute(engine, &tensors, &mut Default::default())
+            .map(drop)
+    });
     assert_eq!(error.unwrap_err().to_string(), contract, "execute");
     assert!(
         count <= contract_count,
@@ -190,7 +206,7 @@ fn planned_and_sliced_executions_reject_non_symmetric_braiding_first() {
 
     let (count, error) = allocations(|| {
         network
-            .execute_symmetric_sliced(&tensors, sliced, usize::MAX)
+            .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
             .map(drop)
     });
     let error = error.unwrap_err();

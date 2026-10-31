@@ -2,10 +2,11 @@ use super::*;
 
 #[test]
 fn op_bearing_batch_reuses_executor_across_shapes_offsets_and_alpha_beta() {
+    let engine = &mut CpuEngine::serial();
     // Adjoint gives both rectangular operands noncontiguous matrix strides.
     let alpha = Complex64::new(0.75, -0.5);
     let beta = Complex64::new(-0.25, 0.125);
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     for (rows, contracted, cols, seed) in [(2, 3, 4, 1.0), (3, 2, 1, 9.0)] {
         let (view_offset, job_offset) = (1, 2);
         let lhs_values = (0..contracted * rows)
@@ -36,6 +37,7 @@ fn op_bearing_batch_reuses_executor_across_shapes_offsets_and_alpha_beta() {
         );
         executor
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 DenseWrite::C64(
                     DenseViewMut::new(&mut output, &output_shape, &flat_strides, view_offset)
                         .unwrap(),
@@ -71,6 +73,7 @@ fn op_bearing_batch_reuses_executor_across_shapes_offsets_and_alpha_beta() {
 }
 #[test]
 fn op_bearing_batch_rejects_offset_overflow_before_view_construction() {
+    let engine = &mut CpuEngine::serial();
     // What: malformed public batch jobs return a typed offset error instead of
     // wrapping an operand base offset before the transposed view is validated.
     let lhs = vec![1.0, 2.0];
@@ -86,10 +89,11 @@ fn op_bearing_batch_rejects_offset_overflow_before_view_construction() {
     }];
     let shape = [1];
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
 
     let error = executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &shape, &strides, 1).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &shape, &strides, 0).unwrap()),
@@ -109,7 +113,7 @@ fn op_bearing_batch_rejects_offset_overflow_before_view_construction() {
 }
 #[test]
 fn op_bearing_uniform_runs_batch_literal_complex_all_matrix_ops() {
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let ops = [MatrixOp::Identity, MatrixOp::Transpose, MatrixOp::Adjoint];
     for (shape, broadcast_lhs, run_len) in [
         ((2, 3, 4), false, 4),
@@ -134,6 +138,7 @@ fn op_bearing_uniform_runs_batch_literal_complex_all_matrix_ops() {
 }
 #[test]
 fn op_bearing_rectangular_run_uses_strided_seam_for_other_float_dtypes() {
+    let engine = &mut CpuEngine::serial();
     let jobs = [
         batch_job((2, 3, 2), (1, 1, 2)),
         batch_job((2, 3, 2), (7, 8, 10)),
@@ -143,10 +148,11 @@ fn op_bearing_rectangular_run_uses_strided_seam_for_other_float_dtypes() {
     let rhs_f32 = (0..16).map(|i| 1.25 - 0.125 * i as f32).collect::<Vec<_>>();
     let mut output_f32 = vec![3.0_f32; 12];
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F32(DenseViewMut::new(&mut output_f32, &[12], &strides, 0).unwrap()),
             DenseRead::F32(DenseView::new(&lhs_f32, &[14], &strides, 0).unwrap()),
             DenseRead::F32(DenseView::new(&rhs_f32, &[16], &strides, 0).unwrap()),
@@ -189,6 +195,7 @@ fn op_bearing_rectangular_run_uses_strided_seam_for_other_float_dtypes() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output_f64, &[12], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs_f64, &[14], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs_f64, &[16], &strides, 0).unwrap()),
@@ -236,6 +243,7 @@ fn op_bearing_rectangular_run_uses_strided_seam_for_other_float_dtypes() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::C32(DenseViewMut::new(&mut output_c32, &[12], &strides, 0).unwrap()),
             DenseRead::C32(DenseView::new(&lhs_c32, &[14], &strides, 0).unwrap()),
             DenseRead::C32(DenseView::new(&rhs_c32, &[16], &strides, 0).unwrap()),
@@ -268,6 +276,7 @@ fn op_bearing_rectangular_run_uses_strided_seam_for_other_float_dtypes() {
 }
 #[test]
 fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
+    let engine = &mut CpuEngine::serial();
     let jobs = vec![
         batch_job((1, 1, 1), (0, 0, 0)),
         batch_job((1, 1, 1), (1, 1, 1)),
@@ -283,10 +292,11 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
     let mut output = [1.0; 8];
     let shape = [output.len()];
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &[lhs.len()], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[rhs.len()], &strides, 0).unwrap()),
@@ -316,6 +326,7 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut singleton_output, &shape, &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &[lhs.len()], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[rhs.len()], &strides, 0).unwrap()),
@@ -341,6 +352,7 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut split_output, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
@@ -357,17 +369,19 @@ fn op_bearing_mixed_runs_and_safe_subpartitions_use_absolute_jobs() {
 }
 #[test]
 fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
+    let engine = &mut CpuEngine::serial();
     let strides = [1];
     let affine = (0..4)
         .map(|offset| batch_job((1, 1, 1), (offset, offset, offset)))
         .collect::<Vec<_>>();
     let data = [2.0, 3.0, 5.0, 7.0];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     for malformed_runs in [&[3][..], &[usize::MAX][..], &[4, 0][..]] {
         let mut output = [-1.0; 4];
         executor.reset_seam_dispatches();
         executor
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 DenseWrite::F64(DenseViewMut::new(&mut output, &[4], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
@@ -389,6 +403,7 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut nonaffine_output, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
@@ -410,6 +425,7 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
         executor.reset_seam_dispatches();
         let error = executor
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 DenseWrite::F64(DenseViewMut::new(&mut output, &[4], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&lhs, &[3], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&rhs, &[4], &strides, 0).unwrap()),
@@ -428,12 +444,14 @@ fn op_bearing_malformed_runs_fall_back_without_skipping_late_errors() {
 }
 #[test]
 fn op_bearing_empty_zero_and_backend_failure_keep_serial_boundaries() {
+    let engine = &mut CpuEngine::serial();
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     let mut output = [3.0];
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[1], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&[1.0], &[1], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&[2.0], &[1], &strides, 0).unwrap()),
@@ -456,6 +474,7 @@ fn op_bearing_empty_zero_and_backend_failure_keep_serial_boundaries() {
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[1], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&[], &[0], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[2], &strides, 0).unwrap()),
@@ -479,6 +498,7 @@ fn op_bearing_empty_zero_and_backend_failure_keep_serial_boundaries() {
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut failed_output, &[2], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&values, &[2], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&values, &[2], &strides, 0).unwrap()),
@@ -502,6 +522,7 @@ fn op_bearing_empty_zero_and_backend_failure_keep_serial_boundaries() {
 }
 #[test]
 fn identity_strided_run_keeps_lhs_bounds_before_rhs_offset_error() {
+    let engine = &mut CpuEngine::serial();
     let jobs = (0..4)
         .map(|batch| DenseGemmBatchJob {
             dst_offset: 2 * batch,
@@ -517,10 +538,11 @@ fn identity_strided_run_keeps_lhs_bounds_before_rhs_offset_error() {
     let rhs = [2.0, 3.0];
     let mut output = [5.0; 8];
     let strides = [1];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut executor = DefaultDenseExecutor::new();
     executor.reset_seam_dispatches();
     let error = executor
         .matmul_batch_axpby_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut output, &[8], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&lhs, &[1], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&rhs, &[1], &strides, 1).unwrap()),
@@ -541,17 +563,19 @@ fn identity_strided_run_keeps_lhs_bounds_before_rhs_offset_error() {
 // no-op or a bypassed scalar loop).
 #[test]
 fn dot_general_conjugation_flag_matches_materialized_conjugate() {
+    let engine = &mut CpuEngine::serial();
     let c = |re: f64, im: f64| Complex64::new(re, im);
     let shape = [2usize, 2];
     let strides = [1usize, 2]; // column-major
     let lhs = vec![c(1.0, 1.0), c(3.0, 2.0), c(2.0, -1.0), c(4.0, -3.0)];
     let rhs = vec![c(5.0, -2.0), c(7.0, -4.0), c(6.0, 1.0), c(8.0, 2.0)];
 
-    let run = |lhs_data: &[Complex64], lhs_conj: bool, rhs_conj: bool| -> Vec<Complex64> {
+    let mut run = |lhs_data: &[Complex64], lhs_conj: bool, rhs_conj: bool| -> Vec<Complex64> {
         let mut out = vec![c(0.0, 0.0); 4];
         let mut executor = DefaultDenseExecutor::new();
         executor
             .dot_general_into(
+                engine,
                 DenseWrite::C64(DenseViewMut::new(&mut out, &shape, &strides, 0).unwrap()),
                 DenseRead::C64(DenseView::new(lhs_data, &shape, &strides, 0).unwrap()),
                 DenseRead::C64(DenseView::new(&rhs, &shape, &strides, 0).unwrap()),

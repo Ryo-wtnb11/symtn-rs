@@ -13,21 +13,25 @@ fn zero_extent_profile_counts_match_serial_replay() {
     let mut serial = TreeTransformReplayProfile::default();
     let mut threaded = TreeTransformReplayProfile::default();
     for (profile, threads) in [(&mut serial, 1), (&mut threaded, 4)] {
-        tree_transform_structure_with_structural_recoupling_raw_profiled(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            &mut [],
-            &[],
-            1.0,
-            0.0,
-            threads,
-            profile,
-        )
-        .unwrap();
+        crate::host_pool::test_pool(threads)
+            .install(|engine| {
+                tree_transform_structure_with_structural_recoupling_raw_profiled(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut [],
+                    &[],
+                    1.0,
+                    0.0,
+                    threads,
+                    profile,
+                )
+            })
+            .unwrap();
     }
 
     assert_eq!(threaded.single_blocks, serial.single_blocks);
@@ -52,21 +56,25 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
     let mut serial = TreeTransformReplayProfile::default();
     let mut threaded = TreeTransformReplayProfile::default();
     for (profile, threads) in [(&mut serial, 1), (&mut threaded, 4)] {
-        tree_transform_structure_with_structural_recoupling_raw_profiled(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            &mut [],
-            &[],
-            1.0,
-            0.0,
-            threads,
-            profile,
-        )
-        .unwrap();
+        crate::host_pool::test_pool(threads)
+            .install(|engine| {
+                tree_transform_structure_with_structural_recoupling_raw_profiled(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut [],
+                    &[],
+                    1.0,
+                    0.0,
+                    threads,
+                    profile,
+                )
+            })
+            .unwrap();
     }
 
     assert_eq!(threaded.multi_blocks, serial.multi_blocks);
@@ -78,16 +86,14 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 
 #[test]
 fn profiled_multi_attributes_recoupling_to_dense_gemm() {
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(2)
-        .build()
-        .unwrap();
-    pool.install(|| {
+    let mut pool = crate::host_pool::test_pool(2);
+    pool.install(|engine| {
         let (dst_structure, src_structure, structure) = identity_multi_fixture();
         for threads in [1, 2] {
             let mut dst = vec![f64::NAN; 3];
             let mut profile = TreeTransformReplayProfile::default();
             tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
@@ -118,6 +124,7 @@ fn profiled_multi_attributes_recoupling_to_dense_gemm() {
         let (mut dst, src, structure) = fixture();
         let mut profile = TreeTransformReplayProfile::default();
         tree_transform_structure_with_structural_recoupling_raw_profiled(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
@@ -142,6 +149,7 @@ fn profiled_multi_attributes_recoupling_to_dense_gemm() {
 
 #[test]
 fn profiled_overwrite_zeros_inactive_layout_without_touching_padding() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_structure = Arc::new(BlockStructure::packed_column_major(1, [vec![1]]).unwrap());
     let dst_structure = Arc::new(custom_structure(vec![block(0, 1, 1, 0), block(1, 1, 1, 2)]));
     let structure = TreeTransformStructure::compile_structures(
@@ -154,6 +162,7 @@ fn profiled_overwrite_zeros_inactive_layout_without_touching_padding() {
     let mut profile = TreeTransformReplayProfile::default();
 
     tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -175,9 +184,11 @@ fn profiled_overwrite_zeros_inactive_layout_without_touching_padding() {
 
 #[test]
 fn profiled_replay_attributes_inactive_destination_scaling() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (mut dst, src, structure) = fixture();
     let mut profile = TreeTransformReplayProfile::default();
     tree_transform_structure_with_structural_recoupling_raw_profiled(
+        engine,
         &mut ObservedKernels::new(|call| {
             if matches!(call, KernelCall::Scale { .. }) {
                 std::thread::sleep(Duration::from_millis(40));

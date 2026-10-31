@@ -1,50 +1,27 @@
-//! S1a evidence: `DefaultDenseExecutor` opens one Tenferro CPU session per
-//! dense phase, and the phase's results are unchanged.
-//!
-//! Every test in this target takes the shared serial guard.
+//! Value contracts of the dense executor's batched routes, independent of
+//! how the engine schedules them: a serial op-bearing batch lands bitwise
+//! what one call per job lands, a failed batch leaves the executor usable,
+//! `factorize_batch` returns the per-matrix factors, and a mixed run
+//! partition lands bitwise what one call per run lands (on the same engine).
 
 #![cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
 
 use num_complex::Complex64;
 use symtn_dense::{
-    cpu_session_stats, reset_cpu_session_stats, strided_batch_runs, CpuSessionStats,
-    DefaultDenseExecutor, DenseError, DenseExecutor, DenseFactorization, DenseGemmBatchJob,
-    DenseRead, DenseScalar, DenseView, DenseViewMut, DenseWrite, MatrixOp,
+    strided_batch_runs, CpuEngine, DefaultDenseExecutor, DenseError, DenseExecutor,
+    DenseFactorization, DenseGemmBatchJob, DenseRead, DenseScalar, DenseView, DenseViewMut,
+    DenseWrite, Engine, MatrixOp, Pool,
 };
 
 use crate::numerics;
-
-fn assert_close(got: f64, want: f64, tol: f64) {
-    assert!((got - want).abs() <= tol, "{got} != {want} (tol {tol})");
-}
-
-// Session-scope evidence. `cpu_session_stats` is a process-wide counter,
-// so every test that reads a delta takes this lock; they must not run
-// concurrently with one another.
-static CPU_SESSION_COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Held for the whole of each test below, not just around the measured call:
-/// the reference loops open sessions too, and a concurrent test would show up
-/// in another test's delta.
-fn counter_lock() -> std::sync::MutexGuard<'static, ()> {
-    CPU_SESSION_COUNTER_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn sessions_opened() -> u64 {
-    cpu_session_stats().sessions_opened
-}
-
 // Heterogeneous jobs with a non-Identity operand op take the op-bearing serial
-// route (`runs.len() == jobs.len()`). It must enter exactly one Tenferro
-// session for the whole loop and land bitwise what the same jobs produce when
-// issued one at a time through the public batch API. Bit equality is a
-// determinism contract here, not an arithmetic one: the fixture pins the
-// singleton runs, so both sides issue the identical single-threaded kernel
-// per job and only the session boundary differs.
+// route (`runs.len() == jobs.len()`). It must land bitwise what the same jobs
+// produce when issued one at a time through the public batch API. Bit
+// equality is a determinism contract here, not an arithmetic one: the fixture
+// pins the singleton runs, so both sides issue the identical single-threaded
+// kernel per job.
 #[allow(clippy::too_many_arguments)]
-fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
+fn serial_route_is_bitwise_equal_to_per_job_calls<T, W, R>(
     values: impl Fn(usize) -> T,
     accumulator: impl Fn(usize) -> T,
     alpha: DenseScalar,
@@ -58,7 +35,6 @@ fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
     W: for<'x> Fn(DenseViewMut<'x, T>) -> DenseWrite<'x>,
     R: for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
 {
-    let _guard = counter_lock();
     // Alternating shapes: no constant-stride run, so `strided_batch_runs`
     // yields singleton runs and the serial route is forced.
     let shapes = [(4usize, 3usize, 5usize), (5, 4, 3)];
@@ -91,10 +67,11 @@ fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
     let strides = [1usize];
 
     let mut batched = initial.clone();
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
-    let before = sessions_opened();
-    let result = {
-        executor.matmul_batch_axpby_with_ops_into(
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
+    executor
+        .matmul_batch_axpby_with_ops_into(
+            engine,
             wrap_write(DenseViewMut::new(&mut batched, &[initial.len()], &strides, 0).unwrap()),
             wrap_read(DenseView::new(&lhs, &[lhs.len()], &strides, 0).unwrap()),
             wrap_read(DenseView::new(&rhs, &[rhs.len()], &strides, 0).unwrap()),
@@ -105,17 +82,15 @@ fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
             alpha,
             beta,
         )
-    };
-    let sessions = sessions_opened() - before;
-    result.unwrap();
-    assert_eq!(sessions, 1, "the whole job loop must share one session");
+        .unwrap();
 
     // Reference: the identical kernels issued one job per call.
     let mut per_job = initial.clone();
-    let mut reference = DefaultDenseExecutor::with_threads(1).unwrap();
+    let mut reference = DefaultDenseExecutor::new();
     for job in &jobs {
         reference
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 wrap_write(DenseViewMut::new(&mut per_job, &[initial.len()], &strides, 0).unwrap()),
                 wrap_read(DenseView::new(&lhs, &[lhs.len()], &strides, 0).unwrap()),
                 wrap_read(DenseView::new(&rhs, &[rhs.len()], &strides, 0).unwrap()),
@@ -128,15 +103,14 @@ fn serial_route_is_one_session_and_bitwise_equal<T, W, R>(
             )
             .unwrap();
     }
-    assert_eq!(batched, per_job, "session scope must not change any value");
+    assert_eq!(batched, per_job, "batching must not change any value");
     assert_ne!(batched, initial, "fixture must actually write");
 }
 
 #[test]
 #[allow(clippy::redundant_closure)]
-fn op_bearing_serial_batch_uses_one_session_f64() {
-    let _serial = crate::counting_alloc::serial();
-    serial_route_is_one_session_and_bitwise_equal(
+fn op_bearing_serial_batch_is_per_job_bitwise_f64() {
+    serial_route_is_bitwise_equal_to_per_job_calls(
         |i| 0.5 + 0.25 * i as f64,
         |i| 2.0 + 0.05 * i as f64,
         DenseScalar::F64(0.75),
@@ -154,14 +128,13 @@ fn op_bearing_serial_batch_uses_one_session_f64() {
 // never produced there.
 #[test]
 #[allow(clippy::redundant_closure)]
-fn op_bearing_serial_batch_uses_one_session_c64() {
-    let _serial = crate::counting_alloc::serial();
+fn op_bearing_serial_batch_is_per_job_bitwise_c64() {
     for (lhs_op, rhs_op) in [
         (MatrixOp::Adjoint, MatrixOp::Identity),
         (MatrixOp::Identity, MatrixOp::Adjoint),
         (MatrixOp::Adjoint, MatrixOp::Adjoint),
     ] {
-        serial_route_is_one_session_and_bitwise_equal(
+        serial_route_is_bitwise_equal_to_per_job_calls(
             |i| Complex64::new(0.5 + 0.25 * i as f64, -0.75 + 0.125 * i as f64),
             |i| Complex64::new(2.0 + 0.05 * i as f64, -1.0 - 0.025 * i as f64),
             DenseScalar::C64(Complex64::new(0.75, -0.5)),
@@ -175,42 +148,10 @@ fn op_bearing_serial_batch_uses_one_session_c64() {
     }
 }
 
-// An empty job list is a supported call on the op-bearing route
-// (`runs.len() == jobs.len()` with both empty). A session is a process-wide
-// critical section, so it must not be taken for an empty loop.
+// A failure raised inside the batch must surface the same typed error the
+// per-job path produced, and the executor and engine must stay usable.
 #[test]
-fn op_bearing_empty_batch_opens_no_session() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    let strides = [1usize];
-    let mut output = [3.0f64];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
-
-    let before = sessions_opened();
-    executor
-        .matmul_batch_axpby_with_ops_into(
-            DenseWrite::F64(DenseViewMut::new(&mut output, &[1], &strides, 0).unwrap()),
-            DenseRead::F64(DenseView::new(&[1.0], &[1], &strides, 0).unwrap()),
-            DenseRead::F64(DenseView::new(&[2.0], &[1], &strides, 0).unwrap()),
-            &[],
-            &[],
-            MatrixOp::Transpose,
-            MatrixOp::Identity,
-            DenseScalar::F64(1.0),
-            DenseScalar::F64(0.0),
-        )
-        .unwrap();
-    assert_eq!(sessions_opened() - before, 0);
-    assert_eq!(output, [3.0]);
-}
-
-// A failure raised inside the session must surface the same typed error the
-// per-job path produced, and the executor must stay usable: the session is
-// released on the error path, so a following call can enter a new one.
-#[test]
-fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
+fn op_bearing_serial_batch_error_keeps_executor_usable() {
     let good = DenseGemmBatchJob {
         rows: 2,
         contracted: 2,
@@ -227,12 +168,13 @@ fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
     let data = [1.0f64, 2.0, 3.0, 4.0];
     let mut output = [0.0f64; 4];
     let strides = [1usize];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
 
-    let before = sessions_opened();
     let error = {
         executor
             .matmul_batch_axpby_with_ops_into(
+                engine,
                 DenseWrite::F64(DenseViewMut::new(&mut output, &[4], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
                 DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
@@ -245,14 +187,13 @@ fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
             )
             .unwrap_err()
     };
-    let sessions = sessions_opened() - before;
     assert_eq!(error, DenseError::OutOfBounds);
-    assert_eq!(sessions, 1);
 
-    // The executor still works after the failed scope.
+    // The executor still works after the failed batch.
     let mut again = [0.0f64; 4];
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::F64(DenseViewMut::new(&mut again, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
             DenseRead::F64(DenseView::new(&data, &[4], &strides, 0).unwrap()),
@@ -266,98 +207,6 @@ fn op_bearing_serial_batch_error_inside_session_keeps_executor_usable() {
         .unwrap();
     // A^T A for the column-major [[1,3],[2,4]].
     assert_eq!(again, [5.0, 11.0, 11.0, 25.0]);
-}
-
-// `eig_vals` runs its contiguity pre-pass and the values call in one session
-// (it opened two before), with the spectrum unchanged.
-#[test]
-fn eig_vals_uses_one_session_for_prepass_and_values() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    let shape = [2usize, 2];
-    // Non-contiguous source, so the pre-pass actually copies.
-    let padded = [2.0f64, 1.0, 9.0, 1.0, 3.0, 9.0];
-    let strides = [1usize, 3];
-    let mut executor = DefaultDenseExecutor::new();
-
-    let before = sessions_opened();
-    let values = {
-        executor
-            .eig_vals(DenseRead::F64(
-                DenseView::new(&padded, &shape, &strides, 0).unwrap(),
-            ))
-            .unwrap()
-    };
-    let sessions = sessions_opened() - before;
-    assert_eq!(sessions, 1);
-
-    // [[2,1],[1,3]] is symmetric: the eigenvalues are real and known.
-    let values = values.as_c64_slice().unwrap();
-    assert_eq!(values.len(), 2);
-    let mut real = values.iter().map(|v| v.re).collect::<Vec<_>>();
-    real.sort_by(f64::total_cmp);
-    let expected = [(5.0 - 5.0f64.sqrt()) / 2.0, (5.0 + 5.0f64.sqrt()) / 2.0];
-    for (got, want) in real.iter().zip(expected) {
-        assert_close(*got, want, 1e-12);
-    }
-    for value in values {
-        assert_close(value.im, 0.0, 1e-12);
-    }
-}
-
-#[test]
-fn eig_vals_uses_one_session_for_c64() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    let c = Complex64::new;
-    let shape = [2usize, 2];
-    let strides = [1usize, 2];
-    // [[0,-i],[i,0]] — Hermitian, eigenvalues -1 and +1.
-    let m = [c(0.0, 0.0), c(0.0, 1.0), c(0.0, -1.0), c(0.0, 0.0)];
-    let mut executor = DefaultDenseExecutor::new();
-
-    let before = sessions_opened();
-    let values = {
-        executor
-            .eig_vals(DenseRead::C64(
-                DenseView::new(&m, &shape, &strides, 0).unwrap(),
-            ))
-            .unwrap()
-    };
-    let sessions = sessions_opened() - before;
-    assert_eq!(sessions, 1);
-
-    let values = values.as_c64_slice().unwrap();
-    assert_eq!(values.len(), 2);
-    let mut real = values.iter().map(|v| v.re).collect::<Vec<_>>();
-    real.sort_by(f64::total_cmp);
-    assert_close(real[0], -1.0, 1e-12);
-    assert_close(real[1], 1.0, 1e-12);
-}
-
-// The counter is documented as a lower bound: `reset` zeroes it, and the
-// sessions Tenferro opens internally for a plain backend-level dot are not
-// visible here.
-#[test]
-fn cpu_session_stats_reset_and_scope() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    reset_cpu_session_stats();
-    assert_eq!(cpu_session_stats(), CpuSessionStats::default());
-
-    let data = [1.0f64, 2.0, 3.0, 4.0];
-    let mut output = [0.0f64; 4];
-    let strides = [1usize, 2];
-    let mut executor = DefaultDenseExecutor::with_threads(1).unwrap();
-    executor
-        .matmul_into(
-            DenseWrite::F64(DenseViewMut::new(&mut output, &[2, 2], &strides, 0).unwrap()),
-            DenseRead::F64(DenseView::new(&data, &[2, 2], &strides, 0).unwrap()),
-            DenseRead::F64(DenseView::new(&data, &[2, 2], &strides, 0).unwrap()),
-        )
-        .unwrap();
-    assert_eq!(cpu_session_stats().sessions_opened, 0);
-    reset_cpu_session_stats();
 }
 
 /// Asserts equal shapes and factor entries within the workspace tolerance.
@@ -385,14 +234,13 @@ fn assert_factor_agrees(
     }
 }
 
-// A coupled-sector factorization loop is one `factorize_batch`: it must enter
-// one session for every matrix, and return what the per-matrix entries return
-// (path agreement under the tolerance rule, see `assert_factor_agrees`).
-fn factorize_batch_is_one_session_and_matches_per_call<T: Copy>(
+// A coupled-sector factorization loop is one `factorize_batch`: it must
+// return what the per-matrix entries return (path agreement under the
+// tolerance rule, see `assert_factor_agrees`).
+fn factorize_batch_matches_per_call<T: Copy>(
     value: impl Fn(usize) -> T,
     wrap: impl for<'x> Fn(DenseView<'x, T>) -> DenseRead<'x>,
 ) {
-    let _guard = counter_lock();
     let shapes = [(3usize, 2usize), (2, 4), (4, 4), (1, 3), (5, 2)];
     let data = shapes
         .iter()
@@ -413,32 +261,21 @@ fn factorize_batch_is_one_session_and_matches_per_call<T: Copy>(
         .map(|(block, (shape, strides))| wrap(DenseView::new(block, shape, strides, 0).unwrap()))
         .collect::<Vec<_>>();
 
+    let engine = &mut CpuEngine::serial();
     for op in [DenseFactorization::Qr, DenseFactorization::Svd] {
         let mut executor = DefaultDenseExecutor::new();
-        let before = sessions_opened();
-        let batched = executor.factorize_batch(op, &inputs).unwrap();
-        assert_eq!(
-            sessions_opened() - before,
-            1,
-            "{op:?}: one session per batch"
-        );
+        let batched = executor.factorize_batch(engine, op, &inputs).unwrap();
 
         let mut reference = DefaultDenseExecutor::new();
-        let before = sessions_opened();
         let per_call = inputs
             .iter()
             .map(|&input| match op {
-                DenseFactorization::Qr => reference.qr(input),
-                DenseFactorization::Svd => reference.svd(input),
+                DenseFactorization::Qr => reference.qr(engine, input),
+                DenseFactorization::Svd => reference.svd(engine, input),
                 _ => unreachable!("fixture exercises QR and SVD only"),
             })
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(
-            sessions_opened() - before,
-            inputs.len() as u64,
-            "{op:?}: the per-call entry opens one session per matrix"
-        );
         assert_eq!(batched.len(), per_call.len());
         for ((got, want), &(rows, cols)) in batched.iter().zip(&per_call).zip(&shapes) {
             assert_eq!(got.len(), want.len(), "{op:?}: factor counts differ");
@@ -451,9 +288,8 @@ fn factorize_batch_is_one_session_and_matches_per_call<T: Copy>(
 
 #[test]
 #[allow(clippy::redundant_closure)]
-fn factorize_batch_is_one_session_and_matches_per_call_f64() {
-    let _serial = crate::counting_alloc::serial();
-    factorize_batch_is_one_session_and_matches_per_call(
+fn factorize_batch_matches_per_call_f64() {
+    factorize_batch_matches_per_call(
         |i| ((i * 7 + 3) % 11) as f64 - 4.5,
         // Constructor functions fix one lifetime; the closure stays generic.
         |view| DenseRead::F64(view),
@@ -462,9 +298,8 @@ fn factorize_batch_is_one_session_and_matches_per_call_f64() {
 
 #[test]
 #[allow(clippy::redundant_closure)]
-fn factorize_batch_is_one_session_and_matches_per_call_c64() {
-    let _serial = crate::counting_alloc::serial();
-    factorize_batch_is_one_session_and_matches_per_call(
+fn factorize_batch_matches_per_call_c64() {
+    factorize_batch_matches_per_call(
         |i| {
             Complex64::new(
                 ((i * 7 + 3) % 11) as f64 - 4.5,
@@ -475,35 +310,20 @@ fn factorize_batch_is_one_session_and_matches_per_call_c64() {
     );
 }
 
-// An empty batch is a supported call and must not take the process-wide
-// execution permit for an empty loop.
-#[test]
-fn factorize_batch_empty_opens_no_session() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    let mut executor = DefaultDenseExecutor::new();
-    let before = sessions_opened();
-    let outputs = executor
-        .factorize_batch(DenseFactorization::Qr, &[])
-        .unwrap();
-    assert!(outputs.is_empty());
-    assert_eq!(sessions_opened() - before, 0);
-}
-
-/// Runs `jobs` with `runs` as one op-bearing c64 call on `dst` and returns the
-/// (sessions, admissions) it took.
+/// Runs `jobs` with `runs` as one op-bearing c64 call on `dst`.
 fn partition_call(
+    engine: &mut dyn Engine,
     executor: &mut DefaultDenseExecutor,
     (lhs, rhs): (&[Complex64], &[Complex64]),
     dst: &mut [Complex64],
     jobs: &[DenseGemmBatchJob],
     runs: &[usize],
-) -> (u64, u64) {
+) {
     let strides = [1usize];
     let dst_len = dst.len();
-    let before = cpu_session_stats();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::C64(DenseViewMut::new(dst, &[dst_len], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(lhs, &[lhs.len()], &strides, 0).unwrap()),
             DenseRead::C64(DenseView::new(rhs, &[rhs.len()], &strides, 0).unwrap()),
@@ -515,31 +335,21 @@ fn partition_call(
             DenseScalar::C64(Complex64::new(-0.25, 0.125)),
         )
         .unwrap();
-    let after = cpu_session_stats();
-    (
-        after.sessions_opened - before.sessions_opened,
-        after.admissions - before.admissions,
-    )
 }
 
-// #1291: a mixed run partition is one dense phase. Adjacent non-batchable runs
-// share one serial session, and the whole phase — strided runs included —
-// pays one execution admission. Each GEMM keeps its kernel, order, alpha/beta
-// and conjugation, so the output is bitwise what one call per run produces.
+// #1291: a mixed run partition is one dense phase. Each GEMM keeps its
+// kernel, order, alpha/beta and conjugation, so on one engine the output is
+// bitwise what one call per run produces, serial or threaded.
 #[test]
-fn mixed_partition_is_one_admission_and_bitwise_equal_to_per_run_calls() {
-    let _serial = crate::counting_alloc::serial();
-    let _guard = counter_lock();
-    // (partition, serial stretches, runs issued one call each: admissions)
-    let cases: [(&[usize], u64, u64); 4] = [
-        (&[4, 1, 1, 1], 1, 4),
-        (&[1, 4, 1, 4], 2, 4),
-        (&[1, 1, 3, 1, 2], 2, 5),
-        // One run: no scope, its single strided call admits itself.
-        (&[4], 0, 1),
-    ];
-    for threads in [Some(1), None] {
-        for (pattern, stretches, per_run_admissions) in cases {
+fn mixed_partition_is_bitwise_equal_to_per_run_calls() {
+    let patterns: [&[usize]; 4] = [&[4, 1, 1, 1], &[1, 4, 1, 4], &[1, 1, 3, 1, 2], &[4]];
+    for threads in [1usize, 4] {
+        let mut engine = if threads == 1 {
+            CpuEngine::serial()
+        } else {
+            CpuEngine::new(Pool::builder().threads(threads).build().unwrap())
+        };
+        for pattern in patterns {
             let mut jobs = Vec::new();
             let (mut l, mut r, mut d) = (0usize, 0usize, 0usize);
             for (index, &len) in pattern.iter().enumerate() {
@@ -571,35 +381,32 @@ fn mixed_partition_is_one_admission_and_bitwise_equal_to_per_run_calls() {
             let lhs = (0..l).map(value).collect::<Vec<_>>();
             let rhs = (0..r).map(|i| value(i + 5)).collect::<Vec<_>>();
             let initial = (0..d).map(|i| value(i + 9)).collect::<Vec<_>>();
-            let executor = || match threads {
-                Some(threads) => DefaultDenseExecutor::with_threads(threads).unwrap(),
-                None => DefaultDenseExecutor::new(),
-            };
-            let label = format!("{pattern:?} threads={threads:?}");
+            let label = format!("{pattern:?} threads={threads}");
 
             let mut whole = initial.clone();
-            let counts = partition_call(&mut executor(), (&lhs, &rhs), &mut whole, &jobs, pattern);
-            assert_eq!(counts, (stretches, 1), "{label}: (sessions, admissions)");
+            partition_call(
+                &mut engine,
+                &mut DefaultDenseExecutor::new(),
+                (&lhs, &rhs),
+                &mut whole,
+                &jobs,
+                pattern,
+            );
 
             let mut per_run = initial.clone();
-            let mut reference = executor();
-            let mut admissions = 0;
+            let mut reference = DefaultDenseExecutor::new();
             let mut start = 0;
             for &len in pattern {
-                admissions += partition_call(
+                partition_call(
+                    &mut engine,
                     &mut reference,
                     (&lhs, &rhs),
                     &mut per_run,
                     &jobs[start..start + len],
                     &[len],
-                )
-                .1;
+                );
                 start += len;
             }
-            assert_eq!(
-                admissions, per_run_admissions,
-                "{label}: per-run admissions"
-            );
             let bits = |v: &[Complex64]| {
                 v.iter()
                     .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
@@ -609,4 +416,48 @@ fn mixed_partition_is_one_admission_and_bitwise_equal_to_per_run_calls() {
             assert_ne!(whole, initial, "{label}: fixture must write");
         }
     }
+}
+
+// A replay issues one single-job GEMM per block, block shapes differing. On a
+// warm engine every such GEMM finds its plan: none is rebuilt because the
+// previous block had another shape (tenferro-rs#2349).
+#[test]
+fn single_job_gemms_of_alternating_shapes_reuse_their_plans_when_warm() {
+    let shapes = [(4usize, 3usize, 5usize), (5, 4, 3), (2, 6, 7)];
+    let lhs = (0..64).map(|i| i as f64 * 0.5 - 3.0).collect::<Vec<_>>();
+    let rhs = (0..64).map(|i| 1.0 - i as f64 * 0.25).collect::<Vec<_>>();
+    let mut dst = vec![0.0; 64];
+    let strides = [1usize];
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
+    let mut round = |engine: &mut CpuEngine, dst: &mut [f64]| {
+        for (rows, contracted, cols) in shapes {
+            let job = DenseGemmBatchJob {
+                rows,
+                contracted,
+                cols,
+                lhs_offset: 0,
+                rhs_offset: 0,
+                dst_offset: 0,
+            };
+            executor
+                .matmul_batch_axpby_into(
+                    engine,
+                    DenseWrite::F64(DenseViewMut::new(dst, &[64], &strides, 0).unwrap()),
+                    DenseRead::F64(DenseView::new(&lhs, &[64], &strides, 0).unwrap()),
+                    DenseRead::F64(DenseView::new(&rhs, &[64], &strides, 0).unwrap()),
+                    &[job],
+                    &[1],
+                    DenseScalar::F64(1.0),
+                    DenseScalar::F64(0.0),
+                )
+                .unwrap();
+        }
+    };
+    round(engine, &mut dst);
+    let warm = engine.plan_cache().contraction_stats();
+    round(engine, &mut dst);
+    let after = engine.plan_cache().contraction_stats();
+    assert_eq!(after.misses, warm.misses, "a warm round rebuilt a plan");
+    assert_eq!(after.hits - warm.hits, shapes.len() as u64);
 }

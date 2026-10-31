@@ -5,6 +5,7 @@
 
 use std::hash::Hash;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::MultiplicityFreeRigidSymbols;
 use symtn_tensors::{
@@ -18,6 +19,7 @@ use crate::factorize::{BoundDynFactor, FactorScalar, TestTensor};
 /// destination is created from the operands' shared provider and remains
 /// bound to that exact allocation.
 pub(crate) fn compose_bound_dyn<RuleKey, BT, BC, R, D>(
+    engine: &mut dyn Engine,
     context: &mut TensorContractFusionExecutionContext<D, RuleKey, BT, BC>,
     lhs: &BoundDynFactor<R, D>,
     rhs: &BoundDynFactor<R, D>,
@@ -51,6 +53,7 @@ where
     ];
     let output_axes: Vec<usize> = (0..dst_space.space().rank()).collect();
     context.tensorcontract_planned_into(
+        engine,
         &dst_space,
         &mut dst_data,
         (FusionOperand::direct(lhs_space.space()), lhs.data()),
@@ -68,6 +71,7 @@ where
 
 /// [`compose_bound_dyn`] over unbound test operands, binding both to `rule`.
 pub(crate) fn compose<RuleKey, BT, BC, R, D>(
+    engine: &mut dyn Engine,
     context: &mut TensorContractFusionExecutionContext<D, RuleKey, BT, BC>,
     rule: &R,
     lhs: &TestTensor<D>,
@@ -89,7 +93,7 @@ where
         let (nout, nin) = (tensor.fusion_space().nout(), tensor.fusion_space().nin());
         BoundDynFactor::from_bound(tensor.space().clone(), tensor.data().to_vec(), nout, nin)
     };
-    let out = compose_bound_dyn(context, &bind(lhs)?, &bind(rhs)?)?;
+    let out = compose_bound_dyn(engine, context, &bind(lhs)?, &bind(rhs)?)?;
     Ok(crate::factorize::typed_from_bound_factor(out)?
         .into_parts()
         .1)

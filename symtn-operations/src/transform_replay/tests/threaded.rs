@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationError> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let block_structure =
         Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 2]; 4]).unwrap());
     let transform = TreeTransformStructure::compile_structures(
@@ -22,6 +23,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
         let mut kernels = StridedHostKernelAdapter::default();
         if overwrite {
             tree_transform_structure_overwrite_with_strided_kernel_raw(
+                strided_kernel::Exec::serial(),
                 &mut kernels,
                 &mut TreeTransformWorkspace::default(),
                 &transform,
@@ -32,6 +34,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
                 0.5,
             )?;
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
                 &mut kernels,
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
@@ -46,6 +49,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
             )?;
         } else {
             tree_transform_structure_with_strided_kernel_raw(
+                strided_kernel::Exec::serial(),
                 &mut kernels,
                 &mut TreeTransformWorkspace::default(),
                 &transform,
@@ -57,6 +61,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
                 -0.25,
             )?;
             tree_transform_structure_with_structural_recoupling_raw(
+                engine,
                 &mut kernels,
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
@@ -95,20 +100,24 @@ fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
     let dst_structure = Arc::new(dst_structure);
     let src_structure = Arc::new(src_structure);
     for (dst, threads) in [(&mut serial[..], 1), (&mut threaded[..], 4)] {
-        tree_transform_structure_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &structure,
-            &dst_structure,
-            &src_structure,
-            dst,
-            &src,
-            1.0,
-            0.5,
-            threads,
-        )
-        .unwrap();
+        crate::host_pool::test_pool(threads)
+            .install(|engine| {
+                tree_transform_structure_with_structural_recoupling_raw(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &structure,
+                    &dst_structure,
+                    &src_structure,
+                    dst,
+                    &src,
+                    1.0,
+                    0.5,
+                    threads,
+                )
+            })
+            .unwrap();
     }
 
     assert_eq!(threaded, serial);
@@ -133,20 +142,24 @@ fn threaded_replay_handles_rank_zero_blocks() {
     let mut serial = [10.0, 20.0];
     let mut threaded = serial;
     for (dst, threads) in [(&mut serial[..], 1), (&mut threaded[..], 4)] {
-        tree_transform_structure_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            dst,
-            &src,
-            1.0,
-            0.5,
-            threads,
-        )
-        .unwrap();
+        crate::host_pool::test_pool(threads)
+            .install(|engine| {
+                tree_transform_structure_with_structural_recoupling_raw(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    dst,
+                    &src,
+                    1.0,
+                    0.5,
+                    threads,
+                )
+            })
+            .unwrap();
     }
     assert_eq!(threaded, serial);
     assert_eq!(threaded, [11.0, 5.0]);
@@ -162,20 +175,24 @@ fn threaded_replay_ignores_zero_extent_work() {
     )
     .unwrap();
     assert!(transform.parallel_schedule().singles.is_empty());
-    tree_transform_structure_with_structural_recoupling_raw(
-        &mut StridedHostKernelAdapter::default(),
-        &mut DefaultDenseExecutor::new(),
-        &mut TreeTransformWorkspace::default(),
-        &transform,
-        &structure,
-        &structure,
-        &mut [],
-        &[],
-        1.0,
-        f64::NAN,
-        4,
-    )
-    .unwrap();
+    crate::host_pool::test_pool(4)
+        .install(|engine| {
+            tree_transform_structure_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut [],
+                &[],
+                1.0,
+                f64::NAN,
+                4,
+            )
+        })
+        .unwrap();
 }
 
 #[test]
@@ -199,20 +216,24 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
     for (dst, threads) in [(&mut serial[..], 1), (&mut threaded[..], 4)] {
-        tree_transform_structure_with_structural_recoupling_raw(
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &dst_structure,
-            &src_structure,
-            dst,
-            &src,
-            1.0,
-            0.5,
-            threads,
-        )
-        .unwrap();
+        crate::host_pool::test_pool(threads)
+            .install(|engine| {
+                tree_transform_structure_with_structural_recoupling_raw(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &dst_structure,
+                    &src_structure,
+                    dst,
+                    &src,
+                    1.0,
+                    0.5,
+                    threads,
+                )
+            })
+            .unwrap();
     }
 
     assert_eq!(threaded, serial);
@@ -221,6 +242,7 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
 
 #[test]
 fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: normal and profiled replay use the same effective worker count,
     // preserve serial beta semantics, and never size scratch from a caller's
     // unbounded thread request.
@@ -238,6 +260,7 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
 
     let mut expected = initial.clone();
     tree_transform_structure_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -252,14 +275,12 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
     )
     .unwrap();
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(3)
-        .build()
-        .unwrap();
+    let mut pool = crate::host_pool::test_pool(3);
     let mut destination = initial.clone();
     let mut workspace = TreeTransformWorkspace::default();
-    pool.install(|| {
+    pool.install(|engine| {
         tree_transform_structure_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut workspace,
@@ -274,14 +295,19 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
         )
     })
     .unwrap();
-    assert_eq!(workspace.fused_indices.len(), 3 * 2);
+    assert_eq!(
+        workspace.fused_indices.len(),
+        2,
+        "only the calling lane is shared"
+    );
     assert_eq!(destination, expected);
 
     let mut profiled_destination = initial;
     let mut profiled_workspace = TreeTransformWorkspace::default();
     let mut profile = TreeTransformReplayProfile::default();
-    pool.install(|| {
+    pool.install(|engine| {
         tree_transform_structure_with_structural_recoupling_raw_profiled(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut profiled_workspace,
@@ -297,7 +323,7 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
         )
     })
     .unwrap();
-    assert_eq!(profiled_workspace.fused_indices.len(), 3 * 2);
+    assert_eq!(profiled_workspace.fused_indices.len(), 2);
     assert_eq!(profiled_destination, expected);
 }
 
@@ -379,14 +405,12 @@ where
     let (dst_structure, src_structure, replay) = recoupling_fixture();
     let fused_rank = replay.layouts().max_fused_rank();
     assert!(fused_rank > 0);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .build()
-        .unwrap();
-    pool.install(|| {
+    let mut pool = crate::host_pool::test_pool(threads);
+    pool.install(|engine| {
         let mut axpby = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();
         tree_transform_structure_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut workspace,
@@ -400,11 +424,14 @@ where
             threads,
         )
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
 
         let mut overwrite = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut workspace,
@@ -418,7 +445,9 @@ where
             threads,
         )
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         [axpby, overwrite]
     })
 }

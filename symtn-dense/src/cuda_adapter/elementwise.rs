@@ -70,7 +70,7 @@ pub(super) fn reject_zero_alpha<D: CudaScalar>(
 /// context so a caller can pass a coefficient the context itself owns.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn submit_region_axpby<D: CudaScalar>(
-    backend: &mut CudaBackend,
+    backend: &mut dyn Engine,
     op: &'static str,
     src: &CudaDenseStorage,
     src_region: &CudaRegion,
@@ -84,29 +84,36 @@ pub(super) fn submit_region_axpby<D: CudaScalar>(
 ) -> Result<(), DenseError> {
     let rank = src_region.dims().len();
     let (view_dims, src_strides) = src_region.contraction_view_metadata()?;
-    let (_, dst_strides) = dst_region.contraction_view_metadata()?;
+    let dst_strides = isize_strides(dst_region.strides())?;
     let coeff_offset = isize::try_from(coeff_offset).map_err(|_| DenseError::OffsetOverflow {
         value: coeff_offset,
     })?;
 
+    // The coefficient is rank 1 and fully contracted, so the destination
+    // keeps the region's own rank: Tenferro 0.8 serves a destination view of
+    // at most `t4a_cuda_kernels::MAX_RANK` (8) modes, and a trailing unit
+    // mode there would cost a rank-8 region its place under that limit.
     let lhs = src.region_view_nd::<D>(&view_dims, &src_strides, src_region.offset_isize()?)?;
-    let rhs = coeff.region_view_nd::<D>(&[1, 1], &[1, 1], coeff_offset)?;
-    let out = dst.region_view_nd_mut::<D>(&view_dims, &dst_strides, dst_region.offset_isize()?)?;
+    let rhs = coeff.region_view_nd::<D>(&[1], &[1], coeff_offset)?;
+    let out =
+        dst.region_view_nd_mut::<D>(dst_region.dims(), &dst_strides, dst_region.offset_isize()?)?;
 
     let config = DotGeneralConfig {
-        lhs_contracting_dims: vec![rank],
-        rhs_contracting_dims: vec![0],
-        lhs_batch_dims: Vec::new(),
-        rhs_batch_dims: Vec::new(),
+        lhs_contracting_dims: [rank].into_iter().collect(),
+        rhs_contracting_dims: [0].into_iter().collect(),
+        lhs_batch_dims: Default::default(),
+        rhs_batch_dims: Default::default(),
     };
-    // The structural coefficient is the 1x1 *operand*, never the descriptor
+    // The structural coefficient is the one-element *operand*, never the descriptor
     // alpha: a descriptor alpha of 0 lets CUDA skip the source read and erase
     // NaN/Inf, where the host multiplies and propagates it. The caller's own
     // scale rides the descriptor, and a caller whose scale is zero passes it
     // as the zero *operand* instead ([`CudaRegionCoefficient::Zero`]) for the
     // same reason.
     let accumulation = DotGeneralAccumulation {
-        lhs_conj: conj,
+        // Conjugation is the identity on a real payload, and Tenferro 0.8's
+        // cuTENSOR plan refuses a conjugate operator on a real dtype.
+        lhs_conj: conj && D::IS_COMPLEX,
         rhs_conj: false,
         alpha: alpha.contraction_scalar(),
         beta: beta.scalar(),
@@ -123,14 +130,14 @@ pub(super) fn submit_region_axpby<D: CudaScalar>(
         .map_err(|err| cuda_error(op, err))
 }
 /// `dst_region = alpha * c * [conj] src_region + beta * dst_region`, where `c`
-/// is a 1x1 **data** operand chosen by `coeff` and `alpha` is the caller's own
+/// is a one-element **data** operand chosen by `coeff` and `alpha` is the caller's own
 /// scale, carried by the contraction descriptor.
 ///
 /// This is the single strided data-movement primitive the device structural
 /// operations are built on: one strided, offset, rank-N source region of one
 /// buffer moved into a strided, offset, rank-N destination region of another,
 /// with the axis permutation carried by the destination strides. It submits
-/// one `dot_general` against the 1x1 coefficient and allocates no device
+/// one `dot_general` against the one-element coefficient and allocates no device
 /// buffer of its own.
 ///
 /// Transfer contract: a call with [`CudaRegionCoefficient::Buffer`] moves
@@ -185,17 +192,14 @@ pub(super) fn submit_region_axpby<D: CudaScalar>(
 /// refcounted, so a shared and an exclusive borrow of one buffer cannot
 /// coexist. An in-place strided transform is therefore inexpressible here.
 ///
-/// No rank limit is imposed: the probe accepted every mode count up to 72,
-/// far above any rank a fusion tree reaches.
+/// symtn imposes no rank limit of its own. Tenferro 0.8 serves a destination
+/// view of at most 8 modes and answers a wider region with a typed
+/// `Unsupported` backend error, which the probe
+/// `tests/cuda_strided_region_probe.rs` records.
 ///
-/// Disclosed cost: Tenferro's stream slots are per thread, so a context-owned
-/// operand (a context `1` or zero-template coefficient, or any
-/// [`cuda_region_zero`]) that is used from a
-/// thread other than the one that created it can force a device-wide
-/// synchronize per call. Every such call happens under the device lease,
-/// which serializes them; a multi-threaded device executor must keep
-/// operand creation and use on the same stream slot or pass its own
-/// coefficient buffer.
+/// Context-owned operands (a context `1` or zero-template coefficient, or any
+/// [`cuda_region_zero`]) belong to one context, which borrows one engine for
+/// one operation, so they are created and read on that engine's stream.
 #[allow(clippy::too_many_arguments)]
 pub fn cuda_region_axpby<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
@@ -251,7 +255,7 @@ pub fn cuda_region_axpby<D: CudaScalar>(
 
     match coeff {
         CudaRegionCoefficient::Buffer(coeff, offset) => submit_region_axpby::<D>(
-            &mut ctx.backend,
+            &mut *ctx.backend,
             OP,
             src,
             src_region,
@@ -288,7 +292,7 @@ pub fn cuda_region_axpby<D: CudaScalar>(
         }
     }
 }
-/// Where [`cuda_region_axpby`] reads its 1x1 coefficient operand.
+/// Where [`cuda_region_axpby`] reads its one-element coefficient operand.
 ///
 /// The variants exist because the operand is data, not a descriptor scalar: a
 /// caller that needs an exact `0` there — a caller scale of zero, which the
@@ -304,7 +308,7 @@ pub enum CudaRegionCoefficient<'a> {
     /// upload-free.
     Zero,
     /// A caller-owned device vector at an element offset — block `b` of a
-    /// structure's uploaded coefficients is the 1x1 view at offset `b`.
+    /// structure's uploaded coefficients is the one-element view at offset `b`.
     Buffer(&'a CudaDenseStorage, usize),
 }
 /// Writes zeros over `dst_region`, reading the context's zero template as a
@@ -488,36 +492,41 @@ pub fn cuda_region_trace_accumulate<D: CudaScalar>(
         return Err(cuda_error(OP, "context scalar operand is missing"));
     };
 
-    let src_strides = src_region
-        .strides()
-        .iter()
-        .map(|&stride| {
-            isize::try_from(stride).map_err(|_| DenseError::StrideOverflow { value: stride })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut ones_dims = trace_dims.to_vec();
-    ones_dims.push(1);
-    let mut ones_strides = Vec::with_capacity(ones_dims.len());
+    // The template is contracted over every traced mode and the destination
+    // keeps its own rank, as in `submit_region_axpby`: Tenferro 0.8 writes a
+    // view of at most `t4a_cuda_kernels::MAX_RANK` (8) modes, and a trailing
+    // free unit mode would refuse a rank-8 destination. With no traced mode
+    // the source takes that unit mode instead, against a one-element template.
+    let traced = trace_dims.len();
+    let (src_dims, src_strides, template_dims) = if traced == 0 {
+        let (dims, strides) = src_region.contraction_view_metadata()?;
+        (dims, strides, vec![1])
+    } else {
+        let strides = isize_strides(src_region.strides())?;
+        (src_region.dims().to_vec(), strides, trace_dims.to_vec())
+    };
+    let mut template_strides = Vec::with_capacity(template_dims.len());
     let mut running = 1isize;
-    for &dim in &ones_dims {
-        ones_strides.push(running);
+    for &dim in &template_dims {
+        template_strides.push(running);
         running *= dim as isize;
     }
-    let (out_dims, out_strides) = dst_region.contraction_view_metadata()?;
+    let out_strides = isize_strides(dst_region.strides())?;
 
-    let lhs =
-        src.region_view_nd::<D>(src_region.dims(), &src_strides, src_region.offset_isize()?)?;
-    let rhs = template.region_view_nd::<D>(&ones_dims, &ones_strides, 0)?;
-    let out = dst.region_view_nd_mut::<D>(&out_dims, &out_strides, dst_region.offset_isize()?)?;
-    let traced = trace_dims.len();
+    let lhs = src.region_view_nd::<D>(&src_dims, &src_strides, src_region.offset_isize()?)?;
+    let rhs = template.region_view_nd::<D>(&template_dims, &template_strides, 0)?;
+    let out =
+        dst.region_view_nd_mut::<D>(dst_region.dims(), &out_strides, dst_region.offset_isize()?)?;
+    let contracted = template_dims.len();
     let config = DotGeneralConfig {
-        lhs_contracting_dims: (rank..rank + traced).collect(),
-        rhs_contracting_dims: (0..traced).collect(),
-        lhs_batch_dims: Vec::new(),
-        rhs_batch_dims: Vec::new(),
+        lhs_contracting_dims: (rank..rank + contracted).collect(),
+        rhs_contracting_dims: (0..contracted).collect(),
+        lhs_batch_dims: Default::default(),
+        rhs_batch_dims: Default::default(),
     };
     let accumulation = DotGeneralAccumulation {
-        lhs_conj: conj,
+        // Identity on a real payload; see `submit_region_axpby`.
+        lhs_conj: conj && D::IS_COMPLEX,
         rhs_conj: false,
         alpha: D::ONE.contraction_scalar(),
         beta: D::ONE.contraction_scalar(),
@@ -679,8 +688,8 @@ pub fn cuda_gather_members<D: CudaScalar>(
         [_] => (
             member_len,
             tenferro_tensor::GatherConfig {
-                offset_dims: vec![0],
-                collapsed_slice_dims: vec![],
+                offset_dims: [0].into_iter().collect(),
+                collapsed_slice_dims: Default::default(),
                 start_index_map: vec![0],
                 index_vector_dim: 1,
                 slice_sizes: vec![member_len],
@@ -689,8 +698,8 @@ pub fn cuda_gather_members<D: CudaScalar>(
         &[rows, _] if rows == member_len => (
             1,
             tenferro_tensor::GatherConfig {
-                offset_dims: vec![0],
-                collapsed_slice_dims: vec![1],
+                offset_dims: [0].into_iter().collect(),
+                collapsed_slice_dims: [1].into_iter().collect(),
                 start_index_map: vec![1],
                 index_vector_dim: 1,
                 slice_sizes: vec![member_len, 1],
@@ -711,7 +720,7 @@ pub fn cuda_gather_members<D: CudaScalar>(
         .collect::<Result<Vec<_>, _>>()?;
     let host =
         i64::into_tensor(vec![selection.len(), 1], starts).map_err(|err| cuda_error(OP, err))?;
-    let indices = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(OP, err))?;
+    let indices = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(OP, err))?;
     record_h2d(selection.len() * std::mem::size_of::<i64>());
     record(|stats| stats.copy_calls += 1);
     let gathered = ctx
@@ -769,12 +778,12 @@ pub fn cuda_gather_member_elements<D: CudaScalar>(
     }
     let count = elements.len();
     let host = i64::into_tensor(vec![count, 1], elements).map_err(|err| cuda_error(OP, err))?;
-    let indices = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(OP, err))?;
+    let indices = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(OP, err))?;
     record_h2d(count * std::mem::size_of::<i64>());
     record(|stats| stats.copy_calls += 1);
     let config = tenferro_tensor::GatherConfig {
-        offset_dims: vec![1],
-        collapsed_slice_dims: vec![0],
+        offset_dims: [1].into_iter().collect(),
+        collapsed_slice_dims: [0].into_iter().collect(),
         start_index_map: vec![0],
         index_vector_dim: 1,
         slice_sizes: vec![1, members],
@@ -882,11 +891,11 @@ pub fn cuda_gather_elements<D: CudaScalar>(
     let count = elements.len();
     let host =
         i64::into_tensor(vec![count, rank], coordinates).map_err(|err| cuda_error(OP, err))?;
-    let indices = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(OP, err))?;
+    let indices = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(OP, err))?;
     record_h2d(count * rank * std::mem::size_of::<i64>());
     record(|stats| stats.copy_calls += 1);
     let config = tenferro_tensor::GatherConfig {
-        offset_dims: vec![],
+        offset_dims: Default::default(),
         collapsed_slice_dims: (0..rank).collect(),
         start_index_map: (0..rank).collect(),
         index_vector_dim: 1,
@@ -917,7 +926,7 @@ pub fn cuda_conj<D: CudaScalar>(
     ensure_payload_dtype::<D>(OP, src)?;
     let conjugated = ctx
         .backend
-        .conj(&src.tensor)
+        .conj_read(TensorRead::from_tensor(&src.tensor))
         .map_err(|err| cuda_error(OP, err))?;
     CudaDenseStorage::from_tensor::<D>(OP, conjugated, ctx.device)
 }

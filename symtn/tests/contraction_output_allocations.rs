@@ -46,15 +46,18 @@ fn su2_space(
 /// The contracted bond carries only charge 0, so the destination `[a] <- [c]`
 /// has coupled charges -1 and 1 that no GEMM writes (inactive blocks).
 fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u64, seed: u64) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let open = u1_space(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let bond = u1_space(&provider, &[(0, 2)]);
-    let lhs: TensorMap<_, D> = TensorMap::rand_with_seed(&runtime, [&open], [&bond], seed).unwrap();
+    let lhs: TensorMap<_, D> =
+        TensorMap::rand_with_seed(engine, &runtime, [&open], [&bond], seed).unwrap();
     let rhs: TensorMap<_, D> =
-        TensorMap::rand_with_seed(&runtime, [&bond], [&open], seed + 1).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&bond], [&open], seed + 1).unwrap();
     let warm = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -73,6 +76,7 @@ fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u
     let measurement = measure(payload_bytes, || {
         output = Some(black_box(
             lhs.contract(
+                engine,
                 &rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -100,7 +104,7 @@ fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(max_allocations: u
     );
 }
 
-// Total allocations of one warmed owned U(1) contraction (dense_threads(1),
+// Total allocations of one warmed owned U(1) contraction (serial engine,
 // debug build): f64 38 calls / 2380 bytes, Complex64 38 / 2516, each with
 // exactly one allocator-zeroed payload (#1212).
 const TOTAL_ALLOCATIONS_U1: u64 = 38;
@@ -120,20 +124,22 @@ fn owned_c64_contraction_output_is_one_allocator_zeroed_payload() {
 /// SU(2) compose: non-abelian recoupling, so this is the fixture where the
 /// coefficient scratch is converted per structure identity.
 fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     // Destination `[a, c] <- [d, e]` couples to spins 1/2 and 3/2; the bond
     // `b` carries only spin 1/2, so the spin-3/2 block is inactive.
     let a = su2_space(&provider, &[(0, 2), (2, 3)]);
     let c = su2_space(&provider, &[(1, 2)]);
     let b = su2_space(&provider, &[(1, 3)]);
-    let lhs: TensorMap<_, D> = TensorMap::rand_with_seed(&runtime, [&a, &c], [&b], seed).unwrap();
+    let lhs: TensorMap<_, D> =
+        TensorMap::rand_with_seed(engine, &runtime, [&a, &c], [&b], seed).unwrap();
     let rhs: TensorMap<_, D> =
-        TensorMap::rand_with_seed(&runtime, [&b], [&a, &c], seed + 1).unwrap();
-    let warm = lhs.compose(&rhs).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&b], [&a, &c], seed + 1).unwrap();
+    let warm = lhs.compose(engine, &rhs).unwrap();
     let payload_bytes = std::mem::size_of_val(warm.dense_data().unwrap());
     let measurement = measure(payload_bytes, || {
-        black_box(lhs.compose(&rhs).unwrap());
+        black_box(lhs.compose(engine, &rhs).unwrap());
     });
     assert_eq!(
         measurement.matched_zeroed_calls, 1,

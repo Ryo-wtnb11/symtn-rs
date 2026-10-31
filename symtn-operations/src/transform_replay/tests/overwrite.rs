@@ -19,30 +19,45 @@ impl FailFirstBatchExecutor {
 }
 
 impl DenseExecutor for FailFirstBatchExecutor {
-    fn svd(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.svd(input)
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.svd(engine, input)
     }
 
-    fn qr(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.qr(input)
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.qr(engine, input)
     }
 
-    fn eigh(&mut self, input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.eigh(input)
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.eigh(engine, input)
     }
 
     fn dot_general_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
         config: &DenseDotConfig,
     ) -> Result<(), DenseError> {
-        self.inner.dot_general_into(output, lhs, rhs, config)
+        self.inner
+            .dot_general_into(engine, output, lhs, rhs, config)
     }
 
     fn matmul_batch_axpby_into(
         &mut self,
+        engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -64,12 +79,13 @@ impl DenseExecutor for FailFirstBatchExecutor {
             });
         }
         self.inner
-            .matmul_batch_axpby_into(output, lhs, rhs, jobs, runs, alpha, beta)
+            .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
     }
 }
 
 #[test]
 fn inactive_destination_scaling_preserves_storage_padding() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_structure = BlockStructure::packed_column_major(1, [vec![1]]).unwrap();
     let dst_structure = custom_structure(vec![block(0, 2, 2, 0)]);
     let structure =
@@ -77,6 +93,7 @@ fn inactive_destination_scaling_preserves_storage_padding() {
             .unwrap();
     let mut dst = vec![10.0, 99.0, 30.0];
     tree_transform_structure_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -95,8 +112,10 @@ fn inactive_destination_scaling_preserves_storage_padding() {
 
 #[test]
 fn nan_beta_reaches_active_and_inactive_destinations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (mut dst, src, structure) = fixture();
     tree_transform_structure_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -122,6 +141,7 @@ fn generic_beta_zero_wipes_nan_in_inactive_destinations() {
     dst.data_mut().fill(f64::NAN);
 
     tree_transform_structure_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &structure,
@@ -140,11 +160,13 @@ fn generic_beta_zero_wipes_nan_in_inactive_destinations() {
 
 #[test]
 fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // The one-block fixture never reaches the threaded driver; threaded
     // overwrite is covered by threaded.rs's multi-block recoupling oracle.
     let (mut dst, src, structure) = fixture();
     dst.data_mut().fill(f64::NAN);
     tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -163,6 +185,7 @@ fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
     let (mut dst, src, structure) = fixture();
     dst.data_mut().fill(f64::NAN);
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &structure,
@@ -178,6 +201,7 @@ fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
     let (mut dst, src, structure) = fixture();
     dst.data_mut().fill(f64::NAN);
     tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -201,6 +225,7 @@ fn overwrite_multi_does_not_read_nan_active_or_inactive_destinations() {
     let mut dst = vec![f64::NAN; 3];
 
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &structure,
@@ -224,12 +249,10 @@ fn overwrite_multi_c64_does_not_read_nan_destinations() {
         let nan = num_complex::Complex64::new(f64::NAN, f64::NAN);
         let mut dst = vec![nan; 3];
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
-        pool.install(|| {
+        let mut pool = crate::host_pool::test_pool(threads);
+        pool.install(|engine| {
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
                 &mut workspace,
@@ -247,7 +270,9 @@ fn overwrite_multi_c64_does_not_read_nan_destinations() {
             )
         })
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(
             dst,
             [
@@ -287,12 +312,10 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
     for threads in [1, 2] {
         let mut dst = [f64::NAN; 5];
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap();
-        pool.install(|| {
+        let mut pool = crate::host_pool::test_pool(threads);
+        pool.install(|engine| {
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
                 &mut workspace,
@@ -307,13 +330,16 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
             )
         })
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(dst, expected);
     }
 }
 
 #[test]
 fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst_structure, src_structure, replay) = identity_multi_fixture();
     let mut workspace = TreeTransformWorkspace::default();
     let mut dense = FailFirstBatchExecutor::new();
@@ -321,6 +347,7 @@ fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
 
     assert!(
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut dense,
             &mut workspace,
@@ -343,6 +370,7 @@ fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
         .all(|value| value.is_nan()));
 
     tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut dense,
         &mut workspace,
@@ -361,10 +389,13 @@ fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
 
 #[test]
 fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
+    let mut exec = strided_kernel::Exec::serial();
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (mut dst, src, structure) = fixture();
     dst.data_mut().fill(f64::NAN);
     let before = dst.data().to_vec();
     let result = tree_transform_structure_overwrite_with_strided_kernel_raw(
+        exec.reborrow(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &structure,
@@ -387,6 +418,7 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
     );
 
     let result = tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),
@@ -421,6 +453,7 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
     .unwrap();
     let mut scalar_dst = [f64::NAN];
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        exec.reborrow(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &scalar_replay,
@@ -441,6 +474,7 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
     )
     .unwrap();
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        exec.reborrow(),
         &mut StridedHostKernelAdapter::default(),
         &mut TreeTransformWorkspace::default(),
         &empty_replay,
@@ -455,10 +489,12 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
 
 #[test]
 fn structural_serial_replay_scales_inactive_destinations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for beta in [0.0, 0.5, 1.0] {
         let (mut dst, src, structure) = fixture();
         let dst_structure = Arc::clone(dst.structure());
         tree_transform_structure_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
@@ -478,11 +514,13 @@ fn structural_serial_replay_scales_inactive_destinations() {
 
 #[test]
 fn strided_replay_scales_inactive_destinations() {
+    let mut exec = strided_kernel::Exec::serial();
     for beta in [0.0, 0.5, 1.0] {
         let (mut dst, src, structure) = fixture();
         let dst_structure = Arc::clone(dst.structure());
         let src_structure = Arc::clone(src.structure());
         tree_transform_structure_with_strided_kernel_raw(
+            exec.reborrow(),
             &mut StridedHostKernelAdapter::default(),
             &mut TreeTransformWorkspace::default(),
             &structure,

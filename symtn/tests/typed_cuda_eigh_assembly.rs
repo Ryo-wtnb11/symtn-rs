@@ -30,18 +30,26 @@ fn leg(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn close(got: &TensorMap<U1FusionRule, f64>, want: &TensorMap<U1FusionRule, f64>) {
+fn close(
+    engine: &mut dyn symtn::typed::Engine,
+    got: &TensorMap<U1FusionRule, f64>,
+    want: &TensorMap<U1FusionRule, f64>,
+) {
     assert_eq!(
-        got.materialize().unwrap().dense_data().unwrap().len(),
-        want.materialize().unwrap().dense_data().unwrap().len()
+        got.materialize(engine).unwrap().dense_data().unwrap().len(),
+        want.materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len()
     );
     for (got, want) in got
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(want.materialize().unwrap().dense_data().unwrap())
+        .zip(want.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert!((got - want).abs() <= 1e-10, "{got} vs {want}");
     }
@@ -50,24 +58,28 @@ fn close(got: &TensorMap<U1FusionRule, f64>, want: &TensorMap<U1FusionRule, f64>
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let small = leg(&[(-1, 2), (0, 1), (1, 2)]);
     // The same five coupled sectors with the same matrix sizes (4, 4, 9, 4,
     // 4), reached through one codomain tree each (`fused`) or through nine
     // trees in total (`small x small`).
     let fused = leg(&[(-2, 4), (-1, 4), (0, 9), (1, 4), (2, 4)]);
-    let one_tree = TensorMap::rand_with_seed(&runtime, [&fused], [&fused], 7).unwrap();
+    let one_tree = TensorMap::rand_with_seed(engine, &runtime, [&fused], [&fused], 7).unwrap();
     let many_trees =
-        TensorMap::rand_with_seed(&runtime, [&small, &small], [&small, &small], 7).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&small, &small], [&small, &small], 7).unwrap();
 
     let mut counts = Vec::new();
     for source in [one_tree, many_trees] {
-        let source = source.axpby(1.0, &source.adjoint().unwrap(), 1.0).unwrap();
-        let device = source.to_cuda().unwrap();
+        let adjoint = source.adjoint(engine).unwrap();
+        let source = source.axpby(engine, 1.0, &adjoint, 1.0).unwrap();
+        let device = source.to_cuda(cuda).unwrap();
 
         let before = cuda_transfer_stats();
         let Eigh { d, v } = device
             .eigh_full(
+                cuda,
                 &codomain_axes(&device),
                 &domain_axes(&device),
                 HermitianTol::DEFAULT,
@@ -87,15 +99,18 @@ fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
         // eigenvectors (raw cuSOLVER gauge) satisfy the eigen equation.
         let Eigh { d: host_d, .. } = source
             .eigh_full(
+                engine,
                 &codomain_axes(&source),
                 &domain_axes(&source),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
-        let d = d.to_host().unwrap();
-        let v = v.to_host().unwrap();
-        close(&d, &host_d);
-        close(&source.compose(&v).unwrap(), &v.compose(&d).unwrap());
+        let d = d.to_host(cuda).unwrap();
+        let v = v.to_host(cuda).unwrap();
+        close(engine, &d, &host_d);
+        let lhs = source.compose(engine, &v).unwrap();
+        let rhs = v.compose(engine, &d).unwrap();
+        close(engine, &lhs, &rhs);
     }
     // The same sectors and sizes, so every upload is independent of the tree
     // count. The selector-free copy counts and the forced selector path are

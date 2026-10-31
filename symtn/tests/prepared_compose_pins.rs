@@ -11,12 +11,15 @@
 //!
 //! Allocation counts and retained bytes are structural contracts, not exact
 //! sizes, so a dense-backend release or a struct layout change cannot fail
-//! them: a warm `execute` and `execute_into` allocate at most once (the
-//! backend's grouped-GEMM validation), `execute_into` retains nothing new,
-//! retained bytes grow with `B` and return to the B = 1 footprint, and at
-//! B = 1 the workspace retains only its output (no stacked replay; the base
-//! kept a one-member replay there, 208 bytes and 8 allocations on these
-//! fixtures).
+//! them: a warm `execute` and `execute_into` allocate nothing at B = 1 (the
+//! workspace keeps its core's grouped-GEMM plans,
+//! `prepared_member1_core_reuse`) and at most the per-call grouped core plan
+//! (two allocations in cpueinsum 0.9) at B > 1, until `B > 1` retention
+//! lands; `execute_into` retains nothing new; retained bytes grow with
+//! `B > 1` and return to the B = 1 footprint; and at B = 1 the workspace
+//! retains its output plus the charged grouped-GEMM bindings of its core (no
+//! stacked replay; the base kept a one-member replay there, 208 bytes and 8
+//! allocations on these fixtures).
 //!
 //! The target-wide serial guard keeps this test's cache warm-up ordered.
 
@@ -65,9 +68,10 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut state = 0xcbf2_9ce4_8422_2325;
     for index in 0..stack.len() {
-        let member = stack.member(index).unwrap();
+        let member = stack.member(engine, index).unwrap();
         fold(
             &mut state,
             member.dense_data().unwrap().iter().flat_map(|value| {
@@ -99,7 +103,8 @@ fn record<R, D>(
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let stacks = |count, salt| {
         (
             StackedTensorMap::pack(&members::<R, D>(&runtime, &[&v, &v], &[&w], count, salt))
@@ -112,11 +117,12 @@ fn record<R, D>(
     // A first composition on another plan creates the Runtime's context and
     // fills the process-wide caches, whose cold cost depends on the platform
     // and the enabled features; the rows below count this plan's own work.
-    let warmup = ComposePlan::new(&lhs, &rhs).unwrap();
+    let warmup = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let warmup_workspace = &mut warmup.workspace().unwrap();
     warmup
-        .execute(&lhs, &rhs, &mut warmup.workspace().unwrap())
+        .execute(engine, &lhs, &rhs, warmup_workspace)
         .unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut retained_by_call = Vec::new();
     for (call, count) in [1usize, 2, 17, 1].into_iter().enumerate() {
@@ -127,34 +133,42 @@ fn record<R, D>(
                 .unwrap()
         });
         let (_, first, first_bytes) = calls(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         });
         let (_, warm, warm_bytes) = calls(|| {
-            plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+            plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         });
-        let output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let output = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         let value = stack_digest(output);
         let output_bytes = output.len()
-            * output.member(0).unwrap().dense_data().unwrap().len()
+            * output
+                .member(engine, 0)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len()
             * std::mem::size_of::<D>();
         let retained = workspace.retained_bytes();
-        // The first `execute_into` may grow the Runtime context's fill
-        // scratch once; the second is warm.
+        // A warm B = 1 call reuses the workspace's grouped core plans; at
+        // B > 1 the core prepares its grouped plan per call (two allocations).
+        let warm_budget = if count == 1 { 0 } else { 2 };
+        // The first `execute_into` may grow the workspace's fill scratch
+        // once; the second is warm.
         for (warm_into, mut dst) in fills.into_iter().enumerate() {
             let (_, into, into_bytes) = calls(|| {
-                plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+                plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                     .unwrap();
             });
             assert_eq!(stack_digest(&dst), value, "{key}: execute_into == execute");
             assert!(
-                warm_into == 0 || into <= 1,
+                warm_into == 0 || into <= warm_budget,
                 "{key}: warm execute_into allocated {into} ({into_bytes} B)"
             );
         }
         eprintln!(
             "    (\"{key}\", {value:#x}), // calls first={first} ({first_bytes} B) warm={warm} ({warm_bytes} B), retained {retained}"
         );
-        assert!(warm <= 1, "{key}: warm execute allocated {warm}");
+        assert!(warm <= warm_budget, "{key}: warm execute allocated {warm}");
         assert!(first > warm, "{key}: the counter sees the cold call");
         assert_eq!(
             workspace.retained_bytes(),
@@ -162,9 +176,9 @@ fn record<R, D>(
             "{key}: execute_into retains nothing"
         );
         if count == 1 {
-            assert_eq!(
-                retained, output_bytes,
-                "{key}: B = 1 retains only the output"
+            assert!(
+                retained >= output_bytes,
+                "{key}: B = 1 retains the output and the core bindings"
             );
         }
         retained_by_call.push(retained);
@@ -173,10 +187,8 @@ fn record<R, D>(
     let [one, two, seventeen, again] = retained_by_call[..] else {
         unreachable!()
     };
-    assert!(
-        one <= two && two <= seventeen,
-        "{label}: retained grows with B"
-    );
+    // B = 1 also holds the charged core bindings, which B > 1 releases.
+    assert!(two <= seventeen, "{label}: retained grows with B");
     assert_eq!(
         again, one,
         "{label}: B = 1 again retains the B = 1 footprint"
@@ -186,16 +198,17 @@ fn record<R, D>(
 /// Every rejected call of `mismatched_stacks_are_typed_errors_before_any_work`
 /// and the foreign workspace, as the error each returns.
 fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
     let lhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], 3, 1)).unwrap();
     let rhs = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 3, 2)).unwrap();
     let short = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], 2, 2)).unwrap();
     let foreign =
         StackedTensorMap::pack(&members::<_, f64>(&other_runtime, &[&w], &[&v], 3, 2)).unwrap();
-    let plan = ComposePlan::new(&lhs, &rhs).unwrap();
-    let other_plan = ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
+    let other_plan = ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut ws = plan.workspace().unwrap();
     let mut other_ws = other_plan.workspace().unwrap();
     let mut wrong_dst =
@@ -208,39 +221,39 @@ fn error_matrix() -> Vec<(&'static str, Option<Error>)> {
     vec![
         (
             "new: foreign runtime",
-            show(ComposePlan::new(&lhs, &foreign).map(|_| ())),
+            show(ComposePlan::new(engine, &lhs, &foreign).map(|_| ())),
         ),
         (
             "new: member counts differ",
-            show(ComposePlan::new(&lhs, &short).map(|_| ())),
+            show(ComposePlan::new(engine, &lhs, &short).map(|_| ())),
         ),
         (
             "execute: swapped operands",
-            show(plan.execute(&rhs, &lhs, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &rhs, &lhs, &mut ws).map(|_| ())),
         ),
         (
             "execute: foreign runtime",
-            show(plan.execute(&lhs, &foreign, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &foreign, &mut ws).map(|_| ())),
         ),
         (
             "execute: member counts differ",
-            show(plan.execute(&lhs, &short, &mut ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &short, &mut ws).map(|_| ())),
         ),
         (
             "execute_into: wrong destination",
-            show(plan.execute_into(&lhs, &rhs, &mut wrong_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut wrong_dst, &mut ws)),
         ),
         (
             "execute_into: short destination",
-            show(plan.execute_into(&lhs, &rhs, &mut short_dst, &mut ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut short_dst, &mut ws)),
         ),
         (
             "execute_into: foreign workspace",
-            show(plan.execute_into(&lhs, &rhs, &mut dst, &mut other_ws)),
+            show(plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut other_ws)),
         ),
         (
             "execute: foreign workspace",
-            show(plan.execute(&lhs, &rhs, &mut other_ws).map(|_| ())),
+            show(plan.execute(engine, &lhs, &rhs, &mut other_ws).map(|_| ())),
         ),
     ]
 }

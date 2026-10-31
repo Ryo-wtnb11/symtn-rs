@@ -978,6 +978,7 @@ fn build_generic_tree_pair_plan_matches_core_rows_and_guards_style() {
 
 #[test]
 fn generic_multiplicity_monomial_rows_compile_and_execute_as_direct_singles() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a GenericFusion R matrix whose core rows are structurally
     // singleton and destination-injective uses the same direct replay contract.
     let rule = ToyGenericRule {
@@ -1041,6 +1042,7 @@ fn generic_multiplicity_monomial_rows_compile_and_execute_as_direct_singles() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -1211,6 +1213,7 @@ fn generic_dense_block_plan_matches_per_source_oracle_matrix() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn racah_generated_sun_adjoint_checked_bound_round_trips() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_sectors::LieGroupFusionRule;
 
     fn repartition(source_nout: usize, target_nout: usize) -> TreeTransformOperation {
@@ -1282,6 +1285,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
             let (moved, moved_data) =
                 crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                     .tree_transform_owned_checked_generic_in(
+                        engine,
                         &source,
                         None,
                         &source_data,
@@ -1291,13 +1295,17 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
                     .unwrap();
             assert!(Arc::ptr_eq(moved.provider_arc(), &provider));
             assert_eq!(moved_data.len(), moved.space().required_len().unwrap());
-            let (round_trip, round_trip_data) = crate::TreeTransformExecutionContext::<
-                f64,
-                RuleIdentity,
-                f64,
-            >::default()
-            .tree_transform_owned_checked_generic_in(&moved, None, &moved_data, &backward, 1.0)
-            .unwrap();
+            let (round_trip, round_trip_data) =
+                crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
+                    .tree_transform_owned_checked_generic_in(
+                        engine,
+                        &moved,
+                        None,
+                        &moved_data,
+                        &backward,
+                        1.0,
+                    )
+                    .unwrap();
             assert_eq!(round_trip.space(), source.space());
             assert_eq!(snapshot(provider.as_ref(), &round_trip), source_snapshot);
             assert!(Arc::ptr_eq(round_trip.provider_arc(), &provider));
@@ -1316,6 +1324,7 @@ fn racah_generated_sun_adjoint_checked_bound_round_trips() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1337,9 +1346,9 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
     .unwrap();
     let data = vec![1.0; source.space().required_len().unwrap()];
     let operation = TreeTransformOperation::permute([0, 2, 3], [1, 4]);
-    let transform = || {
+    let mut transform = || {
         crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
             .unwrap()
     };
     drop(transform());
@@ -1363,6 +1372,7 @@ fn warm_checked_generic_transform_of_an_evicted_source_makes_no_admission_query(
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn retained_su3_vertex_move_replay_queries_no_symbols() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Fills the process-global coefficient cache; sibling tests assert sharing in it.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -1411,6 +1421,7 @@ fn retained_su3_vertex_move_replay_queries_no_symbols() {
     for _ in 0..2 {
         backend
             .tree_transform_structure_into_raw(
+                engine,
                 &mut workspace,
                 &replay,
                 &destination,
@@ -1456,6 +1467,7 @@ fn measure_checked_generic_transform_case(
     case: &str,
     operation: TreeTransformOperation,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_sectors::LieGroupFusionRule;
 
     fusion_symbols::cache::reset();
@@ -1566,6 +1578,7 @@ fn measure_checked_generic_transform_case(
     let mut workspace = TreeTransformWorkspace::<f64>::default();
     backend
         .tree_transform_structure_into_raw(
+            engine,
             &mut workspace,
             &replay,
             &destination_structure,
@@ -1581,6 +1594,7 @@ fn measure_checked_generic_transform_case(
     measured_provider_phase(provider.as_ref(), case, "replay_preallocated", || {
         backend
             .tree_transform_structure_into_raw_profiled(
+                engine,
                 &mut workspace,
                 &replay,
                 &destination_structure,
@@ -1612,6 +1626,7 @@ fn measure_checked_generic_transform_case(
         measured_provider_phase(provider.as_ref(), case, "runtime_cold_seed", || {
             context
                 .tree_transform_owned_checked_generic_in(
+                    engine,
                     &source,
                     None,
                     &source_data,
@@ -1628,7 +1643,14 @@ fn measure_checked_generic_transform_case(
         provider.reset_calls();
         let started = std::time::Instant::now();
         let output = context
-            .tree_transform_owned_checked_generic_in(&source, None, &source_data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(
+                engine,
+                &source,
+                None,
+                &source_data,
+                &operation,
+                1.0,
+            )
             .unwrap();
         samples_ns.push(started.elapsed().as_nanos());
         let calls = provider.calls.get();

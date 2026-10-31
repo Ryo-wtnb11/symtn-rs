@@ -30,25 +30,25 @@ fn delta(before: CudaTransferStats) -> (u64, u64, u64, u64, u64) {
 const ONE_GATHER: (u64, u64, u64, u64, u64) = (1, 0, 1, 0, 0);
 
 macro_rules! device_restrict {
-    ($label:expr, $leg:expr) => {{
+    ($cuda:ident, $engine:ident, $label:expr, $leg:expr) => {{
         let leg = $leg;
         let a = leg(0);
         let dual = a.try_dual().unwrap();
         let other = leg(1);
-        let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-        device_restrict!(@dtype $label, &runtime, &a, &dual, &other, f64);
-        device_restrict!(@dtype $label, &runtime, &a, &dual, &other, Complex64);
+        let runtime = Runtime::builder().build().unwrap();
+        device_restrict!($cuda, $engine, @dtype $label, &runtime, &a, &dual, &other, f64);
+        device_restrict!($cuda, $engine, @dtype $label, &runtime, &a, &dual, &other, Complex64);
     }};
-    (@dtype $label:expr, $runtime:expr, $a:expr, $dual:expr, $other:expr, $d:ty) => {{
+    ($cuda:ident, $engine:ident, @dtype $label:expr, $runtime:expr, $a:expr, $dual:expr, $other:expr, $d:ty) => {{
         // Why a closure: each expansion becomes its own stack frame. Inlined
         // into one test function, the four symmetries times two dtypes
         // overflow a debug test thread's stack once checked Generic SU(3) is
         // enabled.
-        let check = || {
+        let mut check = || {
         // B = 3, 17 and 64: the submission count must not move with B.
         for count in [3usize, 17, 64] {
-            let members = mixed_members!($runtime, $a, $dual, $d, count);
-            let device = StackedTensorMap::pack(&members).unwrap().to_cuda().unwrap();
+            let members = mixed_members!($engine, $runtime, $a, $dual, $d, count);
+            let device = StackedTensorMap::pack(&members).unwrap().to_cuda($cuda).unwrap();
             for (axis, parent) in [$a, $dual, $a, $dual].into_iter().enumerate() {
                 for (choice, selection) in selections(parent).iter().enumerate() {
                     let label = format!(
@@ -57,7 +57,7 @@ macro_rules! device_restrict {
                         stringify!($d)
                     );
                     let before = cuda_transfer_stats();
-                    let restricted = device.restrict_leg(&[(axis, selection)]).unwrap();
+                    let restricted = device.restrict_leg($cuda, &[(axis, selection)]).unwrap();
                     assert_eq!(delta(before), ONE_GATHER, "{label}: submissions");
                     assert_eq!(restricted.len(), count, "{label}");
 
@@ -66,36 +66,36 @@ macro_rules! device_restrict {
                     let next = (axis + 2) % 4;
                     let second = &selections([$a, $dual][next % 2])[1];
                     let before = cuda_transfer_stats();
-                    let twice = restricted.restrict_leg(&[(next, second)]).unwrap();
+                    let twice = restricted.restrict_leg($cuda, &[(next, second)]).unwrap();
                     assert_eq!(delta(before), ONE_GATHER, "{label}: chained submissions");
                     let picked = [count - 1, 0, 1];
                     let of_selected = device
-                        .select(&picked)
+                        .select($cuda, &picked)
                         .unwrap()
-                        .restrict_leg(&[(axis, selection)])
+                        .restrict_leg($cuda, &[(axis, selection)])
                         .unwrap();
 
-                    let restricted = restricted.to_host().unwrap();
-                    let twice = twice.to_host().unwrap();
-                    let of_selected = of_selected.to_host().unwrap();
+                    let restricted = restricted.to_host($cuda).unwrap();
+                    let twice = twice.to_host($cuda).unwrap();
+                    let of_selected = of_selected.to_host($cuda).unwrap();
                     for (i, member) in members.iter().enumerate() {
-                        let expected = member.restrict_leg(&[(axis, selection)]).unwrap();
-                        let actual = restricted.member(i).unwrap();
+                        let expected = member.restrict_leg($engine, &[(axis, selection)]).unwrap();
+                        let actual = restricted.member($engine, i).unwrap();
                         assert!(
                             actual.structure_signature() == expected.structure_signature(),
                             "{label}: member {i} space"
                         );
                         fixtures::assert_bit_exact(actual.dense_data().unwrap(), expected.dense_data().unwrap(), &label);
                         fixtures::assert_bit_exact(
-                            twice.member(i).unwrap().dense_data().unwrap(),
-                            expected.restrict_leg(&[(next, second)]).unwrap().dense_data().unwrap(),
+                            twice.member($engine, i).unwrap().dense_data().unwrap(),
+                            expected.restrict_leg($engine, &[(next, second)]).unwrap().dense_data().unwrap(),
                             &label,
                         );
                     }
                     for (j, &i) in picked.iter().enumerate() {
                         fixtures::assert_bit_exact(
-                            of_selected.member(j).unwrap().dense_data().unwrap(),
-                            members[i].restrict_leg(&[(axis, selection)]).unwrap().dense_data().unwrap(),
+                            of_selected.member($engine, j).unwrap().dense_data().unwrap(),
+                            members[i].restrict_leg($engine, &[(axis, selection)]).unwrap().dense_data().unwrap(),
                             &label,
                         );
                     }
@@ -116,14 +116,14 @@ macro_rules! device_restrict {
             for (choice, set) in sets.iter().enumerate() {
                 let label = format!("{} {} B={count} set {choice}", $label, stringify!($d));
                 let before = cuda_transfer_stats();
-                let restricted = device.restrict_leg(set).unwrap();
+                let restricted = device.restrict_leg($cuda, set).unwrap();
                 assert_eq!(delta(before), ONE_GATHER, "{label}: submissions");
-                let restricted = restricted.to_host().unwrap();
+                let restricted = restricted.to_host($cuda).unwrap();
                 for (i, member) in members.iter().enumerate() {
                     let sequential = set.iter().fold(member.clone(), |tensor, &pair| {
-                        tensor.restrict_leg(&[pair]).unwrap()
+                        tensor.restrict_leg($engine, &[pair]).unwrap()
                     });
-                    let actual = restricted.member(i).unwrap();
+                    let actual = restricted.member($engine, i).unwrap();
                     assert!(
                         actual.structure_signature() == sequential.structure_signature(),
                         "{label}: member {i} space"
@@ -138,13 +138,13 @@ macro_rules! device_restrict {
             let on_other = &selections($other)[0];
             let before = cuda_transfer_stats();
             for (axis, selection) in [(4, on_a), (0, on_dual), (1, on_a), (2, on_other)] {
-                let expected = members[0].restrict_leg(&[(axis, selection)]).err().unwrap();
-                let actual = device.restrict_leg(&[(axis, selection)]).err().unwrap();
+                let expected = members[0].restrict_leg($engine, &[(axis, selection)]).err().unwrap();
+                let actual = device.restrict_leg($cuda, &[(axis, selection)]).err().unwrap();
                 assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "axis {axis}");
             }
             for set in [vec![], vec![(0, on_a), (0, on_a)]] {
-                let expected = members[0].restrict_leg(&set).err().unwrap();
-                let actual = device.restrict_leg(&set).err().unwrap();
+                let expected = members[0].restrict_leg($engine, &set).err().unwrap();
+                let actual = device.restrict_leg($cuda, &set).err().unwrap();
                 assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "set {set:?}");
             }
             assert_eq!(delta(before), (0, 0, 0, 0, 0), "rejections submit nothing");
@@ -157,22 +157,24 @@ macro_rules! device_restrict {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_restrict_leg_is_bit_exact_with_one_gather_per_call() {
-    for_each_symmetry!(device_restrict);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    for_each_symmetry!(engine, device_restrict, cuda);
 
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let q = fixtures::U1Irrep::new;
     let charged =
         GradedSpace::try_new(std::sync::Arc::new(fixtures::U1FusionRule), [(q(1), 2)]).unwrap();
     let neutral =
         GradedSpace::try_new(std::sync::Arc::new(fixtures::U1FusionRule), [(q(0), 2)]).unwrap();
-    let empty = TensorMap::<_, f64>::zeros(&runtime, [&charged], [&neutral]).unwrap();
+    let empty = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged], [&neutral]).unwrap();
     let device = StackedTensorMap::pack(&[&empty, &empty])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let selection = LegSelection::try_new(&charged, [(q(1), 1..2)]).unwrap();
     let before = cuda_transfer_stats();
-    let restricted = device.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = device.restrict_leg(cuda, &[(0, &selection)]).unwrap();
     assert_eq!(
         delta(before).2,
         0,
@@ -180,9 +182,9 @@ fn device_restrict_leg_is_bit_exact_with_one_gather_per_call() {
     );
     assert_eq!(restricted.len(), 2);
     assert!(restricted
-        .to_host()
+        .to_host(cuda)
         .unwrap()
-        .member(1)
+        .member(engine, 1)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -191,22 +193,22 @@ fn device_restrict_leg_is_bit_exact_with_one_gather_per_call() {
     // Both empty-producing paths keep the `[L, B]` shape the other consumes:
     // a restriction of a blockless selection, and a selection of a blockless
     // restriction, succeed as eager does and launch nothing.
-    let expected = empty.restrict_leg(&[(0, &selection)]).unwrap();
+    let expected = empty.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let before = cuda_transfer_stats();
     let of_selected = device
-        .select(&[1, 0, 1])
+        .select(cuda, &[1, 0, 1])
         .unwrap()
-        .restrict_leg(&[(0, &selection)])
+        .restrict_leg(cuda, &[(0, &selection)])
         .unwrap();
-    let of_restricted = restricted.select(&[0]).unwrap();
+    let of_restricted = restricted.select(cuda, &[0]).unwrap();
     assert_eq!(delta(before).2, 0, "blockless chains launch no gather");
     assert_eq!((of_selected.len(), of_restricted.len()), (3, 1));
     for stack in [of_selected, of_restricted] {
-        let host = stack.to_host().unwrap();
+        let host = stack.to_host(cuda).unwrap();
         assert!(*host.signature() == expected.structure_signature());
         for member in 0..host.len() {
             assert!(host
-                .member(member)
+                .member(engine, member)
                 .unwrap()
                 .dense_data()
                 .unwrap()

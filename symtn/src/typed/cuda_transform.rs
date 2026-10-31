@@ -15,13 +15,13 @@ use super::*;
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, TypedSectorAdmission};
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_checked_generic_cuda_permute<R>(tensor: &TensorMap<R, f64, CudaStorage>)
+/// fn no_checked_generic_cuda_permute<R>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<R, f64, CudaStorage>)
 /// where
 ///     R: TypedSectorAdmission<Mode = CheckedGenericAdmissionMode>
 ///         + CheckedGenericFusion
 ///         + CheckedGenericRigidSymbols<Scalar = f64>,
 /// {
-///     let _ = tensor.permute(&[1], &[0]);
+///     let _ = tensor.permute(engine, &[1], &[0]);
 /// }
 /// ```
 ///
@@ -29,8 +29,8 @@ use super::*;
 /// use symtn::sector::TableRule;
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_generic_cuda_permute(tensor: &TensorMap<TableRule, f64, CudaStorage>) {
-///     let _ = tensor.permute(&[1], &[0]);
+/// fn no_generic_cuda_permute(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<TableRule, f64, CudaStorage>) {
+///     let _ = tensor.permute(engine, &[1], &[0]);
 /// }
 /// ```
 ///
@@ -40,11 +40,11 @@ use super::*;
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{CudaPayload, CudaStorage, TensorMap};
 ///
-/// fn device_permute<D: CudaPayload>(tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>) {
-///     let _ = tensor.permute(&[1], &[0]);
-///     let _ = tensor.braid(&[1], &[0], &[0, 1]);
-///     let _ = tensor.transpose(&[1], &[0]);
-///     let _ = tensor.repartition(0);
+/// fn device_permute<D: CudaPayload>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, D, CudaStorage<D>>) {
+///     let _ = tensor.permute(engine, &[1], &[0]);
+///     let _ = tensor.braid(engine, &[1], &[0], &[0, 1]);
+///     let _ = tensor.transpose(engine, &[1], &[0]);
+///     let _ = tensor.repartition(engine, 0);
 /// }
 /// ```
 impl<R, D> TransformExec<R, D> for CudaStorage<D>
@@ -53,6 +53,7 @@ where
     D: CudaPayload,
 {
     fn replay_owned<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         t: &TensorMap<R, D, Self>,
@@ -64,7 +65,6 @@ where
         let source = cuda_transform_source(t.owned_body().map(|body| body.data.as_ref()))?;
         let required_len = replay.destination.required_len().map_err(Error::from)?;
         let TreeReplay {
-            runtime,
             lease,
             structure,
             destination,
@@ -72,11 +72,9 @@ where
             ..
         } = replay;
         drop(lease);
-        let mut lease = runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
-        if source.placement() != Placement::Cuda(cuda.device()) {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "transform", &[&source.0])?;
         // ponytail: #740 — the device seam still initializes an output by
         // uploading zeros; replace only with a measured native allocation.
         //
@@ -111,6 +109,7 @@ where
     /// expressibility and Stage C before its first submission, so a rejected
     /// replay leaves the caller's destination byte-identical.
     fn replay_into<C: Copy>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: TreeReplay<'_, D, C>,
         source: TransformIntoSource<'_, D, Self, C>,
@@ -125,7 +124,6 @@ where
             return Err(internal_layout_error("CUDA tensors hold no compact data").into());
         };
         let TreeReplay {
-            runtime,
             lease,
             structure,
             destination: destination_structure,
@@ -133,12 +131,9 @@ where
             ..
         } = replay;
         drop(lease);
-        let mut lease = runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
-        let expected = Placement::Cuda(cuda.device());
-        if source.placement() != expected || destination.placement() != expected {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "transform_into", &[&source.0, &destination.0])?;
         executor
             .replay(
                 cuda,
@@ -172,6 +167,7 @@ where
     D: CudaPayload,
 {
     fn scale_blocks<C: TwistCoefficient<D>>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         factor_of: &dyn Fn(&BlockKey) -> C,
@@ -182,14 +178,10 @@ where
         let required_len = space.space().required_len()?;
         let blocks = cuda_twist_regions::<D, C>(space.space(), factor_of, operation)?;
 
-        let mut lease = t.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        TensorMap::<R, D, Self>::validate_cuda_owned_metadata(
-            Placement::Cuda(cuda.device()),
-            src.placement(),
-            required_len,
-            src.len(),
-        )?;
+        ensure_cuda_owns(cuda, operation, &[&src.0])?;
+        TensorMap::<R, D, Self>::validate_cuda_owned_len(required_len, src.len())?;
         // ponytail: #740 — the device seam still initializes an output by
         // uploading zeros; replace only with a measured native allocation.
         let mut dst = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); required_len])?;

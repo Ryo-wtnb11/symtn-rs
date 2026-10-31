@@ -133,6 +133,7 @@ fn coupled_layout_contraction_matches_packed_layout_product() {
 
 #[test]
 fn coupled_layout_complex_contraction_matches_packed_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let degeneracy = 2usize;
@@ -251,6 +252,7 @@ fn coupled_layout_complex_contraction_matches_packed_fallback() {
     let alpha = Complex64::new(0.75, -0.25);
     let beta = Complex64::new(-0.5, 0.125);
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst_packed,
         &lhs_packed,
@@ -261,6 +263,7 @@ fn coupled_layout_complex_contraction_matches_packed_fallback() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst_coupled,
         &lhs_coupled,
@@ -290,6 +293,7 @@ fn coupled_layout_complex_contraction_matches_packed_fallback() {
 
 #[test]
 fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -308,6 +312,7 @@ fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
     let mut dst =
         TestTensor::<Complex64>::from_vec_with_fusion_space(vec![initial], space).unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -331,6 +336,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
     R::Key: Clone + Eq + std::hash::Hash + Send + Sync + 'static,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
     let homspace = || {
@@ -442,6 +448,7 @@ where
             || TensorContractSpec::new(lhs_axes, rhs_axes, OutputAxisOrder::from_axes(output_axes));
         let mut packed_context = TensorContractFusionExecutionContext::<f64, R::Key>::default();
         context_contract_into(
+            engine,
             &mut packed_context,
             rule,
             &mut dst_packed,
@@ -478,6 +485,7 @@ where
 
             dst_packed.data_mut().fill(0.0);
             context_contract_into(
+                engine,
                 &mut packed_context,
                 rule,
                 &mut dst_packed,
@@ -497,6 +505,7 @@ where
             let mut dynamic = vec![0.0; ordinary.len()];
             packed_context
                 .tensorcontract_fusion_dyn_into_raw(
+                    engine,
                     rule,
                     &dst_dynamic,
                     &mut dynamic,
@@ -513,6 +522,7 @@ where
         }
         let mut coupled_context = TensorContractFusionExecutionContext::<f64, R::Key>::default();
         context_contract_into(
+            engine,
             &mut coupled_context,
             rule,
             &mut dst_coupled,
@@ -530,6 +540,7 @@ where
 
 #[test]
 fn coupled_layout_compose_uses_direct_gemm_groups() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let degeneracy = 2usize;
     let leg = || {
@@ -582,6 +593,7 @@ fn coupled_layout_compose_uses_direct_gemm_groups() {
     let rhs_dyn = rhs.fusion_space().unwrap().as_ref().clone();
     let resolution = context
         .plan_tensorcontract_fusion_dyn_raw(
+            engine,
             &rule,
             &dst_dyn,
             &lhs_dyn,

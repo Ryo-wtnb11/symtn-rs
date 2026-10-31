@@ -131,6 +131,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
     D: Payload + DenseRecouplingScalar + RecouplingCoefficientAction<f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src = legs(&provider, sectors);
     let src_data: Vec<D> = cycle(&SOURCE, src.space().required_len().unwrap());
     let alpha = D::from_real(0.0);
@@ -144,6 +145,7 @@ where
         let mut got = initial.clone();
         context
             .tree_transform_dyn_into(
+                engine,
                 provider.as_ref(),
                 operation.clone(),
                 dst.space().structure(),
@@ -174,6 +176,7 @@ where
     for beta in [1.0, 0.0] {
         let mut got = initial.clone();
         tensortrace_fusion_dyn_into(
+            strided_kernel::Exec::serial(),
             &trace_dst,
             &mut got,
             &src,
@@ -189,7 +192,15 @@ where
             .collect();
         assert_same(&format!("{label} trace_permute! β = {beta}"), &got, &want);
     }
-    let owned = tensortrace_fusion_dyn_owned(&trace_dst, &src, &src_data, axes, alpha).unwrap();
+    let owned = tensortrace_fusion_dyn_owned(
+        strided_kernel::Exec::serial(),
+        &trace_dst,
+        &src,
+        &src_data,
+        axes,
+        alpha,
+    )
+    .unwrap();
     assert_same(
         &format!("{label} owned trace"),
         &owned,
@@ -242,10 +253,28 @@ fn check_trace_overflow<R, D>(
     let axes = TensorTraceAxisSpec::new(&[], &[0], &[1]);
     let alpha = D::from_real(alpha);
     let mut got = vec![D::from_real(7.0)];
-    tensortrace_fusion_dyn_into(&dst, &mut got, &src, &src_data, axes, alpha, zero).unwrap();
+    tensortrace_fusion_dyn_into(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &mut got,
+        &src,
+        &src_data,
+        axes,
+        alpha,
+        zero,
+    )
+    .unwrap();
     // Two traced elements reach the one output entry.
     crate::test_numerics::numerics::assert_close(label, got[0], want, 2);
-    let owned = tensortrace_fusion_dyn_owned(&dst, &src, &src_data, axes, alpha).unwrap();
+    let owned = tensortrace_fusion_dyn_owned(
+        strided_kernel::Exec::serial(),
+        &dst,
+        &src,
+        &src_data,
+        axes,
+        alpha,
+    )
+    .unwrap();
     crate::test_numerics::numerics::assert_close(label, owned[0], want, 2);
 }
 
@@ -329,6 +358,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
     D: Payload + DenseRecouplingScalar + RecouplingCoefficientAction<f64>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     const FINITE: [(f64, f64); 4] = [(0.5, 0.25), (-1.0, 2.0), (0.75, -0.5), (1.5, 1.0)];
     let square = || matrix_space(&provider, sectors, false);
     let cases = [
@@ -367,6 +397,7 @@ where
         let mut contract = |dst_data: &mut [D], lhs_data: &[D], alpha: f64, beta: f64| {
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &dst,
                     dst_data,
                     if conjugate {

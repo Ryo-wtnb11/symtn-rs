@@ -142,6 +142,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey + Clone,
     R::Key: 'static + Clone + Eq + std::hash::Hash + Send + Sync,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let bound = (|| {
         Ok::<_, OperationError>((
             bind(rule, &dst_space)?,
@@ -155,6 +156,7 @@ where
     };
     TensorContractFusionExecutionContext::<f64, R::Key>::default()
         .tensorcontract_planned_into(
+            engine,
             &dst,
             &mut [0.0],
             (FusionOperand::direct(lhs.space()), &[2.0]),
@@ -243,6 +245,7 @@ fn fusion_contract_rejects_same_type_rule_with_distinct_identity() {
 
 #[test]
 fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let space = || bind(&rule, &bound_scalar_space(&rule)).unwrap();
     let (dst_space, lhs, rhs) = (space(), space(), space());
@@ -254,6 +257,7 @@ fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
 
         TensorContractFusionExecutionContext::<f64, _>::default()
             .tensorcontract_planned_into(
+                engine,
                 &dst_space,
                 &mut dst,
                 (lhs_operand, &[2.0]),

@@ -35,6 +35,7 @@ mod tests {
 
         adapter
             .add_strided_baked(
+                strided_kernel::Exec::serial(),
                 &mut zero_strides,
                 &mut dst,
                 &src,
@@ -64,7 +65,15 @@ mod tests {
         let coefficients = [1.0_f64, 0.5, -1.0, 2.0];
 
         adapter
-            .recoupling_src_times_u_transpose(&mut destination, &source, &coefficients, 2, 2, 2)
+            .recoupling_src_times_u_transpose(
+                strided_kernel::Exec::serial(),
+                &mut destination,
+                &source,
+                &coefficients,
+                2,
+                2,
+                2,
+            )
             .unwrap();
 
         assert_eq!(destination, [6.0, 12.0, 19.0, 38.0]);
@@ -291,7 +300,11 @@ mod tests {
         );
     }
 
-    fn assert_copy_matches_index_reference(shape: &[usize], strides: &[isize]) {
+    fn assert_copy_matches_index_reference(
+        mut exec: crate::host_pool::Exec<'_>,
+        shape: &[usize],
+        strides: &[isize],
+    ) {
         let backing_len = shape
             .iter()
             .zip(strides)
@@ -317,6 +330,7 @@ mod tests {
             let mut actual = vec![-1.0; backing_len];
             adapter
                 .copy_scale_strided_baked(
+                    exec.reborrow(),
                     &mut actual,
                     &src,
                     shape,
@@ -339,6 +353,7 @@ mod tests {
         // What: a rank-9 strided copy-scale writes alpha * src exactly at the
         // strided positions and nothing else, with and without a baked layout.
         assert_copy_matches_index_reference(
+            strided_kernel::Exec::serial(),
             &[2, 2, 2, 2, 2, 2, 2, 2, 2],
             &[1, 3, 9, 27, 81, 243, 729, 2187, 6561],
         );
@@ -346,6 +361,7 @@ mod tests {
 
     #[test]
     fn public_baked_methods_reject_raw_rank_mismatches_before_dispatch() {
+        let mut exec = strided_kernel::Exec::serial();
         let mut adapter = StridedHostKernelAdapter::default();
         let mut zero_strides = Vec::new();
         let mut dst = [0.0_f64; 2];
@@ -363,6 +379,7 @@ mod tests {
         assert_eq!(
             adapter
                 .add_strided_baked(
+                    exec.reborrow(),
                     &mut zero_strides,
                     &mut dst,
                     &src,
@@ -383,6 +400,7 @@ mod tests {
         assert_eq!(
             adapter
                 .add_strided_baked(
+                    exec.reborrow(),
                     &mut zero_strides,
                     &mut dst,
                     &src,
@@ -403,7 +421,18 @@ mod tests {
         assert_eq!(
             adapter
                 .axpby_strided_baked(
-                    &mut dst, &src, &shape, &missing, &strides, 0, 0, 1.0, 2.0, None, None
+                    exec.reborrow(),
+                    &mut dst,
+                    &src,
+                    &shape,
+                    &missing,
+                    &strides,
+                    0,
+                    0,
+                    1.0,
+                    2.0,
+                    None,
+                    None
                 )
                 .unwrap_err(),
             dst_error
@@ -411,7 +440,18 @@ mod tests {
         assert_eq!(
             adapter
                 .axpby_strided_baked(
-                    &mut dst, &src, &shape, &strides, &missing, 0, 0, 1.0, 2.0, None, None
+                    exec.reborrow(),
+                    &mut dst,
+                    &src,
+                    &shape,
+                    &strides,
+                    &missing,
+                    0,
+                    0,
+                    1.0,
+                    2.0,
+                    None,
+                    None
                 )
                 .unwrap_err(),
             dst_error
@@ -419,7 +459,18 @@ mod tests {
         assert_eq!(
             adapter
                 .copy_scale_strided_baked(
-                    &mut dst, &src, &shape, &missing, &strides, 0, 0, false, 1.0, None, None
+                    exec.reborrow(),
+                    &mut dst,
+                    &src,
+                    &shape,
+                    &missing,
+                    &strides,
+                    0,
+                    0,
+                    false,
+                    1.0,
+                    None,
+                    None
                 )
                 .unwrap_err(),
             dst_error
@@ -427,7 +478,18 @@ mod tests {
         assert_eq!(
             adapter
                 .copy_scale_strided_baked(
-                    &mut dst, &src, &shape, &strides, &missing, 0, 0, false, 1.0, None, None
+                    exec.reborrow(),
+                    &mut dst,
+                    &src,
+                    &shape,
+                    &strides,
+                    &missing,
+                    0,
+                    0,
+                    false,
+                    1.0,
+                    None,
+                    None
                 )
                 .unwrap_err(),
             dst_error
@@ -529,6 +591,7 @@ mod tests {
 
     #[test]
     fn strided_host_adapter_fused_beta_branches_match_axpby_semantics() {
+        let mut exec = strided_kernel::Exec::serial();
         let mut adapter = StridedHostKernelAdapter::default();
         let mut zero_strides = Vec::new();
         let src = [2.0_f64, 3.0];
@@ -537,6 +600,7 @@ mod tests {
         let mut dst = [10.0_f64, 20.0];
         adapter
             .add_strided_baked(
+                exec.reborrow(),
                 &mut zero_strides,
                 &mut dst,
                 &src,
@@ -557,6 +621,7 @@ mod tests {
         // add_strided beta = 0: assign through the fused path.
         adapter
             .add_strided_baked(
+                exec.reborrow(),
                 &mut zero_strides,
                 &mut dst,
                 &src,
@@ -577,11 +642,37 @@ mod tests {
         // axpby_strided beta = 1 then beta = 0.
         let mut dst = [1.0_f64, 2.0];
         adapter
-            .axpby_strided_baked(&mut dst, &src, &[2], &[1], &[1], 0, 0, 3.0, 1.0, None, None)
+            .axpby_strided_baked(
+                exec.reborrow(),
+                &mut dst,
+                &src,
+                &[2],
+                &[1],
+                &[1],
+                0,
+                0,
+                3.0,
+                1.0,
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(dst, [7.0, 11.0]);
         adapter
-            .axpby_strided_baked(&mut dst, &src, &[2], &[1], &[1], 0, 0, 3.0, 0.0, None, None)
+            .axpby_strided_baked(
+                exec.reborrow(),
+                &mut dst,
+                &src,
+                &[2],
+                &[1],
+                &[1],
+                0,
+                0,
+                3.0,
+                0.0,
+                None,
+                None,
+            )
             .unwrap();
         assert_eq!(dst, [6.0, 9.0]);
 
@@ -589,6 +680,7 @@ mod tests {
         let mut dst = [99.0_f64, 99.0];
         adapter
             .copy_scale_strided_baked(
+                exec.reborrow(),
                 &mut dst,
                 &src,
                 &[2],
@@ -605,7 +697,9 @@ mod tests {
         assert_eq!(dst, [-2.0, -3.0]);
 
         // scale_strided scales in place.
-        adapter.scale_strided(&mut dst, &[2], &[1], 0, 2.0).unwrap();
+        adapter
+            .scale_strided(exec.reborrow(), &mut dst, &[2], &[1], 0, 2.0)
+            .unwrap();
         assert_eq!(dst, [-4.0, -6.0]);
     }
 
@@ -636,6 +730,7 @@ mod tests {
     }
 
     fn assert_checked_matches_scalar_kernel<T>(
+        mut exec: crate::host_pool::Exec<'_>,
         values: &[T],
         alpha_beta: &[(T, T)],
         bits: fn(T) -> u128,
@@ -647,7 +742,8 @@ mod tests {
             + Zero
             + One
             + ConjugateValue
-            + strided_kernel::MaybeSendSync,
+            + Send
+            + Sync,
     {
         let mut adapter = StridedHostKernelAdapter::default();
         for (shape, dst_strides, dst_offset, src_strides, src_offset) in checked_cases() {
@@ -659,6 +755,7 @@ mod tests {
                         .collect();
                     let mut expected = initial.clone();
                     tensoradd_raw_strided_kernel(
+                        exec.reborrow(),
                         &mut Vec::new(),
                         &mut expected,
                         &src,
@@ -675,6 +772,7 @@ mod tests {
                     let mut actual = initial.clone();
                     adapter
                         .tensoradd_strided_checked(
+                            exec.reborrow(),
                             &mut actual,
                             &src,
                             &shape,
@@ -698,6 +796,7 @@ mod tests {
                         let past_end = isize::try_from(src.len()).unwrap();
                         assert!(adapter
                             .tensoradd_strided_checked(
+                                exec.reborrow(),
                                 &mut untouched,
                                 &src,
                                 &shape,
@@ -712,6 +811,7 @@ mod tests {
                             .is_err());
                         assert!(adapter
                             .tensoradd_strided_checked(
+                                exec.reborrow(),
                                 &mut untouched,
                                 &src,
                                 &shape,
@@ -738,6 +838,7 @@ mod tests {
     /// zeros and non-finite values, where `1 * src` and `0 + src` would not be.
     #[test]
     fn checked_block_copy_is_bit_identical_to_the_scalar_kernel() {
+        let mut exec = strided_kernel::Exec::serial();
         let reals = [
             1.5,
             -0.0,
@@ -750,6 +851,7 @@ mod tests {
             f64::MIN_POSITIVE / 4.0,
         ];
         assert_checked_matches_scalar_kernel(
+            exec.reborrow(),
             &reals,
             &[(1.0, 0.0), (1.0, 1.0), (-2.0, 0.0), (0.5, -3.0)],
             |value: f64| u128::from(value.to_bits()),
@@ -767,6 +869,7 @@ mod tests {
         ];
         let one = Complex64::new(1.0, 0.0);
         assert_checked_matches_scalar_kernel(
+            exec.reborrow(),
             &complexes,
             &[
                 (one, Complex64::new(0.0, 0.0)),
@@ -790,6 +893,7 @@ mod tests {
     /// 0, β)` leaves `scale(C, β)`: `C` for `β = 1`, `0` for `β = 0`.
     #[test]
     fn zero_scales_ignore_non_finite_sources() {
+        let mut exec = strided_kernel::Exec::serial();
         use num_complex::Complex64;
         let src = [
             Complex64::new(f64::INFINITY, 1.0),
@@ -822,6 +926,7 @@ mod tests {
                 let mut dst = initial;
                 adapter
                     .transform_strided_baked(
+                        exec.reborrow(),
                         &mut zero_strides,
                         &mut dst,
                         &src,
@@ -845,6 +950,7 @@ mod tests {
         let mut dst = initial;
         adapter
             .copy_scale_strided_baked(
+                exec.reborrow(),
                 &mut dst,
                 &src,
                 &[2],
@@ -864,6 +970,7 @@ mod tests {
             let mut dst = initial;
             adapter
                 .add_strided_baked(
+                    exec.reborrow(),
                     &mut zero_strides,
                     &mut dst,
                     &src,
@@ -883,6 +990,7 @@ mod tests {
             let mut dst = initial;
             adapter
                 .axpby_strided_baked(
+                    exec.reborrow(),
                     &mut dst,
                     &src,
                     &[2],

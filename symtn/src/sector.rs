@@ -18,6 +18,7 @@
 //! use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let engine = &mut symtn::typed::CpuEngine::serial();
 //! let category = TableCategory::fibonacci();
 //! let tau = category.object(2)?;
 //! let rule = CategoryRule::try_new(
@@ -26,7 +27,7 @@
 //! )?;
 //! let v = GradedSpace::try_new(Arc::new(rule), [(tau, 2)])?;
 //! let runtime = Runtime::builder().build()?;
-//! let tensor: TensorMap<_, Complex64> = TensorMap::zeros(&runtime, [&v], [&v])?;
+//! let tensor: TensorMap<_, Complex64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
 //! assert_eq!(tensor.subblock_count(), 1);
 //! # Ok(())
 //! # }

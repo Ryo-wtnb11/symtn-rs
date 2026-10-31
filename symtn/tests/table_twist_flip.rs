@@ -90,7 +90,8 @@ fn filled(
     codomain: &[GradedSpace<TableRule>],
     domain: &[GradedSpace<TableRule>],
 ) -> Table {
-    TensorMap::from_subblock_fn(runtime, codomain, domain, |trees, index| {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::from_subblock_fn(engine, runtime, codomain, domain, |trees, index| {
         entry(tag, trees, index)
     })
     .unwrap()
@@ -109,15 +110,20 @@ fn operand(runtime: &Runtime, category: &Category) -> Table {
 }
 
 fn probe(runtime: &Runtime, result: &Table) -> Complex64 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     filled(runtime, "p", &result.codomain(), &result.domain())
-        .inner(result)
+        .inner(engine, result)
         .unwrap()
 }
 
 fn assert_same(what: &str, got: &Table, want: &Table) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_eq!(got.codomain(), want.codomain(), "{what}: codomain");
     assert_eq!(got.domain(), want.domain(), "{what}: domain");
-    let (got, want) = (got.materialize().unwrap(), want.materialize().unwrap());
+    let (got, want) = (
+        got.materialize(engine).unwrap(),
+        want.materialize(engine).unwrap(),
+    );
     let (got, want) = (got.dense_data().unwrap(), want.dense_data().unwrap());
     assert_eq!(got.len(), want.len(), "{what}: length");
     for (index, (x, y)) in got.iter().zip(want.iter()).enumerate() {
@@ -163,12 +169,13 @@ const FLIP_ROWS: [(&str, bool, &[usize], Complex64); 4] = [
 
 #[test]
 fn flip_matches_values_checked_against_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         for &(name, inverse, legs, want) in &FLIP_ROWS {
             if name == category.name {
-                let result = t.flip(legs, direction(inverse)).unwrap();
+                let result = t.flip(engine, legs, direction(inverse)).unwrap();
                 assert_close(
                     &format!("{name} flip {inverse} {legs:?}"),
                     probe(&runtime, &result),
@@ -184,11 +191,12 @@ fn flip_matches_values_checked_against_tensorkit() {
 /// inverse): θ_τ = e^{-4πi/5}; θ_σ = e^{iπ/8}, θ_ψ = −1.
 #[test]
 fn twist_scales_every_block_by_the_closed_form_theta() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         for (inverse, legs) in TWISTS {
-            let result = t.twist(legs, direction(inverse)).unwrap();
+            let result = t.twist(engine, legs, direction(inverse)).unwrap();
             let mut nontrivial = false;
             for (trees, block) in result.subblocks().unwrap() {
                 let uncoupled = [trees.codomain_uncoupled(), trees.domain_uncoupled()].concat();
@@ -230,32 +238,40 @@ fn twist_scales_every_block_by_the_closed_form_theta() {
 /// `flip⁴` is `θ²`, not the identity, for these anyons.
 #[test]
 fn twist_and_flip_invert_as_tensorkit_defines() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let (f, b) = (Direction::Forward, Direction::Inverse);
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
         let name = category.name;
         for (_, legs) in TWISTS {
-            let round = t.twist(legs, f).unwrap().twist(legs, b).unwrap();
+            let round = t
+                .twist(engine, legs, f)
+                .unwrap()
+                .twist(engine, legs, b)
+                .unwrap();
             assert_same(&format!("{name} twist {legs:?}"), &round, &t);
         }
         for leg in 0..4 {
             let legs = &[leg];
-            let once = t.flip(legs, f).unwrap();
+            let once = t.flip(engine, legs, f).unwrap();
             assert_same(
                 &format!("{name} flip inv∘flip {leg}"),
-                &once.flip(legs, b).unwrap(),
+                &once.flip(engine, legs, b).unwrap(),
                 &t,
             );
             assert_same(
                 &format!("{name} flip∘flip inv {leg}"),
-                &t.flip(legs, b).unwrap().flip(legs, f).unwrap(),
+                &t.flip(engine, legs, b)
+                    .unwrap()
+                    .flip(engine, legs, f)
+                    .unwrap(),
                 &t,
             );
             assert_same(
                 &format!("{name} flip∘flip {leg}"),
-                &once.flip(legs, f).unwrap(),
-                &t.twist(legs, f).unwrap(),
+                &once.flip(engine, legs, f).unwrap(),
+                &t.twist(engine, legs, f).unwrap(),
             );
         }
     }
@@ -266,29 +282,30 @@ fn twist_and_flip_invert_as_tensorkit_defines() {
 /// same operation on the materialized adjoint.
 #[test]
 fn lazy_adjoint_twist_and_flip_equal_the_materialized_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     for category in [fibonacci(), ising()] {
         let t = operand(&runtime, &category);
-        let lazy = t.adjoint().unwrap();
+        let lazy = t.adjoint(engine).unwrap();
         assert!(lazy.dense_data().is_err(), "the adjoint is a lazy view");
-        let eager = lazy.materialize().unwrap();
+        let eager = lazy.materialize(engine).unwrap();
         let name = category.name;
         for (inverse, legs) in TWISTS {
-            let got = lazy.twist(legs, direction(inverse)).unwrap();
+            let got = lazy.twist(engine, legs, direction(inverse)).unwrap();
             assert!(got.dense_data().is_err(), "{name} twist stays lazy");
             assert_same(
                 &format!("{name} adjoint twist {inverse} {legs:?}"),
                 &got,
-                &eager.twist(legs, direction(inverse)).unwrap(),
+                &eager.twist(engine, legs, direction(inverse)).unwrap(),
             );
         }
         for (inverse, legs) in FLIPS {
-            let got = lazy.flip(legs, direction(inverse)).unwrap();
+            let got = lazy.flip(engine, legs, direction(inverse)).unwrap();
             assert!(got.dense_data().is_err(), "{name} flip stays lazy");
             assert_same(
                 &format!("{name} adjoint flip {inverse} {legs:?}"),
                 &got,
-                &eager.flip(legs, direction(inverse)).unwrap(),
+                &eager.flip(engine, legs, direction(inverse)).unwrap(),
             );
         }
     }
@@ -299,6 +316,7 @@ fn lazy_adjoint_twist_and_flip_equal_the_materialized_adjoint() {
 /// inverse), and the result equals the dense twist of the materialized map.
 #[test]
 fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     for category in [fibonacci(), ising()] {
         let sectors = category.v.sectors().unwrap();
@@ -311,14 +329,14 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
                     .collect(),
             })
             .collect::<Vec<_>>();
-        let compact = Table::diagonal(&runtime, &category.v, spectrum.clone()).unwrap();
-        let dense = compact.materialize().unwrap();
+        let compact = Table::diagonal(engine, &runtime, &category.v, spectrum.clone()).unwrap();
+        let dense = compact.materialize(engine).unwrap();
         for legs in [&[0][..], &[1], &[0, 1]] {
             for inverse in [false, true] {
                 let what = format!("{} compact twist {legs:?} {inverse}", category.name);
-                let twisted = compact.twist(legs, direction(inverse)).unwrap();
+                let twisted = compact.twist(engine, legs, direction(inverse)).unwrap();
                 assert!(twisted.dense_data().is_err(), "{what}: stays compact");
-                for (got, source) in twisted.diagview().unwrap().iter().zip(&spectrum) {
+                for (got, source) in twisted.diagview(engine).unwrap().iter().zip(&spectrum) {
                     assert_eq!(got.sector, source.sector);
                     let theta = (category.theta)(source.sector.label()).powi(legs.len() as i32);
                     let factor = if inverse { theta.conj() } else { theta };
@@ -329,7 +347,7 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
                 assert_same(
                     &what,
                     &twisted,
-                    &dense.twist(legs, direction(inverse)).unwrap(),
+                    &dense.twist(engine, legs, direction(inverse)).unwrap(),
                 );
             }
         }
@@ -341,16 +359,18 @@ fn compact_diagonal_twist_scales_its_spectrum_by_complex_theta() {
 /// input is untouched.
 #[test]
 fn no_braiding_table_keeps_its_typed_refusals() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap());
     let mixed = space(rule.clone(), &[(1, 2), (3, 1)]);
     let unit = space(rule, &[(1, 2)]);
-    let t: Table = TensorMap::rand_with_seed(&runtime, [&mixed, &unit], [&mixed], 5).unwrap();
+    let t: Table =
+        TensorMap::rand_with_seed(engine, &runtime, [&mixed, &unit], [&mixed], 5).unwrap();
     let before = t.dense_data().unwrap().to_vec();
 
     assert_same(
         "unit-leg twist",
-        &t.twist(&[1], Direction::Forward).unwrap(),
+        &t.twist(engine, &[1], Direction::Forward).unwrap(),
         &t,
     );
     let refused = |result: Result<Table, Error>, needle: &str| match result {
@@ -360,19 +380,21 @@ fn no_braiding_table_keeps_its_typed_refusals() {
         other => panic!("expected InvalidArgument, got {:?}", other.map(|_| ())),
     };
     refused(
-        t.twist(&[0], Direction::Forward),
+        t.twist(engine, &[0], Direction::Forward),
         "carries non-unit sectors but the fusion rule has no braiding",
     );
     refused(
-        t.twist(&[2], Direction::Inverse),
+        t.twist(engine, &[2], Direction::Inverse),
         "carries non-unit sectors but the fusion rule has no braiding",
     );
     refused(
-        t.flip(&[1], Direction::Forward),
+        t.flip(engine, &[1], Direction::Forward),
         "needs the twist and Frobenius-Schur coefficients but the fusion rule has no braiding",
     );
     refused(
-        t.adjoint().unwrap().flip(&[0], Direction::Inverse),
+        t.adjoint(engine)
+            .unwrap()
+            .flip(engine, &[0], Direction::Inverse),
         "needs the twist and Frobenius-Schur coefficients but the fusion rule has no braiding",
     );
     assert_eq!(t.dense_data().unwrap(), &before[..]);
@@ -380,9 +402,10 @@ fn no_braiding_table_keeps_its_typed_refusals() {
 
 #[test]
 fn fibonacci_flip_rejects_a_repeated_leg() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let t = operand(&runtime, &fibonacci());
-    match t.flip(&[1, 1], Direction::Forward) {
+    match t.flip(engine, &[1, 1], Direction::Forward) {
         Err(Error::InvalidArgument(message)) => {
             assert!(message.contains("listed more than once"), "{message}");
         }

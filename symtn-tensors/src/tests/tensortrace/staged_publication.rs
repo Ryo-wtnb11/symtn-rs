@@ -80,6 +80,7 @@ fn raw_execution_failure_does_not_publish() {
         })
     }));
     let error = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| None,
@@ -112,6 +113,7 @@ fn pivotal_failure_precedes_payload_and_raw_execution() {
     TRACE_TEST_FAIL_TWIST.set(true);
     probe::set_trace_raw_execution_hook(Box::new(|| panic!("raw execution after pivotal failure")));
     let error = tensortrace_checked_generic_in::<_, f64, Vec<f64>>(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| None,
@@ -152,6 +154,7 @@ fn destination_error_precedes_pivotal_and_payload() {
     TRACE_TEST_FAIL_TWIST.set(true);
     TRACE_TEST_TWIST_CALLS.set(0);
     let error = tensortrace_checked_generic_in::<_, f64, Vec<f64>>(
+        strided_kernel::Exec::serial(),
         wrong_dst,
         &src,
         |_| None,
@@ -199,6 +202,7 @@ fn success_uses_independent_partial_trace_and_commits_after_execution() {
     }));
     let calls = Cell::new(0);
     let (out, data) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| panic!("read asked for a non-scalar destination"),
@@ -233,6 +237,7 @@ fn admission_runs_before_payload_and_again_after_execution() {
     let dst = stage(&src);
     TRACE_TEST_WRONG_STYLE.set(true);
     let early = tensortrace_checked_generic_in::<_, f64, Vec<f64>>(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| None,
@@ -251,6 +256,7 @@ fn admission_runs_before_payload_and_again_after_execution() {
         Ok(())
     }));
     let late = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| None,
@@ -282,6 +288,7 @@ fn warm_failure_preserves_winner_and_reset_stale_success_stays_uncached() {
     let src = source();
     clear_structure_caches();
     let (winner, _) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         stage(&src),
         &src,
         |_| None,
@@ -298,6 +305,7 @@ fn warm_failure_preserves_winner_and_reset_stale_success_stays_uncached() {
         })
     }));
     let failed = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         stage(&src),
         &src,
         |_| None,
@@ -308,6 +316,7 @@ fn warm_failure_preserves_winner_and_reset_stale_success_stays_uncached() {
     assert!(failed.is_err());
     assert_eq!(owner(), before);
     let (again, _) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         stage(&src),
         &src,
         |_| None,
@@ -325,6 +334,7 @@ fn warm_failure_preserves_winner_and_reset_stale_success_stays_uncached() {
     let stale = staged.destination.structure().content_key();
     clear_structure_caches();
     let (out, data) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         staged,
         &src,
         |_| None,
@@ -343,6 +353,7 @@ fn warm_failure_preserves_winner_and_reset_stale_success_stays_uncached() {
     let staged_miss = stage(&src);
     clear_structure_caches();
     let (_, data) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         staged_miss,
         &src,
         |_| None,
@@ -384,6 +395,7 @@ fn read_answers_a_scalar_destination_in_the_same_transaction() {
     probe::set_trace_raw_execution_hook(Box::new(|| panic!("executed after a read")));
     let terms = Cell::new(0);
     let (out, data) = tensortrace_checked_generic_in::<_, f64, Vec<f64>>(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |structure| {
@@ -404,6 +416,7 @@ fn read_answers_a_scalar_destination_in_the_same_transaction() {
     let conjugated = TensorTraceAxisSpec::new_with_conjugation(&[], &[0], &[1], true);
     let dst = crate::tensortrace_stage_checked_generic(&src, conjugated, 0).unwrap();
     let (_, data) = tensortrace_checked_generic_in(
+        strided_kernel::Exec::serial(),
         dst,
         &src,
         |_| panic!("read asked for a conjugated source"),

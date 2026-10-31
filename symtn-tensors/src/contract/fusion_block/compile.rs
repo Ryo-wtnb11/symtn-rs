@@ -286,14 +286,23 @@ pub(crate) fn compile_checked_generic_core_plan_general(
 #[cfg(test)]
 /// Host implementation of [`StorageGemm`] over host-readable storages.
 pub(crate) struct HostStorageGemm<'a, B, W> {
+    engine: &'a mut dyn Engine,
     backend: &'a mut B,
     workspace: &'a mut W,
 }
 
 #[cfg(test)]
 impl<'a, B, W> HostStorageGemm<'a, B, W> {
-    pub(crate) fn new(backend: &'a mut B, workspace: &'a mut W) -> Self {
-        Self { backend, workspace }
+    pub(crate) fn new(
+        engine: &'a mut dyn Engine,
+        backend: &'a mut B,
+        workspace: &'a mut W,
+    ) -> Self {
+        Self {
+            engine,
+            backend,
+            workspace,
+        }
     }
 }
 
@@ -327,6 +336,7 @@ where
         let lhs_len = rows * contracted;
         let rhs_len = contracted * cols;
         self.backend.matmul_rank2_into_raw(
+            &mut *self.engine,
             self.workspace,
             &mut dst.as_mut_slice()[dst_offset..dst_offset + dst_len],
             &lhs.as_slice()[lhs_offset..lhs_offset + lhs_len],
@@ -361,6 +371,7 @@ where
         let lhs_len = rows * contracted;
         let rhs_len = contracted * cols;
         self.backend.matmul_rank2_axpby_into_raw(
+            &mut *self.engine,
             self.workspace,
             &mut dst.as_mut_slice()[dst_offset..dst_offset + dst_len],
             &lhs.as_slice()[lhs_offset..lhs_offset + lhs_len],

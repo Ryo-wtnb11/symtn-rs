@@ -36,10 +36,6 @@ strided-kernel.workspace = true
 # Fast non-cryptographic hasher for internal plan/structure/recoupling caches
 # keyed on fusion-tree structure (no untrusted input); std SipHash is slow here.
 rustc-hash = "2"
-# Parallel tree-transform plan compile runs inside the runtime's CPU pool
-# (`symtn_operations::host_pool`); rayon is already in every build through
-# strided-kernel's "parallel" feature, so this adds no dependency weight.
-rayon = "1.10"
 num-traits = "0.2"
 num-complex = "0.4"
 smallvec = { version = "1", features = ["const_generics", "union"] }

@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 /// Runs one streaming per-block factorization loop inside a single executor
 /// linear-algebra scope: the backend admits the call once, while the loop
@@ -6,8 +7,9 @@ use super::*;
 /// `factorize_batch` would instead hold every block's factors at once.
 #[doc(hidden)]
 pub fn in_linalg_scope<E, T>(
+    engine: &mut dyn Engine,
     dense: &mut E,
-    body: impl FnOnce(&mut dyn DenseExecutor) -> Result<T, OperationError> + Send,
+    body: impl FnOnce(&mut dyn DenseExecutor, &mut dyn Engine) -> Result<T, OperationError> + Send,
 ) -> Result<T, OperationError>
 where
     E: DenseExecutor + ?Sized,
@@ -17,14 +19,13 @@ where
     let mut outcome = None;
     #[cfg(test)]
     let mut probes = Some(crate::probe::Carried::take());
-    let scoped = dense.with_linalg_scope(&mut |dense| {
-        symtn_tensors::host_pool::observe_dense_site();
+    let scoped = dense.with_linalg_scope(engine, &mut |dense, engine| {
         if let Some(body) = body.take() {
             #[cfg(test)]
             if let Some(probes) = probes.take() {
                 probes.put();
             }
-            outcome = Some(body(dense));
+            outcome = Some(body(dense, engine));
             #[cfg(test)]
             {
                 probes = Some(crate::probe::Carried::take());
@@ -46,6 +47,7 @@ where
 }
 
 pub(super) fn factorize_col_major_batch<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     op: DenseFactorization,
     blocks: &[(&[D], usize, usize)],
@@ -67,7 +69,7 @@ where
         .collect::<Result<Vec<_>, _>>()
         .map_err(OperationError::Dense)?;
     let outputs = dense
-        .factorize_batch(op, &inputs)
+        .factorize_batch(engine, op, &inputs)
         .map_err(OperationError::Dense)?;
     // An overriding executor is outside this crate: a short batch would
     // otherwise drop a sector silently or panic in a consumer. Each entry's

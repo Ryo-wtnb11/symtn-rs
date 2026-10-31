@@ -2,6 +2,7 @@
 //! decomposition suites.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -19,7 +20,7 @@ fn one() -> Complex64 {
     Complex64::new(1.0, 0.0)
 }
 
-fn assert_typed_network_conj<R>(runtime: &Runtime, p: &GradedSpace<R>)
+fn assert_typed_network_conj<R>(engine: &mut dyn Engine, runtime: &Runtime, p: &GradedSpace<R>)
 where
     R: TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -32,10 +33,12 @@ where
 {
     let l = p.clone();
     let r = p.try_dual().unwrap();
-    let psi = TensorMap::<R, Complex64>::rand_with_seed(runtime, [p], [&l, &r], 71).unwrap();
-    let h0 = TensorMap::<R, Complex64>::rand_with_seed(runtime, [p], [p], 72).unwrap();
+    let psi =
+        TensorMap::<R, Complex64>::rand_with_seed(engine, runtime, [p], [&l, &r], 71).unwrap();
+    let h0 = TensorMap::<R, Complex64>::rand_with_seed(engine, runtime, [p], [p], 72).unwrap();
+    let h0_adjoint = &h0.adjoint(engine).unwrap();
     let h = h0
-        .axpby(one() * 0.5, &h0.adjoint().unwrap(), one() * 0.5)
+        .axpby(engine, one() * 0.5, h0_adjoint, one() * 0.5)
         .unwrap();
 
     let expectation = net(
@@ -47,24 +50,25 @@ where
         &[],
         &[],
     )
-    .contract(&[&psi, &h, &psi])
+    .contract(engine, &[&psi, &h, &psi])
     .unwrap()
-    .scalar()
+    .scalar(engine)
     .unwrap();
     let norm = net(
         &[conj(op(&["p"], &["l", "r"])), op(&["p"], &["l", "r"])],
         &[],
         &[],
     )
-    .contract(&[&psi, &psi])
+    .contract(engine, &[&psi, &psi])
     .unwrap()
-    .scalar()
+    .scalar(engine)
     .unwrap();
     assert!(norm.re > 0.0);
     assert!(norm.im.abs() <= 1.0e-12 * (1.0 + norm.re));
     assert!(expectation.im.abs() <= 1.0e-10 * (1.0 + expectation.norm()));
+    let h_compose = &h.compose(engine, &psi).unwrap();
 
-    let via_inner = psi.inner(&h.compose(&psi).unwrap()).unwrap();
+    let via_inner = psi.inner(engine, h_compose).unwrap();
     assert!((via_inner - expectation).norm() <= 1.0e-10 * (1.0 + expectation.norm()));
 }
 
@@ -72,6 +76,7 @@ where
 /// conjugation: a Hermitian expectation value is real.
 #[test]
 fn network_conj_expectation_value_is_real() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -82,7 +87,7 @@ fn network_conj_expectation_value_is_real() {
         ],
     )
     .unwrap();
-    assert_typed_network_conj(&runtime, &u1);
+    assert_typed_network_conj(engine, &runtime, &u1);
 
     let su2 = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -92,5 +97,5 @@ fn network_conj_expectation_value_is_real() {
         ],
     )
     .unwrap();
-    assert_typed_network_conj(&runtime, &su2);
+    assert_typed_network_conj(engine, &runtime, &su2);
 }

@@ -51,7 +51,8 @@ fn u1(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpace<U1Fus
 /// One `restrict_leg` on a leg whose degeneracies are `scale` times a base
 /// shape: the measurement and the payload byte count for that scale.
 fn restrict_measurement(scale: usize) -> (Measurement, usize) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(
         &provider,
@@ -59,7 +60,7 @@ fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     );
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&other, &other], 41).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 41).unwrap();
     let selection = LegSelection::try_new(
         &leg,
         [
@@ -70,12 +71,14 @@ fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     .unwrap();
 
     // Warm every structural cache the call can hit before measuring.
-    let warm = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let warm = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let payload_bytes = std::mem::size_of_val(warm.dense_data().unwrap());
 
     let mut output = None;
     let measurement = measure(payload_bytes, || {
-        output = Some(black_box(source.restrict_leg(&[(0, &selection)]).unwrap()));
+        output = Some(black_box(
+            source.restrict_leg(engine, &[(0, &selection)]).unwrap(),
+        ));
     });
     assert_eq!(
         output.unwrap().dense_data().unwrap(),
@@ -119,7 +122,8 @@ fn restrict_leg_allocates_one_unfilled_payload_and_degeneracy_independent_scratc
 /// `scale` times a base shape: the measurement and the payload byte count.
 /// `sequential` restricts one leg per call instead, the negative control.
 fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(
         &provider,
@@ -127,7 +131,7 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
     );
     let dual = leg.try_dual().unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &dual], [&leg], 53).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &dual], [&leg], 53).unwrap();
     let on_leg = LegSelection::try_new(
         &leg,
         [
@@ -145,13 +149,13 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
     )
     .unwrap();
     let set = [(2, &on_leg), (0, &on_leg), (1, &on_dual)];
-    let restrict = || {
+    let mut restrict = || {
         if sequential {
             set.iter().fold(source.clone(), |tensor, &pair| {
-                tensor.restrict_leg(&[pair]).unwrap()
+                tensor.restrict_leg(engine, &[pair]).unwrap()
             })
         } else {
-            source.restrict_leg(&set).unwrap()
+            source.restrict_leg(engine, &set).unwrap()
         }
     };
 
@@ -207,14 +211,15 @@ fn restricting_three_legs_is_one_payload_pass() {
 
 #[test]
 fn the_network_restriction_of_several_axes_fills_no_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0);
     let rows = u1(&provider, &[(0, 6)]);
     let columns = u1(&provider, &[(0, 8)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&rows], [&columns], 43).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&rows], [&columns], 43).unwrap();
     let zero_id = TypedSectorAdmission::try_encode_label(provider.as_ref(), &zero).unwrap();
     let restrictions = [
         NetworkDegeneracyRestriction {
@@ -255,19 +260,24 @@ fn the_network_restriction_of_several_axes_fills_no_payload() {
 /// One compact two-leg `restrict_leg` on an `s : bond <- bond` whose degeneracies
 /// are `scale` times a base shape, keeping a fixed prefix of each sector.
 fn compact_restrict_measurement(scale: usize) -> Measurement {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2 * scale), (0, 3 * scale)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 47).unwrap();
-    let Svd { s, .. } = source.svd_compact(&[0], &[1]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 47).unwrap();
+    let Svd { s, .. } = source.svd_compact(engine, &[0], &[1]).unwrap();
     let bond = s.domain()[0].clone();
     let selection =
         LegSelection::try_new(&bond, [(U1Irrep::new(-1), 0..2), (U1Irrep::new(0), 0..3)]).unwrap();
 
-    let warm = s.restrict_leg(&[(0, &selection), (1, &selection)]).unwrap();
+    let warm = s
+        .restrict_leg(engine, &[(0, &selection), (1, &selection)])
+        .unwrap();
     assert!(
-        symtn::expert::diagonal_spectrum(&warm).unwrap().is_some(),
+        symtn::expert::diagonal_spectrum(engine, &warm)
+            .unwrap()
+            .is_some(),
         "a compact receiver must stay compact"
     );
 
@@ -275,12 +285,13 @@ fn compact_restrict_measurement(scale: usize) -> Measurement {
     // No dense payload to watch: callers compare only calls and bytes.
     let measurement = measure(0, || {
         output = Some(black_box(
-            s.restrict_leg(&[(0, &selection), (1, &selection)]).unwrap(),
+            s.restrict_leg(engine, &[(0, &selection), (1, &selection)])
+                .unwrap(),
         ));
     });
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&output.unwrap()).unwrap(),
-        symtn::expert::diagonal_spectrum(&warm).unwrap()
+        symtn::expert::diagonal_spectrum(engine, &output.unwrap()).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &warm).unwrap()
     );
     measurement
 }
@@ -299,26 +310,27 @@ fn compact_restrict_leg_costs_the_kept_values_and_nothing_per_discarded_one() {
 
 #[test]
 fn lazy_adjoint_add_and_materialization_fill_no_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the owned outputs of a lazy-adjoint `add` and of the first
     // lazy-adjoint `data()` tile their storage, so neither zero-fills its
     // payload before overwriting every block (#1290). For `f64` the base
     // fill was `vec![0.0; len]`, an allocator-zeroed allocation.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     let square: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&leg, &other], 53).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&leg, &other], 53).unwrap();
     let partner: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&leg, &other], 59).unwrap();
-    let lazy = square.adjoint().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&leg, &other], 59).unwrap();
+    let lazy = square.adjoint(engine).unwrap();
     let payload_bytes = std::mem::size_of_val(square.dense_data().unwrap());
     assert!(square.subblock_count() > 1);
 
     let mut sum = None;
     let add = measure(payload_bytes, || {
-        sum = Some(black_box(lazy.axpby(0.5, &partner, -2.0).unwrap()));
+        sum = Some(black_box(lazy.axpby(engine, 0.5, &partner, -2.0).unwrap()));
     });
     assert_eq!(
         add.zeroed_payloads, 0,
@@ -326,7 +338,13 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
     );
 
     let materialize = measure(payload_bytes, || {
-        black_box(lazy.materialize().unwrap().dense_data().unwrap().len());
+        black_box(
+            lazy.materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len(),
+        );
     });
     assert_eq!(
         materialize.zeroed_payloads, 0,
@@ -335,7 +353,7 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
     // Oracle: the elementwise sum over the materialized adjoint payload,
     // which shares the partner's logical layout.
     let expected: Vec<u64> = lazy
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -358,7 +376,8 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
 /// strided sub-matrices. Returns the measurement and payload bytes of one
 /// warm call whose previous outputs were dropped.
 fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(
         &provider,
@@ -366,7 +385,7 @@ fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
     );
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&leg, &other], 61).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&leg, &other], 61).unwrap();
     let selection = LegSelection::try_new(
         &leg,
         [
@@ -375,14 +394,18 @@ fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
         ],
     )
     .unwrap();
-    let warm = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let warm = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let expected = warm.dense_data().unwrap().to_vec();
     let payload_bytes = std::mem::size_of_val(warm.dense_data().unwrap());
     drop(warm);
-    drop(black_box(source.restrict_leg(&[(0, &selection)]).unwrap()));
+    drop(black_box(
+        source.restrict_leg(engine, &[(0, &selection)]).unwrap(),
+    ));
     let mut output = None;
     let measurement = measure(payload_bytes, || {
-        output = Some(black_box(source.restrict_leg(&[(0, &selection)]).unwrap()));
+        output = Some(black_box(
+            source.restrict_leg(engine, &[(0, &selection)]).unwrap(),
+        ));
     });
     assert_eq!(output.unwrap().dense_data().unwrap(), expected.as_slice());
     (measurement, payload_bytes)
@@ -415,33 +438,42 @@ fn steady_state_restrict_leg_with_several_row_trees_pays_no_layout_proof() {
 /// other]` (several row trees per coupled sector): the measurement of a warm
 /// call and its payload bytes.
 fn stacked_restrict_measurement(members: usize) -> (Measurement, usize) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let tensors: Vec<TensorMap<_, f64>> = (0..members)
         .map(|seed| {
-            TensorMap::rand_with_seed(&runtime, [&leg, &other], [&leg, &other], 67 + seed as u64)
-                .unwrap()
+            TensorMap::rand_with_seed(
+                engine,
+                &runtime,
+                [&leg, &other],
+                [&leg, &other],
+                67 + seed as u64,
+            )
+            .unwrap()
         })
         .collect();
     let stack = StackedTensorMap::pack(&tensors).unwrap();
     let selection =
         LegSelection::try_new(&leg, [(U1Irrep::new(-1), 0..1), (U1Irrep::new(0), 1..3)]).unwrap();
-    let warm = stack.restrict_leg(&[(0, &selection)]).unwrap();
+    let warm = stack.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let payload_bytes =
-        members * std::mem::size_of_val(warm.member(0).unwrap().dense_data().unwrap());
+        members * std::mem::size_of_val(warm.member(engine, 0).unwrap().dense_data().unwrap());
     drop(warm);
     let mut output = None;
     let measurement = measure(payload_bytes, || {
-        output = Some(black_box(stack.restrict_leg(&[(0, &selection)]).unwrap()));
+        output = Some(black_box(
+            stack.restrict_leg(engine, &[(0, &selection)]).unwrap(),
+        ));
     });
     let output = output.unwrap();
     for (index, tensor) in tensors.iter().enumerate() {
         assert_eq!(
-            output.member(index).unwrap().dense_data().unwrap(),
+            output.member(engine, index).unwrap().dense_data().unwrap(),
             tensor
-                .restrict_leg(&[(0, &selection)])
+                .restrict_leg(engine, &[(0, &selection)])
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -477,7 +509,8 @@ fn stacked_restrict_leg_allocates_one_unfilled_payload_independent_of_the_member
 /// `scale` times a base shape: the two warm measurements and the restricted
 /// and embedded payload bytes.
 fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize, usize) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(
         &provider,
@@ -485,7 +518,7 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     );
     let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &other], [&other], 71).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 71).unwrap();
     let every_other = |degeneracy: usize| (0..degeneracy).step_by(2).collect::<Vec<_>>();
     let selection = LegSelection::try_new(
         &leg,
@@ -497,12 +530,14 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     )
     .unwrap();
 
-    let warm = source.restrict_leg(&[(0, &selection)]).unwrap();
-    let warm_embedded = warm.embed_leg(0, &selection).unwrap();
+    let warm = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
+    let warm_embedded = warm.embed_leg(engine, 0, &selection).unwrap();
     let payload_bytes = std::mem::size_of_val(warm.dense_data().unwrap());
     let mut output = None;
     let restrict = measure(payload_bytes, || {
-        output = Some(black_box(source.restrict_leg(&[(0, &selection)]).unwrap()));
+        output = Some(black_box(
+            source.restrict_leg(engine, &[(0, &selection)]).unwrap(),
+        ));
     });
     assert_eq!(
         output.unwrap().dense_data().unwrap(),
@@ -511,7 +546,7 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     let embedded_bytes = std::mem::size_of_val(warm_embedded.dense_data().unwrap());
     let mut embedded = None;
     let embed = measure(embedded_bytes, || {
-        embedded = Some(black_box(warm.embed_leg(0, &selection).unwrap()));
+        embedded = Some(black_box(warm.embed_leg(engine, 0, &selection).unwrap()));
     });
     assert_eq!(
         embedded.unwrap().dense_data().unwrap(),

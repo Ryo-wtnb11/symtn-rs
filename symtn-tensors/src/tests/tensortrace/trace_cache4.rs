@@ -219,10 +219,16 @@ fn check_mf_trace<R>(
             }
         }
         let real_out = crate::tensortrace_fusion_dyn_owned_checked(
-            &trace.dst, &trace.src, &real_data, axes, 1.0,
+            strided_kernel::Exec::serial(),
+            &trace.dst,
+            &trace.src,
+            &real_data,
+            axes,
+            1.0,
         )
         .unwrap();
         let complex_out = crate::tensortrace_fusion_dyn_owned_checked(
+            strided_kernel::Exec::serial(),
             &trace.dst,
             &trace.src,
             &complex_data,
@@ -533,6 +539,7 @@ fn trace_groups_resolve_through_cache4_per_group() {
 /// the other's value, and each still hits its own entry afterwards.
 #[test]
 fn trace_and_transform_of_one_permutation_do_not_share_entries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Exact hit/miss counts: alone in a child process, so no sibling test
     // publishes or clears these shared SU(2) groups meanwhile.
     if crate::test_support::run_isolated_or_return(
@@ -566,7 +573,7 @@ fn trace_and_transform_of_one_permutation_do_not_share_entries() {
     let mut transform = |degeneracy| {
         let layout = structure(degeneracy);
         planning
-            .resolve_tree_pair(&SU2FusionRule, &operation, &layout, &layout, false)
+            .resolve_tree_pair(engine, &SU2FusionRule, &operation, &layout, &layout, false)
             .unwrap()
     };
     let su2 = MfTrace::new(Arc::new(SU2FusionRule), su2_hom(), open, 1);
@@ -766,8 +773,15 @@ fn present_zero_entry_propagates_nan_warm_as_cold() {
         .collect::<Vec<_>>();
     data[block.offset()..block.storage_end_exclusive().unwrap()].fill(f64::NAN);
     let run = || {
-        crate::tensortrace_fusion_dyn_owned_checked(&trace.dst, &trace.src, &data, axes, 1.0)
-            .unwrap()
+        crate::tensortrace_fusion_dyn_owned_checked(
+            strided_kernel::Exec::serial(),
+            &trace.dst,
+            &trace.src,
+            &data,
+            axes,
+            1.0,
+        )
+        .unwrap()
     };
     // The compiles above left the groups resident: reset so this run is cold.
     let cold_out = {

@@ -134,7 +134,9 @@ fn case<D: Payload>(ctx: &mut CudaDenseContext, name: &str) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn many_spectra_download_once_and_bitwise_unchanged() {
-    let mut ctx = CudaDenseContext::new(0).expect("CUDA device 0");
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).expect("CUDA device 0");
     case::<f32>(&mut ctx, "f32");
     case::<f64>(&mut ctx, "f64");
     case::<Complex32>(&mut ctx, "Complex32");

@@ -90,6 +90,7 @@ fn compile_rejects_nonzero_stride_self_overlap() {
 
 #[test]
 fn interleaved_disjoint_destinations_with_overlapping_ranges_are_valid() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_structure = BlockStructure::packed_column_major(1, [vec![1]]).unwrap();
     let dst_structure = custom_structure(vec![block(0, 2, 2, 0), block(1, 2, 2, 1)]);
     let structure =
@@ -97,6 +98,7 @@ fn interleaved_disjoint_destinations_with_overlapping_ranges_are_valid() {
             .unwrap();
     let mut dst = vec![10.0, 20.0, 30.0, 40.0];
     tree_transform_structure_with_structural_recoupling_raw(
+        engine,
         &mut StridedHostKernelAdapter::default(),
         &mut DefaultDenseExecutor::new(),
         &mut TreeTransformWorkspace::default(),

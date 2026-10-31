@@ -32,6 +32,7 @@
 //! use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
 //!
 //! # fn main() -> Result<(), Error> {
+//! let engine = &mut symtn::typed::CpuEngine::serial();
 //! let runtime = Runtime::builder().build()?;
 //! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
 //!
@@ -39,7 +40,7 @@
 //! let odd = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
-//! let t: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&v], [&v])?;
+//! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
 //! assert_eq!(t.subblock_count(), 2);
 //! assert_eq!(t.subblock_fusion_trees(0)?.coupled(), &even);
 //! # Ok(())
@@ -264,10 +265,9 @@ pub type PhysicalDenseError<E> = symtn_tensors::PhysicalConversionError<E>;
 
 /// Every fallible method here returns this error.
 pub use crate::error::{Alternative, Error};
-#[cfg(feature = "cuda")]
-pub use crate::runtime::CudaTreeTransformStats;
-/// The runtime every constructor here takes, its builder and configuration.
-pub use crate::runtime::{LinalgBackend, Runtime, RuntimeBuilder, RuntimeConfigError};
+/// The runtime every constructor here takes (prepared structural state) and
+/// its builder.
+pub use crate::runtime::{Runtime, RuntimeBuilder};
 /// The complex payload scalars.
 pub use num_complex::{Complex32, Complex64};
 /// Block and fusion-tree keys and vertex labels read from a [`TensorMap`],
@@ -276,6 +276,33 @@ pub use symtn_core::{
     BlockKey, BlockKeyKind, CheckedFusionSpaceError, FusionTreeGroupKey, FusionTreeKey,
     FusionTreePairKey, MultiplicityIndex, OpaqueBlockKey,
 };
+/// The caller-owned execution resources every numerical operation takes as
+/// its first argument (`engine: &mut dyn Engine`): tenferro's engine trait,
+/// its CPU engine and the CPU engine's thread pool.
+///
+/// How grouped dense GEMMs (the recoupling and contraction batches) use a
+/// pooled `CpuEngine`'s threads is the engine's batch policy, an engine-owned
+/// setting symtn never overrides. On the native provider the default
+/// (`CpuBatchStrategy::Auto`) runs the GEMMs of one batch one per lane with a
+/// single thread each, so a batch of a few large blocks keeps most of the pool
+/// idle. A workload dominated by large blocks can give each GEMM the whole
+/// pool instead:
+/// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
+/// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
+/// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
+/// the batch's vendor GEMMs sequentially on the calling thread (vendor threads
+/// are outside the engine's lanes); forcing `Inner` there runs the GEMMs on
+/// the native kernels instead of the vendor library.
+pub use symtn_dense::{CpuEngine, Engine, Pool};
+/// The caller-owned CUDA engine every device operation borrows, and the
+/// device id it opens on.
+///
+/// Opening an engine compiles tenferro-gpu's device kernels with NVRTC, seconds
+/// per kernel module, so hold one long-lived engine per device (and thread)
+/// rather than one per task. `TENFERRO_CUDA_ARTIFACT_CACHE=<dir>` persists the
+/// compiled kernels in `<dir>` for later engines and processes.
+#[cfg(feature = "cuda")]
+pub use symtn_dense::{CudaDeviceId, CudaEngine};
 /// The device-scalar supertrait of [`CudaPayload`] and its real counterpart.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{CudaRealScalar, CudaScalar};
@@ -364,13 +391,13 @@ mod cuda_factor;
 pub(crate) use cuda_factor::{
     assemble_aligned_left_factor, assemble_left_factor, assemble_right_factor,
     copy_left_factor_treewise, copy_whole_factor, cuda_download_spectra, cuda_hermitian_regions,
-    cuda_qr_region, cuda_svd_region, dense_err, fill_diagonal_values, require_finite_cuda_input,
-    typed_cuda_eigh_region, upload_selector,
+    cuda_qr_region, cuda_svd_region, dense_err, ensure_cuda_owns, fill_diagonal_values,
+    require_finite_cuda_input, typed_cuda_eigh_region, upload_selector,
 };
 #[cfg(feature = "cuda")]
 use cuda_factor::{
-    download_cuda_reduction_partials, executed_routes, validate_cuda_reduction_placement,
-    validate_cuda_svd_middle_regions, TypedCudaQrScratch, TypedCudaSvdScratch,
+    download_cuda_reduction_partials, executed_routes, validate_cuda_svd_middle_regions,
+    TypedCudaQrScratch, TypedCudaSvdScratch,
 };
 #[cfg(feature = "cuda")]
 use symtn_matrixalgebra::seam::{compact_factor_routes, CompactFactorPlan, CompactFactorRoute};
@@ -453,6 +480,7 @@ mod reduction_ops;
 pub use reduction_ops::ReduceExec;
 mod restrict;
 mod storage;
+pub(crate) use storage::admit_host_engine;
 pub(crate) use storage::sealed::{ExecToken, EXEC};
 #[doc(hidden)]
 pub use storage::TypedStorage;

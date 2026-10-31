@@ -85,8 +85,10 @@ and all three samples use `--locked --offline`; fetch the locked dependencies
 before disconnecting if they are not already in the local Cargo cache.
 
 `OP_MATRIX_DEGENERACY` selects the common per-sector degeneracy (default 8).
-`OP_MATRIX_GEMM_BACKEND` is `faer` by default. A macOS BLAS control uses the
-same Apple Accelerate provider as the pinned TensorKit environment.
+`OP_MATRIX_THREADS` is the width of the caller's engine every row runs on
+(default 1, a serial engine). The CPU provider is the compiled one: faer by
+default; a macOS BLAS control builds `blas-accelerate`, the same Apple
+Accelerate provider as the pinned TensorKit environment.
 `OP_MATRIX_OPERATION` can select one exact operation name for focused profiling.
 `OP_MATRIX_FORM` similarly selects `owned` or `destination`.
 `OP_MATRIX_PROFILE_PAUSE_MS` pauses after that row's warm phase so an external
@@ -184,7 +186,7 @@ RAYON_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
 MKL_NUM_THREADS=1 BLIS_NUM_THREADS=1 \
 OP_MATRIX_OPERATION=oriented_uniform_run \
 OP_MATRIX_MIN_MS=200 \
-OP_MATRIX_GEMM_BACKEND=faer \
+OP_MATRIX_THREADS=1 \
 OP_MATRIX_CARGO_FEATURES=cpu-faer,cgc-gen \
 CARGO_TARGET_DIR=/Users/ryowatanabe/Research/codes/MyTensorNetworks/libraries/tenet/target \
 benchmarks/operation_matrix.sh
@@ -299,8 +301,8 @@ and retained idle storage remain unavailable in this runner.
 
 These checked rows construct `DefaultDenseExecutor` directly. The prescribed
 comparison builds only `cpu-faer,cgc-gen` and uses the wrapper's
-`RAYON_NUM_THREADS=1` and BLAS thread limits. `OP_MATRIX_GEMM_BACKEND` configures
-tensor-operation GEMM and does not select the factorization provider.
+`RAYON_NUM_THREADS=1` and BLAS thread limits, and a serial engine
+(`OP_MATRIX_THREADS=1`).
 
 ```sh
 OP_MATRIX_OPERATION=full_qr_lowering \
@@ -336,7 +338,6 @@ unavailable.
 The Apple Accelerate control is:
 
 ```sh
-OP_MATRIX_GEMM_BACKEND=blas \
 OP_MATRIX_CARGO_FEATURES=blas-accelerate \
 benchmarks/operation_matrix.sh
 

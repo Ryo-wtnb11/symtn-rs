@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
@@ -61,7 +62,18 @@ fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
     assert_eq!(specs, vec![TensorContractBlockSpec::new(0, 0, 0)]);
 
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
-    context_contract_into(&mut context, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    context_contract_into(
+        engine,
+        &mut context,
+        &rule,
+        &mut dst,
+        &lhs,
+        &rhs,
+        axes,
+        alpha,
+        beta,
+    )
+    .unwrap();
     // What: an irregular packed Core plan replays the active block and scales
     // the inactive one by beta.
     assert!(context.last_resolution_is_core());
@@ -70,6 +82,7 @@ fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
 
 #[test]
 fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -151,6 +164,7 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
     let mut oracle = vec![initial[0]];
     crate::TensorContractFusionExecutionContext::<Complex64, _>::default()
         .tensorcontract_prelowered_into(
+            engine,
             &oracle_dst_bound,
             &mut oracle,
             crate::FusionOperand::direct(adjoint_bound.space()),
@@ -178,6 +192,7 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
             .data_mut()
             .copy_from_slice(&[Complex64::new(10.0, 4.0), Complex64::new(20.0, -2.0)]);
         context_contract_into(
+            engine,
             &mut context,
             &rule,
             &mut actual,
@@ -194,9 +209,11 @@ fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_or
 
 #[test]
 fn tensorcontract_fusion_block_replay_scatter_beta_supports_dense_dtypes() {
-    assert_fusion_block_scatter_beta_dtype(2.0_f32, 5.0, 10.0, 20.0, 2.0, 3.0);
-    assert_fusion_block_scatter_beta_dtype(2.0_f64, 5.0, 10.0, 20.0, 2.0, 3.0);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    assert_fusion_block_scatter_beta_dtype(engine, 2.0_f32, 5.0, 10.0, 20.0, 2.0, 3.0);
+    assert_fusion_block_scatter_beta_dtype(engine, 2.0_f64, 5.0, 10.0, 20.0, 2.0, 3.0);
     assert_fusion_block_scatter_beta_dtype(
+        engine,
         Complex32::new(2.0, 1.0),
         Complex32::new(5.0, -2.0),
         Complex32::new(10.0, 1.0),
@@ -205,6 +222,7 @@ fn tensorcontract_fusion_block_replay_scatter_beta_supports_dense_dtypes() {
         Complex32::new(-1.0, 0.5),
     );
     assert_fusion_block_scatter_beta_dtype(
+        engine,
         Complex64::new(2.0, 1.0),
         Complex64::new(5.0, -2.0),
         Complex64::new(10.0, 1.0),
@@ -215,6 +233,7 @@ fn tensorcontract_fusion_block_replay_scatter_beta_supports_dense_dtypes() {
 }
 
 fn assert_fusion_block_scatter_beta_dtype<T>(
+    engine: &mut dyn Engine,
     lhs_value: T,
     rhs_value: T,
     initial_even: T,
@@ -271,6 +290,7 @@ fn assert_fusion_block_scatter_beta_dtype<T>(
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,

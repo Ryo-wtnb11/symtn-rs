@@ -87,8 +87,12 @@ fn bits<D: Bits>(data: &[D]) -> Vec<[Option<u64>; 2]> {
 /// Device `materialize` of `host.to_cuda()` and of its lazy adjoint against
 /// the Host results: bit-equal, one fresh payload, no payload upload, no
 /// download.
-fn check<R, D>(host: &TensorMap<R, D>, what: &str)
-where
+fn check<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    host: &TensorMap<R, D>,
+    what: &str,
+) where
     R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec
@@ -99,9 +103,9 @@ where
     D: Bits + symtn::typed::CudaPayload,
 {
     assert!(host.subblock_count() >= 2, "{what}: multi-block fixture");
-    let host_lazy = host.adjoint().unwrap();
-    let device = host.to_cuda().unwrap();
-    let lazy = device.adjoint().unwrap();
+    let host_lazy = host.adjoint(engine).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
+    let lazy = device.adjoint(cuda).unwrap();
     assert!(
         symtn::typed::__network::network_reuse_class(&lazy, false)
             == NetworkReuseClass::LazyAdjoint
@@ -110,7 +114,7 @@ where
     let len = host.dense_data().unwrap().len() as u64;
     // A chained input: an owned device copy (a `[len, 1]` gather output, not
     // the flat upload) and its lazy adjoint.
-    let rechained = device.materialize().unwrap().adjoint().unwrap();
+    let rechained = device.materialize(cuda).unwrap().adjoint(cuda).unwrap();
     // (input, Host expected, device allocations, upload bytes). The counters
     // charge every upload as an allocation too. Owned and real adjoint: the
     // payload plus the gather's 8-byte member index. Complex adjoint: the
@@ -122,24 +126,24 @@ where
         (2, 8, 8)
     };
     for (input, expected, allocs, bytes, case) in [
-        (&device, host.materialize().unwrap(), 2, 8, "owned"),
+        (&device, host.materialize(engine).unwrap(), 2, 8, "owned"),
         (
             &lazy,
-            host_lazy.materialize().unwrap(),
+            host_lazy.materialize(engine).unwrap(),
             adjoint_allocs,
             flat_bytes,
             "adjoint",
         ),
         (
             &rechained,
-            host_lazy.materialize().unwrap(),
+            host_lazy.materialize(engine).unwrap(),
             adjoint_allocs,
             chained_bytes,
             "chained adjoint",
         ),
     ] {
         let before = cuda_transfer_stats();
-        let owned = input.materialize().unwrap();
+        let owned = input.materialize(cuda).unwrap();
         let after = cuda_transfer_stats();
         assert_eq!(
             after.device_allocs - before.device_allocs,
@@ -160,7 +164,7 @@ where
         );
         assert_eq!(owned.placement(), input.placement(), "{what} {case}");
         assert!(std::ptr::eq(owned.provider(), input.provider()));
-        let back = owned.to_host().unwrap();
+        let back = owned.to_host(cuda).unwrap();
         assert_eq!(
             back.codomain(),
             expected.codomain(),
@@ -177,9 +181,9 @@ where
     assert_eq!(
         bits(
             device
-                .materialize()
+                .materialize(cuda)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -189,11 +193,11 @@ where
     );
     // The adjoint of the lazy adjoint materializes to the parent.
     let twice = lazy
-        .adjoint()
+        .adjoint(cuda)
         .unwrap()
-        .materialize()
+        .materialize(cuda)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_eq!(twice.codomain(), host.codomain(), "{what}: adjoint twice");
     assert_eq!(twice.domain(), host.domain(), "{what}: adjoint twice");
@@ -208,9 +212,10 @@ where
     // source keeps its values.
     let codomain: Vec<usize> = (0..host.codomain_rank()).collect();
     let domain: Vec<usize> = (host.codomain_rank()..host.rank()).collect();
-    let mut destination = device.materialize().unwrap();
+    let mut destination = device.materialize(cuda).unwrap();
     device
         .permute_into(
+            cuda,
             &codomain,
             &domain,
             &mut destination,
@@ -219,21 +224,33 @@ where
         )
         .unwrap();
     assert_eq!(
-        bits(device.to_host().unwrap().dense_data().unwrap()),
+        bits(device.to_host(cuda).unwrap().dense_data().unwrap()),
         bits(host.dense_data().unwrap()),
         "{what}: input unchanged"
     );
     let mut alias = device.clone();
     assert!(device
-        .permute_into(&codomain, &domain, &mut alias, D::two(), D::from_real(0.0))
+        .permute_into(
+            cuda,
+            &codomain,
+            &domain,
+            &mut alias,
+            D::two(),
+            D::from_real(0.0)
+        )
         .err()
         .unwrap()
         .report()
         .contains("must not alias an input"));
 }
 
-fn fixtures<R, D>(runtime: &Runtime, leg: &GradedSpace<R>, what: &str)
-where
+fn fixtures<R, D>(
+    cuda: &mut dyn symtn::typed::Engine,
+    engine: &mut dyn symtn::typed::Engine,
+    runtime: &Runtime,
+    leg: &GradedSpace<R>,
+    what: &str,
+) where
     R: symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec
@@ -245,18 +262,20 @@ where
 {
     let dual = leg.try_dual().unwrap();
     let square: TensorMap<R, D> =
-        TensorMap::rand_with_seed(runtime, [leg, &dual], [&dual, leg], 1545).unwrap();
-    check(&square, &format!("{what} 2<-2"));
+        TensorMap::rand_with_seed(engine, runtime, [leg, &dual], [&dual, leg], 1545).unwrap();
+    check(engine, cuda, &square, &format!("{what} 2<-2"));
     // nout != nin: the adjoint swaps unequal codomain and domain ranks.
     let uneven: TensorMap<R, D> =
-        TensorMap::rand_with_seed(runtime, [leg], [&dual, leg], 1546).unwrap();
-    check(&uneven, &format!("{what} 1<-2"));
+        TensorMap::rand_with_seed(engine, runtime, [leg], [&dual, leg], 1546).unwrap();
+    check(engine, cuda, &uneven, &format!("{what} 1<-2"));
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_materialize_matches_host_with_one_fresh_payload() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -290,15 +309,15 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
         ],
     )
     .unwrap();
-    fixtures::<_, f64>(&runtime, &u1, "U1/f64");
-    fixtures::<_, Complex64>(&runtime, &u1, "U1/c64");
-    fixtures::<_, f64>(&runtime, &su2, "SU2/f64");
-    fixtures::<_, Complex64>(&runtime, &su2, "SU2/c64");
-    fixtures::<_, f64>(&runtime, &fz2_u1, "fZ2xU1/f64");
-    fixtures::<_, Complex64>(&runtime, &fz2_u1, "fZ2xU1/c64");
-    fixtures::<_, f32>(&runtime, &u1, "U1/f32");
-    fixtures::<_, Complex32>(&runtime, &u1, "U1/c32");
-    fixtures::<_, Complex32>(&runtime, &su2, "SU2/c32");
+    fixtures::<_, f64>(cuda, engine, &runtime, &u1, "U1/f64");
+    fixtures::<_, Complex64>(cuda, engine, &runtime, &u1, "U1/c64");
+    fixtures::<_, f64>(cuda, engine, &runtime, &su2, "SU2/f64");
+    fixtures::<_, Complex64>(cuda, engine, &runtime, &su2, "SU2/c64");
+    fixtures::<_, f64>(cuda, engine, &runtime, &fz2_u1, "fZ2xU1/f64");
+    fixtures::<_, Complex64>(cuda, engine, &runtime, &fz2_u1, "fZ2xU1/c64");
+    fixtures::<_, f32>(cuda, engine, &runtime, &u1, "U1/f32");
+    fixtures::<_, Complex32>(cuda, engine, &runtime, &u1, "U1/c32");
+    fixtures::<_, Complex32>(cuda, engine, &runtime, &su2, "SU2/c32");
 
     // Values a unit-operand contraction would change: complex infinities,
     // and signed zeros in either part. The owned copy and the adjoint
@@ -315,14 +334,18 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
     let dual = u1.try_dual().unwrap();
     let mut next = 0;
     let special: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &dual], [&dual, &u1], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &dual], [&dual, &u1], |_, _| {
             next += 1;
             specials[next % specials.len()]
         })
         .unwrap();
-    check(&special, "U1/c64 specials");
+    check(engine, cuda, &special, "U1/c64 specials");
     // The Host oracle itself conjugates exactly.
-    let host_adjoint = special.adjoint().unwrap().materialize().unwrap();
+    let host_adjoint = special
+        .adjoint(engine)
+        .unwrap()
+        .materialize(engine)
+        .unwrap();
     assert!(host_adjoint
         .dense_data()
         .unwrap()
@@ -338,20 +361,20 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
     ];
     let mut next = 0;
     let nan: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &dual], [&dual, &u1], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &dual], [&dual, &u1], |_, _| {
             next += 1;
             nans[next % nans.len()]
         })
         .unwrap();
-    check(&nan, "U1/c64 NaN");
+    check(engine, cuda, &nan, "U1/c64 NaN");
     let device_adjoint = nan
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .adjoint()
+        .adjoint(cuda)
         .unwrap()
-        .materialize()
+        .materialize(cuda)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert!(device_adjoint
         .dense_data()

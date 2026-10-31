@@ -81,10 +81,12 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     (0..count)
         .map(|member| {
             let mut next = 1000 * member + 100 * salt;
             TensorMap::from_subblock_fn(
+                engine,
                 runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -118,9 +120,11 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     (0..count)
         .map(|_| {
             TensorMap::from_subblock_fn(
+                engine,
                 runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -157,6 +161,7 @@ where
     <R as SectorCodec>::Sector: Debug,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let trees = tensor.subblock_fusion_trees(index).unwrap();
     let codomain = tree_key(
         trees.coupled(),
@@ -174,7 +179,7 @@ where
     let nout = tensor.codomain_rank();
     let rows: usize = block.shape()[..nout].iter().product();
     let cols: usize = block.shape()[nout..].iter().product();
-    let materialized = tensor.materialize().unwrap();
+    let materialized = tensor.materialize(engine).unwrap();
     let data = materialized.dense_data().unwrap();
     let mut matrix = Vec::with_capacity(rows * cols);
     for_each_index(block.shape(), |index| {
@@ -269,95 +274,4 @@ fn mul<D: Payload>(a: D, b: D) -> D {
 fn add<D: Payload>(a: D, b: D) -> D {
     let ((ar, ai), (br, bi)) = (a.parts(), b.parts());
     D::entry(ar + br, ai + bi)
-}
-
-/// The plan entries a device handle for `a · b` must reserve, derived from
-/// the public block trees alone: one per distinct coupled-sector GEMM shape
-/// `(m, k, n)` over the sectors both operands carry, plus one per distinct
-/// length of a maximal run of consecutive inactive destination sectors
-/// (`template` is the destination; its payload is not read).
-pub fn expected_plan_entries<R, D>(
-    a: &TensorMap<R, D>,
-    b: &TensorMap<R, D>,
-    template: &TensorMap<R, D>,
-) -> usize
-where
-    R: symtn::sector::TypedSectorAdmission<
-            Sector = <R as symtn::sector::SectorCodec>::Sector,
-            Error = symtn::typed::FusionAlgebraError,
-            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
-        > + MultiplicityFreeRigidSymbols<Scalar = f64>
-        + CheckedFusionAlgebra
-        + SectorCodec,
-    <R as SectorCodec>::Sector: Debug,
-    D: Payload,
-{
-    use std::collections::{BTreeMap, HashSet};
-    // Per coupled sector: distinct row trees -> rows, distinct column trees -> cols.
-    type Extents = HashMap<String, (HashMap<String, usize>, HashMap<String, usize>)>;
-    let extents = |t: &TensorMap<R, D>| {
-        let mut out: Extents = HashMap::new();
-        for index in 0..t.subblock_count() {
-            let (row, col, rows, cols, _) = block_matrix(t, index);
-            let coupled = format!("{:?}", t.subblock_fusion_trees(index).unwrap().coupled());
-            let entry = out.entry(coupled).or_default();
-            entry.0.insert(row, rows);
-            entry.1.insert(col, cols);
-        }
-        out
-    };
-    let total = |map: &HashMap<String, usize>| map.values().sum::<usize>();
-    let (ea, eb) = (extents(a), extents(b));
-    let gemms = ea
-        .iter()
-        .filter_map(|(c, (rows, inner))| {
-            eb.get(c)
-                .map(|(_, cols)| (total(rows), total(inner), total(cols)))
-        })
-        .collect::<HashSet<_>>()
-        .len();
-    // Destination sectors in storage order, with their element counts.
-    let mut sectors: BTreeMap<usize, (String, usize)> = BTreeMap::new();
-    let mut starts: HashMap<String, usize> = HashMap::new();
-    for index in 0..template.subblock_count() {
-        let coupled = format!(
-            "{:?}",
-            template.subblock_fusion_trees(index).unwrap().coupled()
-        );
-        let offset = template.subblock(index).unwrap().offset();
-        let start = starts.entry(coupled).or_insert(offset);
-        *start = (*start).min(offset);
-    }
-    for (coupled, &start) in &starts {
-        let len = (0..template.subblock_count())
-            .filter(|&i| {
-                format!("{:?}", template.subblock_fusion_trees(i).unwrap().coupled()) == *coupled
-            })
-            .map(|i| {
-                template
-                    .subblock(i)
-                    .unwrap()
-                    .shape()
-                    .iter()
-                    .product::<usize>()
-            })
-            .sum();
-        sectors.insert(start, (coupled.clone(), len));
-    }
-    let mut runs = HashSet::new();
-    let mut run = 0;
-    for (coupled, len) in sectors.values() {
-        if ea.contains_key(coupled) && eb.contains_key(coupled) {
-            if run > 0 {
-                runs.insert(run);
-            }
-            run = 0;
-        } else {
-            run += len;
-        }
-    }
-    if run > 0 {
-        runs.insert(run);
-    }
-    gemms + runs.len()
 }

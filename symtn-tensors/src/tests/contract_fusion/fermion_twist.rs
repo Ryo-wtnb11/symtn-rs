@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn tensorcontract_fusion_fermion_rhs_dual_codomain_twists_like_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FermionParityFusionRule;
     let odd = SectorId::new(1);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
@@ -46,6 +47,7 @@ fn tensorcontract_fusion_fermion_rhs_dual_codomain_twists_like_tensorkit() {
     );
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -61,6 +63,7 @@ fn tensorcontract_fusion_fermion_rhs_dual_codomain_twists_like_tensorkit() {
 
 #[test]
 fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit @tensor reference (Julia crosscheck 2026-07-04):
     // V = Vect[FermionParity](0 => 1, 1 => 2); A :: V <- V'; B :: V' <- V
     // A blocks: even [0.5], odd [1.5, 2.5, 3.5, 4.5] (col-major)
@@ -127,6 +130,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     assert!(!facts[1].rhs_requires_twist());
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -187,6 +191,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     let mut contract_backend = DenseTreeTransformOperations::default_executor();
     let mut contract_workspace = TensorContractWorkspace::default();
     crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+        engine,
         &mut tree_backend,
         &mut tree_workspace,
         &mut contract_backend,
@@ -213,6 +218,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     )
     .unwrap();
     crate::contract::execute_dynamic_tree_execution_artifact_for_test(
+        engine,
         &rule,
         &reverse_plan,
         &mut artifact_dst,
@@ -232,6 +238,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
     dst.data_mut().copy_from_slice(&initial);
     let mut context = TensorContractFusionExecutionContext::<f64, _>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut dst,
@@ -256,6 +263,7 @@ fn tensorcontract_fusion_fermion_twist_deg2_matches_tensorkit_reference() {
 
 #[test]
 fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Both operands are already in core form, so TensorKit's `blas_contract!`
     // (tensoroperations.jl:398-409 @cfaa073) copies and twists the smaller
     // one, A (5 elements), not B (10): C[a; b w] = sum_k A[a; k] θ_k
@@ -341,12 +349,13 @@ fn fermion_twist_folds_into_core_alpha_by_hand_calculation() {
     };
     // The eager entry.
     let mut plain = new_dst();
-    fusion_contract_into(&rule, &mut plain, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(engine, &rule, &mut plain, &lhs, &rhs, axes, alpha, beta).unwrap();
     // The same entry through an explicit context: it records the route the
     // eager call takes.
     let mut artifact = new_dst();
     let mut artifact_context = TensorContractFusionExecutionContext::<f64, _>::default();
     context_contract_into(
+        engine,
         &mut artifact_context,
         &rule,
         &mut artifact,

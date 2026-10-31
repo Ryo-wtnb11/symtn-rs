@@ -723,6 +723,7 @@ where
     let one = T::from_parts(1.0, 0.0);
     if overwrite {
         symtn_operations::tree_transform_structure_overwrite_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &fixture.structure,
@@ -735,6 +736,7 @@ where
         .unwrap();
     } else {
         symtn_operations::tree_transform_structure_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &fixture.structure,

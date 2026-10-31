@@ -276,6 +276,7 @@ fn checked_group_compiler_reports_step_major_first_provider_error() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_runtime_failure_order_is_stable_and_publishes_nothing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let fixture = order_fixture();
     let homspace = fixture.homspace.clone();
     let provider = Arc::new(fixture.provider);
@@ -313,7 +314,7 @@ fn checked_runtime_failure_order_is_stable_and_publishes_nothing() {
         provider.r_calls.borrow_mut().clear();
         provider.f_calls.set(0);
         let error = context
-            .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
             .unwrap_err();
         assert_eq!(format!("{error:?}"), format!("{standalone:?}"));
         assert_eq!(*provider.r_calls.borrow(), standalone_r);

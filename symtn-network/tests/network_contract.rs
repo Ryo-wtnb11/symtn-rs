@@ -62,31 +62,36 @@ macro_rules! paths {
     ($name:ident, $space:expr) => {
         #[test]
         fn $name() {
-            let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+            let engine = &mut symtn::typed::CpuEngine::serial();
+            let runtime = Runtime::builder().build().unwrap();
             let v = $space;
-            let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 1).unwrap();
-            let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 2).unwrap();
-            let c = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 3).unwrap();
+            let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 1).unwrap();
+            let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 2).unwrap();
+            let c = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 3).unwrap();
 
             // The chain.
             let oracle = a
-                .contract(&b, &matrix())
+                .contract(engine, &b, &matrix())
                 .unwrap()
-                .contract(&c, &matrix())
+                .contract(engine, &c, &matrix())
                 .unwrap();
             let network = chain();
             let planned = network
                 .plan(&[&a, &b, &c], &GreedyDenseOptimizer)
                 .unwrap()
-                .execute(&[&a, &b, &c], &mut NetworkExecutionWorkspace::default())
+                .execute(
+                    engine,
+                    &[&a, &b, &c],
+                    &mut NetworkExecutionWorkspace::default(),
+                )
                 .unwrap();
-            let eager = network.contract(&[&a, &b, &c]).unwrap();
+            let eager = network.contract(engine, &[&a, &b, &c]).unwrap();
             let cached_result = net(
                 &[op(&["i"], &["j"]), op(&["j"], &["k"]), op(&["k"], &["m"])],
                 &["i"],
                 &["m"],
             )
-            .contract(&[&a, &b, &c])
+            .contract(engine, &[&a, &b, &c])
             .unwrap();
             assert_eq!(eager.codomain(), oracle.codomain());
             assert_eq!(eager.domain(), oracle.domain());
@@ -106,10 +111,12 @@ macro_rules! paths {
             // `psi.inner(h psi)`: for fermions the closed network is the
             // supertrace, which differs from the inner product by the odd
             // sectors' signs.
-            let psi = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v, &v], 4).unwrap();
-            let h = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 5).unwrap();
+            let psi =
+                TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v, &v], 4).unwrap();
+            let h = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 5).unwrap();
             let h_psi = h
                 .contract(
+                    engine,
                     &psi,
                     &ContractSpec {
                         lhs: &[1],
@@ -120,9 +127,10 @@ macro_rules! paths {
                 )
                 .unwrap();
             let oracle = psi
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
                 .contract(
+                    engine,
                     &h_psi,
                     &ContractSpec {
                         lhs: &[2, 0, 1],
@@ -132,20 +140,24 @@ macro_rules! paths {
                     },
                 )
                 .unwrap()
-                .scalar()
+                .scalar(engine)
                 .unwrap();
             let network = expectation();
             let eager = network
-                .contract(&[&psi, &h, &psi])
+                .contract(engine, &[&psi, &h, &psi])
                 .unwrap()
-                .scalar()
+                .scalar(engine)
                 .unwrap();
             let planned = network
                 .plan(&[&psi, &h, &psi], &GreedyDenseOptimizer)
                 .unwrap()
-                .execute(&[&psi, &h, &psi], &mut NetworkExecutionWorkspace::default())
+                .execute(
+                    engine,
+                    &[&psi, &h, &psi],
+                    &mut NetworkExecutionWorkspace::default(),
+                )
                 .unwrap()
-                .scalar()
+                .scalar(engine)
                 .unwrap();
             let cached_result = net(
                 &[
@@ -156,9 +168,9 @@ macro_rules! paths {
                 &[],
                 &[],
             )
-            .contract(&[&psi, &h, &psi])
+            .contract(engine, &[&psi, &h, &psi])
             .unwrap()
-            .scalar()
+            .scalar(engine)
             .unwrap();
             close(&[eager], &[oracle]);
             close(&[planned], &[oracle]);
@@ -212,20 +224,21 @@ fn u1_space(dim: usize) -> GradedSpace<U1FusionRule> {
 
 #[test]
 fn contract_shares_the_topology_cache_and_counts_hits() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = u1_space(2);
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 10).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 11).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 12).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 10).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 11).unwrap();
+    let c = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 12).unwrap();
     let network = chain();
 
-    let first = network.contract(&[&a, &b, &c]).unwrap();
+    let first = network.contract(engine, &[&a, &b, &c]).unwrap();
     let cold = plan_cache_stats(&runtime);
     assert_eq!((cold.misses, cold.hits, cold.entries), (1, 0, 1));
     assert_eq!(cold.workspaces_created, 1);
 
     // The network's own alias.
-    let second = network.contract(&[&a, &b, &c]).unwrap();
+    let second = network.contract(engine, &[&a, &b, &c]).unwrap();
     let warm = plan_cache_stats(&runtime);
     assert_eq!((warm.misses, warm.hits, warm.entries), (1, 1, 1));
     assert_eq!(warm.workspace_reuses, 1);
@@ -233,13 +246,13 @@ fn contract_shares_the_topology_cache_and_counts_hits() {
 
     // Equal networks built anew over the same topology
     // reach the same entry.
-    chain().contract(&[&a, &b, &c]).unwrap();
+    chain().contract(engine, &[&a, &b, &c]).unwrap();
     net(
         &[op(&["i"], &["j"]), op(&["j"], &["k"]), op(&["k"], &["m"])],
         &["i"],
         &["m"],
     )
-    .contract(&[&a, &b, &c])
+    .contract(engine, &[&a, &b, &c])
     .unwrap();
     let shared = plan_cache_stats(&runtime);
     assert_eq!((shared.misses, shared.hits, shared.entries), (1, 3, 1));
@@ -253,28 +266,29 @@ fn contract_shares_the_topology_cache_and_counts_hits() {
         Some(1),
     )
     .unwrap();
-    other.contract(&[&a, &b, &c]).unwrap();
+    other.contract(engine, &[&a, &b, &c]).unwrap();
     let after = plan_cache_stats(&runtime);
     assert_eq!((after.misses, after.entries), (2, 2));
 
     clear_plan_cache(&runtime);
     assert_eq!(plan_cache_stats(&runtime), Default::default());
-    network.contract(&[&a, &b, &c]).unwrap();
+    network.contract(engine, &[&a, &b, &c]).unwrap();
     assert_eq!(plan_cache_stats(&runtime).misses, 1);
 }
 
 #[test]
 fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = u1_space(2);
     let w = u1_space(3);
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 20).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 21).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 22).unwrap();
-    let wide = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&w], 23).unwrap();
-    let rank3 = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v, &v], 24).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 20).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 21).unwrap();
+    let c = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 22).unwrap();
+    let wide = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&w], 23).unwrap();
+    let rank3 = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v, &v], 24).unwrap();
     let network = chain();
-    network.contract(&[&a, &b, &c]).unwrap();
+    network.contract(engine, &[&a, &b, &c]).unwrap();
     let before = plan_cache_stats(&runtime);
 
     for (what, tensors) in [
@@ -282,35 +296,36 @@ fn contract_rejects_before_the_lookup_and_leaves_the_cache_unchanged() {
         ("contracted space", vec![&a, &wide, &c]),
         ("rank", vec![&a, &rank3, &c]),
     ] {
-        assert!(network.contract(&tensors).is_err(), "{what}");
+        assert!(network.contract(engine, &tensors).is_err(), "{what}");
         assert_eq!(plan_cache_stats(&runtime), before, "{what}");
     }
 
     let foreign = Runtime::builder().build().unwrap();
-    let elsewhere = TensorMap::<_, f64>::rand_with_seed(&foreign, [&v], [&v], 25).unwrap();
-    assert!(network.contract(&[&a, &b, &elsewhere]).is_err());
+    let elsewhere = TensorMap::<_, f64>::rand_with_seed(engine, &foreign, [&v], [&v], 25).unwrap();
+    assert!(network.contract(engine, &[&a, &b, &elsewhere]).is_err());
     assert_eq!(plan_cache_stats(&runtime), before);
 }
 
 #[test]
 fn contract_orders_round_trip_through_save_and_load() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let first = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&first, ""), 0);
     let v = u1_space(2);
-    let a = TensorMap::<_, f64>::rand_with_seed(&first, [&v], [&v], 40).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&first, [&v], [&v], 41).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&first, [&v], [&v], 42).unwrap();
-    let expected = chain().contract(&[&a, &b, &c]).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &first, [&v], [&v], 40).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &first, [&v], [&v], 41).unwrap();
+    let c = TensorMap::<_, f64>::rand_with_seed(engine, &first, [&v], [&v], 42).unwrap();
+    let expected = chain().contract(engine, &[&a, &b, &c]).unwrap();
     let saved = save_plan_cache(&first);
     assert!(saved.contains("TOPO "));
     assert_eq!(plan_cache_stats(&first).persisted_orders, 1);
 
     let second = Runtime::builder().build().unwrap();
     assert_eq!(load_plan_cache(&second, &saved), 1);
-    let a = TensorMap::<_, f64>::rand_with_seed(&second, [&v], [&v], 40).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&second, [&v], [&v], 41).unwrap();
-    let c = TensorMap::<_, f64>::rand_with_seed(&second, [&v], [&v], 42).unwrap();
-    let actual = chain().contract(&[&a, &b, &c]).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &second, [&v], [&v], 40).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &second, [&v], [&v], 41).unwrap();
+    let c = TensorMap::<_, f64>::rand_with_seed(engine, &second, [&v], [&v], 42).unwrap();
+    let actual = chain().contract(engine, &[&a, &b, &c]).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     // The second runtime keeps exactly the loaded order under the same
     // topology text. Greedy search is deterministic, so replay of a loaded

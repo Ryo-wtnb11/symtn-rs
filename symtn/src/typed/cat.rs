@@ -9,10 +9,10 @@ where
         CatOperandLayout::owned(space.structure(), space.nout(), space.nin())
     }
 
-    fn adjoint_logical_for_cat(&self) -> Result<Option<Self>, Error> {
+    fn adjoint_logical_for_cat(&self, engine: &mut dyn Engine) -> Result<Option<Self>, Error> {
         match &self.repr {
             TypedTensorRepr::Owned(_) => Ok(None),
-            TypedTensorRepr::Adjoint(_) => self.materialized_tensor_uncached().map(Some),
+            TypedTensorRepr::Adjoint(_) => self.materialized_tensor_uncached(engine).map(Some),
         }
     }
 
@@ -95,6 +95,7 @@ where
     /// Pass `&t.adjoint()?.materialize()?` instead.
     pub fn cat<'a>(
         &self,
+        engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D>>,
         side: Side,
     ) -> Result<Self, FacadeError<R>> {
@@ -110,7 +111,6 @@ where
         }
         let lhs = lhs_space.homspace();
         let rhs = rhs_space.homspace();
-        let _host_pool = self.runtime.enter_host_pool();
         let (axis, homspace) = cat_homspace(
             lhs.codomain(),
             lhs.domain(),
@@ -134,7 +134,7 @@ where
         )
         .map_err(FacadeError::<R>::from)?
         {
-            plan.execute([lhs_data, rhs_data])
+            plan.execute(engine, [lhs_data, rhs_data])
                 .map_err(FacadeError::<R>::from)?
         } else {
             // Why not recurse through `cat`: output admission has succeeded,
@@ -148,10 +148,10 @@ where
             // Only a lazy adjoint needs a logical payload; an owned operand
             // retains its borrowed dense or compact source.
             let lhs_local = self
-                .adjoint_logical_for_cat()
+                .adjoint_logical_for_cat(engine)
                 .map_err(FacadeError::<R>::from)?;
             let rhs_local = other
-                .adjoint_logical_for_cat()
+                .adjoint_logical_for_cat(engine)
                 .map_err(FacadeError::<R>::from)?;
             let (lhs_layout, lhs_data) = match &lhs_local {
                 Some(local) => local.cat_operand(),
@@ -176,7 +176,7 @@ where
                     "owned cat operands did not produce a copy plan",
                 ))
             })?;
-            plan.execute([lhs_data, rhs_data])
+            plan.execute(engine, [lhs_data, rhs_data])
                 .map_err(FacadeError::<R>::from)?
         };
         Ok(Self {

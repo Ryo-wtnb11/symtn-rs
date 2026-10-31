@@ -4,7 +4,18 @@
 use super::*;
 
 pub(super) mod sealed {
-    pub trait Sealed {}
+    pub trait Sealed: Sized {
+        /// Admits the caller's engine for an operation that returns without
+        /// any work (an identity permutation, a unit twist): the refusal the
+        /// working path would give, so a short circuit never succeeds on an
+        /// engine the operation itself refuses.
+        fn admit_shortcut_engine(
+            _engine: &mut dyn symtn_dense::Engine,
+            _storage: &Self,
+        ) -> Result<(), crate::typed::Error> {
+            Ok(())
+        }
+    }
 
     /// The proof that a family kernel is called from inside this crate.
     ///
@@ -20,7 +31,11 @@ pub(super) mod sealed {
     pub(crate) const EXEC: ExecToken = ExecToken(());
 }
 
-impl<D> sealed::Sealed for Vec<D> {}
+impl<D> sealed::Sealed for Vec<D> {
+    fn admit_shortcut_engine(engine: &mut dyn Engine, _: &Self) -> Result<(), Error> {
+        admit_host_engine(engine)
+    }
+}
 
 /// One storage's placement and capability set for rule `R`, payload `D`.
 ///
@@ -46,8 +61,8 @@ impl<D> sealed::Sealed for Vec<D> {}
 /// use symtn::sector::U1FusionRule;
 /// use symtn::typed::{PreparedExec, Runtime};
 ///
-/// fn call(runtime: &Runtime) {
-///     let _lease = <Vec<f64> as PreparedExec<U1FusionRule, f64>>::lease_members(runtime);
+/// fn call(engine: &mut dyn symtn::typed::Engine, _runtime: &Runtime) {
+///     let _lease = <Vec<f64> as PreparedExec<U1FusionRule, f64>>::lease_members(engine);
 /// }
 /// ```
 #[doc(hidden)]
@@ -84,4 +99,31 @@ impl<R, D: 'static> TypedStorage<R, D> for Vec<D> {
     fn from_host(_: ExecToken, t: TensorMap<R, D>) -> Result<TensorMap<R, D, Self>, Error> {
         Ok(t)
     }
+}
+
+impl<R, D, S: TypedStorage<R, D>> TensorMap<R, D, S> {
+    /// [`sealed::Sealed::admit_shortcut_engine`] for this tensor's stored
+    /// payload, called by every short circuit before it returns a clone.
+    pub(super) fn admit_shortcut_engine(&self, engine: &mut dyn Engine) -> Result<(), Error> {
+        match self.storage_body().data.as_ref() {
+            TypedData::Dense(storage) => {
+                <S as sealed::Sealed>::admit_shortcut_engine(engine, storage)
+            }
+            // A compact spectrum lives on the Host only.
+            TypedData::Diagonal(_) => admit_host_engine(engine),
+        }
+    }
+}
+
+/// Admits the caller's engine for a Host value operation: the check every
+/// Host region makes before it runs, for entries whose arithmetic needs no
+/// token. A broken CPU engine, a CUDA engine or any other engine is a typed
+/// error, never a serial fallback.
+pub(crate) fn admit_host_engine(engine: &mut dyn Engine) -> Result<(), Error> {
+    symtn_operations::host_pool::region(
+        engine,
+        symtn_operations::host_pool::HostPoolSite::Strided,
+        |_| (),
+    )?;
+    Ok(())
 }

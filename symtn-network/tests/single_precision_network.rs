@@ -98,15 +98,19 @@ fn assert_payloads_agree<D: Parts, W: Parts>(what: &str, narrow: &[D], wide: &[W
 }
 
 macro_rules! twin {
-    ($rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
+    ($engine:ident, $rt:expr, $narrow:ty, $wide:ty, $codomain:expr, $domain:expr, $seed:expr) => {{
         let mut state = $seed;
         let narrow: TensorMap<_, $narrow> =
-            TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, _| draw_parts(&mut state))
-                .unwrap();
+            TensorMap::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
+                draw_parts(&mut state)
+            })
+            .unwrap();
         let mut state = $seed;
         let wide: TensorMap<_, $wide> =
-            TensorMap::from_subblock_fn($rt, $codomain, $domain, |_, _| draw_parts(&mut state))
-                .unwrap();
+            TensorMap::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
+                draw_parts(&mut state)
+            })
+            .unwrap();
         (narrow, wide)
     }};
 }
@@ -118,7 +122,8 @@ macro_rules! network_suite {
 
             #[test]
             fn u1_chain_matches_the_widened_oracle() {
-                let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+                let engine = &mut symtn::typed::CpuEngine::serial();
+                let runtime = Runtime::builder().build().unwrap();
                 let leg = GradedSpace::try_new(
                     Arc::new(U1FusionRule),
                     [
@@ -128,9 +133,9 @@ macro_rules! network_suite {
                     ],
                 )
                 .unwrap();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 7_001);
-                let (b, wb) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 7_002);
-                let (c, wc) = twin!(&runtime, $narrow, $wide, [&leg], [&leg], 7_003);
+                let (a, wa) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 7_001);
+                let (b, wb) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 7_002);
+                let (c, wc) = twin!(engine, &runtime, $narrow, $wide, [&leg], [&leg], 7_003);
                 let terms = wa.dense_data().unwrap().len();
 
                 let got = net(
@@ -138,14 +143,14 @@ macro_rules! network_suite {
                     &["i"],
                     &["l"],
                 )
-                .contract(&[&a, &b, &c])
+                .contract(engine, &[&a, &b, &c])
                 .unwrap();
                 let expected = net(
                     &[op(&["i"], &["j"]), op(&["j"], &["k"]), op(&["k"], &["l"])],
                     &["i"],
                     &["l"],
                 )
-                .contract(&[&wa, &wb, &wc])
+                .contract(engine, &[&wa, &wb, &wc])
                 .unwrap();
                 assert_payloads_agree(
                     "u1 chain",
@@ -162,13 +167,21 @@ macro_rules! network_suite {
                     &["i"],
                     &["l"],
                 )
-                .contract(&[&a, &b, &c])
+                .contract(engine, &[&a, &b, &c])
                 .unwrap();
                 assert_eq!(again.dense_data().unwrap(), got.dense_data().unwrap());
 
                 // Full trace, on the single-precision lane.
-                let traced = a.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
-                let wide_traced = wa.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap();
+                let traced = a
+                    .trace_pairs(engine, &[(0, 1)])
+                    .unwrap()
+                    .scalar(engine)
+                    .unwrap();
+                let wide_traced = wa
+                    .trace_pairs(engine, &[(0, 1)])
+                    .unwrap()
+                    .scalar(engine)
+                    .unwrap();
                 let tolerance = K
                     * (terms as f64).sqrt()
                     * f64::from(f32::EPSILON)
@@ -183,7 +196,8 @@ macro_rules! network_suite {
 
             #[test]
             fn su2_two_tensor_network_matches_the_widened_oracle() {
-                let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+                let engine = &mut symtn::typed::CpuEngine::serial();
+                let runtime = Runtime::builder().build().unwrap();
                 let leg = GradedSpace::try_new(
                     Arc::new(SU2FusionRule),
                     [
@@ -192,8 +206,24 @@ macro_rules! network_suite {
                     ],
                 )
                 .unwrap();
-                let (a, wa) = twin!(&runtime, $narrow, $wide, [&leg, &leg], [&leg], 7_101);
-                let (b, wb) = twin!(&runtime, $narrow, $wide, [&leg], [&leg, &leg], 7_102);
+                let (a, wa) = twin!(
+                    engine,
+                    &runtime,
+                    $narrow,
+                    $wide,
+                    [&leg, &leg],
+                    [&leg],
+                    7_101
+                );
+                let (b, wb) = twin!(
+                    engine,
+                    &runtime,
+                    $narrow,
+                    $wide,
+                    [&leg],
+                    [&leg, &leg],
+                    7_102
+                );
                 let terms = wa.dense_data().unwrap().len();
 
                 let got = net(
@@ -201,14 +231,14 @@ macro_rules! network_suite {
                     &["i", "j"],
                     &["l", "m"],
                 )
-                .contract(&[&a, &b])
+                .contract(engine, &[&a, &b])
                 .unwrap();
                 let expected = net(
                     &[op(&["i", "j"], &["k"]), op(&["k"], &["l", "m"])],
                     &["i", "j"],
                     &["l", "m"],
                 )
-                .contract(&[&wa, &wb])
+                .contract(engine, &[&wa, &wb])
                 .unwrap();
                 assert_payloads_agree(
                     "su2 network",

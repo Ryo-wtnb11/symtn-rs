@@ -9,9 +9,10 @@ use crate::report;
 use report::Report;
 
 fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(rule, [(U1Irrep::new(0), n)]).unwrap();
-    TensorMap::from_subblock_fn(runtime, [&space], [&space], move |_, ij| {
+    TensorMap::from_subblock_fn(engine, runtime, [&space], [&space], move |_, ij| {
         if ij[0] == ij[1] {
             value
         } else {
@@ -23,10 +24,11 @@ fn tensor(runtime: &Runtime, n: usize, value: f64) -> TensorMap<U1FusionRule, f6
 
 #[test]
 fn scale_assign_mutates_unique_dense_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mut value = tensor(&runtime, 3, 2.0);
-    value.scale_assign(3.0).unwrap();
+    value.scale_assign(engine, 3.0).unwrap();
     assert_eq!(
         value.dense_data().unwrap(),
         &[6.0, 0.0, 0.0, 0.0, 6.0, 0.0, 0.0, 0.0, 6.0]
@@ -35,18 +37,19 @@ fn scale_assign_mutates_unique_dense_payload() {
 
 #[test]
 fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let x = tensor(&runtime, 2, 3.0);
     let mut destination = tensor(&runtime, 2, 2.0);
-    x.axpby_into(&mut destination, -1.0, 2.0).unwrap();
+    x.axpby_into(engine, &mut destination, -1.0, 2.0).unwrap();
     assert_eq!(destination.dense_data().unwrap(), &[1.0, 0.0, 0.0, 1.0]);
 
     // A clone shares the payload: writing it would change the clone too, and
     // replacing it would allocate behind the caller's back.
     let clone = destination.clone();
     assert_eq!(
-        x.axpby_into(&mut destination, 1.0, 1.0),
+        x.axpby_into(engine, &mut destination, 1.0, 1.0),
         Err(Error::DestinationShared)
     );
     assert_eq!(destination.dense_data().unwrap(), &[1.0, 0.0, 0.0, 1.0]);
@@ -55,11 +58,14 @@ fn axpby_into_updates_a_unique_destination_and_refuses_a_shared_one() {
 
 #[test]
 fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mut destination = tensor(&runtime, 2, 2.0);
     let x = tensor(&runtime, 3, 3.0);
-    let error = x.axpby_into(&mut destination, 1.0, 1.0).unwrap_err();
+    let error = x
+        .axpby_into(engine, &mut destination, 1.0, 1.0)
+        .unwrap_err();
     assert!(
         matches!(
             &error,
@@ -74,14 +80,15 @@ fn axpby_into_rejects_a_layout_mismatch_without_mutating_the_destination() {
 
 #[test]
 fn unique_dense_destinations_are_allocation_free() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mut destination = tensor(&runtime, 64, 2.0);
     let x = tensor(&runtime, 64, 3.0);
     let ((), allocs) =
-        counting_alloc::measure(|| x.axpby_into(&mut destination, -1.0, 2.0).unwrap());
+        counting_alloc::measure(|| x.axpby_into(engine, &mut destination, -1.0, 2.0).unwrap());
     assert_eq!(allocs.calls, 0);
     let mut scaled = tensor(&runtime, 64, 2.0);
-    let ((), allocs) = counting_alloc::measure(|| scaled.scale_assign(3.0).unwrap());
+    let ((), allocs) = counting_alloc::measure(|| scaled.scale_assign(engine, 3.0).unwrap());
     assert_eq!(allocs.calls, 0);
 }

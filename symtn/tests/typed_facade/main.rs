@@ -11,12 +11,12 @@ use crate::{numerics, ulp};
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
 macro_rules! full_transpose {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let tensor = &$tensor;
         let codomain_rank = tensor.codomain_rank();
         let codomain_axes: Vec<usize> = (codomain_rank..tensor.rank()).rev().collect();
         let domain_axes: Vec<usize> = (0..codomain_rank).rev().collect();
-        tensor.transpose(&codomain_axes, &domain_axes)
+        tensor.transpose($engine, &codomain_axes, &domain_axes)
     }};
 }
 
@@ -580,12 +580,14 @@ fn z3_rank_four(
     runtime: &Runtime,
     provider: &Arc<ExternalZ3Rule>,
 ) -> TensorMap<ExternalZ3Rule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let wide = z3_leg(provider, false);
     let narrow = z3_other_leg(provider, false);
     let wide_dual = wide.try_dual().unwrap();
     let narrow_dual = narrow.try_dual().unwrap();
     let mut counter = 0.0;
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         [&wide, &narrow],
         [&wide_dual, &narrow_dual],
@@ -610,6 +612,7 @@ fn z2_tensor_split(
     runtime: &Runtime,
     num_codomain: usize,
 ) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
         [
@@ -621,6 +624,7 @@ fn z2_tensor_split(
     let legs = [&leg, &leg, &leg];
     let (codomain, domain) = legs.split_at(num_codomain);
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -633,6 +637,7 @@ fn z2_tensor_split(
 /// not proportional to the real one, so a stray conjugation or a real-only
 /// path is visible in every comparison this tensor feeds.
 fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let complex = |value: f64| Complex64::new(value, 1.0 + value % 5.0);
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
@@ -642,7 +647,7 @@ fn z2_complex_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule
         ],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], |sectors, indices| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |sectors, indices| {
         complex(typed_fill_value(sectors, indices))
     })
     .unwrap()
@@ -666,8 +671,9 @@ fn counting_z3(
     domain: &GradedSpace<ExternalZ3Rule>,
     start: f64,
 ) -> TensorMap<ExternalZ3Rule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut next = start - 1.0;
-    TensorMap::from_subblock_fn(runtime, [codomain], [domain], |_, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [codomain], [domain], |_, _| {
         next += 1.0;
         next
     })
@@ -845,6 +851,7 @@ impl CategoryCodec<PlanarTrivial> for PlanarTrivialCodec {
 
 #[test]
 fn a_failing_typed_operation_publishes_no_cache_state() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Keep the absolute process-global snapshot in an explicitly fresh child
     // process, as in the original #1606 regression gate.
@@ -867,9 +874,10 @@ fn a_failing_typed_operation_publishes_no_cache_state() {
     );
     let runtime_before = completed_transformers();
 
-    assert!(tensor.permute(&[0, 0], &[2, 3]).is_err());
+    assert!(tensor.permute(engine, &[0, 0], &[2, 3]).is_err());
     assert!(tensor
         .contract(
+            engine,
             &tensor,
             &ContractSpec {
                 lhs: &[3],
@@ -926,19 +934,21 @@ mod typed_is_self_sufficient {
 
     #[test]
     fn typed_imports_run_an_end_to_end_typed_operation() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let _serial = crate::counting_alloc::serial();
         let runtime: Runtime = Runtime::builder().build().expect("runtime builds");
         let provider = Arc::new(external_z3());
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(Z3Charge(0), 2), (Z3Charge(1), 3)])
             .expect("leg is well formed");
 
-        let build = || -> Result<TensorMap<ExternalZ3Rule, f64>, Error> {
+        let mut build = || -> Result<TensorMap<ExternalZ3Rule, f64>, Error> {
             let mut next = 0.0;
-            let tensor = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, _| {
-                next += 1.0;
-                next
-            })?;
-            full_transpose!(tensor)
+            let tensor =
+                TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, _| {
+                    next += 1.0;
+                    next
+                })?;
+            full_transpose!(engine, tensor)
         };
 
         let transposed = build().expect("the typed pipeline runs");
@@ -947,7 +957,7 @@ mod typed_is_self_sufficient {
 
         // The re-exported `Error` is the same type the facade returns, not a
         // lookalike: this only type-checks if the two are one.
-        let failure: Error = transposed.repartition(9).unwrap_err();
+        let failure: Error = transposed.repartition(engine, 9).unwrap_err();
         assert!(matches!(failure, Error::InvalidArgument(_)));
     }
 }
@@ -983,9 +993,10 @@ fn fermionic_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
 fn fermionic_rank_three(
     runtime: &Runtime,
 ) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fermionic_leg();
     let mut next = 0.0;
-    TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], |_, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], |_, _| {
         next += 1.0;
         next
     })
@@ -996,19 +1007,19 @@ fn fermionic_rank_three(
 /// `find_truncated` -> `restrict_leg`.
 /// Evaluates to `(u, s, vh, error)`.
 macro_rules! truncated_svd {
-    ($tensor:expr, $truncation:expr) => {{
+    ($engine:ident, $tensor:expr, $truncation:expr) => {{
         let Svd { u, s, vh } = $tensor
-            .svd_compact(&codomain_axes(&$tensor), &domain_axes(&$tensor))
+            .svd_compact($engine, &codomain_axes(&$tensor), &domain_axes(&$tensor))
             .unwrap();
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), &$truncation)
+            .find_truncated(&s.diagview($engine).unwrap(), &$truncation)
             .unwrap();
         (
-            u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            u.restrict_leg($engine, &[(u.codomain_rank(), &found.selection)])
                 .unwrap(),
-            s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            s.restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                 .unwrap(),
-            vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
+            vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap(),
             found.error,
         )
     }};
@@ -1030,6 +1041,7 @@ fn su2_tensor_split(
     runtime: &Runtime,
     num_codomain: usize,
 ) -> TensorMap<symtn::sector::SU2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::SU2FusionRule),
         [
@@ -1042,6 +1054,7 @@ fn su2_tensor_split(
     let (codomain, domain) = legs.split_at(num_codomain);
     let mut next = 0.0;
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -1066,6 +1079,7 @@ fn su2_tensor(runtime: &Runtime) -> TensorMap<symtn::sector::SU2FusionRule, f64>
 /// A Z2 endomorphism, `[v] <- [v]`: the abelian half of the `tr`
 /// comparison, where every quantum dimension is one.
 fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
         [
@@ -1074,7 +1088,7 @@ fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
         ],
     )
     .unwrap();
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], typed_fill_value).unwrap()
+    TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], typed_fill_value).unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,9 +1097,10 @@ fn z2_endomorphism(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, 
 
 /// A fermionic endomorphism `[v] <- [v]` with distinct sector values.
 fn fermionic_endo(runtime: &Runtime) -> TensorMap<symtn::sector::FermionParityFusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fermionic_leg();
     let mut next = 0.0;
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, _| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, _| {
         next += 1.0;
         next
     })
@@ -1128,26 +1143,30 @@ where
         + SectorCodec,
     D: symtn::typed::TensorScalar + std::fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let codomain = compact.codomain();
     let domain = compact.domain();
-    let zeros = TensorMap::zeros(compact.runtime(), &codomain, &domain)
+    let zeros = TensorMap::zeros(engine, compact.runtime(), &codomain, &domain)
         .expect("zero tensor on an admitted bond space is total");
     let dense = compact
-        .axpby(D::from_real(1.0), &zeros, D::from_real(1.0))
+        .axpby(engine, D::from_real(1.0), &zeros, D::from_real(1.0))
         .expect("mixed add on one bond space is total");
     assert_eq!(
         dense.dense_data().unwrap(),
-        compact.materialize().unwrap().dense_data().unwrap(),
+        compact.materialize(engine).unwrap().dense_data().unwrap(),
         "the dense twin lost values"
     );
     assert!(
-        symtn::expert::diagonal_spectrum(&dense).unwrap().is_none(),
+        symtn::expert::diagonal_spectrum(engine, &dense)
+            .unwrap()
+            .is_none(),
         "the dense twin stayed compact"
     );
     dense
 }
 
 fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::Z2FusionRule),
         [
@@ -1156,8 +1175,9 @@ fn z2_bond(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
         ],
     )
     .unwrap();
-    let typed = TensorMap::from_subblock_fn(runtime, [&leg], [&leg], typed_fill_value).unwrap();
-    typed.svd_compact(&[0], &[1]).unwrap().s
+    let typed =
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], typed_fill_value).unwrap();
+    typed.svd_compact(engine, &[0], &[1]).unwrap().s
 }
 
 // ---------------------------------------------------------------------------
@@ -1223,8 +1243,10 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut next = first_value - 1.0;
     let typed = TensorMap::from_subblock_fn(
+        engine,
         runtime,
         [typed_legs.0, typed_legs.1],
         [typed_legs.0, typed_legs.1],

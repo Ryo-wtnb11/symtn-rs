@@ -31,8 +31,11 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    re.convert::<Complex64>()
-        .axpby(one(), &im.convert::<Complex64>(), i())
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let im_convert = &im.convert::<Complex64>(engine).unwrap();
+    re.convert::<Complex64>(engine)
+        .unwrap()
+        .axpby(engine, one(), im_convert, i())
         .unwrap()
 }
 
@@ -56,36 +59,44 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let a =
-        TensorMap::<R, f64>::rand_with_seed(runtime, [space, space], [space, space], 11).unwrap();
+        TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space, space], [space, space], 11)
+            .unwrap();
     let b =
-        TensorMap::<R, f64>::rand_with_seed(runtime, [space, space], [space, space], 12).unwrap();
+        TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space, space], [space, space], 12)
+            .unwrap();
     let c =
-        TensorMap::<R, f64>::rand_with_seed(runtime, [space, space], [space, space], 13).unwrap();
+        TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space, space], [space, space], 13)
+            .unwrap();
     let d =
-        TensorMap::<R, f64>::rand_with_seed(runtime, [space, space], [space, space], 14).unwrap();
+        TensorMap::<R, f64>::rand_with_seed(engine, runtime, [space, space], [space, space], 14)
+            .unwrap();
 
     let x = complexify(&a, &b);
     let y = complexify(&c, &d);
+    let b_compose = &b.compose(engine, &d).unwrap();
     let real = a
-        .compose(&c)
+        .compose(engine, &c)
         .unwrap()
-        .axpby(1.0, &b.compose(&d).unwrap(), -1.0)
+        .axpby(engine, 1.0, b_compose, -1.0)
         .unwrap();
+    let b_compose = &b.compose(engine, &c).unwrap();
     let imaginary = a
-        .compose(&d)
+        .compose(engine, &d)
         .unwrap()
-        .axpby(1.0, &b.compose(&c).unwrap(), 1.0)
+        .axpby(engine, 1.0, b_compose, 1.0)
         .unwrap();
     let expected = complexify(&real, &imaginary);
 
     assert_close(
-        x.compose(&y).unwrap().dense_data().unwrap(),
+        x.compose(engine, &y).unwrap().dense_data().unwrap(),
         expected.dense_data().unwrap(),
         1.0e-12,
     );
     assert_close(
         x.contract(
+            engine,
             &y,
             &ContractSpec {
                 lhs: &[2, 3],

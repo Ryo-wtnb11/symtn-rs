@@ -50,8 +50,8 @@ mod device {
     use symtn::typed::FusionAlgebraError;
     use symtn::typed::{Complex32, Complex64};
     use symtn::typed::{
-        ContractSpec, CudaStorage, Eigh, GradedSpace, Qr, Runtime, SpectrumMagnitude, Svd,
-        TensorMap, Truncation,
+        ContractSpec, CpuEngine, CudaDeviceId, CudaEngine, CudaStorage, Eigh, Engine, GradedSpace,
+        Qr, Runtime, SpectrumMagnitude, Svd, TensorMap, Truncation,
     };
     use symtn_network::Network;
 
@@ -267,16 +267,20 @@ mod device {
     /// result is handed back rather than dropped inside it, and the completion
     /// barrier runs after the clock stops with its own device traffic recorded
     /// in separate columns.
-    fn measure<T>(mut operation: impl FnMut() -> T, mut barrier: impl FnMut()) -> (T, Sample) {
+    fn measure<T>(
+        engine: &mut dyn Engine,
+        mut operation: impl FnMut(&mut dyn Engine) -> T,
+        mut barrier: impl FnMut(&mut dyn Engine),
+    ) -> (T, Sample) {
         let before = cuda_transfer_stats();
         counting_alloc::start();
         let start = Instant::now();
-        let output = operation();
+        let output = operation(engine);
         let nanos = start.elapsed().as_nanos() as u64;
         let allocs = counting_alloc::stop();
         black_box(&output);
         let after = cuda_transfer_stats();
-        barrier();
+        barrier(engine);
         let after_barrier = cuda_transfer_stats();
         (
             output,
@@ -422,18 +426,19 @@ mod device {
     /// returned output after both phases have been measured.
     fn bench<T, E: std::fmt::Display>(
         config: &Config,
+        engine: &mut dyn Engine,
         first_phase: &'static str,
-        mut operation: impl FnMut() -> Result<T, E>,
-        mut barrier: impl FnMut(),
+        mut operation: impl FnMut(&mut dyn Engine) -> Result<T, E>,
+        mut barrier: impl FnMut(&mut dyn Engine),
     ) -> Result<(T, [PhaseRow; 2]), String> {
-        let (first, cold) = measure(&mut operation, &mut barrier);
+        let (first, cold) = measure(engine, &mut operation, &mut barrier);
         let first = first.map_err(|error| sanitize(&error.to_string()))?;
         for _ in 0..config.warmup {
-            black_box(operation().map_err(|error| sanitize(&error.to_string()))?);
+            black_box(operation(engine).map_err(|error| sanitize(&error.to_string()))?);
         }
         let mut samples = Vec::with_capacity(config.iterations);
         for _ in 0..config.iterations {
-            let (output, sample) = measure(&mut operation, &mut barrier);
+            let (output, sample) = measure(engine, &mut operation, &mut barrier);
             drop(output.map_err(|error| sanitize(&error.to_string()))?);
             samples.push(sample);
         }
@@ -510,7 +515,7 @@ mod device {
         );
         println!(
             "# cold_scope=cold is the first call of the measured operation on a fresh Runtime; \
-             the fixture's own upload has already run, so process-global CUDA state and \
+             the fixture's own upload and engine warm-up have already run, so CUDA state and \
              interned space structures may be warm. Rows whose measured operation is itself \
              performed during fixture setup report first_after_setup instead of cold"
         );
@@ -543,33 +548,25 @@ mod device {
              included in the phase columns"
         );
         // The tenferro backend library initialization (cuTENSOR,
-        // cuSOLVER/cuBLAS handles) happens at Runtime construction (#1278),
-        // so that cost is reported here rather than in the `cold` cells. `first` is this
-        // process's first CUDA Runtime and also pays CUDA context creation;
-        // `second` is a second fresh Runtime in the same process, where the
-        // context is warm but the backend instance, and therefore the
-        // warm-up, is new. Both are one observation, not a median.
-        let build_start = Instant::now();
-        let first_runtime = Runtime::builder()
-            .cuda(config.device)
-            .dense_threads(1)
-            .build()
-            .expect("CUDA Runtime for the construction measurement");
-        let first_build_ns = build_start.elapsed().as_nanos();
-        drop(first_runtime);
-        let build_start = Instant::now();
-        let second_runtime = Runtime::builder()
-            .cuda(config.device)
-            .dense_threads(1)
-            .build()
-            .expect("CUDA Runtime for the construction measurement");
-        let second_build_ns = build_start.elapsed().as_nanos();
-        drop(second_runtime);
+        // cuSOLVER/cuBLAS handles) is paid by the warm-up each row's fresh
+        // engine runs during fixture setup, so it is reported here rather than
+        // in the `cold` cells. `first` is this process's first CUDA engine and
+        // also pays CUDA context creation; `second` is a second fresh engine in
+        // the same process. Both are one observation, not a median.
+        let open_and_warm = || {
+            let start = Instant::now();
+            let mut engine = cuda_engine(config);
+            symtn::expert::CudaDenseContext::new(&mut engine)
+                .and_then(|mut context| context.warm_up())
+                .expect("CUDA engine warm-up for the construction measurement");
+            start.elapsed().as_nanos()
+        };
+        let first_build_ns = open_and_warm();
+        let second_build_ns = open_and_warm();
         println!(
-            "# runtime_build_ns first={first_build_ns} second={second_build_ns} \
-             scope=one Runtime::builder().cuda(device).dense_threads(1).build() each, one \
-             observation, first includes CUDA context creation, both include the #1278 \
-             backend warm-up"
+            "# engine_open_ns first={first_build_ns} second={second_build_ns} \
+             scope=one CudaEngine::open(device) plus CudaDenseContext::warm_up each, one \
+             observation, first includes CUDA context creation"
         );
         println!(
             "# tensorkit_cuda_comparison=absent: neither TensorKit nor QSpace has a matched \
@@ -598,9 +595,20 @@ mod device {
         hermitian_device: Option<TensorMap<R, D, CudaStorage<D>>>,
     }
 
-    /// Builds one row's Runtime, Host fixture, and device upload. Everything
-    /// here happens before any timer starts.
-    fn fixture<R, D>(config: &Config, space: &GradedSpace<R>, count: usize) -> Fixture<R, D>
+    /// The CUDA engine every row opens on the configured device.
+    fn cuda_engine(config: &Config) -> CudaEngine {
+        let ordinal = u32::try_from(config.device).expect("--device fits in u32");
+        CudaEngine::open(CudaDeviceId::from_ordinal(ordinal)).expect("CUDA engine")
+    }
+
+    /// Builds one row's Runtime, engines (a fresh CUDA engine, warmed up so
+    /// backend initialization stays out of the `cold` cells), Host fixture and
+    /// device upload. Everything here happens before any timer starts.
+    fn fixture<R, D>(
+        config: &Config,
+        space: &GradedSpace<R>,
+        count: usize,
+    ) -> (Fixture<R, D>, CpuEngine, CudaEngine)
     where
         R: TypedSectorAdmission<Error = FusionAlgebraError, Mode = MultiplicityFreeAdmissionMode>
             + MultiplicityFreeRigidSymbols<Scalar = f64>
@@ -612,30 +620,43 @@ mod device {
         D: HarnessScalar,
     {
         let runtime = Runtime::builder()
-            .cuda(config.device)
-            .dense_threads(1)
             .build()
-            .expect("CUDA Runtime for the measured row");
+            .expect("Runtime for the measured row");
+        let mut cpu = CpuEngine::serial();
+        let mut cuda = cuda_engine(config);
+        symtn::expert::CudaDenseContext::new(&mut cuda)
+            .and_then(|mut context| context.warm_up())
+            .expect("CUDA engine warm-up");
         let host: Vec<TensorMap<R, D>> = (0..count)
             .map(|index| {
                 let shift = index as f64;
-                TensorMap::from_subblock_fn(&runtime, [space], [space], move |_, indices| {
-                    let row = indices[0] as f64;
-                    let column = indices[1] as f64;
-                    D::entry(
-                        1.0 + shift + 0.5 * row + 0.25 * column,
-                        0.125 * row - 0.0625 * column - 0.03125 * shift,
-                    )
-                })
+                TensorMap::from_subblock_fn(
+                    &mut cpu,
+                    &runtime,
+                    [space],
+                    [space],
+                    move |_, indices| {
+                        let row = indices[0] as f64;
+                        let column = indices[1] as f64;
+                        D::entry(
+                            1.0 + shift + 0.5 * row + 0.25 * column,
+                            0.125 * row - 0.0625 * column - 0.03125 * shift,
+                        )
+                    },
+                )
                 .expect("Host fixture tensor")
             })
             .collect();
         let device = host
             .iter()
-            .map(|tensor| tensor.to_cuda().expect("fixture upload"))
+            .map(|tensor| tensor.to_cuda(&mut cuda).expect("fixture upload"))
             .collect();
-        let hermitian_host =
-            TensorMap::<R, D>::from_subblock_fn(&runtime, [space], [space], |_, indices| {
+        let hermitian_host = TensorMap::<R, D>::from_subblock_fn(
+            &mut cpu,
+            &runtime,
+            [space],
+            [space],
+            |_, indices| {
                 let (row, column) = (indices[0], indices[1]);
                 if row == column {
                     D::entry(row as f64 + 1.0, 0.0)
@@ -643,18 +664,23 @@ mod device {
                     let magnitude = 0.25 / (1.0 + row.abs_diff(column) as f64);
                     D::entry(magnitude, if row < column { 0.125 } else { -0.125 })
                 }
-            })
-            .ok();
+            },
+        )
+        .ok();
         let hermitian_device = hermitian_host
             .as_ref()
-            .and_then(|tensor| tensor.to_cuda().ok());
-        Fixture {
-            runtime,
-            host,
-            device,
-            hermitian_host,
-            hermitian_device,
-        }
+            .and_then(|tensor| tensor.to_cuda(&mut cuda).ok());
+        (
+            Fixture {
+                runtime,
+                host,
+                device,
+                hermitian_host,
+                hermitian_device,
+            },
+            cpu,
+            cuda,
+        )
     }
 
     /// Prints both arms of a row whose device probe failed, so an unsupported
@@ -700,19 +726,25 @@ mod device {
         // transfer roundtrip; the measured operations also run during fixture
         // setup, so their first phase is reported as first_after_setup
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, _cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             let source = &fixture.host[0];
             let uploaded = &fixture.device[0];
-            let barrier = || {
-                let _ = uploaded.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = uploaded.norm(engine, 2.0);
             };
-            match bench(config, "first_after_setup", || source.to_cuda(), barrier) {
+            match bench(
+                config,
+                &mut cuda,
+                "first_after_setup",
+                |engine: &mut dyn Engine| source.to_cuda(engine),
+                barrier,
+            ) {
                 Err(reason) => skip_row(label("to_cuda"), &reason),
                 Ok((first, rows)) => {
                     let check = verdict(
                         payload_close(
                             first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("roundtrip download")
                                 .dense_data()
                                 .unwrap(),
@@ -725,7 +757,13 @@ mod device {
                     print_skip(label("to_cuda"), "host", "no Host counterpart");
                 }
             }
-            match bench(config, "first_after_setup", || uploaded.to_host(), barrier) {
+            match bench(
+                config,
+                &mut cuda,
+                "first_after_setup",
+                |engine: &mut dyn Engine| uploaded.to_host(engine),
+                barrier,
+            ) {
                 Err(reason) => skip_row(label("to_host"), &reason),
                 Ok((first, rows)) => {
                     let check = verdict(
@@ -744,17 +782,19 @@ mod device {
 
         // contract, canonical direct
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            let barrier = || {
-                let _ = lhs_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = lhs_device.norm(engine, 2.0);
             };
             match bench(
                 config,
+                &mut cuda,
                 "cold",
-                || {
+                |engine: &mut dyn Engine| {
                     lhs_device.contract(
+                        engine,
                         rhs_device,
                         &ContractSpec {
                             lhs: &[1],
@@ -770,10 +810,12 @@ mod device {
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || {
+                        |engine: &mut dyn Engine| {
                             Ok::<_, Never>(
                                 lhs.contract(
+                                    engine,
                                     rhs,
                                     &ContractSpec {
                                         lhs: &[1],
@@ -785,13 +827,13 @@ mod device {
                                 .expect("Host contract"),
                             )
                         },
-                        || {},
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host contract arm");
                     let check = verdict(
                         payload_close(
                             device_first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download")
                                 .dense_data()
                                 .unwrap(),
@@ -809,21 +851,23 @@ mod device {
         // contract with a lazy-adjoint left operand; the lazy views are built
         // once as operands, outside every timed region
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            let barrier = || {
-                let _ = lhs_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = lhs_device.norm(engine, 2.0);
             };
-            match lhs_device.adjoint() {
+            match lhs_device.adjoint(&mut cuda) {
                 Err(error) => skip_row(label("contract_lazy_adjoint_lhs"), &error.to_string()),
                 Ok(lhs_adjoint) => {
-                    let host_adjoint = lhs.adjoint().expect("Host adjoint");
+                    let host_adjoint = lhs.adjoint(&mut cpu).expect("Host adjoint");
                     match bench(
                         config,
+                        &mut cuda,
                         "cold",
-                        || {
+                        |engine: &mut dyn Engine| {
                             lhs_adjoint.contract(
+                                engine,
                                 rhs_device,
                                 &ContractSpec {
                                     lhs: &[1],
@@ -839,11 +883,13 @@ mod device {
                         Ok((device_first, device_rows)) => {
                             let (host_first, host_rows) = bench(
                                 config,
+                                &mut cpu,
                                 "cold",
-                                || {
+                                |engine: &mut dyn Engine| {
                                     Ok::<_, Never>(
                                         host_adjoint
                                             .contract(
+                                                engine,
                                                 rhs,
                                                 &ContractSpec {
                                                     lhs: &[1],
@@ -855,13 +901,13 @@ mod device {
                                             .expect("Host adjoint contract"),
                                     )
                                 },
-                                || {},
+                                |_: &mut dyn Engine| {},
                             )
                             .expect("Host adjoint contract arm");
                             let check = verdict(
                                 payload_close(
                                     device_first
-                                        .to_host()
+                                        .to_host(&mut cuda)
                                         .expect("download")
                                         .dense_data()
                                         .unwrap(),
@@ -890,26 +936,35 @@ mod device {
 
         // compose
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            let barrier = || {
-                let _ = lhs_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = lhs_device.norm(engine, 2.0);
             };
-            match bench(config, "cold", || lhs_device.compose(rhs_device), barrier) {
+            match bench(
+                config,
+                &mut cuda,
+                "cold",
+                |engine: &mut dyn Engine| lhs_device.compose(engine, rhs_device),
+                barrier,
+            ) {
                 Err(reason) => skip_row(label("compose"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(lhs.compose(rhs).expect("Host compose")),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(lhs.compose(engine, rhs).expect("Host compose"))
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host compose arm");
                     let check = verdict(
                         payload_close(
                             device_first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download")
                                 .dense_data()
                                 .unwrap(),
@@ -928,18 +983,19 @@ mod device {
         // written once per row and expanded against the device and the Host
         // receiver, so the two arms cannot drift.
         macro_rules! transform_row {
-            ($name:expr, |$t:ident| $call:expr) => {{
-                let fixture = fixture::<R, D>(config, space, 1);
+            ($name:expr, |$t:ident, $e:ident| $call:expr) => {{
+                let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
                 let host_source = &fixture.host[0];
                 let device_source = &fixture.device[0];
-                let barrier = || {
-                    let _ = device_source.norm(2.0);
+                let barrier = |engine: &mut dyn Engine| {
+                    let _ = device_source.norm(engine, 2.0);
                 };
                 match bench(
                     config,
+                    &mut cuda,
                     "cold",
-                    || {
-                        let $t = device_source;
+                    |engine: &mut dyn Engine| {
+                        let ($t, $e) = (device_source, engine);
                         $call
                     },
                     barrier,
@@ -948,23 +1004,24 @@ mod device {
                     Ok((device_first, device_rows)) => {
                         let (host_first, host_rows) = bench(
                             config,
+                            &mut cpu,
                             "cold",
-                            || {
+                            |engine: &mut dyn Engine| {
                                 Ok::<_, Never>(
                                     {
-                                        let $t = host_source;
+                                        let ($t, $e) = (host_source, engine);
                                         $call
                                     }
                                     .expect("Host transform"),
                                 )
                             },
-                            || {},
+                            |_: &mut dyn Engine| {},
                         )
                         .expect("Host transform arm");
                         let check = verdict(
                             payload_close(
                                 device_first
-                                    .to_host()
+                                    .to_host(&mut cuda)
                                     .expect("download")
                                     .dense_data()
                                     .unwrap(),
@@ -979,33 +1036,42 @@ mod device {
                 }
             }};
         }
-        transform_row!("permute", |t| t.permute(&[1], &[0]));
-        transform_row!("braid", |t| t.braid(&[1], &[0], &[1, 2]));
-        transform_row!("transpose", |t| t.transpose(&[1], &[0]));
-        transform_row!("repartition", |t| t.repartition(0));
+        transform_row!("permute", |t, e| t.permute(e, &[1], &[0]));
+        transform_row!("braid", |t, e| t.braid(e, &[1], &[0], &[1, 2]));
+        transform_row!("transpose", |t, e| t.transpose(e, &[1], &[0]));
+        transform_row!("repartition", |t, e| t.repartition(e, 0));
 
         // scale
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             let source = &fixture.host[0];
             let source_device = &fixture.device[0];
-            let barrier = || {
-                let _ = source_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = source_device.norm(engine, 2.0);
             };
-            match bench(config, "cold", || source_device.scale(factor), barrier) {
+            match bench(
+                config,
+                &mut cuda,
+                "cold",
+                |engine: &mut dyn Engine| source_device.scale(engine, factor),
+                barrier,
+            ) {
                 Err(reason) => skip_row(label("scale"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(source.scale(factor).unwrap()),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(source.scale(engine, factor).unwrap())
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host scale arm");
                     let check = verdict(
                         payload_close(
                             device_first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download")
                                 .dense_data()
                                 .unwrap(),
@@ -1022,31 +1088,35 @@ mod device {
 
         // add, owned operands
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            let barrier = || {
-                let _ = lhs_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = lhs_device.norm(engine, 2.0);
             };
             match bench(
                 config,
+                &mut cuda,
                 "cold",
-                || lhs_device.axpby(alpha, rhs_device, beta),
+                |engine: &mut dyn Engine| lhs_device.axpby(engine, alpha, rhs_device, beta),
                 barrier,
             ) {
                 Err(reason) => skip_row(label("add_owned"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(lhs.axpby(alpha, rhs, beta).expect("Host add")),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(lhs.axpby(engine, alpha, rhs, beta).expect("Host add"))
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host add arm");
                     let check = verdict(
                         payload_close(
                             device_first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download")
                                 .dense_data()
                                 .unwrap(),
@@ -1063,51 +1133,55 @@ mod device {
 
         // add, lazy-adjoint fold on both operands
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            let barrier = || {
-                let _ = lhs_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = lhs_device.norm(engine, 2.0);
             };
-            match (lhs_device.adjoint(), rhs_device.adjoint()) {
+            match (lhs_device.adjoint(&mut cuda), rhs_device.adjoint(&mut cuda)) {
                 (Err(error), _) | (_, Err(error)) => {
                     skip_row(label("add_lazy_fold"), &error.to_string())
                 }
                 (Ok(lhs_adjoint), Ok(rhs_adjoint)) => {
-                    let host_lhs = lhs.adjoint().expect("Host adjoint");
-                    let host_rhs = rhs.adjoint().expect("Host adjoint");
+                    let host_lhs = lhs.adjoint(&mut cpu).expect("Host adjoint");
+                    let host_rhs = rhs.adjoint(&mut cpu).expect("Host adjoint");
                     match bench(
                         config,
+                        &mut cuda,
                         "cold",
-                        || lhs_adjoint.axpby(alpha, &rhs_adjoint, beta),
+                        |engine: &mut dyn Engine| {
+                            lhs_adjoint.axpby(engine, alpha, &rhs_adjoint, beta)
+                        },
                         barrier,
                     ) {
                         Err(reason) => skip_row(label("add_lazy_fold"), &reason),
                         Ok((device_first, device_rows)) => {
                             let (host_first, host_rows) = bench(
                                 config,
+                                &mut cpu,
                                 "cold",
-                                || {
+                                |engine: &mut dyn Engine| {
                                     Ok::<_, Never>(
                                         host_lhs
-                                            .axpby(alpha, &host_rhs, beta)
+                                            .axpby(engine, alpha, &host_rhs, beta)
                                             .expect("Host lazy add"),
                                     )
                                 },
-                                || {},
+                                |_: &mut dyn Engine| {},
                             )
                             .expect("Host lazy add arm");
                             let check = verdict(
                                 payload_close(
                                     device_first
-                                        .to_host()
+                                        .to_host(&mut cuda)
                                         .expect("download")
-                                        .materialize()
+                                        .materialize(&mut cpu)
                                         .expect("materialize")
                                         .dense_data()
                                         .unwrap(),
                                     host_first
-                                        .materialize()
+                                        .materialize(&mut cpu)
                                         .expect("materialize")
                                         .dense_data()
                                         .unwrap(),
@@ -1125,17 +1199,26 @@ mod device {
 
         // norm
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             let source = &fixture.host[0];
             let source_device = &fixture.device[0];
-            match bench(config, "cold", || source_device.norm(2.0), || {}) {
+            match bench(
+                config,
+                &mut cuda,
+                "cold",
+                |engine: &mut dyn Engine| source_device.norm(engine, 2.0),
+                |_: &mut dyn Engine| {},
+            ) {
                 Err(reason) => skip_row(label("norm"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(source.norm(2.0).expect("Host norm")),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(source.norm(engine, 2.0).expect("Host norm"))
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host norm arm");
                     let check = verdict(
@@ -1150,17 +1233,26 @@ mod device {
 
         // inner
         {
-            let fixture = fixture::<R, D>(config, space, 2);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 2);
             let (lhs, rhs) = (&fixture.host[0], &fixture.host[1]);
             let (lhs_device, rhs_device) = (&fixture.device[0], &fixture.device[1]);
-            match bench(config, "cold", || lhs_device.inner(rhs_device), || {}) {
+            match bench(
+                config,
+                &mut cuda,
+                "cold",
+                |engine: &mut dyn Engine| lhs_device.inner(engine, rhs_device),
+                |_: &mut dyn Engine| {},
+            ) {
                 Err(reason) => skip_row(label("inner"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(lhs.inner(rhs).expect("Host inner")),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(lhs.inner(engine, rhs).expect("Host inner"))
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host inner arm");
                     let check = verdict(
@@ -1176,36 +1268,40 @@ mod device {
 
         // svd_compact
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             let source = &fixture.host[0];
             let source_device = &fixture.device[0];
-            let barrier = || {
-                let _ = source_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = source_device.norm(engine, 2.0);
             };
             match bench(
                 config,
+                &mut cuda,
                 "cold",
-                || source_device.svd_compact(&[0], &[1]),
+                |engine: &mut dyn Engine| source_device.svd_compact(engine, &[0], &[1]),
                 barrier,
             ) {
                 Err(reason) => skip_row(label("svd_compact"), &reason),
                 Ok((Svd { u, s, vh }, device_rows)) => {
                     let (_, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || {
+                        |engine: &mut dyn Engine| {
                             Ok::<_, Never>(
-                                source.svd_compact(&[0], &[1]).expect("Host svd_compact"),
+                                source
+                                    .svd_compact(engine, &[0], &[1])
+                                    .expect("Host svd_compact"),
                             )
                         },
-                        || {},
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host svd_compact arm");
                     let rebuilt = u
-                        .compose(&s)
-                        .and_then(|left| left.compose(&vh))
+                        .compose(&mut cuda, &s)
+                        .and_then(|left| left.compose(&mut cuda, &vh))
                         .expect("device SVD reconstruction")
-                        .to_host()
+                        .to_host(&mut cuda)
                         .expect("download");
                     let check = verdict(
                         payload_close(
@@ -1227,63 +1323,76 @@ mod device {
         // amount of work; the row prices the recipe the rustdoc gives, not
         // one kernel against another.
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             let source = &fixture.host[0];
             let source_device = &fixture.device[0];
             let truncation = Truncation::rank(degeneracy.max(1));
-            let barrier = || {
-                let _ = source_device.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = source_device.norm(engine, 2.0);
             };
-            let composed = || -> Result<_, String> {
+            let composed = |engine: &mut dyn Engine| -> Result<_, String> {
                 let Svd { u, s, vh } = source_device
-                    .svd_compact(&[0], &[1])
+                    .svd_compact(engine, &[0], &[1])
                     .map_err(|e| e.to_string())?;
                 let (u, s, vh) = (
-                    u.to_host().map_err(|e| e.to_string())?,
-                    s.to_host().map_err(|e| e.to_string())?,
-                    vh.to_host().map_err(|e| e.to_string())?,
+                    u.to_host(engine).map_err(|e| e.to_string())?,
+                    s.to_host(engine).map_err(|e| e.to_string())?,
+                    vh.to_host(engine).map_err(|e| e.to_string())?,
                 );
                 let found = s.domain()[0]
-                    .find_truncated(&s.diagview().map_err(|e| e.to_string())?, &truncation)
+                    .find_truncated(
+                        &s.diagview(&mut cpu).map_err(|e| e.to_string())?,
+                        &truncation,
+                    )
                     .map_err(|e| e.to_string())?;
                 let u = u
-                    .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+                    .restrict_leg(&mut cpu, &[(u.codomain_rank(), &found.selection)])
                     .map_err(|e| e.to_string())?;
                 let s = s
-                    .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                    .restrict_leg(&mut cpu, &[(0, &found.selection), (1, &found.selection)])
                     .map_err(|e| e.to_string())?;
                 let vh = vh
-                    .restrict_leg(&[(0, &found.selection)])
+                    .restrict_leg(&mut cpu, &[(0, &found.selection)])
                     .map_err(|e| e.to_string())?;
                 Ok((u, s, vh, found.error))
             };
-            match bench(config, "cold", composed, barrier) {
+            match bench(config, &mut cuda, "cold", composed, barrier) {
                 Err(reason) => skip_row(label("svd_trunc_composition"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || {
-                            let Svd { u, s, vh } =
-                                source.svd_compact(&[0], &[1]).expect("Host svd_compact");
+                        |engine: &mut dyn Engine| {
+                            let Svd { u, s, vh } = source
+                                .svd_compact(engine, &[0], &[1])
+                                .expect("Host svd_compact");
                             let found = s.domain()[0]
-                                .find_truncated(&s.diagview().expect("Host spectrum"), &truncation)
+                                .find_truncated(
+                                    &s.diagview(engine).expect("Host spectrum"),
+                                    &truncation,
+                                )
                                 .expect("Host find_truncated");
                             let restrict = "Host restriction";
                             Ok::<_, Never>((
-                                u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+                                u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
                                     .expect(restrict),
-                                s.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                                s.restrict_leg(
+                                    engine,
+                                    &[(0, &found.selection), (1, &found.selection)],
+                                )
+                                .expect(restrict),
+                                vh.restrict_leg(engine, &[(0, &found.selection)])
                                     .expect(restrict),
-                                vh.restrict_leg(&[(0, &found.selection)]).expect(restrict),
                                 found.error,
                             ))
                         },
-                        || {},
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host truncated SVD arm");
-                    let kept = device_first.1.diagview().expect("kept spectrum");
-                    let expected_kept = host_first.1.diagview().expect("Host kept spectrum");
+                    let kept = device_first.1.diagview(&mut cpu).expect("kept spectrum");
+                    let expected_kept =
+                        host_first.1.diagview(&mut cpu).expect("Host kept spectrum");
                     let zero = D::entry(0.0, 0.0);
                     let kept_match = kept.len() == expected_kept.len()
                         && kept.iter().zip(&expected_kept).all(|(actual, expected)| {
@@ -1309,27 +1418,37 @@ mod device {
 
         // eigh_full, on the Hermitian fixture
         {
-            let fixture = fixture::<R, D>(config, space, 1);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
             match (&fixture.hermitian_host, &fixture.hermitian_device) {
                 (Some(source), Some(source_device)) => {
-                    let barrier = || {
-                        let _ = source_device.norm(2.0);
+                    let barrier = |engine: &mut dyn Engine| {
+                        let _ = source_device.norm(engine, 2.0);
                     };
                     match bench(
                         config,
+                        &mut cuda,
                         "cold",
-                        || source_device.eigh_full(&[0], &[1], symtn::typed::HermitianTol::DEFAULT),
+                        |engine: &mut dyn Engine| {
+                            source_device.eigh_full(
+                                engine,
+                                &[0],
+                                &[1],
+                                symtn::typed::HermitianTol::DEFAULT,
+                            )
+                        },
                         barrier,
                     ) {
                         Err(reason) => skip_row(label("eigh_full"), &reason),
                         Ok((Eigh { d, v }, device_rows)) => {
                             let (_, host_rows) = bench(
                                 config,
+                                &mut cpu,
                                 "cold",
-                                || {
+                                |engine: &mut dyn Engine| {
                                     Ok::<_, Never>(
                                         source
                                             .eigh_full(
+                                                engine,
                                                 &[0],
                                                 &[1],
                                                 symtn::typed::HermitianTol::DEFAULT,
@@ -1337,16 +1456,17 @@ mod device {
                                             .expect("Host eigh_full"),
                                     )
                                 },
-                                || {},
+                                |_: &mut dyn Engine| {},
                             )
                             .expect("Host eigh_full arm");
                             let rebuilt = v
-                                .compose(&d)
+                                .compose(&mut cuda, &d)
                                 .and_then(|left| {
-                                    v.adjoint().and_then(|adjoint| left.compose(&adjoint))
+                                    v.adjoint(&mut cuda)
+                                        .and_then(|adjoint| left.compose(&mut cuda, &adjoint))
                                 })
                                 .expect("device EIGH reconstruction")
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download");
                             let check = verdict(
                                 payload_close(
@@ -1375,26 +1495,35 @@ mod device {
                 Some(1),
             )
             .expect("chain network");
-            let fixture = fixture::<R, D>(config, space, 3);
+            let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 3);
             let (a, b, c) = (&fixture.host[0], &fixture.host[1], &fixture.host[2]);
             let (ad, bd, cd) = (&fixture.device[0], &fixture.device[1], &fixture.device[2]);
-            let barrier = || {
-                let _ = ad.norm(2.0);
+            let barrier = |engine: &mut dyn Engine| {
+                let _ = ad.norm(engine, 2.0);
             };
-            match bench(config, "cold", || chain.contract(&[ad, bd, cd]), barrier) {
+            match bench(
+                config,
+                &mut cuda,
+                "cold",
+                |engine: &mut dyn Engine| chain.contract(engine, &[ad, bd, cd]),
+                barrier,
+            ) {
                 Err(reason) => skip_row(label("network_chain3"), &reason),
                 Ok((device_first, device_rows)) => {
                     let (host_first, host_rows) = bench(
                         config,
+                        &mut cpu,
                         "cold",
-                        || Ok::<_, Never>(chain.contract(&[a, b, c]).expect("Host chain")),
-                        || {},
+                        |engine: &mut dyn Engine| {
+                            Ok::<_, Never>(chain.contract(engine, &[a, b, c]).expect("Host chain"))
+                        },
+                        |_: &mut dyn Engine| {},
                     )
                     .expect("Host chain arm");
                     let check = verdict(
                         payload_close(
                             device_first
-                                .to_host()
+                                .to_host(&mut cuda)
                                 .expect("download")
                                 .dense_data()
                                 .unwrap(),
@@ -1441,31 +1570,39 @@ mod device {
             degeneracy,
             operation: "qr_compact",
         };
-        let fixture = fixture::<R, D>(config, space, 1);
+        let (fixture, mut cpu, mut cuda) = fixture::<R, D>(config, space, 1);
         let source = &fixture.host[0];
         let source_device = &fixture.device[0];
-        let barrier = || {
-            let _ = source_device.norm(2.0);
+        let barrier = |engine: &mut dyn Engine| {
+            let _ = source_device.norm(engine, 2.0);
         };
         match bench(
             config,
+            &mut cuda,
             "cold",
-            || source_device.qr_compact(&[0], &[1]),
+            |engine: &mut dyn Engine| source_device.qr_compact(engine, &[0], &[1]),
             barrier,
         ) {
             Err(reason) => skip_row(labels, &reason),
             Ok((Qr { q, r }, device_rows)) => {
                 let (_, host_rows) = bench(
                     config,
+                    &mut cpu,
                     "cold",
-                    || Ok::<_, Never>(source.qr_compact(&[0], &[1]).expect("Host qr_compact")),
-                    || {},
+                    |engine: &mut dyn Engine| {
+                        Ok::<_, Never>(
+                            source
+                                .qr_compact(engine, &[0], &[1])
+                                .expect("Host qr_compact"),
+                        )
+                    },
+                    |_: &mut dyn Engine| {},
                 )
                 .expect("Host qr_compact arm");
                 let rebuilt = q
-                    .compose(&r)
+                    .compose(&mut cuda, &r)
                     .expect("device QR reconstruction")
-                    .to_host()
+                    .to_host(&mut cuda)
                     .expect("download");
                 let check = verdict(
                     payload_close(

@@ -1,5 +1,5 @@
 error: contract! does not take scalar factors; hint: scale the result with `TensorMap::scale`
- --> tests/ui/scalar_factor.rs:4:33
+ --> tests/ui/scalar_factor.rs:4:46
   |
-4 |     let _ = contract!([i; j] := 2.0 * a[i; j]);
-  |                                 ^^^
+4 |     let _ = contract!(&mut engine, [i; j] := 2.0 * a[i; j]);
+  |                                              ^^^

@@ -310,6 +310,7 @@ fn tensor_contract_fusion_execution_context_reports_host_placement() {
 
 #[test]
 fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -361,6 +362,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
     );
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -381,6 +383,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
     .unwrap();
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -395,6 +398,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
 
     context_dst.data_mut().copy_from_slice(&[10.0, 20.0]);
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -409,6 +413,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
 
     context_dst.data_mut().copy_from_slice(&[10.0, 20.0]);
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -425,6 +430,7 @@ fn tensorcontract_fusion_block_specs_enumerate_z2_compose_blocks_and_replays() {
 
 #[test]
 fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: SU2 C[a b; g h] = A[a b; c d] * B[d c; g h] equals an explicit
     // RHS permutation followed by core composition.
     let rule = SU2FusionRule;
@@ -456,6 +462,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
         TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], tensor_space.clone())
             .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst_swap,
         &lhs,
@@ -483,6 +490,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
         TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], tensor_space.clone())
             .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst_compose,
         &lhs,
@@ -531,6 +539,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
             let mut contract_backend = DenseTreeTransformOperations::default_executor();
             let mut contract_workspace = TensorContractWorkspace::default();
             crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+                engine,
                 &mut tree_backend,
                 &mut tree_workspace,
                 &mut contract_backend,
@@ -548,6 +557,7 @@ fn tensorcontract_fusion_su2_swap_matches_explicit_permute_then_compose() {
                 TestTensor::<f64>::from_vec_with_fusion_space(vec![0.0; len], tensor_space.clone())
                     .unwrap();
             crate::contract::execute_dynamic_tree_execution_artifact_for_test(
+                engine,
                 &rule,
                 &plan,
                 &mut artifact,

@@ -483,15 +483,17 @@ pub(super) fn validate_cuda_svd_middle_regions(
     Ok(diagonals)
 }
 
-pub(super) fn validate_cuda_reduction_placement(
-    expected: Placement,
-    lhs: Placement,
-    rhs: Placement,
+/// Admits a CUDA operation's device inputs and destinations on the caller's
+/// engine, before it uploads, allocates or writes anything. A buffer of
+/// another engine is [`Error::PlacementMismatch`] even on the same device
+/// ordinal: engines are separate allocation domains.
+pub(crate) fn ensure_cuda_owns(
+    cuda: &CudaDenseContext,
+    op: &'static str,
+    operands: &[&CudaDenseStorage],
 ) -> Result<(), Error> {
-    if lhs != expected || rhs != expected {
-        return Err(Error::PlacementMismatch);
-    }
-    Ok(())
+    cuda.ensure_owns(op, operands)
+        .map_err(|_| Error::PlacementMismatch)
 }
 
 pub(super) fn download_cuda_reduction_partials<D: CudaPayload>(

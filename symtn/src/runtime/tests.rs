@@ -11,6 +11,7 @@ use symtn_core::{
 
 #[test]
 fn network_destination_dual_stays_inside_complete_publication_epoch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     const FILTER: &str =
         "runtime::tests::network_destination_dual_stays_inside_complete_publication_epoch";
     if std::env::var_os("SYMTN_NETWORK_PRODUCER_RESET").is_none() {
@@ -27,14 +28,14 @@ fn network_destination_dual_stays_inside_complete_publication_epoch() {
         );
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(NetworkResetU1 {
         reset_on_dual: std::sync::atomic::AtomicBool::new(false),
     });
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(symtn_core::U1Irrep::new(1), 2)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
     symtn_core::clear_structure_caches();
     provider.reset_on_dual.store(true, Ordering::SeqCst);
     let stale = source
@@ -359,121 +360,34 @@ impl MultiplicityFreeRigidSymbols for CountingFibonacci {
     }
 }
 
-// What: the context pool must hold pointer-sized entries. Pooling the
-// complete multi-lane execution state by value made Vec pop/push memmoves
-// ~70% of a small standalone op's cost (issue #228). Reverting
-// `PooledContext` to a by-value alias fails here instead of silently
-// reintroducing that tax.
-#[test]
-fn pooled_context_is_pointer_sized() {
-    assert!(std::mem::size_of::<PooledContext>() <= std::mem::size_of::<usize>());
-}
-
-// What: every Runtime on one ordinal must share one device lock (#1384),
-// and distinct ordinals must not serialize on each other.
+// What: a device operation runs only on the caller's CUDA engine. A CPU
+// engine is a typed refusal before any transfer or device allocation; no
+// GPU is needed to prove it.
 #[cfg(feature = "cuda")]
 #[test]
-fn cuda_device_lock_is_one_per_ordinal() {
-    assert!(std::ptr::eq(cuda_device_lock(7), cuda_device_lock(7)));
-    assert!(!std::ptr::eq(cuda_device_lock(7), cuda_device_lock(8)));
-}
-
-// The default-feature graph includes faer. This control verifies that its
-// explicit provider path constructs; the adapter's private route test pins
-// the unset compiled-default selection separately.
-#[cfg(feature = "cpu-faer")]
-#[test]
-fn transform_ops_builds_for_every_faer_config() {
-    let faer = symtn_dense::CpuBackendKind::Faer;
-    let serial = symtn_dense::SharedCpuContext::with_threads(1).expect("serial context");
-    let env = symtn_dense::SharedCpuContext::from_env();
-    for ctx in [&serial, &env] {
-        let ops = make_transform_ops(ctx, None).expect("default transform ops");
-        assert!(ops.dense().shares_cpu_context(ctx));
-        // Explicit-kind arm: build must succeed; context sharing holds
-        // whenever the kind IS the compiled default (all-faer builds), but
-        // an explicit non-default kind keeps a private context (see
-        // `DefaultDenseExecutor::with_shared_context`), so no sharing
-        // assert here — it would flip on blas-featured builds.
-        let ops = make_transform_ops(ctx, Some(faer)).expect("faer transform ops");
-        drop(ops);
-    }
-}
-
-#[test]
-fn runtime_and_leased_contexts_share_one_cpu_context() {
-    let runtime = Runtime::builder().build().expect("runtime");
-    let shared = runtime.execution_config().shared_ctx.clone();
-    {
-        let mut state = runtime.lock();
-        assert!(state.shares_cpu_context(&shared));
-    }
-
-    let mut lease = runtime.lease_context().expect("lease");
-    assert!(lease.context().shares_cpu_context(&shared));
-    let mut network_context =
-        TensorExecutionContext::for_config(runtime.execution_config()).expect("context");
-    assert!(network_context.shares_cpu_context(&shared));
-}
-
-// What: a lane built after the runtime carries the configuration the
-// eager lanes were given. Deferring construction is the whole reason a
-// program that never touches single precision pays nothing for it, and the
-// deferral is only sound if the late lane is indistinguishable.
-#[test]
-fn lazily_built_single_precision_lanes_inherit_the_runtime_configuration() {
-    let runtime = Runtime::builder()
-        .recoupling_threads(3)
-        .build()
-        .expect("runtime");
-    let shared = runtime.execution_config().shared_ctx.clone();
-
-    let mut state = runtime.lock();
-    state.mf.force_single_precision_lanes().expect("mf lanes");
-    state
-        .generic
-        .force_single_precision_lanes()
-        .expect("generic lanes");
-    assert!(state.recoupling_threads_are(3));
-    assert!(state.shares_cpu_context(&shared));
-    drop(state);
-
-    let mut context =
-        TensorExecutionContext::for_config(runtime.execution_config()).expect("context");
-    context.mf.force_single_precision_lanes().expect("mf lanes");
-    context
-        .generic
-        .force_single_precision_lanes()
-        .expect("generic lanes");
-    assert!(context.recoupling_threads_are(3));
-    assert!(context.shares_cpu_context(&shared));
-}
-
-#[test]
-fn runtime_builder_recoupling_threads_reach_every_runtime_and_context_lane() {
-    fn assert_runtime_and_context(runtime: &Runtime, expected: usize) {
-        {
-            let mut state = runtime.lock();
-            assert!(state.recoupling_threads_are(expected));
-        }
-
-        let mut context =
-            TensorExecutionContext::for_config(runtime.execution_config()).expect("context");
-        assert!(context.recoupling_threads_are(expected));
-    }
-
-    let configured = Runtime::builder()
-        .recoupling_threads(3)
-        .build()
-        .expect("configured runtime");
-    assert_runtime_and_context(&configured, 3);
-
-    let default = Runtime::builder().build().expect("default runtime");
-    assert_runtime_and_context(&default, 1);
+fn cuda_call_refuses_a_cpu_engine() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let before = symtn_dense::cuda_transfer_stats();
+    let error = cuda_call(cpu).err().expect("a CPU engine is refused");
+    assert!(
+        matches!(
+            &error,
+            Error::Operation(operation) if matches!(
+                operation.as_ref(),
+                symtn_tensors::OperationError::Dense(symtn_dense::DenseError::Unsupported {
+                    op: "cuda_context",
+                    ..
+                })
+            )
+        ),
+        "{error:?}"
+    );
+    assert_eq!(symtn_dense::cuda_transfer_stats(), before);
 }
 
 #[test]
 fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_FIBONACCI_LANE_ISOLATED",
         "runtime::tests::fibonacci_complex_lane_reuses_nonreal_structural_plan",
@@ -484,7 +398,6 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
     // Fibonacci braid, then warm replay avoids every structural-symbol
     // query. Layout queries are counted separately and are not claimed to
     // disappear.
-    let runtime = Runtime::builder().build().expect("runtime");
     let rule = Arc::new(CountingFibonacci::new());
     let tau = SectorId::new(1);
     let leg = || SectorLeg::new([(tau, 1)], false);
@@ -510,7 +423,7 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
     let source_data = vec![Complex64::new(1.0, 0.0); source.space().required_len().unwrap()];
     let mut destination_data =
         vec![Complex64::new(0.0, 0.0); destination.space().required_len().unwrap()];
-    let mut lease = runtime.lease_context().expect("context");
+    let mut lease = crate::runtime::ContextLease::new();
     let context = lease
         .context()
         .complex_multiplicity_free_lane()
@@ -518,6 +431,7 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
 
     context
         .tree_transform_dyn_overwrite_into_ref(
+            engine,
             rule.as_ref(),
             &operation,
             &destination_structure,
@@ -541,6 +455,7 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
     destination_data.fill(Complex64::new(0.0, 0.0));
     context
         .tree_transform_dyn_overwrite_into_ref(
+            engine,
             rule.as_ref(),
             &operation,
             &destination_structure,
@@ -564,6 +479,7 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
 
 #[test]
 fn fibonacci_checked_construction_failures_publish_nothing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_FIBONACCI_FAILURES_ISOLATED",
         "runtime::tests::fibonacci_checked_construction_failures_publish_nothing",
@@ -582,6 +498,7 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
     let callbacks = AtomicUsize::new(0);
 
     let late = TensorMap::<CountingFibonacci, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         [&tau, &tau, &tau],
         [&tau],
@@ -603,6 +520,7 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
     assert_eq!(crate::test_cache::completed(), cache_before);
 
     let early = TensorMap::<CountingFibonacci, Complex64>::from_subblock_fn(
+        engine,
         &runtime,
         std::iter::empty(),
         std::iter::empty(),
@@ -620,6 +538,7 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
     assert_eq!(crate::test_cache::completed(), cache_before);
 
     assert!(TensorMap::<CountingFibonacci, Complex64>::rand_with_seed(
+        engine,
         &runtime,
         [&tau, &tau, &tau],
         [&tau],
@@ -631,6 +550,7 @@ fn fibonacci_checked_construction_failures_publish_nothing() {
 
 #[test]
 fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_RUNTIMES_SHARE_ISOLATED",
         "runtime::tests::runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly",
@@ -650,13 +570,13 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     )
     .unwrap();
     let source_a: TensorMap<SU2FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime_a, [&space, &space], [&space], 475_002).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime_a, [&space, &space], [&space], 475_002).unwrap();
     let source_b: TensorMap<SU2FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime_b, [&space, &space], [&space], 475_002).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime_b, [&space, &space], [&space], 475_002).unwrap();
     crate::cache::clear();
-    let expected_a = source_a.permute(&[1], &[2, 0]).unwrap();
+    let expected_a = source_a.permute(engine, &[1], &[2, 0]).unwrap();
     let after_a = crate::test_cache::completed();
-    let expected_b = source_b.permute(&[1], &[2, 0]).unwrap();
+    let expected_b = source_b.permute(engine, &[1], &[2, 0]).unwrap();
     let after_b = crate::test_cache::completed();
     // What: one process-global entry serves both Runtimes (#2014).
     assert_eq!((after_a.entries(), after_a.misses()), (1, 1));
@@ -670,7 +590,7 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     crate::cache::clear();
     assert_eq!(crate::test_cache::completed().entries(), 0);
 
-    let mut context = TensorExecutionContext::for_config(runtime_b.execution_config()).unwrap();
+    let mut context = TensorExecutionContext::new();
     let source_space = source_b.test_bound_space();
     let destination_space = expected_b.test_bound_space();
     let rule = Arc::clone(source_space.provider_arc());
@@ -689,9 +609,10 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
     let mut actual = vec![f64::NAN; expected_data.len()];
     context
         .mf
-        .f64
+        .f64_lane()
         .tree_context_mut()
         .tree_transform_dyn_overwrite_into_ref(
+            engine,
             rule.as_ref(),
             &operation,
             &destination_structure,
@@ -702,49 +623,4 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
         )
         .unwrap();
     assert_eq!(actual, expected_data);
-}
-
-#[cfg(feature = "cuda")]
-#[test]
-fn clearing_cuda_caches_without_a_device_leaves_the_semantic_caches_intact() {
-    if crate::test_cache::run_isolated_or_return(
-        "SYMTN_CLEAR_CUDA_CACHES_ISOLATED",
-        "runtime::tests::clearing_cuda_caches_without_a_device_leaves_the_semantic_caches_intact",
-    ) {
-        return;
-    }
-    let runtime = Runtime::builder().build().unwrap();
-    let space = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 1),
-        ],
-    )
-    .unwrap();
-    let source: TensorMap<SU2FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 2217).unwrap();
-    let _ = source.permute(&[1], &[2, 0]).unwrap();
-    let before = crate::test_cache::completed().entries();
-    assert!(before > 0);
-
-    runtime.clear_cuda_caches();
-
-    assert_eq!(crate::test_cache::completed().entries(), before);
-    assert!(runtime.cuda_tree_transform_stats().is_none());
-    assert!(runtime.cuda_contract_scratch_bytes().is_none());
-}
-
-/// Compile-level gate for the device-state ownership of #1322: the lease is
-/// still a `CudaDenseContext` for every caller that wants only the dense
-/// context, and a transform reaches both halves through `split()` without
-/// leasing twice. It is never executed — a device would be needed to
-/// obtain a lease — but it fails the build if either shape regresses.
-#[cfg(feature = "cuda")]
-#[allow(dead_code)]
-fn cuda_lease_still_derefs_to_the_dense_context_and_splits(mut lease: CudaLease<'_>) {
-    let dense: &mut symtn_dense::CudaDenseContext = &mut lease;
-    let _ = dense.device();
-    let (dense, executor) = lease.split();
-    let _ = executor.retained_device_bytes(dense);
 }

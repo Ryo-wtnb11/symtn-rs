@@ -10,6 +10,8 @@ mod executor;
     not(feature = "provider-inject")
 ))]
 mod factor_properties;
+#[cfg(feature = "tenferro")]
+mod grouped_binding;
 mod tensor;
 mod view;
 
@@ -60,6 +62,7 @@ fn check_complex_oriented_run(
     broadcast_lhs: bool,
     run_len: usize,
 ) {
+    let engine = &mut CpuEngine::serial();
     let (rows, contracted, cols) = shape;
     let view_offset = 2usize;
     let lhs_first = 3usize;
@@ -111,6 +114,7 @@ fn check_complex_oriented_run(
     executor.reset_seam_dispatches();
     executor
         .matmul_batch_axpby_with_ops_into(
+            engine,
             DenseWrite::C64(
                 DenseViewMut::new(&mut output, &out_shape, &strides, view_offset).unwrap(),
             ),
@@ -319,16 +323,18 @@ fn diag_c64_from_real(values: &[f64]) -> Vec<Complex64> {
     not(feature = "provider-inject"),
     any(feature = "cpu-faer", feature = "cpu-blas-core")
 ))]
-fn assert_values_only_for_explicit_cpu_provider(kind: CpuBackendKind) {
-    let mut executor = DefaultDenseExecutor::with_kind(kind).unwrap();
+fn assert_values_only_for_compiled_cpu_provider() {
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
     let data = [2.0_f64, 0.0, 0.0, -1.0];
     let shape = [2, 2];
     let strides = [1, 2];
 
     let values = executor
-        .svd_vals(DenseRead::F64(
-            DenseView::new(&data, &shape, &strides, 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -337,9 +343,10 @@ fn assert_values_only_for_explicit_cpu_provider(kind: CpuBackendKind) {
     }
 
     let values = executor
-        .eigh_vals(DenseRead::F64(
-            DenseView::new(&data, &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap()),
+        )
         .unwrap();
     let values = values.as_f64_slice().unwrap();
     assert_eq!(values.len(), 2);
@@ -532,6 +539,7 @@ fn run_identity_batch<T: IdentityBatchScalar>(
     alpha: T,
     beta: T,
 ) -> Result<(), DenseError> {
+    let engine = &mut CpuEngine::serial();
     let strides = [1usize];
     let (lhs_base, rhs_base, dst_base) = fixture.base;
     let lhs_shape = [fixture.lhs.len() - lhs_base];
@@ -539,6 +547,7 @@ fn run_identity_batch<T: IdentityBatchScalar>(
     let out_shape = [fixture.output.len() - dst_base];
     executor.reset_seam_dispatches();
     executor.matmul_batch_axpby_into(
+        engine,
         T::write(DenseViewMut::new(&mut fixture.output, &out_shape, &strides, dst_base).unwrap()),
         T::read(DenseView::new(&fixture.lhs, &lhs_shape, &strides, lhs_base).unwrap()),
         T::read(DenseView::new(&fixture.rhs, &rhs_shape, &strides, rhs_base).unwrap()),

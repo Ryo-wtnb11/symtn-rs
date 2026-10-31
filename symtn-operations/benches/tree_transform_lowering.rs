@@ -84,6 +84,7 @@ impl Fixture {
 }
 
 fn replay(
+    engine: &mut dyn symtn_dense::Engine,
     backend: &mut DenseTreeTransformOperations,
     workspace: &mut TreeTransformWorkspace<f64>,
     transform: &TreeTransformStructure<f64>,
@@ -93,6 +94,7 @@ fn replay(
 ) {
     backend
         .tree_transform_structure_overwrite_into_raw(
+            engine,
             workspace,
             transform,
             structure,
@@ -106,6 +108,7 @@ fn replay(
 }
 
 fn profiled_replay(
+    engine: &mut dyn symtn_dense::Engine,
     backend: &mut DenseTreeTransformOperations,
     workspace: &mut TreeTransformWorkspace<f64>,
     transform: &TreeTransformStructure<f64>,
@@ -116,6 +119,7 @@ fn profiled_replay(
     let mut profile = TreeTransformReplayProfile::default();
     backend
         .tree_transform_structure_overwrite_into_raw_profiled(
+            engine,
             workspace,
             transform,
             structure,
@@ -159,10 +163,12 @@ fn print_sample(label: &str, profile: TreeTransformReplayProfile, calls: usize, 
 
 fn report_first_and_warm(fixture: &mut Fixture) {
     fixture.describe();
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let ((profile, _backend, _workspace), calls, bytes) = measured(|| {
         let mut backend = DenseTreeTransformOperations::default();
         let mut workspace = TreeTransformWorkspace::default();
         let profile = profiled_replay(
+            engine,
             &mut backend,
             &mut workspace,
             &fixture.a,
@@ -182,6 +188,7 @@ fn report_first_and_warm(fixture: &mut Fixture) {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay(
+        engine,
         &mut backend,
         &mut workspace,
         &fixture.a,
@@ -191,6 +198,7 @@ fn report_first_and_warm(fixture: &mut Fixture) {
     );
     let (profile, calls, bytes) = measured(|| {
         profiled_replay(
+            engine,
             &mut backend,
             &mut workspace,
             &fixture.a,
@@ -208,6 +216,7 @@ fn report_first_and_warm(fixture: &mut Fixture) {
 
     let (profile, calls, bytes) = measured(|| {
         profiled_replay(
+            engine,
             &mut backend,
             &mut workspace,
             &fixture.b,
@@ -226,6 +235,7 @@ fn report_first_and_warm(fixture: &mut Fixture) {
 
 fn bench_fixture(c: &mut Criterion, mut fixture: Fixture) {
     report_first_and_warm(&mut fixture);
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut group = c.benchmark_group(fixture.name);
     group.measurement_time(Duration::from_secs(3));
     group.sample_size(30);
@@ -235,6 +245,7 @@ fn bench_fixture(c: &mut Criterion, mut fixture: Fixture) {
             let mut backend = DenseTreeTransformOperations::default();
             let mut workspace = TreeTransformWorkspace::default();
             replay(
+                engine,
                 &mut backend,
                 &mut workspace,
                 &fixture.a,
@@ -251,6 +262,7 @@ fn bench_fixture(c: &mut Criterion, mut fixture: Fixture) {
         bencher.iter(|| {
             let mut backend = DenseTreeTransformOperations::default();
             replay(
+                engine,
                 &mut backend,
                 &mut workspace,
                 &fixture.a,
@@ -267,6 +279,7 @@ fn bench_fixture(c: &mut Criterion, mut fixture: Fixture) {
     group.bench_function("reused_workspace_reused_executor_AA", |bencher| {
         bencher.iter(|| {
             replay(
+                engine,
                 &mut backend,
                 &mut workspace,
                 &fixture.a,
@@ -285,6 +298,7 @@ fn bench_fixture(c: &mut Criterion, mut fixture: Fixture) {
             use_a = !use_a;
             let transform = if use_a { &fixture.a } else { &fixture.b };
             replay(
+                engine,
                 &mut backend,
                 &mut workspace,
                 transform,
@@ -514,6 +528,7 @@ fn rank_fixture(logical_rank: usize, permutation: Permutation, blocks: usize) ->
     let mut kernels = StridedHostKernelAdapter::default();
     let mut workspace = TreeTransformWorkspace::default();
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut kernels,
         &mut workspace,
         &transform,
@@ -584,6 +599,7 @@ fn bench_rank_fixture(c: &mut Criterion, mut fixture: RankFixture) {
     let mut kernels = StridedHostKernelAdapter::default();
     let mut workspace = TreeTransformWorkspace::default();
     tree_transform_structure_overwrite_with_strided_kernel_raw(
+        strided_kernel::Exec::serial(),
         &mut kernels,
         &mut workspace,
         &fixture.transform,
@@ -596,6 +612,7 @@ fn bench_rank_fixture(c: &mut Criterion, mut fixture: RankFixture) {
     .unwrap();
     let (_, warm_allocations, warm_bytes) = measured(|| {
         tree_transform_structure_overwrite_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &fixture.transform,
@@ -614,6 +631,7 @@ fn bench_rank_fixture(c: &mut Criterion, mut fixture: RankFixture) {
     group.bench_function("warm_strided_replay", |bencher| {
         bencher.iter(|| {
             tree_transform_structure_overwrite_with_strided_kernel_raw(
+                strided_kernel::Exec::serial(),
                 &mut kernels,
                 &mut workspace,
                 &fixture.transform,

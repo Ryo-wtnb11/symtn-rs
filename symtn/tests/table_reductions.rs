@@ -10,6 +10,7 @@
 //! equals the real-symbol U(1) exactly.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, U1FusionRule};
@@ -49,6 +50,7 @@ fn check_closed_forms(
     sectors: &[(u16, usize)],
     d: fn(u16) -> f64,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(rule),
@@ -57,10 +59,14 @@ fn check_closed_forms(
             .map(|&(label, degeneracy)| (TableSector::new(label), degeneracy)),
     )
     .unwrap();
-    let filled = |tag: &'static str, codomain: Vec<&GradedSpace<TableRule>>, domain: Vec<_>| {
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, codomain, domain, |trees, index| {
-            entry(tag, trees, index)
-        })
+    let mut filled = |tag: &'static str, codomain: Vec<&GradedSpace<TableRule>>, domain: Vec<_>| {
+        TensorMap::<_, Complex64>::from_subblock_fn(
+            engine,
+            &runtime,
+            codomain,
+            domain,
+            |trees, index| entry(tag, trees, index),
+        )
         .unwrap()
     };
     let t = filled("t", vec![&v, &v], vec![&v, &v]);
@@ -101,38 +107,42 @@ fn check_closed_forms(
     };
 
     let real = |value: f64| Complex64::new(value, 0.0);
-    assert_close(&format!("{category} tr"), t.tr().unwrap(), tr);
+    assert_close(&format!("{category} tr"), t.tr(engine).unwrap(), tr);
     for (p, want) in [(1.0, norm1), (2.0, norm2.sqrt()), (f64::INFINITY, norminf)] {
         assert_close(
             &format!("{category} norm({p})"),
-            real(t.norm(p).unwrap()),
+            real(t.norm(engine, p).unwrap()),
             real(want),
         );
     }
-    assert_close(&format!("{category} inner"), s.inner(&t).unwrap(), inner);
+    assert_close(
+        &format!("{category} inner"),
+        s.inner(engine, &t).unwrap(),
+        inner,
+    );
     assert_close(
         &format!("{category} scalar"),
-        x.compose(&y).unwrap().scalar().unwrap(),
+        x.compose(engine, &y).unwrap().scalar(engine).unwrap(),
         unit_entry(&x) * unit_entry(&y),
     );
 
     // The adjoint identities on the lazy view: tr(t^H) = conj(tr t),
     // norm(t^H) = norm(t), inner(s^H, t^H) = conj(inner(s, t)).
-    let (t_h, s_h) = (t.adjoint().unwrap(), s.adjoint().unwrap());
+    let (t_h, s_h) = (t.adjoint(engine).unwrap(), s.adjoint(engine).unwrap());
     assert_close(
         &format!("{category} tr adjoint"),
-        t_h.tr().unwrap(),
-        t.tr().unwrap().conj(),
+        t_h.tr(engine).unwrap(),
+        t.tr(engine).unwrap().conj(),
     );
     assert_close(
         &format!("{category} norm adjoint"),
-        real(t_h.norm(2.0).unwrap()),
-        real(t.norm(2.0).unwrap()),
+        real(t_h.norm(engine, 2.0).unwrap()),
+        real(t.norm(engine, 2.0).unwrap()),
     );
     assert_close(
         &format!("{category} inner adjoint"),
-        s_h.inner(&t_h).unwrap(),
-        s.inner(&t).unwrap().conj(),
+        s_h.inner(engine, &t_h).unwrap(),
+        s.inner(engine, &t).unwrap().conj(),
     );
 }
 
@@ -187,13 +197,19 @@ fn graded_space_dimension_is_the_hand_weighted_sum() {
 
 #[test]
 fn a_non_real_quantum_dimension_is_refused_by_every_weighted_reduction() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // SU(2) is `Simple`: every reduction reads `dim(c)`.
     let runtime = Runtime::builder().build().unwrap();
-    let (v, t) = operands!(&runtime, Embedded::<_, true>(SU2FusionRule), su2_sectors());
+    let (v, t) = operands!(
+        engine,
+        &runtime,
+        Embedded::<_, true>(SU2FusionRule),
+        su2_sectors()
+    );
     for (what, error) in [
-        ("tr", t.tr().unwrap_err()),
-        ("norm", t.norm(2.0).unwrap_err()),
-        ("inner", t.inner(&t).unwrap_err()),
+        ("tr", t.tr(engine).unwrap_err()),
+        ("norm", t.norm(engine, 2.0).unwrap_err()),
+        ("inner", t.inner(engine, &t).unwrap_err()),
         ("GradedSpace::dim", v.dim().unwrap_err()),
     ] {
         assert!(is_non_real_dimension(&error), "{what}: {error:?}");
@@ -202,32 +218,45 @@ fn a_non_real_quantum_dimension_is_refused_by_every_weighted_reduction() {
 
 #[test]
 fn unique_fusion_norm_and_inner_never_read_the_dimension() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit `inner` (`vectorinterface.jl:124`) and `norm` (`linalg.jl:281`) skip `dim(c)`
     // for `UniqueFusion`, where every quantum dimension is one; symtn's
     // Unique reductions do too, so only `tr` and `dim` meet the tilt.
     let runtime = Runtime::builder().build().unwrap();
-    let (v, t) = operands!(&runtime, Embedded::<_, true>(U1FusionRule), u1_sectors());
-    let (_, real) = operands!(&runtime, U1FusionRule, u1_sectors());
-    assert_eq!(
-        t.norm(2.0).unwrap().to_bits(),
-        real.norm(2.0).unwrap().to_bits()
+    let (v, t) = operands!(
+        engine,
+        &runtime,
+        Embedded::<_, true>(U1FusionRule),
+        u1_sectors()
     );
-    assert_eq!(t.inner(&t).unwrap(), real.inner(&real).unwrap());
-    assert!(is_non_real_dimension(&t.tr().unwrap_err()));
+    let (_, real) = operands!(engine, &runtime, U1FusionRule, u1_sectors());
+    assert_eq!(
+        t.norm(engine, 2.0).unwrap().to_bits(),
+        real.norm(engine, 2.0).unwrap().to_bits()
+    );
+    assert_eq!(
+        t.inner(engine, &t).unwrap(),
+        real.inner(engine, &real).unwrap()
+    );
+    assert!(is_non_real_dimension(&t.tr(engine).unwrap_err()));
     assert!(is_non_real_dimension(&v.dim().unwrap_err()));
 }
 
 macro_rules! assert_same_reductions {
-    ($runtime:expr, $base:expr, $sectors:expr) => {{
-        let (complex_space, complex) = operands!($runtime, Embedded::<_, false>($base), $sectors);
-        let (real_space, real) = operands!($runtime, $base, $sectors);
+    ($engine:ident, $runtime:expr, $base:expr, $sectors:expr) => {{
+        let (complex_space, complex) =
+            operands!($engine, $runtime, Embedded::<_, false>($base), $sectors);
+        let (real_space, real) = operands!($engine, $runtime, $base, $sectors);
         assert_eq!(complex.dense_data().unwrap(), real.dense_data().unwrap());
-        assert_eq!(complex.tr().unwrap(), real.tr().unwrap());
+        assert_eq!(complex.tr($engine).unwrap(), real.tr($engine).unwrap());
         assert_eq!(
-            complex.norm(2.0).unwrap().to_bits(),
-            real.norm(2.0).unwrap().to_bits()
+            complex.norm($engine, 2.0).unwrap().to_bits(),
+            real.norm($engine, 2.0).unwrap().to_bits()
         );
-        assert_eq!(complex.inner(&complex).unwrap(), real.inner(&real).unwrap());
+        assert_eq!(
+            complex.inner($engine, &complex).unwrap(),
+            real.inner($engine, &real).unwrap()
+        );
         assert_eq!(
             complex_space.dim().unwrap().to_bits(),
             real_space.dim().unwrap().to_bits()
@@ -237,13 +266,15 @@ macro_rules! assert_same_reductions {
 
 #[test]
 fn a_real_complex_embedding_reduces_exactly_as_the_real_symbol_rule() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_same_reductions!(&runtime, U1FusionRule, u1_sectors());
-    assert_same_reductions!(&runtime, SU2FusionRule, su2_sectors());
+    assert_same_reductions!(engine, &runtime, U1FusionRule, u1_sectors());
+    assert_same_reductions!(engine, &runtime, SU2FusionRule, su2_sectors());
 }
 
 #[test]
 fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::{Duality, LegSelection, Side};
     let runtime = Runtime::builder().build().unwrap();
     let (unit, psi, sigma) = (
@@ -257,22 +288,24 @@ fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
     )
     .unwrap();
     let t: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v, &v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], |trees, index| {
             entry("t", trees, index)
         })
         .unwrap();
 
     // A unit leg carries no recoupling: insertion then removal is the
     // identity on the payload.
-    let widened = t.insert_unit(1, Side::Codomain, Duality::Plain).unwrap();
+    let widened = t
+        .insert_unit(engine, 1, Side::Codomain, Duality::Plain)
+        .unwrap();
     assert_eq!(widened.rank(), 5);
-    let narrowed = widened.remove_unit(1).unwrap();
+    let narrowed = widened.remove_unit(engine, 1).unwrap();
     assert_eq!(narrowed.dense_data().unwrap(), t.dense_data().unwrap());
 
     // Keep σ position 1 and the unit on leg 0: every kept entry is the
     // parent's entry at the selected degeneracy position.
     let selection = LegSelection::try_new(&v, [(sigma, vec![1]), (unit, vec![0])]).unwrap();
-    let restricted = t.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = t.restrict_leg(engine, &[(0, &selection)]).unwrap();
     let mut seen = 0;
     for (trees, block) in restricted.subblocks().unwrap() {
         let leg0 = trees.codomain_uncoupled()[0];
@@ -295,18 +328,20 @@ fn ising_unit_legs_restriction_and_diagonality_follow_the_hand_oracle() {
     }
     assert!(seen > 0);
 
-    let identity: TensorMap<_, Complex64> = TensorMap::isomorphism(&runtime, [&v], [&v]).unwrap();
-    assert!(symtn::expert::is_diagonal(&identity, 0.0).unwrap());
+    let identity: TensorMap<_, Complex64> =
+        TensorMap::isomorphism(engine, &runtime, [&v], [&v]).unwrap();
+    assert!(symtn::expert::is_diagonal(engine, &identity, 0.0).unwrap());
     let full: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v], [&v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v], [&v], |trees, index| {
             entry("d", trees, index)
         })
         .unwrap();
-    assert!(!symtn::expert::is_diagonal(&full, 0.0).unwrap());
+    assert!(!symtn::expert::is_diagonal(engine, &full, 0.0).unwrap());
 }
 
 #[test]
 fn ising_compact_diagonal_agrees_with_its_dense_twin() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn::typed::SectorSpectrum;
     let runtime = Runtime::builder().build().unwrap();
     let (unit, psi, sigma) = (
@@ -320,6 +355,7 @@ fn ising_compact_diagonal_agrees_with_its_dense_twin() {
     )
     .unwrap();
     let compact: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &v,
         [
@@ -342,55 +378,89 @@ fn ising_compact_diagonal_agrees_with_its_dense_twin() {
         compact.dense_data().is_err(),
         "the diagonal is stored compact"
     );
-    let dense = compact.materialize().unwrap();
+    let dense = compact.materialize(engine).unwrap();
     let x: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v], [&v], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&v], [&v], |trees, index| {
             entry("x", trees, index)
         })
         .unwrap();
 
-    assert_close("tr", compact.tr().unwrap(), dense.tr().unwrap());
+    assert_close("tr", compact.tr(engine).unwrap(), dense.tr(engine).unwrap());
     let real = |value: f64| Complex64::new(value, 0.0);
     for p in [1.0, 2.0, f64::INFINITY] {
         assert_close(
             &format!("norm({p})"),
-            real(compact.norm(p).unwrap()),
-            real(dense.norm(p).unwrap()),
+            real(compact.norm(engine, p).unwrap()),
+            real(dense.norm(engine, p).unwrap()),
         );
     }
     assert_close(
         "inner",
-        compact.inner(&x).unwrap(),
-        dense.inner(&x).unwrap(),
+        compact.inner(engine, &x).unwrap(),
+        dense.inner(engine, &x).unwrap(),
     );
-    let flat = |t: TensorMap<TableRule, Complex64>| -> Vec<Complex64> {
-        t.materialize().unwrap().dense_data().unwrap().to_vec()
+    let flat = |engine: &mut dyn Engine, t: TensorMap<TableRule, Complex64>| -> Vec<Complex64> {
+        t.materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec()
     };
     for (what, got, want) in [
         (
             "compose D x",
-            flat(compact.compose(&x).unwrap()),
-            flat(dense.compose(&x).unwrap()),
+            {
+                let c = compact.compose(engine, &x).unwrap();
+                flat(engine, c)
+            },
+            {
+                let c = dense.compose(engine, &x).unwrap();
+                flat(engine, c)
+            },
         ),
         (
             "compose x D",
-            flat(x.compose(&compact).unwrap()),
-            flat(x.compose(&dense).unwrap()),
+            {
+                let c = x.compose(engine, &compact).unwrap();
+                flat(engine, c)
+            },
+            {
+                let c = x.compose(engine, &dense).unwrap();
+                flat(engine, c)
+            },
         ),
         (
             "transpose",
-            flat(compact.transpose(&[1], &[0]).unwrap()),
-            flat(dense.transpose(&[1], &[0]).unwrap()),
+            {
+                let c = compact.transpose(engine, &[1], &[0]).unwrap();
+                flat(engine, c)
+            },
+            {
+                let c = dense.transpose(engine, &[1], &[0]).unwrap();
+                flat(engine, c)
+            },
         ),
         (
             "braid",
-            flat(compact.braid(&[1], &[0], &[0, 1]).unwrap()),
-            flat(dense.braid(&[1], &[0], &[0, 1]).unwrap()),
+            {
+                let c = compact.braid(engine, &[1], &[0], &[0, 1]).unwrap();
+                flat(engine, c)
+            },
+            {
+                let c = dense.braid(engine, &[1], &[0], &[0, 1]).unwrap();
+                flat(engine, c)
+            },
         ),
         (
             "inverse braid",
-            flat(compact.braid(&[1], &[0], &[1, 0]).unwrap()),
-            flat(dense.braid(&[1], &[0], &[1, 0]).unwrap()),
+            {
+                let c = compact.braid(engine, &[1], &[0], &[1, 0]).unwrap();
+                flat(engine, c)
+            },
+            {
+                let c = dense.braid(engine, &[1], &[0], &[1, 0]).unwrap();
+                flat(engine, c)
+            },
         ),
     ] {
         assert_eq!(got.len(), want.len(), "{what}");

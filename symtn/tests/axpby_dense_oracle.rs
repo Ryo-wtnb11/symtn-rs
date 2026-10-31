@@ -15,7 +15,7 @@ use symtn::sector::{
     FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
     U1FusionRule, U1Irrep, Z2Irrep,
 };
-use symtn::typed::{GradedSpace, Runtime, TensorMap};
+use symtn::typed::{CpuEngine, Engine, GradedSpace, Runtime, TensorMap};
 
 use crate::numerics;
 
@@ -41,9 +41,9 @@ impl Sample for Complex64 {
 
 /// Fills a tensor from a counter so `x` and `y` carry unrelated values.
 macro_rules! filled {
-    ($rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
+    ($engine:ident, $rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
         let mut k = 0usize;
-        TensorMap::<_, $d>::from_subblock_fn($rt, $codomain, $domain, |_, _| {
+        TensorMap::<_, $d>::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
             k += 1;
             <$d as Sample>::sample(k, $salt)
         })
@@ -59,10 +59,10 @@ fn assert_linear_combination<D: Sample>(what: &str, z: &[D], x: &[D], y: &[D], a
 /// The physical dense expansion of `z` against `alpha * X + beta * Y`,
 /// computed on the expansions of `x` and `y`.
 macro_rules! physical_case {
-    ($what:expr, $x:expr, $y:expr, $z:expr, $alpha:expr, $beta:expr) => {{
-        let x = $x.to_physical_dense().unwrap();
-        let y = $y.to_physical_dense().unwrap();
-        let z = $z.to_physical_dense().unwrap();
+    ($engine:ident, $what:expr, $x:expr, $y:expr, $z:expr, $alpha:expr, $beta:expr) => {{
+        let x = $x.to_physical_dense($engine).unwrap();
+        let y = $y.to_physical_dense($engine).unwrap();
+        let z = $z.to_physical_dense($engine).unwrap();
         assert_eq!(z.shape, x.shape);
         assert_linear_combination($what, &z.data, &x.data, &y.data, $alpha, $beta);
     }};
@@ -71,7 +71,7 @@ macro_rules! physical_case {
 /// Every entry of `z`, addressed by its fusion trees and block index,
 /// against the same entries of `x` and `y`.
 macro_rules! block_case {
-    ($what:expr, $x:expr, $y:expr, $z:expr, $alpha:expr, $beta:expr) => {{
+    ($engine:ident, $what:expr, $x:expr, $y:expr, $z:expr, $alpha:expr, $beta:expr) => {{
         let entries = |t: &TensorMap<_, _>| {
             let mut out = HashMap::new();
             for (trees, block) in t.subblocks().unwrap() {
@@ -142,62 +142,66 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
 /// Runs one symmetry for both payload dtypes. `$check` is the oracle macro,
 /// `$run` maps `(x, y, alpha, beta)` to a Host `z` (directly or via CUDA).
 macro_rules! symmetry {
-    ($rt:expr, $legs:expr, $check:ident, $run:expr) => {{
+    ($engine:ident, $rt:expr, $legs:expr, $check:ident, $run:expr) => {{
         let (v, w) = $legs;
         {
             let (a, b) = F64_COEFFS;
-            let x = filled!($rt, [&v, &w], [&v], f64, 1);
-            let y = filled!($rt, [&v, &w], [&v], f64, 2);
-            let z = $run(&x, &y, a, b);
-            $check!("f64", x, y, z, a, b);
+            let x = filled!($engine, $rt, [&v, &w], [&v], f64, 1);
+            let y = filled!($engine, $rt, [&v, &w], [&v], f64, 2);
+            let z = $run($engine, &x, &y, a, b);
+            $check!($engine, "f64", x, y, z, a, b);
         }
         {
             let (a, b) = (C64_ALPHA, C64_BETA);
-            let x = filled!($rt, [&v, &w], [&v], Complex64, 1);
-            let y = filled!($rt, [&v, &w], [&v], Complex64, 2);
-            let z = $run(&x, &y, a, b);
-            $check!("c64", x, y, z, a, b);
+            let x = filled!($engine, $rt, [&v, &w], [&v], Complex64, 1);
+            let y = filled!($engine, $rt, [&v, &w], [&v], Complex64, 2);
+            let z = $run($engine, &x, &y, a, b);
+            $check!($engine, "c64", x, y, z, a, b);
         }
     }};
 }
 
 macro_rules! host {
-    () => {
-        |x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| x.axpby(a, y, b).unwrap()
+    ($engine:ident) => {
+        |engine: &mut dyn Engine, x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
+            x.axpby(engine, a, y, b).unwrap()
+        }
     };
 }
 
 #[test]
 fn axpby_matches_dense_expansion_on_host() {
+    let engine = &mut CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    symmetry!(&rt, u1_legs(), physical_case, host!());
-    symmetry!(&rt, su2_legs(), physical_case, host!());
-    symmetry!(&rt, fz2u1_legs(), block_case, host!());
+    symmetry!(engine, &rt, u1_legs(), physical_case, host!(engine));
+    symmetry!(engine, &rt, su2_legs(), physical_case, host!(engine));
+    symmetry!(engine, &rt, fz2u1_legs(), block_case, host!(engine));
 }
 
 #[test]
 fn axpby_into_matches_dense_expansion_on_host() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     macro_rules! assign {
-        () => {
-            |x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
-                let mut z = x.materialize().unwrap();
-                y.axpby_into(&mut z, b, a).unwrap();
+        ($engine:ident) => {
+            |engine: &mut dyn Engine, x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
+                let mut z = x.materialize(engine).unwrap();
+                y.axpby_into(engine, &mut z, b, a).unwrap();
                 z
             }
         };
     }
     let rt = Runtime::builder().build().unwrap();
-    symmetry!(&rt, u1_legs(), physical_case, assign!());
-    symmetry!(&rt, su2_legs(), physical_case, assign!());
-    symmetry!(&rt, fz2u1_legs(), block_case, assign!());
+    symmetry!(engine, &rt, u1_legs(), physical_case, assign!(engine));
+    symmetry!(engine, &rt, su2_legs(), physical_case, assign!(engine));
+    symmetry!(engine, &rt, fz2u1_legs(), block_case, assign!(engine));
 }
 
 #[cfg(feature = "cuda")]
 macro_rules! device {
-    () => {
-        |x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
-            let (xd, yd) = (x.to_cuda().unwrap(), y.to_cuda().unwrap());
-            xd.axpby(a, &yd, b).unwrap().to_host().unwrap()
+    ($cuda:ident) => {
+        |_engine: &mut dyn Engine, x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
+            let (xd, yd) = (x.to_cuda($cuda).unwrap(), y.to_cuda($cuda).unwrap());
+            xd.axpby($cuda, a, &yd, b).unwrap().to_host($cuda).unwrap()
         }
     };
 }
@@ -206,8 +210,10 @@ macro_rules! device {
 #[test]
 #[ignore]
 fn axpby_matches_dense_expansion_on_cuda() {
-    let rt = Runtime::builder().cuda(0).build().unwrap();
-    symmetry!(&rt, u1_legs(), physical_case, device!());
-    symmetry!(&rt, su2_legs(), physical_case, device!());
-    symmetry!(&rt, fz2u1_legs(), block_case, device!());
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let rt = Runtime::builder().build().unwrap();
+    symmetry!(engine, &rt, u1_legs(), physical_case, device!(cuda));
+    symmetry!(engine, &rt, su2_legs(), physical_case, device!(cuda));
+    symmetry!(engine, &rt, fz2u1_legs(), block_case, device!(cuda));
 }

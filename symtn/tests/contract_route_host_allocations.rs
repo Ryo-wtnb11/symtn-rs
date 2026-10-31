@@ -2,8 +2,7 @@
 //! (`contract_into`) and `ContractPlan` members (B = 1, 17), cold and warm,
 //! on one thread.
 //!
-//! Call-count upper bounds recorded on `e6e9cac8` (before Core and CopyC
-//! joined the one Host executor); bytes are reported, not asserted.
+//! Call-count upper bounds (see `BASE`); bytes are reported, not asserted.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
@@ -32,7 +31,8 @@ struct Row {
 }
 
 fn row(codomain: &[usize]) -> Row {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
@@ -44,32 +44,36 @@ fn row(codomain: &[usize]) -> Row {
     )
     .unwrap();
     let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)]).unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     let spec = ContractSpec {
         lhs: &[2],
         rhs: &[0],
         codomain,
         domain: &[2],
     };
-    let mut out = a.contract(&b, &spec).unwrap();
-    a.contract_into(&b, &spec, &mut out, 1.0, 0.0).unwrap();
-    let eager_warm = measure(|| a.contract_into(&b, &spec, &mut out, 1.0, 0.0).unwrap());
+    let mut out = a.contract(engine, &b, &spec).unwrap();
+    a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+        .unwrap();
+    let eager_warm = measure(|| {
+        a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
+            .unwrap()
+    });
 
-    let member = |members: usize| {
+    let mut member = |members: usize| {
         let lhs = StackedTensorMap::pack(&vec![&a; members]).unwrap();
         let rhs = StackedTensorMap::pack(&vec![&b; members]).unwrap();
-        let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
         let mut workspace = plan.workspace().unwrap();
-        plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         let mut dst = workspace.take_output().unwrap();
         let mut workspace = plan.workspace().unwrap();
         let cold = measure(|| {
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
         let warm = measure(|| {
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
         (cold, warm)
@@ -85,26 +89,34 @@ fn row(codomain: &[usize]) -> Row {
     }
 }
 
-/// `e6e9cac8`, debug test build, one thread.
+/// Recorded on the caller-owned engine model, debug test build, one thread.
+/// Against the `e6e9cac8` base (core `eager_warm` 11, `member17_warm` 1 for
+/// both routes): an eager call now allocates its executor and transform
+/// scratch per call (the Runtime keeps no execution pool; TensorKit's
+/// TensorOperations also allocates temporaries per call), and an unbound
+/// grouped core submission prepares its `cpueinsum` 0.9 `GroupedPlan` per
+/// call (two allocations, where Tenferro 0.7.1's grouped validator made
+/// one). `B = 1` workspaces keep their grouped plans, so `member1_warm` is
+/// zero; `B > 1` retention is deferred.
 const BASE: [(&str, Row); 2] = [
     (
         "core",
         Row {
-            eager_warm: (11, 1248),
-            member1_cold: (9, 328),
-            member1_warm: (1, 48),
-            member17_cold: (9, 2632),
-            member17_warm: (1, 816),
+            eager_warm: (14, 16064),
+            member1_cold: (6, 15472),
+            member1_warm: (0, 0),
+            member17_cold: (11, 252328),
+            member17_warm: (2, 248880),
         },
     ),
     (
         "copyC",
         Row {
-            eager_warm: (14, 1648),
-            member1_cold: (11, 2880),
-            member1_warm: (1, 48),
-            member17_cold: (13, 45568),
-            member17_warm: (1, 816),
+            eager_warm: (18, 18984),
+            member1_cold: (7, 17992),
+            member1_warm: (0, 0),
+            member17_cold: (15, 295264),
+            member17_warm: (2, 248880),
         },
     ),
 ];

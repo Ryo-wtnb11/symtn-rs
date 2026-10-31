@@ -10,7 +10,7 @@ use std::sync::Arc;
 use num_traits::{One, Zero};
 use symtn_core::{BlockStructure, CoupledSectorRegion, Placement, SectorId, TensorStorage};
 pub use symtn_dense::MatrixOp;
-use symtn_dense::{strided_batch_runs, strided_batch_runs_into, DenseGemmBatchJob};
+use symtn_dense::{strided_batch_runs, strided_batch_runs_into, DenseGemmBatchJob, Engine};
 
 use crate::host_scalar_kernels::validate_raw_strided_bounds;
 use crate::host_scratch::HostScratchBuffer;

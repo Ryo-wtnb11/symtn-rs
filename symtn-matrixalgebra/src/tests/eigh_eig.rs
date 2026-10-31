@@ -4,13 +4,19 @@ use super::*;
 
 #[test]
 fn eigh_canonical_layout_skips_input_pack_and_vector_scatter() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical EIGH reads source regions and writes final eigenvector regions directly.
     let rule = Z2FusionRule;
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let eigh_copy_rec = crate::probe::record();
-    eigh_full(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_eq!(
         eigh_copy_rec.eigh_copy(),
@@ -62,6 +68,7 @@ fn checked_only_generic_eigh_validates_every_region_before_dense_work() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -85,7 +92,7 @@ fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     assert!(matches!(
-        eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT),
+        eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT),
         Err(CheckedGenericFactorPlanError::Provider(LateGenericError(1)))
     ));
     assert_eq!(dense.counts().of(&[Op::Eigh, Op::EighInto]), 2);
@@ -100,7 +107,8 @@ fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
     let checked = bind_to_spy(&source, &complete);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let full = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let full =
+        eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
     assert_eq!(dense.counts().of(&[Op::Eigh, Op::EighInto]), 2);
     assert!(Arc::ptr_eq(full.v().space().provider_arc(), &complete));
     assert!(full
@@ -116,6 +124,7 @@ fn checked_generic_eigh_stages_dense_work_before_checked_factor_admission() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_eigh_late_dense_failure_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -143,7 +152,7 @@ fn checked_generic_eigh_late_dense_failure_publishes_no_factors() {
     });
     let one_sided_rec = crate::probe::record();
 
-    let result = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT);
+    let result = eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT);
 
     assert!(matches!(
         result,
@@ -165,6 +174,7 @@ fn checked_generic_eigh_late_dense_failure_publishes_no_factors() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn assert_checked_generic_eigh_live_pair_owners<D: crate::factorize::FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -188,7 +198,8 @@ fn assert_checked_generic_eigh_live_pair_owners<D: crate::factorize::FactorScala
     let mut dense = ScriptedExecutor::<RejectEighInto>::default();
     let eigh_pairs_rec = crate::probe::record();
 
-    let full = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let full =
+        eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
 
     assert_eq!(dense.counts().eigh_into, 0);
     assert_eq!(dense.vector_ptrs, eigh_pairs_rec.checked_eigh_pairs());
@@ -250,6 +261,7 @@ fn assert_complex_checked_eigh_reconstruction<R>(
 
 #[test]
 fn checked_generic_eigh_reconstructs_complex_unequal_multi_tree_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, hermitian, _) = generic_values_endomorphism_input();
     let source_regions = source
         .space()
@@ -277,6 +289,7 @@ fn checked_generic_eigh_reconstructs_complex_unequal_multi_tree_sectors() {
     let (provider, checked) = bind_checked_only(&source);
     let input = BoundDynamicTensorRef::try_new(&checked, &hermitian).unwrap();
     let full = eigh_full_dyn_checked_generic(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &input,
         HermitianTol::DEFAULT,
@@ -292,6 +305,7 @@ fn checked_generic_eigh_reconstructs_complex_unequal_multi_tree_sectors() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_eigh_reconstructs_padded_reordered_complex_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, hermitian, _) = generic_values_endomorphism_input();
     let source_regions = source
         .space()
@@ -318,6 +332,7 @@ fn checked_generic_eigh_reconstructs_padded_reordered_complex_input() {
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let before = input.data().to_vec();
     let full = eigh_full_dyn_checked_generic(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &input,
         HermitianTol::DEFAULT,
@@ -330,6 +345,7 @@ fn checked_generic_eigh_reconstructs_padded_reordered_complex_input() {
 
 #[test]
 fn checked_generic_eigh_stably_keeps_raw_exact_signed_ties() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, mut hermitian, _) = generic_values_endomorphism_input();
     let regions = source
         .space()
@@ -354,7 +370,8 @@ fn checked_generic_eigh_stably_keeps_raw_exact_signed_ties() {
     let input = BoundDynamicTensorRef::try_new(&checked, &hermitian).unwrap();
     let mut dense = ScriptedExecutor::<RecordingEigh>::default();
 
-    let full = eigh_full_dyn_checked_generic(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let full =
+        eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
 
     let tied_sector = full
         .eigenvalues()
@@ -388,6 +405,7 @@ fn checked_generic_eigh_stably_keeps_raw_exact_signed_ties() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_eig_stages_dense_work_before_checked_factor_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
     let homspace = FusionTreeHomSpace::new(
@@ -410,7 +428,7 @@ fn checked_generic_eig_stages_dense_work_before_checked_factor_admission() {
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     assert!(matches!(
-        eig_full_dyn_checked_generic(&mut dense, &input),
+        eig_full_dyn_checked_generic(engine, &mut dense, &input),
         Err(CheckedGenericFactorPlanError::Provider(LateGenericError(1)))
     ));
     assert_eq!(dense.counts().eig, 2);
@@ -420,6 +438,7 @@ fn checked_generic_eig_stages_dense_work_before_checked_factor_admission() {
 
 #[test]
 fn eigh_noncanonical_layout_uses_copy_fallback() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: expert noncanonical EIGH retains positive pack-and-vector-scatter copy evidence.
     let rule = Z2FusionRule;
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -429,7 +448,7 @@ fn eigh_noncanonical_layout_uses_copy_fallback() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let eigh_copy_rec = crate::probe::record();
-    eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
     let probe = eigh_copy_rec.eigh_copy();
 
     assert!(probe.input_pack_bytes > 0);
@@ -438,6 +457,7 @@ fn eigh_noncanonical_layout_uses_copy_fallback() {
 
 #[test]
 fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical EIGH validates every coupled sector without packing before any driver call.
     let rule = Z2FusionRule;
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -455,6 +475,7 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
 
     let eigh_copy_rec = crate::probe::record();
     let error = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule), &nonhermitian),
     )
@@ -475,6 +496,7 @@ fn eigh_direct_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
 
 #[test]
 fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a valid noncanonical layout receives the same complex Hermitian preflight after packing.
     let rule = Z2FusionRule;
     let real = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -495,7 +517,7 @@ fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
 
     let eigh_copy_rec = crate::probe::record();
-    let error = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap_err();
+    let error = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap_err();
 
     assert_eq!(
         error,
@@ -509,6 +531,7 @@ fn eigh_fallback_rejects_nonhermitian_complex_input_before_dense_execution() {
 
 #[test]
 fn eigh_vals_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: values-only EIGH validates every borrowed sector before its first no-vector driver.
     let rule = Z2FusionRule;
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
@@ -526,6 +549,7 @@ fn eigh_vals_rejects_a_later_nonhermitian_sector_before_any_dense_call() {
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
 
     let error = eigh_vals(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule), &nonhermitian),
     )
@@ -691,6 +715,7 @@ fn eigh_relative_hermitian_preflight_counts_cross_block_pairs_twice() {
 
 #[test]
 fn eigh_rejects_a_nonreal_complex_diagonal_before_dense_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: complex Hermitian validation checks diagonal reality as well as off-diagonal conjugacy.
     let tensor = one_sector_matrix(vec![
         Complex64::new(1.0, 1.0),
@@ -701,6 +726,7 @@ fn eigh_rejects_a_nonreal_complex_diagonal_before_dense_execution() {
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
 
     let error = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
     )
@@ -714,11 +740,13 @@ fn eigh_rejects_a_nonreal_complex_diagonal_before_dense_execution() {
 
 #[test]
 fn eigh_rejects_nonfinite_input_before_dense_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: NaN and infinity cannot satisfy the Hermitian EIGH input contract.
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let tensor = one_sector_matrix(vec![value, 0.0, 0.0, 2.0]);
         let mut dense = ScriptedExecutor::<EighCallSpy>::default();
         let error = eigh_full(
+            engine,
             &mut dense,
             &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
         )
@@ -732,11 +760,13 @@ fn eigh_rejects_nonfinite_input_before_dense_execution() {
 
 #[test]
 fn eigh_preserves_endomorphism_error_precedence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a non-endomorphism retains its structural error before numeric Hermitian inspection.
     let tensor = one_sector_rectangular_matrix(vec![f64::NAN; 6], 2, 3);
     let mut dense = ScriptedExecutor::<EighCallSpy>::default();
 
     let error = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
     )
@@ -753,6 +783,7 @@ fn eigh_preserves_endomorphism_error_precedence() {
 
 #[test]
 fn eigh_error_preserves_borrowed_input_and_publishes_no_output() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an EIGH backend failure leaves borrowed storage unchanged and returns no vectors.
     let rule = Arc::new(Z2FusionRule);
     let canonical = hermitian_test_tensor(rule.as_ref(), &[SectorId::new(0), SectorId::new(1)]);
@@ -762,7 +793,11 @@ fn eigh_error_preserves_borrowed_input_and_publishes_no_output() {
         let mut dense = ScriptedExecutor::<FailAfterObservingEighInput>::default();
 
         let eigh_copy_rec = crate::probe::record();
-        let result = eigh_full(&mut dense, &bound_tensor_ref!(Arc::clone(&rule), tensor));
+        let result = eigh_full(
+            engine,
+            &mut dense,
+            &bound_tensor_ref!(Arc::clone(&rule), tensor),
+        );
 
         assert!(matches!(result, Err(OperationError::Dense(_))));
         assert_eq!(tensor.data(), before);
@@ -827,6 +862,7 @@ fn unequal_fallback_eigh_fixtures() -> (TestTensor<f64>, TestTensor<Complex64>) 
 
 #[test]
 fn eigh_fallback_publishes_the_provider_ascending_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the noncanonical fallback publishes the solver's ascending order,
     // ±x ties included, unchanged.
     let rule = Arc::new(Z2FusionRule);
@@ -844,7 +880,12 @@ fn eigh_fallback_publishes_the_provider_ascending_order() {
         .is_none());
     let mut dense = ScriptedExecutor::<RecordingEigh>::default();
 
-    let eigh = eigh_full(&mut dense, &bound_tensor_ref!(Arc::clone(&rule), &padded)).unwrap();
+    let eigh = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::clone(&rule), &padded),
+    )
+    .unwrap();
 
     assert_eq!(dense.raw_values.len(), source_regions.len());
     assert_eq!(
@@ -868,6 +909,7 @@ fn eigh_fallback_publishes_the_provider_ascending_order() {
 
 #[test]
 fn eigh_fallback_reconstructs_complex_unequal_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the padded fallback scatters each complex owned V into the public
     // factor structure without changing any sector's V D V^H reconstruction.
     let rule = Arc::new(Z2FusionRule);
@@ -884,7 +926,12 @@ fn eigh_fallback_reconstructs_complex_unequal_sectors() {
         .unwrap()
         .is_none());
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let eigh = eigh_full(&mut dense, &bound_tensor_ref!(Arc::clone(&rule), &padded)).unwrap();
+    let eigh = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::clone(&rule), &padded),
+    )
+    .unwrap();
     let vector_regions = eigh
         .v
         .structure()
@@ -962,8 +1009,10 @@ fn eigh_rejects_non_finite_owned_eigenvalues_before_sorting() {
 fn eigh_direct_outputs_keep_executor_vector_owner() {
     // What: a one-region direct EIGH publishes the executor-returned V buffer.
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let mut dense = ScriptedExecutor::<RejectEighInto>::default();
         let eigh = eigh_full(
+            engine,
             &mut dense,
             &bound_tensor_ref!(Arc::new(Z2FusionRule), tensor),
         )
@@ -1012,6 +1061,7 @@ fn eigh_fallback_keeps_owned_vectors_until_the_final_scatter_for_every_dtype() {
     // What: the fallback's executor V is the same allocation immediately before
     // symtn's required structural scatter, not the final factor allocation.
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rule = Arc::new(Z2FusionRule);
         let bound = bound_tensor(Arc::clone(&rule), tensor);
         let adjoint = bound.space().adjoint_view().unwrap();
@@ -1022,7 +1072,7 @@ fn eigh_fallback_keeps_owned_vectors_until_the_final_scatter_for_every_dtype() {
         let mut dense = ScriptedExecutor::<RejectEighInto>::default();
         let eigh_vectors_rec = crate::probe::record();
 
-        let eigh = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+        let eigh = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
         let before_scatter = eigh_vectors_rec.eigh_owned_vectors();
 
         assert!(!before_scatter.is_empty());
@@ -1064,12 +1114,14 @@ fn eigh_fallback_keeps_owned_vectors_until_the_final_scatter_for_every_dtype() {
 
 #[test]
 fn eigh_zero_only_input_normalizes_to_an_empty_factorization_result() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a zero-only endomorphism has no phantom output sector or spectrum
     // entry and does not invoke the dense executor.
     let tensor = rectangular_svd_tensor(0, 0);
     let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
 
     let eigh = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
     )
@@ -1088,15 +1140,16 @@ fn eigh_zero_only_input_normalizes_to_an_empty_factorization_result() {
 
 #[test]
 fn compact_owned_eigh_preserves_eigh_into_output_precedence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = one_sector_matrix(vec![2.0, 0.0, 0.0, 3.0]);
     let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
     let input = bound.as_ref();
-    let check = |outputs: Vec<DenseTensor>, expected: DenseError| {
+    let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingEighInput {
             outputs: Some(outputs),
             ..Default::default()
         });
-        let error = eigh_full(&mut dense, &input).unwrap_err();
+        let error = eigh_full(engine, &mut dense, &input).unwrap_err();
         assert_eq!(error, OperationError::Dense(expected));
     };
 
@@ -1136,7 +1189,7 @@ fn compact_owned_eigh_preserves_eigh_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = eigh_full(&mut dense, &input).unwrap_err();
+    let error = eigh_full(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 
     let mut outputs = f64_eigh_outputs(2);
@@ -1153,12 +1206,13 @@ fn compact_owned_eigh_preserves_eigh_into_output_precedence() {
         outputs: Some(outputs),
         ..Default::default()
     });
-    let error = eigh_full(&mut dense, &input).unwrap_err();
+    let error = eigh_full(engine, &mut dense, &input).unwrap_err();
     assert!(matches!(error, OperationError::Dense(actual) if actual == expected));
 }
 
 #[test]
 fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: full EIGH preserves the eigen equation and factor orientation at the lowest U(1) label.
     let rule = U1FusionRule;
     let minimum = U1Irrep::new(i32::MIN + 1).sector_id();
@@ -1170,7 +1224,12 @@ fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
     let tensor = TestTensor::from_vec_with_fusion_space(vec![4.0, 1.0, 1.0, 3.0], space).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let result = eigh_full(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let result = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
 
     assert_eq!(result.v.tensor().dims(), &[2, 2]);
     assert_eq!(result.d.tensor().dims(), &[2, 2]);
@@ -1189,6 +1248,7 @@ fn eigh_full_does_not_relabel_the_lowest_u1_sector() {
 
 #[test]
 fn eigh_full_satisfies_the_eigen_equation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let tensor = hermitian_test_tensor(
         &rule,
@@ -1199,6 +1259,7 @@ fn eigh_full_satisfies_the_eigen_equation() {
     );
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let eigh = eigh_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -1216,9 +1277,11 @@ fn assert_eigh_reconstructs_rule<R>(rule: &R, sectors: &[SectorId])
 where
     R: Clone + MultiplicityFreeRigidSymbols<Scalar = f64> + TreeTransformRuleCacheKey,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = hermitian_test_tensor(rule, sectors);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let eigh = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new((*rule).clone()), &tensor),
     )
@@ -1272,6 +1335,7 @@ fn eigh_reconstructs_u1_fermion_parity_and_product_rules() {
 
 #[test]
 fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
     // What: complex direct vectors reconstruct every sector and use the canonical phase gauge.
@@ -1286,7 +1350,12 @@ fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
     )
     .unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let eigh = eigh_full(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let eigh = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(2)
@@ -1342,6 +1411,7 @@ fn eigh_direct_regions_publish_vectors_by_factor_order_and_spectra_by_source_ord
     // What: reversed source spans leave spectra in source traversal while V is
     // interpreted through the published factor's sector regions.
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let rule = Arc::new(Z2FusionRule);
         let bound = bound_tensor(Arc::clone(&rule), tensor);
         let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
@@ -1355,7 +1425,7 @@ fn eigh_direct_regions_publish_vectors_by_factor_order_and_spectra_by_source_ord
             }));
 
         let mut dense = symtn_dense::DefaultDenseExecutor::new();
-        let eigh = eigh_full(&mut dense, &bound.as_ref()).unwrap();
+        let eigh = eigh_full(engine, &mut dense, &bound.as_ref()).unwrap();
         let source_regions = tensor
             .structure()
             .coupled_sector_regions(1)
@@ -1453,12 +1523,14 @@ fn eigh_direct_regions_publish_vectors_by_factor_order_and_spectra_by_source_ord
 
 #[test]
 fn eig_full_satisfies_the_eigen_equation_for_real_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
     let rule = Z2FusionRule;
     // Non-symmetric endomorphism.
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let eig = eig_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
@@ -1524,6 +1596,7 @@ fn eig_full_satisfies_the_eigen_equation_for_real_input() {
 
 #[test]
 fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical sector blocks [[2,1],[1,2]] (spectrum {3, 1}) stored
     // with reversed columns read as [[1,2],[2,1]], which is Hermitian with
     // spectrum {3, -1}. The Hermitian preflight cannot catch it; only the
@@ -1551,6 +1624,7 @@ fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let reference = eigh_vals(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::clone(&provider), &canonical),
     )
@@ -1562,12 +1636,19 @@ fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
         assert!((spectrum.values[1] - 3.0).abs() < 1e-12, "{reference:?}");
     }
     let swapped = bound_tensor(provider, &swapped);
-    assert_stacking_refusal(eigh_vals(&mut dense, &swapped.as_ref()), "eigh_vals ");
-    assert_stacking_refusal(eigh_full(&mut dense, &swapped.as_ref()), "eigh_full ");
+    assert_stacking_refusal(
+        eigh_vals(engine, &mut dense, &swapped.as_ref()),
+        "eigh_vals ",
+    );
+    assert_stacking_refusal(
+        eigh_full(engine, &mut dense, &swapped.as_ref()),
+        "eigh_full ",
+    );
 }
 
 #[test]
 fn eigh_admits_gemm_built_gram_and_congruence_matrices_at_n_1000() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#1987): `AᵀA` and `Aᵀ(HA)` (`H = B + Bᵀ`) formed by the dense
     // backend's gemm are admitted by the default tolerance. Independent
     // oracle: their relative anti-Hermitian residual by direct summation,
@@ -1585,29 +1666,32 @@ fn eigh_admits_gemm_built_gram_and_congruence_matrices_at_n_1000() {
             .collect::<Vec<f64>>()
     };
     let (a, b) = (random(), random());
-    let product = |lhs: &[f64], lhs_strides: [usize; 2], rhs: &[f64]| {
-        let mut out = vec![0.0; n * n];
-        symtn_dense::DefaultDenseExecutor::new()
-            .matmul_into(
-                symtn_dense::DenseWrite::F64(
-                    symtn_dense::DenseViewMut::new(&mut out, &[n, n], &[1, n], 0).unwrap(),
-                ),
-                symtn_dense::DenseRead::F64(
-                    symtn_dense::DenseView::new(lhs, &[n, n], &lhs_strides, 0).unwrap(),
-                ),
-                symtn_dense::DenseRead::F64(
-                    symtn_dense::DenseView::new(rhs, &[n, n], &[1, n], 0).unwrap(),
-                ),
-            )
-            .unwrap();
-        out
-    };
+    let product =
+        |engine: &mut symtn_dense::CpuEngine, lhs: &[f64], lhs_strides: [usize; 2], rhs: &[f64]| {
+            let mut out = vec![0.0; n * n];
+            symtn_dense::DefaultDenseExecutor::new()
+                .matmul_into(
+                    engine,
+                    symtn_dense::DenseWrite::F64(
+                        symtn_dense::DenseViewMut::new(&mut out, &[n, n], &[1, n], 0).unwrap(),
+                    ),
+                    symtn_dense::DenseRead::F64(
+                        symtn_dense::DenseView::new(lhs, &[n, n], &lhs_strides, 0).unwrap(),
+                    ),
+                    symtn_dense::DenseRead::F64(
+                        symtn_dense::DenseView::new(rhs, &[n, n], &[1, n], 0).unwrap(),
+                    ),
+                )
+                .unwrap();
+            out
+        };
     let transposed = [n, 1];
     let h: Vec<f64> = (0..n * n)
         .map(|index| b[index] + b[(index % n) * n + index / n])
         .collect();
-    let gram = product(&a, transposed, &a);
-    let congruence = product(&a, transposed, &product(&h, [1, n], &a));
+    let gram = product(engine, &a, transposed, &a);
+    let h_a = product(engine, &h, [1, n], &a);
+    let congruence = product(engine, &a, transposed, &h_a);
     for matrix in [gram, congruence] {
         let (mut residual, mut norm) = (0.0_f64, 0.0_f64);
         for col in 0..n {
@@ -1626,6 +1710,7 @@ fn eigh_admits_gemm_built_gram_and_congruence_matrices_at_n_1000() {
 
 #[test]
 fn ascending_provider_eigh_order_is_published_without_a_permutation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the LAPACK/faer `syev` spectrum is already ascending, so full and
     // values-only EIGH publish it after the O(n) check alone: no sort, no
     // value copy, no eigenvector column permutation (#1985).
@@ -1633,8 +1718,18 @@ fn ascending_provider_eigh_order_is_published_without_a_permutation() {
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let permutations = crate::probe::record();
-    let full = eigh_full(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
-    let values = eigh_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &tensor)).unwrap();
+    let full = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
+    let values = eigh_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &tensor),
+    )
+    .unwrap();
     assert_eq!(
         permutations.get(crate::probe::Event::EigOrderPermutation),
         0

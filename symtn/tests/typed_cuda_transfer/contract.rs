@@ -1,7 +1,11 @@
 use super::*;
 
-fn assert_direct_contract_and_compose<R>(lhs: &TensorMap<R, f64>, rhs: &TensorMap<R, f64>)
-where
+fn assert_direct_contract_and_compose<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    lhs: &TensorMap<R, f64>,
+    rhs: &TensorMap<R, f64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -20,19 +24,23 @@ where
         codomain,
         domain,
     };
-    let expected_contract = lhs.contract(rhs, &spec).unwrap();
-    let expected_compose = lhs.compose(rhs).unwrap();
+    let expected_contract = lhs.contract(engine, rhs, &spec).unwrap();
+    let expected_compose = lhs.compose(engine, rhs).unwrap();
     let provider = lhs.provider() as *const R;
     let runtime = symtn::typed::__network::runtime_identity(lhs.runtime());
-    let lhs_device = lhs.to_cuda().unwrap();
-    let rhs_device = rhs.to_cuda().unwrap();
+    let lhs_device = lhs.to_cuda(cuda).unwrap();
+    let rhs_device = rhs.to_cuda(cuda).unwrap();
 
     let contract = lhs_device
-        .contract(&rhs_device, &spec)
+        .contract(cuda, &rhs_device, &spec)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
-    let compose = lhs_device.compose(&rhs_device).unwrap().to_host().unwrap();
+    let compose = lhs_device
+        .compose(cuda, &rhs_device)
+        .unwrap()
+        .to_host(cuda)
+        .unwrap();
 
     for (actual, expected) in [
         (&contract, &expected_contract),
@@ -48,7 +56,9 @@ where
 #[test]
 #[ignore]
 fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
@@ -56,15 +66,15 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let u1_lhs = TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
+    let u1_lhs = TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
-    let u1_rhs = TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
+    let u1_rhs = TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 2.0
     })
     .unwrap();
-    assert_direct_contract_and_compose(&u1_lhs, &u1_rhs);
+    assert_direct_contract_and_compose(engine, cuda, &u1_lhs, &u1_rhs);
 
     let su2_rule = Arc::new(SU2FusionRule);
     let su2 = GradedSpace::try_new(
@@ -75,17 +85,23 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
         ],
     )
     .unwrap();
-    let su2_lhs =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2, &su2], [&su2, &su2], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
-    let su2_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2, &su2], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 3.0
-        })
-        .unwrap();
-    assert_direct_contract_and_compose(&su2_lhs, &su2_rhs);
+    let su2_lhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2, &su2],
+        [&su2, &su2],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
+    let su2_rhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2],
+        [&su2, &su2, &su2],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 3.0,
+    )
+    .unwrap();
+    assert_direct_contract_and_compose(engine, cuda, &su2_lhs, &su2_rhs);
 
     let product_rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
@@ -100,16 +116,16 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     )
     .unwrap();
     let product_lhs =
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
     let product_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&product], [&product], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 4.0
         })
         .unwrap();
-    assert_direct_contract_and_compose(&product_lhs, &product_rhs);
+    assert_direct_contract_and_compose(engine, cuda, &product_lhs, &product_rhs);
 
     let product_dual = GradedSpace::try_new(
         Arc::clone(&product_rule),
@@ -121,6 +137,7 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     .and_then(|space| space.try_dual())
     .unwrap();
     let product_multileg_lhs = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&product],
         [&product_dual, &product_dual],
@@ -128,19 +145,22 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     )
     .unwrap();
     let product_multileg_rhs = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&product_dual, &product_dual],
         [&product],
         |_, indices| indices.iter().sum::<usize>() as f64 + 2.0,
     )
     .unwrap();
-    assert_direct_contract_and_compose(&product_multileg_lhs, &product_multileg_rhs);
+    assert_direct_contract_and_compose(engine, cuda, &product_multileg_lhs, &product_multileg_rhs);
 }
 
 #[test]
 #[ignore]
 fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let lhs_codomain = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)]).unwrap();
     let lhs_domain = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)])
@@ -151,11 +171,14 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
         .unwrap();
     let rhs_domain = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)]).unwrap();
     let lhs =
-        TensorMap::from_subblock_fn(&runtime, [&lhs_codomain], [&lhs_domain], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&lhs_codomain], [&lhs_domain], |_, _| 2.0)
+            .unwrap();
     let rhs =
-        TensorMap::from_subblock_fn(&runtime, [&rhs_codomain], [&rhs_domain], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&rhs_codomain], [&rhs_domain], |_, _| 3.0)
+            .unwrap();
     assert_eq!(
         lhs.contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -169,15 +192,18 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
         .unwrap(),
         [-6.0]
     );
-    assert_eq!(lhs.compose(&rhs).unwrap().dense_data().unwrap(), [6.0]);
+    assert_eq!(
+        lhs.compose(engine, &rhs).unwrap().dense_data().unwrap(),
+        [6.0]
+    );
 
-    let lhs_device = lhs.to_cuda().unwrap();
-    let rhs_device = rhs.to_cuda().unwrap();
+    let lhs_device = lhs.to_cuda(cuda).unwrap();
+    let rhs_device = rhs.to_cuda(cuda).unwrap();
     assert_eq!(
         lhs_device
-            .compose(&rhs_device)
+            .compose(cuda, &rhs_device)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -186,6 +212,7 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
     assert_eq!(
         lhs_device
             .contract(
+                cuda,
                 &rhs_device,
                 &ContractSpec {
                     lhs: &[1],
@@ -195,7 +222,7 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
                 }
             )
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -206,22 +233,24 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
 #[test]
 #[ignore]
 fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mutation() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
-    let other_runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
-    let host = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let host = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
     let other_host =
-        TensorMap::from_subblock_fn(&other_runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &other_runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
     let expected = host.dense_data().unwrap().to_vec();
-    let device = host.to_cuda().unwrap();
-    let other_device = other_host.to_cuda().unwrap();
+    let device = host.to_cuda(cuda).unwrap();
+    let other_device = other_host.to_cuda(cuda).unwrap();
 
     assert_eq!(
-        device.compose(&other_device).unwrap_err(),
+        device.compose(cuda, &other_device).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     );
     // General axes are admitted (#1345): a mismatched pairing is
@@ -229,6 +258,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
     assert_eq!(
         device
             .contract(
+                cuda,
                 &device,
                 &ContractSpec {
                     lhs: &[0],
@@ -240,6 +270,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
             .unwrap_err()
             .to_string(),
         host.contract(
+            engine,
             &host,
             &ContractSpec {
                 lhs: &[0],
@@ -260,6 +291,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
     close(
         device
             .contract(
+                cuda,
                 &device,
                 &ContractSpec {
                     lhs: &[1],
@@ -269,11 +301,12 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
                 },
             )
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
         host.contract(
+            engine,
             &host,
             &ContractSpec {
                 lhs: &[1],
@@ -286,10 +319,10 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         .dense_data()
         .unwrap(),
     );
-    let lazy_host = host.adjoint().unwrap();
-    let expected_lazy_compose = lazy_host.compose(&host).unwrap();
-    let lazy = lazy_host.to_cuda().unwrap();
-    let lazy_compose = lazy.compose(&device).unwrap().to_host().unwrap();
+    let lazy_host = host.adjoint(engine).unwrap();
+    let expected_lazy_compose = lazy_host.compose(engine, &host).unwrap();
+    let lazy = lazy_host.to_cuda(cuda).unwrap();
+    let lazy_compose = lazy.compose(cuda, &device).unwrap().to_host(cuda).unwrap();
     assert!(std::ptr::eq(lazy_compose.provider(), host.provider()));
     assert!(symtn::typed::__network::runtime_identity(&runtime).matches(lazy_compose.runtime()));
     assert_eq!(
@@ -302,6 +335,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
     );
     let lazy_general = lazy
         .contract(
+            cuda,
             &device,
             &ContractSpec {
                 lhs: &[1],
@@ -313,6 +347,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         .unwrap();
     let expected_lazy_general = lazy_host
         .contract(
+            engine,
             &host,
             &ContractSpec {
                 lhs: &[1],
@@ -323,52 +358,66 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         )
         .unwrap();
     close(
-        lazy_general.to_host().unwrap().dense_data().unwrap(),
+        lazy_general.to_host(cuda).unwrap().dense_data().unwrap(),
         expected_lazy_general.dense_data().unwrap(),
     );
-    assert_eq!(device.to_host().unwrap().dense_data().unwrap(), expected);
+    assert_eq!(
+        device.to_host(cuda).unwrap().dense_data().unwrap(),
+        expected
+    );
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let zn4 = Arc::new(ZNFusionRule::new(4).unwrap());
     let zn3_leg = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
     let zn4_leg = GradedSpace::try_new(Arc::clone(&zn4), [(zn4.irrep(0), 1)]).unwrap();
     let zn3_tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&zn3_leg], [&zn3_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&zn3_leg], [&zn3_leg], |_, _| 1.0).unwrap();
     let zn4_tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&zn4_leg], [&zn4_leg], |_, _| 1.0).unwrap();
-    let zn3_device = zn3_tensor.to_cuda().unwrap();
-    let zn4_device = zn4_tensor.to_cuda().unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&zn4_leg], [&zn4_leg], |_, _| 1.0).unwrap();
+    let zn3_device = zn3_tensor.to_cuda(cuda).unwrap();
+    let zn4_device = zn4_tensor.to_cuda(cuda).unwrap();
     assert!(zn3_device
-        .compose(&zn4_device)
+        .compose(cuda, &zn4_device)
         .err()
         .unwrap()
         .report()
         .contains("fusion rule mismatch"));
-    assert_eq!(zn3_device.to_host().unwrap().dense_data().unwrap(), [1.0]);
-    assert_eq!(zn4_device.to_host().unwrap().dense_data().unwrap(), [1.0]);
+    assert_eq!(
+        zn3_device.to_host(cuda).unwrap().dense_data().unwrap(),
+        [1.0]
+    );
+    assert_eq!(
+        zn4_device.to_host(cuda).unwrap().dense_data().unwrap(),
+        [1.0]
+    );
 
     let left_open = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
     let seam = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
     let right_open = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(2), 1)]).unwrap();
     let zero_lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&left_open], [&seam], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&left_open], [&seam], |_, _| 1.0).unwrap();
     let zero_rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&seam], [&right_open], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&seam], [&right_open], |_, _| 1.0).unwrap();
     assert_eq!(zero_lhs.subblock_count(), 0);
     assert_eq!(zero_rhs.subblock_count(), 0);
+    let zero_rhs_device = zero_rhs.to_cuda(cuda).unwrap();
     let zero_output = zero_lhs
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .compose(&zero_rhs.to_cuda().unwrap())
+        .compose(cuda, &zero_rhs_device)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     assert_eq!(zero_output.subblock_count(), 0);
     assert!(zero_output.dense_data().unwrap().is_empty());
 }
 
-fn assert_c64_contract_and_compose<R>(lhs: &TensorMap<R, Complex64>, rhs: &TensorMap<R, Complex64>)
-where
+fn assert_c64_contract_and_compose<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    lhs: &TensorMap<R, Complex64>,
+    rhs: &TensorMap<R, Complex64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -387,17 +436,21 @@ where
         codomain,
         domain,
     };
-    let expected_contract = lhs.contract(rhs, &spec).unwrap();
-    let expected_compose = lhs.compose(rhs).unwrap();
-    let lhs_device = lhs.to_cuda().unwrap();
-    let rhs_device = rhs.to_cuda().unwrap();
+    let expected_contract = lhs.contract(engine, rhs, &spec).unwrap();
+    let expected_compose = lhs.compose(engine, rhs).unwrap();
+    let lhs_device = lhs.to_cuda(cuda).unwrap();
+    let rhs_device = rhs.to_cuda(cuda).unwrap();
 
     let contract = lhs_device
-        .contract(&rhs_device, &spec)
+        .contract(cuda, &rhs_device, &spec)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
-    let compose = lhs_device.compose(&rhs_device).unwrap().to_host().unwrap();
+    let compose = lhs_device
+        .compose(cuda, &rhs_device)
+        .unwrap()
+        .to_host(cuda)
+        .unwrap();
     for (actual, expected) in [
         (&contract, &expected_contract),
         (&compose, &expected_compose),
@@ -419,13 +472,13 @@ where
     // Lazy conjugate-transpose operands on either side must route the
     // conjugation through the GEMM flag, never a materialized buffer.
     // `A^H . A` and `B . B^H` are composable for every split.
-    let host_left = lhs.adjoint().unwrap().compose(lhs).unwrap();
+    let host_left = lhs.adjoint(engine).unwrap().compose(engine, lhs).unwrap();
     let device_left = lhs_device
-        .adjoint()
+        .adjoint(cuda)
         .unwrap()
-        .compose(&lhs_device)
+        .compose(cuda, &lhs_device)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     numerics::assert_slices_close(
         "device_left",
@@ -433,11 +486,13 @@ where
         host_left.dense_data().unwrap(),
         CONTRACT_TERMS,
     );
-    let host_right = rhs.compose(&rhs.adjoint().unwrap()).unwrap();
+    let rhs_adjoint = rhs.adjoint(engine).unwrap();
+    let host_right = rhs.compose(engine, &rhs_adjoint).unwrap();
+    let rhs_device_adjoint = rhs_device.adjoint(cuda).unwrap();
     let device_right = rhs_device
-        .compose(&rhs_device.adjoint().unwrap())
+        .compose(cuda, &rhs_device_adjoint)
         .unwrap()
-        .to_host()
+        .to_host(cuda)
         .unwrap();
     numerics::assert_slices_close(
         "device_right",
@@ -450,23 +505,32 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_c64_contract_and_compose_match_host() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    assert_c64_contract_and_compose(
-        &TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-            complex_entry(indices, 1.0)
-        })
-        .unwrap(),
-        &TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-            complex_entry(indices, 2.0)
-        })
-        .unwrap(),
-    );
+    let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 1.0),
+    )
+    .unwrap();
+    let host_result_2 = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 2.0),
+    )
+    .unwrap();
+    assert_c64_contract_and_compose(engine, cuda, &host_result, &host_result_2);
 
     let su2 = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
@@ -476,22 +540,23 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
         ],
     )
     .unwrap();
-    assert_c64_contract_and_compose(
-        &TensorMap::<_, Complex64>::from_subblock_fn(
-            &runtime,
-            [&su2, &su2, &su2],
-            [&su2, &su2],
-            |_, indices| complex_entry(indices, 1.0),
-        )
-        .unwrap(),
-        &TensorMap::<_, Complex64>::from_subblock_fn(
-            &runtime,
-            [&su2, &su2],
-            [&su2, &su2, &su2],
-            |_, indices| complex_entry(indices, 3.0),
-        )
-        .unwrap(),
-    );
+    let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2, &su2],
+        [&su2, &su2],
+        |_, indices| complex_entry(indices, 1.0),
+    )
+    .unwrap();
+    let host_result_2 = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2],
+        [&su2, &su2, &su2],
+        |_, indices| complex_entry(indices, 3.0),
+    )
+    .unwrap();
+    assert_c64_contract_and_compose(engine, cuda, &host_result, &host_result_2);
 
     // Fermionic provider: contract carries the twist, compose does not, so
     // the two results stay distinct for complex payloads too.
@@ -506,36 +571,43 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
     )
     .and_then(|space| space.try_dual())
     .unwrap();
-    assert_c64_contract_and_compose(
-        &TensorMap::<_, Complex64>::from_subblock_fn(
-            &runtime,
-            [&fz2],
-            [&fz2_dual, &fz2_dual],
-            |_, indices| complex_entry(indices, 1.0),
-        )
-        .unwrap(),
-        &TensorMap::<_, Complex64>::from_subblock_fn(
-            &runtime,
-            [&fz2_dual, &fz2_dual],
-            [&fz2],
-            |_, indices| complex_entry(indices, 2.0),
-        )
-        .unwrap(),
-    );
+    let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&fz2],
+        [&fz2_dual, &fz2_dual],
+        |_, indices| complex_entry(indices, 1.0),
+    )
+    .unwrap();
+    let host_result_2 = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&fz2_dual, &fz2_dual],
+        [&fz2],
+        |_, indices| complex_entry(indices, 2.0),
+    )
+    .unwrap();
+    assert_c64_contract_and_compose(engine, cuda, &host_result, &host_result_2);
 
     // General axes are admitted (#1345): these scopes agree with the Host.
-    let host_lhs =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-            complex_entry(indices, 5.0)
-        })
-        .unwrap();
-    let host_rhs =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-            complex_entry(indices, 6.0)
-        })
-        .unwrap();
-    let lhs = host_lhs.to_cuda().unwrap();
-    let rhs = host_rhs.to_cuda().unwrap();
+    let host_lhs = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 5.0),
+    )
+    .unwrap();
+    let host_rhs = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 6.0),
+    )
+    .unwrap();
+    let lhs = host_lhs.to_cuda(cuda).unwrap();
+    let rhs = host_rhs.to_cuda(cuda).unwrap();
     for spec in [
         ContractSpec {
             lhs: &[0],
@@ -550,8 +622,12 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
             domain: &[0],
         },
     ] {
-        let expected = host_lhs.contract(&host_rhs, &spec).unwrap();
-        let actual = lhs.contract(&rhs, &spec).unwrap().to_host().unwrap();
+        let expected = host_lhs.contract(engine, &host_rhs, &spec).unwrap();
+        let actual = lhs
+            .contract(cuda, &rhs, &spec)
+            .unwrap()
+            .to_host(cuda)
+            .unwrap();
         assert_eq!(
             actual.dense_data().unwrap().len(),
             expected.dense_data().unwrap().len()
@@ -577,15 +653,25 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let a = TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-        complex_entry(indices, 1.0) * Complex64::new(1.0, indices[1] as f64 + 1.0)
-    })
+    let a = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 1.0) * Complex64::new(1.0, indices[1] as f64 + 1.0),
+    )
     .unwrap();
-    let b = TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
-        complex_entry(indices, 3.0) * Complex64::new(indices[0] as f64 + 1.0, -1.0)
-    })
+    let b = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| complex_entry(indices, 3.0) * Complex64::new(indices[0] as f64 + 1.0, -1.0),
+    )
     .unwrap();
     assert_eq!(a.subblock_count(), 1);
 
@@ -612,8 +698,8 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
         }
     }
 
-    let a_device = a.to_cuda().unwrap();
-    let b_device = b.to_cuda().unwrap();
+    let a_device = a.to_cuda(cuda).unwrap();
+    let b_device = b.to_cuda(cuda).unwrap();
     // Both device entry points: `compose` (twist-free compiler) and `contract`
     // (which lowers the lazy operand through `TensorContractSpec::
     // new_with_conjugation`). U(1) is bosonic, so both must equal the same
@@ -621,20 +707,21 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
     let results = [
         (
             "compose",
-            a.adjoint().unwrap().compose(&b).unwrap(),
+            a.adjoint(engine).unwrap().compose(engine, &b).unwrap(),
             a_device
-                .adjoint()
+                .adjoint(cuda)
                 .unwrap()
-                .compose(&b_device)
+                .compose(cuda, &b_device)
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap(),
         ),
         (
             "contract",
-            a.adjoint()
+            a.adjoint(engine)
                 .unwrap()
                 .contract(
+                    engine,
                     &b,
                     &ContractSpec {
                         lhs: &[1],
@@ -645,9 +732,10 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
                 )
                 .unwrap(),
             a_device
-                .adjoint()
+                .adjoint(cuda)
                 .unwrap()
                 .contract(
+                    cuda,
                     &b_device,
                     &ContractSpec {
                         lhs: &[1],
@@ -657,7 +745,7 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
                     },
                 )
                 .unwrap()
-                .to_host()
+                .to_host(cuda)
                 .unwrap(),
         ),
     ];
@@ -695,7 +783,9 @@ fn typed_cuda_c64_lazy_adjoint_contract_matches_a_hand_expansion() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_contract_into_matches_the_returning_contraction() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     // `k` carries only charge 0, so the destination's charge-1 block has no
     // contributing GEMM and must come out as exactly `+0.0` from the zeroing
     // of the plan's inactive blocks.
@@ -705,17 +795,30 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     )
     .unwrap();
     let inner = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&outer], [&inner], 761_000)
-        .unwrap()
-        .to_cuda()
-        .unwrap();
-    let rhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&inner], [&outer], 761_001)
-        .unwrap()
-        .to_cuda()
-        .unwrap();
+    let lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&outer],
+        [&inner],
+        761_000,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
+    let rhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&inner],
+        [&outer],
+        761_001,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
 
     let expected = lhs
         .contract(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -725,20 +828,32 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
             },
         )
         .unwrap();
-    let expected_data = expected.to_host().unwrap().dense_data().unwrap().to_vec();
+    let expected_data = expected
+        .to_host(cuda)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     assert!(
         expected_data.contains(&0.0),
         "fixture must contain a destination block no GEMM reaches"
     );
 
-    let poisoned = || {
-        TensorMap::<U1FusionRule, f64>::from_subblock_fn(&runtime, [&outer], [&outer], |_, _| 7.5)
-            .unwrap()
-            .to_cuda()
-            .unwrap()
+    let poisoned = |engine: &mut dyn symtn::typed::Engine, cuda: &mut dyn symtn::typed::Engine| {
+        TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+            engine,
+            &runtime,
+            [&outer],
+            [&outer],
+            |_, _| 7.5,
+        )
+        .unwrap()
+        .to_cuda(cuda)
+        .unwrap()
     };
-    let mut destination = poisoned();
+    let mut destination = poisoned(engine, cuda);
     lhs.contract_into(
+        cuda,
         &rhs,
         &ContractSpec {
             lhs: &[1],
@@ -752,7 +867,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     )
     .unwrap();
     let written = destination
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -779,25 +894,31 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
 
     // Every rejection is refused before a device write: the poisoned bytes
     // survive each one unchanged.
-    let poison_data = poisoned().to_host().unwrap().dense_data().unwrap().to_vec();
-    let assert_rejected =
-        |label: &str,
-         result: Result<(), symtn::typed::Error>,
-         dst: &TensorMap<U1FusionRule, f64, CudaStorage>| {
-            assert!(result.is_err(), "{label} must be rejected");
-            assert_eq!(
-                dst.to_host().unwrap().dense_data().unwrap(),
-                poison_data.as_slice(),
-                "{label} wrote to the destination before rejecting"
-            );
-        };
+    let poison_data = poisoned(engine, cuda)
+        .to_host(cuda)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
+    let assert_rejected = |label: &str,
+                           result: Result<(), symtn::typed::Error>,
+                           dst: &TensorMap<U1FusionRule, f64, CudaStorage>,
+                           cuda: &mut dyn symtn::typed::Engine| {
+        assert!(result.is_err(), "{label} must be rejected");
+        assert_eq!(
+            dst.to_host(cuda).unwrap().dense_data().unwrap(),
+            poison_data.as_slice(),
+            "{label} wrote to the destination before rejecting"
+        );
+    };
 
     // Alias: the destination shares the lhs payload body, directly and through
     // a lazy adjoint view of the same parent.
-    let lhs_data = lhs.to_host().unwrap().dense_data().unwrap().to_vec();
+    let lhs_data = lhs.to_host(cuda).unwrap().dense_data().unwrap().to_vec();
     let mut lhs_alias = lhs.clone();
     assert!(
         lhs.contract_into(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -813,14 +934,15 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         "an lhs alias must be rejected"
     );
     assert_eq!(
-        lhs_alias.to_host().unwrap().dense_data().unwrap(),
+        lhs_alias.to_host(cuda).unwrap().dense_data().unwrap(),
         lhs_data.as_slice()
     );
     let mut adjoint_alias = lhs.clone();
     assert!(lhs
-        .adjoint()
+        .adjoint(cuda)
         .unwrap()
         .contract_into(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[0],
@@ -834,7 +956,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         )
         .is_err());
     assert_eq!(
-        adjoint_alias.to_host().unwrap().dense_data().unwrap(),
+        adjoint_alias.to_host(cuda).unwrap().dense_data().unwrap(),
         lhs_data.as_slice()
     );
 
@@ -846,16 +968,17 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     )
     .unwrap();
     let mut wrong_space = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&drifted],
         [&drifted],
         |_, _| 7.5,
     )
     .unwrap()
-    .to_cuda()
+    .to_cuda(cuda)
     .unwrap();
     let wrong_space_before = wrong_space
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -867,6 +990,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     );
     assert!(
         lhs.contract_into(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -882,15 +1006,16 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         "a destination whose block layout differs must be rejected"
     );
     assert_eq!(
-        wrong_space.to_host().unwrap().dense_data().unwrap(),
+        wrong_space.to_host(cuda).unwrap().dense_data().unwrap(),
         wrong_space_before.as_slice()
     );
 
-    let mut destination = poisoned();
+    let mut destination = poisoned(engine, cuda);
     let shared = destination.clone();
     assert_rejected(
         "shared ownership",
         lhs.contract_into(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -903,11 +1028,13 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
             0.0,
         ),
         &destination,
+        cuda,
     );
     drop(shared);
     // Every alpha and beta is supported (#1550): `2 * contract + 0.5 * dst`,
     // with the unreached block scaled rather than cleared.
     lhs.contract_into(
+        cuda,
         &rhs,
         &ContractSpec {
             lhs: &[1],
@@ -927,7 +1054,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         .collect();
     numerics::assert_slices_close(
         "contract_into alpha = 2, beta = 0.5",
-        destination.to_host().unwrap().dense_data().unwrap(),
+        destination.to_host(cuda).unwrap().dense_data().unwrap(),
         &accumulated,
         3,
     );
@@ -935,18 +1062,29 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     // A destination whose blocks all exist but none of which any GEMM reaches:
     // the inactive-block zeroing alone produces the whole result.
     let disjoint = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(7), 2)]).unwrap();
-    let empty_lhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&outer], [&disjoint], 761_002)
-            .unwrap()
-            .to_cuda()
-            .unwrap();
-    let empty_rhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&disjoint], [&outer], 761_003)
-            .unwrap()
-            .to_cuda()
-            .unwrap();
+    let empty_lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&outer],
+        [&disjoint],
+        761_002,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
+    let empty_rhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&disjoint],
+        [&outer],
+        761_003,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
     let empty_expected = empty_lhs
         .contract(
+            cuda,
             &empty_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -956,9 +1094,10 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
             },
         )
         .unwrap();
-    let mut empty_destination = poisoned();
+    let mut empty_destination = poisoned(engine, cuda);
     empty_lhs
         .contract_into(
+            cuda,
             &empty_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -972,35 +1111,50 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         )
         .unwrap();
     assert_eq!(
-        empty_destination.to_host().unwrap().dense_data().unwrap(),
-        empty_expected.to_host().unwrap().dense_data().unwrap()
+        empty_destination
+            .to_host(cuda)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
+        empty_expected.to_host(cuda).unwrap().dense_data().unwrap()
     );
 
     // A destination space with no coupled sector at all: `required_len` is 0,
     // so the replay writes nothing.
     let single = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let zero_lhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&single], [&single], 761_004)
-            .unwrap()
-            .to_cuda()
-            .unwrap();
-    let zero_rhs =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&single], [&disjoint], 761_005)
-            .unwrap()
-            .to_cuda()
-            .unwrap();
+    let zero_lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&single],
+        [&single],
+        761_004,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
+    let zero_rhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        engine,
+        &runtime,
+        [&single],
+        [&disjoint],
+        761_005,
+    )
+    .unwrap()
+    .to_cuda(cuda)
+    .unwrap();
     let mut zero_destination = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&single],
         [&disjoint],
         |_, _| 7.5,
     )
     .unwrap()
-    .to_cuda()
+    .to_cuda(cuda)
     .unwrap();
     assert!(
         zero_destination
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -1009,6 +1163,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     );
     zero_lhs
         .contract_into(
+            cuda,
             &zero_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1022,9 +1177,14 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
         )
         .unwrap();
     assert_eq!(
-        zero_destination.to_host().unwrap().dense_data().unwrap(),
+        zero_destination
+            .to_host(cuda)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         zero_lhs
             .contract(
+                cuda,
                 &zero_rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -1034,7 +1194,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
                 }
             )
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap()

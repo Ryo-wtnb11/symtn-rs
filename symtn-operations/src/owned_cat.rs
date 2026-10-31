@@ -4,7 +4,7 @@ use core::ops::Range;
 
 use num_complex::Complex64;
 use num_traits::Zero;
-use strided_kernel::{CopyPlan, MaybeSendSync, RawStridedMut, RawStridedRef, StridedError};
+use strided_kernel::{CopyPlan, RawStridedMut, RawStridedRef, StridedError};
 
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::ConjugateValue;
@@ -116,7 +116,8 @@ pub enum OwnedCatC64Source<'a> {
 
 /// Returns `None` unless the compiled copies prove a complete physical overwrite.
 #[doc(hidden)]
-pub fn try_cat_owned_raw<D: ConjugateValue + MaybeSendSync>(
+pub fn try_cat_owned_raw<D: ConjugateValue + Send + Sync>(
+    mut exec: crate::host_pool::Exec<'_>,
     required_len: usize,
     side: OwnedCatSide,
     copies: &[OwnedCatCopy],
@@ -130,7 +131,7 @@ pub fn try_cat_owned_raw<D: ConjugateValue + MaybeSendSync>(
     )?;
     Some(initialize_infallible(required_len, |destination| {
         for copy in copies {
-            write_same(destination, sources[copy.source], copy);
+            write_same(exec.reborrow(), destination, sources[copy.source], copy);
         }
     }))
 }
@@ -139,6 +140,7 @@ pub fn try_cat_owned_raw<D: ConjugateValue + MaybeSendSync>(
 /// and initializes each compact slab column before writing its stored diagonal.
 #[doc(hidden)]
 pub fn try_cat_owned_mixed_raw<D>(
+    mut exec: crate::host_pool::Exec<'_>,
     required_len: usize,
     side: OwnedCatSide,
     copies: &[OwnedCatCopy],
@@ -147,7 +149,7 @@ pub fn try_cat_owned_mixed_raw<D>(
     compact_diagonals: &[Option<&[D]>],
 ) -> Option<Vec<D>>
 where
-    D: ConjugateValue + MaybeSendSync + Zero,
+    D: ConjugateValue + Send + Sync + Zero,
 {
     if sources
         .iter()
@@ -166,7 +168,7 @@ where
     Some(initialize_infallible(required_len, |destination| {
         for (copy_index, copy) in copies.iter().enumerate() {
             if let Some(source) = sources[copy.source] {
-                write_same(destination, source, copy);
+                write_same(exec.reborrow(), destination, source, copy);
             } else {
                 let values = compact_diagonals[copy_index]
                     .expect("compact cat diagonal was admitted before output allocation");
@@ -188,6 +190,7 @@ where
 /// Returns `None` unless the compiled mixed-dtype copies prove a complete overwrite.
 #[doc(hidden)]
 pub fn try_cat_owned_c64_raw(
+    mut exec: crate::host_pool::Exec<'_>,
     required_len: usize,
     side: OwnedCatSide,
     copies: &[OwnedCatCopy],
@@ -202,7 +205,9 @@ pub fn try_cat_owned_c64_raw(
         for copy in copies {
             match sources[copy.source] {
                 OwnedCatC64Source::F64(source) => write_widened(destination, source, copy),
-                OwnedCatC64Source::C64(source) => write_same(destination, source, copy),
+                OwnedCatC64Source::C64(source) => {
+                    write_same(exec.reborrow(), destination, source, copy)
+                }
             }
         }
     }))
@@ -319,7 +324,8 @@ fn source_bounds_hold(copy: &OwnedCatCopy, source_len: usize) -> bool {
         .is_some_and(|last| last < source_len)
 }
 
-fn write_same<D: ConjugateValue + MaybeSendSync>(
+fn write_same<D: ConjugateValue + Send + Sync>(
+    exec: crate::host_pool::Exec<'_>,
     destination: &mut [MaybeUninit<D>],
     source: &[D],
     copy: &OwnedCatCopy,
@@ -334,7 +340,8 @@ fn write_same<D: ConjugateValue + MaybeSendSync>(
         // initializes every logical destination slot, which is the coverage
         // `initialize_owned` relies on; a panic here unwinds before its
         // `set_len`, as with the indexing panics of the loops below.
-        copy_strided_rows(destination, source, copy).expect("owned cat geometry was validated");
+        copy_strided_rows(exec, destination, source, copy)
+            .expect("owned cat geometry was validated");
         #[cfg(test)]
         for column in 0..copy.cols {
             let start = copy.destination_offset + column * copy.destination_leading_dimension;
@@ -377,7 +384,8 @@ fn write_same<D: ConjugateValue + MaybeSendSync>(
 
 /// One compiled rank-2 strided copy into the uninitialized destination; the
 /// replay allocates nothing at rank 2 (`RAW_FUSED_RANK_LIMIT` is 8).
-fn copy_strided_rows<D: Copy + MaybeSendSync>(
+fn copy_strided_rows<D: Copy + Send + Sync>(
+    exec: crate::host_pool::Exec<'_>,
     destination: &mut [MaybeUninit<D>],
     source: &[D],
     copy: &OwnedCatCopy,
@@ -400,9 +408,7 @@ fn copy_strided_rows<D: Copy + MaybeSendSync>(
         signed(copy.destination_offset)?,
     )?;
     let plan = CopyPlan::compile(&dims, &destination_strides, &source_strides)?;
-    crate::host_pool::strided(copy.rows * copy.cols, || {
-        plan.execute_uninit(&mut destination, &source)
-    })
+    plan.execute_uninit(&mut destination, &source, exec)
 }
 
 fn write_widened(destination: &mut [MaybeUninit<Complex64>], source: &[f64], copy: &OwnedCatCopy) {
@@ -451,6 +457,7 @@ mod tests {
         let diagonal = [-0.0, nan];
         crate::probe::arm_writes(crate::probe::Writer::Cat, 8);
         let output = try_cat_owned_mixed_raw(
+            strided_kernel::Exec::serial(),
             8,
             OwnedCatSide::Domain,
             &copies,
@@ -512,6 +519,7 @@ mod tests {
         ];
         let (output, bitmap) = with_bitmap(12, || {
             try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
                 12,
                 OwnedCatSide::Domain,
                 &copies,
@@ -534,6 +542,7 @@ mod tests {
         ];
         let (output, bitmap) = with_bitmap(10, || {
             try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
                 10,
                 OwnedCatSide::Codomain,
                 &copies,
@@ -557,7 +566,14 @@ mod tests {
             Complex64::new(4., 4.),
         ];
         let (output, bitmap) = with_bitmap(4, || {
-            try_cat_owned_raw(4, OwnedCatSide::Domain, &copies, [&source, &[]]).unwrap()
+            try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
+                4,
+                OwnedCatSide::Domain,
+                &copies,
+                [&source, &[]],
+            )
+            .unwrap()
         });
         assert_eq!(
             output,
@@ -584,7 +600,14 @@ mod tests {
             copy(1, 0, 6, [3, 1], [1, 3], 3, 6..9, false),
         ];
         let (output, bitmap) = with_bitmap(9, || {
-            try_cat_owned_raw(9, OwnedCatSide::Domain, &copies, [&lhs, &rhs[..3]]).unwrap()
+            try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
+                9,
+                OwnedCatSide::Domain,
+                &copies,
+                [&lhs, &rhs[..3]],
+            )
+            .unwrap()
         });
         let expected = [1., 2., 3., 4., 5., 6., -0.0, f64::NAN, 7.5];
         assert_eq!(
@@ -600,7 +623,14 @@ mod tests {
             copy(1, 0, 2, [1, 2], [1, 1], 3, 0..6, false),
         ];
         let (output, bitmap) = with_bitmap(6, || {
-            try_cat_owned_raw(6, OwnedCatSide::Codomain, &copies, [&lhs, &rhs[2..]]).unwrap()
+            try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
+                6,
+                OwnedCatSide::Codomain,
+                &copies,
+                [&lhs, &rhs[2..]],
+            )
+            .unwrap()
         });
         let expected = [4., 5., 7.5, 2., 3., f64::INFINITY];
         assert_eq!(
@@ -621,7 +651,14 @@ mod tests {
             Complex64::new(4., 4.),
         ];
         let copies = [copy(0, 0, 0, [2, 2], [2, 1], 2, 0..4, false)];
-        let output = try_cat_owned_raw(4, OwnedCatSide::Domain, &copies, [&source, &[]]).unwrap();
+        let output = try_cat_owned_raw(
+            strided_kernel::Exec::serial(),
+            4,
+            OwnedCatSide::Domain,
+            &copies,
+            [&source, &[]],
+        )
+        .unwrap();
         assert_eq!(output, [source[0], source[2], source[1], source[3]]);
     }
 
@@ -636,6 +673,7 @@ mod tests {
         let complex = [Complex64::new(3., 4.), Complex64::new(5., 6.)];
         let (output, bitmap) = with_bitmap(4, || {
             try_cat_owned_c64_raw(
+                strided_kernel::Exec::serial(),
                 4,
                 OwnedCatSide::Domain,
                 &copies,
@@ -660,21 +698,23 @@ mod tests {
 
     #[test]
     fn empty_and_zero_extent_outputs_are_completed() {
+        let mut exec = strided_kernel::Exec::serial();
         // What: empty canonical storage and explicit zero-extent copy geometry
         // complete without manufacturing a nonempty payload.
         assert_eq!(
-            try_cat_owned_raw::<f64>(0, OwnedCatSide::Domain, &[], [&[], &[]]),
+            try_cat_owned_raw::<f64>(exec.reborrow(), 0, OwnedCatSide::Domain, &[], [&[], &[]]),
             Some(vec![])
         );
         let zero = [copy(0, 0, 0, [0, 1], [1, 0], 0, 0..0, false)];
         assert_eq!(
-            try_cat_owned_raw::<f64>(0, OwnedCatSide::Domain, &zero, [&[], &[]]),
+            try_cat_owned_raw::<f64>(exec.reborrow(), 0, OwnedCatSide::Domain, &zero, [&[], &[]]),
             Some(vec![])
         );
     }
 
     #[test]
     fn invalid_geometry_declines_before_opening_the_transaction() {
+        let mut exec = strided_kernel::Exec::serial();
         // What: overlap with equal total area, holes, padding, reordered or
         // nonmonotone slabs, source OOB, and checked overflow are all declined.
         let valid_sources = [&[1., 2.][..], &[3., 4.][..]];
@@ -724,10 +764,14 @@ mod tests {
             ),
         ];
         for (required_len, copies) in invalid {
-            assert!(
-                try_cat_owned_raw(required_len, OwnedCatSide::Domain, &copies, valid_sources)
-                    .is_none()
-            );
+            assert!(try_cat_owned_raw(
+                exec.reborrow(),
+                required_len,
+                OwnedCatSide::Domain,
+                &copies,
+                valid_sources
+            )
+            .is_none());
             assert!(!crate::probe::writes_armed(crate::probe::Writer::Cat));
         }
     }
@@ -743,6 +787,7 @@ mod tests {
         crate::probe::arm_writes(crate::probe::Writer::Cat, 6);
 
         let output = try_cat_owned_raw(
+            strided_kernel::Exec::serial(),
             6,
             OwnedCatSide::Codomain,
             &copies,
@@ -770,14 +815,15 @@ mod tests {
         // What: unwinding inside an accepted mapped write leaves the owned
         // transaction at length zero, so no partial output can escape.
         let copies = [copy(0, 0, 0, [2, 1], [1, 2], 2, 0..2, true)];
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = try_cat_owned_raw(
+                strided_kernel::Exec::serial(),
                 2,
                 OwnedCatSide::Domain,
                 &copies,
                 [&[PanicValue, PanicValue], &[]],
             );
-        });
+        }));
         assert!(result.is_err());
     }
 }

@@ -85,6 +85,7 @@ fn cuda_route_assembly_counts(plan: &CompactFactorPlan) -> (usize, usize, usize)
 #[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     fn assert_host_spaces<R>(source: &TensorMap<R, f64>, plan: &CompactFactorPlan)
     where
         R: symtn_core::TypedSectorAdmission<
@@ -95,10 +96,11 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
+        let cpu = &mut crate::typed::CpuEngine::serial();
         let space = source.logical_space();
         let (rows, cols) = (codomain_axes(source), domain_axes(source));
-        let Qr { q, r } = source.qr_compact(&rows, &cols).unwrap();
-        let Svd { u, s, vh } = source.svd_compact(&rows, &cols).unwrap();
+        let Qr { q, r } = source.qr_compact(cpu, &rows, &cols).unwrap();
+        let Svd { u, s, vh } = source.svd_compact(cpu, &rows, &cols).unwrap();
         let left = plan.left_space(space).unwrap();
         let right = plan.right_space(space).unwrap();
         let bond = plan.bond_space(space).unwrap();
@@ -132,7 +134,7 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
         }
         if space.space().homspace().codomain() == space.space().homspace().domain() {
             let Eigh { d, v } = source
-                .eigh_full(&rows, &cols, HermitianTol::DEFAULT)
+                .eigh_full(cpu, &rows, &cols, HermitianTol::DEFAULT)
                 .unwrap();
             assert_eq!(v.logical_space().space(), left.space(), "eigh v");
             assert_eq!(d.logical_space().space(), bond.space(), "eigh d");
@@ -140,7 +142,7 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     }
 
     // Multi-tree sectors, a dual codomain leg, sectors on one side only.
-    let source = u1_lazy_fixture();
+    let source = u1_lazy_fixture(cpu);
     let plan = compact_factor_routes(source.logical_space()).unwrap();
     assert!(executed_routes(&plan).count() > 1);
     assert!(plan
@@ -152,7 +154,7 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     // The device method itself, on a device-typed compact diagonal (a valid
     // device tensor that needs no allocation) over a multi-sector bond; its
     // dense Host twin has the same space.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -162,17 +164,22 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
         ],
     )
     .unwrap();
-    let dense =
-        TensorMap::<U1FusionRule, f64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+    let dense = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        cpu,
+        &runtime,
+        [&leg],
+        [&leg],
+        |_, index| {
             if index[0] == index[1] {
                 2.0 + index[0] as f64
             } else {
                 0.25
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let spectrum = dense
-        .svd_compact(&codomain_axes(&dense), &domain_axes(&dense))
+        .svd_compact(cpu, &codomain_axes(&dense), &domain_axes(&dense))
         .unwrap()
         .s;
     let TypedData::Diagonal(values) = owned(&spectrum).data.as_ref() else {
@@ -185,7 +192,7 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
             TypedData::<f64, CudaStorage>::Diagonal(values.clone()),
         )),
     };
-    let host = spectrum.materialize().unwrap();
+    let host = spectrum.materialize(cpu).unwrap();
     assert_eq!(host.logical_space().space(), device.logical_space().space());
     assert_host_spaces(&host, &device.compact_factor_plan().unwrap());
 }
@@ -193,7 +200,11 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
 #[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_work() {
-    let diagonal = u1_lazy_fixture().svd_compact(&[0, 1], &[2]).unwrap().s;
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let diagonal = u1_lazy_fixture(cpu)
+        .svd_compact(cpu, &[0, 1], &[2])
+        .unwrap()
+        .s;
     let TypedData::Diagonal(spectrum) = owned(&diagonal).data.as_ref() else {
         unreachable!("SVD factor is compact")
     };
@@ -205,15 +216,15 @@ fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_w
         )),
     };
     assert!(matches!(
-        device_diagonal.qr_compact(&codomain_axes(&device_diagonal), &domain_axes(&device_diagonal)),
+        device_diagonal.qr_compact(cpu, &codomain_axes(&device_diagonal), &domain_axes(&device_diagonal)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
     assert!(matches!(
-        device_diagonal.svd_compact(&codomain_axes(&device_diagonal), &domain_axes(&device_diagonal)),
+        device_diagonal.svd_compact(cpu, &codomain_axes(&device_diagonal), &domain_axes(&device_diagonal)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
     assert!(matches!(
-        device_diagonal.eigh_full(&codomain_axes(&device_diagonal), &domain_axes(&device_diagonal), HermitianTol::DEFAULT),
+        device_diagonal.eigh_full(cpu, &codomain_axes(&device_diagonal), &domain_axes(&device_diagonal), HermitianTol::DEFAULT),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
     // #1452: the adjoint of a compact diagonal is the owned (conjugated)
@@ -221,18 +232,18 @@ fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_w
     // compact storage. The lazy-operand rejection needs a dense device
     // parent and is covered by
     // `typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work`.
-    let adjoint = device_diagonal.adjoint().unwrap();
+    let adjoint = device_diagonal.adjoint(cpu).unwrap();
     assert!(Arc::ptr_eq(owned(&adjoint), owned(&device_diagonal)));
     assert!(matches!(
-        adjoint.qr_compact(&codomain_axes(&adjoint), &domain_axes(&adjoint)),
+        adjoint.qr_compact(cpu, &codomain_axes(&adjoint), &domain_axes(&adjoint)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
     assert!(matches!(
-        adjoint.svd_compact(&codomain_axes(&adjoint), &domain_axes(&adjoint)),
+        adjoint.svd_compact(cpu, &codomain_axes(&adjoint), &domain_axes(&adjoint)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
     assert!(matches!(
-        adjoint.eigh_full(&codomain_axes(&adjoint), &domain_axes(&adjoint), HermitianTol::DEFAULT),
+        adjoint.eigh_full(cpu, &codomain_axes(&adjoint), &domain_axes(&adjoint), HermitianTol::DEFAULT),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("dense CUDA storage")
     ));
 
@@ -254,7 +265,7 @@ fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_w
             complex_spectrum.clone(),
         )),
     };
-    let complex_adjoint = complex_diagonal.adjoint().unwrap();
+    let complex_adjoint = complex_diagonal.adjoint(cpu).unwrap();
     let TypedData::Diagonal(conjugated) = owned(&complex_adjoint).data.as_ref() else {
         unreachable!("the adjoint of a compact diagonal is compact")
     };
@@ -269,29 +280,32 @@ fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_w
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
-    let lazy = source.to_cuda().unwrap().adjoint().unwrap();
+    let lazy = source.to_cuda(cuda).unwrap().adjoint(cuda).unwrap();
     assert!(matches!(&lazy.repr, TypedTensorRepr::Adjoint(_)));
     assert!(matches!(
-        lazy.qr_compact(&codomain_axes(&lazy), &domain_axes(&lazy)),
+        lazy.qr_compact(cuda, &codomain_axes(&lazy), &domain_axes(&lazy)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("lazy adjoint")
     ));
     assert!(matches!(
-        lazy.svd_compact(&codomain_axes(&lazy), &domain_axes(&lazy)),
+        lazy.svd_compact(cuda, &codomain_axes(&lazy), &domain_axes(&lazy)),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("lazy adjoint")
     ));
     assert!(matches!(
-        lazy.eigh_full(&codomain_axes(&lazy), &domain_axes(&lazy), HermitianTol::DEFAULT),
+        lazy.eigh_full(cuda, &codomain_axes(&lazy), &domain_axes(&lazy), HermitianTol::DEFAULT),
         Err(Error::UnsupportedOnDevice(message)) if message.contains("lazy adjoint")
     ));
 }
@@ -300,14 +314,17 @@ fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [(U1Irrep::new(-1), 2), (U1Irrep::new(0), 3)],
     )
     .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
         let (row, col) = (indices[0], indices[1]);
         if row == col {
             row as f64 + 1.0
@@ -318,10 +335,11 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         }
     })
     .unwrap();
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
 
     let expected_full = source
         .eigh_full(
+            cpu,
             &codomain_axes(&source),
             &domain_axes(&source),
             HermitianTol::DEFAULT,
@@ -332,6 +350,7 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         v: v_device,
     } = device
         .eigh_full(
+            cuda,
             &codomain_axes(&device),
             &domain_axes(&device),
             HermitianTol::DEFAULT,
@@ -343,12 +362,16 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         v_device.logical_space().provider_arc(),
         source.logical_space().provider_arc()
     ));
-    let d = d_device.to_host().unwrap();
-    let v = v_device.to_host().unwrap();
-    assert_typed_map_close(&d, &expected_full.d, 1.0e-10);
+    let d = d_device.to_host(cuda).unwrap();
+    let v = v_device.to_host(cuda).unwrap();
+    assert_typed_map_close(cpu, &d, &expected_full.d, 1.0e-10);
     assert_typed_map_close(
-        &source.compose(&v).unwrap(),
-        &v.compose(&d).unwrap(),
+        cpu,
+        &source
+            .compose(&mut crate::typed::CpuEngine::serial(), &v)
+            .unwrap(),
+        &v.compose(&mut crate::typed::CpuEngine::serial(), &d)
+            .unwrap(),
         1.0e-10,
     );
 
@@ -361,18 +384,20 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         ],
     )
     .unwrap();
-    let su2_source = TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |_, indices| {
-        if indices[0] == indices[1] {
-            indices[0] as f64 + 1.0
-        } else {
-            0.25
-        }
-    })
-    .unwrap();
+    let su2_source =
+        TensorMap::from_subblock_fn(cpu, &runtime, [&su2_leg], [&su2_leg], |_, indices| {
+            if indices[0] == indices[1] {
+                indices[0] as f64 + 1.0
+            } else {
+                0.25
+            }
+        })
+        .unwrap();
     assert!(su2_source.subblock_count() >= 2);
-    let su2_device = su2_source.to_cuda().unwrap();
+    let su2_device = su2_source.to_cuda(cuda).unwrap();
     let Eigh { d: su2_d, v: su2_v } = su2_device
         .eigh_full(
+            cuda,
             &codomain_axes(&su2_device),
             &domain_axes(&su2_device),
             HermitianTol::DEFAULT,
@@ -382,19 +407,25 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
         su2_v.logical_space().provider_arc(),
         su2_source.logical_space().provider_arc()
     ));
-    let su2_d = su2_d.to_host().unwrap();
-    let su2_v = su2_v.to_host().unwrap();
+    let su2_d = su2_d.to_host(cuda).unwrap();
+    let su2_v = su2_v.to_host(cuda).unwrap();
     assert_typed_map_close(
-        &su2_source.compose(&su2_v).unwrap(),
-        &su2_v.compose(&su2_d).unwrap(),
+        cpu,
+        &su2_source
+            .compose(&mut crate::typed::CpuEngine::serial(), &su2_v)
+            .unwrap(),
+        &su2_v
+            .compose(&mut crate::typed::CpuEngine::serial(), &su2_d)
+            .unwrap(),
         1.0e-10,
     );
 
-    let input_before_failure = device.to_host().unwrap();
+    let input_before_failure = device.to_host(cuda).unwrap();
     for failure in [("decomposition", 2), ("assembly", 2)] {
         probe::arm(Fault::CudaEigh(failure.0), failure.1);
         assert!(device
             .eigh_full(
+                cuda,
                 &codomain_axes(&device),
                 &domain_axes(&device),
                 HermitianTol::DEFAULT
@@ -402,23 +433,24 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
             .is_err());
         probe::disarm();
         assert_typed_map_close(
-            &device.to_host().unwrap(),
+            cpu,
+            &device.to_host(cuda).unwrap(),
             &input_before_failure,
             f64::EPSILON,
         );
     }
 
-    let nonhermitian = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let nonhermitian = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
         match (indices[0], indices[1]) {
             (0, 1) => 1.0,
             _ => 0.0,
         }
     })
     .unwrap()
-    .to_cuda()
+    .to_cuda(cuda)
     .unwrap();
     assert!(matches!(
-        nonhermitian.eigh_full(&codomain_axes(&nonhermitian), &domain_axes(&nonhermitian), HermitianTol::DEFAULT),
+        nonhermitian.eigh_full(cuda, &codomain_axes(&nonhermitian), &domain_axes(&nonhermitian), HermitianTol::DEFAULT),
         Err(Error::Operation(error))
             if matches!(
                 error.as_ref(),
@@ -493,12 +525,13 @@ fn mis_stacked_hermitian_z2(runtime: &Runtime) -> TensorMap<Z2FusionRule, f64> {
 
 #[test]
 fn host_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let tensor = mis_stacked_hermitian_z2(&runtime);
     let error = format!(
         "{:?}",
         tensor
-            .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
             .err()
     );
     assert!(error.contains("eigh_full requires identical"), "{error}");
@@ -508,13 +541,15 @@ fn host_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: the device path reads the same tiling as the host and must
     // refuse it too, instead of returning the {3, -1} spectrum of the
     // column-permuted block.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-    let device = mis_stacked_hermitian_z2(&runtime).to_cuda().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let device = mis_stacked_hermitian_z2(&runtime).to_cuda(cuda).unwrap();
     assert!(matches!(
-        device.eigh_full(&codomain_axes(&device), &domain_axes(&device), HermitianTol::DEFAULT),
+        device.eigh_full(cuda, &codomain_axes(&device), &domain_axes(&device), HermitianTol::DEFAULT),
         Err(Error::Operation(error))
             if matches!(
                 error.as_ref(),
@@ -528,6 +563,9 @@ fn typed_cuda_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: cuSOLVER's ascending order is the published one (#1985), so an
     // aligned route copies its eigenvectors once and the general path once
     // per codomain tree, with no selector. The selector-GEMM assembly (one
@@ -535,7 +573,7 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
     // path for a non-identity order, is forced for comparison. All four are
     // exact data movement and publish the same values; the GEMM's `x * 1 + 0`
     // may turn a `-0.0` into `+0.0`, so zeros are compared by value.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -545,11 +583,17 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
         ],
     )
     .unwrap();
-    let source =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 11)
-            .unwrap();
-    let source = source.axpby(1.0, &source.adjoint().unwrap(), 1.0).unwrap();
-    let device = source.to_cuda().unwrap();
+    let source = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        cpu,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        11,
+    )
+    .unwrap();
+    let adjoint = source.adjoint(cpu).unwrap();
+    let source = source.axpby(cpu, 1.0, &adjoint, 1.0).unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let sectors = sector_regions(
         device.logical_space().space().structure(),
         device.logical_space().space().nout(),
@@ -577,6 +621,7 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
         let Eigh { d, v } = probe::with_routes(routes, || {
             device
                 .eigh_full(
+                    cuda,
                     &codomain_axes(&device),
                     &domain_axes(&device),
                     HermitianTol::DEFAULT,
@@ -586,7 +631,7 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
         assert_eq!(recording.get(Event::CudaSelectorUpload), uploads);
         let (_, factor_copies, _, _, assembly_gemms, _, _) = qr_counts(&recording);
         assert_eq!((factor_copies, assembly_gemms), (copies, gemms));
-        outputs.push((d.to_host().unwrap(), v.to_host().unwrap()));
+        outputs.push((d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap()));
     }
     let bits = |map: &TensorMap<U1FusionRule, f64>| {
         map.dense_data()
@@ -600,20 +645,31 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
         assert_eq!(bits(&outputs[0].1), bits(v));
     }
     let (d, v) = &outputs[0];
-    assert_typed_map_close(&source.compose(v).unwrap(), &v.compose(d).unwrap(), 1.0e-10);
+    assert_typed_map_close(
+        cpu,
+        &source
+            .compose(&mut crate::typed::CpuEngine::serial(), v)
+            .unwrap(),
+        &v.compose(&mut crate::typed::CpuEngine::serial(), d)
+            .unwrap(),
+        1.0e-10,
+    );
 }
 
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: cuSOLVER's order is already ascending, so the selector assembly
     // only runs for a non-identity order. Reversing every odd sector's order
     // (test toggle) makes that permutation real next to identity sectors:
     // values follow the injected order, every column pairs with its value
     // (`t v = v d`), and one selector is uploaded, on aligned and per-tree
     // routes alike.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -623,11 +679,17 @@ fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
         ],
     )
     .unwrap();
-    let source =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 13)
-            .unwrap();
-    let source = source.axpby(1.0, &source.adjoint().unwrap(), 1.0).unwrap();
-    let device = source.to_cuda().unwrap();
+    let source = TensorMap::<U1FusionRule, f64>::rand_with_seed(
+        cpu,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        13,
+    )
+    .unwrap();
+    let adjoint = source.adjoint(cpu).unwrap();
+    let source = source.axpby(cpu, 1.0, &adjoint, 1.0).unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let sectors = sector_regions(
         device.logical_space().space().structure(),
         device.logical_space().space().nout(),
@@ -640,18 +702,19 @@ fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
         .map(|(index, region)| index % 2 == 1 && region.rows() >= 2)
         .collect();
     assert!(reversed.iter().any(|&r| r) && reversed.iter().any(|&r| !r));
-    let eigh = |device: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>| {
+    let mut eigh = |device: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>| {
         let Eigh { d, v } = device
             .eigh_full(
+                cuda,
                 &codomain_axes(device),
                 &domain_axes(device),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
-        (d.to_host().unwrap(), v.to_host().unwrap())
+        (d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap())
     };
     let (ascending, _) = eigh(&device);
-    let ascending = ascending.diagview().unwrap();
+    let ascending = ascending.diagview(cpu).unwrap();
     // The spectra list the sectors in source-region order.
     assert_eq!(
         ascending
@@ -675,7 +738,12 @@ fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
         assert_eq!(recording.get(Event::CudaSelectorUpload), 1);
         let (_, factor_copies, _, _, assembly_gemms, _, _) = qr_counts(&recording);
         assert_eq!((factor_copies, assembly_gemms), (0, gemms));
-        for ((entry, want), &reverse) in d.diagview().unwrap().iter().zip(&ascending).zip(&reversed)
+        for ((entry, want), &reverse) in d
+            .diagview(cpu)
+            .unwrap()
+            .iter()
+            .zip(&ascending)
+            .zip(&reversed)
         {
             let mut want = want.values.clone();
             if reverse {
@@ -684,8 +752,12 @@ fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
             assert_eq!(entry.values, want, "treewise {treewise}");
         }
         assert_typed_map_close(
-            &source.compose(&v).unwrap(),
-            &v.compose(&d).unwrap(),
+            cpu,
+            &source
+                .compose(&mut crate::typed::CpuEngine::serial(), &v)
+                .unwrap(),
+            &v.compose(&mut crate::typed::CpuEngine::serial(), &d)
+                .unwrap(),
             1.0e-10,
         );
     }
@@ -695,7 +767,10 @@ fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -705,7 +780,7 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
         ],
     )
     .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg, &leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
@@ -718,7 +793,7 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
         .iter()
         .filter(|region| region.rows() != 0 && region.cols() != 0)
         .count();
-    let source_device = source.to_cuda().unwrap();
+    let source_device = source.to_cuda(cuda).unwrap();
     // Per-route transfer and kernel counts follow the proved layout flag.
     let plan = source_device.compact_factor_plan().unwrap();
     let (factor_copies, selector_uploads, assembly_gemms) = cuda_route_assembly_counts(&plan);
@@ -748,7 +823,11 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
 
     let recording = probe::record();
     source_device
-        .qr_compact(&codomain_axes(&source_device), &domain_axes(&source_device))
+        .qr_compact(
+            cuda,
+            &codomain_axes(&source_device),
+            &domain_axes(&source_device),
+        )
         .unwrap()
         .pair();
     assert_eq!(
@@ -765,8 +844,8 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     );
 
     let malformed_storage = {
-        let lease = runtime.lease_cuda().unwrap();
-        CudaStorage::<f64>::upload(&lease, &[]).unwrap()
+        let call = crate::runtime::cuda_call(cuda).unwrap();
+        CudaStorage::<f64>::upload(&call, &[]).unwrap()
     };
     let malformed = TensorMap {
         runtime: runtime.clone(),
@@ -777,14 +856,14 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     };
     let recording = probe::record();
     assert!(matches!(
-        malformed.qr_compact(&codomain_axes(&malformed), &domain_axes(&malformed)),
+        malformed.qr_compact(cuda, &codomain_axes(&malformed), &domain_axes(&malformed)),
         Err(Error::InvalidArgument(message)) if message.contains("payload length")
     ));
     assert_eq!(qr_counts(&recording), (0, 0, 0, 0, 0, 0, 0));
 
     let stranded_storage = {
-        let lease = runtime.lease_cuda().unwrap();
-        CudaStorage::upload(&lease, source.dense_data().unwrap()).unwrap()
+        let call = crate::runtime::cuda_call(cuda).unwrap();
+        CudaStorage::upload(&call, source.dense_data().unwrap()).unwrap()
     };
     let stranded = TensorMap {
         runtime: Runtime::builder().build().unwrap(),
@@ -795,8 +874,8 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     };
     let recording = probe::record();
     assert!(matches!(
-        stranded.qr_compact(&codomain_axes(&stranded), &domain_axes(&stranded)),
-        Err(Error::InvalidArgument(message)) if message.contains("without a CUDA device")
+        stranded.qr_compact(cpu, &codomain_axes(&stranded), &domain_axes(&stranded)),
+        Err(error) if error_chain(&error).contains("CUDA engine")
     ));
     assert_eq!(qr_counts(&recording), (0, 0, 0, 0, 0, 0, 0));
 
@@ -804,12 +883,12 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
     let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
     let empty: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     let recording = probe::record();
     empty
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .qr_compact(&codomain_axes(&empty), &domain_axes(&empty))
+        .qr_compact(cuda, &codomain_axes(&empty), &domain_axes(&empty))
         .unwrap()
         .pair();
     assert_eq!(qr_counts(&recording), (0, 0, 0, 2, 0, 0, 0));
@@ -819,7 +898,10 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -829,7 +911,7 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
         ],
     )
     .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg, &leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
     .unwrap();
@@ -846,14 +928,18 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
         .iter()
         .map(|region| region.rows().min(region.cols()))
         .sum();
-    let source_device = source.to_cuda().unwrap();
+    let source_device = source.to_cuda(cuda).unwrap();
     // Compact SVD assembles through the same aligned-copy dispatch as QR
     // and shares its copy/selector/GEMM observation.
     let plan = source_device.compact_factor_plan().unwrap();
     let (factor_copies, _, assembly_gemms) = cuda_route_assembly_counts(&plan);
     let recording = probe::record();
     source_device
-        .svd_compact(&codomain_axes(&source_device), &domain_axes(&source_device))
+        .svd_compact(
+            cuda,
+            &codomain_axes(&source_device),
+            &domain_axes(&source_device),
+        )
         .unwrap();
     assert_eq!(
         svd_counts(&recording),
@@ -868,8 +954,8 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     );
 
     let malformed_storage = {
-        let lease = runtime.lease_cuda().unwrap();
-        CudaStorage::<f64>::upload(&lease, &[]).unwrap()
+        let call = crate::runtime::cuda_call(cuda).unwrap();
+        CudaStorage::<f64>::upload(&call, &[]).unwrap()
     };
     let malformed = TensorMap {
         runtime: runtime.clone(),
@@ -881,17 +967,20 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     for lazy in [false, true] {
         let recording = probe::record();
         let rejected = if lazy {
-            source_device.adjoint().unwrap().svd_compact(&[0], &[1, 2])
+            source_device
+                .adjoint(cuda)
+                .unwrap()
+                .svd_compact(cuda, &[0], &[1, 2])
         } else {
-            malformed.svd_compact(&codomain_axes(&malformed), &domain_axes(&malformed))
+            malformed.svd_compact(cuda, &codomain_axes(&malformed), &domain_axes(&malformed))
         };
         assert!(rejected.is_err());
         assert_eq!(svd_counts(&recording), (0, 0, 0, 0, 0));
     }
 
     let stranded_storage = {
-        let lease = runtime.lease_cuda().unwrap();
-        CudaStorage::upload(&lease, source.dense_data().unwrap()).unwrap()
+        let call = crate::runtime::cuda_call(cuda).unwrap();
+        CudaStorage::upload(&call, source.dense_data().unwrap()).unwrap()
     };
     let stranded = TensorMap {
         runtime: Runtime::builder().build().unwrap(),
@@ -902,7 +991,7 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     };
     let recording = probe::record();
     assert!(stranded
-        .svd_compact(&codomain_axes(&stranded), &domain_axes(&stranded))
+        .svd_compact(cpu, &codomain_axes(&stranded), &domain_axes(&stranded))
         .is_err());
     assert_eq!(svd_counts(&recording), (0, 0, 0, 0, 0));
 }
@@ -911,11 +1000,14 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_non_aligned_routes_upload_no_selector_and_the_same_diagonal() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: the rustdoc's upload count, three zero-initialized factors
     // and no selector upload even on non-aligned routes (the gauge
     // selector is built on the device), and a diagonal that does not
     // depend on the assembly path.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -926,8 +1018,9 @@ fn typed_cuda_svd_non_aligned_routes_upload_no_selector_and_the_same_diagonal() 
     )
     .unwrap();
     let source =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg], 13).unwrap();
-    let device = source.to_cuda().unwrap();
+        TensorMap::<U1FusionRule, f64>::rand_with_seed(cpu, &runtime, [&leg, &leg], [&leg], 13)
+            .unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let routes = sector_regions(
         source.logical_space().space().structure(),
         source.logical_space().space().nout(),
@@ -941,7 +1034,7 @@ fn typed_cuda_svd_non_aligned_routes_upload_no_selector_and_the_same_diagonal() 
         let recording = probe::record();
         let Svd { s, .. } = probe::with_routes(svd_routes(treewise), || {
             device
-                .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+                .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                 .unwrap()
         });
         let (_, _, creations, _, _) = svd_counts(&recording);
@@ -952,7 +1045,7 @@ fn typed_cuda_svd_non_aligned_routes_upload_no_selector_and_the_same_diagonal() 
             "treewise {treewise}"
         );
         diagonals.push(
-            s.to_host()
+            s.to_host(cuda)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -975,7 +1068,8 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaFactorizationPayload,
 {
-    let tensor = tensor.materialize().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let tensor = tensor.materialize(cpu).unwrap();
     let data = tensor.dense_data().unwrap();
     let space = tensor.logical_space().space();
     sector_regions(space.structure(), space.nout())
@@ -1007,21 +1101,26 @@ where
         + SectorCodec,
     D: CudaFactorizationPayload,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let Svd { u, s, vh } = host
-        .svd_compact(&codomain_axes(host), &domain_axes(host))
+        .svd_compact(cpu, &codomain_axes(host), &domain_axes(host))
         .unwrap();
     let bond = s.domain();
-    let spectrum = TensorMap::<R, D>::from_subblock_fn(host.runtime(), &bond, &bond, |_, index| {
-        if index[0] != index[1] {
-            D::zero()
-        } else if index[0] < 2 {
-            D::from_real(2.0)
-        } else {
-            D::from_real(1.0 / (2 + index[0]) as f64)
-        }
-    })
-    .unwrap();
-    u.compose(&spectrum).unwrap().compose(&vh).unwrap()
+    let spectrum =
+        TensorMap::<R, D>::from_subblock_fn(cpu, host.runtime(), &bond, &bond, |_, index| {
+            if index[0] != index[1] {
+                D::zero()
+            } else if index[0] < 2 {
+                D::from_real(2.0)
+            } else {
+                D::from_real(1.0 / (2 + index[0]) as f64)
+            }
+        })
+        .unwrap();
+    u.compose(cpu, &spectrum)
+        .unwrap()
+        .compose(cpu, &vh)
+        .unwrap()
 }
 
 /// Consistency contract of #1552, Host SVD as the oracle: (1) singular
@@ -1042,19 +1141,22 @@ where
         + SectorCodec,
     D: CudaFactorizationPayload,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let tolerance = 1.0e3 * D::epsilon();
     let expected = host
-        .svd_compact(&codomain_axes(host), &domain_axes(host))
+        .svd_compact(cpu, &codomain_axes(host), &domain_axes(host))
         .unwrap();
     let actual = host
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .svd_compact(&codomain_axes(host), &domain_axes(host))
+        .svd_compact(cuda, &codomain_axes(host), &domain_axes(host))
         .unwrap();
     let actual = Svd {
-        u: actual.u.to_host().unwrap(),
-        s: actual.s.to_host().unwrap(),
-        vh: actual.vh.to_host().unwrap(),
+        u: actual.u.to_host(cuda).unwrap(),
+        s: actual.s.to_host(cuda).unwrap(),
+        vh: actual.vh.to_host(cuda).unwrap(),
     };
     let matrices = |svd: &Svd<TensorMap<R, D>>| {
         (
@@ -1188,7 +1290,7 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     // over U(1) and SU(2), f64 and c64, generic and exactly degenerate
     // spectra, and aligned as well as forced per-tree (non-aligned)
     // assembly, where the gauge rides the selector GEMM instead.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1216,9 +1318,11 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
-        let real = TensorMap::<R, f64>::rand_with_seed(runtime, [leg, leg], [leg], 21).unwrap();
+        let cpu = &mut crate::typed::CpuEngine::serial();
+        let real =
+            TensorMap::<R, f64>::rand_with_seed(cpu, runtime, [leg, leg], [leg], 21).unwrap();
         let complex =
-            TensorMap::<R, Complex64>::rand_with_seed(runtime, [leg, leg], [leg], 22).unwrap();
+            TensorMap::<R, Complex64>::rand_with_seed(cpu, runtime, [leg, leg], [leg], 22).unwrap();
         let mut entrywise = 0;
         for treewise in [false, true] {
             probe::with_routes(svd_routes(treewise), || {
@@ -1239,6 +1343,9 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: A = [[1, -1], [-1, 1]] has singular vectors whose entries tie
     // in exact arithmetic. cuSOLVER returns them 1 ulp apart
     // (0.7071067811865475 vs ...476, observed on the A100), so the rule
@@ -1248,26 +1355,31 @@ fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
     // be zeroed (a tie-break that summed tied entries would do that).
     // The exact-tie contract (first row wins) is pinned on hand-built
     // factors in `symtn-dense/tests/cuda_svd_gauge.rs`.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let host =
-        TensorMap::<U1FusionRule, f64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+    let host = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
+        cpu,
+        &runtime,
+        [&leg],
+        [&leg],
+        |_, index| {
             if index[0] == index[1] {
                 1.0
             } else {
                 -1.0
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let Svd { u, s, vh } = host
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .svd_compact(&codomain_axes(&host), &domain_axes(&host))
+        .svd_compact(cuda, &codomain_axes(&host), &domain_axes(&host))
         .unwrap();
     let (u, s, vh) = (
-        u.to_host().unwrap(),
-        s.to_host().unwrap(),
-        vh.to_host().unwrap(),
+        u.to_host(cuda).unwrap(),
+        s.to_host(cuda).unwrap(),
+        vh.to_host(cuda).unwrap(),
     );
     let half = std::f64::consts::FRAC_1_SQRT_2;
     let u = u.dense_data().unwrap();
@@ -1309,7 +1421,7 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
     // side (the selector's embed_diagonal), and 1 conj for a complex left
     // side. Per call, one gauge-weight upload (no per-route identity
     // selectors); nothing is downloaded.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1324,9 +1436,13 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
         leg: &GradedSpace<U1FusionRule>,
         seed: u64,
     ) {
+        let cpu = &mut crate::typed::CpuEngine::serial();
+        let cuda = &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
+            .unwrap();
         let host =
-            TensorMap::<U1FusionRule, D>::rand_with_seed(runtime, [leg, leg], [leg], seed).unwrap();
-        let device = host.to_cuda().unwrap();
+            TensorMap::<U1FusionRule, D>::rand_with_seed(cpu, runtime, [leg, leg], [leg], seed)
+                .unwrap();
+        let device = host.to_cuda(cuda).unwrap();
         let regions = sector_regions(
             host.logical_space().space().structure(),
             host.logical_space().space().nout(),
@@ -1350,7 +1466,7 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
             let before = symtn_dense::cuda_transfer_stats();
             let Svd { u, s, vh } = probe::with_routes(svd_routes(treewise), || {
                 device
-                    .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+                    .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
                     .unwrap()
             });
             let after = symtn_dense::cuda_transfer_stats();
@@ -1385,6 +1501,7 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
 /// buffer by [`fill_diagonal_values`]. Returned as widened bits.
 #[cfg(feature = "cuda")]
 fn downloaded_svd_diagonal_bits<R, D>(
+    engine: &mut dyn Engine,
     device: &TensorMap<R, D, CudaStorage<D>>,
     s_len: usize,
     s_structure: &BlockStructure,
@@ -1396,7 +1513,7 @@ where
     let source = device.direct_cuda_storage("test").unwrap();
     let space = device.logical_space().space();
     let regions = sector_regions(space.structure(), space.nout()).unwrap();
-    let mut lease = device.runtime.lease_cuda().unwrap();
+    let mut lease = crate::runtime::cuda_call(engine).unwrap();
     let cuda = &mut *lease;
     let mut sectors = Vec::new();
     let mut spectra = Vec::new();
@@ -1443,6 +1560,9 @@ where
         + SectorCodec,
     D: CudaFactorizationPayload,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let regions = sector_regions(
         host.logical_space().space().structure(),
         host.logical_space().space().nout(),
@@ -1453,18 +1573,19 @@ where
         .filter(|region| region.rows() != 0 && region.cols() != 0)
         .count();
     assert!(nonempty > 1, "the fixture needs several blocks");
-    let device = host.to_cuda().unwrap();
+    let device = host.to_cuda(cuda).unwrap();
     let Svd { s, .. } = device
-        .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+        .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
-    let s = s.to_host().unwrap();
+    let s = s.to_host(cuda).unwrap();
     let expected = downloaded_svd_diagonal_bits(
+        cuda,
         &device,
-        s.materialize().unwrap().dense_data().unwrap().len(),
+        s.materialize(cpu).unwrap().dense_data().unwrap().len(),
         s.logical_space().space().structure(),
     );
     let actual: Vec<_> = s
-        .materialize()
+        .materialize(cpu)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -1475,16 +1596,17 @@ where
     assert_eq!(actual, expected);
     // The spectra themselves agree with the Host SVD to dtype tolerance.
     let Svd { s: host_s, .. } = host
-        .svd_compact(&codomain_axes(host), &domain_axes(host))
+        .svd_compact(cpu, &codomain_axes(host), &domain_axes(host))
         .unwrap();
     let tolerance = 1.0e3 * D::epsilon();
+    let host_s = host_s.materialize(cpu).unwrap();
     for (device, host) in s
-        .materialize()
+        .materialize(cpu)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(host_s.materialize().unwrap().dense_data().unwrap())
+        .zip(host_s.dense_data().unwrap())
     {
         let (device, host) = (device.widen_complex(), host.widen_complex());
         assert!(
@@ -1510,6 +1632,7 @@ fn assert_device_svd_diagonal_every_dtype<R>(
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let fused = |legs: &[&GradedSpace<R>]| {
         legs[1..]
             .iter()
@@ -1527,8 +1650,9 @@ fn assert_device_svd_diagonal_every_dtype<R>(
                 .any(|sector| !coupled_codomain.contains(sector)),
         "the fixture needs a coupled sector on one side only"
     );
-    let host = |seed| {
+    let mut host = |seed| {
         TensorMap::<R, f64>::rand_with_seed(
+            &mut *cpu,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -1539,6 +1663,7 @@ fn assert_device_svd_diagonal_every_dtype<R>(
     assert_device_svd_diagonal_matches_the_downloaded_one(&host(3));
     assert_device_svd_diagonal_matches_the_downloaded_one(
         &TensorMap::<R, Complex64>::rand_with_seed(
+            cpu,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -1548,6 +1673,7 @@ fn assert_device_svd_diagonal_every_dtype<R>(
     );
     assert_device_svd_diagonal_matches_the_downloaded_one(
         &TensorMap::<R, f32>::rand_with_seed(
+            cpu,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -1557,6 +1683,7 @@ fn assert_device_svd_diagonal_every_dtype<R>(
     );
     assert_device_svd_diagonal_matches_the_downloaded_one(
         &TensorMap::<R, num_complex::Complex32>::rand_with_seed(
+            cpu,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -1574,7 +1701,7 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     // spectrum; it must equal, bit for bit, the host-filled `s` built from
     // the same solver's downloaded spectra, across symmetries, dtypes,
     // multi-tree (non-aligned) sectors and an empty coupled sector.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1 = Arc::new(U1FusionRule);
     let u1_leg = |charges: &[(i32, usize)]| {
@@ -1673,6 +1800,7 @@ fn finite_input_fixture<D: NonfiniteFixture>(
     cols: usize,
     entry: Option<(f64, f64)>,
 ) -> TensorMap<U1FusionRule, D> {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let leg = |dim: usize| {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
@@ -1681,7 +1809,7 @@ fn finite_input_fixture<D: NonfiniteFixture>(
         .unwrap()
     };
     let last = U1Irrep::new(2);
-    TensorMap::from_subblock_fn(runtime, [&leg(rows)], [&leg(cols)], |trees, index| {
+    TensorMap::from_subblock_fn(cpu, runtime, [&leg(rows)], [&leg(cols)], |trees, index| {
         let (i, j) = (index[0], index[1]);
         if let Some((re, im)) = entry {
             if *trees.coupled() == last && i == rows - 1 && j == cols - 1 {
@@ -1709,6 +1837,7 @@ enum FiniteInputOp {
 /// Runs `op` on the current split; the error is rendered for comparison.
 #[cfg(feature = "cuda")]
 fn run_finite_input_op<D, S>(
+    engine: &mut dyn Engine,
     tensor: &TensorMap<U1FusionRule, D, S>,
     op: FiniteInputOp,
 ) -> Result<(), String>
@@ -1718,10 +1847,10 @@ where
 {
     let (rows, cols) = (codomain_axes(tensor), domain_axes(tensor));
     match op {
-        FiniteInputOp::Qr => tensor.qr_compact(&rows, &cols).map(drop),
-        FiniteInputOp::Svd => tensor.svd_compact(&rows, &cols).map(drop),
+        FiniteInputOp::Qr => tensor.qr_compact(engine, &rows, &cols).map(drop),
+        FiniteInputOp::Svd => tensor.svd_compact(engine, &rows, &cols).map(drop),
         FiniteInputOp::Eigh => tensor
-            .eigh_full(&rows, &cols, HermitianTol::DEFAULT)
+            .eigh_full(engine, &rows, &cols, HermitianTol::DEFAULT)
             .map(drop),
     }
     .map_err(|err| format!("{err:?}"))
@@ -1729,6 +1858,9 @@ where
 
 #[cfg(feature = "cuda")]
 fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runtime: &Runtime) {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let mut entries = vec![
         (f64::NAN, 0.0),
         (f64::INFINITY, 0.0),
@@ -1750,14 +1882,14 @@ fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runt
     for (op, rows, cols) in cases {
         for entry in &entries {
             let host = finite_input_fixture::<D>(runtime, rows, cols, Some(*entry));
-            let expected = run_finite_input_op(&host, op).unwrap_err();
+            let expected = run_finite_input_op(cpu, &host, op).unwrap_err();
             assert!(
                 expected.contains("input components must be finite"),
                 "{op:?} {entry:?}: Host {expected}"
             );
-            let device = host.to_cuda().unwrap();
+            let device = host.to_cuda(cuda).unwrap();
             let before = symtn_dense::cuda_transfer_stats();
-            let refused = run_finite_input_op(&device, op).unwrap_err();
+            let refused = run_finite_input_op(cuda, &device, op).unwrap_err();
             let after = symtn_dense::cuda_transfer_stats();
             assert_eq!(refused, expected, "{op:?} {rows}x{cols} {entry:?}");
             // No solver ran and no output was uploaded or allocated: the
@@ -1781,9 +1913,9 @@ fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runt
         }
         for entry in finite {
             let device = finite_input_fixture::<D>(runtime, rows, cols, Some(entry))
-                .to_cuda()
+                .to_cuda(cuda)
                 .unwrap();
-            if let Err(err) = run_finite_input_op(&device, op) {
+            if let Err(err) = run_finite_input_op(cuda, &device, op) {
                 assert!(
                     !err.contains("input components must be finite"),
                     "{op:?} {entry:?}: {err}"
@@ -1793,12 +1925,12 @@ fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runt
         // A subnormal entry is an ordinary finite input: the device result
         // is the Host's.
         let host = finite_input_fixture::<D>(runtime, rows, cols, Some((D::SUBNORMAL, 0.0)));
-        let device = host.to_cuda().unwrap();
+        let device = host.to_cuda(cuda).unwrap();
         let before = symtn_dense::cuda_transfer_stats();
-        run_finite_input_op(&device, op).unwrap();
+        run_finite_input_op(cuda, &device, op).unwrap();
         let after = symtn_dense::cuda_transfer_stats();
         assert!(after.solver_calls > before.solver_calls, "{op:?}");
-        run_finite_input_op(&host, op).unwrap();
+        run_finite_input_op(cpu, &host, op).unwrap();
     }
 }
 
@@ -1809,7 +1941,7 @@ fn typed_cuda_factorizations_refuse_nonfinite_input_with_the_host_error() {
     // What: eager device QR, SVD and EIGH refuse a NaN or infinite real or
     // imaginary component with the Host's error (#1986, #2038), before any
     // solver call or output upload; EIGH reports it ahead of Hermiticity.
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     assert_device_refuses_nonfinite_input_like_the_host::<f32>(&runtime);
     assert_device_refuses_nonfinite_input_like_the_host::<f64>(&runtime);
     assert_device_refuses_nonfinite_input_like_the_host::<num_complex::Complex32>(&runtime);

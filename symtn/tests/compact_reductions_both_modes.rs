@@ -22,6 +22,7 @@
 #![cfg(feature = "cgc-gen")]
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{LieGroupFusionRule, SU2FusionRule, SU2Irrep};
 use symtn::typed::{Complex64, GradedSpace, SectorSpectrum, TensorMap};
@@ -121,7 +122,7 @@ fn oracle(conv: impl Fn(Complex64) -> Complex64) -> Oracle {
 /// `a`; `tr` of each; `inner` across every compact/dense/lazy pairing; then
 /// `axpby(compact, lazy)` and `axpby(lazy, compact)` as their norm and trace.
 macro_rules! reductions {
-    ($rule:expr, $label:expr, $twice_of:expr, $D:ty, $conv:expr) => {{
+    ($engine:ident, $rule:expr, $label:expr, $twice_of:expr, $D:ty, $conv:expr) => {{
         let runtime = host_runtime();
         let label = $label;
         let twice_of = $twice_of;
@@ -140,47 +141,49 @@ macro_rules! reductions {
                 })
                 .collect::<Vec<_>>()
         };
-        let compact_a = TensorMap::<_, $D>::diagonal(&runtime, &leg, spectrum(a)).unwrap();
-        let compact_b = TensorMap::<_, $D>::diagonal(&runtime, &leg, spectrum(b)).unwrap();
-        let dense = |fill: &dyn Fn(usize, usize, usize) -> Complex64| -> TensorMap<_, $D> {
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, indices| {
+        let compact_a = TensorMap::<_, $D>::diagonal($engine, &runtime, &leg, spectrum(a)).unwrap();
+        let compact_b = TensorMap::<_, $D>::diagonal($engine, &runtime, &leg, spectrum(b)).unwrap();
+        let dense = |$engine: &mut dyn Engine,
+                     fill: &dyn Fn(usize, usize, usize) -> Complex64|
+         -> TensorMap<_, $D> {
+            TensorMap::from_subblock_fn($engine, &runtime, [&leg], [&leg], |trees, indices| {
                 conv(fill(twice_of(trees.coupled()), indices[0], indices[1]))
             })
             .unwrap()
         };
-        let twin_a = dense(&|twice, i, j| {
+        let twin_a = dense($engine, &|twice, i, j| {
             if i == j {
                 a(twice, i)
             } else {
                 Complex64::default()
             }
         });
-        let lazy_twin_a = dense(&|twice, i, j| {
+        let lazy_twin_a = dense($engine, &|twice, i, j| {
             if i == j {
                 a(twice, i).conj()
             } else {
                 Complex64::default()
             }
         })
-        .adjoint()
+        .adjoint($engine)
         .unwrap();
         // `diag(dense_b) = b` with nonzero off-diagonal entries, and a lazy
         // `L = P^H` whose diagonal is `b` and whose parent stores `off`.
-        let dense_b = dense(&|twice, i, j| {
+        let dense_b = dense($engine, &|twice, i, j| {
             if i == j {
                 b(twice, i)
             } else {
                 off(twice, i, j)
             }
         });
-        let lazy_b = dense(&|twice, i, j| {
+        let lazy_b = dense($engine, &|twice, i, j| {
             if i == j {
                 b(twice, i).conj()
             } else {
                 off(twice, i, j)
             }
         })
-        .adjoint()
+        .adjoint($engine)
         .unwrap();
         let wide = |value: $D| numerics::Numeric::wide(value);
         let mut out: Vec<(String, Complex64)> = Vec::new();
@@ -190,9 +193,12 @@ macro_rules! reductions {
             ("lazy", &lazy_twin_a),
         ] {
             for p in POWERS {
-                out.push((format!("{what} norm({p})"), tensor.norm(p).unwrap().into()));
+                out.push((
+                    format!("{what} norm({p})"),
+                    tensor.norm($engine, p).unwrap().into(),
+                ));
             }
-            out.push((format!("{what} tr"), wide(tensor.tr().unwrap())));
+            out.push((format!("{what} tr"), wide(tensor.tr($engine).unwrap())));
         }
         for (what, lhs, rhs, conjugate) in [
             ("compact.inner(compact)", &compact_a, &compact_b, false),
@@ -201,7 +207,7 @@ macro_rules! reductions {
             ("compact.inner(lazy)", &compact_a, &lazy_b, false),
             ("lazy.inner(compact)", &lazy_b, &compact_a, true),
         ] {
-            let value = wide(lhs.inner(rhs).unwrap());
+            let value = wide(lhs.inner($engine, rhs).unwrap());
             out.push((
                 what.to_string(),
                 if conjugate { value.conj() } else { value },
@@ -212,18 +218,18 @@ macro_rules! reductions {
         for (what, sum) in [
             (
                 "axpby(compact, lazy)",
-                compact_a.axpby(alpha, &lazy_b, beta).unwrap(),
+                compact_a.axpby($engine, alpha, &lazy_b, beta).unwrap(),
             ),
             (
                 "axpby(lazy, compact)",
-                lazy_b.axpby(beta, &compact_a, alpha).unwrap(),
+                lazy_b.axpby($engine, beta, &compact_a, alpha).unwrap(),
             ),
         ] {
             out.push((
                 format!("{what} norm(2)^2"),
-                sum.norm(2.0).unwrap().powi(2).into(),
+                sum.norm($engine, 2.0).unwrap().powi(2).into(),
             ));
-            out.push((format!("{what} tr"), wide(sum.tr().unwrap())));
+            out.push((format!("{what} tr"), wide(sum.tr($engine).unwrap())));
         }
         out
     }};
@@ -277,11 +283,13 @@ fn sun2_twice(label: &[i64]) -> usize {
 
 #[test]
 fn compact_dense_and_lazy_reductions_agree_across_modes_f64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // What: one reduction body serves both modes; a checked Generic compact
     // operand reduces and `norm(p != 2)` exists on checked Generic.
     let real = |z: Complex64| z.re;
-    let mf = reductions!(SU2FusionRule, su2, su2_twice, f64, real);
+    let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, f64, real);
     let checked = reductions!(
+        engine,
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun2_twice,
@@ -293,9 +301,11 @@ fn compact_dense_and_lazy_reductions_agree_across_modes_f64() {
 
 #[test]
 fn compact_dense_and_lazy_reductions_agree_across_modes_c64() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let complex = |z: Complex64| z;
-    let mf = reductions!(SU2FusionRule, su2, su2_twice, Complex64, complex);
+    let mf = reductions!(engine, SU2FusionRule, su2, su2_twice, Complex64, complex);
     let checked = reductions!(
+        engine,
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         sun2,
         sun2_twice,
@@ -309,61 +319,65 @@ fn compact_dense_and_lazy_reductions_agree_across_modes_c64() {
 /// `t`'s, and every `p` agrees with a dense twin of `s`.
 #[test]
 fn svd_compact_spectrum_reduces_on_su3_and_on_su2_in_both_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = host_runtime();
     macro_rules! check {
-        ($what:expr, $rule:expr, $sectors:expr) => {{
+        ($engine:ident, $what:expr, $rule:expr, $sectors:expr) => {{
             let leg = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
             let t: TensorMap<_, Complex64> =
-                TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+                TensorMap::from_subblock_fn($engine, &runtime, [&leg], [&leg], |_, indices| {
                     Complex64::new(
                         1.0 + 0.5 * indices[0] as f64 - 0.3 * indices[1] as f64,
                         0.25 * (indices[0] * indices[1]) as f64 - 0.1,
                     )
                 })
                 .unwrap();
-            let s = t.svd_compact(&[0], &[1]).unwrap().s;
+            let s = t.svd_compact($engine, &[0], &[1]).unwrap().s;
             assert!(s.dense_data().is_err(), "{}: s is stored compact", $what);
             numerics::assert_close(
                 &format!("{} |s| = |t|", $what),
-                s.norm(2.0).unwrap(),
-                t.norm(2.0).unwrap(),
+                s.norm($engine, 2.0).unwrap(),
+                t.norm($engine, 2.0).unwrap(),
                 TERMS,
             );
             numerics::assert_close(
                 &format!("{} <s, s> = |t|^2", $what),
-                s.inner(&s).unwrap(),
-                Complex64::from(t.norm(2.0).unwrap().powi(2)),
+                s.inner($engine, &s).unwrap(),
+                Complex64::from(t.norm($engine, 2.0).unwrap().powi(2)),
                 TERMS,
             );
-            let twin = s.materialize().unwrap();
+            let twin = s.materialize($engine).unwrap();
             for p in POWERS {
                 numerics::assert_close(
                     &format!("{} norm({p})", $what),
-                    s.norm(p).unwrap(),
-                    twin.norm(p).unwrap(),
+                    s.norm($engine, p).unwrap(),
+                    twin.norm($engine, p).unwrap(),
                     TERMS,
                 );
             }
             numerics::assert_close(
                 &format!("{} tr", $what),
-                s.tr().unwrap(),
-                twin.tr().unwrap(),
+                s.tr($engine).unwrap(),
+                twin.tr($engine).unwrap(),
                 TERMS,
             );
-            [POWERS.map(|p| s.norm(p).unwrap())]
+            [POWERS.map(|p| s.norm($engine, p).unwrap())]
         }};
     }
     check!(
+        engine,
         "su3",
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         [(vec![0i64, 0], 2), (vec![1, 1], 3), (vec![1, 0], 2)]
     );
     let mf = check!(
+        engine,
         "mf su2",
         SU2FusionRule,
         SECTORS.map(|(twice, k)| (su2(twice), k))
     );
     let checked = check!(
+        engine,
         "checked su2",
         LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap(),
         SECTORS.map(|(twice, k)| (sun2(twice), k))

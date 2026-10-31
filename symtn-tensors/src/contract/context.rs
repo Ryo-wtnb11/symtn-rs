@@ -1,5 +1,6 @@
 use std::hash::Hash;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     BlockStructure, CheckedFusionAlgebra, MultiplicityFreeAdmissionMode,
@@ -91,6 +92,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn execute_storage_contract_members_host(
         &mut self,
+        engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
         dst: (&Arc<BlockStructure>, &mut [D]),
         lhs: (&Arc<BlockStructure>, &[D]),
@@ -104,6 +106,7 @@ where
     {
         let (tree_backend, _) = self.tree_context.backend_workspace_mut();
         super::route_host::execute_members_host(
+            engine,
             tree_backend,
             &mut self.contract_backend,
             &mut self.contract_workspace,
@@ -183,8 +186,8 @@ where
     /// Lends the grow-only Host buffer that holds TensorKit
     /// `blas_contract!`'s `copyC` temporary: the default-output contraction
     /// an eager caller then permutes into its own result. It lives with this
-    /// context's other execution scratch, so it is pooled and bounded the same
-    /// way (largest temporary seen, per idle context). Return it with
+    /// context's other execution scratch and is bounded the same way (the
+    /// largest temporary seen by this context). Return it with
     /// [`Self::restore_copy_c_scratch`]; a buffer lost to an error is simply
     /// reallocated by the next caller.
     #[doc(hidden)]
@@ -195,12 +198,6 @@ where
     #[doc(hidden)]
     pub fn restore_copy_c_scratch(&mut self, scratch: HostScratchBuffer<D>) {
         self.copy_c_scratch = scratch;
-    }
-
-    /// Logical length of the retained `copyC` buffer.
-    #[doc(hidden)]
-    pub fn copy_c_scratch_len(&self) -> usize {
-        self.copy_c_scratch.len()
     }
 
     #[cfg(test)]
@@ -393,6 +390,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_fusion_dyn_into_raw<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         dst_space: &DynamicFusionMapSpace,
         dst_data: &mut [D],
@@ -410,6 +408,7 @@ where
     {
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.tensorcontract_planned_raw_into::<MultiplicityFreeAdmissionMode, R>(
+            engine,
             &mut (),
             PlanTarget {
                 rule,
@@ -436,6 +435,7 @@ where
     #[cfg(test)]
     pub(crate) fn plan_tensorcontract_fusion_dyn_raw<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         dst_space: &DynamicFusionMapSpace,
         lhs_space: &DynamicFusionMapSpace,
@@ -448,6 +448,7 @@ where
     {
         let output_axes = spec_output_axes(axes, dst_space.rank());
         self.plan_contract_raw::<super::resolution::HostEagerExecutor, R>(
+            engine,
             PlanTarget {
                 rule,
                 space: dst_space,
@@ -471,6 +472,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tensorcontract_prelowered_into<R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         dst_data: &mut [D],
         lhs: FusionOperand<'_>,
@@ -495,6 +497,7 @@ where
         }
         let output_axes = spec_output_axes(axes, dst_space.space().rank());
         self.tensorcontract_planned_into(
+            engine,
             dst_space,
             dst_data,
             (lhs, lhs_data),
@@ -515,6 +518,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn tensorcontract_planned_into<R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         dst_data: &mut [D],
         (lhs, lhs_data): (FusionOperand<'_>, &[D]),
@@ -530,6 +534,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         self.tensorcontract_planned_raw_into::<MultiplicityFreeAdmissionMode, R>(
+            engine,
             &mut (),
             PlanTarget::bound(dst_space),
             dst_data,
@@ -551,6 +556,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn tensorcontract_planned_raw_into<M, R>(
         &mut self,
+        engine: &mut dyn Engine,
         txn: &mut M::ContractTxn,
         target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
         dst_data: &mut [D],
@@ -567,6 +573,7 @@ where
         let resolution = match planned {
             PlannedContraction::Contract(axes) => {
                 plan_contract_in::<super::resolution::HostEagerExecutor, M, R>(
+                    engine,
                     M::contract_cache(self.tree_context.planning(), txn),
                     target,
                     lhs,
@@ -581,6 +588,7 @@ where
         #[cfg(test)]
         self.record_contract_route(&resolution);
         self.execute_contract_route_host(
+            engine,
             &resolution,
             target.space.structure(),
             dst_data,
@@ -602,8 +610,10 @@ where
     /// Lazy adjoints stay storage-conjugate operands; neither is
     /// materialized.
     #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
     pub fn tensorcompose_planned_into<R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         dst_data: &mut [D],
         (lhs, lhs_data): (FusionOperand<'_>, &[D]),
@@ -616,6 +626,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         self.tensorcontract_planned_raw_into::<MultiplicityFreeAdmissionMode, R>(
+            engine,
             &mut (),
             PlanTarget::bound(dst_space),
             dst_data,
@@ -636,6 +647,7 @@ where
     #[allow(clippy::type_complexity)]
     pub(super) fn tensorcontract_in<'a, St, R>(
         &mut self,
+        engine: &mut dyn Engine,
         (lhs_authority, lhs, lhs_data): (
             &'a BoundDynamicFusionMapSpace<R>,
             FusionOperand<'a>,
@@ -659,9 +671,10 @@ where
             request,
         )?;
         let resolution =
-            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(&mut staged)?;
+            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
         let mut data = crate::zeroed_payload(staged_len(&staged));
         self.execute_contract_resolution_host(
+            engine,
             &resolution,
             (staged_destination(&staged).structure(), &mut data),
             (lhs.storage_space().structure(), lhs_data),
@@ -686,6 +699,7 @@ where
     #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     pub(super) fn tensorcontract_into_in<'a, 'd, St, R, E>(
         &mut self,
+        engine: &mut dyn Engine,
         (lhs_authority, lhs, lhs_data): (
             &'a BoundDynamicFusionMapSpace<R>,
             FusionOperand<'a>,
@@ -718,8 +732,9 @@ where
         staged_require_destination(&staged, dst_space)?;
         let dst = dst_data()?;
         let resolution =
-            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(&mut staged)?;
+            self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
         self.execute_contract_resolution_host(
+            engine,
             &resolution,
             (staged_destination(&staged).structure(), dst),
             (lhs.storage_space().structure(), lhs_data),
@@ -737,6 +752,7 @@ where
     /// the call's transaction.
     fn plan_staged<'a, X: ExecCaps, R, St>(
         &mut self,
+        engine: &mut dyn Engine,
         staged: &mut StagedContract<'a, R, St>,
     ) -> Result<StorageContractResolution<C>, ContractStageError<'a, R, St>>
     where
@@ -745,9 +761,12 @@ where
     {
         match staged_try_core::<X, R, St>(staged)? {
             CoreRoute::Hit(core) => Ok(core),
-            CoreRoute::Miss(miss) => {
-                staged_plan_beyond_core::<X, R, St>(staged, miss, self.tree_context.planning())
-            }
+            CoreRoute::Miss(miss) => staged_plan_beyond_core::<X, R, St>(
+                engine,
+                staged,
+                miss,
+                self.tree_context.planning(),
+            ),
         }
     }
 
@@ -760,8 +779,10 @@ where
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.
     #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
     pub fn execute_contract_resolution_host(
         &mut self,
+        engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
         dst: (&Arc<BlockStructure>, &mut [D]),
         lhs: (&Arc<BlockStructure>, &[D]),
@@ -774,7 +795,7 @@ where
     {
         #[cfg(test)]
         self.record_contract_route(resolution);
-        self.execute_route_host(resolution, dst, lhs, rhs, alpha, init)
+        self.execute_route_host(engine, resolution, dst, lhs, rhs, alpha, init)
     }
 
     /// [`StagedContract::plan_beyond_core`] of a multiplicity-free
@@ -785,6 +806,7 @@ where
     #[doc(hidden)]
     pub fn plan_staged_contract_beyond_core<X: ExecCaps, R>(
         &mut self,
+        engine: &mut dyn Engine,
         staged: &mut StagedContract<'_, R, MultiplicityFreeContractStage<R>>,
         miss: CoreMiss,
     ) -> Result<StorageContractResolution<C>, OperationError>
@@ -794,6 +816,7 @@ where
             + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         staged_plan_beyond_core::<X, R, MultiplicityFreeContractStage<R>>(
+            engine,
             staged,
             miss,
             self.tree_context.planning(),
@@ -816,6 +839,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn plan_contract<X: ExecCaps, R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
@@ -828,6 +852,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         self.plan_contract_raw::<X, R>(
+            engine,
             PlanTarget::bound(dst_space),
             lhs,
             rhs,
@@ -840,6 +865,7 @@ where
     /// caller's rule without binding a space per call.
     pub(crate) fn plan_contract_raw<X: ExecCaps, R>(
         &mut self,
+        engine: &mut dyn Engine,
         target: PlanTarget<'_, R>,
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
@@ -850,6 +876,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         plan_contract_in::<X, MultiplicityFreeAdmissionMode, R>(
+            engine,
             self.tree_context.planning(),
             target,
             lhs,
@@ -872,6 +899,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn plan_contract_beyond_core<X: ExecCaps, R>(
         &mut self,
+        engine: &mut dyn Engine,
         miss: CoreMiss,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         lhs: FusionOperand<'_>,
@@ -885,6 +913,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         plan_contract_beyond_core_in::<X, MultiplicityFreeAdmissionMode, R>(
+            engine,
             self.tree_context.planning(),
             miss,
             PlanTarget::bound(dst_space),
@@ -901,6 +930,7 @@ where
     #[cfg(test)]
     pub(crate) fn compile_storage_contract_resolution<R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
@@ -915,7 +945,7 @@ where
         )? {
             CoreRoute::Hit(core) => Ok(core),
             CoreRoute::Miss(_) => {
-                self.compile_storage_contract_dynamic_tree(dst_space, lhs, rhs, axes)
+                self.compile_storage_contract_dynamic_tree(engine, dst_space, lhs, rhs, axes)
             }
         }
     }
@@ -945,6 +975,7 @@ where
     #[doc(hidden)]
     pub fn compile_storage_contract_dynamic_tree<R>(
         &mut self,
+        engine: &mut dyn Engine,
         dst_space: &BoundDynamicFusionMapSpace<R>,
         lhs: FusionOperand<'_>,
         rhs: FusionOperand<'_>,
@@ -955,6 +986,7 @@ where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
         compile_dynamic_tree_in::<MultiplicityFreeAdmissionMode, R>(
+            engine,
             self.tree_context.planning(),
             PlanTarget::bound(dst_space),
             lhs,
@@ -972,15 +1004,17 @@ where
     ///
     /// `CopyC` is TensorKit `blas_contract!`'s `copyC`
     /// (`tensoroperations.jl:436-446` @cfaa073): `mul!(Cnew, A, B)` into the
-    /// lane's pooled temporary, then `tensoradd!(C, Cnew, pAB, false, α, β)`.
-    /// TensorKit allocates `Cnew` per call (`tensoralloc_add(..., Val(true))`);
-    /// the pooled buffer plays that role, so a warm call allocates no
-    /// output-sized temporary. Stale pooled values are never read: eager
-    /// scratch carries no core slot, so the core writes the temporary with a
-    /// strong-zero `beta = 0`, inactive blocks included.
+    /// context's `copyC` temporary, then
+    /// `tensoradd!(C, Cnew, pAB, false, α, β)`. TensorKit allocates `Cnew` per
+    /// call (`tensoralloc_add(..., Val(true))`); so does an eager call here,
+    /// whose context is per-call scratch, while a context a caller keeps
+    /// reuses it. Stale values are never read: eager scratch carries no core
+    /// slot, so the core writes the temporary with a strong-zero `beta = 0`,
+    /// inactive blocks included.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn execute_contract_route_host(
         &mut self,
+        engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
         dst_structure: &Arc<BlockStructure>,
         dst_data: &mut [D],
@@ -992,15 +1026,24 @@ where
     where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     {
-        self.execute_route_host(resolution, (dst_structure, dst_data), lhs, rhs, alpha, init)
+        self.execute_route_host(
+            engine,
+            resolution,
+            (dst_structure, dst_data),
+            lhs,
+            rhs,
+            alpha,
+            init,
+        )
     }
 
     /// The eager arm of every route: the one route executor at one member,
-    /// over this context's tree workspace and scratch (the pooled `copyC`
+    /// over this context's tree workspace and scratch (the context's `copyC`
     /// temporary as a CopyC core destination).
     #[allow(clippy::too_many_arguments)]
     fn execute_route_host(
         &mut self,
+        engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
         dst: (&Arc<BlockStructure>, &mut [D]),
         lhs: (&Arc<BlockStructure>, &[D]),
@@ -1026,6 +1069,7 @@ where
             scratch.core_dst = copy_c_scratch;
         }
         super::route_host::execute_route_host(
+            engine,
             &mut super::route_host::EagerTreeStage {
                 backend: tree_context.backend_mut(),
                 workspaces: stage_workspaces,
@@ -1279,6 +1323,7 @@ where
 /// then the `DynamicTree` artifact, under the context's planning state or
 /// the call's transaction.
 pub(crate) fn staged_plan_beyond_core<'a, X: ExecCaps, R, St>(
+    engine: &mut dyn Engine,
     staged: &mut StagedContract<'a, R, St>,
     miss: CoreMiss,
     planning: &mut TreeTransformPlanning,
@@ -1304,6 +1349,7 @@ where
         let plan =
             FusionContractPlan::planar(orders, lhs.storage_conjugate(), rhs.storage_conjugate());
         return compile_dynamic_tree_in::<St::M, R>(
+            engine,
             St::M::contract_cache(planning, txn),
             PlanTarget {
                 rule,
@@ -1325,6 +1371,7 @@ where
         .into());
     };
     plan_contract_beyond_core_in::<X, St::M, R>(
+        engine,
         St::M::contract_cache(planning, txn),
         miss,
         PlanTarget {
@@ -1561,6 +1608,7 @@ where
 /// `M`, deriving spaces and transformers under `cache` (the context's
 /// planning state, or a checked call's transaction).
 pub(crate) fn plan_contract_in<X: ExecCaps, M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
@@ -1582,6 +1630,7 @@ where
     match core {
         CoreRoute::Hit(core) => Ok(core),
         CoreRoute::Miss(miss) => plan_contract_beyond_core_in::<X, M, R>(
+            engine,
             cache,
             miss,
             target,
@@ -1593,6 +1642,7 @@ where
 }
 
 fn plan_contract_beyond_core_in<X: ExecCaps, M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     miss: CoreMiss,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
@@ -1626,6 +1676,7 @@ where
     );
     if let Some(orientation) = order {
         if let Some(copy) = plan_copy_c_in::<X, M, R>(
+            engine,
             cache,
             target,
             lhs,
@@ -1643,12 +1694,22 @@ where
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
     );
-    compile_dynamic_tree_in::<M, R>(cache, target, lhs, rhs, axes, X::IRREGULAR_CORE, None)
+    compile_dynamic_tree_in::<M, R>(
+        engine,
+        cache,
+        target,
+        lhs,
+        rhs,
+        axes,
+        X::IRREGULAR_CORE,
+        None,
+    )
 }
 
 /// The `CopyC` route in `orientation`, or `None` when its temporary has
 /// no core the executor runs (the `DynamicTree` artifact then applies).
 fn plan_copy_c_in<X: ExecCaps, M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
@@ -1720,6 +1781,7 @@ where
     );
     let temporary_structure = Arc::clone(temporary.structure());
     let transform = M::tree_structure(
+        engine,
         cache,
         target.rule,
         &operation,
@@ -1748,7 +1810,9 @@ where
 /// not fully direct ([`ExecCaps::IRREGULAR_CORE`]), as the artifact's core
 /// over a non-canonical destination tiling (#1517) is. `plan` is the fixed
 /// plan of a planar contraction; `None` selects the contraction's.
+#[allow(clippy::too_many_arguments)]
 fn compile_dynamic_tree_in<M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     lhs: FusionOperand<'_>,
@@ -1767,6 +1831,7 @@ where
     let artifact = if !lhs.storage_conjugate() && !rhs.storage_conjugate() {
         let (lhs_space, rhs_space) = (lhs.storage_space(), rhs.storage_space());
         compile_stored_dynamic_tree::<M, R>(
+            engine,
             cache,
             target,
             (lhs_space, lhs_space.structure()),
@@ -1775,7 +1840,7 @@ where
             plan,
         )?
     } else {
-        M::prelowered_dynamic_tree_artifact(cache, target, lhs, rhs, axes, plan)?
+        M::prelowered_dynamic_tree_artifact(engine, cache, target, lhs, rhs, axes, plan)?
     };
     // Transformed sources are canonical coupled layouts, so only a
     // non-canonical destination tiling leaves the core plan not fully
@@ -1797,6 +1862,7 @@ where
 /// logical space over its parent's storage. `plan` fixes the plan instead of
 /// selecting one for `axes`.
 pub(crate) fn compile_stored_dynamic_tree<M, R>(
+    engine: &mut dyn Engine,
     cache: &mut M::StructureCache,
     target: PlanTarget<'_, R, M::SpaceAuthority<'_>>,
     (lhs_space, lhs_structure): (&DynamicFusionMapSpace, &Arc<BlockStructure>),
@@ -1823,6 +1889,7 @@ where
         }
     };
     super::dynamic::compile_dynamic_tree_execution_artifact::<M, R>(
+        engine,
         cache,
         rule,
         authority,
@@ -1839,6 +1906,7 @@ where
 /// lazy-adjoint operand: both operands prelowered to logical-key layouts
 /// under the destination's primer; `plan` as in [`compile_stored_dynamic_tree`].
 pub(crate) fn compile_prelowered_dynamic_tree<R>(
+    engine: &mut dyn Engine,
     planning: &mut TreeTransformPlanning,
     target: PlanTarget<'_, R>,
     lhs: FusionOperand<'_>,
@@ -1873,6 +1941,7 @@ where
         }
     };
     super::dynamic::compile_prelowered_dynamic_tree_execution_artifact(
+        engine,
         planning,
         rule,
         layout_primer,

@@ -112,11 +112,11 @@ impl TypedSectorAdmission for RejectingTraceTwist {
     }
 }
 
-fn assert_compact_late_rejection<D>()
+fn assert_compact_late_rejection<D>(engine: &mut dyn Engine)
 where
     D: TensorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(RejectingTraceTwist {
         inner: LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         twist_calls: AtomicUsize::new(0),
@@ -124,6 +124,7 @@ where
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -140,7 +141,7 @@ where
     .unwrap();
     assert_eq!(provider.twist_calls.load(Ordering::Relaxed), 0);
     let densified = probe::record();
-    let result = diagonal.trace_pairs(&[(0, 1)]);
+    let result = diagonal.trace_pairs(engine, &[(0, 1)]);
     assert!(matches!(
         result,
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
@@ -159,6 +160,7 @@ where
 
 #[test]
 fn checked_compact_late_pivotal_failure_never_materializes_real_or_complex_payload() {
-    assert_compact_late_rejection::<f64>();
-    assert_compact_late_rejection::<Complex64>();
+    let engine = &mut crate::typed::CpuEngine::serial();
+    assert_compact_late_rejection::<f64>(engine);
+    assert_compact_late_rejection::<Complex64>(engine);
 }

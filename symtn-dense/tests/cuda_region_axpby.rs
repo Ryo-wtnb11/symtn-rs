@@ -153,8 +153,9 @@ impl RegionScalar for Complex64 {
     }
 }
 
-fn context() -> CudaDenseContext {
-    CudaDenseContext::new(0).expect("CUDA device 0 must be available for the device suite")
+fn engine() -> symtn_dense::CudaEngine {
+    symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+        .expect("CUDA device 0 must be available for the device suite")
 }
 
 fn upload<D: RegionScalar>(ctx: &CudaDenseContext, data: &[D]) -> CudaDenseStorage {
@@ -361,25 +362,25 @@ fn nd_sweep<D: RegionScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nd_region_axpby_matches_a_host_strided_loop_f64() {
-    nd_sweep::<f64>(&mut context());
+    nd_sweep::<f64>(&mut CudaDenseContext::new(&mut engine()).unwrap());
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nd_region_axpby_matches_a_host_strided_loop_f32() {
-    nd_sweep::<f32>(&mut context());
+    nd_sweep::<f32>(&mut CudaDenseContext::new(&mut engine()).unwrap());
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nd_region_axpby_matches_a_host_strided_loop_c32() {
-    nd_sweep::<Complex32>(&mut context());
+    nd_sweep::<Complex32>(&mut CudaDenseContext::new(&mut engine()).unwrap());
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn nd_region_axpby_matches_a_host_strided_loop_c64() {
-    nd_sweep::<Complex64>(&mut context());
+    nd_sweep::<Complex64>(&mut CudaDenseContext::new(&mut engine()).unwrap());
 }
 
 // ---------------------------------------------------------------------------
@@ -426,7 +427,8 @@ fn zero_coefficient_case<D: RegionScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_zero_coefficient_propagates_nan_from_the_source() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     zero_coefficient_case::<f32>(&mut ctx);
     zero_coefficient_case::<f64>(&mut ctx);
     zero_coefficient_case::<Complex32>(&mut ctx);
@@ -475,7 +477,8 @@ fn poisoned_destination_case<D: RegionScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn overwrite_is_independent_of_a_nan_poisoned_destination() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     poisoned_destination_case::<f32>(&mut ctx);
     poisoned_destination_case::<f64>(&mut ctx);
     poisoned_destination_case::<Complex32>(&mut ctx);
@@ -491,7 +494,8 @@ fn overwrite_is_independent_of_a_nan_poisoned_destination() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn infinite_payload_behaviour_is_recorded() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let dims = [2usize];
     let strides = [1usize];
 
@@ -596,7 +600,8 @@ fn zero_fill_case<D: RegionScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_context_zero_template_overwrites_exactly_its_region() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     zero_fill_case::<f32>(&mut ctx);
     zero_fill_case::<f64>(&mut ctx);
     zero_fill_case::<Complex32>(&mut ctx);
@@ -606,7 +611,8 @@ fn the_context_zero_template_overwrites_exactly_its_region() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_zero_template_is_uploaded_once_per_dtype_and_grows_monotonically() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let mut dst = upload::<f64>(&ctx, &[1.0f64; 64]);
 
     // First fill of this dtype: the `1` operand and a 16-element template.
@@ -687,7 +693,8 @@ fn the_zero_template_is_uploaded_once_per_dtype_and_grows_monotonically() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_broadcast_source_axis_forms_an_outer_product() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let rows = 3usize;
     let cols = 4usize;
     let src_host: Vec<f64> = (0..rows).map(|index| 1.0 + index as f64).collect();
@@ -725,7 +732,8 @@ fn a_broadcast_source_axis_forms_an_outer_product() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_diagonal_source_view_extracts_the_block_diagonal() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let n = 4usize;
     let block_strides = [3usize, 3 * n];
     let base = 5usize;
@@ -768,7 +776,8 @@ fn a_diagonal_source_view_extracts_the_block_diagonal() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn gapped_and_interleaved_destinations_are_accepted() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src_host: Vec<f64> = (0..64).map(|index| 1.0 + index as f64).collect();
     let src = upload::<f64>(&ctx, &src_host);
 
@@ -832,7 +841,8 @@ fn gapped_and_interleaved_destinations_are_accepted() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_reserved_zero_template_makes_every_later_fill_transfer_free() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     assert_eq!(ctx.scalar_operand_bytes(), 0);
     let mut dst = upload::<f64>(&ctx, &[1.0f64; 64]);
 
@@ -873,7 +883,8 @@ fn a_reserved_zero_template_makes_every_later_fill_transfer_free() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn every_rejection_is_typed_and_submits_no_device_work() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src = upload::<f64>(&ctx, &(0..64).map(|index| index as f64).collect::<Vec<_>>());
     let coeff = upload::<f64>(&ctx, &[2.0, 3.0]);
     let complex = upload::<Complex64>(&ctx, &[Complex64::new(1.0, 0.0); 64]);
@@ -1009,7 +1020,8 @@ fn every_rejection_is_typed_and_submits_no_device_work() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_zero_extent_region_is_a_no_op_without_a_submission() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src = upload::<f64>(&ctx, &(0..16).map(|index| index as f64).collect::<Vec<_>>());
     let coeff = upload::<f64>(&ctx, &[2.0]);
     let host: Vec<f64> = (0..16).map(|index| -(index as f64)).collect();
@@ -1046,7 +1058,8 @@ fn a_zero_extent_region_is_a_no_op_without_a_submission() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_call_phase_moves_nothing_across_the_host_boundary() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let dims = [3usize, 2, 4];
     let src_strides = permuted_strides(&dims, &[0, 1, 2], 1);
     let dst_strides = permuted_strides(&dims, &[2, 0, 1], 1);
@@ -1139,7 +1152,8 @@ fn a_descriptor_scale_multiplies_the_move_in_both_dtypes() {
     // structural coefficient stays a data operand, so the written values are
     // the product of both — for a real scale and for a genuinely complex one,
     // whose imaginary part a real-only descriptor would drop.
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     scaled_move_matches_a_host_loop::<f64>(&mut ctx, -2.5);
     scaled_move_matches_a_host_loop::<Complex64>(&mut ctx, Complex64::new(0.5, -1.25));
     scaled_move_matches_a_host_loop::<Complex64>(&mut ctx, Complex64::new(-2.5, 0.0));
@@ -1153,7 +1167,8 @@ fn the_zero_coefficient_operand_multiplies_on_a_fresh_context() {
     // descriptor scale of zero (rejected) would erase it. The context
     // is fresh, so this also executes the lazy one-element template upload and
     // proves the second call needs none.
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let dims = [2usize, 2];
     let strides = [1usize, 2];
     let poisoned = upload::<f64>(&ctx, &[f64::NAN, 1.0, f64::INFINITY, 2.0]);
@@ -1216,7 +1231,8 @@ fn a_zero_descriptor_scale_and_a_rejected_zero_operand_cost_nothing() {
     // What: the zero-scale rejection and every other rejection happen before
     // any device work — including before the lazy zero-template upload the
     // accepted call would have done.
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src = upload::<f64>(&ctx, &[1.0, 2.0, 3.0, 4.0]);
     let mut dst = upload::<f64>(&ctx, &[0.0; 4]);
 

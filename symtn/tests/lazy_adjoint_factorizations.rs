@@ -53,16 +53,19 @@ fn assert_spectra_close<S: PartialEq + std::fmt::Debug, V: Distance>(
 
 /// Same spaces, same storage form, same values.
 macro_rules! assert_factor_close {
-    ($what:expr, $lazy:expr, $eager:expr) => {{
+    ($engine:ident, $what:expr, $lazy:expr, $eager:expr) => {{
         let (what, lazy, eager) = ($what, &$lazy, &$eager);
         assert_eq!(lazy.codomain(), eager.codomain(), "{what}: codomain");
         assert_eq!(lazy.domain(), eager.domain(), "{what}: domain");
         assert_eq!(
-            lazy.diagview().is_ok(),
-            eager.diagview().is_ok(),
+            lazy.diagview($engine).is_ok(),
+            eager.diagview($engine).is_ok(),
             "{what}: storage form"
         );
-        let (lazy, eager) = (lazy.materialize().unwrap(), eager.materialize().unwrap());
+        let (lazy, eager) = (
+            lazy.materialize($engine).unwrap(),
+            eager.materialize($engine).unwrap(),
+        );
         let (lazy, eager) = (lazy.dense_data().unwrap(), eager.dense_data().unwrap());
         assert_eq!(lazy.len(), eager.len(), "{what}: payload length");
         for (&a, &b) in lazy.iter().zip(eager) {
@@ -74,38 +77,58 @@ macro_rules! assert_factor_close {
 /// Every one-input factorization on the lazy adjoint of the rectangular
 /// `parent`, against the materialized adjoint.
 macro_rules! assert_rectangular_ops {
-    ($label:expr, $parent:expr) => {{
+    ($engine:ident, $label:expr, $parent:expr) => {{
         let label = $label;
-        let lazy = $parent.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = $parent.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let rows: Vec<usize> = (0..lazy.codomain_rank()).collect();
         let cols: Vec<usize> =
             (lazy.codomain_rank()..lazy.codomain_rank() + lazy.domain_rank()).collect();
         let (r, c) = (rows.as_slice(), cols.as_slice());
 
         for (name, lazy_qr, eager_qr) in [
-            ("qr_compact", lazy.qr_compact(r, c), eager.qr_compact(r, c)),
-            ("qr_full", lazy.qr_full(r, c), eager.qr_full(r, c)),
+            (
+                "qr_compact",
+                lazy.qr_compact($engine, r, c),
+                eager.qr_compact($engine, r, c),
+            ),
+            (
+                "qr_full",
+                lazy.qr_full($engine, r, c),
+                eager.qr_full($engine, r, c),
+            ),
         ] {
             let (Qr { q, r: rr }, Qr { q: eq, r: er }) = (lazy_qr.unwrap(), eager_qr.unwrap());
-            assert_factor_close!(format!("{label} {name} q"), q, eq);
-            assert_factor_close!(format!("{label} {name} r"), rr, er);
+            assert_factor_close!($engine, format!("{label} {name} q"), q, eq);
+            assert_factor_close!($engine, format!("{label} {name} r"), rr, er);
         }
         for (name, lazy_lq, eager_lq) in [
-            ("lq_compact", lazy.lq_compact(r, c), eager.lq_compact(r, c)),
-            ("lq_full", lazy.lq_full(r, c), eager.lq_full(r, c)),
+            (
+                "lq_compact",
+                lazy.lq_compact($engine, r, c),
+                eager.lq_compact($engine, r, c),
+            ),
+            (
+                "lq_full",
+                lazy.lq_full($engine, r, c),
+                eager.lq_full($engine, r, c),
+            ),
         ] {
             let (Lq { l, q }, Lq { l: el, q: eq }) = (lazy_lq.unwrap(), eager_lq.unwrap());
-            assert_factor_close!(format!("{label} {name} l"), l, el);
-            assert_factor_close!(format!("{label} {name} q"), q, eq);
+            assert_factor_close!($engine, format!("{label} {name} l"), l, el);
+            assert_factor_close!($engine, format!("{label} {name} q"), q, eq);
         }
         for (name, lazy_svd, eager_svd) in [
             (
                 "svd_compact",
-                lazy.svd_compact(r, c),
-                eager.svd_compact(r, c),
+                lazy.svd_compact($engine, r, c),
+                eager.svd_compact($engine, r, c),
             ),
-            ("svd_full", lazy.svd_full(r, c), eager.svd_full(r, c)),
+            (
+                "svd_full",
+                lazy.svd_full($engine, r, c),
+                eager.svd_full($engine, r, c),
+            ),
         ] {
             let (
                 Svd { u, s, vh },
@@ -115,29 +138,32 @@ macro_rules! assert_rectangular_ops {
                     vh: evh,
                 },
             ) = (lazy_svd.unwrap(), eager_svd.unwrap());
-            assert_factor_close!(format!("{label} {name} u"), u, eu);
-            assert_factor_close!(format!("{label} {name} s"), s, es);
-            assert_factor_close!(format!("{label} {name} vh"), vh, evh);
+            assert_factor_close!($engine, format!("{label} {name} u"), u, eu);
+            assert_factor_close!($engine, format!("{label} {name} s"), s, es);
+            assert_factor_close!($engine, format!("{label} {name} vh"), vh, evh);
         }
         assert_spectra_close(
             &format!("{label} svd_vals"),
-            &lazy.svd_vals(r, c).unwrap(),
-            &eager.svd_vals(r, c).unwrap(),
+            &lazy.svd_vals($engine, r, c).unwrap(),
+            &eager.svd_vals($engine, r, c).unwrap(),
         );
         assert_factor_close!(
+            $engine,
             format!("{label} left_null"),
-            lazy.left_null(r, c).unwrap(),
-            eager.left_null(r, c).unwrap()
+            lazy.left_null($engine, r, c).unwrap(),
+            eager.left_null($engine, r, c).unwrap()
         );
         assert_factor_close!(
+            $engine,
             format!("{label} right_null"),
-            lazy.right_null(r, c).unwrap(),
-            eager.right_null(r, c).unwrap()
+            lazy.right_null($engine, r, c).unwrap(),
+            eager.right_null($engine, r, c).unwrap()
         );
         assert_factor_close!(
+            $engine,
             format!("{label} pinv"),
-            lazy.pinv(r, c, 1.0e-12).unwrap(),
-            eager.pinv(r, c, 1.0e-12).unwrap()
+            lazy.pinv($engine, r, c, 1.0e-12).unwrap(),
+            eager.pinv($engine, r, c, 1.0e-12).unwrap()
         );
     }};
 }
@@ -146,84 +172,91 @@ macro_rules! assert_rectangular_ops {
 /// coupled-sector blocks, so both polar directions apply), and the Hermitian
 /// ones on the lazy adjoint of `hermitian`.
 macro_rules! assert_endomorphism_ops {
-    ($label:expr, $parent:expr, $hermitian:expr) => {{
+    ($engine:ident, $label:expr, $parent:expr, $hermitian:expr) => {{
         let label = $label;
-        let lazy = $parent.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = $parent.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let rows: Vec<usize> = (0..lazy.codomain_rank()).collect();
         let cols: Vec<usize> =
             (lazy.codomain_rank()..lazy.codomain_rank() + lazy.domain_rank()).collect();
         let (r, c) = (rows.as_slice(), cols.as_slice());
 
         let (LeftPolar { w, p }, LeftPolar { w: ew, p: ep }) = (
-            lazy.left_polar(r, c).unwrap(),
-            eager.left_polar(r, c).unwrap(),
+            lazy.left_polar($engine, r, c).unwrap(),
+            eager.left_polar($engine, r, c).unwrap(),
         );
-        assert_factor_close!(format!("{label} left_polar w"), w, ew);
-        assert_factor_close!(format!("{label} left_polar p"), p, ep);
+        assert_factor_close!($engine, format!("{label} left_polar w"), w, ew);
+        assert_factor_close!($engine, format!("{label} left_polar p"), p, ep);
         let (RightPolar { p, wh }, RightPolar { p: ep, wh: ewh }) = (
-            lazy.right_polar(r, c).unwrap(),
-            eager.right_polar(r, c).unwrap(),
+            lazy.right_polar($engine, r, c).unwrap(),
+            eager.right_polar($engine, r, c).unwrap(),
         );
-        assert_factor_close!(format!("{label} right_polar p"), p, ep);
-        assert_factor_close!(format!("{label} right_polar wh"), wh, ewh);
+        assert_factor_close!($engine, format!("{label} right_polar p"), p, ep);
+        assert_factor_close!($engine, format!("{label} right_polar wh"), wh, ewh);
         assert_factor_close!(
+            $engine,
             format!("{label} inv"),
-            lazy.inv(r, c).unwrap(),
-            eager.inv(r, c).unwrap()
+            lazy.inv($engine, r, c).unwrap(),
+            eager.inv($engine, r, c).unwrap()
         );
         assert_factor_close!(
+            $engine,
             format!("{label} exp"),
-            lazy.exp(r, c).unwrap(),
-            eager.exp(r, c).unwrap()
+            lazy.exp($engine, r, c).unwrap(),
+            eager.exp($engine, r, c).unwrap()
         );
         assert_spectra_close(
             &format!("{label} eig_vals"),
-            &lazy.eig_vals(r, c).unwrap(),
-            &eager.eig_vals(r, c).unwrap(),
+            &lazy.eig_vals($engine, r, c).unwrap(),
+            &eager.eig_vals($engine, r, c).unwrap(),
         );
-        let (Eig { d, v }, Eig { d: ed, v: ev }) =
-            (lazy.eig_full(r, c).unwrap(), eager.eig_full(r, c).unwrap());
-        assert_factor_close!(format!("{label} eig_full d"), d, ed);
-        assert_factor_close!(format!("{label} eig_full v"), v, ev);
+        let (Eig { d, v }, Eig { d: ed, v: ev }) = (
+            lazy.eig_full($engine, r, c).unwrap(),
+            eager.eig_full($engine, r, c).unwrap(),
+        );
+        assert_factor_close!($engine, format!("{label} eig_full d"), d, ed);
+        assert_factor_close!($engine, format!("{label} eig_full v"), v, ev);
 
-        let lazy = $hermitian.adjoint().unwrap();
-        let eager = lazy.materialize().unwrap();
+        let lazy = $hermitian.adjoint($engine).unwrap();
+        let eager = lazy.materialize($engine).unwrap();
         let tol = HermitianTol::DEFAULT;
         assert_spectra_close(
             &format!("{label} eigh_vals"),
-            &lazy.eigh_vals(r, c, tol).unwrap(),
-            &eager.eigh_vals(r, c, tol).unwrap(),
+            &lazy.eigh_vals($engine, r, c, tol).unwrap(),
+            &eager.eigh_vals($engine, r, c, tol).unwrap(),
         );
         let (Eigh { d, v }, Eigh { d: ed, v: ev }) = (
-            lazy.eigh_full(r, c, tol).unwrap(),
-            eager.eigh_full(r, c, tol).unwrap(),
+            lazy.eigh_full($engine, r, c, tol).unwrap(),
+            eager.eigh_full($engine, r, c, tol).unwrap(),
         );
-        assert_factor_close!(format!("{label} eigh_full d"), d, ed);
-        assert_factor_close!(format!("{label} eigh_full v"), v, ev);
+        assert_factor_close!($engine, format!("{label} eigh_full d"), d, ed);
+        assert_factor_close!($engine, format!("{label} eigh_full v"), v, ev);
     }};
 }
 
 /// Rectangular `[a, b] <- [a]` and endomorphism `[a, a] <- [a, a]` fixtures
 /// with a Hermitian `X X^H`, for both scalar types.
 macro_rules! assert_all_ops {
-    ($label:expr, $runtime:expr, $a:expr, $b:expr) => {{
+    ($engine:ident, $label:expr, $runtime:expr, $a:expr, $b:expr) => {{
+        let engine = &mut *$engine;
         let (runtime, a, b) = (&$runtime, &$a, &$b);
         macro_rules! for_dtype {
             ($d:ty, $seed:expr) => {{
                 let label = format!("{} {}", $label, stringify!($d));
                 let rectangular =
-                    TensorMap::<_, $d>::rand_with_seed(runtime, [a, b], [a], $seed).unwrap();
-                assert_rectangular_ops!(format!("{label} tall"), rectangular);
+                    TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a, b], [a], $seed)
+                        .unwrap();
+                assert_rectangular_ops!(engine, format!("{label} tall"), rectangular);
                 let wide =
-                    TensorMap::<_, $d>::rand_with_seed(runtime, [a], [a, b], $seed + 1).unwrap();
-                assert_rectangular_ops!(format!("{label} wide"), wide);
+                    TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a], [a, b], $seed + 1)
+                        .unwrap();
+                assert_rectangular_ops!(engine, format!("{label} wide"), wide);
                 let square =
-                    TensorMap::<_, $d>::rand_with_seed(runtime, [a, a], [a, a], $seed + 2).unwrap();
-                let hermitian = square
-                    .compose(&square.adjoint().unwrap().materialize().unwrap())
-                    .unwrap();
-                assert_endomorphism_ops!(label, square, hermitian);
+                    TensorMap::<_, $d>::rand_with_seed(engine, runtime, [a, a], [a, a], $seed + 2)
+                        .unwrap();
+                let square_adjoint = &square.adjoint(engine).unwrap().materialize(engine).unwrap();
+                let hermitian = square.compose(engine, square_adjoint).unwrap();
+                assert_endomorphism_ops!(engine, label, square, hermitian);
             }};
         }
         for_dtype!(f64, 1755);
@@ -233,7 +266,8 @@ macro_rules! assert_all_ops {
 
 #[test]
 fn multiplicity_free_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let su2 = |pairs: &[(usize, usize)]| {
         GradedSpace::try_new(
@@ -246,15 +280,16 @@ fn multiplicity_free_su2_lazy_adjoint_factorizations_match_the_materialized_adjo
     };
     let a = su2(&[(0, 2), (1, 2), (2, 1)]);
     let b = su2(&[(0, 1), (1, 2)]);
-    assert_all_ops!("MF SU(2)", runtime, a, b);
+    assert_all_ops!(engine, "MF SU(2)", runtime, a, b);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(2).unwrap()).unwrap());
     let a = GradedSpace::try_new(
@@ -263,7 +298,7 @@ fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
     )
     .unwrap();
     let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![0i64], 1), (vec![1], 2)]).unwrap();
-    assert_all_ops!("checked SU(2)", runtime, a, b);
+    assert_all_ops!(engine, "checked SU(2)", runtime, a, b);
 }
 
 /// SU(3) `8 ⊗ 8 ∋ 8` twice: blocks that differ only by their vertex label
@@ -272,15 +307,17 @@ fn checked_su2_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_adjoint() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let a =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 1), (vec![0, 0], 1)]).unwrap();
     let b = GradedSpace::try_new(Arc::clone(&provider), [(vec![2i64, 2], 2)]).unwrap();
-    let probe = TensorMap::<_, f64>::rand_with_seed(&runtime, [&a, &a], [&a, &a], 0).unwrap();
+    let probe =
+        TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&a, &a], [&a, &a], 0).unwrap();
     assert!(
         (0..probe.subblock_count()).any(|index| probe
             .subblock_fusion_trees(index)
@@ -290,7 +327,7 @@ fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_a
             .any(|vertex| vertex.get() == 2)),
         "fixture must carry a Generic vertex key mu = 2"
     );
-    assert_all_ops!("checked SU(3)", runtime, a, b);
+    assert_all_ops!(engine, "checked SU(3)", runtime, a, b);
 }
 
 /// The checked parent-reading seams (compact and full SVD, pinv) on
@@ -299,9 +336,10 @@ fn checked_su3_multiplicity_lazy_adjoint_factorizations_match_the_materialized_a
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su3_seams_keep_non_self_dual_sectors_and_dual_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let three =
@@ -312,8 +350,8 @@ fn checked_su3_seams_keep_non_self_dual_sectors_and_dual_legs() {
     assert!(dual.is_dual() && !three.is_dual());
 
     macro_rules! seams {
-        ($d:ty, $seed:expr, [$($codomain:expr),+], [$($domain:expr),+]) => {{
-            let parent = TensorMap::<_, $d>::rand_with_seed(
+        ($engine:ident, $d:ty, $seed:expr, [$($codomain:expr),+], [$($domain:expr),+]) => {{
+            let parent = TensorMap::<_, $d>::rand_with_seed($engine,
                 &runtime,
                 [$(&$codomain),+],
                 [$(&$domain),+],
@@ -321,33 +359,33 @@ fn checked_su3_seams_keep_non_self_dual_sectors_and_dual_legs() {
             )
             .unwrap();
             let label = format!("{} {}", stringify!($d), $seed);
-            let lazy = parent.adjoint().unwrap();
-            let eager = lazy.materialize().unwrap();
+            let lazy = parent.adjoint($engine).unwrap();
+            let eager = lazy.materialize($engine).unwrap();
             let rows: Vec<usize> = (0..lazy.codomain_rank()).collect();
             let cols: Vec<usize> =
                 (lazy.codomain_rank()..lazy.codomain_rank() + lazy.domain_rank()).collect();
             let (r, c) = (rows.as_slice(), cols.as_slice());
             for (name, lazy_svd, eager_svd) in [
-                ("svd_compact", lazy.svd_compact(r, c), eager.svd_compact(r, c)),
-                ("svd_full", lazy.svd_full(r, c), eager.svd_full(r, c)),
+                ("svd_compact", lazy.svd_compact($engine, r, c), eager.svd_compact($engine, r, c)),
+                ("svd_full", lazy.svd_full($engine, r, c), eager.svd_full($engine, r, c)),
             ] {
                 let (Svd { u, s, vh }, Svd { u: eu, s: es, vh: evh }) =
                     (lazy_svd.unwrap(), eager_svd.unwrap());
-                assert_factor_close!(format!("{label} {name} u"), u, eu);
-                assert_factor_close!(format!("{label} {name} s"), s, es);
-                assert_factor_close!(format!("{label} {name} vh"), vh, evh);
+                assert_factor_close!($engine, format!("{label} {name} u"), u, eu);
+                assert_factor_close!($engine, format!("{label} {name} s"), s, es);
+                assert_factor_close!($engine, format!("{label} {name} vh"), vh, evh);
             }
-            assert_factor_close!(
+            assert_factor_close!($engine,
                 format!("{label} pinv"),
-                lazy.pinv(r, c, 1.0e-12).unwrap(),
-                eager.pinv(r, c, 1.0e-12).unwrap()
+                lazy.pinv($engine, r, c, 1.0e-12).unwrap(),
+                eager.pinv($engine, r, c, 1.0e-12).unwrap()
             );
         }};
     }
-    seams!(f64, 31, [three, three_bar], [three]);
-    seams!(Complex64, 32, [three, three_bar], [three]);
-    seams!(f64, 33, [three_bar], [three, dual]);
-    seams!(Complex64, 34, [three_bar], [three, dual]);
-    seams!(f64, 35, [dual, three_bar], [dual]);
-    seams!(Complex64, 36, [dual, three_bar], [dual]);
+    seams!(engine, f64, 31, [three, three_bar], [three]);
+    seams!(engine, Complex64, 32, [three, three_bar], [three]);
+    seams!(engine, f64, 33, [three_bar], [three, dual]);
+    seams!(engine, Complex64, 34, [three_bar], [three, dual]);
+    seams!(engine, f64, 35, [dual, three_bar], [dual]);
+    seams!(engine, Complex64, 36, [dual, three_bar], [dual]);
 }

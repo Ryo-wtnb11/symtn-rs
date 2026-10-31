@@ -27,53 +27,53 @@ fn default_rtol(epsilon: f64) -> f64 {
 /// Left null space by composition: `u`'s columns kept by `truncation` over
 /// `s`'s diagonal padded to `u`'s bond.
 macro_rules! composed_left_null {
-    ($a:expr, $truncation:expr) => {{
-        let Svd { u, s, .. } = $a.svd_full(&[0], &[1]).unwrap();
+    ($engine:ident, $a:expr, $truncation:expr) => {{
+        let Svd { u, s, .. } = $a.svd_full($engine, &[0], &[1]).unwrap();
         let bond = u.domain()[0].clone();
-        let spectrum = bond.extend_spectrum(&s.diagview().unwrap()).unwrap();
+        let spectrum = bond.extend_spectrum(&s.diagview($engine).unwrap()).unwrap();
         let found = bond.find_truncated(&spectrum, &$truncation).unwrap();
-        u.restrict_leg(&[(1, &found.selection)]).unwrap()
+        u.restrict_leg($engine, &[(1, &found.selection)]).unwrap()
     }};
 }
 
 /// Right null space by composition, on `vh`'s bond.
 macro_rules! composed_right_null {
-    ($a:expr, $truncation:expr) => {{
-        let Svd { s, vh, .. } = $a.svd_full(&[0], &[1]).unwrap();
+    ($engine:ident, $a:expr, $truncation:expr) => {{
+        let Svd { s, vh, .. } = $a.svd_full($engine, &[0], &[1]).unwrap();
         let bond = vh.codomain()[0].clone();
-        let spectrum = bond.extend_spectrum(&s.diagview().unwrap()).unwrap();
+        let spectrum = bond.extend_spectrum(&s.diagview($engine).unwrap()).unwrap();
         let found = bond.find_truncated(&spectrum, &$truncation).unwrap();
-        vh.restrict_leg(&[(0, &found.selection)]).unwrap()
+        vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap()
     }};
 }
 
 /// `n^H a = 0` and `n^H n = 1` (left), or `a n^H = 0` and `n n^H = 1` (right).
 macro_rules! assert_null_space {
-    ($runtime:expr, $a:expr, $n:expr, $left:expr, $tol:expr, $one:expr) => {{
+    ($engine:ident, $runtime:expr, $a:expr, $n:expr, $left:expr, $tol:expr, $one:expr) => {{
         let (a, n) = (&$a, &$n);
-        let n_adjoint = n.adjoint().unwrap().materialize().unwrap();
+        let n_adjoint = n.adjoint($engine).unwrap().materialize($engine).unwrap();
         let (residual, gram, bond) = if $left {
             (
-                n_adjoint.compose(a).unwrap(),
-                n_adjoint.compose(n).unwrap(),
+                n_adjoint.compose($engine, a).unwrap(),
+                n_adjoint.compose($engine, n).unwrap(),
                 n.domain(),
             )
         } else {
             (
-                a.compose(&n_adjoint).unwrap(),
-                n.compose(&n_adjoint).unwrap(),
+                a.compose($engine, &n_adjoint).unwrap(),
+                n.compose($engine, &n_adjoint).unwrap(),
                 n.codomain(),
             )
         };
         assert!(
-            residual.norm(2.0).unwrap() <= $tol * (1.0 + a.norm(2.0).unwrap()),
+            residual.norm($engine, 2.0).unwrap() <= $tol * (1.0 + a.norm($engine, 2.0).unwrap()),
             "the null space does not annihilate the input"
         );
-        let identity = TensorMap::isomorphism(&$runtime, &bond, &bond).unwrap();
+        let identity = TensorMap::isomorphism($engine, &$runtime, &bond, &bond).unwrap();
         let defect = gram
-            .axpby($one, &identity, -$one)
+            .axpby($engine, $one, &identity, -$one)
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(
             defect <= $tol,
@@ -86,7 +86,7 @@ macro_rules! assert_null_space {
 /// `3 x 3` block of rank two (nullity `0 + 1`), and charge 2 lives only in the
 /// codomain (nullity 2).
 macro_rules! u1_rank_deficient {
-    ($runtime:expr, $scalar:ty, $value:expr) => {{
+    ($engine:ident, $runtime:expr, $scalar:ty, $value:expr) => {{
         let rule = Arc::new(U1FusionRule);
         let codomain = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -101,7 +101,7 @@ macro_rules! u1_rank_deficient {
             GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)]).unwrap();
         let value = $value;
         let a: TensorMap<_, $scalar> =
-            TensorMap::from_subblock_fn(&$runtime, [&codomain], [&domain], |trees, i| {
+            TensorMap::from_subblock_fn($engine, &$runtime, [&codomain], [&domain], |trees, i| {
                 if *trees.coupled() == U1Irrep::new(0) {
                     // Outer product: rank one.
                     value((i[0] + 1) as f64, 0.5 * i[0] as f64)
@@ -118,15 +118,15 @@ macro_rules! u1_rank_deficient {
 }
 
 macro_rules! check_u1 {
-    ($scalar:ty, $value:expr, $epsilon:expr, $tol:expr) => {{
+    ($engine:ident, $scalar:ty, $value:expr, $epsilon:expr, $tol:expr) => {{
         let runtime = host_runtime();
         let value = $value;
-        let a = u1_rank_deficient!(runtime, $scalar, value);
+        let a = u1_rank_deficient!($engine, runtime, $scalar, value);
         let below = Truncation::below(0.0, default_rtol($epsilon)).unwrap();
         let expected = [(0, 3), (1, 1), (2, 2)];
 
-        let left = composed_left_null!(a, below);
-        assert_null_space!(runtime, a, left, true, $tol, value(1.0, 0.0));
+        let left = composed_left_null!($engine, a, below);
+        assert_null_space!($engine, runtime, a, left, true, $tol, value(1.0, 0.0));
         for (charge, nullity) in expected {
             assert_eq!(
                 left.domain()[0].degeneracy(&U1Irrep::new(charge)).unwrap(),
@@ -135,7 +135,7 @@ macro_rules! check_u1 {
             );
         }
         // The shape-based default keeps only the rectangular deficit.
-        let shape = a.left_null(&[0], &[1]).unwrap();
+        let shape = a.left_null($engine, &[0], &[1]).unwrap();
         for (charge, nullity) in [(0, 2), (1, 0), (2, 2)] {
             assert_eq!(
                 shape.domain()[0].degeneracy(&U1Irrep::new(charge)).unwrap(),
@@ -143,9 +143,9 @@ macro_rules! check_u1 {
             );
         }
 
-        let wide = a.adjoint().unwrap().materialize().unwrap();
-        let right = composed_right_null!(wide, below);
-        assert_null_space!(runtime, wide, right, false, $tol, value(1.0, 0.0));
+        let wide = a.adjoint($engine).unwrap().materialize($engine).unwrap();
+        let right = composed_right_null!($engine, wide, below);
+        assert_null_space!($engine, runtime, wide, right, false, $tol, value(1.0, 0.0));
         for (charge, nullity) in expected {
             assert_eq!(
                 right.codomain()[0]
@@ -159,13 +159,13 @@ macro_rules! check_u1 {
         // `maxnullity` (`rank_smallest`) caps the weighted count, taking the
         // smallest values first; every kept direction is still null.
         let capped = below.clone().and(Truncation::rank_smallest(4));
-        let left = composed_left_null!(a, capped);
-        assert_null_space!(runtime, a, left, true, $tol, value(1.0, 0.0));
+        let left = composed_left_null!($engine, a, capped);
+        assert_null_space!($engine, runtime, a, left, true, $tol, value(1.0, 0.0));
         assert_eq!(left.domain()[0].degeneracies().iter().sum::<usize>(), 4);
 
         // An `atol` above every singular value keeps the whole bond.
         let everything = Truncation::below(1.0e6, 0.0).unwrap();
-        let left = composed_left_null!(a, everything);
+        let left = composed_left_null!($engine, a, everything);
         assert_eq!(
             left.domain()[0].degeneracies(),
             a.codomain()[0].degeneracies()
@@ -175,20 +175,24 @@ macro_rules! check_u1 {
 
 #[test]
 fn u1_composed_null_space_counts_rectangular_and_rank_deficits_for_every_dtype() {
-    check_u1!(f64, |re: f64, _im: f64| re, f64::EPSILON, 1e-12);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    check_u1!(engine, f64, |re: f64, _im: f64| re, f64::EPSILON, 1e-12);
     check_u1!(
+        engine,
         f32,
         |re: f64, _im: f64| re as f32,
         f64::from(f32::EPSILON),
         1e-5
     );
     check_u1!(
+        engine,
         Complex64,
         |re: f64, im: f64| Complex64::new(re, im),
         f64::EPSILON,
         1e-12
     );
     check_u1!(
+        engine,
         Complex32,
         |re: f64, im: f64| Complex32::new(re as f32, im as f32),
         f64::from(f32::EPSILON),
@@ -198,6 +202,7 @@ fn u1_composed_null_space_counts_rectangular_and_rank_deficits_for_every_dtype()
 
 #[test]
 fn su2_composed_null_space_counts_reduced_rank_deficits() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: spin 0 is a `3 x 1` block of rank one (nullity 2), spin 1/2 a
     // `2 x 2` block of rank one (nullity 1), so the shape-based default
     // keeps `[2, 0]` and the composition `[2, 1]` reduced directions.
@@ -208,16 +213,16 @@ fn su2_composed_null_space_counts_reduced_rank_deficits() {
     let codomain = GradedSpace::try_new(Arc::clone(&rule), [(spin0, 3), (half, 2)]).unwrap();
     let domain = GradedSpace::try_new(rule, [(spin0, 1), (half, 2)]).unwrap();
     let a: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&codomain], [&domain], |_, i| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, i| {
             ((i[0] + 1) * (i[1] + 2)) as f64
         })
         .unwrap();
     let below = Truncation::below(0.0, default_rtol(f64::EPSILON)).unwrap();
-    let left = composed_left_null!(a, below);
-    assert_null_space!(runtime, a, left, true, 1e-12, 1.0);
+    let left = composed_left_null!(engine, a, below);
+    assert_null_space!(engine, runtime, a, left, true, 1e-12, 1.0);
     assert_eq!(left.domain()[0].degeneracy(&spin0).unwrap(), 2);
     assert_eq!(left.domain()[0].degeneracy(&half).unwrap(), 1);
-    let shape = a.left_null(&[0], &[1]).unwrap();
+    let shape = a.left_null(engine, &[0], &[1]).unwrap();
     assert_eq!(shape.domain()[0].degeneracy(&spin0).unwrap(), 2);
     assert_eq!(shape.domain()[0].degeneracy(&half).unwrap(), 0);
 
@@ -225,7 +230,7 @@ fn su2_composed_null_space_counts_reduced_rank_deficits() {
     // two spin-0 zeros (weight 1 each) and cannot afford a spin-1/2 state
     // (weight 2).
     let capped = below.and(Truncation::rank_smallest(3));
-    let left = composed_left_null!(a, capped);
+    let left = composed_left_null!(engine, a, capped);
     assert_eq!(left.domain()[0].degeneracy(&spin0).unwrap(), 2);
     assert_eq!(left.domain()[0].degeneracy(&half).unwrap(), 0);
 }
@@ -371,6 +376,7 @@ where
 
 #[test]
 fn shape_based_null_spaces_on_dual_legs_annihilate_the_dense_blocks() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the default null spaces of maps with a dual codomain leg and a
     // dual domain leg, real and complex, checked block by block against the
     // input's dense coupled-sector matrices: `(rows - cols)+` orthonormal
@@ -394,18 +400,26 @@ fn shape_based_null_spaces_on_dual_legs_annihilate_the_dense_blocks() {
     // 2 is codomain-only.
     for (codomain, domain, seed) in [(&w_dual, &v, 11), (&w, &v_dual, 12)] {
         let real: TensorMap<_, f64> =
-            TensorMap::rand_with_seed(&runtime, [codomain], [domain], seed).unwrap();
+            TensorMap::rand_with_seed(engine, &runtime, [codomain], [domain], seed).unwrap();
         let complex: TensorMap<_, Complex64> =
-            TensorMap::rand_with_seed(&runtime, [codomain], [domain], seed).unwrap();
-        assert_dense_null(&real, &real.left_null(&[0], &[1]).unwrap(), true);
-        assert_dense_null(&real, &real.right_null(&[0], &[1]).unwrap(), false);
-        assert_dense_null(&complex, &complex.left_null(&[0], &[1]).unwrap(), true);
-        assert_dense_null(&complex, &complex.right_null(&[0], &[1]).unwrap(), false);
+            TensorMap::rand_with_seed(engine, &runtime, [codomain], [domain], seed).unwrap();
+        assert_dense_null(&real, &real.left_null(engine, &[0], &[1]).unwrap(), true);
+        assert_dense_null(&real, &real.right_null(engine, &[0], &[1]).unwrap(), false);
+        assert_dense_null(
+            &complex,
+            &complex.left_null(engine, &[0], &[1]).unwrap(),
+            true,
+        );
+        assert_dense_null(
+            &complex,
+            &complex.right_null(engine, &[0], &[1]).unwrap(),
+            false,
+        );
         // The wide transpose of the same legs: the right null space is the
         // nontrivial one.
         let wide: TensorMap<_, Complex64> =
-            TensorMap::rand_with_seed(&runtime, [domain], [codomain], seed).unwrap();
-        assert_dense_null(&wide, &wide.right_null(&[0], &[1]).unwrap(), false);
-        assert_dense_null(&wide, &wide.left_null(&[0], &[1]).unwrap(), true);
+            TensorMap::rand_with_seed(engine, &runtime, [domain], [codomain], seed).unwrap();
+        assert_dense_null(&wide, &wide.right_null(engine, &[0], &[1]).unwrap(), false);
+        assert_dense_null(&wide, &wide.left_null(engine, &[0], &[1]).unwrap(), true);
     }
 }

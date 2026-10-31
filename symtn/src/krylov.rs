@@ -5,9 +5,21 @@
 //! [`TensorMap`] implements. Every krylov solver then runs directly on
 //! tensors. For `eigsolve`, `exponentiate`, `linsolve` and the Arnoldi
 //! solvers a linear map is any closure
-//! `FnMut(&TensorMap<R, D>, &mut TensorMap<R, D>) -> Result<(), FacadeError<R>>`;
+//! `FnMut(&mut dyn Engine, &TensorMap<R, D>, &mut TensorMap<R, D>) -> Result<(), FacadeError<R>>`;
 //! `svdsolve` also needs the adjoint, so its map is a type of your own
 //! implementing [`AdjointMap`].
+//!
+//! # The context is the caller's engine
+//!
+//! [`Vector::Context`] is [`dyn Engine`](crate::typed::Engine), the same
+//! engine every other symtn operation takes. The caller passes
+//! `&mut engine` to each solver and workspace constructor; krylov forwards
+//! that one borrow to every vector operation and to the linear map, which
+//! therefore receives the engine as its first argument instead of capturing
+//! it. symtn creates and stores no engine of its own: the solver runs on the
+//! caller's threads, and an engine that cannot run Host operations (a CUDA
+//! engine, a broken pool) is refused with the same typed error as any other
+//! Host value operation, as `krylov::Error::Vector`.
 //!
 //! # The vector operations
 //!
@@ -17,8 +29,8 @@
 //! | `krylov::Vector` | symtn | TensorKit |
 //! |---|---|---|
 //! | `similar` | [`TensorMap::zeros_like`] | `zerovector` |
-//! | `copy_from(x)` | `x.axpby_into(self, 1, 0)` | `scale!(ty, tx, 1)` |
-//! | `axpby(a, x, b)` | `x.axpby_into(self, a, b)` | `add!(ty, tx, α, β)` |
+//! | `copy_from(x)` | `x.axpby_into(engine, self, 1, 0)` | `scale!(ty, tx, 1)` |
+//! | `axpby(a, x, b)` | `x.axpby_into(engine, self, a, b)` | `add!(ty, tx, α, β)` |
 //! | `inner(y)` | [`TensorMap::inner`] | `inner` |
 //! | `norm` | [`TensorMap::norm`]`(2.0)` | `norm` |
 //!
@@ -47,21 +59,24 @@
 //!
 //! use symtn::krylov::{self, Lanczos, Which, Workspace};
 //! use symtn::sector::{U1FusionRule, U1Irrep};
-//! use symtn::typed::{GradedSpace, Runtime, TensorMap};
+//! use symtn::typed::{Engine, GradedSpace, Runtime, TensorMap};
 //!
+//! let engine: &mut dyn Engine = &mut symtn::typed::CpuEngine::serial();
 //! let rt = Runtime::builder().build()?;
 //! let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
 //! // H = diag(1, 2, 3) on charge 0 and diag(1, 2) on charge 1.
-//! let h = TensorMap::<_, f64>::from_subblock_fn(&rt, [&v], [&v], |_, i| {
+//! let h = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, i| {
 //!     if i[0] == i[1] { (i[0] + 1) as f64 } else { 0.0 }
 //! })?;
-//! let x0 = TensorMap::<_, f64>::rand_with_seed(&rt, [&v], [], 1)?;
-//! let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
-//!     h.compose(x)?.axpby_into(y, 1.0, 0.0)
+//! let x0 = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [], 1)?;
+//! let mut op = |engine: &mut (dyn Engine + 'static),
+//!               x: &TensorMap<U1FusionRule, f64>,
+//!               y: &mut TensorMap<U1FusionRule, f64>| {
+//!     h.compose(engine, x)?.axpby_into(engine, y, 1.0, 0.0)
 //! };
-//! let mut ws = Workspace::with_capacity(&x0, 5)?;
-//! let (values, _, _) =
-//!     krylov::eigsolve(&mut op, &x0, 1, Which::LargestReal, &Lanczos::new(5, 100, 1e-12), &mut ws)?;
+//! let mut ws = Workspace::with_capacity(engine, &x0, 5)?;
+//! let alg = Lanczos::new(5, 100, 1e-12);
+//! let (values, _, _) = krylov::eigsolve(engine, &mut op, &x0, 1, Which::LargestReal, &alg, &mut ws)?;
 //! assert!((values[0] - 3.0).abs() < 1e-10);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -81,7 +96,7 @@ use num_complex::{Complex32, Complex64};
 use crate::sector::TypedSectorAdmission;
 // `Error` is not imported: it would shadow the re-exported `krylov::Error`.
 use crate::typed::{
-    ElementwiseExec, FacadeError, FactorScalar, ReduceExec, TensorMap, TypedAdjointSpace,
+    ElementwiseExec, Engine, FacadeError, FactorScalar, ReduceExec, TensorMap, TypedAdjointSpace,
     TypedSpaceModeDispatch, TypedTensorModeDispatch,
 };
 
@@ -97,8 +112,9 @@ macro_rules! host_vector {
         {
             type Scalar = $d;
             type Error = FacadeError<R>;
+            type Context = dyn Engine;
 
-            fn similar(&self) -> Result<Self, Self::Error> {
+            fn similar(&self, engine: &mut Self::Context) -> Result<Self, Self::Error> {
                 if !self.is_owned_dense() {
                     return Err(crate::typed::Error::Unsupported {
                         operation: "Vector::similar",
@@ -106,23 +122,33 @@ macro_rules! host_vector {
                     }
                     .into());
                 }
-                self.zeros_like()
+                self.zeros_like(engine)
             }
 
-            fn copy_from(&mut self, x: &Self) -> Result<(), Self::Error> {
-                x.axpby_into(self, <$d>::from_real(1.0), <$d>::from_real(0.0))
+            fn copy_from(
+                &mut self,
+                engine: &mut Self::Context,
+                x: &Self,
+            ) -> Result<(), Self::Error> {
+                x.axpby_into(engine, self, <$d>::from_real(1.0), <$d>::from_real(0.0))
             }
 
-            fn inner(&self, y: &Self) -> Result<$d, Self::Error> {
-                TensorMap::inner(self, y)
+            fn inner(&self, engine: &mut Self::Context, y: &Self) -> Result<$d, Self::Error> {
+                TensorMap::inner(self, engine, y)
             }
 
-            fn norm(&self) -> Result<$real, Self::Error> {
-                Ok(TensorMap::norm(self, 2.0)? as $real)
+            fn norm(&self, engine: &mut Self::Context) -> Result<$real, Self::Error> {
+                Ok(TensorMap::norm(self, engine, 2.0)? as $real)
             }
 
-            fn axpby(&mut self, a: $d, x: &Self, b: $d) -> Result<(), Self::Error> {
-                x.axpby_into(self, a, b)
+            fn axpby(
+                &mut self,
+                engine: &mut Self::Context,
+                a: $d,
+                x: &Self,
+                b: $d,
+            ) -> Result<(), Self::Error> {
+                x.axpby_into(engine, self, a, b)
             }
         }
     };

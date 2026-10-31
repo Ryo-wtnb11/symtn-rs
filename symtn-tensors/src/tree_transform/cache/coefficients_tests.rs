@@ -339,14 +339,14 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
         (Arc::clone(&source), source)
     };
     let mut planning = TreeTransformPlanning::default();
-    planning.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
+    let engine = &mut symtn_operations::host_pool::test_engine(4);
     // Degeneracies no other test uses, so no completed transformer of
     // these layouts is resident.
     let (dst, src) = layouts(23);
     let group_count = src.fusion_tree_group_slice().len();
     take_coefficient_group_activity();
     planning
-        .resolve_tree_pair(&SU2FusionRule, &operation, &dst, &src, false)
+        .resolve_tree_pair(engine, &SU2FusionRule, &operation, &dst, &src, false)
         .unwrap();
     let cold = take_coefficient_group_activity();
     assert_eq!(cold.hits + cold.misses, group_count);
@@ -355,7 +355,14 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
     for (degeneracy, storage_conjugate) in [(29, false), (31, true)] {
         let (dst, src) = layouts(degeneracy);
         let warm = planning
-            .resolve_tree_pair(&SU2FusionRule, &operation, &dst, &src, storage_conjugate)
+            .resolve_tree_pair(
+                engine,
+                &SU2FusionRule,
+                &operation,
+                &dst,
+                &src,
+                storage_conjugate,
+            )
             .unwrap();
         let activity = take_coefficient_group_activity();
         assert_eq!(
@@ -390,6 +397,7 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
 /// values of an uncached build; another operation's group set does not.
 #[test]
 fn degeneracy_only_bindings_of_one_group_set_share_one_coefficient_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Hits must not race a clearing sibling test.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -400,7 +408,7 @@ fn degeneracy_only_bindings_of_one_group_set_share_one_coefficient_payload() {
     let mut bind = |degeneracy: usize, operation: &TreeTransformOperation| {
         let source = su2_structure(degeneracy);
         planning
-            .resolve_tree_pair(&SU2FusionRule, operation, &source, &source, false)
+            .resolve_tree_pair(engine, &SU2FusionRule, operation, &source, &source, false)
             .unwrap()
     };
     let first = bind(43, &operation);

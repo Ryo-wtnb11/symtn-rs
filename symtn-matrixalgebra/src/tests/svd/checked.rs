@@ -4,11 +4,12 @@ fn assert_checked_compact_svd<D>(complex: bool)
 where
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let kept = 2;
     let (provider, space, data) = checked_svd_truncation_input::<D>(complex);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
     assert_eq!(dense.counts().svd_into, 0);
@@ -119,6 +120,7 @@ fn checked_generic_svd_compact_uses_each_complex_compact_decomposition_once() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_svd_compact_empty_input_skips_dense_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let vacuum = SectorId::new(0);
     let x = SectorId::new(1);
     let homspace = FusionTreeHomSpace::new(
@@ -140,7 +142,7 @@ fn checked_generic_svd_compact_empty_input_skips_dense_execution() {
     let data = Vec::<f64>::new();
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 0);
     assert_eq!(dense.counts().svd_into, 0);
@@ -154,11 +156,12 @@ fn checked_generic_svd_compact_empty_input_skips_dense_execution() {
 
 #[test]
 fn checked_generic_svd_compact_dense_failure_precedes_output_provider_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (provider, space, data) = checked_svd_truncation_input::<f64>(false);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
     let before = input.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
-    let result = svd_compact_dyn_checked_generic(&mut dense, &input);
+    let result = svd_compact_dyn_checked_generic(engine, &mut dense, &input);
 
     assert!(matches!(
         result,
@@ -177,6 +180,7 @@ fn checked_generic_svd_compact_dense_failure_precedes_output_provider_admission(
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FactorGenericRule;
     let x = SectorId::new(1);
     let vacuum = SectorId::new(0);
@@ -198,7 +202,7 @@ fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_s
     // A non-bond space is misuse for diagonal storage, refused before any
     // provider query (MAK `@assert m == n && isdiag(A)`).
     assert!(matches!(
-        svd_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, f64>(
+        svd_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, f64>(engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
             FactorSource::Diagonal {
                 space: &checked,
@@ -212,7 +216,7 @@ fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_s
     assert_eq!(checked_provider.calls.get(), 0);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 1);
     assert!(Arc::ptr_eq(
         full.u().space().provider_arc(),
@@ -241,6 +245,7 @@ fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_s
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_full_svd_failure_publishes_no_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = generic_factorization_input();
     let failing = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -251,7 +256,7 @@ fn checked_generic_full_svd_failure_publishes_no_factors() {
     let checked = bind_to_spy(&source, &failing);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let result = svd_full_dyn_checked_generic(&mut dense, &input);
+    let result = svd_full_dyn_checked_generic(engine, &mut dense, &input);
     assert!(matches!(
         result,
         Err(crate::CheckedGenericFactorPlanError::Provider(_))
@@ -259,12 +264,13 @@ fn checked_generic_full_svd_failure_publishes_no_factors() {
 }
 
 fn assert_checked_compact_svd_live_stage_owners<D: crate::factorize::FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, space, data) = checked_svd_truncation_input::<D>(true);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
     let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
     let svd_stage_rec = crate::probe::record();
 
-    svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     let stage = svd_stage_rec.checked_svd_stages();
 
     assert_eq!(dense.counts().svd_into, 0);
@@ -284,12 +290,14 @@ fn checked_generic_compact_svd_keeps_live_stage_owners_for_every_dtype() {
 
 #[test]
 fn checked_compact_svd_zero_rank_skips_backend_and_post_gauge_stage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
     let svd_stage_rec = crate::probe::record();
 
     for (rows, cols) in [(0, 3), (3, 0)] {
         assert_eq!(
             crate::factorize::compact_svd_numerical_stage_lengths_for_test(
+                engine,
                 &mut dense,
                 &[] as &[f64],
                 rows,
@@ -310,6 +318,7 @@ fn checked_compact_svd_zero_rank_skips_backend_and_post_gauge_stage() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_full_svd_completes_unmatched_columns_and_disjoint_space() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FactorGenericRule;
     let x = SectorId::new(1);
     let vacuum = SectorId::new(0);
@@ -332,7 +341,7 @@ fn checked_generic_full_svd_completes_unmatched_columns_and_disjoint_space() {
     .unwrap();
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     let structure = full.vh().space().space().structure();
     assert!((0..structure.block_count()).any(|index| {
         matches!(
@@ -359,7 +368,7 @@ fn checked_generic_full_svd_completes_unmatched_columns_and_disjoint_space() {
     .unwrap();
     let data = vec![1.0; source.space().required_len().unwrap()];
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert!(full.singular_values().is_empty());
 }
 
@@ -368,6 +377,7 @@ fn checked_generic_full_svd_completes_unmatched_columns_and_disjoint_space() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn assert_checked_full_svd_builder_failure(fail_at: usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -379,7 +389,7 @@ fn assert_checked_full_svd_builder_failure(fail_at: usize) {
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let before = input.data().to_vec();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let result = svd_full_dyn_checked_generic(&mut dense, &input);
+    let result = svd_full_dyn_checked_generic(engine, &mut dense, &input);
 
     assert!(matches!(
         result,
@@ -402,6 +412,7 @@ fn assert_checked_full_svd_builder_failure(fail_at: usize) {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn full_svd_provider_steps() -> ([usize; 3], usize, usize) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -412,7 +423,7 @@ fn full_svd_provider_steps() -> ([usize; 3], usize, usize) {
     let checked = bind_to_spy(&source, &provider);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let output = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let output = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     let observed = provider.calls.get();
     assert!(Arc::ptr_eq(output.u().space().provider_arc(), &provider));
     assert!(Arc::ptr_eq(output.vh().space().provider_arc(), &provider));
@@ -483,6 +494,7 @@ fn checked_generic_full_svd_enumerates_each_output_layout_once() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_native_full_svd_stages_before_unchanged_provider_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = generic_factorization_input();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
@@ -496,7 +508,7 @@ fn checked_native_full_svd_stages_before_unchanged_provider_admission() {
         return;
     };
 
-    let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
     assert_eq!(dense.counts().svd_full, 2);
     let (steps, ..) = full_svd_provider_steps();
@@ -539,6 +551,7 @@ fn checked_generic_full_svd_local_shape_error_precedes_provider_query() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_native_full_svd_reconstructs_complex_interleaved_square_trees() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical, _, data) = generic_values_endomorphism_input();
     let (interleaved_space, interleaved_data) =
         interleaved_generic_endomorphism_input(&canonical, &data);
@@ -558,7 +571,7 @@ fn checked_native_full_svd_reconstructs_complex_interleaved_square_trees() {
         return;
     };
 
-    let full = svd_full_dyn_checked_generic(&mut dense, &input).unwrap();
+    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
     assert_eq!(dense.counts().svd_full, 2);
     assert_compact_factors_reconstruct_input(&input, full.u(), Some(full.s()), full.vh());
@@ -568,6 +581,7 @@ fn checked_native_full_svd_reconstructs_complex_interleaved_square_trees() {
 }
 
 fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize::FactorScalar>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (base, data) = generic_factorization_input();
     let data = data.into_iter().map(D::from_real).collect::<Vec<_>>();
     let (provider, source) = bind_checked_only(&base);
@@ -582,7 +596,7 @@ fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize:
     .unwrap();
     let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
 
-    let result = pinv_direct_into_dyn(&mut dense, &input, output, 0.0).unwrap();
+    let result = pinv_direct_into_dyn(engine, &mut dense, &input, output, 0.0).unwrap();
 
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
@@ -776,6 +790,7 @@ impl CheckedGenericRigidSymbols for FailSingleLegFold {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a provider error while laying out checked compact SVD's dense `S`
     // is returned unchanged as `Provider(e)`, after both dense SVDs and with
     // the input untouched. U and Vh each enumerate their layout once before
@@ -791,7 +806,8 @@ fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
         let checked = bind_to_spy(&source, &provider);
         let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
         let mut dense = ScriptedExecutor::<CountingDense>::default();
-        let Svd { u, vh, .. } = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+        let Svd { u, vh, .. } =
+            svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         let folds = |homspace: &FusionTreeHomSpace| {
             let probe = FailSingleLegFold {
                 rule: FactorGenericRule,
@@ -816,7 +832,7 @@ fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
     let input = BoundDynamicTensorRef::try_new(&failing_space, &data).unwrap();
     let before = input.data().to_vec();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let result = svd_compact_dyn_checked_generic(&mut dense, &input);
+    let result = svd_compact_dyn_checked_generic(engine, &mut dense, &input);
 
     assert!(matches!(
         result,
@@ -836,6 +852,7 @@ fn checked_generic_svd_compact_preserves_a_diagonal_s_fold_failure() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_svd_compact_enumerates_each_factor_layout_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: checked compact SVD queries the provider for exactly one
     // enumeration of each of the U, S and Vh spaces.
     let (source, data) = generic_factorization_input();
@@ -848,7 +865,7 @@ fn checked_generic_svd_compact_enumerates_each_factor_layout_once() {
     let checked = bind_to_spy(&source, &provider);
     let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
     let mut dense = ScriptedExecutor::<CountingDense>::default();
-    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let Svd { u, s, vh } = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     let compact_calls = provider.calls.get();
     assert!(s.data().len() > 1);
     assert_eq!(
@@ -1094,6 +1111,7 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
 
 #[test]
 fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#1994): compact QR/LQ/polar keep the input space and emit
     // their spectra in region order. On an aligned expert layout whose
     // blocks are not in sector order that order is not sector order, so the
@@ -1160,6 +1178,7 @@ fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admis
     // Region order is what QR emits; on this layout it is the reverse of
     // sector order, and that spectrum is admitted.
     let Qr { q, .. } = qr_compact_from_source::<Mf, _, _, _, _>(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         FactorSource::Diagonal {
             space: &reversed,

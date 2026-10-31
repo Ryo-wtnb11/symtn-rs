@@ -2,6 +2,7 @@
 
 use std::fmt::Debug;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::LieGroupFusionRule;
 use symtn::typed::{Complex64, Error, Runtime};
@@ -45,11 +46,15 @@ fn copy_prefix<D: Copy>(
     }
 }
 
-fn assert_absorb_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D)
-where
+fn assert_absorb_case<D>(
+    engine: &mut dyn Engine,
+    n: usize,
+    label: Vec<i64>,
+    value: impl Fn(usize) -> D,
+) where
     D: Copy + Debug + PartialEq + symtn::typed::TensorScalar,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let destination_provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let source_provider =
@@ -65,6 +70,7 @@ where
         GradedSpace::try_new(Arc::clone(&source_provider), [(label.clone(), degeneracy)]).unwrap()
     });
     let destination: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [
             &destination_legs[0],
@@ -78,6 +84,7 @@ where
     )
     .unwrap();
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&source_legs[0], &source_legs[1], &source_legs[2]],
         [],
@@ -124,23 +131,28 @@ where
         "fixture must carry Generic vertex key μ=2"
     );
 
-    let direct = destination.absorb(&source).unwrap();
+    let direct = destination.absorb(engine, &source).unwrap();
     assert_eq!(direct.dense_data().unwrap(), expected);
     assert!(std::ptr::eq(
         direct.provider(),
         destination_provider.as_ref()
     ));
     assert!(!std::ptr::eq(direct.provider(), source_provider.as_ref()));
+    let source_adjoint = &source.adjoint(engine).unwrap();
 
     let lazy = destination
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .absorb(&source.adjoint().unwrap())
+        .absorb(engine, source_adjoint)
         .unwrap();
-    let expected_lazy = direct.adjoint().unwrap();
+    let expected_lazy = direct.adjoint(engine).unwrap();
     assert_eq!(
         lazy.dense_data().unwrap(),
-        expected_lazy.materialize().unwrap().dense_data().unwrap()
+        expected_lazy
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
     );
 
     assert_eq!(destination.dense_data().unwrap(), destination_before);
@@ -148,25 +160,27 @@ where
 
 #[test]
 fn checked_generic_absorb_matches_su3_su4_vertex_keys_prefixes_and_lazy_adjoint() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // What: exact Generic fusion-tree keys (including multiplicity vertices),
     // distinct equal-identity provider Arcs, asymmetric min-prefix copies, and
     // direct/lazy-adjoint parity for f64 and c64 on both SU(3) and SU(4).
-    assert_absorb_case(3, vec![2, 2], |value| value as f64);
-    assert_absorb_case(3, vec![2, 2], |value| {
+    assert_absorb_case(engine, 3, vec![2, 2], |value| value as f64);
+    assert_absorb_case(engine, 3, vec![2, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_absorb_case(4, vec![2, 0, 2], |value| value as f64);
-    assert_absorb_case(4, vec![2, 0, 2], |value| {
+    assert_absorb_case(engine, 4, vec![2, 0, 2], |value| value as f64);
+    assert_absorb_case(engine, 4, vec![2, 0, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
 
 #[test]
 fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // What: rank, identity, runtime, and duality reject in that order before
     // copying; the input payloads remain the caller-owned originals.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let equal_identity =
@@ -181,32 +195,43 @@ fn checked_generic_absorb_validation_precedence_leaves_inputs_unchanged() {
     let wrong_leg =
         GradedSpace::try_new(Arc::clone(&wrong_identity), [(vec![1, 0, 1], 2)]).unwrap();
     let destination: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg, &leg], [], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [], |_, indices| {
             indices.iter().sum::<usize>() as f64
         })
         .unwrap();
     let before = destination.dense_data().unwrap().to_vec();
-    let bad_rank: TensorMap<_, f64> = TensorMap::zeros(&other_runtime, [&wrong_leg], []).unwrap();
-    let bad_identity: TensorMap<_, f64> =
-        TensorMap::zeros(&other_runtime, [&wrong_leg, &wrong_leg, &wrong_leg], []).unwrap();
-    let bad_runtime: TensorMap<_, f64> =
-        TensorMap::zeros(&other_runtime, [&equal_leg, &equal_leg, &equal_leg], []).unwrap();
+    let bad_rank: TensorMap<_, f64> =
+        TensorMap::zeros(engine, &other_runtime, [&wrong_leg], []).unwrap();
+    let bad_identity: TensorMap<_, f64> = TensorMap::zeros(
+        engine,
+        &other_runtime,
+        [&wrong_leg, &wrong_leg, &wrong_leg],
+        [],
+    )
+    .unwrap();
+    let bad_runtime: TensorMap<_, f64> = TensorMap::zeros(
+        engine,
+        &other_runtime,
+        [&equal_leg, &equal_leg, &equal_leg],
+        [],
+    )
+    .unwrap();
     let bad_duality: TensorMap<_, f64> =
-        TensorMap::zeros(&runtime, [&dual_leg, &dual_leg, &dual_leg], []).unwrap();
+        TensorMap::zeros(engine, &runtime, [&dual_leg, &dual_leg, &dual_leg], []).unwrap();
 
     assert!(
-        matches!(destination.absorb(&bad_rank), Err(Error::InvalidArgument(message)) if message.contains("equal codomain/domain ranks"))
+        matches!(destination.absorb(engine, &bad_rank), Err(Error::InvalidArgument(message)) if message.contains("equal codomain/domain ranks"))
     );
     assert!(matches!(
-        destination.absorb(&bad_identity),
+        destination.absorb(engine, &bad_identity),
         Err(Error::RuleMismatch)
     ));
     assert!(matches!(
-        destination.absorb(&bad_runtime),
+        destination.absorb(engine, &bad_runtime),
         Err(Error::RuntimeMismatch)
     ));
     assert!(
-        matches!(destination.absorb(&bad_duality), Err(Error::InvalidArgument(message)) if message.contains("equal duality"))
+        matches!(destination.absorb(engine, &bad_duality), Err(Error::InvalidArgument(message)) if message.contains("equal duality"))
     );
     assert_eq!(destination.dense_data().unwrap(), before);
 }

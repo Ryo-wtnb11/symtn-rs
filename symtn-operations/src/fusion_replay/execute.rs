@@ -7,6 +7,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn execute_raw<A, G, D>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         fusion_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -25,6 +26,7 @@ where
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
         self.execute_host(
+            engine,
             kernels,
             gemm,
             fusion_workspace,
@@ -46,6 +48,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn execute_raw_zeroed<A, G, D>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         fusion_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -63,6 +66,7 @@ where
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
         self.execute_host(
+            engine,
             kernels,
             gemm,
             fusion_workspace,
@@ -80,6 +84,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn execute_host<A, G, D>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         fusion_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -115,14 +120,23 @@ where
             fusion_workspace.scratch.resize_filled(0, D::zero());
         }
 
-        self.init_inactive_blocks(kernels, &mut fusion_workspace.zero_strides, dst_data, init)?;
+        crate::host_pool::with_exec(engine, |exec| {
+            self.init_inactive_blocks(
+                exec,
+                kernels,
+                &mut fusion_workspace.zero_strides,
+                dst_data,
+                init,
+            )
+        })?;
 
         if !self.direct_batch.is_empty() {
-            self.execute_direct_batches(gemm, dst_data, lhs_data, rhs_data, alpha, beta)?;
+            self.execute_direct_batches(engine, gemm, dst_data, lhs_data, rhs_data, alpha, beta)?;
         }
 
         for execution in &self.irregular {
             self.execute_irregular_group(
+                engine,
                 kernels,
                 gemm,
                 fusion_workspace,
@@ -142,8 +156,10 @@ where
     /// (plan-time invariant), so an unscaled plan is exactly one batch. The
     /// batches write disjoint destination blocks, so `beta` reaches each
     /// written element once.
+    #[allow(clippy::too_many_arguments)]
     fn execute_direct_batches<G, D>(
         &self,
+        engine: &mut dyn Engine,
         gemm: &mut G,
         dst: &mut [D],
         lhs: &[D],
@@ -189,6 +205,7 @@ where
                 alpha.scale_by_coefficient(coefficient)
             };
             self.execute_batch(
+                engine,
                 gemm,
                 dst,
                 lhs,
@@ -206,6 +223,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn execute_irregular_group<A, G, D>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         fusion_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -230,7 +248,9 @@ where
             if group.lhs.needs_clear {
                 lhs.fill(D::zero());
             }
-            pack_group(kernels, &group.lhs, lhs_data, lhs)?;
+            crate::host_pool::with_exec(engine, |exec| {
+                pack_group(exec, kernels, &group.lhs, lhs_data, lhs)
+            })?;
         }
         if forms_product && execution.class.packs_rhs() {
             let start_index = execution.scratch.rhs_offset;
@@ -239,7 +259,9 @@ where
             if group.rhs.needs_clear {
                 rhs.fill(D::zero());
             }
-            pack_group(kernels, &group.rhs, rhs_data, rhs)?;
+            crate::host_pool::with_exec(engine, |exec| {
+                pack_group(exec, kernels, &group.rhs, rhs_data, rhs)
+            })?;
         }
 
         if execution.class.scatters_dst() {
@@ -257,6 +279,7 @@ where
                 rhs_data
             };
             self.execute_batch(
+                engine,
                 gemm,
                 destination,
                 lhs,
@@ -266,7 +289,9 @@ where
                 alpha,
                 D::zero(),
             )?;
-            scatter_group(kernels, &group.dst, dst_data, destination, beta)?;
+            crate::host_pool::with_exec(engine, |exec| {
+                scatter_group(exec, kernels, &group.dst, dst_data, destination, beta)
+            })?;
         } else {
             let lhs = if execution.class.packs_lhs() {
                 &scratch[..execution.scratch.lhs_len]
@@ -280,6 +305,7 @@ where
                 rhs_data
             };
             self.execute_batch(
+                engine,
                 gemm,
                 dst_data,
                 lhs,
@@ -296,6 +322,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn execute_batch<G, D>(
         &self,
+        engine: &mut dyn Engine,
         gemm: &mut G,
         dst: &mut [D],
         lhs: &[D],
@@ -324,9 +351,10 @@ where
             return Ok(());
         }
         if self.lhs_op == MatrixOp::Identity && self.rhs_op == MatrixOp::Identity {
-            gemm.matmul_rank2_batch(dst, lhs, rhs, jobs, runs, alpha, beta)
+            gemm.matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta)
         } else {
             gemm.matmul_rank2_batch_with_ops(
+                engine,
                 dst,
                 lhs,
                 rhs,
@@ -354,20 +382,6 @@ where
             .map(|job| (job.rows, job.contracted, job.cols))
             .collect::<HashSet<_>>()
             .len()
-    }
-
-    /// The device plan entries one CUDA direct replay of this plan holds: a
-    /// dense plan per distinct GEMM shape and one per distinct inactive
-    /// zero-fill layout.
-    #[doc(hidden)]
-    pub fn cuda_direct_plan_entries(&self) -> usize {
-        self.distinct_direct_gemm_shapes()
-            + self
-                .inactive_destination_regions()
-                .iter()
-                .map(|layout| (&layout.block.shape, &layout.block.strides))
-                .collect::<HashSet<_>>()
-                .len()
     }
 
     /// The per-member payload lengths `[dst, lhs, rhs]` this plan's
@@ -632,6 +646,7 @@ where
 }
 
 pub(super) fn pack_group<A, T, C>(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     group: &FusionBlockMatrixGroup<C>,
     data: &[T],
@@ -644,6 +659,7 @@ where
 {
     for layout in &group.subblocks {
         kernels.transform_strided_baked(
+            exec.reborrow(),
             &mut Vec::new(),
             packed,
             data,
@@ -663,6 +679,7 @@ where
 }
 
 pub(super) fn scatter_group<A, T, C>(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     group: &FusionBlockMatrixGroup<C>,
     data: &mut [T],
@@ -676,6 +693,7 @@ where
 {
     for layout in &group.subblocks {
         kernels.transform_strided_baked(
+            exec.reborrow(),
             &mut Vec::new(),
             data,
             packed,
@@ -720,6 +738,7 @@ impl<C> FusionBlockContractPlan<C> {
     /// stride scratch for the zero-source assignment.
     fn init_inactive_blocks<A, T>(
         &self,
+        mut exec: crate::host_pool::Exec<'_>,
         kernels: &mut A,
         zero_strides: &mut Vec<isize>,
         data: &mut [T],
@@ -740,6 +759,7 @@ impl<C> FusionBlockContractPlan<C> {
                 zero_strides.clear();
                 zero_strides.resize(layout.block.shape.len(), 0);
                 kernels.copy_scale_strided_baked(
+                    exec.reborrow(),
                     data,
                     &zero,
                     &layout.block.shape,
@@ -757,6 +777,7 @@ impl<C> FusionBlockContractPlan<C> {
         }
         for layout in &self.inactive_dst_scale_blocks {
             kernels.scale_strided(
+                exec.reborrow(),
                 data,
                 &layout.block.shape,
                 &layout.block.strides,

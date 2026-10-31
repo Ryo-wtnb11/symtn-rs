@@ -1,5 +1,6 @@
 use crate::report;
 use report::Report;
+use symtn::typed::Engine;
 
 use crate::braiding_probe;
 use crate::contract_cases;
@@ -32,14 +33,15 @@ where
         + PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for count in [1, 2, 17] {
         let members: Vec<_> = (0..count)
             .map(|i| {
                 let scale = D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0);
-                let lhs = case.lhs.scale(scale).unwrap();
+                let lhs = case.lhs.scale(engine, scale).unwrap();
                 let rhs = case
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap();
                 Case {
                     name: case.name,
@@ -56,12 +58,12 @@ where
         let right: Vec<_> = members.iter().map(|member| &member.rhs).collect();
         let lhs = StackedTensorMap::pack(&left).unwrap();
         let rhs = StackedTensorMap::pack(&right).unwrap();
-        let plan = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
         let mut workspace = plan.workspace().unwrap();
-        let result = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let result = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         for (i, member_case) in members.iter().enumerate() {
-            let member = result.member(i).unwrap();
-            let reference = blas_contract_oracle(member_case);
+            let member = result.member(engine, i).unwrap();
+            let reference = blas_contract_oracle(engine, member_case);
             numerics::assert_nonzero_slices_close(
                 case.name,
                 member.dense_data().unwrap(),
@@ -69,8 +71,8 @@ where
                 case.terms(),
             );
             if member_case.dense {
-                let (_, expected) = dense_oracle(member_case);
-                let physical = member.to_physical_dense().unwrap();
+                let (_, expected) = dense_oracle(engine, member_case);
+                let physical = member.to_physical_dense(engine).unwrap();
                 numerics::assert_nonzero_slices_close(
                     case.name,
                     &physical.data,
@@ -78,7 +80,7 @@ where
                     case.terms(),
                 );
             }
-            let eager = member_case.host();
+            let eager = member_case.host(engine);
             assert_eq!(member.codomain_rank(), eager.codomain_rank());
             assert_eq!(
                 result.signature(),
@@ -93,13 +95,16 @@ where
                 case.terms(),
             );
         }
-        let poison: Vec<_> = members.iter().map(poisoned_destination).collect();
+        let poison: Vec<_> = members
+            .iter()
+            .map(|case| poisoned_destination(engine, case))
+            .collect();
         let mut destination = StackedTensorMap::pack(&poison).unwrap();
-        plan.execute_into(&lhs, &rhs, &mut destination, &mut workspace)
+        plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)
             .unwrap();
         for (i, member_case) in members.iter().enumerate() {
-            let member = destination.member(i).unwrap();
-            let reference = blas_contract_oracle(member_case);
+            let member = destination.member(engine, i).unwrap();
+            let reference = blas_contract_oracle(engine, member_case);
             numerics::assert_nonzero_slices_close(
                 case.name,
                 member.dense_data().unwrap(),
@@ -107,10 +112,10 @@ where
                 case.terms(),
             );
             if member_case.dense {
-                let (_, expected) = dense_oracle(member_case);
+                let (_, expected) = dense_oracle(engine, member_case);
                 numerics::assert_nonzero_slices_close(
                     case.name,
-                    &member.to_physical_dense().unwrap().data,
+                    &member.to_physical_dense(engine).unwrap().data,
                     &expected,
                     case.terms(),
                 );
@@ -121,26 +126,28 @@ where
 
 #[test]
 fn public_host_batch_matches_reference_steps_and_applicable_physical_basis() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    check(u1_reordered::<f64>(&runtime));
-    check(su2_reordered::<f64>(&runtime));
-    check(u1_reordered::<symtn::typed::Complex64>(&runtime));
-    check(su2_reordered::<symtn::typed::Complex64>(&runtime));
-    check(u1_reordered::<f32>(&runtime));
-    check(su2_reordered::<symtn::typed::Complex32>(&runtime));
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    check(u1_reordered::<f64>(engine, &runtime));
+    check(su2_reordered::<f64>(engine, &runtime));
+    check(u1_reordered::<symtn::typed::Complex64>(engine, &runtime));
+    check(su2_reordered::<symtn::typed::Complex64>(engine, &runtime));
+    check(u1_reordered::<f32>(engine, &runtime));
+    check(su2_reordered::<symtn::typed::Complex32>(engine, &runtime));
     check(
-        u1_inactive_cases::<f64>(&runtime)
+        u1_inactive_cases::<f64>(engine, &runtime)
             .into_iter()
             .nth(1)
             .unwrap(),
     );
-    check(su2_bent::<f64>(&runtime));
-    check(u1_rhs_identity::<f64>(&runtime));
+    check(su2_bent::<f64>(engine, &runtime));
+    check(u1_rhs_identity::<f64>(engine, &runtime));
 }
 
 #[test]
 fn public_host_batch_core_and_swapped_core_match_reference_steps() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     fn probes<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -153,7 +160,8 @@ fn public_host_batch_core_and_swapped_core_match_reference_steps() {
             + PhysicalFusionBasis<Scalar = f64>,
         D: Payload,
     {
-        for (mut case, _) in candidate_core_probes::<R, D>(runtime, v)
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        for (mut case, _) in candidate_core_probes::<R, D>(engine, runtime, v)
             .into_iter()
             .filter(|(case, _)| matches!(case.name, "C0" | "C2"))
         {
@@ -166,7 +174,7 @@ fn public_host_batch_core_and_swapped_core_match_reference_steps() {
     probes::<_, f64>(&runtime, &su2());
     probes::<_, symtn::typed::Complex64>(&runtime, &su2());
     check(
-        u1_inactive_cases::<f64>(&runtime)
+        u1_inactive_cases::<f64>(engine, &runtime)
             .into_iter()
             .next()
             .unwrap(),
@@ -175,20 +183,23 @@ fn public_host_batch_core_and_swapped_core_match_reference_steps() {
 
 #[test]
 fn swapped_core_uses_rhs_member_length_and_nondefault_output_split() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1(&[(0, 2), (1, 1)]);
     let w = u1(&[(0, 1), (1, 2)]);
     let x = u1(&[(0, 2), (1, 3)]);
-    let lhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&w], fill(171)).unwrap();
-    let rhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&x, &x], [&v], fill(172)).unwrap();
+    let lhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v], [&w], fill(171)).unwrap();
+    let rhs =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&x, &x], [&v], fill(172)).unwrap();
     let spec = ContractSpec {
         lhs: &[0],
         rhs: &[2],
         codomain: &[1, 2],
         domain: &[0],
     };
-    let eager = lhs.contract(&rhs, &spec).unwrap();
-    let reference = rhs.compose(&lhs).unwrap();
+    let eager = lhs.contract(engine, &rhs, &spec).unwrap();
+    let reference = rhs.compose(engine, &lhs).unwrap();
     numerics::assert_nonzero_slices_close(
         "swapped eager",
         eager.dense_data().unwrap(),
@@ -201,14 +212,14 @@ fn swapped_core_uses_rhs_member_length_and_nondefault_output_split() {
         lhs.dense_data().unwrap().len(),
         rhs.dense_data().unwrap().len()
     );
-    let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+    let plan = ContractPlan::new(engine, &left, &right, &spec).unwrap();
     let mut workspace = plan.workspace().unwrap();
-    let actual = plan.execute(&left, &right, &mut workspace).unwrap();
+    let actual = plan.execute(engine, &left, &right, &mut workspace).unwrap();
     for i in 0..2 {
-        assert_eq!(actual.member(i).unwrap().codomain_rank(), 2);
+        assert_eq!(actual.member(engine, i).unwrap().codomain_rank(), 2);
         numerics::assert_nonzero_slices_close(
             "swapped batch",
-            actual.member(i).unwrap().dense_data().unwrap(),
+            actual.member(engine, i).unwrap().dense_data().unwrap(),
             reference.dense_data().unwrap(),
             64,
         );
@@ -217,17 +228,18 @@ fn swapped_core_uses_rhs_member_length_and_nondefault_output_split() {
 
 #[test]
 fn binding_errors_do_not_write_destination_and_workspaces_are_independent() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    binding_errors_case(&runtime, u1_reordered::<f64>(&runtime));
-    let core = candidate_core_probes::<_, f64>(&runtime, &u1_non_self_dual())
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    binding_errors_case(&runtime, u1_reordered::<f64>(engine, &runtime));
+    let core = candidate_core_probes::<_, f64>(engine, &runtime, &u1_non_self_dual())
         .into_iter()
         .find(|(case, _)| case.name == "C2")
         .unwrap()
         .0;
     binding_errors_case(&runtime, core);
     let v = u1(&[(0, 2), (1, 2)]);
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 3).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 4).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 3).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 4).unwrap();
     binding_errors_case(
         &runtime,
         Case {
@@ -243,21 +255,24 @@ fn binding_errors_do_not_write_destination_and_workspaces_are_independent() {
 }
 
 fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule, f64>) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let lhs = StackedTensorMap::pack(&[&case.lhs, &case.lhs]).unwrap();
     let rhs = StackedTensorMap::pack(&[&case.rhs, &case.rhs]).unwrap();
-    let plan = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
-    let other_plan = ContractPlan::new(&lhs, &rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
+    let other_plan = ContractPlan::new(engine, &lhs, &rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut second = plan.workspace().unwrap();
     let mut foreign = other_plan.workspace().unwrap();
-    let mut destination =
-        StackedTensorMap::pack(&[poisoned_destination(&case), poisoned_destination(&case)])
-            .unwrap();
-    let bits = |stack: &StackedTensorMap<_, f64>| {
+    let mut destination = StackedTensorMap::pack(&[
+        poisoned_destination(engine, &case),
+        poisoned_destination(engine, &case),
+    ])
+    .unwrap();
+    let bits = |engine: &mut dyn Engine, stack: &StackedTensorMap<_, f64>| {
         (0..stack.len())
             .flat_map(|i| {
                 stack
-                    .member(i)
+                    .member(engine, i)
                     .unwrap()
                     .dense_data()
                     .unwrap()
@@ -267,72 +282,76 @@ fn binding_errors_case(runtime: &Runtime, case: Case<symtn::sector::U1FusionRule
             })
             .collect::<Vec<_>>()
     };
-    let before = bits(&destination);
-    let wrong_count = lhs.select(&[0]).unwrap();
+    let before = bits(engine, &destination);
+    let wrong_count = lhs.select(engine, &[0]).unwrap();
     assert!(
-        matches!(ContractPlan::new(&wrong_count, &rhs, &case.spec()), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts"))
+        matches!(ContractPlan::new(engine, &wrong_count, &rhs, &case.spec()), Err(Error::InvalidArgument(m)) if m.contains("operand stacks have different member counts"))
     );
     assert!(plan
-        .execute_into(&wrong_count, &rhs, &mut destination, &mut workspace)
+        .execute_into(engine, &wrong_count, &rhs, &mut destination, &mut workspace)
         .err()
         .unwrap()
         .report()
         .contains("operand stacks have different member counts"));
-    assert_eq!(bits(&destination), before);
+    assert_eq!(bits(engine, &destination), before);
     assert!(plan
-        .execute_into(&lhs, &rhs, &mut destination, &mut foreign)
+        .execute_into(engine, &lhs, &rhs, &mut destination, &mut foreign)
         .err()
         .unwrap()
         .report()
         .contains("workspace belongs to another plan"));
-    assert_eq!(bits(&destination), before);
-    let wrong_destination = destination.select(&[0]).unwrap();
+    assert_eq!(bits(engine, &destination), before);
+    let wrong_destination = destination.select(engine, &[0]).unwrap();
     let mut wrong_destination = wrong_destination;
-    let wrong_before = bits(&wrong_destination);
+    let wrong_before = bits(engine, &wrong_destination);
     assert!(plan
-        .execute_into(&lhs, &rhs, &mut wrong_destination, &mut workspace)
+        .execute_into(engine, &lhs, &rhs, &mut wrong_destination, &mut workspace)
         .err()
         .unwrap()
         .report()
         .contains("destination member count differs"));
-    assert_eq!(bits(&wrong_destination), wrong_before);
+    assert_eq!(bits(engine, &wrong_destination), wrong_before);
     let v = u1(&[(0, 1)]);
-    let wrong_member = TensorMap::<_, f64>::zeros(runtime, [&v], [&v]).unwrap();
+    let wrong_member = TensorMap::<_, f64>::zeros(engine, runtime, [&v], [&v]).unwrap();
     let wrong = StackedTensorMap::pack(&[wrong_member.clone(), wrong_member]).unwrap();
     assert!(matches!(
-        plan.execute_into(&wrong, &rhs, &mut destination, &mut workspace),
+        plan.execute_into(engine, &wrong, &rhs, &mut destination, &mut workspace),
         Err(symtn::typed::Error::BatchSignatureMismatch { member: None, .. })
     ));
-    assert_eq!(bits(&destination), before);
-    plan.execute(&lhs, &rhs, &mut workspace).unwrap();
-    plan.execute(&lhs, &rhs, &mut second).unwrap();
+    assert_eq!(bits(engine, &destination), before);
+    plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
+    plan.execute(engine, &lhs, &rhs, &mut second).unwrap();
     assert!(workspace.retained_bytes() > 0);
     assert!(workspace.take_output().is_some());
     assert!(workspace.take_output().is_none());
-    plan.execute_into(&lhs, &rhs, &mut destination, &mut second)
+    plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut second)
         .unwrap();
-    let singleton = rhs.select(&[0]).unwrap();
-    let singleton_lhs = lhs.select(&[0]).unwrap();
-    plan.execute(&singleton_lhs, &singleton, &mut workspace)
+    let singleton = rhs.select(engine, &[0]).unwrap();
+    let singleton_lhs = lhs.select(engine, &[0]).unwrap();
+    plan.execute(engine, &singleton_lhs, &singleton, &mut workspace)
         .unwrap();
     let many = vec![0; 17];
-    let many_lhs = lhs.select(&many).unwrap();
-    let many_rhs = rhs.select(&many).unwrap();
+    let many_lhs = lhs.select(engine, &many).unwrap();
+    let many_rhs = rhs.select(engine, &many).unwrap();
     assert_eq!(
-        plan.execute(&many_lhs, &many_rhs, &mut workspace)
+        plan.execute(engine, &many_lhs, &many_rhs, &mut workspace)
             .unwrap()
             .len(),
         17
     );
-    assert_eq!(plan.execute(&lhs, &rhs, &mut second).unwrap().len(), 2);
+    assert_eq!(
+        plan.execute(engine, &lhs, &rhs, &mut second).unwrap().len(),
+        2
+    );
 }
 
 #[test]
 fn public_copy_c_matches_eager() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1(&[(0, 2), (1, 2)]);
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 3).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v, &v], 4).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 3).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 4).unwrap();
     let lhs = StackedTensorMap::pack(&[&a]).unwrap();
     let rhs = StackedTensorMap::pack(&[&b]).unwrap();
     for split in [1, 2, 3] {
@@ -344,12 +363,13 @@ fn public_copy_c_matches_eager() {
             codomain,
             domain,
         };
-        let expected = a.contract(&b, &spec).unwrap();
-        let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let expected = a.contract(engine, &b, &spec).unwrap();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
+        let plan_workspace = &mut plan.workspace().unwrap();
         let result = plan
-            .execute(&lhs, &rhs, &mut plan.workspace().unwrap())
+            .execute(engine, &lhs, &rhs, plan_workspace)
             .unwrap()
-            .member(0)
+            .member(engine, 0)
             .unwrap();
         assert_eq!(result.codomain_rank(), split);
         assert_eq!(
@@ -367,7 +387,7 @@ fn public_copy_c_matches_eager() {
 
 #[test]
 fn public_copy_c_both_orientations_and_dtypes() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -380,7 +400,8 @@ fn public_copy_c_both_orientations_and_dtypes() {
             + PhysicalFusionBasis<Scalar = f64>,
         D: Payload,
     {
-        for (mut case, _) in candidate_core_probes::<R, D>(runtime, v) {
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        for (mut case, _) in candidate_core_probes::<R, D>(engine, runtime, v) {
             match case.name {
                 "C1" => {
                     case.name = "C1p";
@@ -407,7 +428,7 @@ fn public_copy_c_both_orientations_and_dtypes() {
 
 #[test]
 fn public_copy_c_small_output_winners() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     fn cases<R, D>(runtime: &Runtime, v: &GradedSpace<R>, c: &GradedSpace<R>)
     where
         R: symtn::sector::TypedSectorAdmission<
@@ -420,8 +441,10 @@ fn public_copy_c_small_output_winners() {
             + PhysicalFusionBasis<Scalar = f64>,
         D: Payload,
     {
-        let tensor = |codomain: [&GradedSpace<R>; 2], domain: [&GradedSpace<R>; 2], salt| {
-            TensorMap::<R, D>::from_subblock_fn(runtime, codomain, domain, fill(salt)).unwrap()
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let mut tensor = |codomain: [&GradedSpace<R>; 2], domain: [&GradedSpace<R>; 2], salt| {
+            TensorMap::<R, D>::from_subblock_fn(engine, runtime, codomain, domain, fill(salt))
+                .unwrap()
         };
         check(Case {
             name: "S1",
@@ -470,16 +493,19 @@ fn non_symmetric_braiding_is_rejected_before_plan_compile() {
 
 #[test]
 fn twist_bearing_dynamic_tree_matches_literal_tensorkit_steps() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! cases {
-        ($rule:ty, $dtype:ty, $space:expr) => {{
+        ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
-            let twist = |tensor: &TensorMap<$rule, $dtype>, legs: &[usize]| {
-                tensor
-                    .twist(legs, symtn::typed::Direction::Forward)
-                    .unwrap()
-            };
+            let twist =
+                |engine: &mut dyn Engine, tensor: &TensorMap<$rule, $dtype>, legs: &[usize]| {
+                    tensor
+                        .twist(engine, legs, symtn::typed::Direction::Forward)
+                        .unwrap()
+                };
             for (case, role) in fermionic_twist_roles::<$rule, $dtype>(
+                $engine,
                 &runtime,
                 &space,
                 ["A", "canonical", "B", "both"],
@@ -492,6 +518,7 @@ fn twist_bearing_dynamic_tree_matches_literal_tensorkit_steps() {
             }
             check_twisted_members(
                 fermionic_canonical_nonuniform::<$rule, $dtype>(
+                    $engine,
                     &runtime,
                     &space,
                     "canonical nonuniform",
@@ -502,14 +529,16 @@ fn twist_bearing_dynamic_tree_matches_literal_tensorkit_steps() {
             );
         }};
     }
-    cases!(contract_cases::FermionU1, f64, fermion_u1());
+    cases!(engine, contract_cases::FermionU1, f64, fermion_u1());
     cases!(
+        engine,
         contract_cases::FermionU1,
         symtn::typed::Complex64,
         fermion_u1()
     );
-    cases!(contract_cases::FermionSu2, f64, fermion_su2());
+    cases!(engine, contract_cases::FermionSu2, f64, fermion_su2());
     cases!(
+        engine,
         contract_cases::FermionSu2,
         symtn::typed::Complex64,
         fermion_su2()
@@ -519,7 +548,7 @@ fn twist_bearing_dynamic_tree_matches_literal_tensorkit_steps() {
 fn check_twisted_members<R, D>(
     case: Case<R, D>,
     role: TwistRole,
-    twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
+    twist: impl Fn(&mut dyn Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -530,6 +559,7 @@ fn check_twisted_members<R, D>(
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     fn compare<D: Payload>(actual: &[D], expected: &[D], terms: usize, what: &str) {
         assert_eq!(actual.len(), expected.len(), "{what}: payload length");
         let scale = expected
@@ -547,7 +577,7 @@ fn check_twisted_members<R, D>(
     }
     let first_lhs = StackedTensorMap::pack(&[&case.lhs]).unwrap();
     let first_rhs = StackedTensorMap::pack(&[&case.rhs]).unwrap();
-    let plan = ContractPlan::new(&first_lhs, &first_rhs, &case.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &case.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut independent = plan.workspace().unwrap();
     for count in [1, 2, 17] {
@@ -556,11 +586,11 @@ fn check_twisted_members<R, D>(
                 name: case.name,
                 lhs: case
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap(),
                 rhs: case
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap(),
                 lhs_axes: case.lhs_axes.clone(),
                 rhs_axes: case.rhs_axes.clone(),
@@ -572,11 +602,11 @@ fn check_twisted_members<R, D>(
         let rhs_refs: Vec<_> = members.iter().map(|member| &member.rhs).collect();
         let lhs = StackedTensorMap::pack(&lhs_refs).unwrap();
         let rhs = StackedTensorMap::pack(&rhs_refs).unwrap();
-        let output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let output = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         for (i, member) in members.iter().enumerate() {
-            let actual = output.member(i).unwrap();
-            let eager = member.host();
-            let oracle = fermionic_blas_contract_oracle(member, role, twist);
+            let actual = output.member(engine, i).unwrap();
+            let eager = member.host(engine);
+            let oracle = fermionic_blas_contract_oracle(engine, member, role, twist);
             // Every output entry is bilinear, so the product of reduced source
             // lengths bounds all contracted and recoupled floating terms.
             let terms =
@@ -600,7 +630,8 @@ fn check_twisted_members<R, D>(
                 case.name,
             );
             if i == 0 {
-                let untwisted = fermionic_blas_contract_oracle(member, TwistRole::None, twist);
+                let untwisted =
+                    fermionic_blas_contract_oracle(engine, member, TwistRole::None, twist);
                 let expected = oracle.dense_data().unwrap();
                 let scale = expected
                     .iter()
@@ -617,29 +648,38 @@ fn check_twisted_members<R, D>(
                 );
             }
         }
-        let poisoned: Vec<_> = members.iter().map(poisoned_destination).collect();
+        let poisoned: Vec<_> = members
+            .iter()
+            .map(|case| poisoned_destination(engine, case))
+            .collect();
         let refs: Vec<_> = poisoned.iter().collect();
         let mut dst = StackedTensorMap::pack(&refs).unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut independent)
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut independent)
             .unwrap();
         for (i, member) in members.iter().enumerate() {
             compare(
-                dst.member(i).unwrap().dense_data().unwrap(),
-                member.host().dense_data().unwrap(),
+                dst.member(engine, i).unwrap().dense_data().unwrap(),
+                member.host(engine).dense_data().unwrap(),
                 member.lhs.dense_data().unwrap().len() * member.rhs.dense_data().unwrap().len(),
                 case.name,
             );
         }
         if count == 2 {
             let before: Vec<_> = (0..count)
-                .map(|i| dst.member(i).unwrap().dense_data().unwrap().to_vec())
+                .map(|i| {
+                    dst.member(engine, i)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .to_vec()
+                })
                 .collect();
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
-                .execute_into(&lhs, &short_rhs, &mut dst, &mut independent)
+                .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut independent)
                 .is_err());
             for (i, data) in before.iter().enumerate() {
-                assert_eq!(dst.member(i).unwrap().dense_data().unwrap(), data);
+                assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), data);
             }
         }
     }
@@ -648,7 +688,7 @@ fn check_twisted_members<R, D>(
 fn check_fermionic_unit_batch<R, D>(
     case: Case<R, D>,
     split: usize,
-    twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
+    twist: impl Fn(&mut dyn Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -659,17 +699,18 @@ fn check_fermionic_unit_batch<R, D>(
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for count in [1, 2, 17] {
         let members: Vec<_> = (0..count)
             .map(|i| Case {
                 name: case.name,
                 lhs: case
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap(),
                 rhs: case
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap(),
                 lhs_axes: case.lhs_axes.clone(),
                 rhs_axes: case.rhs_axes.clone(),
@@ -687,11 +728,11 @@ fn check_fermionic_unit_batch<R, D>(
             codomain: &case.output_axes[..split],
             domain: &case.output_axes[split..],
         };
-        let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
         let mut workspace = plan.workspace().unwrap();
-        let result = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let result = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         for (index, member) in members.iter().enumerate() {
-            let actual = result.member(index).unwrap();
+            let actual = result.member(engine, index).unwrap();
             // The selected swapped core absorbs the orientation into its
             // structural lowering. TensorKit's unswapped step sequence twists A.
             let role = if case.name == "C2" {
@@ -699,9 +740,11 @@ fn check_fermionic_unit_batch<R, D>(
             } else {
                 TwistRole::None
             };
-            let oracle = fermionic_blas_contract_oracle_partitioned(member, role, split, twist);
+            let oracle =
+                fermionic_blas_contract_oracle_partitioned(engine, member, role, split, twist);
             if case.name == "C2" && count == 1 {
                 let untwisted = fermionic_blas_contract_oracle_partitioned(
+                    engine,
                     member,
                     TwistRole::None,
                     split,
@@ -720,7 +763,7 @@ fn check_fermionic_unit_batch<R, D>(
                     .zip(untwisted.dense_data().unwrap())
                     .any(|(&a, &b)| a.distance(b) > 1e-3 * scale));
             }
-            let eager = member.lhs.contract(&member.rhs, &spec).unwrap();
+            let eager = member.lhs.contract(engine, &member.rhs, &spec).unwrap();
             assert_eq!(actual.codomain_rank(), split);
             assert_eq!(
                 result.signature(),
@@ -744,14 +787,14 @@ fn check_fermionic_unit_batch<R, D>(
         if count == 2 {
             let outputs: Vec<_> = members
                 .iter()
-                .map(|member| member.lhs.contract(&member.rhs, &spec).unwrap())
+                .map(|member| member.lhs.contract(engine, &member.rhs, &spec).unwrap())
                 .collect();
             let refs: Vec<_> = outputs.iter().collect();
             let mut destination = StackedTensorMap::pack(&refs).unwrap();
             let before: Vec<Vec<D>> = (0..count)
                 .map(|i| {
                     destination
-                        .member(i)
+                        .member(engine, i)
                         .unwrap()
                         .dense_data()
                         .unwrap()
@@ -760,11 +803,11 @@ fn check_fermionic_unit_batch<R, D>(
                 .collect();
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             assert!(plan
-                .execute_into(&lhs, &short_rhs, &mut destination, &mut workspace)
+                .execute_into(engine, &lhs, &short_rhs, &mut destination, &mut workspace)
                 .is_err());
             for (i, expected) in before.iter().enumerate() {
                 assert_eq!(
-                    destination.member(i).unwrap().dense_data().unwrap(),
+                    destination.member(engine, i).unwrap().dense_data().unwrap(),
                     expected
                 );
             }
@@ -774,14 +817,16 @@ fn check_fermionic_unit_batch<R, D>(
 
 #[test]
 fn fermionic_unit_direct_and_copy_c_match_tensorkit_steps() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! cases {
-        ($rule:ty, $dtype:ty, $space:expr) => {{
+        ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
-            let twist = |t: &TensorMap<$rule, $dtype>, legs: &[usize]| {
-                t.twist(legs, symtn::typed::Direction::Forward).unwrap()
+            let twist = |engine: &mut dyn Engine, t: &TensorMap<$rule, $dtype>, legs: &[usize]| {
+                t.twist(engine, legs, symtn::typed::Direction::Forward)
+                    .unwrap()
             };
-            for (mut case, _) in candidate_core_probes::<$rule, $dtype>(&runtime, &space) {
+            for (mut case, _) in candidate_core_probes::<$rule, $dtype>($engine, &runtime, &space) {
                 if !matches!(case.name, "C0" | "C1" | "C2") {
                     continue;
                 }
@@ -810,14 +855,16 @@ fn fermionic_unit_direct_and_copy_c_match_tensorkit_steps() {
             }
         }};
     }
-    cases!(contract_cases::FermionU1, f64, fermion_u1());
+    cases!(engine, contract_cases::FermionU1, f64, fermion_u1());
     cases!(
+        engine,
         contract_cases::FermionU1,
         symtn::typed::Complex64,
         fermion_u1()
     );
-    cases!(contract_cases::FermionSu2, f64, fermion_su2());
+    cases!(engine, contract_cases::FermionSu2, f64, fermion_su2());
     cases!(
+        engine,
         contract_cases::FermionSu2,
         symtn::typed::Complex64,
         fermion_su2()
@@ -828,7 +875,7 @@ fn check_mixed_signed_members<R, D>(
     runtime: &Runtime,
     v: &GradedSpace<R>,
     swapped: bool,
-    twist: impl Fn(&TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
+    twist: impl Fn(&mut dyn Engine, &TensorMap<R, D>, &[usize]) -> TensorMap<R, D> + Copy,
 ) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -839,9 +886,12 @@ fn check_mixed_signed_members<R, D>(
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let dual = v.try_dual().unwrap();
-    let lhs = TensorMap::<R, D>::from_subblock_fn(runtime, [v], [&dual], fill(201)).unwrap();
-    let rhs = TensorMap::<R, D>::from_subblock_fn(runtime, [&dual], [v], fill(202)).unwrap();
+    let lhs =
+        TensorMap::<R, D>::from_subblock_fn(engine, runtime, [v], [&dual], fill(201)).unwrap();
+    let rhs =
+        TensorMap::<R, D>::from_subblock_fn(engine, runtime, [&dual], [v], fill(202)).unwrap();
     let base = Case {
         name: if swapped {
             "mixed signed swapped"
@@ -857,7 +907,7 @@ fn check_mixed_signed_members<R, D>(
     };
     let first_lhs = StackedTensorMap::pack(&[&base.lhs]).unwrap();
     let first_rhs = StackedTensorMap::pack(&[&base.rhs]).unwrap();
-    let plan = ContractPlan::new(&first_lhs, &first_rhs, &base.spec()).unwrap();
+    let plan = ContractPlan::new(engine, &first_lhs, &first_rhs, &base.spec()).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let mut other_workspace = plan.workspace().unwrap();
     for count in [1, 2, 17] {
@@ -866,11 +916,11 @@ fn check_mixed_signed_members<R, D>(
                 name: base.name,
                 lhs: base
                     .lhs
-                    .scale(D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
+                    .scale(engine, D::entry(1.0 + i as f64 / 8.0, i as f64 / 16.0))
                     .unwrap(),
                 rhs: base
                     .rhs
-                    .scale(D::entry(1.0 - i as f64 / 32.0, 0.0))
+                    .scale(engine, D::entry(1.0 - i as f64 / 32.0, 0.0))
                     .unwrap(),
                 lhs_axes: base.lhs_axes.clone(),
                 rhs_axes: base.rhs_axes.clone(),
@@ -882,14 +932,15 @@ fn check_mixed_signed_members<R, D>(
         let right: Vec<_> = members.iter().map(|member| &member.rhs).collect();
         let lhs = StackedTensorMap::pack(&left).unwrap();
         let rhs = StackedTensorMap::pack(&right).unwrap();
-        let result = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
-        let eager: Vec<_> = members.iter().map(Case::host).collect();
+        let result = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
+        let eager: Vec<_> = members.iter().map(|case| case.host(engine)).collect();
         assert_eq!(
             result.signature(),
             StackedTensorMap::pack(&[&eager[0]]).unwrap().signature()
         );
         for (i, member) in members.iter().enumerate() {
             let oracle = fermionic_blas_contract_oracle_partitioned(
+                engine,
                 member,
                 if swapped { TwistRole::A } else { TwistRole::B },
                 1,
@@ -897,7 +948,7 @@ fn check_mixed_signed_members<R, D>(
             );
             numerics::assert_nonzero_slices_close(
                 member.name,
-                result.member(i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
                 oracle.dense_data().unwrap(),
                 member.terms(),
             );
@@ -913,15 +964,21 @@ fn check_mixed_signed_members<R, D>(
                     output_axes: vec![0, 1],
                     dense: false,
                 };
-                let selected_oracle =
-                    fermionic_blas_contract_oracle_partitioned(&selected, TwistRole::B, 1, twist);
+                let selected_oracle = fermionic_blas_contract_oracle_partitioned(
+                    engine,
+                    &selected,
+                    TwistRole::B,
+                    1,
+                    twist,
+                );
                 numerics::assert_nonzero_slices_close(
                     selected.name,
-                    result.member(i).unwrap().dense_data().unwrap(),
+                    result.member(engine, i).unwrap().dense_data().unwrap(),
                     selected_oracle.dense_data().unwrap(),
                     selected.terms(),
                 );
                 let untwisted = fermionic_blas_contract_oracle_partitioned(
+                    engine,
                     &selected,
                     TwistRole::None,
                     1,
@@ -946,20 +1003,23 @@ fn check_mixed_signed_members<R, D>(
             }
             numerics::assert_nonzero_slices_close(
                 member.name,
-                result.member(i).unwrap().dense_data().unwrap(),
+                result.member(engine, i).unwrap().dense_data().unwrap(),
                 eager[i].dense_data().unwrap(),
                 member.terms(),
             );
         }
-        let poisoned: Vec<_> = members.iter().map(poisoned_destination).collect();
+        let poisoned: Vec<_> = members
+            .iter()
+            .map(|case| poisoned_destination(engine, case))
+            .collect();
         let refs: Vec<_> = poisoned.iter().collect();
         let mut dst = StackedTensorMap::pack(&refs).unwrap();
-        plan.execute_into(&lhs, &rhs, &mut dst, &mut other_workspace)
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut other_workspace)
             .unwrap();
         for (i, expected) in eager.iter().enumerate() {
             numerics::assert_nonzero_slices_close(
                 base.name,
-                dst.member(i).unwrap().dense_data().unwrap(),
+                dst.member(engine, i).unwrap().dense_data().unwrap(),
                 expected.dense_data().unwrap(),
                 base.terms(),
             );
@@ -967,13 +1027,19 @@ fn check_mixed_signed_members<R, D>(
         if count == 2 {
             let short_rhs = StackedTensorMap::pack(&[&members[0].rhs]).unwrap();
             let snapshot: Vec<Vec<D>> = (0..count)
-                .map(|i| dst.member(i).unwrap().dense_data().unwrap().to_vec())
+                .map(|i| {
+                    dst.member(engine, i)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .to_vec()
+                })
                 .collect();
             assert!(plan
-                .execute_into(&lhs, &short_rhs, &mut dst, &mut other_workspace)
+                .execute_into(engine, &lhs, &short_rhs, &mut dst, &mut other_workspace)
                 .is_err());
             for (i, before) in snapshot.iter().enumerate() {
-                assert_eq!(dst.member(i).unwrap().dense_data().unwrap(), before);
+                assert_eq!(dst.member(engine, i).unwrap().dense_data().unwrap(), before);
             }
         }
     }
@@ -981,32 +1047,34 @@ fn check_mixed_signed_members<R, D>(
 
 #[test]
 fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($rule:ty, $dtype:ty, $space:expr) => {{
+        ($engine:ident, $rule:ty, $dtype:ty, $space:expr) => {{
             let space = $space;
             for swapped in [false, true] {
                 check_mixed_signed_members(
                     &runtime,
                     &space,
                     swapped,
-                    |tensor: &TensorMap<$rule, $dtype>, legs| {
+                    |engine: &mut dyn Engine, tensor: &TensorMap<$rule, $dtype>, legs: &[usize]| {
                         tensor
-                            .twist(legs, symtn::typed::Direction::Forward)
+                            .twist(engine, legs, symtn::typed::Direction::Forward)
                             .unwrap()
                     },
                 );
             }
         }};
     }
-    case!(contract_cases::FermionU1, f64, fermion_u1());
+    case!(engine, contract_cases::FermionU1, f64, fermion_u1());
     case!(
+        engine,
         contract_cases::FermionU1,
         symtn::typed::Complex64,
         fermion_u1()
     );
-    case!(contract_cases::FermionSu2, f64, fermion_su2());
+    case!(engine, contract_cases::FermionSu2, f64, fermion_su2());
     case!(
+        engine,
         contract_cases::FermionSu2,
         symtn::typed::Complex64,
         fermion_su2()
@@ -1025,8 +1093,9 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
         )
         .unwrap()
     };
-    case!(contract_cases::FermionU1, f64, odd_only());
+    case!(engine, contract_cases::FermionU1, f64, odd_only());
     case!(
+        engine,
         contract_cases::FermionU1,
         symtn::typed::Complex64,
         odd_only()
@@ -1035,8 +1104,9 @@ fn mixed_signed_fermionic_members_match_literal_tensorkit_steps() {
 
 #[test]
 fn partitioned_output_uses_requested_codomain_rank() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let case = u1_reordered::<f64>(&runtime);
+    let case = u1_reordered::<f64>(engine, &runtime);
     let lhs = StackedTensorMap::pack(&[&case.lhs]).unwrap();
     let rhs = StackedTensorMap::pack(&[&case.rhs]).unwrap();
     let mut admitted = 0;
@@ -1048,14 +1118,15 @@ fn partitioned_output_uses_requested_codomain_rank() {
             codomain,
             domain,
         };
-        let Ok(plan) = ContractPlan::new(&lhs, &rhs, &spec) else {
+        let Ok(plan) = ContractPlan::new(engine, &lhs, &rhs, &spec) else {
             continue;
         };
-        let expected = case.lhs.contract(&case.rhs, &spec).unwrap();
+        let expected = case.lhs.contract(engine, &case.rhs, &spec).unwrap();
+        let plan_workspace = &mut plan.workspace().unwrap();
         let actual = plan
-            .execute(&lhs, &rhs, &mut plan.workspace().unwrap())
+            .execute(engine, &lhs, &rhs, plan_workspace)
             .unwrap()
-            .member(0)
+            .member(engine, 0)
             .unwrap();
         assert_eq!(actual.codomain_rank(), split);
         numerics::assert_nonzero_slices_close(
@@ -1074,7 +1145,7 @@ fn partitioned_output_uses_requested_codomain_rank() {
         domain: &[2],
     };
     assert!(
-        matches!(ContractPlan::new(&lhs, &rhs, &malformed), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(ContractPlan::new(engine, &lhs, &rhs, &malformed), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 3, .. }))
     );
 }
 
@@ -1091,16 +1162,20 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     (0..count)
         .map(|i| Case {
             name: case.name,
             lhs: case
                 .lhs
-                .scale(D::entry(lhs_scale - i as f64 / 64.0, (i + 1) as f64 / 32.0))
+                .scale(
+                    engine,
+                    D::entry(lhs_scale - i as f64 / 64.0, (i + 1) as f64 / 32.0),
+                )
                 .unwrap(),
             rhs: case
                 .rhs
-                .scale(D::entry(1.25 + i as f64 / 16.0, 0.0))
+                .scale(engine, D::entry(1.25 + i as f64 / 16.0, 0.0))
                 .unwrap(),
             lhs_axes: case.lhs_axes.clone(),
             rhs_axes: case.rhs_axes.clone(),
@@ -1128,9 +1203,10 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let spec = case.spec();
     let one = |tensor: &TensorMap<R, D>| StackedTensorMap::pack(&[tensor]).unwrap();
-    let plan = ContractPlan::new(&one(&case.lhs), &one(&case.rhs), &spec).unwrap();
+    let plan = ContractPlan::new(engine, &one(&case.lhs), &one(&case.rhs), &spec).unwrap();
     let stack = |members: &[Case<R, D>], pick: fn(&Case<R, D>) -> &TensorMap<R, D>| {
         StackedTensorMap::pack(&members.iter().map(pick).collect::<Vec<_>>()).unwrap()
     };
@@ -1140,6 +1216,7 @@ where
             let what = format!("{} {} seq={sequence:?} B={count}", case.name, D::NAME);
             let stale = rescaled_members(case, count, 2.0 + call as f64);
             plan.execute(
+                engine,
                 &stack(&stale, |m| &m.lhs),
                 &stack(&stale, |m| &m.rhs),
                 &mut workspace,
@@ -1148,6 +1225,7 @@ where
             let longer = rescaled_members(case, count + 1, 1.0);
             assert!(plan
                 .execute(
+                    engine,
                     &stack(&stale, |m| &m.lhs),
                     &stack(&longer, |m| &m.rhs),
                     &mut workspace
@@ -1156,24 +1234,30 @@ where
             assert!(workspace.take_output().is_none(), "{what}");
             let fresh = rescaled_members(case, count, -0.75 - call as f64 / 8.0);
             let (lhs, rhs) = (stack(&fresh, |m| &m.lhs), stack(&fresh, |m| &m.rhs));
-            let returned = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
-            let oracles: Vec<_> = fresh.iter().map(blas_contract_oracle).collect();
+            let returned = plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
+            let oracles: Vec<_> = fresh
+                .iter()
+                .map(|case| blas_contract_oracle(engine, case))
+                .collect();
             for (i, oracle) in oracles.iter().enumerate() {
                 numerics::assert_nonzero_slices_close(
                     &format!("{what} execute member {i}"),
-                    returned.member(i).unwrap().dense_data().unwrap(),
+                    returned.member(engine, i).unwrap().dense_data().unwrap(),
                     oracle.dense_data().unwrap(),
                     case.terms(),
                 );
             }
-            let poison: Vec<_> = fresh.iter().map(poisoned_destination).collect();
+            let poison: Vec<_> = fresh
+                .iter()
+                .map(|case| poisoned_destination(engine, case))
+                .collect();
             let mut dst = StackedTensorMap::pack(&poison).unwrap();
-            plan.execute_into(&lhs, &rhs, &mut dst, &mut workspace)
+            plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap();
             for (i, oracle) in oracles.iter().enumerate() {
                 numerics::assert_nonzero_slices_close(
                     &format!("{what} execute_into member {i}"),
-                    dst.member(i).unwrap().dense_data().unwrap(),
+                    dst.member(engine, i).unwrap().dense_data().unwrap(),
                     oracle.dense_data().unwrap(),
                     case.terms(),
                 );
@@ -1184,34 +1268,37 @@ where
 
 #[test]
 fn reused_output_follows_changed_inputs_on_every_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Core with an inactive block, CopyC (U(1) both orientations, one over
     // an inactive core block, and SU(2)), DynamicTree with an identity output
     // over an inactive block and with source and output transforms.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    fn cases<D: Payload>(runtime: &Runtime) {
-        for case in u1_inactive_cases::<D>(runtime) {
+    let runtime = Runtime::builder().build().unwrap();
+    fn cases<D: Payload>(engine: &mut dyn Engine, runtime: &Runtime) {
+        for case in u1_inactive_cases::<D>(engine, runtime) {
             check_reused_output(&case);
         }
-        for (case, _) in contract_cases::copy_c_probes::<_, D>(runtime, &u1_non_self_dual()) {
+        for (case, _) in contract_cases::copy_c_probes::<_, D>(engine, runtime, &u1_non_self_dual())
+        {
             if matches!(case.name, "C1p" | "C2p") {
                 check_reused_output(&case);
             }
         }
-        for (case, _) in contract_cases::copy_c_probes::<_, D>(runtime, &su2()) {
+        for (case, _) in contract_cases::copy_c_probes::<_, D>(engine, runtime, &su2()) {
             if case.name == "C1p" {
                 check_reused_output(&case);
             }
         }
-        check_reused_output(&u1_reordered::<D>(runtime));
+        check_reused_output(&u1_reordered::<D>(engine, runtime));
     }
-    cases::<f64>(&runtime);
-    cases::<symtn::typed::Complex64>(&runtime);
+    cases::<f64>(engine, &runtime);
+    cases::<symtn::typed::Complex64>(engine, &runtime);
 }
 
 fn reject_braiding<const ANYONIC: bool>(runtime: &Runtime) -> bool {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg =
         GradedSpace::try_new(Arc::new(RealBraidingProbe::<ANYONIC>), [(ProbeSector, 2)]).unwrap();
-    let tensor = TensorMap::<_, f64>::zeros(runtime, [&leg], [&leg]).unwrap();
+    let tensor = TensorMap::<_, f64>::zeros(engine, runtime, [&leg], [&leg]).unwrap();
     let stack = StackedTensorMap::pack(&[tensor]).unwrap();
     let spec = ContractSpec {
         lhs: &[1],
@@ -1219,5 +1306,5 @@ fn reject_braiding<const ANYONIC: bool>(runtime: &Runtime) -> bool {
         codomain: &[0],
         domain: &[1],
     };
-    matches!(ContractPlan::new(&stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedTensorContractScope { message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED }))
+    matches!(ContractPlan::new(engine, &stack, &stack, &spec), Err(Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::UnsupportedTensorContractScope { message: symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED }))
 }

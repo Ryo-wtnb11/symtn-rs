@@ -15,6 +15,7 @@ use super::*;
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn try_tree_transform_structure_overwrite_owned_raw<E, D, C>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
     structure: &TreeTransformStructure<C>,
@@ -46,17 +47,15 @@ where
     debug_assert!(core::ptr::eq(proof.structure, structure));
     let task = structure.task_view()?;
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(schedule, threads);
+    let threads = effective_tree_transform_threads(engine, schedule, threads);
     let layouts = structure.layouts();
     let max_fused_rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
-    let fused_index_len = checked_fused_index_len(threads, max_fused_rank)?;
 
     initialize_owned(proof.required_len, |dst_data| {
         let recoupling_plan = structure.recoupling_plan();
         let storage_conjugate = structure.storage_conjugate();
         let coefficients = task.single_coefficients();
-        let mut kernels = crate::StridedHostKernelAdapter::default();
 
         for &layout_index in structure.inactive_destination_layouts() {
             write_uninit_layout_zero(layouts, layout_index, dst_data)?;
@@ -64,36 +63,40 @@ where
         let blocks = structure.blocks();
         // Singles split on the schedule's slice-disjoint boundaries exactly as
         // `replay_single_blocks` does; a non-disjoint schedule stays serial.
-        split_join_uninit(
-            &schedule.singles,
-            dst_data,
-            0,
-            &mut workspace.fused_indices[..fused_index_len],
-            max_fused_rank,
-            if schedule.singles_slice_disjoint {
-                threads
-            } else {
-                1
-            },
-            &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
-            &|items, dst, dst_start, fused_index| {
-                for &item in items {
-                    let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
-                    write_uninit_layout_from_source(
-                        layouts,
-                        dst_layout,
-                        src_layout,
-                        dst,
-                        dst_start,
-                        src_data,
-                        storage_conjugate,
-                        TransformScale::new(alpha, coefficients[coefficient]),
-                        fused_index,
-                    )?;
-                }
-                Ok(())
-            },
-        )?;
+        let singles_threads = if schedule.singles_slice_disjoint {
+            threads
+        } else {
+            1
+        };
+        replay_region(engine, singles_threads, |exec| {
+            split_join_uninit(
+                &schedule.singles,
+                dst_data,
+                0,
+                workspace.fused_indices.as_mut_slice(),
+                max_fused_rank,
+                singles_threads,
+                exec,
+                &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
+                &|items, dst, dst_start, fused_index| {
+                    for &item in items {
+                        let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
+                        write_uninit_layout_from_source(
+                            layouts,
+                            dst_layout,
+                            src_layout,
+                            dst,
+                            dst_start,
+                            src_data,
+                            storage_conjugate,
+                            TransformScale::new(alpha, coefficients[coefficient]),
+                            fused_index,
+                        )?;
+                    }
+                    Ok(())
+                },
+            )
+        })??;
 
         if recoupling_plan.is_empty() {
             return Ok(());
@@ -103,7 +106,7 @@ where
         let mut pack_cursor = 0;
         for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
             let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(
-                &mut kernels,
+                engine,
                 dense,
                 workspace,
                 task,
@@ -120,32 +123,36 @@ where
             let scatter_groups = &schedule.scatter_groups;
             // Groups split on their ordered destination ranges exactly as
             // `replay_scatter_groups` does; columns inside a group stay serial.
-            split_join_uninit(
-                &workspace.chunk_scatter_groups,
-                dst_data,
-                0,
-                &mut workspace.fused_indices[..fused_index_len],
-                max_fused_rank,
-                if scatter_slice_disjoint { threads } else { 1 },
-                &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
-                &|groups, dst, dst_start, fused_index| {
-                    for &group in groups {
-                        for item in &scatter_columns[scatter_groups[group].columns.clone()] {
-                            write_uninit_layout_from_packed(
-                                layouts,
-                                item.dst_layout,
-                                dst,
-                                dst_start,
-                                packed,
-                                item.packed_offset - destination_start,
-                                alpha,
-                                fused_index,
-                            )?;
+            let scatter_threads = if scatter_slice_disjoint { threads } else { 1 };
+            replay_region(engine, scatter_threads, |exec| {
+                split_join_uninit(
+                    &workspace.chunk_scatter_groups,
+                    dst_data,
+                    0,
+                    workspace.fused_indices.as_mut_slice(),
+                    max_fused_rank,
+                    scatter_threads,
+                    exec,
+                    &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
+                    &|groups, dst, dst_start, fused_index| {
+                        for &group in groups {
+                            for item in &scatter_columns[scatter_groups[group].columns.clone()] {
+                                write_uninit_layout_from_packed(
+                                    layouts,
+                                    item.dst_layout,
+                                    dst,
+                                    dst_start,
+                                    packed,
+                                    item.packed_offset - destination_start,
+                                    alpha,
+                                    fused_index,
+                                )?;
+                            }
                         }
-                    }
-                    Ok(())
-                },
-            )?;
+                        Ok(())
+                    },
+                )
+            })??;
         }
         debug_assert_eq!(pack_cursor, schedule.pack_columns.len());
         Ok(())
@@ -153,7 +160,7 @@ where
     .map(Some)
 }
 
-/// Recursive `rayon::join` over an uninitialised destination, mirroring the
+/// Recursive `replay_join` over an uninitialised destination, mirroring the
 /// split tree of `replay_single_blocks` / `replay_scatter_groups`: `items`
 /// are sorted by destination offset and `dst_lo(item)` is the absolute start
 /// of each item's destination range; `leaf` writes `items` into `dst`, whose
@@ -178,13 +185,14 @@ fn split_join_uninit<I, D>(
     fused_indices: &mut [usize],
     max_fused_rank: usize,
     threads: usize,
+    exec: Exec<'_>,
     dst_lo: &(impl Fn(&I) -> Result<isize, OperationError> + Sync),
     leaf: &(impl Fn(&[I], &mut [MaybeUninit<D>], isize, &mut [usize]) -> Result<(), OperationError>
           + Sync),
 ) -> Result<(), OperationError>
 where
     I: Sync,
-    D: Send,
+    D: Send + Sync,
 {
     if items.is_empty() {
         return Ok(());
@@ -201,9 +209,11 @@ where
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let (left, right) = replay_join(
-        || {
+        exec,
+        |exec| {
             split_join_uninit(
                 left_items,
                 left_data,
@@ -211,18 +221,20 @@ where
                 left_indices,
                 max_fused_rank,
                 left_threads,
+                exec,
                 dst_lo,
                 leaf,
             )
         },
-        || {
+        |exec| {
             split_join_uninit(
                 right_items,
                 right_data,
                 boundary,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 right_threads,
+                exec,
                 dst_lo,
                 leaf,
             )
@@ -255,54 +267,6 @@ fn layout_linear_offset(
             .ok_or_else(|| OperationError::ElementCountOverflow)?;
     }
     usize::try_from(offset).map_err(|_| OperationError::OffsetOverflow { value: usize::MAX })
-}
-
-/// Fused loop nest over a prebaked layout writing into uninitialized memory
-/// (issue #232, condition 2), mirroring `apply_fused_pair_slices` but with
-/// `MaybeUninit::write` for the destination. Each destination offset is visited
-/// exactly once, identical to `layout_linear_offset`'s odometer, so the
-/// write-once-then-`assume_init` invariant of `initialize_owned` (#226/#233) is
-/// preserved: the normalization only drops extent-1 axes, reorders, and fuses
-/// contiguous runs — the *set* of visited (dst, src) offsets is unchanged, and
-/// there is no read-after-write within a single writer (`src` is a disjoint,
-/// fully-initialized slice). The caller supplies runtime-length traversal scratch.
-fn write_fused_uninit<D, F>(
-    baked: BakedFusedLayout<'_>,
-    dst: &mut [MaybeUninit<D>],
-    src: &[D],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    map: F,
-) -> Result<(), OperationError>
-where
-    D: Copy,
-    F: Fn(D) -> D,
-{
-    let dims = baked.dims();
-    let dst_strides = baked.dst_strides();
-    let src_strides = baked.src_strides();
-    let Some(index) = index.get_mut(..dims.len()) else {
-        return Err(OperationError::InvalidArgument {
-            message: "fused traversal scratch is shorter than the normalized rank",
-        });
-    };
-    for_each_fused_span(
-        dims,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        index,
-        |dst_base, src_base, inner_len, inner_dst, inner_src| {
-            for position in 0..inner_len {
-                let dst_position = (dst_base + position as isize * inner_dst) as usize;
-                let src_position = (src_base + position as isize * inner_src) as usize;
-                dst[dst_position].write(map(src[src_position]));
-            }
-        },
-    );
-    Ok(())
 }
 
 // Why-not fuse the zero writer: it has no paired source view, and a pure
@@ -517,6 +481,7 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_matches_initialized_oracle_for_real_and_complex() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: canonical serial owned replay writes every physical value and
         // is byte-for-byte equal to the initialized overwrite oracle.
         let structure = canonical_structure(0);
@@ -529,6 +494,7 @@ mod owned_overwrite_tests {
 
         let mut expected = vec![f64::NAN; 6];
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
@@ -543,6 +509,7 @@ mod owned_overwrite_tests {
         )
         .unwrap();
         let actual = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -561,6 +528,7 @@ mod owned_overwrite_tests {
             .map(|value| Complex64::new(value as f64, -(value as f64)))
             .collect::<Vec<_>>();
         let complex = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -582,6 +550,7 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_multi_matches_direct_matrix_oracle() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: the uninitialized Multi writer applies every destination-by-source
         // recoupling coefficient and writes the final owned payload exactly once.
         let space = FusionTreeHomSpace::new(
@@ -609,6 +578,7 @@ mod owned_overwrite_tests {
         .unwrap();
 
         let actual = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -632,6 +602,7 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_zero_scales_write_zeros_over_non_finite_sources() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: the uninitialized writer follows VectorInterface's
         // `scale(x, 0) = zero(x) * 0` (#1438) for a zero caller alpha and for
         // a zero structural coefficient in a Single block, and for a zero
@@ -648,6 +619,7 @@ mod owned_overwrite_tests {
             )
             .unwrap();
             let actual = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
                 &transform,
@@ -684,6 +656,7 @@ mod owned_overwrite_tests {
         )
         .unwrap();
         let actual = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -699,11 +672,8 @@ mod owned_overwrite_tests {
         assert_eq!(actual, [0.0, 0.0]);
     }
 
-    fn pool(threads: usize) -> rayon::ThreadPool {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads)
-            .build()
-            .unwrap()
+    fn pool(threads: usize) -> crate::host_pool::TestPool {
+        crate::host_pool::test_pool(threads)
     }
 
     fn z2_leg(even: usize, odd: usize) -> SectorLeg {
@@ -744,6 +714,7 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_under_the_parallel_schedule_is_bit_identical_to_serial() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: with a multi-worker budget the owned writer splits the
         // uninitialised destination on the compiled slice-disjoint boundaries
         // and produces exactly the serial owned bytes for real and complex
@@ -758,14 +729,15 @@ mod owned_overwrite_tests {
         assert_eq!(schedule.singles.len(), 3);
         assert_eq!(schedule.pack_columns.len(), 5);
 
-        let pool = pool(3);
+        let mut pool = pool(3);
         assert_eq!(
-            pool.install(|| effective_tree_transform_threads(schedule, 3)),
+            pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
             3
         );
 
         let mut oracle = vec![f64::NAN; source.len()];
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
@@ -780,6 +752,7 @@ mod owned_overwrite_tests {
         )
         .unwrap();
         let serial = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -795,8 +768,9 @@ mod owned_overwrite_tests {
         assert_eq!(serial, oracle);
         let mut workspace = TreeTransformWorkspace::default();
         let parallel = pool
-            .install(|| {
+            .install(|engine| {
                 try_tree_transform_structure_overwrite_owned_raw(
+                    engine,
                     &mut DefaultDenseExecutor::new(),
                     &mut workspace,
                     &transform,
@@ -821,6 +795,7 @@ mod owned_overwrite_tests {
             .collect::<Vec<_>>();
         let alpha = Complex64::new(1.5, -1.0);
         let serial = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut DefaultDenseExecutor::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
@@ -834,8 +809,9 @@ mod owned_overwrite_tests {
         .unwrap()
         .unwrap();
         let parallel = pool
-            .install(|| {
+            .install(|engine| {
                 try_tree_transform_structure_overwrite_owned_raw(
+                    engine,
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
                     &transform,
@@ -870,15 +846,16 @@ mod owned_overwrite_tests {
         )
         .unwrap();
         let schedule = transform.parallel_schedule();
-        let pool = pool(3);
+        let mut pool = pool(3);
         assert_eq!(
-            pool.install(|| effective_tree_transform_threads(schedule, 3)),
+            pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
             1
         );
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let actual = pool
-            .install(|| {
+            .install(|engine| {
                 try_tree_transform_structure_overwrite_owned_raw(
+                    engine,
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
                     &transform,
@@ -898,20 +875,33 @@ mod owned_overwrite_tests {
     struct FailingGemm;
 
     impl DenseExecutor for FailingGemm {
-        fn svd(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn svd(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("owned transform replay never factorizes")
         }
 
-        fn qr(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn qr(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("owned transform replay never factorizes")
         }
 
-        fn eigh(&mut self, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn eigh(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("owned transform replay never factorizes")
         }
 
         fn dot_general_into(
             &mut self,
+            _engine: &mut dyn Engine,
             _: DenseWrite<'_>,
             _: DenseRead<'_>,
             _: DenseRead<'_>,
@@ -922,6 +912,7 @@ mod owned_overwrite_tests {
 
         fn matmul_batch_axpby_into(
             &mut self,
+            _engine: &mut dyn Engine,
             _: DenseWrite<'_>,
             _: DenseRead<'_>,
             _: DenseRead<'_>,
@@ -944,8 +935,9 @@ mod owned_overwrite_tests {
         // part of the uninitialised buffer surfaces as `Err`; no owned payload
         // escapes and nothing panics on the joined workers.
         let (structure, transform, source) = mixed_fixture();
-        let result = pool(3).install(|| {
+        let result = pool(3).install(|engine| {
             try_tree_transform_structure_overwrite_owned_raw(
+                engine,
                 &mut FailingGemm,
                 &mut TreeTransformWorkspace::default(),
                 &transform,
@@ -965,6 +957,7 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_rejects_padding_and_out_of_range_split_before_allocation() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: a holey destination and an out-of-range split receive no owned
         // result, leaving the caller on the initialized fallback path.
         let canonical = canonical_structure(0);
@@ -978,6 +971,7 @@ mod owned_overwrite_tests {
         let mut dense = DefaultDenseExecutor::new();
         let mut workspace = TreeTransformWorkspace::default();
         assert!(try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut dense,
             &mut workspace,
             &padded_transform,
@@ -998,6 +992,7 @@ mod owned_overwrite_tests {
         )
         .unwrap();
         assert!(try_tree_transform_structure_overwrite_owned_raw(
+            engine,
             &mut dense,
             &mut workspace,
             &canonical_transform,

@@ -26,6 +26,7 @@ fn exact(len: usize, salt: usize) -> Vec<f64> {
 /// Every member of `dst` equals the eager contraction of that member's
 /// operands; exact data, so up to the sign of an exact zero.
 fn assert_members_are_eager(
+    engine: &mut dyn Engine,
     what: &str,
     dst: &StackedTensorMap<U1FusionRule, f64>,
     lhs: &StackedTensorMap<U1FusionRule, f64>,
@@ -34,14 +35,15 @@ fn assert_members_are_eager(
     members: usize,
 ) {
     for member in 0..members {
+        let rhs_member = &rhs.member(engine, member).unwrap();
         let eager = lhs
-            .member(member)
+            .member(engine, member)
             .unwrap()
-            .contract(&rhs.member(member).unwrap(), spec)
+            .contract(engine, rhs_member, spec)
             .unwrap();
         let expected = eager.dense_data().unwrap();
         assert!(expected.iter().any(|value| *value != 0.0), "{what}");
-        let actual = dst.member(member).unwrap();
+        let actual = dst.member(engine, member).unwrap();
         assert_eq!(
             actual.dense_data().unwrap(),
             expected,
@@ -50,8 +52,14 @@ fn assert_members_are_eager(
     }
 }
 
-fn check_members(name: &str, lhs_axes: &[usize], codomain: &[usize], copy_c: bool) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+fn check_members(
+    engine: &mut dyn Engine,
+    name: &str,
+    lhs_axes: &[usize],
+    codomain: &[usize],
+    copy_c: bool,
+) {
+    let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
@@ -63,8 +71,8 @@ fn check_members(name: &str, lhs_axes: &[usize], codomain: &[usize], copy_c: boo
     )
     .unwrap();
     let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     let spec = ContractSpec {
         lhs: lhs_axes,
         rhs: &[0],
@@ -80,23 +88,25 @@ fn check_members(name: &str, lhs_axes: &[usize], codomain: &[usize], copy_c: boo
         lhs.storage = exact(lhs_len, 1);
         rhs.storage = exact(rhs_len, 3);
         let (plan, workspace) = plan_and_workspace.get_or_insert_with(|| {
-            let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+            let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
             let workspace = plan.workspace().unwrap();
             (plan, workspace)
         });
         assert_eq!(plan.copy_c().is_some(), copy_c, "{name}");
         assert!(!plan.resolution.is_dynamic_tree(), "{name}");
-        plan.execute(&lhs, &rhs, workspace).unwrap();
+        plan.execute(engine, &lhs, &rhs, workspace).unwrap();
         let mut dst = workspace.take_output().unwrap();
-        assert_members_are_eager(name, &dst, &lhs, &rhs, &spec, members);
+        assert_members_are_eager(engine, name, &dst, &lhs, &rhs, &spec, members);
         dst.storage.fill(f64::NAN);
-        plan.execute_into(&lhs, &rhs, &mut dst, workspace).unwrap();
-        assert_members_are_eager(name, &dst, &lhs, &rhs, &spec, members);
+        plan.execute_into(engine, &lhs, &rhs, &mut dst, workspace)
+            .unwrap();
+        assert_members_are_eager(engine, name, &dst, &lhs, &rhs, &spec, members);
     }
 }
 
 #[test]
 fn member_core_and_copy_c_replays_equal_the_eager_contraction_per_member() {
-    check_members("core", &[2], &[0, 1], false);
-    check_members("copyC", &[2], &[1, 0], true);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    check_members(engine, "core", &[2], &[0, 1], false);
+    check_members(engine, "copyC", &[2], &[1, 0], true);
 }

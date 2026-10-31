@@ -21,35 +21,38 @@ fn eigh_routes(treewise: bool) -> RoutePolicy {
 
 #[test]
 fn spectra_publication_failure_does_not_publish_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let x = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 1).unwrap();
-    let input = x.axpby(1.0, &x.adjoint().unwrap(), 1.0).unwrap();
+    let x = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&leg], [&leg], 1).unwrap();
+    let x_adjoint = &x.adjoint(engine).unwrap();
+    let input = x.axpby(engine, 1.0, x_adjoint, 1.0).unwrap();
     let stack = super::StackedTensorMap::pack(&[input]).unwrap();
     let mut plan =
-        super::EighFullPlan::new(&stack, &[0], &[1], super::HermitianTol::DEFAULT).unwrap();
+        super::EighFullPlan::new(engine, &stack, &[0], &[1], super::HermitianTol::DEFAULT).unwrap();
     let mut workspace = plan.workspace().unwrap();
     plan.routes.label_routes[0] = Some(usize::MAX);
 
-    assert!(plan.execute(&stack, &mut workspace).is_err());
+    assert!(plan.execute(engine, &stack, &mut workspace).is_err());
     assert!(workspace.take_output().is_none());
 }
 
 #[test]
 fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an error inside the replay, after the output buffer is
     // taken (forced by an operand whose layout and payload are
     // consistently one entry short, which only a corrupted stack
     // carries), leaves no observable output; the buffer is kept and the
     // next call recovers.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&v], 3).unwrap();
-    let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v], [&v], 4).unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v], 3).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 4).unwrap();
     let lhs = super::StackedTensorMap::pack(&[&a, &a]).unwrap();
     let rhs = super::StackedTensorMap::pack(&[&b, &b]).unwrap();
     let mut corrupt = super::StackedTensorMap::pack(&[&a, &a]).unwrap();
@@ -57,10 +60,10 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
     corrupt
         .storage
         .truncate(corrupt.member_len * corrupt.members);
-    let plan = super::ComposePlan::new(&lhs, &rhs).unwrap();
+    let plan = super::ComposePlan::new(engine, &lhs, &rhs).unwrap();
     let mut workspace = plan.workspace().unwrap();
     let expected = plan
-        .execute(&lhs, &rhs, &mut workspace)
+        .execute(engine, &lhs, &rhs, &mut workspace)
         .unwrap()
         .storage
         .clone();
@@ -68,8 +71,9 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
 
     // Only the route executor compares the payload with the plan's
     // operand structure; every earlier check passes.
-    let Err(crate::error::Error::Operation(error)) =
-        plan.execute(&corrupt, &rhs, &mut workspace).map(|_| ())
+    let Err(crate::error::Error::Operation(error)) = plan
+        .execute(engine, &corrupt, &rhs, &mut workspace)
+        .map(|_| ())
     else {
         panic!("the corrupted stack must fail as an operation error");
     };
@@ -87,7 +91,9 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
     assert!(workspace.take_output().is_none());
     assert_eq!(workspace.retained_bytes(), bytes);
     assert_eq!(
-        plan.execute(&lhs, &rhs, &mut workspace).unwrap().storage,
+        plan.execute(engine, &lhs, &rhs, &mut workspace)
+            .unwrap()
+            .storage,
         expected
     );
     assert!(workspace.take_output().is_some());
@@ -95,6 +101,7 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
 
 #[test]
 fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: on Host the per-tree placement (one row slice per column
     // and codomain tree) writes exactly the bits of the aligned one (one
     // copy per sector), and both are eager's `d` and `v` per member.
@@ -107,20 +114,34 @@ fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() 
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap();
     let members: Vec<_> = (0..3)
         .map(|seed| {
-            let x = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], seed)
-                .unwrap();
-            x.axpby(1.0, &x.adjoint().unwrap(), 1.0).unwrap()
+            let x = TensorMap::<_, f64>::rand_with_seed(
+                engine,
+                &runtime,
+                [&leg, &leg],
+                [&leg, &leg],
+                seed,
+            )
+            .unwrap();
+            let x_adjoint = &x.adjoint(engine).unwrap();
+            x.axpby(engine, 1.0, x_adjoint, 1.0).unwrap()
         })
         .collect();
     let stack = super::StackedTensorMap::pack(&members).unwrap();
-    let run = |treewise: bool| {
+    let mut run = |treewise: bool| {
         let plan = probe::with_routes(eigh_routes(treewise), || {
-            EighFullPlan::new(&stack, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT).unwrap()
+            EighFullPlan::new(
+                engine,
+                &stack,
+                &[0, 1],
+                &[2, 3],
+                super::HermitianTol::DEFAULT,
+            )
+            .unwrap()
         });
         let mut workspace = plan.workspace().unwrap();
         let copies: usize = plan.routes.copies.iter().map(Vec::len).sum();
         let routes = plan.routes.copies.len();
-        let output = plan.execute(&stack, &mut workspace).unwrap();
+        let output = plan.execute(engine, &stack, &mut workspace).unwrap();
         (
             copies,
             routes,
@@ -137,11 +158,12 @@ fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() 
     let v_len = aligned_v.len() / members.len();
     for (member, input) in members.iter().enumerate() {
         let crate::typed::Eigh { d, v } = input
-            .eigh_full(&[0, 1], &[2, 3], super::HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT)
             .unwrap();
         assert!(tree_v[member * v_len..][..v_len] == *v.dense_data().unwrap());
         assert!(
-            tree_d[member * d_len..][..d_len] == *d.materialize().unwrap().dense_data().unwrap()
+            tree_d[member * d_len..][..d_len]
+                == *d.materialize(engine).unwrap().dense_data().unwrap()
         );
     }
 }
@@ -150,40 +172,57 @@ fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn tree_wise_eigenvector_copies_equal_the_aligned_ones_bitwise() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     // What: the per-tree placement (one copy per codomain tree) writes
     // exactly the bits of the aligned placement (one copy per sector),
     // and both are eager's device `v` at B = 1.
     use super::EighFullPlan;
     use symtn_core::{SU2FusionRule, SU2Irrep};
 
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let j = SU2Irrep::from_twice_spin;
     let leg =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap();
     let members: Vec<_> = (0..3)
         .map(|seed| {
-            let x = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], seed)
-                .unwrap();
-            x.axpby(1.0, &x.adjoint().unwrap(), 1.0).unwrap()
+            let x = TensorMap::<_, f64>::rand_with_seed(
+                &mut *cpu,
+                &runtime,
+                [&leg, &leg],
+                [&leg, &leg],
+                seed,
+            )
+            .unwrap();
+            let adjoint = x.adjoint(&mut *cpu).unwrap();
+            x.axpby(&mut *cpu, 1.0, &adjoint, 1.0).unwrap()
         })
         .collect();
     let stack = super::StackedTensorMap::pack(&members)
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
-    let run = |treewise: bool| {
+    let mut run = |treewise: bool| {
         let plan = probe::with_routes(eigh_routes(treewise), || {
-            EighFullPlan::new(&stack, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT).unwrap()
+            EighFullPlan::new(
+                &mut *cuda,
+                &stack,
+                &[0, 1],
+                &[2, 3],
+                super::HermitianTol::DEFAULT,
+            )
+            .unwrap()
         });
         let mut workspace = plan.workspace().unwrap();
         let copies: usize = plan.routes.copies.iter().map(Vec::len).sum();
         let routes = plan.routes.copies.len();
-        let output = plan.execute(&stack, &mut workspace).unwrap();
+        let output = plan.execute(cuda, &stack, &mut workspace).unwrap();
         (
             copies,
             routes,
-            output.v.to_host().unwrap(),
-            output.d.to_host().unwrap(),
+            output.v.to_host(cuda).unwrap(),
+            output.d.to_host(cuda).unwrap(),
         )
     };
     let (aligned_copies, routes, aligned_v, aligned_d) = run(false);
@@ -194,26 +233,33 @@ fn tree_wise_eigenvector_copies_equal_the_aligned_ones_bitwise() {
     assert!(tree_d.storage == aligned_d.storage);
     let single = super::StackedTensorMap::pack(&members[..1])
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     let plan = probe::with_routes(eigh_routes(true), || {
-        EighFullPlan::new(&single, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT).unwrap()
+        EighFullPlan::new(
+            cuda,
+            &single,
+            &[0, 1],
+            &[2, 3],
+            super::HermitianTol::DEFAULT,
+        )
+        .unwrap()
     });
     let mut workspace = plan.workspace().unwrap();
     let v = plan
-        .execute(&single, &mut workspace)
+        .execute(cuda, &single, &mut workspace)
         .unwrap()
         .v
-        .to_host()
+        .to_host(cuda)
         .unwrap()
-        .member(0)
+        .member(cpu, 0)
         .unwrap();
     let crate::typed::Eigh { v: eager_v, .. } = members[0]
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .eigh_full(&[0, 1], &[2, 3], super::HermitianTol::DEFAULT)
+        .eigh_full(cuda, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT)
         .unwrap();
-    assert!(v.dense_data().unwrap() == eager_v.to_host().unwrap().dense_data().unwrap());
+    assert!(v.dense_data().unwrap() == eager_v.to_host(cuda).unwrap().dense_data().unwrap());
 }
 
 struct PlacedStorage {
@@ -239,10 +285,11 @@ fn hash_of<T: Hash>(value: &T) -> u64 {
 
 #[test]
 fn placement_alone_separates_signatures() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the same space and Runtime on different placements (Host,
     // two device ordinals) gives unequal signatures; equal placement
     // gives equal signatures and equal hashes.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -252,7 +299,7 @@ fn placement_alone_separates_signatures() {
         ],
     )
     .unwrap();
-    let host = TensorMap::<_, f64>::zeros(&runtime, [&leg, &leg], [&leg]).unwrap();
+    let host = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg, &leg], [&leg]).unwrap();
     let placed = |placement| TensorMap::<_, f64, PlacedStorage> {
         runtime: runtime.clone(),
         repr: owned_repr(TypedTensorBody::dense(
@@ -277,18 +324,19 @@ fn placement_alone_separates_signatures() {
 
 #[test]
 fn first_mismatch_names_each_field_alone() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: replacing one field of an equal signature with another
     // signature's value is reported as exactly that field, and `==`
     // agrees with `first_mismatch`.
     use super::SignatureField;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let q = U1Irrep::new;
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 2), (q(1), 1)]).unwrap();
     let wide = GradedSpace::try_new(Arc::new(U1FusionRule), [(q(0), 3), (q(1), 1)]).unwrap();
-    let signature = |runtime: &Runtime, leg: &GradedSpace<U1FusionRule>| {
-        TensorMap::<_, f64>::zeros(runtime, [leg, leg], [leg])
+    let mut signature = |runtime: &Runtime, leg: &GradedSpace<U1FusionRule>| {
+        TensorMap::<_, f64>::zeros(engine, runtime, [leg, leg], [leg])
             .unwrap()
             .structure_signature()
     };
@@ -321,21 +369,22 @@ fn first_mismatch_names_each_field_alone() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_rule_instance_alone_separates_signatures() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What: SU(3) and SU(4) trivial legs give the same hom space and
     // block structure content, so the rule identity alone separates them.
     use std::sync::Arc;
     use symtn_core::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = |rank: usize| {
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap()).unwrap())
     };
     // Why the rules outlive their signatures: a rule identity holds its group
     // weakly, so signatures of dropped rules equal nothing but their clones.
     let (first_su3, second_su3, su4_rule) = (rule(3), rule(3), rule(4));
-    let signature = |rule: &Arc<LieGroupFusionRule>, trivial: Vec<i64>| {
+    let mut signature = |rule: &Arc<LieGroupFusionRule>, trivial: Vec<i64>| {
         let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
-        TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
+        TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };

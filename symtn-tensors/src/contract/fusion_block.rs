@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use symtn_dense::Engine;
 
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
@@ -53,6 +54,8 @@ where
 
 use super::backend::TensorContractBackend;
 use super::dynamic_space::{DynamicFusionMapSpace, FusionOperandLayout};
+// Used by the debug-build core geometry assertion and the test-only compile.
+#[cfg(any(test, debug_assertions))]
 use super::fusion::reject_fusion_contract_conjugation;
 use super::structure::TensorContractAxisPlan;
 
@@ -365,6 +368,7 @@ where
 {
     fn matmul_rank2(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -375,6 +379,7 @@ where
         beta: D,
     ) -> Result<(), OperationError> {
         self.backend.matmul_rank2_axpby_into_raw(
+            engine,
             self.workspace,
             dst,
             lhs,
@@ -389,6 +394,7 @@ where
 
     fn matmul_rank2_batch(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -401,6 +407,7 @@ where
         D: Copy,
     {
         self.backend.matmul_rank2_batch_axpby_into_raw(
+            engine,
             self.workspace,
             dst,
             lhs,
@@ -414,6 +421,7 @@ where
 
     fn matmul_rank2_batch_with_ops(
         &mut self,
+        engine: &mut dyn Engine,
         dst: &mut [D],
         lhs: &[D],
         rhs: &[D],
@@ -428,6 +436,7 @@ where
         D: Copy,
     {
         self.backend.matmul_rank2_batch_with_ops_axpby_into_raw(
+            engine,
             self.workspace,
             dst,
             lhs,
@@ -445,6 +454,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_core_fusion_blocks_into_raw<A, B, R, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     backend: &mut B,
     workspace: &mut B::Workspace,
@@ -468,14 +478,15 @@ where
 {
     let plan = compile_fusion_block_contract_plan(rule, dst_space, lhs_space, rhs_space, axes)?;
     tensorcontract_core_fusion_blocks_with_plan_into_raw(
-        kernels, backend, workspace, &plan, dst_space, dst_data, lhs_space, lhs_data, rhs_space,
-        rhs_data, alpha, beta,
+        engine, kernels, backend, workspace, &plan, dst_space, dst_data, lhs_space, lhs_data,
+        rhs_space, rhs_data, alpha, beta,
     )
 }
 
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tensorcontract_core_fusion_blocks_with_plan_into_raw<A, B, D, C>(
+    engine: &mut dyn Engine,
     kernels: &mut A,
     backend: &mut B,
     workspace: &mut B::Workspace,
@@ -497,6 +508,7 @@ where
 {
     let mut fusion_workspace = FusionBlockContractWorkspace::<D>::default();
     plan.execute_raw(
+        engine,
         kernels,
         &mut BackendRank2Gemm::new(backend, workspace),
         &mut fusion_workspace,

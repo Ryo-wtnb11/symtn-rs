@@ -24,8 +24,7 @@ use num_complex::{Complex32, Complex64};
 use std::sync::Arc;
 use symtn_core::BlockStructure;
 use symtn_dense::{
-    cuda_region_zero, cuda_transfer_stats, reset_cuda_transfer_stats, CudaDenseContext,
-    CudaDenseStorage, CudaRegion, CudaScalar, CudaTransferStats,
+    cuda_transfer_stats, reset_cuda_transfer_stats, CudaDenseContext, CudaScalar, CudaTransferStats,
 };
 use symtn_operations::cuda::CudaStorage;
 use symtn_operations::cuda_transform::CudaSingleMemberRegions;
@@ -33,7 +32,7 @@ use symtn_operations::{
     tree_transform_structure_overwrite_with_strided_kernel_raw,
     tree_transform_structure_with_strided_kernel_raw, CudaTreeTransformDestination,
     CudaTreeTransformExecutor, OperationError, StridedHostKernelAdapter, TreeTransformBlockSpec,
-    TreeTransformStructure, TreeTransformWorkspace, DEFAULT_PLAN_CACHE_BUDGET_BYTES,
+    TreeTransformStructure, TreeTransformWorkspace,
 };
 
 #[test]
@@ -105,7 +104,8 @@ fn unit_single_member_overwrite_zeros_inactive_layouts() {
             &[TreeTransformBlockSpec::single(0, 0, 1.0_f64)],
         )
         .unwrap();
-        let mut ctx = context();
+        let mut ctx_engine = engine();
+        let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
         for members in [1, 2, 17] {
             let regions = CudaSingleMemberRegions::prepare(
                 &transform,
@@ -172,7 +172,8 @@ fn underflowed_f32_single_coefficient_remains_a_data_operand() {
     let regions =
         CudaSingleMemberRegions::prepare(&transform, &structure, &structure, 2, 2, 2, 2, 1)
             .unwrap();
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let coefficients =
         CudaStorage::upload_owned(&ctx, regions.scaled_coefficients::<f32>()).unwrap();
     let input = CudaStorage::upload_owned(&ctx, vec![f32::NAN, 2.0]).unwrap();
@@ -204,8 +205,9 @@ impl DeviceScalar for f64 {}
 impl DeviceScalar for Complex32 {}
 impl DeviceScalar for Complex64 {}
 
-fn context() -> CudaDenseContext {
-    CudaDenseContext::new(0).expect("a CUDA device")
+fn engine() -> symtn_dense::CudaEngine {
+    symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+        .expect("a CUDA device")
 }
 
 fn host_replay<T: DeviceScalar>(
@@ -252,6 +254,7 @@ fn host_replay_scaled<T: DeviceScalar>(
     let one = T::from_parts(1.0, 0.0);
     if overwrite {
         tree_transform_structure_overwrite_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &structure,
@@ -264,6 +267,7 @@ fn host_replay_scaled<T: DeviceScalar>(
         .unwrap();
     } else {
         tree_transform_structure_with_strided_kernel_raw(
+            strided_kernel::Exec::serial(),
             &mut kernels,
             &mut workspace,
             &structure,
@@ -382,7 +386,8 @@ fn device_replay_matches_the_oracle_and_the_host_for_every_fixture() {
     // are neither 1 nor -1, conjugated sources, interleaved multi-block
     // layouts, inactive layouts and a zero-extent block, in all four payload
     // dtypes (#1326) and both destination modes.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in all_fixtures() {
         check_fixture::<f32>(&mut ctx, &mut executor, &fixture);
@@ -398,7 +403,8 @@ fn overwrite_cleans_a_nan_poisoned_destination_including_inactive_layouts() {
     // What: the Overwrite mode is destination-independent — every inactive
     // destination layout is zeroed, so a caller's poisoned buffer cannot leak
     // into a block the transform does not reach.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = inactive_destination_layouts();
     let source = fixture.source::<f64>();
@@ -446,7 +452,8 @@ fn a_warm_replay_transfers_nothing_and_allocates_no_device_buffer() {
     // What: after the first replay of a structure, replaying it again moves
     // nothing across the host boundary and creates no device buffer; only the
     // per-block submissions remain.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = inactive_destination_layouts();
     let structure = fixture.compile();
@@ -508,7 +515,8 @@ fn a_warm_replay_transfers_nothing_and_allocates_no_device_buffer() {
 fn alternating_structures_upload_their_coefficients_exactly_once_each() {
     // What: the coefficient cache holds more than one structure, so a network
     // replay alternating two transforms does not re-upload on every switch.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixtures = [rank_sweep().remove(2), interleaved()];
     let prepared: Vec<_> = fixtures
@@ -574,7 +582,8 @@ fn interleaved() -> Fixture {
 fn a_dropped_structure_releases_its_cached_coefficients() {
     // What: the cache keys on a Weak witness of the structure, so device state
     // for a structure the transform cache has evicted cannot survive it.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = interleaved();
     let source = fixture.source::<f64>();
@@ -619,387 +628,13 @@ fn a_dropped_structure_releases_its_cached_coefficients() {
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn more_signatures_than_the_default_plan_bound_raise_the_cap_without_thrashing() {
-    // What: a structure with more distinct block layouts than Tenferro's
-    // 64-entry cuTENSOR plan bound raises the bound to what it needs, so a warm
-    // replay evicts no plan at all.
-    let mut ctx = context();
-    let mut executor = CudaTreeTransformExecutor::new(1 << 20, DEFAULT_PLAN_CACHE_BUDGET_BYTES);
-    let fixture = many_distinct_signatures(70);
-    let structure = fixture.compile();
-    let source = fixture.source::<f64>();
-    let destination = vec![0.0_f64; fixture.dst_len()];
-    let mut dst = CudaStorage::<f64>::upload(&ctx, &destination).unwrap();
-    let src = CudaStorage::<f64>::upload(&ctx, &source).unwrap();
-    let default_bound = ctx.plan_cache_max_entries().unwrap();
-
-    let replay = |ctx: &mut CudaDenseContext,
-                  executor: &mut CudaTreeTransformExecutor,
-                  dst: &mut CudaStorage<f64>| {
-        executor
-            .replay(
-                ctx,
-                &structure,
-                &fixture.dst_structure(),
-                &fixture.src_structure(),
-                dst,
-                &src,
-                1.0,
-                CudaTreeTransformDestination::Overwrite,
-            )
-            .unwrap();
-    };
-    replay(&mut ctx, &mut executor, &mut dst);
-
-    assert!(
-        executor.required_plan_entries() > 64,
-        "fixture must exceed the default bound, got {}",
-        executor.required_plan_entries()
-    );
-    assert!(
-        ctx.plan_cache_max_entries().unwrap() >= executor.required_plan_entries(),
-        "the cap was not raised from {default_bound}"
-    );
-
-    let warm_before = ctx.plan_cache_stats().unwrap();
-    replay(&mut ctx, &mut executor, &mut dst);
-    let warm_after = ctx.plan_cache_stats().unwrap();
-
-    assert_eq!(
-        warm_after.evictions, warm_before.evictions,
-        "a warm replay must not evict a plan it needs again"
-    );
-    assert_eq!(
-        warm_after.misses, warm_before.misses,
-        "every plan of a warm replay is already cached"
-    );
-    assert_close(
-        &dst.download(&ctx).unwrap(),
-        &fixture.expected(&source, &destination, true),
-        "many signatures",
-    );
-
-    // Negative control: an executor whose plan budget buys nothing raises no
-    // cap, and the same structure then thrashes the 64-entry default. A fresh
-    // context is required because the cap is per backend instance and this
-    // test just raised the one above.
-    let mut starved_ctx = context();
-    let mut starved = CudaTreeTransformExecutor::new(1 << 20, 0);
-    let mut starved_dst = CudaStorage::<f64>::upload(&starved_ctx, &destination).unwrap();
-    let starved_src = CudaStorage::<f64>::upload(&starved_ctx, &source).unwrap();
-    let starved_replay = |ctx: &mut CudaDenseContext,
-                          executor: &mut CudaTreeTransformExecutor,
-                          dst: &mut CudaStorage<f64>| {
-        executor
-            .replay(
-                ctx,
-                &structure,
-                &fixture.dst_structure(),
-                &fixture.src_structure(),
-                dst,
-                &starved_src,
-                1.0,
-                CudaTreeTransformDestination::Overwrite,
-            )
-            .unwrap();
-    };
-    starved_replay(&mut starved_ctx, &mut starved, &mut starved_dst);
-    assert_eq!(
-        starved_ctx.plan_cache_max_entries().unwrap(),
-        default_bound,
-        "a zero plan budget must raise nothing"
-    );
-    let starved_before = starved_ctx.plan_cache_stats().unwrap();
-    starved_replay(&mut starved_ctx, &mut starved, &mut starved_dst);
-    let starved_after = starved_ctx.plan_cache_stats().unwrap();
-    assert!(
-        starved_after.evictions > starved_before.evictions,
-        "without the raise the warm replay must thrash: {starved_before:?} -> {starved_after:?}"
-    );
-    assert_close(
-        &starved_dst.download(&starved_ctx).unwrap(),
-        &fixture.expected(&source, &destination, true),
-        "many signatures, thrashing plan cache",
-    );
-}
-
-/// A compiled fixture held alive with its device buffers, so repeated replays
-/// hit one prepared structure instead of preparing a fresh one each time.
-struct Held<T: DeviceScalar> {
-    fixture: Fixture,
-    structure: symtn_operations::TreeTransformStructure<f64>,
-    dst: CudaStorage<T>,
-    src: CudaStorage<T>,
-}
-
-impl<T: DeviceScalar> Held<T> {
-    fn new(ctx: &CudaDenseContext, fixture: Fixture) -> Self {
-        let structure = fixture.compile();
-        let dst = CudaStorage::<T>::upload(ctx, &vec![T::from_parts(0.0, 0.0); fixture.dst_len()])
-            .unwrap();
-        let src = CudaStorage::<T>::upload(ctx, &fixture.source::<T>()).unwrap();
-        Self {
-            fixture,
-            structure,
-            dst,
-            src,
-        }
-    }
-
-    fn replay(&mut self, ctx: &mut CudaDenseContext, executor: &mut CudaTreeTransformExecutor) {
-        self.replay_scaled(ctx, executor, T::from_parts(1.0, 0.0));
-    }
-
-    fn replay_scaled(
-        &mut self,
-        ctx: &mut CudaDenseContext,
-        executor: &mut CudaTreeTransformExecutor,
-        alpha: T,
-    ) {
-        executor
-            .replay(
-                ctx,
-                &self.structure,
-                &self.fixture.dst_structure(),
-                &self.fixture.src_structure(),
-                &mut self.dst,
-                &self.src,
-                alpha,
-                CudaTreeTransformDestination::Overwrite,
-            )
-            .unwrap();
-    }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn clearing_and_re_preparing_returns_the_same_plan_reservation() {
-    // What: `clear` returns the executor's whole plan-entry reservation, so a
-    // clear/re-prepare cycle leaves the context ledger and the cap where they
-    // were instead of adding the executor total again each cycle.
-    let mut ctx = context();
-    let mut executor = CudaTreeTransformExecutor::default();
-    let mut held: Vec<Held<f64>> = vec![
-        Held::new(&ctx, many_distinct_signatures(12)),
-        Held::new(&ctx, interleaved()),
-    ];
-    for entry in &mut held {
-        entry.replay(&mut ctx, &mut executor);
-    }
-    let reserved = ctx.reserved_plan_entries();
-    let cap = ctx.plan_cache_max_entries().unwrap();
-    assert!(reserved > 0);
-    assert_eq!(reserved, executor.required_plan_entries());
-
-    for cycle in 0..3 {
-        executor.clear(&mut ctx);
-        assert_eq!(ctx.reserved_plan_entries(), 0, "cycle {cycle}");
-        for entry in &mut held {
-            entry.replay(&mut ctx, &mut executor);
-        }
-        assert_eq!(ctx.reserved_plan_entries(), reserved, "cycle {cycle}");
-        assert_eq!(ctx.plan_cache_max_entries().unwrap(), cap, "cycle {cycle}");
-    }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn an_evicted_structure_returns_its_plan_reservation() {
-    // What: when the bounded prepared-structure cache evicts a structure, the
-    // executor total falls and the context ledger falls by the same amount.
-    let mut ctx = context();
-    let mut executor = CudaTreeTransformExecutor::with_structure_entries(
-        1 << 20,
-        DEFAULT_PLAN_CACHE_BUDGET_BYTES,
-        1,
-    );
-    let mut large = Held::<f64>::new(&ctx, many_distinct_signatures(12));
-    let mut small = Held::<f64>::new(&ctx, many_distinct_signatures(3));
-
-    large.replay(&mut ctx, &mut executor);
-    let large_total = executor.required_plan_entries();
-    assert_eq!(ctx.reserved_plan_entries(), large_total);
-
-    small.replay(&mut ctx, &mut executor);
-    assert_eq!(
-        executor.prepared_structures(),
-        1,
-        "the bound evicted nothing"
-    );
-    let small_total = executor.required_plan_entries();
-    assert!(small_total < large_total);
-    assert_eq!(
-        large_total - ctx.reserved_plan_entries(),
-        large_total - small_total,
-        "the ledger must follow the executor total down"
-    );
-
-    // And back up when the evicted structure returns.
-    large.replay(&mut ctx, &mut executor);
-    assert_eq!(ctx.reserved_plan_entries(), large_total);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn an_executor_serving_two_contexts_reserves_on_each_separately() {
-    // What: one executor may prepare on several contexts, and a reservation
-    // can only move on the context that granted it. Clearing one context
-    // returns exactly its own share and leaves the other's intact.
-    let mut a = context();
-    let mut b = context();
-    let mut executor = CudaTreeTransformExecutor::default();
-    let mut on_a = Held::<f64>::new(&a, many_distinct_signatures(12));
-    let mut on_b = Held::<f64>::new(&b, many_distinct_signatures(12));
-
-    on_a.replay(&mut a, &mut executor);
-    let n = a.reserved_plan_entries();
-    assert!(n > 0);
-    on_b.replay(&mut b, &mut executor);
-    assert_eq!(
-        b.reserved_plan_entries(),
-        n,
-        "B reserves its own structures only"
-    );
-    assert_eq!(a.reserved_plan_entries(), n);
-    assert_eq!(executor.required_plan_entries(), 2 * n);
-
-    executor.clear(&mut a);
-    assert_eq!(a.reserved_plan_entries(), 0);
-    assert_eq!(b.reserved_plan_entries(), n, "clearing A must not touch B");
-
-    // B's structure went with the clear; B's next refresh settles its share.
-    on_b.replay(&mut b, &mut executor);
-    assert_eq!(b.reserved_plan_entries(), n);
-    executor.clear(&mut b);
-    assert_eq!(b.reserved_plan_entries(), 0);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn an_eviction_across_contexts_is_settled_on_the_evicted_context() {
-    // What: with one structure slot, preparing on B evicts A's entry. B's
-    // plans are reserved on B; A's now-dead reservation stays recorded
-    // against A and is released at A's next refresh, not leaked or charged
-    // to B.
-    let mut a = context();
-    let mut b = context();
-    let mut executor = CudaTreeTransformExecutor::with_structure_entries(
-        1 << 20,
-        DEFAULT_PLAN_CACHE_BUDGET_BYTES,
-        1,
-    );
-    let mut large_a = Held::<f64>::new(&a, many_distinct_signatures(12));
-    let mut small_a = Held::<f64>::new(&a, many_distinct_signatures(3));
-    let mut on_b = Held::<f64>::new(&b, many_distinct_signatures(12));
-
-    large_a.replay(&mut a, &mut executor);
-    let n = a.reserved_plan_entries();
-    on_b.replay(&mut b, &mut executor);
-    assert_eq!(executor.prepared_structures(), 1, "B's insert evicted A's");
-    assert_eq!(b.reserved_plan_entries(), n, "B's live plans are reserved");
-    assert_eq!(a.reserved_plan_entries(), n, "A's share waits for A");
-
-    // A's next refresh counts only what is prepared on A.
-    small_a.replay(&mut a, &mut executor);
-    let small = executor.required_plan_entries();
-    assert!(small < n);
-    assert_eq!(a.reserved_plan_entries(), small);
-    assert_eq!(b.reserved_plan_entries(), n);
-
-    // Re-preparing the evicted structure does not creep.
-    large_a.replay(&mut a, &mut executor);
-    assert_eq!(a.reserved_plan_entries(), n);
-
-    executor.clear(&mut b);
-    executor.clear(&mut a);
-    assert_eq!(a.reserved_plan_entries(), 0);
-    assert_eq!(b.reserved_plan_entries(), 0);
-}
-
-/// A synthetic consumer outside the executor: `count` zero fills of distinct
-/// packed f32 shapes, one cuTENSOR plan each.
-struct ZeroFills {
-    regions: Vec<CudaRegion>,
-    buffer: CudaDenseStorage,
-}
-
-impl ZeroFills {
-    fn new(ctx: &mut CudaDenseContext, count: usize) -> Self {
-        let regions: Vec<CudaRegion> = (0..count)
-            .map(|index| CudaRegion::packed(&[2 + index % 9, 3 + index / 9], 0).unwrap())
-            .collect();
-        let len = regions
-            .iter()
-            .map(|region| region.element_count().unwrap())
-            .max()
-            .unwrap();
-        ctx.reserve_zero_template::<f32>(len).unwrap();
-        let buffer = CudaDenseStorage::upload_owned::<f32>(ctx, vec![1.0; len]).unwrap();
-        Self { regions, buffer }
-    }
-
-    fn submit(&mut self, ctx: &mut CudaDenseContext) {
-        for region in &self.regions {
-            cuda_region_zero::<f32>(ctx, &mut self.buffer, region).unwrap();
-        }
-    }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn a_consumer_reserving_first_keeps_its_plans_beside_a_large_executor() {
-    // What: plan-entry reservations of independent consumers add. A consumer
-    // that reserves its 80 plans first is not absorbed when an executor's
-    // total then exceeds the default bound of 64, so a warm interleave of both
-    // evicts nothing. Under an absolute raise the consumer's `64 + 80` and
-    // the executor's own total are combined by max, below the joint working
-    // set, and every round thrashes (the negative control).
-    let mut ctx = context();
-    let base = ctx.plan_cache_max_entries().unwrap();
-    let consumer_plans = 80;
-    let mut consumer = ZeroFills::new(&mut ctx, consumer_plans);
-    let mut executor = CudaTreeTransformExecutor::default();
-    let mut held = Held::<f64>::new(&ctx, many_distinct_signatures(70));
-
-    assert_eq!(
-        ctx.reserve_plan_entries(consumer_plans).unwrap(),
-        consumer_plans
-    );
-    consumer.submit(&mut ctx);
-    held.replay(&mut ctx, &mut executor);
-    assert!(executor.required_plan_entries() > base, "{base}");
-    let reserved = consumer_plans + executor.required_plan_entries();
-    assert_eq!(ctx.reserved_plan_entries(), reserved);
-    assert!(ctx.plan_cache_max_entries().unwrap() >= base + reserved);
-    assert_eq!(ctx.plan_cache_stats().unwrap().reservation_shortfall, 0);
-
-    let before = ctx.plan_cache_stats().unwrap();
-    for _ in 0..3 {
-        consumer.submit(&mut ctx);
-        held.replay(&mut ctx, &mut executor);
-    }
-    let after = ctx.plan_cache_stats().unwrap();
-    assert_eq!(after.evictions, before.evictions, "{before:?} -> {after:?}");
-    assert_eq!(after.misses, before.misses, "{before:?} -> {after:?}");
-
-    // Releasing returns the consumer's share and keeps the cap.
-    let cap = ctx.plan_cache_max_entries().unwrap();
-    ctx.release_plan_entries(consumer_plans);
-    assert_eq!(
-        ctx.reserved_plan_entries(),
-        executor.required_plan_entries()
-    );
-    assert_eq!(ctx.plan_cache_max_entries().unwrap(), cap);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
 fn a_coefficient_of_one_moves_f64_payloads_bitwise() {
     // What: where the host copies bit-exactly, the device's multiply by the
     // uploaded `1` is exact too, so the two agree to the last bit for finite
     // f64 payloads. (Not a contract for other coefficients or for complex
     // payloads: the device multiply can deviate from the host at +-inf.)
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in unit_coefficient_fixtures() {
         let source = fixture.source::<f64>();
@@ -1031,12 +666,13 @@ fn a_coefficient_of_one_moves_f64_payloads_bitwise() {
 #[ignore = "requires a real CUDA device"]
 fn unsupported_modes_are_rejected_before_any_device_work() {
     // What: a destination layout the device cannot express is a typed
-    // capability error reported before any upload, allocation, submission or
-    // plan-cache change — for a Single-block structure and for a recoupling
+    // capability error reported before any upload, allocation or submission
+    // — for a Single-block structure and for a recoupling
     // structure, whose pack columns and coefficient upload must not happen on
     // the strength of one unwritable scatter region. Every `beta` is
     // supported (#1550), so it is not a rejection input.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
 
     // A structure whose destination layout the host proves injective only
@@ -1058,7 +694,6 @@ fn unsupported_modes_are_rejected_before_any_device_work() {
 
     reset_cuda_transfer_stats();
     let before = cuda_transfer_stats();
-    let plans_before = ctx.plan_cache_stats().unwrap();
 
     let layout = executor
         .replay(
@@ -1124,13 +759,7 @@ fn unsupported_modes_are_rejected_before_any_device_work() {
         ..delta
     };
     assert_eq!(delta, CudaTransferStats::default(), "rejection did work");
-    assert_eq!(
-        ctx.plan_cache_stats().unwrap(),
-        plans_before,
-        "rejection touched the plan cache"
-    );
     assert_eq!(executor.prepared_structures(), 0);
-    assert_eq!(executor.required_plan_entries(), 0);
 
     // Negative control: a writable structure replays, with a general beta
     // too, and a recoupling structure whose destinations *are* writable
@@ -1178,7 +807,8 @@ fn mismatched_structures_and_lengths_are_rejected_by_admission() {
     // Negative control for the admission wiring: Stage A still checks the
     // structures and the exact storage lengths, and the device buffer's
     // placement is the executor's own.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = interleaved();
     let other = inactive_destination_layouts();
@@ -1245,11 +875,15 @@ fn mismatched_structures_and_lengths_are_rejected_by_admission() {
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn a_second_context_prepares_its_own_device_state() {
-    // What: device state is keyed by context, so a buffer of another context is
-    // never read back through a cached coefficient vector.
-    let mut first = context();
-    let mut second = context();
+fn a_second_engine_prepares_its_own_device_state() {
+    // What: device state is keyed by the engine's allocation domain, so a
+    // buffer of another engine (here on the same device) is never read back
+    // through a cached coefficient vector, while a later context on the same
+    // engine reuses the entry.
+    let mut first_engine = engine();
+    let mut first = CudaDenseContext::new(&mut first_engine).unwrap();
+    let mut second_engine = engine();
+    let mut second = CudaDenseContext::new(&mut second_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = interleaved();
     let structure = fixture.compile();
@@ -1280,7 +914,30 @@ fn a_second_context_prepares_its_own_device_state() {
     assert_eq!(
         executor.prepared_structures(),
         2,
-        "one entry per (structure, dtype, context)"
+        "one entry per (structure, dtype, engine)"
+    );
+    drop(first);
+    let mut again = CudaDenseContext::new(&mut first_engine).unwrap();
+    let mut dst = CudaStorage::<f64>::upload(&again, &destination).unwrap();
+    let src = CudaStorage::<f64>::upload(&again, &source).unwrap();
+    let before = cuda_transfer_stats();
+    executor
+        .replay(
+            &mut again,
+            &structure,
+            &fixture.dst_structure(),
+            &fixture.src_structure(),
+            &mut dst,
+            &src,
+            1.0,
+            CudaTreeTransformDestination::Overwrite,
+        )
+        .unwrap();
+    assert_eq!(stats_delta(before, cuda_transfer_stats()).h2d_calls, 0);
+    assert_eq!(
+        executor.prepared_structures(),
+        2,
+        "the same engine reuses its entry"
     );
 }
 
@@ -1289,7 +946,8 @@ fn a_second_context_prepares_its_own_device_state() {
 fn both_payload_dtypes_share_one_structure_with_their_own_coefficients() {
     // What: the same compiled structure replays for f64 and Complex64, each
     // with its own converted coefficient vector.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = rank_sweep().remove(4); // conjugated, fermionic sign, rank 4
     let structure = fixture.compile();
@@ -1351,7 +1009,8 @@ fn a_warm_recoupling_replay_transfers_nothing_and_reuses_the_workspace() {
     // the whole per-structure device state, so replaying a Multi structure a
     // second time moves nothing across the boundary, allocates nothing, and
     // grows the workspace by nothing.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let structure = fixture.compile();
@@ -1470,7 +1129,8 @@ fn alternating_recoupling_structures_upload_their_matrices_exactly_once_each() {
     // under the same (structure, dtype, context) key, so a replay alternating
     // two Multi structures uploads each structure's matrices once and shares
     // one workspace between them.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     // Widest first, so the workspace is allocated once and the narrower
     // structure reuses it: growth is monotonic and shared across structures.
@@ -1546,7 +1206,8 @@ fn recoupling_replays_match_the_oracle_in_both_dtypes_and_modes() {
     // conjugated source, and Single and Multi blocks in one structure — over
     // both payload dtypes and both destination modes, against the oracle and
     // against the host executor replaying the same compiled structure.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in common::recoupling_fixtures() {
         check_fixture::<f64>(&mut ctx, &mut executor, &fixture);
@@ -1560,7 +1221,8 @@ fn overwrite_cleans_a_nan_poisoned_destination_around_recoupling_blocks() {
     // What: Overwrite is destination-independent for a Multi structure too —
     // the scatter assigns and the untouched layout beside it is zeroed, so a
     // poisoned buffer cannot leak through a recoupling block.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let source = fixture.source::<f64>();
@@ -1596,7 +1258,8 @@ fn a_replay_after_a_non_finite_one_reuses_the_workspace_cleanly() {
     // anything behind that the next replay's result depends on. Without this,
     // a workspace kept across replays would be an invisible channel between
     // two unrelated transforms.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let clean = fixture.source::<f64>();
@@ -1665,7 +1328,8 @@ fn alternating_complex_recoupling_structures_upload_their_matrices_once_each() {
     // What: the per-(structure, dtype, context) key and the shared workspace
     // behave the same for a complex payload, where every coefficient and every
     // packed column is twice as wide.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixtures = [mixed_single_and_multi(), recoupling_non_symmetric_u()];
     let prepared: Vec<_> = fixtures
@@ -1770,7 +1434,8 @@ fn every_caller_scale_matches_the_host_and_the_oracle() {
     // walk, which applies alpha where the host does and is pinned against the
     // host in CI, so a device that scaled the packs or the GEMM instead fails
     // here even though both ends would still be "some multiple of U x".
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in caller_scale_fixtures() {
         for overwrite in [true, false] {
@@ -1828,7 +1493,8 @@ fn a_zero_caller_scale_writes_zeros_over_a_nan_source_as_the_host() {
     // writes zeros over every layout whatever the source holds, and
     // Axpby(1) and Axpby(0) behave as `dst + 0` and Overwrite. Compared
     // with the host and the oracle, whose zero rule CI pins.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let poisoned = vec![f64::NAN; fixture.src_len()];
@@ -1894,7 +1560,8 @@ fn a_zero_caller_scale_over_a_poisoned_destination_matches_the_host() {
     // What: Overwrite with alpha = 0 writes zeros over a NaN destination — but
     // *which* elements come back finite is the host's answer, not an assumption,
     // so this asserts against the host rather than against "all zero".
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let source = fixture.source::<f64>();
@@ -1939,7 +1606,8 @@ fn a_nan_caller_scale_reproduces_the_hosts_nan_pattern() {
     // ends, so the device must poison exactly the elements the host poisons and
     // leave the zero fills exact. Pinned against the host, whose own pattern is
     // pinned against the oracle in CI.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let source = fixture.source::<f64>();
@@ -1974,7 +1642,8 @@ fn a_zero_scale_sizes_the_template_of_a_structure_with_no_zero_fill() {
     // written layouts are the only reason one exists. It must still be
     // reserved — before the first submission — and the result must be the
     // host's: zeros, NaN source included (#1438).
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = rank_sweep().remove(3);
     let source = fixture.source::<f64>();
@@ -2019,20 +1688,19 @@ fn a_zero_scale_sizes_the_template_of_a_structure_with_no_zero_fill() {
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn a_warm_replay_is_transfer_free_and_plan_stable_for_every_caller_scale() {
+fn a_warm_replay_is_transfer_free_for_every_caller_scale() {
     // What: the caller scale is an execution-time argument — it is in no cache
     // key, and the zero fills a zero scale writes read the same context zero
-    // template the inactive-layout fills read, with signatures the plan
-    // requirement already counts. So a warm replay stays transfer-free and
-    // allocation-free for every scale including 0, the prepared-structure count
-    // does not grow, and the zero-scale fills evict no cuTENSOR plan.
+    // template the inactive-layout fills read. So a warm replay stays
+    // transfer-free and allocation-free for every scale including 0, and the
+    // prepared-structure count does not grow.
     warm_scale_sweep::<f32>();
     warm_scale_sweep::<f64>();
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn a_warm_complex_replay_is_transfer_free_and_plan_stable_for_every_caller_scale() {
+fn a_warm_complex_replay_is_transfer_free_for_every_caller_scale() {
     // The same contract for the complex payloads, whose scale, coefficient
     // operand and zero template are a different dtype's buffers — the real-only
     // twin above would not notice a complex one uploaded per call. Each dtype
@@ -2042,7 +1710,8 @@ fn a_warm_complex_replay_is_transfer_free_and_plan_stable_for_every_caller_scale
 }
 
 fn warm_scale_sweep<T: DeviceScalar>() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let structure = fixture.compile();
@@ -2072,20 +1741,9 @@ fn warm_scale_sweep<T: DeviceScalar>() {
     // coefficients and sizes the zero template, the second may grow that
     // template to the largest written layout its zero fills cover.
     replay(&mut ctx, &mut executor, &mut dst, T::from_parts(1.0, 0.0));
-    let after_unit = ctx.plan_cache_stats().unwrap();
     replay(&mut ctx, &mut executor, &mut dst, T::from_parts(0.0, 0.0));
-    let after_zero = ctx.plan_cache_stats().unwrap();
-    // The claim `required_plan_entries` rests on: the zero fills' new plans
-    // are signatures the executor counts, and they evict nothing.
-    assert!(
-        after_zero.misses - after_unit.misses <= executor.required_plan_entries() as u64,
-        "{after_unit:?} -> {after_zero:?}"
-    );
-    assert_eq!(after_zero.evictions, after_unit.evictions);
-    let entries = executor.required_plan_entries();
     let structures = executor.prepared_structures();
     let workspace = executor.workspace_device_bytes();
-    let plans_before = ctx.plan_cache_stats().unwrap();
     let before = cuda_transfer_stats();
 
     let last = T::from_parts(0.5, -1.25);
@@ -2093,7 +1751,6 @@ fn warm_scale_sweep<T: DeviceScalar>() {
         replay(&mut ctx, &mut executor, &mut dst, alpha);
     }
     let warm = stats_delta(before, cuda_transfer_stats());
-    let plans_after = ctx.plan_cache_stats().unwrap();
 
     assert_eq!(warm.h2d_calls, 0, "a warm scaled replay uploaded: {warm:?}");
     assert_eq!(
@@ -2104,21 +1761,8 @@ fn warm_scale_sweep<T: DeviceScalar>() {
         warm.device_allocs, 0,
         "a warm scaled replay allocated: {warm:?}"
     );
-    assert_eq!(
-        executor.required_plan_entries(),
-        entries,
-        "the caller scale changed the plan requirement"
-    );
     assert_eq!(executor.prepared_structures(), structures);
     assert_eq!(executor.workspace_device_bytes(), workspace);
-    assert_eq!(
-        plans_after.evictions, plans_before.evictions,
-        "the zero-scale fills evicted a plan"
-    );
-    assert_eq!(
-        plans_after.misses, plans_before.misses,
-        "a warm zero-scale replay needed a new plan: {plans_before:?} -> {plans_after:?}"
-    );
     assert_close(
         &dst.download(&ctx).unwrap(),
         &fixture.expected_scaled(&source, &destination, true, last),
@@ -2132,7 +1776,8 @@ fn a_zero_caller_scale_is_rejected_in_the_same_order() {
     // What: the caller scale is not an admission input — an unwritable
     // destination layout is still reported before any device work, with a
     // zero scale exactly as with a unit one.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let expert = expert_interleaved_destination();
     let expert_structure = expert.compile();
@@ -2142,7 +1787,6 @@ fn a_zero_caller_scale_is_rejected_in_the_same_order() {
 
     reset_cuda_transfer_stats();
     let before = cuda_transfer_stats();
-    let plans_before = ctx.plan_cache_stats().unwrap();
 
     let layout = executor
         .replay(
@@ -2168,13 +1812,7 @@ fn a_zero_caller_scale_is_rejected_in_the_same_order() {
     assert_eq!(delta.h2d_calls, 0, "a rejection uploaded: {delta:?}");
     assert_eq!(delta.device_allocs, 0, "a rejection allocated: {delta:?}");
     assert_eq!(delta.gemm_calls, 0, "a rejection submitted: {delta:?}");
-    assert_eq!(
-        ctx.plan_cache_stats().unwrap(),
-        plans_before,
-        "a rejection touched the plan cache"
-    );
     assert_eq!(executor.prepared_structures(), 0);
-    assert_eq!(executor.required_plan_entries(), 0);
 }
 
 /// θ = −1 on every other non-empty destination block, starting with the
@@ -2319,7 +1957,8 @@ fn destination_scales_match_the_host_replay_followed_by_an_in_place_block_scale(
     // b — never a pack, the recoupling GEMM or a zero fill — for alpha in
     // {1, 0, -2.5} x θ, all four payload dtypes, Single, conjugated and
     // recoupling fixtures.
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     for fixture in caller_scale_fixtures() {
         check_destination_scales::<f32>(&mut ctx, &mut executor, &fixture);
@@ -2334,7 +1973,8 @@ fn destination_scales_match_the_host_replay_followed_by_an_in_place_block_scale(
 fn a_zero_caller_scale_with_destination_scales_writes_the_hosts_zeros() {
     // What: alpha = 0 takes the zero route whatever θ is, so a NaN source
     // does not reach the destination, as the host's θ * scale(x, 0) (#1438).
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let scales = alternating_scales(&fixture);
@@ -2363,9 +2003,10 @@ fn a_zero_caller_scale_with_destination_scales_writes_the_hosts_zeros() {
 #[ignore = "requires a real CUDA device"]
 fn destination_scales_reuse_the_unscaled_structure_and_transfer_nothing_warm() {
     // What: θ is in no key and uploads nothing — a scaled replay after an
-    // unscaled one of the same structure prepares no structure, asks for no
-    // plan entry, misses no plan and moves no byte.
-    let mut ctx = context();
+    // unscaled one of the same structure prepares no structure and moves no
+    // byte.
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let scales = alternating_scales(&fixture);
@@ -2390,21 +2031,14 @@ fn destination_scales_reuse_the_unscaled_structure_and_transfer_nothing_warm() {
     };
     replay(&mut ctx, &[]);
     replay(&mut ctx, &[]);
-    let plans = ctx.plan_cache_stats().unwrap();
     let before = cuda_transfer_stats();
     replay(&mut ctx, &scales);
     replay(&mut ctx, &scales);
     let warm = stats_delta(before, cuda_transfer_stats());
-    let plans_after = ctx.plan_cache_stats().unwrap();
     assert_eq!(warm.h2d_calls, 0, "{warm:?}");
     assert_eq!(warm.d2h_calls, 0, "{warm:?}");
     assert_eq!(warm.device_allocs, 0, "{warm:?}");
     assert_eq!(executor.prepared_structures(), 1);
-    assert_eq!(
-        plans_after.misses, plans.misses,
-        "{plans:?} -> {plans_after:?}"
-    );
-    assert_eq!(plans_after.evictions, plans.evictions);
     assert_close(
         &dst.download(&ctx).unwrap(),
         &host_replay_then_scale(
@@ -2421,7 +2055,8 @@ fn destination_scales_reuse_the_unscaled_structure_and_transfer_nothing_warm() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn unsorted_or_vanishing_destination_scales_are_rejected_before_any_device_work() {
-    let mut ctx = context();
+    let mut ctx_engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
     let fixture = mixed_single_and_multi();
     let mut scales = alternating_scales(&fixture);
@@ -2463,99 +2098,75 @@ fn unsorted_or_vanishing_destination_scales_are_rejected_before_any_device_work(
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn zero_fill_plans_are_reserved_at_the_first_zero_scale_replay() {
-    // What: a nonzero-scale replay reserves exactly the plans it submits; the
-    // zero fills a zero caller scale writes over every written destination
-    // (#1438) are reserved by the first such replay, before it submits them,
-    // and only once.
-    let mut ctx = context();
-    let mut executor = CudaTreeTransformExecutor::default();
-    let mut held = Held::<f64>::new(&ctx, many_distinct_signatures(70));
-
-    held.replay(&mut ctx, &mut executor);
-    assert_eq!(
-        ctx.reserved_plan_entries(),
-        70,
-        "one plan per transposing move"
-    );
-    assert_eq!(executor.required_plan_entries(), 70);
-
-    let before = ctx.plan_cache_stats().unwrap();
-    held.replay_scaled(&mut ctx, &mut executor, 0.0);
-    let after = ctx.plan_cache_stats().unwrap();
-    assert_eq!(ctx.reserved_plan_entries(), 140, "one fill per destination");
-    assert_eq!(executor.required_plan_entries(), 140);
-    assert_eq!(after.evictions, before.evictions, "{before:?} -> {after:?}");
-    assert_eq!(
-        held.dst.download(&ctx).unwrap(),
-        vec![0.0; held.fixture.dst_len()]
-    );
-
-    // Warm in both scales: nothing more reserved, missed or evicted.
-    held.replay_scaled(&mut ctx, &mut executor, -0.0);
-    held.replay(&mut ctx, &mut executor);
-    let warm = ctx.plan_cache_stats().unwrap();
-    assert_eq!(ctx.reserved_plan_entries(), 140);
-    assert_eq!(
-        (warm.misses, warm.evictions),
-        (after.misses, after.evictions)
-    );
-    let source = held.fixture.source::<f64>();
-    let zeros = vec![0.0; held.fixture.dst_len()];
-    assert_close(
-        &held.dst.download(&ctx).unwrap(),
-        &held.fixture.expected(&source, &zeros, true),
-        "nonzero replay after a zero-scale one",
-    );
-
-    executor.clear(&mut ctx);
-    assert_eq!(ctx.reserved_plan_entries(), 0, "clear returns both parts");
+fn a_single_member_overwrite_refuses_a_foreign_source_before_zeroing_inactive_layouts() {
+    // What: the source belongs to engine A, the destination and context to
+    // engine B on the same device. The overwrite is refused before its
+    // inactive-layout zero fill, so B's destination keeps every element.
+    let structure = Arc::new(BlockStructure::packed_column_major(1, [vec![2], vec![3]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[TreeTransformBlockSpec::single(0, 0, 1.0_f64)],
+    )
+    .unwrap();
+    let regions =
+        CudaSingleMemberRegions::prepare(&transform, &structure, &structure, 5, 5, 5, 5, 1)
+            .unwrap();
+    assert_eq!(regions.zeros().len(), 1);
+    let (mut first, mut second) = (engine(), engine());
+    let source = {
+        let a = CudaDenseContext::new(&mut first).unwrap();
+        CudaStorage::upload_owned(&a, vec![1.0_f64; 5]).unwrap()
+    };
+    let mut b = CudaDenseContext::new(&mut second).unwrap();
+    b.reserve_zero_template::<f64>(5).unwrap();
+    let before_values = vec![7.0_f64, 8.0, 9.0, 10.0, 11.0];
+    let mut destination = CudaStorage::upload_owned(&b, before_values.clone()).unwrap();
+    let before = cuda_transfer_stats();
+    assert!(regions
+        .execute_overwrite(&mut b, &source, None, &mut destination)
+        .is_err());
+    assert_eq!(cuda_transfer_stats(), before, "nothing reached the device");
+    assert_eq!(destination.download(&b).unwrap(), before_values);
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn an_evicted_structure_returns_its_zero_fill_reservation() {
-    // What: the zero-fill part travels with its structure, so an eviction
-    // releases it and a re-preparation starts without it again.
-    let mut ctx = context();
-    let mut executor = CudaTreeTransformExecutor::with_structure_entries(
-        1 << 20,
-        DEFAULT_PLAN_CACHE_BUDGET_BYTES,
-        1,
-    );
-    let mut large = Held::<f64>::new(&ctx, many_distinct_signatures(12));
-    let mut small = Held::<f64>::new(&ctx, many_distinct_signatures(3));
-
-    large.replay_scaled(&mut ctx, &mut executor, 0.0);
-    assert_eq!(ctx.reserved_plan_entries(), 24);
-    small.replay(&mut ctx, &mut executor);
-    assert_eq!(ctx.reserved_plan_entries(), 3, "the eviction released 24");
-    large.replay(&mut ctx, &mut executor);
-    assert_eq!(ctx.reserved_plan_entries(), 12, "re-prepared without fills");
-    executor.clear(&mut ctx);
-    assert_eq!(ctx.reserved_plan_entries(), 0);
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn a_zero_fill_reservation_lands_on_its_own_context() {
-    let mut a = context();
-    let mut b = context();
+fn a_replay_refuses_a_foreign_source_at_every_scale_before_any_device_work() {
+    // What: a cold executor on engine B, given B's destination and a source of
+    // engine A on the same device, is refused by admission before it prepares
+    // (uploads) any state or writes the destination — also at a zero scale,
+    // whose arithmetic never reads the source.
+    let fixture = rank_sweep().remove(3);
+    let structure = fixture.compile();
+    let (mut first, mut second) = (engine(), engine());
+    let source = {
+        let a = CudaDenseContext::new(&mut first).unwrap();
+        CudaStorage::<f64>::upload(&a, &fixture.source::<f64>()).unwrap()
+    };
+    let mut b = CudaDenseContext::new(&mut second).unwrap();
+    let before_values = vec![-1.0_f64; fixture.dst_len()];
+    let mut destination = CudaStorage::<f64>::upload(&b, &before_values).unwrap();
     let mut executor = CudaTreeTransformExecutor::default();
-    let mut on_a = Held::<f64>::new(&a, many_distinct_signatures(12));
-    let mut on_b = Held::<f64>::new(&b, many_distinct_signatures(12));
-
-    on_a.replay(&mut a, &mut executor);
-    on_b.replay(&mut b, &mut executor);
-    on_b.replay_scaled(&mut b, &mut executor, 0.0);
-    assert_eq!(a.reserved_plan_entries(), 12);
-    assert_eq!(b.reserved_plan_entries(), 24);
-    assert_eq!(executor.required_plan_entries(), 36);
-
-    executor.clear(&mut b);
-    assert_eq!(b.reserved_plan_entries(), 0);
-    assert_eq!(a.reserved_plan_entries(), 12, "clearing B must not touch A");
-    on_a.replay(&mut a, &mut executor);
-    executor.clear(&mut a);
-    assert_eq!(a.reserved_plan_entries(), 0);
+    for alpha in [1.0_f64, 0.0] {
+        let before = cuda_transfer_stats();
+        assert!(executor
+            .replay(
+                &mut b,
+                &structure,
+                &fixture.dst_structure(),
+                &fixture.src_structure(),
+                &mut destination,
+                &source,
+                alpha,
+                CudaTreeTransformDestination::Overwrite,
+            )
+            .is_err());
+        assert_eq!(
+            cuda_transfer_stats(),
+            before,
+            "alpha {alpha}: no device work"
+        );
+    }
+    assert_eq!(destination.download(&b).unwrap(), before_values);
 }

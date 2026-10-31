@@ -10,6 +10,7 @@
 //! and the structure lookups every call makes.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{
@@ -129,9 +130,10 @@ fn su3_leg(leg: usize, sectors: usize) -> GradedSpace<symtn::sector::LieGroupFus
 
 /// `[l0, l1] <- [l0, l3]` traced over its first codomain and domain legs.
 macro_rules! trace_source {
-    ($runtime:expr, $leg:expr, $sectors:expr, $scalar:ty, $seed:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr, $sectors:expr, $scalar:ty, $seed:expr) => {{
         let legs: Vec<_> = (0..4).map(|leg| $leg(leg, $sectors)).collect();
         TensorMap::<_, $scalar>::rand_with_seed(
+            $engine,
             $runtime,
             [&legs[0], &legs[1]],
             [&legs[0], &legs[3]],
@@ -144,21 +146,21 @@ macro_rules! trace_source {
 /// `(source blocks, lookups of CALLS warm calls, the same with the compiled
 /// traces disabled)`.
 macro_rules! warm_lookups {
-    ($leg:expr, $sectors:expr) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let source = trace_source!(&runtime, $leg, $sectors, f64, 2416);
-        let calls = || {
+    ($engine:ident, $leg:expr, $sectors:expr) => {{
+        let runtime = Runtime::builder().build().unwrap();
+        let source = trace_source!($engine, &runtime, $leg, $sectors, f64, 2416);
+        let calls = |$engine: &mut dyn Engine| {
             for _ in 0..CALLS {
-                source.trace_pairs(PAIRS).unwrap();
+                source.trace_pairs($engine, PAIRS).unwrap();
             }
         };
         for _ in 0..2 {
-            source.trace_pairs(PAIRS).unwrap();
+            source.trace_pairs($engine, PAIRS).unwrap();
         }
-        let cached = lookups_over(calls);
+        let cached = lookups_over(|| calls($engine));
         let uncached = without_compiled_traces(|| {
-            source.trace_pairs(PAIRS).unwrap();
-            lookups_over(calls)
+            source.trace_pairs($engine, PAIRS).unwrap();
+            lookups_over(|| calls($engine))
         });
         (source.subblock_count(), cached, uncached)
     }};
@@ -173,6 +175,7 @@ macro_rules! warm_lookups {
 /// which is what the hit removes.
 #[test]
 fn a_warm_trace_is_one_compiled_lookup_per_call() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let check = |label: &str, (blocks, cached, uncached): (usize, Lookups, Lookups), grouped| {
         assert_eq!(cached.completed, (CALLS, 0), "{label} B={blocks}");
@@ -187,13 +190,13 @@ fn a_warm_trace_is_one_compiled_lookup_per_call() {
         blocks
     };
     for sectors in [3, 6] {
-        check("U(1)", warm_lookups!(u1_leg, sectors), false);
-        check("SU(2)", warm_lookups!(su2_leg, sectors), true);
+        check("U(1)", warm_lookups!(engine, u1_leg, sectors), false);
+        check("SU(2)", warm_lookups!(engine, su2_leg, sectors), true);
     }
     #[cfg(feature = "cgc-gen")]
     {
-        let small = check("SU(3)", warm_lookups!(su3_leg, 3), true);
-        let large = check("SU(3)", warm_lookups!(su3_leg, 6), true);
+        let small = check("SU(3)", warm_lookups!(engine, su3_leg, 3), true);
+        let large = check("SU(3)", warm_lookups!(engine, su3_leg, 6), true);
         assert!(large > small);
     }
 }
@@ -223,31 +226,38 @@ fn same_bits<T: Bits>(a: &[T], b: &[T]) -> bool {
 /// Bits of the warm (hit), uncached and cold-after-clear traces of one
 /// source, for `trace_pairs` and `trace_pairs_into`.
 macro_rules! check_values {
-    ($label:expr, $leg:expr, $sectors:expr, $scalar:ty) => {{
+    ($engine:ident, $label:expr, $leg:expr, $sectors:expr, $scalar:ty) => {{
         let label = $label;
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let source = trace_source!(&runtime, $leg, $sectors, $scalar, 2417);
-        let first = source.trace_pairs(PAIRS).unwrap();
+        let runtime = Runtime::builder().build().unwrap();
+        let source = trace_source!($engine, &runtime, $leg, $sectors, $scalar, 2417);
+        let first = source.trace_pairs($engine, PAIRS).unwrap();
         let hits = info(StructureCacheKind::CompletedTreeTransformer).hits();
-        let warm = source.trace_pairs(PAIRS).unwrap();
+        let warm = source.trace_pairs($engine, PAIRS).unwrap();
         assert!(
             info(StructureCacheKind::CompletedTreeTransformer).hits() > hits,
             "{label}: the repeat must hit"
         );
         // A fresh payload each: a clone shares its storage.
-        let mut into = source.trace_pairs(PAIRS).unwrap();
+        let mut into = source.trace_pairs($engine, PAIRS).unwrap();
         source
-            .trace_pairs_into(PAIRS, &mut into, <$scalar>::from(2.0), <$scalar>::from(0.5))
+            .trace_pairs_into(
+                $engine,
+                PAIRS,
+                &mut into,
+                <$scalar>::from(2.0),
+                <$scalar>::from(0.5),
+            )
             .unwrap();
         let (uncached, mut uncached_into) = without_compiled_traces(|| {
             (
-                source.trace_pairs(PAIRS).unwrap(),
-                source.trace_pairs(PAIRS).unwrap(),
+                source.trace_pairs($engine, PAIRS).unwrap(),
+                source.trace_pairs($engine, PAIRS).unwrap(),
             )
         });
         without_compiled_traces(|| {
             source
                 .trace_pairs_into(
+                    $engine,
                     PAIRS,
                     &mut uncached_into,
                     <$scalar>::from(2.0),
@@ -256,8 +266,8 @@ macro_rules! check_values {
                 .unwrap()
         });
         symtn::cache::clear();
-        let rebuilt = trace_source!(&runtime, $leg, $sectors, $scalar, 2417);
-        let cold = rebuilt.trace_pairs(PAIRS).unwrap();
+        let rebuilt = trace_source!($engine, &runtime, $leg, $sectors, $scalar, 2417);
+        let cold = rebuilt.trace_pairs($engine, PAIRS).unwrap();
         let data = |t: &TensorMap<_, $scalar>| t.dense_data().unwrap().to_vec();
         assert!(!data(&warm).is_empty(), "{label}");
         assert!(same_bits(&data(&warm), &data(&first)), "{label}: warm");
@@ -279,16 +289,17 @@ macro_rules! check_values {
 /// and checked Generic rules.
 #[test]
 fn a_warm_trace_equals_the_uncached_and_cold_traces() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    check_values!("U(1) f64", u1_leg, 4, f64);
-    check_values!("U(1) c64", u1_leg, 4, Complex64);
-    check_values!("SU(2) f64", su2_leg, 4, f64);
-    check_values!("SU(2) c64", su2_leg, 4, Complex64);
-    check_values!("fZ2xU(1) f64", fz2u1_leg, 4, f64);
-    check_values!("fZ2xU(1) c64", fz2u1_leg, 4, Complex64);
+    check_values!(engine, "U(1) f64", u1_leg, 4, f64);
+    check_values!(engine, "U(1) c64", u1_leg, 4, Complex64);
+    check_values!(engine, "SU(2) f64", su2_leg, 4, f64);
+    check_values!(engine, "SU(2) c64", su2_leg, 4, Complex64);
+    check_values!(engine, "fZ2xU(1) f64", fz2u1_leg, 4, f64);
+    check_values!(engine, "fZ2xU(1) c64", fz2u1_leg, 4, Complex64);
     #[cfg(feature = "cgc-gen")]
     {
-        check_values!("SU(3) f64", su3_leg, 3, f64);
-        check_values!("SU(3) c64", su3_leg, 3, Complex64);
+        check_values!(engine, "SU(3) f64", su3_leg, 3, f64);
+        check_values!(engine, "SU(3) c64", su3_leg, 3, Complex64);
     }
 }

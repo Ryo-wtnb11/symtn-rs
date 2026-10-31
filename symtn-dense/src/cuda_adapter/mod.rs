@@ -9,17 +9,15 @@
 //! device-boundary concern.
 
 use std::cell::Cell;
-use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use num_complex::{Complex32, Complex64};
-use tenferro_gpu::cuda::{download_tensor, upload_tensor, CudaBackend, CudaDeviceId};
+use tenferro_gpu::cuda::raw::with_cuda_engine;
+use tenferro_gpu::cuda::{download_tensor, upload_tensor, CudaRuntime};
 use tenferro_linalg::{QrGauge, QrOptions, TensorReadLinalgExt};
-use tenferro_tensor::backend::{BackendSession, BackendSessionHost};
 use tenferro_tensor::{
-    CompareDir, ContractionScalar, DotGeneralAccumulation, DotGeneralConfig, Tensor, TensorDot,
-    TensorElementwise, TensorIndexing, TensorRead, TensorReduction, TensorScalar as TenferroScalar,
-    TensorStructural, TensorView, TensorViewMut, TensorWrite, TypedTensor,
+    AllocationDomainId, CompareDir, ContractionScalar, DotGeneralAccumulation, DotGeneralConfig,
+    Engine, Tensor, TensorRead, TensorScalar as TenferroScalar, TensorView, TensorViewMut,
+    TensorWrite, TypedTensor,
 };
 
 use super::{DenseBackend, DenseDType, DenseError, MatrixOp};
@@ -28,9 +26,6 @@ use crate::cuda_hermitian::{
 };
 use crate::cuda_region::{
     validate_destination_layout, validate_gather_rows, validate_region, CudaRegion,
-};
-use crate::plan_ledger::{
-    plan_cache_entries_for, PlanEntryLedger, DEFAULT_PLAN_CACHE_BUDGET_BYTES,
 };
 use crate::tensor::dense_dtype_from_tenferro;
 
@@ -47,7 +42,7 @@ mod tests;
 // Re-exports so `crate::cuda_adapter::Item` (what `lib.rs`'s `pub use
 // cuda_adapter::{...}` and every other in-crate caller names) still resolves
 // once the item's *definition* moves into one of the child files above.
-pub use context::{CudaDenseContext, CudaPlanCacheStats};
+pub use context::{CudaDenseContext, CudaScalarOperands};
 pub use elementwise::{
     cuda_conj, cuda_copy_region_into, cuda_copy_strided_into, cuda_gather_elements,
     cuda_gather_member_elements, cuda_gather_members, cuda_region_axpby, cuda_region_scale,
@@ -104,18 +99,23 @@ mod cuda_scalar_sealed {
 ///
 /// Every payload names a **real lane** ([`TenferroScalar::Real`]: `f32` for
 /// `f32` and [`Complex32`], `f64` for `f64` and [`Complex64`]). Real device
-/// metadata — a spectrum, a reduction, the rank-0 divisor of the Hermitian
-/// test — is produced and consumed in that lane rather than in `f64` by
-/// assumption: Tenferro answers a single-precision payload with `F32`
-/// metadata and rejects an `F64` rank-0 divisor against it
-/// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`). Metadata
+/// metadata — a spectrum, a reduction, the Hermitian test's normalizers — is
+/// produced and consumed in that lane rather than in `f64` by assumption:
+/// Tenferro answers a single-precision payload with `F32` metadata and
+/// rejects an `F64` operand against it
+/// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`). A lane
+/// value enters the payload dtype through `From` (`(s, 0)` for a complex
+/// payload) when it must meet the payload in one elementwise op. Metadata
 /// symtn decides on is widened to `f64` at the download, so the host-side
 /// spectrum contract is unchanged.
 ///
 /// Admitting a dtype here does not by itself open a typed tensor API for it;
 /// `symtn`'s `CudaPayload` admits all four (#1336).
 pub trait CudaScalar:
-    TenferroScalar<Real: CudaRealScalar> + PartialEq + cuda_scalar_sealed::Sealed
+    TenferroScalar<Real: CudaRealScalar>
+    + From<<Self as TenferroScalar>::Real>
+    + PartialEq
+    + cuda_scalar_sealed::Sealed
 {
     /// symtn-side dtype tag, used for [`DenseError::DTypeMismatch`].
     const DTYPE: DenseDType;
@@ -167,7 +167,7 @@ pub trait CudaScalar:
 /// Sealed to `f32` and `f64`, which are exactly the
 /// [`TenferroScalar::Real`] types of the admitted payloads. It exists so the
 /// adapter's real-metadata paths — spectrum and reduction downloads, the
-/// rank-0 divisor upload, the Hermitian tolerance — are typed by the payload
+/// Hermitian normalizers, the Hermitian tolerance — are typed by the payload
 /// instead of assuming double precision, while the values symtn's host-side
 /// decisions consume stay `f64`.
 pub trait CudaRealScalar: TenferroScalar + cuda_scalar_sealed::Sealed {
@@ -178,7 +178,7 @@ pub trait CudaRealScalar: TenferroScalar + cuda_scalar_sealed::Sealed {
     /// every `f32` is an `f64`.
     fn widen(self) -> f64;
 
-    /// Narrows a host scalar to this lane, for a rank-0 device operand. The
+    /// Narrows a host scalar to this lane, for a device operand. The
     /// only values narrowed here are powers of two inside this lane's range,
     /// so the value round-trips.
     fn narrow(value: f64) -> Self;
@@ -266,9 +266,9 @@ fn dtype_mismatch<D: CudaScalar>(op: &'static str, tensor: &Tensor) -> DenseErro
     }
 }
 // Why thread-local rather than process-wide or per-context: every record site
-// runs on the thread that called into this module (the device lease in
-// `symtn::runtime::CudaLease` is taken and used on the caller's thread, and no
-// worker or pool thread submits device work), so a thread-local counter
+// runs on the thread that called into this module (the caller's CUDA engine is
+// borrowed on the caller's thread, and no worker or pool thread submits device
+// work), so a thread-local counter
 // attributes exactly the caller's work. A process-wide counter mixes in
 // concurrent callers (#1568); a per-context counter would need the context at
 // sites such as `CudaDenseStorage::download` that do not have it.
@@ -377,22 +377,32 @@ fn cuda_operand_view(op: MatrixOp, rows: usize, cols: usize) -> ([usize; 2], boo
         MatrixOp::Adjoint => ([cols, 1], true),
     }
 }
-/// Validates that every operand resides on the context's CUDA device, so a
-/// storage handle created from one context can't be silently used against
-/// another context's runtime — which would otherwise fail late inside
-/// tenferro/CUDA with a confusing error, or run against the wrong runtime.
-/// `operands` are `(name, device)` pairs; `ctx_device` is `ctx.device`.
+/// Where a device buffer lives: the device ordinal, kept as metadata, and the
+/// allocation domain of the engine that owns it, which is what decides
+/// compatibility. Two engines on one ordinal have distinct domains, and a
+/// buffer of one must never be submitted through the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct CudaPlacement {
+    pub(super) ordinal: usize,
+    pub(super) domain: AllocationDomainId,
+}
+/// Validates that every operand belongs to the context's engine (its
+/// allocation domain, not only its device ordinal), so a buffer from another
+/// engine is refused before any submission instead of failing late inside
+/// tenferro/CUDA or running against the wrong runtime.
 fn ensure_cuda_device(
-    ctx_device: usize,
+    ctx_device: CudaPlacement,
     op: &'static str,
-    operands: &[(&str, usize)],
+    operands: &[(&str, CudaPlacement)],
 ) -> Result<(), DenseError> {
     for (name, device) in operands {
         if *device != ctx_device {
             return Err(cuda_error(
                 op,
                 format!(
-                    "operand `{name}` is on CUDA device {device} but the context is on device {ctx_device}"
+                    "operand `{name}` belongs to another CUDA engine (device {}, {:?}) than the \
+                     supplied one (device {}, {:?})",
+                    device.ordinal, device.domain, ctx_device.ordinal, ctx_device.domain
                 ),
             ));
         }
@@ -421,8 +431,8 @@ fn download_values<R: CudaRealScalar>(
     ctx: &CudaDenseContext,
     tensor: &Tensor,
 ) -> Result<Vec<f64>, DenseError> {
-    let host = download_tensor(ctx.backend.runtime(), tensor)
-        .map_err(|err| cuda_error("cuda_download", err))?;
+    let host =
+        download_tensor(&ctx.runtime, tensor).map_err(|err| cuda_error("cuda_download", err))?;
     if host.dtype() != R::dtype() {
         return Err(cuda_error(
             "cuda_download",

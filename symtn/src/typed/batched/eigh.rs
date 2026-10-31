@@ -1,4 +1,7 @@
 use super::*;
+#[cfg(feature = "cuda")]
+use crate::typed::ensure_cuda_owns;
+use symtn_dense::Engine;
 
 /// The factors of one [`EighFullPlan::execute`], borrowed from its workspace.
 ///
@@ -58,12 +61,7 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// # Retained state and shared effects
 ///
 /// Each workspace owns its output stacks and host spectra, reported by
-/// [`EighFullWorkspace::retained_bytes`] and freed on drop. It reserves
-/// nothing in the
-/// device context's plan-entry ledger: no step submits a cuTENSOR
-/// contraction (the admission and gather are CubeCL kernels, and the
-/// materializations and copies are permutations, which Tenferro caches
-/// separately).
+/// [`EighFullWorkspace::retained_bytes`] and freed on drop.
 ///
 /// ```
 /// use std::sync::Arc;
@@ -73,14 +71,15 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// };
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-/// let stack = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(
+/// let stack = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&leg], [&leg],
 /// )?])?;
-/// let plan = EighFullPlan::new(&stack, &[0], &[1], HermitianTol::DEFAULT)?;
+/// let plan = EighFullPlan::new(engine, &stack, &[0], &[1], HermitianTol::DEFAULT)?;
 /// let mut workspace = plan.workspace()?;
-/// let _output = plan.execute(&stack, &mut workspace)?;
+/// let _output = plan.execute(engine, &stack, &mut workspace)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -182,11 +181,14 @@ where
     /// payload, a layout without packed coupled-sector regions, or leg roles
     /// other than the current split.
     pub fn new(
+        engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D, S>,
         rows: &[usize],
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Self, Error> {
+        // Host-local work: the engine is the uniform call shape.
+        let _ = engine;
         let nout = source.space.space().nout();
         if !rows.iter().copied().eq(0..nout)
             || !cols.iter().copied().eq(nout..source.space.space().rank())
@@ -203,7 +205,6 @@ where
             }
             .into());
         }
-        let _host_pool = source.runtime.enter_host_pool();
         let space = source.space.space();
         symtn_matrixalgebra::seam::EndomorphismFamily::EighFull
             .require_endomorphism(space.homspace())?;
@@ -263,12 +264,6 @@ impl<R: SectorCodec, D, S> EighFullWorkspace<R, D, S> {
         self.output.take_output()
     }
 
-    /// The output buffers for a call over `members`, taken after the source
-    /// is admitted so a rejected call keeps buffers of any member count.
-    fn take_buffers(&mut self, members: usize) -> Option<StackPair<R, D, S>> {
-        self.output.take().filter(|(d, _)| d.members == members)
-    }
-
     /// Bytes retained exclusively by this workspace: output payloads, host
     /// spectra, and Host/CUDA staging buffers. The shared plan and backend
     /// context resources are not included.
@@ -312,6 +307,23 @@ impl<R: SectorCodec, D, S> EighFullPlan<R, D, S> {
                 "eigh workspace belongs to another plan".into(),
             ))
         }
+    }
+
+    /// The source's signature, then the retained `buffers` kept only at its
+    /// member count: a rejected source keeps buffers of any member count.
+    pub(in crate::typed) fn admit_stack_source(
+        &self,
+        source: &StackedTensorMap<R, D, S>,
+        buffers: &mut Option<StackPair<R, D, S>>,
+    ) -> Result<(), Error> {
+        self.check_source(source)?;
+        if buffers
+            .as_ref()
+            .is_some_and(|(d, _)| d.members != source.members)
+        {
+            *buffers = None;
+        }
+        Ok(())
     }
 
     fn check_source(&self, source: &StackedTensorMap<R, D, S>) -> Result<(), Error> {
@@ -418,21 +430,25 @@ where
     /// another plan is rejected before it is touched. Once the workspace is
     /// bound to this plan, any execution error leaves no observable output.
     ///
-    /// On CUDA, non-Hermitian members are found by the batched admission
+    /// On CUDA, factors the workspace retained for another engine are dropped
+    /// before any solver work and rebuilt on this one; a source of another
+    /// engine is refused before any device work. Non-Hermitian members are
+    /// found by the batched admission
     /// before any solver launch, and [`BatchError::Solver`] is returned when
     /// the solver reports a numerical failure on a block. Argument, bounds
     /// and backend failures are [`BatchError::Operation`].
     pub fn execute<'a>(
         &self,
+        engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D, S>,
         workspace: &'a mut EighFullWorkspace<R, D, S>,
     ) -> Result<EighStackOutput<'a, R, D, S>, BatchError> {
         self.check_workspace(workspace)?;
-        if let Err(error) = self.check_source(source) {
-            return Err(workspace.output.hide(error.into()));
-        }
-        let mut buffers = workspace.take_buffers(source.members);
-        if let Err(error) = S::eigh_full_stack(EXEC, self, source, &mut buffers, workspace) {
+        // The stack call drops buffers of another engine before it checks
+        // the source, so no error keeps them.
+        let mut buffers = workspace.output.take();
+        if let Err(error) = S::eigh_full_stack(engine, EXEC, self, source, &mut buffers, workspace)
+        {
             return Err(workspace.output.fail(buffers, error));
         }
         if let Err(error) = self.publish(workspace, source.members) {
@@ -456,10 +472,12 @@ where
     /// its diagonals.
     pub(in crate::typed) fn run_host(
         &self,
+        engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D>,
         buffers: &mut Option<StackPair<R, D, Vec<D>>>,
         sorted: &mut Vec<f64>,
     ) -> Result<(), BatchError> {
+        self.admit_stack_source(source, buffers)?;
         let members = source.members;
         let len = self.member_len;
         let plan = &self.routes;
@@ -530,62 +548,66 @@ where
         let runtime = self.runtime.clone();
         let mut dense = runtime.lease_dense();
         // One linear-algebra scope for the batch: eager opens one per member.
-        let faults = symtn_matrixalgebra::seam::in_linalg_scope(dense.dense(), |dense| {
-            let mut faults = Vec::new();
-            for member in 0..members {
-                let data = &storage[member * len..(member + 1) * len];
-                symtn_matrixalgebra::seam::require_finite_eigh_input(data)?;
-                let values = &mut sorted[member * total..(member + 1) * total];
-                let d_member = &mut d_storage[member * d_len..(member + 1) * d_len];
-                let v_member = &mut v_storage[member * v_len..(member + 1) * v_len];
-                for (index, route) in routes.iter().enumerate() {
-                    let n = route.rank();
-                    let region = &source_regions[route.source_region()];
-                    let values = &mut values[spectrum_offsets[index]..][..n];
-                    let vectors = match symtn_matrixalgebra::seam::eigh_sector_into(
-                        dense,
-                        &data[region.range()],
-                        n,
-                        &mut scratch,
-                        values,
-                    ) {
-                        Ok(vectors) => vectors,
-                        // The eager rejection of a non-finite eigenvalue;
-                        // every other member is still solved so all of them
-                        // are named. An executor's own numerical failure is
-                        // not a member fault.
-                        Err(OperationError::Dense(symtn_dense::DenseError::NumericalFailure {
-                            op: symtn_matrixalgebra::seam::EIGH_EIGENVALUE_CHECK,
-                            ..
-                        })) => {
-                            faults.push((member, MemberFault::NonFiniteEigenvalue));
-                            break;
+        let faults =
+            symtn_matrixalgebra::seam::in_linalg_scope(engine, dense.dense(), |dense, engine| {
+                let mut faults = Vec::new();
+                for member in 0..members {
+                    let data = &storage[member * len..(member + 1) * len];
+                    symtn_matrixalgebra::seam::require_finite_eigh_input(data)?;
+                    let values = &mut sorted[member * total..(member + 1) * total];
+                    let d_member = &mut d_storage[member * d_len..(member + 1) * d_len];
+                    let v_member = &mut v_storage[member * v_len..(member + 1) * v_len];
+                    for (index, route) in routes.iter().enumerate() {
+                        let n = route.rank();
+                        let region = &source_regions[route.source_region()];
+                        let values = &mut values[spectrum_offsets[index]..][..n];
+                        let vectors = match symtn_matrixalgebra::seam::eigh_sector_into(
+                            engine,
+                            dense,
+                            &data[region.range()],
+                            n,
+                            &mut scratch,
+                            values,
+                        ) {
+                            Ok(vectors) => vectors,
+                            // The eager rejection of a non-finite eigenvalue;
+                            // every other member is still solved so all of them
+                            // are named. An executor's own numerical failure is
+                            // not a member fault.
+                            Err(OperationError::Dense(
+                                symtn_dense::DenseError::NumericalFailure {
+                                    op: symtn_matrixalgebra::seam::EIGH_EIGENVALUE_CHECK,
+                                    ..
+                                },
+                            )) => {
+                                faults.push((member, MemberFault::NonFiniteEigenvalue));
+                                break;
+                            }
+                            Err(other) => return Err(other),
+                        };
+                        // One contiguous copy for an aligned route, one row slice
+                        // per column and codomain tree otherwise.
+                        let (ref range, target_rows) = targets[index];
+                        let target = &mut v_member[range.clone()];
+                        for &(source_row, target_row, rows) in &copies[index] {
+                            if rows == n && target_rows == n {
+                                target.copy_from_slice(&vectors);
+                                continue;
+                            }
+                            for column in 0..n {
+                                target[column * target_rows + target_row..][..rows]
+                                    .copy_from_slice(&vectors[column * n + source_row..][..rows]);
+                            }
                         }
-                        Err(other) => return Err(other),
-                    };
-                    // One contiguous copy for an aligned route, one row slice
-                    // per column and codomain tree otherwise.
-                    let (ref range, target_rows) = targets[index];
-                    let target = &mut v_member[range.clone()];
-                    for &(source_row, target_row, rows) in &copies[index] {
-                        if rows == n && target_rows == n {
-                            target.copy_from_slice(&vectors);
-                            continue;
+                        let (offset, step) = diagonals[index];
+                        for (position, &value) in values.iter().enumerate() {
+                            d_member[offset + position * step] = D::from_real(value);
                         }
-                        for column in 0..n {
-                            target[column * target_rows + target_row..][..rows]
-                                .copy_from_slice(&vectors[column * n + source_row..][..rows]);
-                        }
-                    }
-                    let (offset, step) = diagonals[index];
-                    for (position, &value) in values.iter().enumerate() {
-                        d_member[offset + position * step] = D::from_real(value);
                     }
                 }
-            }
-            Ok(faults)
-        })
-        .map_err(Error::from)?;
+                Ok(faults)
+            })
+            .map_err(Error::from)?;
         drop(dense);
         if !faults.is_empty() {
             return Err(BatchError::MemberRejected { members: faults });
@@ -821,17 +843,33 @@ where
     /// every member's sorted eigenvalues, member-major (`Σ n` per member).
     pub(in crate::typed) fn run_cuda(
         &self,
+        engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D, CudaStorage<D>>,
         buffers: &mut Option<StackPair<R, D, CudaStorage<D>>>,
         sorted: &mut Vec<f64>,
         orders: &mut Vec<usize>,
     ) -> Result<(), BatchError> {
         let members = source.members;
-        let runtime = self.runtime.clone();
         let device = &self.routes;
-        let mut lease = runtime.lease_cuda()?;
+        // Factors retained for another engine are dropped first, before the
+        // source check and any solver work, so no error of this call keeps
+        // them (a non-CUDA engine owns none of them either).
+        let mut lease = match crate::runtime::cuda_call(engine) {
+            Ok(lease) => lease,
+            Err(error) => {
+                *buffers = None;
+                return Err(error.into());
+            }
+        };
         let cuda = &mut *lease;
         let routes = &device.routes;
+        if buffers.as_ref().is_some_and(|(d, v)| {
+            ensure_cuda_owns(cuda, "eigh_full", &[&d.storage.0, &v.storage.0]).is_err()
+        }) {
+            *buffers = None;
+        }
+        self.admit_stack_source(source, buffers)?;
+        ensure_cuda_owns(cuda, "eigh_full", &[&source.storage.0])?;
 
         let accepted = symtn_dense::cuda_hermitian_regions_batched::<D>(
             cuda,

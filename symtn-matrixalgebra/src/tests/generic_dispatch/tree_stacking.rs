@@ -41,6 +41,7 @@ fn region_payloads(
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_facade_layouts_take_the_direct_region_path() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let v = SectorLeg::new([(SectorId::new(0), 1), (x, 2)], false);
     let w = SectorLeg::new([(x, 1)], false);
@@ -84,17 +85,17 @@ fn checked_generic_facade_layouts_take_the_direct_region_path() {
 
         let generic_pair_rec = crate::probe::record();
         let compact_qr_copy_rec = crate::probe::record();
-        let qr = qr_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+        let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &qr.q, None, &qr.r);
         assert_eq!(compact_qr_copy_rec.compact_qr_copy().input_pack_bytes, 0);
 
         let compact_svd_copy_rec = crate::probe::record();
-        let svd = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+        let svd = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &svd.u, Some(&svd.s), &svd.vh);
         assert_eq!(compact_svd_copy_rec.compact_svd_copy().input_pack_bytes, 0);
 
         let compact_lq_copy_rec = crate::probe::record();
-        let lq = lq_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+        let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
         assert_compact_factors_reconstruct_input(&input, &lq.l, None, &lq.q);
         assert_eq!(compact_lq_copy_rec.compact_lq_copy().input_pack_bytes, 0);
 
@@ -141,6 +142,7 @@ fn checked_generic_facade_layouts_take_the_direct_region_path() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_mis_stacked_tiling_scatters_factors_and_refuses_eigenvalues() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical, hermitian, general) = generic_values_endomorphism_input();
     let structure = canonical.space().structure();
     let matrix = structure
@@ -230,7 +232,7 @@ fn checked_generic_mis_stacked_tiling_scatters_factors_and_refuses_eigenvalues()
 
     let compact_qr_copy_rec = crate::probe::record();
     let generic_pair_rec = crate::probe::record();
-    let qr = qr_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &qr.q, None, &qr.r);
     assert_eq!(compact_qr_copy_rec.compact_qr_copy().input_pack_bytes, 0);
     assert_eq!(
@@ -239,9 +241,9 @@ fn checked_generic_mis_stacked_tiling_scatters_factors_and_refuses_eigenvalues()
             .canonical_publications,
         0
     );
-    let svd = svd_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let svd = svd_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &svd.u, Some(&svd.s), &svd.vh);
-    let lq = lq_compact_dyn_checked_generic(&mut dense, &input).unwrap();
+    let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &lq.l, None, &lq.q);
 
     let hermitian_input = BoundDynamicTensorRef::try_new(&space, &hermitian_data).unwrap();
@@ -275,6 +277,7 @@ where
         + fmt::Debug
         + 'static,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(rule.clone());
     let general = mis_stacked_endomorphism_copy(&rule, &tsvd_test_tensor(&rule, sectors));
     let hermitian = mis_stacked_endomorphism_copy(&rule, &hermitian_test_tensor(&rule, sectors));
@@ -282,14 +285,19 @@ where
     let hermitian_bound = bound_tensor(Arc::clone(&provider), &hermitian);
     let (general, hermitian) = (general_bound.as_ref(), hermitian_bound.as_ref());
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    assert_stacking_refusal(eig_vals(&mut dense, &general), "eig_vals ");
-    assert_stacking_refusal(eig_full(&mut dense, &general), "eig_full ");
-    assert_stacking_refusal(eigh_vals(&mut dense, &hermitian), "eigh_vals ");
-    assert_stacking_refusal(eigh_full(&mut dense, &hermitian), "eigh_full ");
-    assert_stacking_refusal(exp(&mut dense, &general), "exp ");
-    assert_stacking_refusal(exp(&mut dense, &hermitian), "exp ");
+    assert_stacking_refusal(eig_vals(engine, &mut dense, &general), "eig_vals ");
+    assert_stacking_refusal(eig_full(engine, &mut dense, &general), "eig_full ");
+    assert_stacking_refusal(eigh_vals(engine, &mut dense, &hermitian), "eigh_vals ");
+    assert_stacking_refusal(eigh_full(engine, &mut dense, &hermitian), "eigh_full ");
+    assert_stacking_refusal(exp(engine, &mut dense, &general), "exp ");
+    assert_stacking_refusal(exp(engine, &mut dense, &hermitian), "exp ");
     assert_stacking_refusal(
-        exp_direct_into_dyn(&mut dense, &general.dynamic(), general.space().clone()),
+        exp_direct_into_dyn(
+            engine,
+            &mut dense,
+            &general.dynamic(),
+            general.space().clone(),
+        ),
         "exp ",
     );
 
@@ -302,17 +310,33 @@ where
     let hermitian_adjoint = hermitian_bound.space().adjoint_view().unwrap();
     let hermitian_adjoint =
         BoundDynamicTensorRef::try_new(&hermitian_adjoint, hermitian_bound.data()).unwrap();
-    assert_stacking_refusal(eig_vals_dyn(&mut dense, &general_adjoint), "eig_vals ");
-    assert_stacking_refusal(eig_full_dyn(&mut dense, &general_adjoint), "eig_full ");
     assert_stacking_refusal(
-        eigh_vals_dyn(&mut dense, &hermitian_adjoint, HermitianTol::DEFAULT),
+        eig_vals_dyn(engine, &mut dense, &general_adjoint),
+        "eig_vals ",
+    );
+    assert_stacking_refusal(
+        eig_full_dyn(engine, &mut dense, &general_adjoint),
+        "eig_full ",
+    );
+    assert_stacking_refusal(
+        eigh_vals_dyn(
+            engine,
+            &mut dense,
+            &hermitian_adjoint,
+            HermitianTol::DEFAULT,
+        ),
         "eigh_vals ",
     );
     assert_stacking_refusal(
-        eigh_full_dyn(&mut dense, &hermitian_adjoint, HermitianTol::DEFAULT),
+        eigh_full_dyn(
+            engine,
+            &mut dense,
+            &hermitian_adjoint,
+            HermitianTol::DEFAULT,
+        ),
         "eigh_full ",
     );
-    assert_stacking_refusal(exp_into_mf(&mut dense, &general_adjoint), "exp ");
+    assert_stacking_refusal(exp_into_mf(engine, &mut dense, &general_adjoint), "exp ");
 }
 
 #[test]
@@ -344,6 +368,7 @@ fn multiplicity_free_eigen_ops_refuse_mis_stacked_su2_endomorphisms() {
 
 #[test]
 fn multiplicity_free_eigen_ops_accept_consistently_reordered_tree_stacking() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the guard is stacking identity, not canonical order — reversing
     // rows and columns together is the same operator in a permuted basis and
     // keeps the facade spectra.
@@ -357,10 +382,20 @@ fn multiplicity_free_eigen_ops_accept_consistently_reordered_tree_stacking() {
     let reordered_hermitian = reversed_coupled_tree_basis_copy(&rule, &hermitian);
 
     let eig = |dense: &mut symtn_dense::DefaultDenseExecutor, tensor| {
-        eig_vals(dense, &bound_tensor_ref!(Arc::clone(&provider), tensor)).unwrap()
+        eig_vals(
+            &mut symtn_dense::CpuEngine::serial(),
+            dense,
+            &bound_tensor_ref!(Arc::clone(&provider), tensor),
+        )
+        .unwrap()
     };
     let eigh = |dense: &mut symtn_dense::DefaultDenseExecutor, tensor| {
-        eigh_vals(dense, &bound_tensor_ref!(Arc::clone(&provider), tensor)).unwrap()
+        eigh_vals(
+            &mut symtn_dense::CpuEngine::serial(),
+            dense,
+            &bound_tensor_ref!(Arc::clone(&provider), tensor),
+        )
+        .unwrap()
     };
     for (left, right) in eig(&mut dense, &general)
         .iter()
@@ -381,11 +416,13 @@ fn multiplicity_free_eigen_ops_accept_consistently_reordered_tree_stacking() {
         }
     }
     eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::clone(&provider), &reordered_hermitian),
     )
     .unwrap();
     eig_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::clone(&provider), &reordered_general),
     )
@@ -522,6 +559,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>,
     D: FactorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let reordered = reversed_coupled_tree_basis_copy(provider.as_ref(), facade);
     let facade = bound_tensor(Arc::clone(&provider), facade);
     let reordered = bound_tensor(provider, &reordered);
@@ -536,28 +574,28 @@ where
     let (facade, input) = (facade.dynamic(), reordered.dynamic());
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
-    let expected = svd_compact_dyn(&mut dense, &facade).unwrap();
-    let actual = svd_compact_dyn(&mut dense, &input).unwrap();
+    let expected = svd_compact_dyn(engine, &mut dense, &facade).unwrap();
+    let actual = svd_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, actual.u(), Some(actual.s()), actual.vh());
     assert_factor_matches_facade("svd_compact U", expected.u(), actual.u());
     assert_factor_matches_facade("svd_compact Vh", expected.vh(), actual.vh());
 
     // Why reconstruction only: QR of a column-permuted matrix is a different
     // factorization, so QR/LQ factors are not facade-comparable here.
-    let actual = qr_compact_dyn(&mut dense, &input).unwrap();
+    let actual = qr_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &actual.q, None, &actual.r);
 
-    let actual = lq_compact_dyn(&mut dense, &input).unwrap();
+    let actual = lq_compact_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &actual.l, None, &actual.q);
 
     // Full factorizations publish through the one-sided tree-identity
     // scatter; their completion columns are not unique, so only
     // reconstruction is checked.
-    let actual = svd_full_dyn(&mut dense, &input).unwrap();
+    let actual = svd_full_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, actual.u(), Some(actual.s()), actual.vh());
-    let actual = qr_full_dyn(&mut dense, &input).unwrap();
+    let actual = qr_full_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &actual.q, None, &actual.r);
-    let actual = lq_full_dyn(&mut dense, &input).unwrap();
+    let actual = lq_full_dyn(engine, &mut dense, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &actual.l, None, &actual.q);
 }
 
@@ -571,6 +609,7 @@ where
         + TreeTransformRuleCacheKey<Key = RuleIdentity>
         + Clone,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(rule.clone());
     let hermitian = hermitian_test_tensor(&rule, sectors);
     let general = generic_spectrum_test_tensor(&rule, sectors);
@@ -579,6 +618,7 @@ where
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let eigh = eigh_full(
+        engine,
         &mut dense,
         &bound_tensor_ref!(Arc::clone(&provider), &reordered_hermitian),
     )
@@ -588,7 +628,7 @@ where
     let input = bound_tensor(Arc::clone(&provider), &reordered_hermitian);
     let input = input.as_ref();
     let input = input.dynamic();
-    let eigh = eigh_full_dyn(&mut dense, &input, HermitianTol::DEFAULT).unwrap();
+    let eigh = eigh_full_dyn(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
     let vh = crate::factorize::adjoint_bound_factor(eigh.v()).unwrap();
     let mut vd = eigh.v().clone();
     let vd_space = vd.space().space().clone();
@@ -601,12 +641,12 @@ where
     let reordered = bound_tensor(Arc::clone(&provider), &reordered_general);
     let reordered = reordered.as_ref();
     let reordered = reordered.dynamic();
-    let expected = eig_full_dyn(&mut dense, &facade).unwrap();
-    let actual = eig_full_dyn(&mut dense, &reordered).unwrap();
+    let expected = eig_full_dyn(engine, &mut dense, &facade).unwrap();
+    let actual = eig_full_dyn(engine, &mut dense, &reordered).unwrap();
     assert_eig_columns_match_up_to_scale(expected.v(), actual.v());
 
-    let expected = left_polar_dyn(&mut dense, &facade).unwrap();
-    let actual = left_polar_dyn(&mut dense, &reordered).unwrap();
+    let expected = left_polar_dyn(engine, &mut dense, &facade).unwrap();
+    let actual = left_polar_dyn(engine, &mut dense, &reordered).unwrap();
     assert_factor_matches_facade("left_polar W", &expected.w, &actual.w);
     assert_factor_matches_facade("left_polar P", &expected.p, &actual.p);
 

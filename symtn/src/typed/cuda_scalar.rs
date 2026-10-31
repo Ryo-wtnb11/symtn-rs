@@ -14,7 +14,7 @@ use super::*;
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericFusion, CheckedGenericRigidSymbols, TypedSectorAdmission};
 /// use symtn::typed::{CudaStorage, TensorMap};
 ///
-/// fn no_checked_generic_cuda_operations<R>(
+/// fn no_checked_generic_cuda_operations<R>(engine: &mut dyn symtn::typed::Engine,
 ///     lhs: &TensorMap<R, f64, CudaStorage>,
 ///     rhs: &TensorMap<R, f64, CudaStorage>,
 /// ) where
@@ -22,11 +22,11 @@ use super::*;
 ///         + CheckedGenericFusion
 ///         + CheckedGenericRigidSymbols<Scalar = f64>,
 /// {
-///     let _ = lhs.norm(2.0);
-///     let _ = lhs.inner(rhs);
-///     let _ = lhs.scale(2.0);
-///     let _ = lhs.axpby(2.0, rhs, -3.0);
-///     let _ = lhs.zeros_like();
+///     let _ = lhs.norm(engine, 2.0);
+///     let _ = lhs.inner(engine, rhs);
+///     let _ = lhs.scale(engine, 2.0);
+///     let _ = lhs.axpby(engine, 2.0, rhs, -3.0);
+///     let _ = lhs.zeros_like(engine);
 /// }
 /// ```
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
@@ -42,17 +42,14 @@ where
 {
     fn cuda_zeros_owned(
         &self,
+        engine: &mut dyn Engine,
         required_len: usize,
         source: &CudaStorage<D>,
     ) -> Result<CudaStorage<D>, Error> {
-        let mut lease = self.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        Self::validate_cuda_owned_metadata(
-            Placement::Cuda(cuda.device()),
-            source.placement(),
-            required_len,
-            source.len(),
-        )?;
+        ensure_cuda_owns(cuda, "zeros_like", &[&source.0])?;
+        Self::validate_cuda_owned_len(required_len, source.len())?;
         let output = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); required_len])?;
         #[cfg(test)]
         probe::hit(probe::Event::CudaZeroUpload);
@@ -108,15 +105,20 @@ where
     /// and the device must agree with its own Host.
     fn weighted_inner_cuda(
         &self,
+        engine: &mut dyn Engine,
         lhs: &CudaStorage<D>,
         rhs: &CudaStorage<D>,
     ) -> Result<num_complex::Complex64, Error> {
         match D::DTYPE {
-            symtn_dense::DenseDType::F32 => self.weighted_inner_widened_cuda::<f64>(lhs, rhs),
-            symtn_dense::DenseDType::C32 => {
-                self.weighted_inner_widened_cuda::<num_complex::Complex64>(lhs, rhs)
+            symtn_dense::DenseDType::F32 => {
+                self.weighted_inner_widened_cuda::<f64>(engine, lhs, rhs)
             }
-            _ => Ok(self.weighted_inner_cuda_wide(lhs, rhs)?.widen_complex()),
+            symtn_dense::DenseDType::C32 => {
+                self.weighted_inner_widened_cuda::<num_complex::Complex64>(engine, lhs, rhs)
+            }
+            _ => Ok(self
+                .weighted_inner_cuda_wide(engine, lhs, rhs)?
+                .widen_complex()),
         }
     }
 
@@ -149,10 +151,12 @@ where
     /// range and the result accurate.
     fn weighted_inner_widened_cuda<E: CudaPayload>(
         &self,
+        engine: &mut dyn Engine,
         lhs: &CudaStorage<D>,
         rhs: &CudaStorage<D>,
     ) -> Result<num_complex::Complex64, Error> {
-        let mut lease = self.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
+        ensure_cuda_owns(&lease, "inner", &[&lhs.0, &rhs.0])?;
         let wide_lhs = lhs.widened::<E>(&mut lease)?;
         let wide_rhs = if std::ptr::eq(lhs, rhs) {
             None
@@ -162,7 +166,7 @@ where
         drop(lease);
         let wide_rhs = wide_rhs.as_ref().unwrap_or(&wide_lhs);
         Ok(self
-            .weighted_inner_cuda_wide(&wide_lhs, wide_rhs)?
+            .weighted_inner_cuda_wide(engine, &wide_lhs, wide_rhs)?
             .widen_complex())
     }
 
@@ -170,18 +174,15 @@ where
     /// cross-sector total in `E`'s wide accumulator.
     fn weighted_inner_cuda_wide<E: CudaPayload>(
         &self,
+        engine: &mut dyn Engine,
         lhs: &CudaStorage<E>,
         rhs: &CudaStorage<E>,
     ) -> Result<<E as symtn_tensors::WideScalar>::Wide, Error> {
         let space = self.logical_space().space();
         let regions = sector_regions(space.structure(), space.nout())?;
-        let mut lease = self.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        validate_cuda_reduction_placement(
-            Placement::Cuda(cuda.device()),
-            lhs.placement(),
-            rhs.placement(),
-        )?;
+        ensure_cuda_owns(cuda, "inner", &[&lhs.0, &rhs.0])?;
         // ponytail: #740 keeps the proven host-zero upload until a native
         // allocation has correct cross-stream publication and measured value.
         let mut partials =
@@ -235,7 +236,12 @@ where
         + SectorCodec,
     D: CudaPayload,
 {
-    fn dense_norm(_: ExecToken, t: &TensorMap<R, D, Self>, p: f64) -> Result<f64, Error> {
+    fn dense_norm(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D, Self>,
+        p: f64,
+    ) -> Result<f64, Error> {
         if p != 2.0 {
             return Err(Error::UnsupportedOnDevice(format!(
                 "device norm supports only p = 2, got {p}"
@@ -244,17 +250,19 @@ where
         let storage = t.direct_cuda_storage("norm")?;
         // `<t, t>` is real up to rounding; the norm is its real part's root,
         // matching the Host norm.
-        Ok(t.weighted_inner_cuda(storage, storage)?.re.sqrt())
+        Ok(t.weighted_inner_cuda(engine, storage, storage)?.re.sqrt())
     }
 
     fn dense_inner(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         y: &TensorMap<R, D, Self>,
     ) -> Result<D, Error> {
         let lhs = x.direct_cuda_storage("inner")?;
         let rhs = y.direct_cuda_storage("inner")?;
-        x.weighted_inner_cuda(lhs, rhs).map(D::from_complex64)
+        x.weighted_inner_cuda(engine, lhs, rhs)
+            .map(D::from_complex64)
     }
 }
 
@@ -269,14 +277,19 @@ where
         + SectorCodec,
     D: CudaPayload,
 {
-    fn zeros(_: ExecToken, t: &TensorMap<R, D, Self>) -> Result<TensorMap<R, D, Self>, Error> {
+    fn zeros(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D, Self>,
+    ) -> Result<TensorMap<R, D, Self>, Error> {
         let required_len = t.logical_space().space().required_len()?;
         let source = t.direct_cuda_storage("zeros_like")?;
-        let output = t.cuda_zeros_owned(required_len, source)?;
+        let output = t.cuda_zeros_owned(engine, required_len, source)?;
         Ok(t.with_owned_cuda_storage(output))
     }
 
     fn combine(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         alpha: D,
@@ -297,16 +310,12 @@ where
             .map(|(t, coefficient)| Ok((t.cuda_oriented_read(operation)?, coefficient)))
             .collect::<Result<Vec<_>, Error>>()?;
         let dense_err = |err| Error::from(symtn_tensors::OperationError::Dense(err));
-        let mut lease = x.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        let expected = Placement::Cuda(cuda.device());
+        let sources: Vec<_> = reads.iter().map(|(read, _)| &read.source.0).collect();
+        ensure_cuda_owns(cuda, operation, &sources)?;
         for (read, _) in &reads {
-            TensorMap::<R, D, Self>::validate_cuda_owned_metadata(
-                expected,
-                read.source.placement(),
-                required_len,
-                read.source.len(),
-            )?;
+            TensorMap::<R, D, Self>::validate_cuda_owned_len(required_len, read.source.len())?;
         }
         // ponytail: #740 keeps this proven Host upload (the output is born
         // zero) until native device allocation publishes cross-stream writes
@@ -344,6 +353,7 @@ where
     /// read `x` (the destination becomes `beta * destination` through a
     /// zero-source move).
     fn axpby_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         destination: &mut TensorMap<R, D, Self>,
@@ -352,7 +362,6 @@ where
     ) -> Result<(), Error> {
         let read = x.cuda_oriented_read("axpby_into")?;
         let source = read.source;
-        let device = Placement::Cuda(x.runtime.cuda_device_ordinal_checked()?);
         let TypedTensorRepr::Owned(destination_body) = &mut destination.repr else {
             return Err(internal_layout_error(
                 "ordinary CUDA destination checked above",
@@ -366,16 +375,14 @@ where
                 "dense CUDA destination checked above",
             ));
         };
-        if source.placement() != device || destination_data.placement() != device {
-            return Err(Error::PlacementMismatch);
-        }
+        let mut lease = crate::runtime::cuda_call(engine)?;
+        let cuda = &mut *lease;
+        ensure_cuda_owns(cuda, "axpby_into", &[&source.0, &destination_data.0])?;
         let len = TensorStorage::len(source);
         if len == 0 {
             return Ok(());
         }
         let dense_err = |err| Error::from(symtn_tensors::OperationError::Dense(err));
-        let mut lease = x.runtime.lease_cuda()?;
-        let cuda = &mut *lease;
         if alpha.is_zero() {
             let region = symtn_dense::CudaRegion::packed(&[len], 0).map_err(dense_err)?;
             return symtn_dense::cuda_region_scale::<D>(

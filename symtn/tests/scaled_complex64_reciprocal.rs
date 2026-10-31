@@ -73,7 +73,9 @@ fn diagonal<T>(value: T) -> TensorMap<U1FusionRule, T>
 where
     T: symtn::typed::TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::diagonal(
+        engine,
         &runtime(),
         &leg(1),
         [SectorSpectrum {
@@ -87,22 +89,35 @@ where
 /// The single stored entry of `t.inv(&[0], &[1])` for a rank-`(1,1)`
 /// compact diagonal tensor holding exactly `value`.
 fn compact_inv(value: Complex64) -> Complex64 {
-    diagonal(value).inv(&[0], &[1]).unwrap().diagview().unwrap()[0].values[0]
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    diagonal(value)
+        .inv(engine, &[0], &[1])
+        .unwrap()
+        .diagview(engine)
+        .unwrap()[0]
+        .values[0]
 }
 
 /// `pinv` with `rcond = 0` (never discards a nonzero entry). Only valid for
 /// a finite `value`: `pinv`'s own preflight rejects a non-finite magnitude.
 fn compact_pinv(value: Complex64) -> Complex64 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     diagonal(value)
-        .pinv(&[0], &[1], 0.0)
+        .pinv(engine, &[0], &[1], 0.0)
         .unwrap()
-        .diagview()
+        .diagview(engine)
         .unwrap()[0]
         .values[0]
 }
 
 fn compact_inv32(value: Complex32) -> Complex32 {
-    diagonal(value).inv(&[0], &[1]).unwrap().diagview().unwrap()[0].values[0]
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    diagonal(value)
+        .inv(engine, &[0], &[1])
+        .unwrap()
+        .diagview(engine)
+        .unwrap()[0]
+        .values[0]
 }
 
 /// One branch boundary of `Base.inv(::ComplexF64)` per row. The fast path
@@ -307,8 +322,9 @@ fn compact_reciprocal_32_at_range_edges() {
 /// `NaN + NaN*im`, not an error).
 #[test]
 fn zero_entry_is_still_reported_as_a_singular_diagonal() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert!(diagonal(c(0.0, 0.0))
-        .inv(&[0], &[1])
+        .inv(engine, &[0], &[1])
         .err()
         .unwrap()
         .report()

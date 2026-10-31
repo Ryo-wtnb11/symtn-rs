@@ -2,8 +2,9 @@
 
 The user-facing home of labeled tensor networks: build a `Network` from
 per-operand labels and contract it with `Network::contract`, which plans
-through the Runtime's cache. `contract!([i; k] := a[i; j] * b[j; k])` writes
-the same network in index notation. `NetworkIR`, `PlannedNetwork`,
+through the Runtime's cache, on the caller's engine.
+`contract!(&mut engine, [i; k] := a[i; j] * b[j; k])` writes the same network
+in index notation. `NetworkIR`, `PlannedNetwork`,
 `ContractionPlan`, `Network::plan`,
 optimizer traits, and slicing types let expert users inspect or reuse structural plans;
 symtn executes the resulting plan locally.

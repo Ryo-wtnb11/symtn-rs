@@ -1,4 +1,5 @@
 use super::*;
+use symtn::typed::Engine;
 
 /// A [`Network`] with a resolved contraction order for concrete operand
 /// shapes. Inspect the order via [`Self::plan`], run it via
@@ -259,6 +260,35 @@ where
         self.input_snapshot.clear();
     }
 
+    /// Drops every retained device tensor (step destinations and leftover
+    /// slots) that the caller's engine does not own, decided per buffer by the
+    /// admission the operands pass. Runs before any fallible check of a call,
+    /// so a failed call on a new engine keeps nothing of the old one, and
+    /// again after parked destinations are re-attached. A Host workspace
+    /// keeps everything (a CPU engine owns every Host buffer).
+    fn drop_foreign_device_state(&mut self, engine: &mut dyn Engine)
+    where
+        R: TypedSectorAdmission,
+        R::Mode: NetworkModeDispatch<R, D, S>,
+        D: TensorScalar,
+        S: NetworkOperandStorage<R, D>,
+    {
+        let mut foreign = |tensor: &TensorMap<R, D, S>| {
+            S::admit_operands(engine, std::slice::from_ref(&tensor), false).is_err()
+        };
+        for buffers in &mut self.intermediates {
+            if buffers.output.as_ref().is_some_and(&mut foreign) {
+                buffers.output = None;
+            }
+        }
+        for (slot, producer) in self.slots.iter_mut().zip(&mut self.producers) {
+            if slot.as_ref().is_some_and(&mut foreign) {
+                *slot = None;
+                *producer = None;
+            }
+        }
+    }
+
     pub(crate) fn slot_capacity(&self) -> usize {
         self.slots.capacity()
     }
@@ -371,7 +401,7 @@ impl PlannedNetwork {
 
 /// The device network preflight [`PlannedNetwork::execute`] and
 /// [`Network::contract`] run through `NetworkOperandStorage::admit_operands`:
-/// a Runtime with a device, every operand on it, then
+/// the caller's CUDA engine, every operand on its device, then
 /// [`device_operand_admission`]. These are every rejection class a device
 /// step could raise that the storage-generic body would not already raise
 /// before its first step, decided from operand metadata alone — no
@@ -381,6 +411,7 @@ impl PlannedNetwork {
 /// the same step, and schedules are produced only by `compile_schedule`.
 #[cfg(feature = "cuda")]
 pub(super) fn cuda_operand_admission<R, D>(
+    engine: &mut dyn Engine,
     tensors: &[&TensorMap<R, D, CudaStorage<D>>],
     contracts: bool,
 ) -> Result<(), Error>
@@ -388,19 +419,9 @@ where
     R: TypedSectorAdmission + symtn::sector::FusionRule,
     D: CudaPayload,
 {
-    let device = tensors
-        .first()
-        .ok_or_else(|| invalid("network execution requires at least one operand"))
-        .map(|tensor| __network::cuda_device_ordinal(tensor.runtime()))?
-        .ok_or_else(|| {
-            invalid(
-                "this runtime was built without a CUDA device; use Runtime::builder().cuda(device)",
-            )
-        })?;
-    for &tensor in tensors {
-        if tensor.placement() != Placement::Cuda(device) {
-            return Err(Error::PlacementMismatch);
-        }
+    __network::cuda_engine_device(engine, tensors)?;
+    if tensors.is_empty() {
+        return Err(invalid("network execution requires at least one operand"));
     }
     device_operand_admission(
         contracts,
@@ -457,6 +478,7 @@ impl PlannedNetwork {
     /// successful execution returns a new owned tensor.
     pub fn execute<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -466,6 +488,7 @@ impl PlannedNetwork {
         D: TensorScalar,
         S: NetworkOperandStorage<R, D>,
     {
+        workspace.drop_foreign_device_state(engine);
         if tensors.len() != self.schedule.input_ranks.len() {
             return Err(invalid(format!(
                 "plan has {} operands but {} tensors were given",
@@ -474,8 +497,8 @@ impl PlannedNetwork {
             ))
             .into());
         }
-        S::admit_operands(tensors, !self.schedule.steps.is_empty())?;
-        self.execute_admitted(tensors, workspace)
+        S::admit_operands(engine, tensors, !self.schedule.steps.is_empty())?;
+        self.execute_admitted(engine, tensors, workspace)
     }
 
     /// [`Self::execute`] after its operand count and admission, for callers
@@ -483,6 +506,7 @@ impl PlannedNetwork {
     /// [`Network::contract`] before its plan lookup.
     pub(crate) fn execute_admitted<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -490,9 +514,9 @@ impl PlannedNetwork {
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D, S>,
         D: TensorScalar,
-        S: NetworkPayloadStorage<D>,
+        S: NetworkOperandStorage<R, D>,
     {
-        match self.execute_with_workspace_meter(tensors, workspace, None) {
+        match self.execute_with_workspace_meter(engine, tensors, workspace, None) {
             Ok(result) => Ok(result),
             Err(MeteredNetworkError::Tensor(error)) => Err(error),
             Err(MeteredNetworkError::Payload(_)) => {
@@ -503,6 +527,7 @@ impl PlannedNetwork {
 
     pub(super) fn execute_with_workspace_meter<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
         mut meter: Option<&mut PayloadMeter>,
@@ -511,7 +536,7 @@ impl PlannedNetwork {
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D, S>,
         D: TensorScalar,
-        S: NetworkPayloadStorage<D>,
+        S: NetworkOperandStorage<R, D>,
     {
         debug_assert_eq!(tensors.len(), self.schedule.input_ranks.len());
         let prepared: Result<_, FacadeError<R>> = (|| {
@@ -565,7 +590,7 @@ impl PlannedNetwork {
                 .enumerate()
                 .map(|(index, tensor)| {
                     if self.conj[index] {
-                        <R::Mode as NetworkModeDispatch<R, D, S>>::adjoint_operand(tensor)
+                        <R::Mode as NetworkModeDispatch<R, D, S>>::adjoint_operand(engine, tensor)
                     } else {
                         Ok((*tensor).clone())
                     }
@@ -652,6 +677,8 @@ impl PlannedNetwork {
                 buffers.output = None;
             }
         }
+        // Re-attached parked destinations get the same engine purge.
+        workspace.drop_foreign_device_state(engine);
         workspace.slots.fill(None);
         workspace.producers.fill(None);
         for (index, lowered) in lowered.into_iter().enumerate() {
@@ -681,8 +708,9 @@ impl PlannedNetwork {
                 codomain: &step.codomain,
                 domain: &step.domain,
             };
-            let contracted =
-                <R::Mode as NetworkModeDispatch<R, D, S>>::contract_step(lhs, rhs, buffer, &spec)?;
+            let contracted = <R::Mode as NetworkModeDispatch<R, D, S>>::contract_step(
+                engine, lhs, rhs, buffer, &spec,
+            )?;
             if let Some(meter) = meter.as_deref_mut() {
                 let mut payloads =
                     retained_payloads.expect("meter requires retained payload snapshot");
@@ -715,8 +743,9 @@ impl PlannedNetwork {
             .as_ref()
             .ok_or_else(|| FacadeError::<R>::from(invalid("no final tensor produced")))?;
         if let Some((codomain, domain)) = &self.schedule.final_permutation {
-            let output =
-                <R::Mode as NetworkModeDispatch<R, D, S>>::permute_final(result, codomain, domain)?;
+            let output = <R::Mode as NetworkModeDispatch<R, D, S>>::permute_final(
+                engine, result, codomain, domain,
+            )?;
             if let Some(meter) = meter {
                 let mut payloads = intermediate_payloads(intermediates);
                 payloads.push(__network::network_owned_payload(&output));

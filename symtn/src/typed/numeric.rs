@@ -6,7 +6,7 @@ impl ScalarOps for f64 {
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
         ctxs: &mut Ctxs<Key>,
     ) -> Result<&mut Ctx<Self, Key>, Error> {
-        Ok(&mut ctxs.f64)
+        Ok(ctxs.f64_lane())
     }
 
     fn rand_unit(state: &mut u64) -> Self {
@@ -160,7 +160,7 @@ impl ScalarOps for num_complex::Complex64 {
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
         ctxs: &mut Ctxs<Key>,
     ) -> Result<&mut Ctx<Self, Key>, Error> {
-        Ok(&mut ctxs.c64)
+        Ok(ctxs.c64_lane())
     }
 
     fn rand_unit(state: &mut u64) -> Self {
@@ -190,7 +190,7 @@ impl ScalarOps for f32 {
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
         ctxs: &mut Ctxs<Key>,
     ) -> Result<&mut Ctx<Self, Key>, Error> {
-        ctxs.f32_lane()
+        Ok(ctxs.f32_lane())
     }
 
     fn rand_unit(state: &mut u64) -> Self {
@@ -216,7 +216,7 @@ impl ScalarOps for num_complex::Complex32 {
     fn ctx_of<Key: Clone + Eq + Hash + Send + Sync + 'static>(
         ctxs: &mut Ctxs<Key>,
     ) -> Result<&mut Ctx<Self, Key>, Error> {
-        ctxs.c32_lane()
+        Ok(ctxs.c32_lane())
     }
 
     fn rand_unit(state: &mut u64) -> Self {

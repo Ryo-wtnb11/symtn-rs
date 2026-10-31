@@ -638,6 +638,7 @@ fn owned_checked_trace_publishes_after_success_only() {
     let data = vec![1.0_f64; fixture.src.space().required_len().unwrap()];
     let run = || {
         crate::tensortrace_fusion_dyn_owned_generic_checked(
+            strided_kernel::Exec::serial(),
             &fixture.dst,
             &fixture.src,
             &data,
@@ -693,6 +694,7 @@ fn owned_checked_trace_preflights_once() {
         assert_eq!(provider.calls.take(), preflight);
         let preflights = crate::probe::record();
         crate::tensortrace_checked_generic_in(
+            strided_kernel::Exec::serial(),
             stage,
             &fixture.src,
             |_| None,

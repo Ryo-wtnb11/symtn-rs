@@ -59,12 +59,14 @@ fn su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
 }
 
 fn compact_su2(rt: &Runtime) -> TensorMap<SU2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (bond, _) = su2();
     let spectrum = |twice_spin, values: &[f64]| SectorSpectrum {
         sector: SU2Irrep::from_twice_spin(twice_spin),
         values: values.to_vec(),
     };
     TensorMap::diagonal(
+        engine,
         rt,
         &bond,
         [
@@ -128,7 +130,7 @@ fn assert_hand(
     blocks: &[(f64, Vec<f64>)],
     scale: f64,
     tol: f64,
-    norm: impl Fn(f64) -> Result<f64, Error>,
+    mut norm: impl FnMut(f64) -> Result<f64, Error>,
 ) {
     for p in EXPONENTS {
         let actual = norm(p).unwrap();
@@ -142,20 +144,21 @@ fn assert_hand(
 
 #[test]
 fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (uv, uw) = u1();
     let (sv, sw) = su2();
     let u1_f64: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     let u1_c64: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |_, i| complex_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| complex_fill(i)).unwrap();
     let su2_f64: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| real_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| real_fill(i)).unwrap();
     let su2_c64: TensorMap<SU2FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
     // Every fill entry is dyadic, so the `f32` payload holds it exactly.
     let su2_c32: TensorMap<SU2FusionRule, Complex32> =
-        TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| {
+        TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| {
             let z = complex_fill(i);
             Complex32::new(z.re as f32, z.im as f32)
         })
@@ -163,11 +166,13 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
     // Squares leave the f64 range in both directions, so `p = 2` and the
     // power sums take their rescaling passes; the norm scales linearly.
     let huge: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| 1e200 * real_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| 1e200 * real_fill(i))
+            .unwrap();
     let tiny: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |_, i| 1e-200 * complex_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| 1e-200 * complex_fill(i))
+            .unwrap();
     let compact = compact_su2(&rt);
-    let adjoint = su2_c64.adjoint().unwrap();
+    let adjoint = su2_c64.adjoint(engine).unwrap();
 
     let real = |i: &[usize]| real_fill(i).abs();
     let modulus = |i: &[usize]| complex_fill(i).norm();
@@ -179,23 +184,30 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
         (3.0, vec![0.375, 4.5, 1.0, 0.625]),
     ];
     let tol = 1e-14;
-    assert_hand("u1_f64", &u1_real, 1.0, tol, |p| u1_f64.norm(p));
-    assert_hand("u1_c64", &u1_complex, 1.0, tol, |p| u1_c64.norm(p));
-    assert_hand("su2_f64", &su2_real, 1.0, tol, |p| su2_f64.norm(p));
-    assert_hand("su2_c64", &su2_complex, 1.0, tol, |p| su2_c64.norm(p));
-    assert_hand("su2_c32", &su2_complex, 1.0, 1e-6, |p| su2_c32.norm(p));
-    assert_hand("huge", &su2_real, 1e200, tol, |p| huge.norm(p));
-    assert_hand("tiny", &u1_complex, 1e-200, tol, |p| tiny.norm(p));
-    assert_hand("compact", &diagonal, 1.0, tol, |p| compact.norm(p));
-    assert_hand("adjoint", &su2_complex, 1.0, tol, |p| adjoint.norm(p));
+    assert_hand("u1_f64", &u1_real, 1.0, tol, |p| u1_f64.norm(engine, p));
+    assert_hand("u1_c64", &u1_complex, 1.0, tol, |p| u1_c64.norm(engine, p));
+    assert_hand("su2_f64", &su2_real, 1.0, tol, |p| su2_f64.norm(engine, p));
+    assert_hand("su2_c64", &su2_complex, 1.0, tol, |p| {
+        su2_c64.norm(engine, p)
+    });
+    assert_hand("su2_c32", &su2_complex, 1.0, 1e-6, |p| {
+        su2_c32.norm(engine, p)
+    });
+    assert_hand("huge", &su2_real, 1e200, tol, |p| huge.norm(engine, p));
+    assert_hand("tiny", &u1_complex, 1e-200, tol, |p| tiny.norm(engine, p));
+    assert_hand("compact", &diagonal, 1.0, tol, |p| compact.norm(engine, p));
+    assert_hand("adjoint", &su2_complex, 1.0, tol, |p| {
+        adjoint.norm(engine, p)
+    });
 }
 
 #[test]
 fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (uv, uw) = u1();
     let poisoned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |trees, i| {
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |trees, i| {
             if *trees.coupled() == U1Irrep::new(1) && i == [0, 0] {
                 Complex64::new(1.0, f64::NAN)
             } else {
@@ -203,21 +215,21 @@ fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
             }
         })
         .unwrap();
-    assert!(poisoned.norm(f64::INFINITY).unwrap().is_nan());
+    assert!(poisoned.norm(engine, f64::INFINITY).unwrap().is_nan());
     assert!(poisoned
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .norm(f64::INFINITY)
+        .norm(engine, f64::INFINITY)
         .unwrap()
         .is_nan());
 
     let only_zero = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let only_one = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1), 3)]).unwrap();
     let empty: TensorMap<U1FusionRule, f64> =
-        TensorMap::zeros(&rt, [&only_zero], [&only_one]).unwrap();
-    let zeros: TensorMap<U1FusionRule, f64> = TensorMap::zeros(&rt, [&uv], [&uw]).unwrap();
+        TensorMap::zeros(engine, &rt, [&only_zero], [&only_one]).unwrap();
+    let zeros: TensorMap<U1FusionRule, f64> = TensorMap::zeros(engine, &rt, [&uv], [&uw]).unwrap();
     for (what, tensor) in [("empty", &empty), ("all-zero", &zeros)] {
-        let value = tensor.norm(f64::INFINITY).unwrap();
+        let value = tensor.norm(engine, f64::INFINITY).unwrap();
         assert_eq!(
             value.to_bits(),
             0.0_f64.to_bits(),
@@ -228,13 +240,14 @@ fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
 
 #[test]
 fn invalid_exponents_are_typed_errors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (uv, uw) = u1();
     let tensor: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     for p in [f64::NAN, f64::NEG_INFINITY, 0.0, -0.0, -1.0] {
         assert!(
-            matches!(tensor.norm(p), Err(Error::InvalidArgument(_))),
+            matches!(tensor.norm(engine, p), Err(Error::InvalidArgument(_))),
             "norm({p})"
         );
     }
@@ -247,28 +260,35 @@ fn invalid_exponents_are_typed_errors() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
-    let rt = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let rt = Runtime::builder().build().unwrap();
     let (uv, uw) = u1();
     let (sv, sw) = su2();
     let u1_f64: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     let su2_c64: TensorMap<SU2FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(&rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
+        TensorMap::from_subblock_fn(engine, &rt, [&sv], [&sw], |_, i| complex_fill(i)).unwrap();
 
-    let real = u1_f64.to_cuda().unwrap();
-    let complex = su2_c64.to_cuda().unwrap();
-    let real_norm = real.norm(2.0).unwrap();
-    let complex_norm = complex.norm(2.0).unwrap();
+    let real = u1_f64.to_cuda(cuda).unwrap();
+    let complex = su2_c64.to_cuda(cuda).unwrap();
+    let real_norm = real.norm(cuda, 2.0).unwrap();
+    let complex_norm = complex.norm(cuda, 2.0).unwrap();
     assert_eq!(
         real_norm.to_bits(),
-        real.inner(&real).unwrap().sqrt().to_bits()
+        real.inner(cuda, &real).unwrap().sqrt().to_bits()
     );
     assert_eq!(
         complex_norm.to_bits(),
-        complex.inner(&complex).unwrap().re.sqrt().to_bits()
+        complex.inner(cuda, &complex).unwrap().re.sqrt().to_bits()
     );
     assert_eq!(
-        complex.adjoint().unwrap().norm(2.0).unwrap().to_bits(),
+        complex
+            .adjoint(cuda)
+            .unwrap()
+            .norm(cuda, 2.0)
+            .unwrap()
+            .to_bits(),
         complex_norm.to_bits()
     );
     let host = hand_norm(&filled(u1_blocks(), |i| real_fill(i).abs()), 2.0);
@@ -278,13 +298,13 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
 
     for p in [f64::INFINITY, 1.0, 3.0, 0.5] {
         assert!(
-            matches!(real.norm(p), Err(Error::UnsupportedOnDevice(_))),
+            matches!(real.norm(cuda, p), Err(Error::UnsupportedOnDevice(_))),
             "device norm({p})"
         );
     }
     for p in [f64::NAN, f64::NEG_INFINITY, 0.0, -1.0] {
         assert!(
-            matches!(real.norm(p), Err(Error::InvalidArgument(_))),
+            matches!(real.norm(cuda, p), Err(Error::InvalidArgument(_))),
             "device norm({p})"
         );
     }
@@ -300,7 +320,9 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn compact_host_reductions_match_the_device_frobenius_arm() {
-    let rt = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let rt = Runtime::builder().build().unwrap();
     let (bond, _) = su2();
     let value = |twice: usize, k: usize, shift: f64| {
         Complex64::new(
@@ -314,8 +336,8 @@ fn compact_host_reductions_match_the_device_frobenius_arm() {
             values: (0..degeneracy).map(|k| value(twice, k, shift)).collect(),
         })
     };
-    let a = TensorMap::<_, Complex64>::diagonal(&rt, &bond, spectrum(0.3)).unwrap();
-    let b = TensorMap::<_, Complex64>::diagonal(&rt, &bond, spectrum(-0.2)).unwrap();
+    let a = TensorMap::<_, Complex64>::diagonal(engine, &rt, &bond, spectrum(0.3)).unwrap();
+    let b = TensorMap::<_, Complex64>::diagonal(engine, &rt, &bond, spectrum(-0.2)).unwrap();
     let (mut norm2, mut inner) = (0.0, Complex64::default());
     for (twice, degeneracy) in [(0, 2), (1, 3), (2, 4)] {
         let dim = (twice + 1) as f64;
@@ -330,23 +352,27 @@ fn compact_host_reductions_match_the_device_frobenius_arm() {
             "{what}: {got} against {want}"
         );
     };
-    let (device_a, device_b) = (a.to_cuda().unwrap(), b.to_cuda().unwrap());
+    let (device_a, device_b) = (a.to_cuda(cuda).unwrap(), b.to_cuda(cuda).unwrap());
     close(
         "host compact norm",
-        a.norm(2.0).unwrap().into(),
+        a.norm(engine, 2.0).unwrap().into(),
         norm2.sqrt().into(),
     );
     close(
         "device norm",
-        device_a.norm(2.0).unwrap().into(),
+        device_a.norm(cuda, 2.0).unwrap().into(),
         norm2.sqrt().into(),
     );
-    close("host compact inner", a.inner(&b).unwrap(), inner);
-    close("device inner", device_a.inner(&device_b).unwrap(), inner);
+    close("host compact inner", a.inner(engine, &b).unwrap(), inner);
+    close(
+        "device inner",
+        device_a.inner(cuda, &device_b).unwrap(),
+        inner,
+    );
     for p in [1.0, 3.0, f64::INFINITY] {
-        assert!(a.norm(p).is_ok(), "host compact norm({p})");
+        assert!(a.norm(engine, p).is_ok(), "host compact norm({p})");
         assert!(
-            matches!(device_a.norm(p), Err(Error::UnsupportedOnDevice(_))),
+            matches!(device_a.norm(cuda, p), Err(Error::UnsupportedOnDevice(_))),
             "device norm({p})"
         );
     }

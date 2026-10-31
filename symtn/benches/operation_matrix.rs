@@ -6,15 +6,15 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
+use symtn::typed::Engine;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    Complex64, ContractSpec, Eig, Error, GradedSpace, LinalgBackend, Qr, Runtime, TensorMap,
+    Complex64, ContractSpec, CpuEngine, Eig, Error, GradedSpace, Pool, Qr, Runtime, TensorMap,
     TensorScalar,
 };
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
-use symtn::expert::CpuBackendKind;
 use symtn::expert::DefaultDenseExecutor;
 use symtn::expert::{BlockRef, SectorLeg};
 use symtn::expert::{DenseExecutor, DenseGemmBatchJob, MatrixOp};
@@ -220,16 +220,6 @@ fn bench<T, E>(
 }
 
 fn benchmark_runtime() -> Result<Runtime, Error> {
-    let backend = match std::env::var("OP_MATRIX_GEMM_BACKEND").as_deref() {
-        Ok("blas") => LinalgBackend::Blas,
-        Ok("faer") | Err(_) => LinalgBackend::Faer,
-        Ok(other) => {
-            return Err(Error::InvalidArgument(format!(
-                "OP_MATRIX_GEMM_BACKEND must be `faer` or `blas`, got `{other}`"
-            )))
-        }
-    };
-    let builder = Runtime::builder().dense_threads(1).gemm_backend(backend);
     if std::env::var("OP_MATRIX_CACHE").as_deref() == Ok("disabled") {
         // Process-global: every build is offered and rejected.
         symtn::cache::configure_budgets([
@@ -237,21 +227,28 @@ fn benchmark_runtime() -> Result<Runtime, Error> {
             (StructureCacheKind::TreeTransformCoefficients, 0),
         ]);
     }
-    builder.build()
+    Runtime::builder().build()
+}
+
+/// The engine every row runs on: `OP_MATRIX_THREADS` workers (default 1,
+/// a serial engine).
+fn benchmark_threads() -> usize {
+    std::env::var("OP_MATRIX_THREADS")
+        .ok()
+        .map(|value| value.parse().expect("OP_MATRIX_THREADS must be an integer"))
+        .unwrap_or(1)
+}
+
+fn benchmark_engine(threads: usize) -> Result<CpuEngine, Box<dyn std::error::Error>> {
+    Ok(if threads == 1 {
+        CpuEngine::serial()
+    } else {
+        CpuEngine::new(Pool::builder().threads(threads).build()?)
+    })
 }
 
 fn benchmark_dense_executor() -> Result<DefaultDenseExecutor, symtn::expert::DenseError> {
-    let kind = match std::env::var("OP_MATRIX_GEMM_BACKEND").as_deref() {
-        Ok("blas") => CpuBackendKind::Blas,
-        Ok("faer") | Err(_) => CpuBackendKind::Faer,
-        Ok(other) => {
-            return Err(symtn::expert::DenseError::Unsupported {
-                op: "oriented_uniform_run",
-                message: format!("OP_MATRIX_GEMM_BACKEND must be `faer` or `blas`, got `{other}`"),
-            })
-        }
-    };
-    DefaultDenseExecutor::with_threads_and_kind(1, kind)
+    Ok(DefaultDenseExecutor::new())
 }
 
 fn operation_enabled(operation: &str) -> bool {
@@ -440,6 +437,7 @@ fn expected_adapter<T: OrientedScalar>(
 }
 
 fn execute_adapter<T: OrientedScalar>(
+    engine: &mut dyn Engine,
     executor: &mut DefaultDenseExecutor,
     fixture: &mut AdapterFixture<T>,
     lhs_op: MatrixOp,
@@ -455,6 +453,7 @@ fn execute_adapter<T: OrientedScalar>(
     let rhs = DenseView::new(&fixture.rhs, &rhs_shape, &strides, fixture.rhs_base)?;
     let output = DenseViewMut::new(&mut fixture.output, &dst_shape, &strides, fixture.dst_base)?;
     executor.matmul_batch_axpby_with_ops_into(
+        engine,
         T::dense_write(output),
         T::dense_read(lhs),
         T::dense_read(rhs),
@@ -658,6 +657,7 @@ fn public_fixture<T: OrientedScalar>(
     sectors: usize,
     degeneracy: usize,
 ) -> Result<PublicFixture<T>, Error> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
@@ -669,15 +669,15 @@ fn public_fixture<T: OrientedScalar>(
     let rhs_value = |charge: i32, indices: &[usize]| {
         T::sample(charge as usize * 1013 + 2 * indices[0] + 5 * indices[1] + 401)
     };
-    let lhs = TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |trees, indices| {
+    let lhs = TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, indices| {
         lhs_value(trees.coupled().charge(), indices)
     })?;
-    let lhs_adjoint = lhs.adjoint()?;
-    let rhs = TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |trees, indices| {
+    let lhs_adjoint = lhs.adjoint(engine)?;
+    let rhs = TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, indices| {
         rhs_value(trees.coupled().charge(), indices)
     })?;
     let expected_direct =
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, indices| {
             let charge = trees.coupled().charge();
             let mut sum = T::zero();
             for inner in 0..degeneracy {
@@ -688,7 +688,7 @@ fn public_fixture<T: OrientedScalar>(
             sum
         })?;
     let expected_adjoint =
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, indices| {
             let charge = trees.coupled().charge();
             let mut sum = T::zero();
             for inner in 0..degeneracy {
@@ -726,7 +726,7 @@ fn assert_public_fixture<T: OrientedScalar>(
 }
 
 macro_rules! assert_same_tensor {
-    ($actual:expr, $expected:expr, $authority:expr) => {{
+    ($engine:ident, $actual:expr, $expected:expr, $authority:expr) => {{
         assert!(std::ptr::eq($actual.provider(), $authority.provider()));
         assert_eq!($actual.codomain(), $expected.codomain());
         assert_eq!($actual.domain(), $expected.domain());
@@ -1026,6 +1026,7 @@ fn assert_layout_generic_qr_reconstructs(
 }
 
 fn run_layout_generic_qr(
+    engine: &mut dyn Engine,
     degeneracy: usize,
     min_time: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1049,9 +1050,9 @@ fn run_layout_generic_qr(
     let ordered_input = BoundDynamicTensorRef::try_new(&ordered.space, &ordered.data)?;
     let reordered_input = BoundDynamicTensorRef::try_new(&reordered.space, &reordered.data)?;
     let mut preflight_dense = DefaultDenseExecutor::new();
-    let ordered_expected = qr_compact_dense(&mut preflight_dense, &ordered_input)
+    let ordered_expected = qr_compact_dense(engine, &mut preflight_dense, &ordered_input)
         .map_err(checked_compact_example_error)?;
-    let reordered_expected = qr_compact_dense(&mut preflight_dense, &reordered_input)
+    let reordered_expected = qr_compact_dense(engine, &mut preflight_dense, &reordered_input)
         .map_err(checked_compact_example_error)?;
     assert_layout_generic_factors_equal(&reordered_expected.q, &ordered_expected.q);
     assert_layout_generic_factors_equal(&reordered_expected.r, &ordered_expected.r);
@@ -1079,7 +1080,7 @@ fn run_layout_generic_qr(
             "first_after_setup",
             "warm_after_setup",
             min_time,
-            || qr_compact_dense(&mut dense, input).map_err(checked_compact_example_error),
+            || qr_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error),
         )?;
         assert_layout_generic_qr_reconstructs(&left, &right);
     }
@@ -1345,40 +1346,43 @@ fn checked_compact_example_error(error: CheckedGenericFactorPlanError<Infallible
 }
 
 fn preflight_checked_compact_input<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     input: &BoundDynamicTensorRef<'_, LayoutGenericRule, D>,
     sector_count: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut dense = DefaultDenseExecutor::new();
-    let qr = qr_compact_dense(&mut dense, input).map_err(checked_compact_example_error)?;
+    let qr = qr_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error)?;
     assert_checked_pair_reconstructs(&qr.q, &qr.r, sector_count);
     assert_columns_orthonormal(&qr.q, sector_count);
     drop(qr);
-    let svd = svd_compact_dyn_checked_generic(&mut dense, input)
+    let svd = svd_compact_dyn_checked_generic(engine, &mut dense, input)
         .map_err(checked_compact_example_error)?;
     assert_checked_svd_reconstructs(&svd.u, &svd.s, &svd.vh, sector_count);
     assert_columns_orthonormal(&svd.u, sector_count);
     assert_rows_orthonormal(&svd.vh, sector_count);
     drop(svd);
-    let lq = lq_compact_dense(&mut dense, input).map_err(checked_compact_example_error)?;
+    let lq = lq_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error)?;
     assert_checked_pair_reconstructs(&lq.l, &lq.q, sector_count);
     assert_rows_orthonormal(&lq.q, sector_count);
     Ok(())
 }
 
 fn run_checked_compact_operation<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     operation: &str,
     dense: &mut DefaultDenseExecutor,
     input: &BoundDynamicTensorRef<'_, LayoutGenericRule, D>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match operation {
         "qr" => drop(black_box(
-            qr_compact_dense(dense, input).map_err(checked_compact_example_error)?,
+            qr_compact_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         )),
         "svd" => drop(black_box(
-            svd_compact_dyn_checked_generic(dense, input).map_err(checked_compact_example_error)?,
+            svd_compact_dyn_checked_generic(engine, dense, input)
+                .map_err(checked_compact_example_error)?,
         )),
         "lq" => drop(black_box(
-            lq_compact_dense(dense, input).map_err(checked_compact_example_error)?,
+            lq_compact_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         )),
         _ => unreachable!("fixed checked compact operation table"),
     }
@@ -1386,6 +1390,7 @@ fn run_checked_compact_operation<D: HarnessScalar>(
 }
 
 fn run_checked_compact_input_fixture<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     workload: &str,
     degeneracy: usize,
     sector_count: usize,
@@ -1446,8 +1451,8 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
             BoundDynamicTensorRef::try_new(&changed_fixture.space, &changed_fixture.data)?;
         let original = fixture.data.clone();
         let changed_original = changed_fixture.data.clone();
-        preflight_checked_compact_input(&input, sector_count)?;
-        preflight_checked_compact_input(&changed_input, sector_count)?;
+        preflight_checked_compact_input(engine, &input, sector_count)?;
+        preflight_checked_compact_input(engine, &changed_input, sector_count)?;
         assert_checked_source_unchanged(&fixture.data, &original);
         assert_checked_source_unchanged(&changed_fixture.data, &changed_original);
 
@@ -1462,7 +1467,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
             "first_after_setup",
             "warm_after_setup",
             min_time,
-            || qr_compact_dense(&mut dense, &input).map_err(checked_compact_example_error),
+            || qr_compact_dense(engine, &mut dense, &input).map_err(checked_compact_example_error),
         )?;
         assert_checked_pair_reconstructs(&qr.q, &qr.r, sector_count);
         drop(qr);
@@ -1475,7 +1480,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
             "warm_after_setup",
             min_time,
             || {
-                svd_compact_dyn_checked_generic(&mut dense, &input)
+                svd_compact_dyn_checked_generic(engine, &mut dense, &input)
                     .map_err(checked_compact_example_error)
             },
         )?;
@@ -1489,7 +1494,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
             "first_after_setup",
             "warm_after_setup",
             min_time,
-            || lq_compact_dense(&mut dense, &input).map_err(checked_compact_example_error),
+            || lq_compact_dense(engine, &mut dense, &input).map_err(checked_compact_example_error),
         )?;
         assert_checked_pair_reconstructs(&lq.l, &lq.q, sector_count);
         drop(lq);
@@ -1510,7 +1515,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
                 || {
                     let selected = if changed { &changed_input } else { &input };
                     changed = !changed;
-                    run_checked_compact_operation(operation, &mut dense, selected)
+                    run_checked_compact_operation(engine, operation, &mut dense, selected)
                 },
             )?;
         }
@@ -1521,22 +1526,30 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
 }
 
 fn run_checked_compact_input_for<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     degeneracy: usize,
     min_time: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    run_checked_compact_input_fixture::<D>("few-large", degeneracy, 2, min_time)?;
-    run_checked_compact_input_fixture::<D>("many-small", (degeneracy / 16).max(1), 16, min_time)
+    run_checked_compact_input_fixture::<D>(engine, "few-large", degeneracy, 2, min_time)?;
+    run_checked_compact_input_fixture::<D>(
+        engine,
+        "many-small",
+        (degeneracy / 16).max(1),
+        16,
+        min_time,
+    )
 }
 
 fn run_checked_compact_input(
+    engine: &mut dyn Engine,
     degeneracy: usize,
     min_time: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !operation_enabled("checked_compact_input") || !form_enabled("owned") {
         return Ok(());
     }
-    run_checked_compact_input_for::<f64>(degeneracy, min_time)?;
-    run_checked_compact_input_for::<Complex64>(degeneracy, min_time)
+    run_checked_compact_input_for::<f64>(engine, degeneracy, min_time)?;
+    run_checked_compact_input_for::<Complex64>(engine, degeneracy, min_time)
 }
 
 fn eig_value<D: HarnessScalar>(sector: usize, row: usize, column: usize) -> D {
@@ -2086,6 +2099,7 @@ where
 }
 
 fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
+    engine: &mut dyn Engine,
     workload: &str,
     degeneracy: usize,
     sector_count: usize,
@@ -2138,13 +2152,13 @@ fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
             BoundDynamicTensorRef::try_new(&changed_control.space, &changed_control.data)?;
         let mut preflight = DefaultDenseExecutor::new();
         for selected in [&input, &changed_input] {
-            let eig =
-                eig_full_dense(&mut preflight, selected).map_err(checked_compact_example_error)?;
+            let eig = eig_full_dense(engine, &mut preflight, selected)
+                .map_err(checked_compact_example_error)?;
             assert_checked_eig(selected, &eig, sector_count);
             drop(eig);
         }
         for selected in [&control_input, &changed_control_input] {
-            let qr = qr_compact_dense(&mut preflight, selected)
+            let qr = qr_compact_dense(engine, &mut preflight, selected)
                 .map_err(checked_compact_example_error)?;
             assert_checked_pair_reconstructs(&qr.q, &qr.r, sector_count);
             drop(qr);
@@ -2171,12 +2185,12 @@ fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
                 || {
                     if is_eig {
                         drop(black_box(
-                            eig_full_dense(&mut dense, &input)
+                            eig_full_dense(engine, &mut dense, &input)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     } else {
                         drop(black_box(
-                            qr_compact_dense(&mut dense, fixed)
+                            qr_compact_dense(engine, &mut dense, fixed)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     }
@@ -2197,12 +2211,12 @@ fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
                     changed = !changed;
                     if is_eig {
                         drop(black_box(
-                            eig_full_dense(&mut dense, selected)
+                            eig_full_dense(engine, &mut dense, selected)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     } else {
                         drop(black_box(
-                            qr_compact_dense(&mut dense, selected)
+                            qr_compact_dense(engine, &mut dense, selected)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     }
@@ -2217,6 +2231,7 @@ fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
 }
 
 fn run_mf_eig<D>(
+    engine: &mut dyn Engine,
     workload: &str,
     degeneracy: usize,
     sector_count: usize,
@@ -2226,12 +2241,13 @@ where
     D: HarnessScalar<Eig = Complex64> + symtn::typed::AdvancedLinalgScalar,
 {
     let runtime = benchmark_runtime()?;
-    let make = |d| -> Result<_, Box<dyn std::error::Error>> {
+    let mut make = |d| -> Result<_, Box<dyn std::error::Error>> {
         let space = GradedSpace::try_new(
             Arc::new(U1FusionRule),
             (0..sector_count).map(|sector| (U1Irrep::new(sector as i32), d)),
         )?;
         Ok(TensorMap::<U1FusionRule, D>::from_subblock_fn(
+            engine,
             &runtime,
             [&space],
             [&space],
@@ -2254,7 +2270,7 @@ where
     let source = make(degeneracy)?;
     let changed_source = make(degeneracy + 1)?;
     for selected in [&source, &changed_source] {
-        let Eig { d, v } = selected.eig_full(&[0], &[1])?;
+        let Eig { d, v } = selected.eig_full(engine, &[0], &[1])?;
         assert_mf_eig(selected, &d, &v, sector_count)?;
         drop((d, v));
     }
@@ -2268,7 +2284,7 @@ where
         "warm_after_preflight",
         min_time,
         || {
-            drop(black_box(source.eig_full(&[0], &[1])?));
+            drop(black_box(source.eig_full(engine, &[0], &[1])?));
             Ok::<_, Error>(())
         },
     )?;
@@ -2284,7 +2300,7 @@ where
         || {
             let selected = if changed { &changed_source } else { &source };
             changed = !changed;
-            drop(black_box(selected.eig_full(&[0], &[1])?));
+            drop(black_box(selected.eig_full(engine, &[0], &[1])?));
             Ok::<_, Error>(())
         },
     )?;
@@ -2312,6 +2328,7 @@ where
 }
 
 fn run_eig_source_geometry(
+    engine: &mut dyn Engine,
     degeneracy: usize,
     min_time: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2322,15 +2339,16 @@ fn run_eig_source_geometry(
         ("few-large", degeneracy, 2),
         ("many-small", (degeneracy / 16).max(1), 16),
     ] {
-        run_checked_eig::<f64>(workload, d, sectors, min_time)?;
-        run_checked_eig::<Complex64>(workload, d, sectors, min_time)?;
-        run_mf_eig::<f64>(workload, d, sectors, min_time)?;
-        run_mf_eig::<Complex64>(workload, d, sectors, min_time)?;
+        run_checked_eig::<f64>(engine, workload, d, sectors, min_time)?;
+        run_checked_eig::<Complex64>(engine, workload, d, sectors, min_time)?;
+        run_mf_eig::<f64>(engine, workload, d, sectors, min_time)?;
+        run_mf_eig::<Complex64>(engine, workload, d, sectors, min_time)?;
     }
     Ok(())
 }
 
 fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
+    engine: &mut dyn Engine,
     workload: &str,
     degeneracy: usize,
     sector_count: usize,
@@ -2376,11 +2394,11 @@ fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
         for (selected, selected_degeneracy) in
             [(&input, degeneracy), (&changed_input, degeneracy + 1)]
         {
-            let eig =
-                eig_full_dense(&mut preflight, selected).map_err(checked_compact_example_error)?;
+            let eig = eig_full_dense(engine, &mut preflight, selected)
+                .map_err(checked_compact_example_error)?;
             assert_multitree_eig(selected, &eig, selected_degeneracy, sector_count);
             drop(eig);
-            let qr = qr_compact_dense(&mut preflight, selected)
+            let qr = qr_compact_dense(engine, &mut preflight, selected)
                 .map_err(checked_compact_example_error)?;
             assert_multitree_qr(selected, &qr.q, &qr.r, selected_degeneracy, sector_count);
             drop(qr);
@@ -2405,12 +2423,12 @@ fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
                 || {
                     if is_eig {
                         drop(black_box(
-                            eig_full_dense(&mut dense, &input)
+                            eig_full_dense(engine, &mut dense, &input)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     } else {
                         drop(black_box(
-                            qr_compact_dense(&mut dense, &input)
+                            qr_compact_dense(engine, &mut dense, &input)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     }
@@ -2431,12 +2449,12 @@ fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
                     changed = !changed;
                     if is_eig {
                         drop(black_box(
-                            eig_full_dense(&mut dense, selected)
+                            eig_full_dense(engine, &mut dense, selected)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     } else {
                         drop(black_box(
-                            qr_compact_dense(&mut dense, selected)
+                            qr_compact_dense(engine, &mut dense, selected)
                                 .map_err(checked_compact_example_error)?,
                         ));
                     }
@@ -2451,6 +2469,7 @@ fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
 }
 
 fn run_eig_output_placement(
+    engine: &mut dyn Engine,
     degeneracy: usize,
     min_time: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2461,10 +2480,10 @@ fn run_eig_output_placement(
         ("few-large", degeneracy, 2),
         ("many-small", (degeneracy / 16).max(1), 16),
     ] {
-        run_checked_multitree_eig::<f64>(workload, d, sectors, min_time)?;
-        run_checked_multitree_eig::<Complex64>(workload, d, sectors, min_time)?;
-        run_mf_eig::<f64>(workload, d, sectors, min_time)?;
-        run_mf_eig::<Complex64>(workload, d, sectors, min_time)?;
+        run_checked_multitree_eig::<f64>(engine, workload, d, sectors, min_time)?;
+        run_checked_multitree_eig::<Complex64>(engine, workload, d, sectors, min_time)?;
+        run_mf_eig::<f64>(engine, workload, d, sectors, min_time)?;
+        run_mf_eig::<Complex64>(engine, workload, d, sectors, min_time)?;
     }
     Ok(())
 }
@@ -2515,23 +2534,25 @@ fn assert_full_qr_lq<D: HarnessScalar>(
 }
 
 fn run_checked_full_qr_lq<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     operation: &str,
     dense: &mut DefaultDenseExecutor,
     input: &BoundDynamicTensorRef<'_, LayoutGenericRule, D>,
 ) -> Result<(), Error> {
     if operation == "qr" {
         drop(black_box(
-            qr_full_dense(dense, input).map_err(checked_compact_example_error)?,
+            qr_full_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         ));
     } else {
         drop(black_box(
-            lq_full_dense(dense, input).map_err(checked_compact_example_error)?,
+            lq_full_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         ));
     }
     Ok(())
 }
 
 fn run_full_qr_fixture<D: HarnessScalar>(
+    engine: &mut dyn Engine,
     workload: &str,
     degeneracy: usize,
     sector_count: usize,
@@ -2566,11 +2587,11 @@ fn run_full_qr_fixture<D: HarnessScalar>(
         let changed_original = changed_fixture.data.clone();
         let mut preflight_dense = DefaultDenseExecutor::new();
         for selected in [&input, &changed] {
-            let qr = qr_full_dense(&mut preflight_dense, selected)
+            let qr = qr_full_dense(engine, &mut preflight_dense, selected)
                 .map_err(checked_compact_example_error)?;
             assert_full_qr_lq(selected, &qr.q, &qr.r, "qr", sector_count);
             drop(qr);
-            let lq = lq_full_dense(&mut preflight_dense, selected)
+            let lq = lq_full_dense(engine, &mut preflight_dense, selected)
                 .map_err(checked_compact_example_error)?;
             assert_full_qr_lq(selected, &lq.l, &lq.q, "lq", sector_count);
             drop(lq);
@@ -2588,7 +2609,7 @@ fn run_full_qr_fixture<D: HarnessScalar>(
                 "first_after_setup",
                 "warm_after_setup",
                 min_time,
-                || run_checked_full_qr_lq(operation, &mut dense, &input),
+                || run_checked_full_qr_lq(engine, operation, &mut dense, &input),
             )?;
             let mut alternate = false;
             bench(
@@ -2602,7 +2623,7 @@ fn run_full_qr_fixture<D: HarnessScalar>(
                 || {
                     let selected = if alternate { &changed } else { &input };
                     alternate = !alternate;
-                    run_checked_full_qr_lq(operation, &mut dense, selected)
+                    run_checked_full_qr_lq(engine, operation, &mut dense, selected)
                 },
             )?;
         }
@@ -2612,14 +2633,17 @@ fn run_full_qr_fixture<D: HarnessScalar>(
     Ok(())
 }
 
-fn run_full_qr_lowering(min_time: Duration) -> Result<(), Box<dyn std::error::Error>> {
+fn run_full_qr_lowering(
+    engine: &mut dyn Engine,
+    min_time: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("OP_MATRIX_OPERATION").as_deref() != Ok("full_qr_lowering")
         || !form_enabled("owned")
     {
         return Ok(());
     }
     let min_time = min_time.max(Duration::from_millis(100));
-    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical,padded dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features OP_MATRIX_GEMM_BACKEND_does_not_select_factorization_provider threads=wrapper_RAYON_BLAS_1");
+    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical,padded dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features engine_threads=OP_MATRIX_THREADS");
     for (workload, degeneracy, sectors) in [("few-large", 32, 2), ("many-small", 2, 16)] {
         for (shape_name, aspect) in [
             ("square", CheckedMatrixAspect::Square),
@@ -2627,10 +2651,10 @@ fn run_full_qr_lowering(min_time: Duration) -> Result<(), Box<dyn std::error::Er
             ("tall", CheckedMatrixAspect::Tall),
         ] {
             run_full_qr_fixture::<f64>(
-                workload, degeneracy, sectors, shape_name, aspect, min_time,
+                engine, workload, degeneracy, sectors, shape_name, aspect, min_time,
             )?;
             run_full_qr_fixture::<Complex64>(
-                workload, degeneracy, sectors, shape_name, aspect, min_time,
+                engine, workload, degeneracy, sectors, shape_name, aspect, min_time,
             )?;
         }
     }
@@ -2638,7 +2662,7 @@ fn run_full_qr_lowering(min_time: Duration) -> Result<(), Box<dyn std::error::Er
 }
 
 macro_rules! run_provider {
-    ($symmetry:literal, $rule:ty, $space:expr, $min_time:expr) => {{
+    ($engine:ident, $symmetry:literal, $rule:ty, $space:expr, $min_time:expr) => {{
         let space = $space;
         for operation in ["permute", "transpose", "repartition"] {
             if !operation_enabled(operation) {
@@ -2650,6 +2674,7 @@ macro_rules! run_provider {
                 }
                 let runtime = benchmark_runtime()?;
                 let source = TensorMap::<$rule, f64>::rand_with_seed(
+                    $engine,
                     &runtime,
                     [&space, &space],
                     [&space],
@@ -2665,28 +2690,28 @@ macro_rules! run_provider {
                         "warm",
                         $min_time,
                         || match operation {
-                            "permute" => source.permute(&[1], &[2, 0]),
-                            "transpose" => source.transpose(&[2], &[1, 0]),
-                            "repartition" => source.repartition(1),
+                            "permute" => source.permute($engine, &[1], &[2, 0]),
+                            "transpose" => source.transpose($engine, &[2], &[1, 0]),
+                            "repartition" => source.repartition($engine, 1),
                             _ => unreachable!("fixed tree-operation table"),
                         },
                     )?;
-                    assert!(cold.norm(2.0)?.is_finite());
+                    assert!(cold.norm($engine, 2.0)?.is_finite());
                     let expected = match operation {
-                        "permute" => source.permute(&[1], &[2, 0])?,
-                        "transpose" => source.transpose(&[2], &[1, 0])?,
-                        "repartition" => source.repartition(1)?,
+                        "permute" => source.permute($engine, &[1], &[2, 0])?,
+                        "transpose" => source.transpose($engine, &[2], &[1, 0])?,
+                        "repartition" => source.repartition($engine, 1)?,
                         _ => unreachable!("fixed tree-operation table"),
                     };
-                    assert_same_tensor!(cold, expected, source);
+                    assert_same_tensor!($engine, cold, expected, source);
                 } else {
                     let expected = match operation {
-                        "permute" => source.permute(&[1], &[2, 0])?,
-                        "transpose" => source.transpose(&[2], &[1, 0])?,
-                        "repartition" => source.repartition(1)?,
+                        "permute" => source.permute($engine, &[1], &[2, 0])?,
+                        "transpose" => source.transpose($engine, &[2], &[1, 0])?,
+                        "repartition" => source.repartition($engine, 1)?,
                         _ => unreachable!("fixed tree-operation table"),
                     };
-                    let mut destination = expected.zeros_like().unwrap();
+                    let mut destination = expected.zeros_like($engine).unwrap();
                     bench(
                         &runtime,
                         $symmetry,
@@ -2696,17 +2721,29 @@ macro_rules! run_provider {
                         "warm_after_setup",
                         $min_time,
                         || match operation {
-                            "permute" => {
-                                source.permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+                            "permute" => source.permute_into(
+                                $engine,
+                                &[1],
+                                &[2, 0],
+                                &mut destination,
+                                1.0,
+                                0.0,
+                            ),
+                            "transpose" => source.transpose_into(
+                                $engine,
+                                &[2],
+                                &[1, 0],
+                                &mut destination,
+                                1.0,
+                                0.0,
+                            ),
+                            "repartition" => {
+                                source.repartition_into($engine, &mut destination, 1.0, 0.0)
                             }
-                            "transpose" => {
-                                source.transpose_into(&[2], &[1, 0], &mut destination, 1.0, 0.0)
-                            }
-                            "repartition" => source.repartition_into(&mut destination, 1.0, 0.0),
                             _ => unreachable!("fixed tree-operation table"),
                         },
                     )?;
-                    assert_same_tensor!(destination, expected, source);
+                    assert_same_tensor!($engine, destination, expected, source);
                 }
             }
         }
@@ -2717,6 +2754,7 @@ macro_rules! run_provider {
             }
             let runtime = benchmark_runtime()?;
             let source = TensorMap::<$rule, f64>::rand_with_seed(
+                $engine,
                 &runtime,
                 [&space, &space],
                 [&space, &space],
@@ -2724,7 +2762,7 @@ macro_rules! run_provider {
             )?;
             let logical_source = match operation {
                 "trace" => source,
-                "trace_adjoint" => source.adjoint()?,
+                "trace_adjoint" => source.adjoint($engine)?,
                 _ => unreachable!("fixed trace-operation table"),
             };
             let traced = bench(
@@ -2735,28 +2773,30 @@ macro_rules! run_provider {
                 "cold",
                 "warm",
                 $min_time,
-                || logical_source.trace_pairs(&[(1, 2)]),
+                || logical_source.trace_pairs($engine, &[(1, 2)]),
             )?;
-            assert!(traced.norm(2.0)?.is_finite());
-            let expected = logical_source.trace_pairs(&[(1, 2)])?;
-            assert_same_tensor!(traced, expected, logical_source);
+            assert!(traced.norm($engine, 2.0)?.is_finite());
+            let expected = logical_source.trace_pairs($engine, &[(1, 2)])?;
+            assert_same_tensor!($engine, traced, expected, logical_source);
         }
 
         let runtime = benchmark_runtime()?;
         let lhs = TensorMap::<$rule, f64>::rand_with_seed(
+            $engine,
             &runtime,
             [&space, &space],
             [&space, &space],
             728,
         )?;
         let rhs = TensorMap::<$rule, f64>::rand_with_seed(
+            $engine,
             &runtime,
             [&space, &space],
             [&space, &space],
             729,
         )?;
-        let lhs_adjoint = lhs.adjoint()?;
-        let rhs_adjoint = rhs.adjoint()?;
+        let lhs_adjoint = lhs.adjoint($engine)?;
+        let rhs_adjoint = rhs.adjoint($engine)?;
         for (suffix, left, right) in [("", &lhs, &rhs), ("_adjoint", &lhs_adjoint, &rhs_adjoint)] {
             let scale_name = format!("scale{suffix}");
             if operation_enabled(&scale_name) && form_enabled("owned") {
@@ -2768,10 +2808,10 @@ macro_rules! run_provider {
                     "cold",
                     "warm",
                     $min_time,
-                    || Ok::<_, Error>(left.scale(0.5).unwrap()),
+                    || Ok::<_, Error>(left.scale($engine, 0.5).unwrap()),
                 )?;
-                let error = (scaled.norm(2.0)? - 0.5 * left.norm(2.0)?).abs();
-                assert!(error <= 256.0 * f64::EPSILON * left.norm(2.0)?.max(1.0));
+                let error = (scaled.norm($engine, 2.0)? - 0.5 * left.norm($engine, 2.0)?).abs();
+                assert!(error <= 256.0 * f64::EPSILON * left.norm($engine, 2.0)?.max(1.0));
             }
 
             let add_name = format!("add{suffix}");
@@ -2786,12 +2826,12 @@ macro_rules! run_provider {
                     "cold",
                     "warm",
                     $min_time,
-                    || left.axpby(alpha, right, beta),
+                    || left.axpby($engine, alpha, right, beta),
                 )?;
-                let expected_norm_squared = alpha * alpha * left.norm(2.0)?.powi(2)
-                    + beta * beta * right.norm(2.0)?.powi(2)
-                    + 2.0 * alpha * beta * left.inner(right)?;
-                let error = (added.norm(2.0)?.powi(2) - expected_norm_squared).abs();
+                let expected_norm_squared = alpha * alpha * left.norm($engine, 2.0)?.powi(2)
+                    + beta * beta * right.norm($engine, 2.0)?.powi(2)
+                    + 2.0 * alpha * beta * left.inner($engine, right)?;
+                let error = (added.norm($engine, 2.0)?.powi(2) - expected_norm_squared).abs();
                 assert!(error <= 1024.0 * f64::EPSILON * expected_norm_squared.abs().max(1.0));
             }
 
@@ -2805,7 +2845,7 @@ macro_rules! run_provider {
                     "cold",
                     "warm",
                     $min_time,
-                    || left.norm(2.0),
+                    || left.norm($engine, 2.0),
                 )?;
                 assert!(value.is_finite());
             }
@@ -2820,7 +2860,7 @@ macro_rules! run_provider {
                     "cold",
                     "warm",
                     $min_time,
-                    || left.inner(right),
+                    || left.inner($engine, right),
                 )?;
                 assert!(value.is_finite());
             }
@@ -2829,12 +2869,14 @@ macro_rules! run_provider {
         if operation_enabled("compose") && form_enabled("owned") {
             let runtime = benchmark_runtime()?;
             let lhs = TensorMap::<$rule, f64>::rand_with_seed(
+                $engine,
                 &runtime,
                 [&space, &space],
                 [&space, &space],
                 725,
             )?;
             let rhs = TensorMap::<$rule, f64>::rand_with_seed(
+                $engine,
                 &runtime,
                 [&space, &space],
                 [&space, &space],
@@ -2848,9 +2890,10 @@ macro_rules! run_provider {
                 "cold",
                 "warm",
                 $min_time,
-                || lhs.compose(&rhs),
+                || lhs.compose($engine, &rhs),
             )?;
             let contracted = lhs.contract(
+                $engine,
                 &rhs,
                 &ContractSpec {
                     lhs: &[2, 3],
@@ -2859,7 +2902,7 @@ macro_rules! run_provider {
                     domain: &[2, 3],
                 },
             )?;
-            assert_same_tensor!(composed, contracted, lhs);
+            assert_same_tensor!($engine, composed, contracted, lhs);
         }
 
         for (operation, lhs_axes, rhs_axes, output_axes) in [
@@ -2899,12 +2942,14 @@ macro_rules! run_provider {
                 }
                 let runtime = benchmark_runtime()?;
                 let lhs = TensorMap::<$rule, f64>::rand_with_seed(
+                    $engine,
                     &runtime,
                     [&space, &space],
                     [&space, &space],
                     725,
                 )?;
                 let rhs = TensorMap::<$rule, f64>::rand_with_seed(
+                    $engine,
                     &runtime,
                     [&space, &space],
                     [&space, &space],
@@ -2919,14 +2964,14 @@ macro_rules! run_provider {
                         "cold",
                         "warm",
                         $min_time,
-                        || lhs.contract(&rhs, &spec),
+                        || lhs.contract($engine, &rhs, &spec),
                     )?;
-                    assert!(cold.norm(2.0)?.is_finite());
-                    let expected = lhs.contract(&rhs, &spec)?;
-                    assert_same_tensor!(cold, expected, lhs);
+                    assert!(cold.norm($engine, 2.0)?.is_finite());
+                    let expected = lhs.contract($engine, &rhs, &spec)?;
+                    assert_same_tensor!($engine, cold, expected, lhs);
                 } else {
-                    let expected = lhs.contract(&rhs, &spec)?;
-                    let mut destination = expected.zeros_like().unwrap();
+                    let expected = lhs.contract($engine, &rhs, &spec)?;
+                    let mut destination = expected.zeros_like($engine).unwrap();
                     bench(
                         &runtime,
                         $symmetry,
@@ -2935,9 +2980,9 @@ macro_rules! run_provider {
                         "first_after_setup",
                         "warm_after_setup",
                         $min_time,
-                        || lhs.contract_into(&rhs, &spec, &mut destination, 1.0, 0.0),
+                        || lhs.contract_into($engine, &rhs, &spec, &mut destination, 1.0, 0.0),
                     )?;
-                    assert_same_tensor!(destination, expected, lhs);
+                    assert_same_tensor!($engine, destination, expected, lhs);
                 }
             }
         }
@@ -2946,6 +2991,7 @@ macro_rules! run_provider {
 
 #[cfg(feature = "cgc-gen")]
 fn run_checked_sun(
+    engine: &mut dyn Engine,
     symmetry: &str,
     provider: std::sync::Arc<symtn::sector::LieGroupFusionRule>,
     label: Vec<i64>,
@@ -2965,6 +3011,7 @@ fn run_checked_sun(
         }
         let runtime = benchmark_runtime()?;
         let source = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
+            engine,
             &runtime,
             [&space, &space],
             [&space],
@@ -2979,19 +3026,19 @@ fn run_checked_sun(
             "warm",
             min_time,
             || match operation {
-                "permute" => source.permute(&[1], &[2, 0]),
-                "transpose" => source.transpose(&[2], &[1, 0]),
-                "repartition" => source.repartition(1),
+                "permute" => source.permute(engine, &[1], &[2, 0]),
+                "transpose" => source.transpose(engine, &[2], &[1, 0]),
+                "repartition" => source.repartition(engine, 1),
                 _ => unreachable!("fixed tree-operation table"),
             },
         )?;
         let expected = match operation {
-            "permute" => source.permute(&[1], &[2, 0])?,
-            "transpose" => source.transpose(&[2], &[1, 0])?,
-            "repartition" => source.repartition(1)?,
+            "permute" => source.permute(engine, &[1], &[2, 0])?,
+            "transpose" => source.transpose(engine, &[2], &[1, 0])?,
+            "repartition" => source.repartition(engine, 1)?,
             _ => unreachable!("fixed tree-operation table"),
         };
-        assert_same_tensor!(cold, expected, source);
+        assert_same_tensor!(engine, cold, expected, source);
     }
 
     if !qr_only && (operation_enabled("trace") || operation_enabled("trace_adjoint")) {
@@ -3000,12 +3047,14 @@ fn run_checked_sun(
 
     let runtime = benchmark_runtime()?;
     let lhs = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
+        engine,
         &runtime,
         [&space, &space],
         [&space, &space],
         725,
     )?;
     let rhs = TensorMap::<LieGroupFusionRule, f64>::rand_with_seed(
+        engine,
         &runtime,
         [&space, &space],
         [&space, &space],
@@ -3077,7 +3126,7 @@ fn run_checked_sun(
                             symtn::typed::GenericTensorError<
                                 symtn::sector::LieGroupFusionRuleError,
                             >,
-                        >(lhs.scale(0.5).unwrap())
+                        >(lhs.scale(engine, 0.5).unwrap())
                     },
                 )?;
                 for (&actual, &input) in scaled
@@ -3088,7 +3137,7 @@ fn run_checked_sun(
                 {
                     assert_eq!(actual, 0.5 * input);
                 }
-                assert_same_tensor!(scaled, lhs.scale(0.5).unwrap(), lhs);
+                assert_same_tensor!(engine, scaled, lhs.scale(engine, 0.5).unwrap(), lhs);
             }
             1 => {
                 let added = bench(
@@ -3099,7 +3148,7 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.axpby(0.75, &rhs, -0.25),
+                    || lhs.axpby(engine, 0.75, &rhs, -0.25),
                 )?;
                 for ((&actual, &left), &right) in added
                     .dense_data()
@@ -3110,7 +3159,7 @@ fn run_checked_sun(
                 {
                     assert_eq!(actual, 0.75 * left - 0.25 * right);
                 }
-                assert_same_tensor!(added, lhs.axpby(0.75, &rhs, -0.25)?, lhs);
+                assert_same_tensor!(engine, added, lhs.axpby(engine, 0.75, &rhs, -0.25)?, lhs);
             }
             2 => {
                 let norm = bench(
@@ -3121,9 +3170,9 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.norm(2.0),
+                    || lhs.norm(engine, 2.0),
                 )?;
-                let inner_self = lhs.inner(&lhs)?;
+                let inner_self = lhs.inner(engine, &lhs)?;
                 assert!(
                     (norm * norm - inner_self).abs()
                         <= 256.0 * f64::EPSILON * inner_self.abs().max(1.0)
@@ -3138,9 +3187,9 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.inner(&rhs),
+                    || lhs.inner(engine, &rhs),
                 )?;
-                let reverse = rhs.inner(&lhs)?;
+                let reverse = rhs.inner(engine, &lhs)?;
                 assert!((inner - reverse).abs() <= 256.0 * f64::EPSILON * inner.abs().max(1.0));
             }
             4 => {
@@ -3152,11 +3201,13 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.compose(&rhs),
+                    || lhs.compose(engine, &rhs),
                 )?;
                 assert_same_tensor!(
+                    engine,
                     composed,
                     lhs.contract(
+                        engine,
                         &rhs,
                         &ContractSpec {
                             lhs: &[2, 3],
@@ -3177,9 +3228,9 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.qr_compact(&[0, 1], &[2, 3]),
+                    || lhs.qr_compact(engine, &[0, 1], &[2, 3]),
                 )?;
-                assert_same_tensor!(q.compose(&r)?, lhs, lhs);
+                assert_same_tensor!(engine, q.compose(engine, &r)?, lhs, lhs);
             }
             _ => {
                 let (lhs_axes, output_axes) = match action {
@@ -3203,9 +3254,9 @@ fn run_checked_sun(
                     "cold",
                     "warm",
                     min_time,
-                    || lhs.contract(&rhs, &spec),
+                    || lhs.contract(engine, &rhs, &spec),
                 )?;
-                assert_same_tensor!(output, lhs.contract(&rhs, &spec)?, lhs);
+                assert_same_tensor!(engine, output, lhs.contract(engine, &rhs, &spec)?, lhs);
             }
         }
     }
@@ -3221,6 +3272,7 @@ fn matrix_op_tag(op: MatrixOp) -> &'static str {
 }
 
 fn run_adapter_case<T: OrientedScalar>(
+    engine: &mut dyn Engine,
     class: &str,
     shapes: &[(usize, usize, usize)],
     expected_runs: &[usize],
@@ -3241,6 +3293,7 @@ fn run_adapter_case<T: OrientedScalar>(
     let expected = expected_adapter(&preflight, lhs_op, rhs_op, alpha, beta);
     let mut preflight_executor = benchmark_dense_executor()?;
     execute_adapter(
+        engine,
         &mut preflight_executor,
         &mut preflight,
         lhs_op,
@@ -3260,6 +3313,7 @@ fn run_adapter_case<T: OrientedScalar>(
     let mut executor = benchmark_dense_executor()?;
     bench_adapter(&form, min_time, expected_marker, || {
         execute_adapter(
+            engine,
             &mut executor,
             &mut fixture,
             lhs_op,
@@ -3272,6 +3326,7 @@ fn run_adapter_case<T: OrientedScalar>(
 }
 
 fn run_adapter_shape_cycle<T: OrientedScalar>(
+    engine: &mut dyn Engine,
     class: &str,
     geometries: &[(usize, usize, usize)],
     jobs: usize,
@@ -3292,6 +3347,7 @@ fn run_adapter_shape_cycle<T: OrientedScalar>(
         );
         let mut executor = benchmark_dense_executor()?;
         execute_adapter(
+            engine,
             &mut executor,
             &mut fixture,
             lhs_op,
@@ -3319,6 +3375,7 @@ fn run_adapter_shape_cycle<T: OrientedScalar>(
         let case = next;
         next = (next + 1) % fixtures.len();
         let (first, len) = execute_adapter(
+            engine,
             &mut executor,
             &mut fixtures[case],
             lhs_op,
@@ -3343,12 +3400,13 @@ fn observe_owned<T: OrientedScalar>(output: TensorMap<U1FusionRule, T>) -> (usiz
 }
 
 macro_rules! preflight_public {
-    ($fixture:expr) => {{
-        let direct = $fixture.lhs.compose(&$fixture.rhs)?;
+    ($engine:ident, $fixture:expr) => {{
+        let direct = $fixture.lhs.compose($engine, &$fixture.rhs)?;
         assert_public_fixture(&direct, &$fixture.expected_direct)?;
-        let composed = $fixture.lhs_adjoint.compose(&$fixture.rhs)?;
+        let composed = $fixture.lhs_adjoint.compose($engine, &$fixture.rhs)?;
         assert_public_fixture(&composed, &$fixture.expected_adjoint)?;
         let contracted = $fixture.lhs_adjoint.contract(
+            $engine,
             &$fixture.rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -3362,11 +3420,11 @@ macro_rules! preflight_public {
 }
 
 macro_rules! run_public_dtype {
-    ($ty:ty, $class:expr, $sectors:expr, $degeneracy:expr, $min_time:expr) => {{
+    ($engine:ident, $ty:ty, $class:expr, $sectors:expr, $degeneracy:expr, $min_time:expr) => {{
         for operation in ["direct_compose", "lazy_lhs_compose", "lazy_lhs_contract"] {
             let preflight_runtime = benchmark_runtime()?;
             let preflight = public_fixture::<$ty>(&preflight_runtime, $sectors, $degeneracy)?;
-            preflight_public!(preflight);
+            preflight_public!($engine, preflight);
             drop(preflight);
             drop(preflight_runtime);
 
@@ -3388,7 +3446,7 @@ macro_rules! run_public_dtype {
                     "first_fresh_runtime_after_preflight",
                     "warm_fixed",
                     $min_time,
-                    || Ok::<_, Error>(observe_owned(fixture.lhs.compose(&fixture.rhs)?)),
+                    || Ok::<_, Error>(observe_owned(fixture.lhs.compose($engine, &fixture.rhs)?)),
                 )?,
                 "lazy_lhs_compose" => bench(
                     &runtime,
@@ -3398,7 +3456,11 @@ macro_rules! run_public_dtype {
                     "first_fresh_runtime_after_preflight",
                     "warm_fixed",
                     $min_time,
-                    || Ok::<_, Error>(observe_owned(fixture.lhs_adjoint.compose(&fixture.rhs)?)),
+                    || {
+                        Ok::<_, Error>(observe_owned(
+                            fixture.lhs_adjoint.compose($engine, &fixture.rhs)?,
+                        ))
+                    },
                 )?,
                 "lazy_lhs_contract" => bench(
                     &runtime,
@@ -3410,6 +3472,7 @@ macro_rules! run_public_dtype {
                     $min_time,
                     || {
                         Ok::<_, Error>(observe_owned(fixture.lhs_adjoint.contract(
+                            $engine,
                             &fixture.rhs,
                             &ContractSpec {
                                 lhs: &[1],
@@ -3429,11 +3492,11 @@ macro_rules! run_public_dtype {
 }
 
 macro_rules! run_public_shape_dtype {
-    ($ty:ty, $class:expr, $sectors:expr, $degeneracies:expr, $min_time:expr) => {{
+    ($engine:ident, $ty:ty, $class:expr, $sectors:expr, $degeneracies:expr, $min_time:expr) => {{
         let preflight_runtime = benchmark_runtime()?;
         for &degeneracy in $degeneracies {
             let fixture = public_fixture::<$ty>(&preflight_runtime, $sectors, degeneracy)?;
-            preflight_public!(fixture);
+            preflight_public!($engine, fixture);
         }
         drop(preflight_runtime);
 
@@ -3455,14 +3518,19 @@ macro_rules! run_public_shape_dtype {
         bench_public_shape(&runtime, &form, $min_time, &expected, || {
             let case = next;
             next = (next + 1) % fixtures.len();
-            let output = fixtures[case].lhs_adjoint.compose(&fixtures[case].rhs)?;
+            let output = fixtures[case]
+                .lhs_adjoint
+                .compose($engine, &fixtures[case].rhs)?;
             let (_, first, len) = observe_owned(output);
             Ok((case, first, len))
         })?;
     }};
 }
 
-fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error::Error>> {
+fn run_oriented_uniform_run(
+    engine: &mut dyn Engine,
+    min_time: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
     let many_small = vec![(4, 3, 5); 32];
     let few_large = vec![(64, 48, 56); 4];
     let minimum_run = vec![(4, 3, 5); 2];
@@ -3475,18 +3543,51 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         (MatrixOp::Identity, MatrixOp::Identity),
         (MatrixOp::Transpose, MatrixOp::Identity),
     ] {
-        run_adapter_case::<f64>("many_small", &many_small, &[32], lhs_op, rhs_op, min_time)?;
-        run_adapter_case::<f64>("few_large", &few_large, &[4], lhs_op, rhs_op, min_time)?;
+        run_adapter_case::<f64>(
+            engine,
+            "many_small",
+            &many_small,
+            &[32],
+            lhs_op,
+            rhs_op,
+            min_time,
+        )?;
+        run_adapter_case::<f64>(
+            engine,
+            "few_large",
+            &few_large,
+            &[4],
+            lhs_op,
+            rhs_op,
+            min_time,
+        )?;
     }
     for (lhs_op, rhs_op) in [
         (MatrixOp::Identity, MatrixOp::Identity),
         (MatrixOp::Adjoint, MatrixOp::Identity),
         (MatrixOp::Adjoint, MatrixOp::Adjoint),
     ] {
-        run_adapter_case::<Complex64>("many_small", &many_small, &[32], lhs_op, rhs_op, min_time)?;
-        run_adapter_case::<Complex64>("few_large", &few_large, &[4], lhs_op, rhs_op, min_time)?;
+        run_adapter_case::<Complex64>(
+            engine,
+            "many_small",
+            &many_small,
+            &[32],
+            lhs_op,
+            rhs_op,
+            min_time,
+        )?;
+        run_adapter_case::<Complex64>(
+            engine,
+            "few_large",
+            &few_large,
+            &[4],
+            lhs_op,
+            rhs_op,
+            min_time,
+        )?;
     }
     run_adapter_case::<f64>(
+        engine,
         "minimum_run",
         &minimum_run,
         &[2],
@@ -3495,6 +3596,7 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         min_time,
     )?;
     run_adapter_case::<Complex64>(
+        engine,
         "minimum_run",
         &minimum_run,
         &[2],
@@ -3503,6 +3605,7 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         min_time,
     )?;
     run_adapter_case::<Complex64>(
+        engine,
         "singleton",
         &singleton,
         &[1],
@@ -3511,6 +3614,7 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         min_time,
     )?;
     run_adapter_case::<Complex64>(
+        engine,
         "heterogeneous",
         &heterogeneous,
         &[1; 8],
@@ -3522,6 +3626,7 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
     let small_shapes = [(4, 3, 5), (5, 4, 6), (3, 6, 4)];
     let large_shapes = [(64, 48, 56), (56, 40, 64), (72, 56, 48)];
     run_adapter_shape_cycle::<f64>(
+        engine,
         "many_small",
         &small_shapes,
         32,
@@ -3529,14 +3634,23 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         min_time,
     )?;
     run_adapter_shape_cycle::<Complex64>(
+        engine,
         "many_small",
         &small_shapes,
         32,
         MatrixOp::Adjoint,
         min_time,
     )?;
-    run_adapter_shape_cycle::<f64>("few_large", &large_shapes, 4, MatrixOp::Transpose, min_time)?;
+    run_adapter_shape_cycle::<f64>(
+        engine,
+        "few_large",
+        &large_shapes,
+        4,
+        MatrixOp::Transpose,
+        min_time,
+    )?;
     run_adapter_shape_cycle::<Complex64>(
+        engine,
         "few_large",
         &large_shapes,
         4,
@@ -3544,18 +3658,20 @@ fn run_oriented_uniform_run(min_time: Duration) -> Result<(), Box<dyn std::error
         min_time,
     )?;
 
-    run_public_dtype!(f64, "many_small", 32, 4, min_time);
-    run_public_dtype!(Complex64, "many_small", 32, 4, min_time);
-    run_public_dtype!(f64, "few_large", 4, 32, min_time);
-    run_public_dtype!(Complex64, "few_large", 4, 32, min_time);
-    run_public_shape_dtype!(f64, "many_small", 32, &[4, 5, 3], min_time);
-    run_public_shape_dtype!(Complex64, "many_small", 32, &[4, 5, 3], min_time);
-    run_public_shape_dtype!(f64, "few_large", 4, &[32, 33, 31], min_time);
-    run_public_shape_dtype!(Complex64, "few_large", 4, &[32, 33, 31], min_time);
+    run_public_dtype!(engine, f64, "many_small", 32, 4, min_time);
+    run_public_dtype!(engine, Complex64, "many_small", 32, 4, min_time);
+    run_public_dtype!(engine, f64, "few_large", 4, 32, min_time);
+    run_public_dtype!(engine, Complex64, "few_large", 4, 32, min_time);
+    run_public_shape_dtype!(engine, f64, "many_small", 32, &[4, 5, 3], min_time);
+    run_public_shape_dtype!(engine, Complex64, "many_small", 32, &[4, 5, 3], min_time);
+    run_public_shape_dtype!(engine, f64, "few_large", 4, &[32, 33, 31], min_time);
+    run_public_shape_dtype!(engine, Complex64, "few_large", 4, &[32, 33, 31], min_time);
     Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let threads = benchmark_threads();
+    let engine = &mut benchmark_engine(threads)?;
     if let Ok(operation) = std::env::var("OP_MATRIX_OPERATION") {
         if !matches!(
             operation.as_str(),
@@ -3623,7 +3739,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::var("TENFERRO_AUTHORITY").unwrap_or_else(|_| "unknown".into())
     );
     println!(
-        "# features=cpu-faer:{} blas-provider:{} cuda:{} gemm_backend={}",
+        "# features=cpu-faer:{} blas-provider:{} cuda:{} engine_threads={threads}",
         cfg!(feature = "cpu-faer"),
         cfg!(any(
             feature = "cpu-blas",
@@ -3632,7 +3748,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             feature = "blas-mkl"
         )),
         cfg!(feature = "cuda"),
-        std::env::var("OP_MATRIX_GEMM_BACKEND").unwrap_or_else(|_| "faer".into())
     );
     println!("# degeneracy={degeneracy}");
     println!("# threads=RAYON_NUM_THREADS:{} OPENBLAS_NUM_THREADS:{} OMP_NUM_THREADS:{} MKL_NUM_THREADS:{}", env_or_unset("RAYON_NUM_THREADS"), env_or_unset("OPENBLAS_NUM_THREADS"), env_or_unset("OMP_NUM_THREADS"), env_or_unset("MKL_NUM_THREADS"));
@@ -3675,18 +3790,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let min_time = Duration::from_millis(min_ms);
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("oriented_uniform_run") {
-        return run_oriented_uniform_run(min_time);
+        return run_oriented_uniform_run(engine, min_time);
     }
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("eig_source_geometry") {
-        return run_eig_source_geometry(degeneracy, min_time);
+        return run_eig_source_geometry(engine, degeneracy, min_time);
     }
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("eig_output_placement") {
-        return run_eig_output_placement(degeneracy, min_time);
+        return run_eig_output_placement(engine, degeneracy, min_time);
     }
-    run_layout_generic_qr(degeneracy, min_time)?;
-    run_checked_compact_input(degeneracy, min_time)?;
-    run_full_qr_lowering(min_time)?;
+    run_layout_generic_qr(engine, degeneracy, min_time)?;
+    run_checked_compact_input(engine, degeneracy, min_time)?;
+    run_full_qr_lowering(engine, min_time)?;
     run_provider!(
+        engine,
         "U1",
         U1FusionRule,
         GradedSpace::try_new(
@@ -3700,6 +3816,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         min_time
     );
     run_provider!(
+        engine,
         "SU2",
         SU2FusionRule,
         GradedSpace::try_new(
@@ -3718,6 +3835,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use symtn::sector::LieGroupFusionRule;
 
         run_checked_sun(
+            engine,
             "SU3[0;0]",
             Arc::new(LieGroupFusionRule::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -3728,6 +3846,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             true,
         )?;
         run_checked_sun(
+            engine,
             "SU3[1;1]",
             Arc::new(LieGroupFusionRule::new(
                 fusion_symbols::lie::GroupId::su(3).unwrap(),
@@ -3738,6 +3857,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             false,
         )?;
         run_checked_sun(
+            engine,
             "SU4[1;0;1]",
             Arc::new(LieGroupFusionRule::new(
                 fusion_symbols::lie::GroupId::su(4).unwrap(),
@@ -3792,6 +3912,7 @@ fn lq_dense<R, D>(
 }
 
 fn qr_compact_dense<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> CheckedQr<R, D>
@@ -3801,19 +3922,25 @@ where
     D: FactorScalar,
 {
     qr_compact_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
     )
     .map(qr_dense)
 }
 
-fn qr_full_dense<E, R, D>(dense: &mut E, input: &BoundDynamicTensorRef<'_, R, D>) -> CheckedQr<R, D>
+fn qr_full_dense<E, R, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    input: &BoundDynamicTensorRef<'_, R, D>,
+) -> CheckedQr<R, D>
 where
     E: symtn_dense::DenseExecutor + ?Sized,
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
     qr_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
     )
@@ -3821,6 +3948,7 @@ where
 }
 
 fn lq_compact_dense<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> CheckedLq<R, D>
@@ -3830,19 +3958,25 @@ where
     D: FactorScalar,
 {
     lq_compact_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
     )
     .map(lq_dense)
 }
 
-fn lq_full_dense<E, R, D>(dense: &mut E, input: &BoundDynamicTensorRef<'_, R, D>) -> CheckedLq<R, D>
+fn lq_full_dense<E, R, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    input: &BoundDynamicTensorRef<'_, R, D>,
+) -> CheckedLq<R, D>
 where
     E: symtn_dense::DenseExecutor + ?Sized,
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
     lq_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
     )
@@ -3850,6 +3984,7 @@ where
 }
 
 fn eig_full_dense<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<EigFullDyn<R, D>, CheckedGenericFactorPlanError<<R as CheckedGenericFusion>::Error>>
@@ -3859,6 +3994,7 @@ where
     D: FactorScalar,
 {
     eig_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
         dense,
         dense_source(input),
     )

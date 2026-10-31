@@ -81,17 +81,19 @@ fn absorb_merge_matches_only_complete_asymmetric_interleaved_keys() {
 
 #[test]
 fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let dense = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |_, indices| {
+    let dense = TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, indices| {
         (indices[0] + 2 * indices[1]) as f64
     })
     .unwrap();
-    let lazy = dense.adjoint().unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     let eager = eager_adjoint_oracle(&dense);
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -100,11 +102,11 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
         }],
     )
     .unwrap();
-    let actual = diagonal.axpby(0.5, &lazy, -2.0).unwrap();
-    let expected = diagonal.axpby(0.5, &eager, -2.0).unwrap();
+    let actual = diagonal.axpby(engine, 0.5, &lazy, -2.0).unwrap();
+    let expected = diagonal.axpby(engine, 0.5, &eager, -2.0).unwrap();
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
-    let reverse = lazy.axpby(-2.0, &diagonal, 0.5).unwrap();
-    let expected_reverse = eager.axpby(-2.0, &diagonal, 0.5).unwrap();
+    let reverse = lazy.axpby(engine, -2.0, &diagonal, 0.5).unwrap();
+    let expected_reverse = eager.axpby(engine, -2.0, &diagonal, 0.5).unwrap();
     assert_eq!(
         reverse.dense_data().unwrap(),
         expected_reverse.dense_data().unwrap()
@@ -115,11 +117,12 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
         (&diagonal, &lazy, &diagonal, &eager),
         (&lazy, &diagonal, &eager, &diagonal),
     ] {
-        let actual = lhs.compose(rhs).unwrap();
-        let expected = eager_lhs.compose(eager_rhs).unwrap();
+        let actual = lhs.compose(engine, rhs).unwrap();
+        let expected = eager_lhs.compose(engine, eager_rhs).unwrap();
         assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
         let actual = lhs
             .contract(
+                engine,
                 rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -131,6 +134,7 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
             .unwrap();
         let expected = eager_lhs
             .contract(
+                engine,
                 eager_rhs,
                 &ContractSpec {
                     lhs: &[1],
@@ -146,14 +150,14 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
 
     numerics::assert_close(
         "diagonal.inner(&lazy)",
-        diagonal.inner(&lazy).unwrap(),
-        diagonal.inner(&eager).unwrap(),
+        diagonal.inner(engine, &lazy).unwrap(),
+        diagonal.inner(engine, &eager).unwrap(),
         GATE_TERMS,
     );
     numerics::assert_close(
         "lazy.inner(&diagonal)",
-        lazy.inner(&diagonal).unwrap(),
-        eager.inner(&diagonal).unwrap(),
+        lazy.inner(engine, &diagonal).unwrap(),
+        eager.inner(engine, &diagonal).unwrap(),
         GATE_TERMS,
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -161,19 +165,22 @@ fn mixed_compact_add_does_not_materialize_the_lazy_operand() {
 
 #[test]
 fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
-    let dense = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |_, indices| {
-        match (indices[0], indices[1]) {
-            (0, 0) => Complex64::new(1.0, 2.0),
-            (1, 1) => Complex64::new(4.0, -1.0),
-            _ => Complex64::new(6.0, 7.0),
-        }
-    })
-    .unwrap();
-    let lazy = dense.adjoint().unwrap();
+    let dense =
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, indices| {
+            match (indices[0], indices[1]) {
+                (0, 0) => Complex64::new(1.0, 2.0),
+                (1, 1) => Complex64::new(4.0, -1.0),
+                _ => Complex64::new(6.0, 7.0),
+            }
+        })
+        .unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -186,25 +193,25 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
     let densified = probe::record();
     numerics::assert_close(
         "diagonal.inner(&dense)",
-        diagonal.inner(&dense).unwrap(),
+        diagonal.inner(engine, &dense).unwrap(),
         Complex64::new(3.5, 0.0),
         GATE_TERMS,
     );
     numerics::assert_close(
         "dense.inner(&diagonal)",
-        dense.inner(&diagonal).unwrap(),
+        dense.inner(engine, &diagonal).unwrap(),
         Complex64::new(3.5, 0.0),
         GATE_TERMS,
     );
     numerics::assert_close(
         "diagonal.inner(&lazy)",
-        diagonal.inner(&lazy).unwrap(),
+        diagonal.inner(engine, &lazy).unwrap(),
         Complex64::new(-7.5, -10.0),
         GATE_TERMS,
     );
     numerics::assert_close(
         "lazy.inner(&diagonal)",
-        lazy.inner(&diagonal).unwrap(),
+        lazy.inner(engine, &diagonal).unwrap(),
         Complex64::new(-7.5, 10.0),
         GATE_TERMS,
     );
@@ -213,11 +220,13 @@ fn mixed_compact_dense_inner_does_not_materialize_the_diagonal() {
 
 #[test]
 fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let spin0 = SU2Irrep::from_twice_spin(0);
     let spin_half = SU2Irrep::from_twice_spin(1);
     let bond = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -232,31 +241,32 @@ fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
         ],
     )
     .unwrap();
-    let dense = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, indices| {
-        if indices[0] != indices[1] {
-            if indices[0] == 0 {
-                f64::NAN
+    let dense =
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, indices| {
+            if indices[0] != indices[1] {
+                if indices[0] == 0 {
+                    f64::NAN
+                } else {
+                    f64::INFINITY
+                }
+            } else if *trees.coupled() == spin0 {
+                [4.0, 5.0][indices[0]]
             } else {
-                f64::INFINITY
+                6.0
             }
-        } else if *trees.coupled() == spin0 {
-            [4.0, 5.0][indices[0]]
-        } else {
-            6.0
-        }
-    })
-    .unwrap();
-    let lazy = dense.adjoint().unwrap();
+        })
+        .unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
 
     let densified = probe::record();
     for dense in [&dense, &lazy] {
-        assert_eq!(diagonal.inner(dense).unwrap(), 50.0);
-        assert_eq!(dense.inner(&diagonal).unwrap(), 50.0);
+        assert_eq!(diagonal.inner(engine, dense).unwrap(), 50.0);
+        assert_eq!(dense.inner(engine, &diagonal).unwrap(), 50.0);
     }
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     let nonfinite_diagonal =
-        TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, indices| {
             if indices == [0, 0] && *trees.coupled() == spin0 {
                 f64::NAN
             } else {
@@ -264,11 +274,17 @@ fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
             }
         })
         .unwrap();
-    assert!(diagonal.inner(&nonfinite_diagonal).unwrap().is_nan());
-    assert!(nonfinite_diagonal.inner(&diagonal).unwrap().is_nan());
+    assert!(diagonal
+        .inner(engine, &nonfinite_diagonal)
+        .unwrap()
+        .is_nan());
+    assert!(nonfinite_diagonal
+        .inner(engine, &diagonal)
+        .unwrap()
+        .is_nan());
 
     let infinite_diagonal =
-        TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, indices| {
             if indices == [0, 0] && *trees.coupled() == spin0 {
                 f64::INFINITY
             } else {
@@ -276,28 +292,42 @@ fn mixed_compact_dense_inner_weights_sectors_and_skips_structural_zeros() {
             }
         })
         .unwrap();
-    assert!(diagonal.inner(&infinite_diagonal).unwrap().is_infinite());
-    assert!(infinite_diagonal.inner(&diagonal).unwrap().is_infinite());
+    assert!(diagonal
+        .inner(engine, &infinite_diagonal)
+        .unwrap()
+        .is_infinite());
+    assert!(infinite_diagonal
+        .inner(engine, &diagonal)
+        .unwrap()
+        .is_infinite());
 }
 
 #[test]
 fn mixed_compact_dense_inner_accepts_an_empty_bond() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
-    let diagonal: TensorMap<_, f64> =
-        TensorMap::diagonal(&runtime, &bond, Vec::<SectorSpectrum<_, f64>>::new()).unwrap();
+    let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
+        &runtime,
+        &bond,
+        Vec::<SectorSpectrum<_, f64>>::new(),
+    )
+    .unwrap();
     let dense: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |_, _| unreachable!()).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, _| unreachable!())
+            .unwrap();
 
     let densified = probe::record();
-    assert_eq!(diagonal.inner(&dense).unwrap(), 0.0);
-    assert_eq!(dense.inner(&diagonal).unwrap(), 0.0);
+    assert_eq!(diagonal.inner(engine, &dense).unwrap(), 0.0);
+    assert_eq!(dense.inner(engine, &diagonal).unwrap(), 0.0);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
 #[test]
 fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -308,6 +338,7 @@ fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
     )
     .unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -326,24 +357,25 @@ fn mixed_compact_lazy_inner_maps_non_self_dual_parent_blocks() {
         ],
     )
     .unwrap();
-    let dense = TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |trees, indices| {
-        if indices[0] != indices[1] {
-            -1000.0
-        } else {
-            match trees.coupled().charge() {
-                -1 => 30.0,
-                0 => [10.0, 20.0][indices[0]],
-                2 => 40.0,
-                charge => panic!("unexpected charge {charge}"),
+    let dense =
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |trees, indices| {
+            if indices[0] != indices[1] {
+                -1000.0
+            } else {
+                match trees.coupled().charge() {
+                    -1 => 30.0,
+                    0 => [10.0, 20.0][indices[0]],
+                    2 => 40.0,
+                    charge => panic!("unexpected charge {charge}"),
+                }
             }
-        }
-    })
-    .unwrap();
-    let lazy = dense.adjoint().unwrap();
+        })
+        .unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
 
     let densified = probe::record();
-    assert_eq!(diagonal.inner(&lazy).unwrap(), 500.0);
-    assert_eq!(lazy.inner(&diagonal).unwrap(), 500.0);
+    assert_eq!(diagonal.inner(engine, &lazy).unwrap(), 500.0);
+    assert_eq!(lazy.inner(engine, &diagonal).unwrap(), 500.0);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
@@ -355,11 +387,12 @@ fn transform_seam_calls<T>(operation: impl FnOnce() -> T) -> usize {
 
 #[test]
 fn exact_identity_transforms_share_unique_and_simple_bodies() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#689): exact identity permute/braid/transpose/repartition
     // never reach the transform seam and return the same body allocation.
     // Body identity also pins zero payload copies more directly than an
     // allocator byte count can.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
@@ -371,12 +404,15 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
         ],
     )
     .unwrap();
-    let u1_f64: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1_leg, &u1_leg], [&u1_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
-    let u1_c64 = u1_f64.convert::<Complex64>();
+    let u1_f64: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1_leg, &u1_leg],
+        [&u1_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
+    let u1_c64 = u1_f64.convert::<Complex64>(engine).unwrap();
 
     let su2_provider = Arc::new(SU2FusionRule);
     let su2_leg = GradedSpace::try_new(
@@ -387,22 +423,25 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
         ],
     )
     .unwrap();
-    let su2_f64: TensorMap<SU2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg, &su2_leg], [&su2_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
-    let su2_c64 = su2_f64.convert::<Complex64>();
+    let su2_f64: TensorMap<SU2FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2_leg, &su2_leg],
+        [&su2_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
+    let su2_c64 = su2_f64.convert::<Complex64>(engine).unwrap();
 
     macro_rules! assert_identity_ops {
-        ($tensor:expr) => {{
+        ($engine:ident, $tensor:expr) => {{
             let tensor = $tensor;
             let calls = transform_seam_calls(|| {
                 for output in [
-                    tensor.permute(&[0, 1], &[2]).unwrap(),
-                    tensor.braid(&[0, 1], &[2], &[5, 3, 1]).unwrap(),
-                    tensor.transpose(&[0, 1], &[2]).unwrap(),
-                    tensor.repartition(2).unwrap(),
+                    tensor.permute($engine, &[0, 1], &[2]).unwrap(),
+                    tensor.braid($engine, &[0, 1], &[2], &[5, 3, 1]).unwrap(),
+                    tensor.transpose($engine, &[0, 1], &[2]).unwrap(),
+                    tensor.repartition($engine, 2).unwrap(),
                 ] {
                     assert!(Arc::ptr_eq(owned(tensor), owned(&output)));
                     assert!(Arc::ptr_eq(&owned(tensor).data, &owned(&output).data));
@@ -416,27 +455,27 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
         }};
     }
 
-    assert_identity_ops!(&u1_f64);
-    assert_identity_ops!(&u1_c64);
-    assert_identity_ops!(&su2_f64);
-    assert_identity_ops!(&su2_c64);
+    assert_identity_ops!(engine, &u1_f64);
+    assert_identity_ops!(engine, &u1_c64);
+    assert_identity_ops!(engine, &su2_f64);
+    assert_identity_ops!(engine, &su2_c64);
 
     // Validation still precedes the braid shortcut.
     let calls = transform_seam_calls(|| {
-        assert!(u1_f64.braid(&[0, 1], &[2], &[0, 0]).is_err());
+        assert!(u1_f64.braid(engine, &[0, 1], &[2], &[0, 0]).is_err());
     });
     assert_eq!(calls, 0);
     assert!(
-        matches!(u1_f64.permute(&[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(u1_f64.permute(engine, &[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
     assert!(
-        matches!(u1_f64.transpose(&[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
+        matches!(u1_f64.transpose(engine, &[0, 1], &[2, 3]), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidPermutation { rank: 3, .. }))
     );
-    assert!(u1_f64.repartition(4).is_err());
+    assert!(u1_f64.repartition(engine, 4).is_err());
 
     // Negative control: the counter observes a real transform.
     let calls = transform_seam_calls(|| {
-        let moved = u1_f64.permute(&[1, 0], &[2]).unwrap();
+        let moved = u1_f64.permute(engine, &[1, 0], &[2]).unwrap();
         assert!(!Arc::ptr_eq(owned(&u1_f64), owned(&moved)));
     });
     assert_eq!(calls, 1);
@@ -444,20 +483,27 @@ fn exact_identity_transforms_share_unique_and_simple_bodies() {
 
 #[test]
 fn high_rank_identity_has_no_inline_capacity_boundary() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
     let tensor: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg; 10], [&leg; 9], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg; 10], [&leg; 9], |_, _| 1.0).unwrap();
     let codomain_axes: Vec<_> = (0..10).collect();
     let domain_axes: Vec<_> = (10..19).collect();
     let levels = vec![0; 19];
 
     let calls = transform_seam_calls(|| {
         for output in [
-            tensor.permute(&codomain_axes, &domain_axes).unwrap(),
-            tensor.braid(&codomain_axes, &domain_axes, &levels).unwrap(),
-            tensor.transpose(&codomain_axes, &domain_axes).unwrap(),
+            tensor
+                .permute(engine, &codomain_axes, &domain_axes)
+                .unwrap(),
+            tensor
+                .braid(engine, &codomain_axes, &domain_axes, &levels)
+                .unwrap(),
+            tensor
+                .transpose(engine, &codomain_axes, &domain_axes)
+                .unwrap(),
         ] {
             assert!(Arc::ptr_eq(owned(&tensor), owned(&output)));
         }
@@ -467,17 +513,18 @@ fn high_rank_identity_has_no_inline_capacity_boundary() {
 
 #[test]
 fn compact_identity_transforms_do_not_materialize() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let densified = probe::record();
-    let factor = fixture().svd_compact(&[0], &[1]).unwrap().s;
+    let factor = fixture(engine).svd_compact(engine, &[0], &[1]).unwrap().s;
     assert!(matches!(&*owned(&factor).data, TypedData::Diagonal(_)));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     let calls = transform_seam_calls(|| {
         for output in [
-            factor.permute(&[0], &[1]).unwrap(),
-            factor.braid(&[0], &[1], &[2, 1]).unwrap(),
-            factor.transpose(&[0], &[1]).unwrap(),
-            factor.repartition(1).unwrap(),
+            factor.permute(engine, &[0], &[1]).unwrap(),
+            factor.braid(engine, &[0], &[1], &[2, 1]).unwrap(),
+            factor.transpose(engine, &[0], &[1]).unwrap(),
+            factor.repartition(engine, 1).unwrap(),
         ] {
             assert!(Arc::ptr_eq(owned(&factor), owned(&output)));
             assert!(matches!(&*owned(&output).data, TypedData::Diagonal(_)));
@@ -490,10 +537,11 @@ fn compact_identity_transforms_do_not_materialize() {
 
 #[test]
 fn scalar_transpose_shares_the_body() {
-    let scalar = fixture().trace_pairs(&[(0, 1)]).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let scalar = fixture(engine).trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(scalar.rank(), 0);
     let calls = transform_seam_calls(|| {
-        let transposed = scalar.transpose(&[], &[]).unwrap();
+        let transposed = scalar.transpose(engine, &[], &[]).unwrap();
         assert!(Arc::ptr_eq(owned(&scalar), owned(&transposed)));
     });
     assert_eq!(calls, 0);
@@ -501,23 +549,27 @@ fn scalar_transpose_shares_the_body() {
 
 #[test]
 fn twist_on_a_compact_spectrum_stays_compact() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#580): the compact twist arm scales
     // spectrum-per-sector and keeps `TypedData::Diagonal` — the space is
     // unchanged, so O(Σ_c k_c) storage survives — and its own identity
     // answer (θ ≡ 1 across the spectrum's sectors) is a body-sharing
     // clone.
-    let s = fz2_fixture().svd_compact(&[0, 1], &[2]).unwrap().s;
-    let twisted = s.twist(&[0], Direction::Forward).unwrap();
+    let s = fz2_fixture(engine)
+        .svd_compact(engine, &[0, 1], &[2])
+        .unwrap()
+        .s;
+    let twisted = s.twist(engine, &[0], Direction::Forward).unwrap();
     assert!(matches!(&*owned(&twisted).data, TypedData::Diagonal(_)));
     assert!(!Arc::ptr_eq(&owned(&s).data, &owned(&twisted).data));
-    let inverse = s.twist(&[0], Direction::Inverse).unwrap();
+    let inverse = s.twist(engine, &[0], Direction::Inverse).unwrap();
     assert!(matches!(&*owned(&inverse).data, TypedData::Diagonal(_)));
     assert!(!Arc::ptr_eq(&owned(&s).data, &owned(&inverse).data));
 
-    let bosonic_s = fixture().svd_compact(&[0], &[1]).unwrap().s;
-    let untouched = bosonic_s.twist(&[0], Direction::Forward).unwrap();
+    let bosonic_s = fixture(engine).svd_compact(engine, &[0], &[1]).unwrap().s;
+    let untouched = bosonic_s.twist(engine, &[0], Direction::Forward).unwrap();
     assert!(Arc::ptr_eq(owned(&bosonic_s), owned(&untouched)));
-    let untouched_inverse = bosonic_s.twist(&[0], Direction::Inverse).unwrap();
+    let untouched_inverse = bosonic_s.twist(engine, &[0], Direction::Inverse).unwrap();
     assert!(Arc::ptr_eq(owned(&bosonic_s), owned(&untouched_inverse)));
 }
 
@@ -534,13 +586,14 @@ fn twist_on_a_compact_spectrum_stays_compact() {
 /// caller's order or reordered values inside a sector fails.
 #[test]
 fn diagonal_spectrum_factor_converts_every_value_bitwise() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0);
     let one = U1Irrep::new(1);
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3), (one, 2)]).unwrap();
     let authority: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 0.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 0.0).unwrap();
     let id = |label| TypedSectorAdmission::try_encode_label(provider.as_ref(), &label).unwrap();
 
     let tiny = f64::from(f32::MIN_POSITIVE) / 2.0;
@@ -565,7 +618,7 @@ fn diagonal_spectrum_factor_converts_every_value_bitwise() {
         <f64 as FactorScalar>::from_real,
     )
     .unwrap();
-    let seen = wide_factor.diagview().unwrap();
+    let seen = wide_factor.diagview(engine).unwrap();
     let bits: Vec<(U1Irrep, Vec<u64>)> = seen
         .iter()
         .map(|entry| {
@@ -598,7 +651,7 @@ fn diagonal_spectrum_factor_converts_every_value_bitwise() {
         <f32 as FactorScalar>::from_real,
     )
     .unwrap();
-    let seen = narrow_factor.diagview().unwrap();
+    let seen = narrow_factor.diagview(engine).unwrap();
     let bits: Vec<(U1Irrep, Vec<u32>)> = seen
         .iter()
         .map(|entry| {
@@ -626,38 +679,41 @@ fn diagonal_spectrum_factor_converts_every_value_bitwise() {
 
 #[test]
 fn compact_arms_never_densify_their_spectrum_operand() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#1548): the operations with a compact-diagonal arm read the stored
     // spectrum and never enter the operation-local densification. The probe
     // counts entries directly, which the integration byte ceilings cannot
     // tell apart from a scaled copy.
-    let tensor = fixture();
-    let Svd { u, s: d, vh } = tensor.svd_compact(&[0], &[1]).unwrap();
+    let tensor = fixture(engine);
+    let Svd { u, s: d, vh } = tensor.svd_compact(engine, &[0], &[1]).unwrap();
     let complex_d = tensor
-        .convert::<Complex64>()
-        .svd_compact(&[0], &[1])
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .svd_compact(engine, &[0], &[1])
         .unwrap()
         .s;
     let densified = probe::record();
 
-    let _ = d.scale(0.5).unwrap();
-    let _ = d.adjoint().unwrap();
-    let _ = d.axpby(0.75, &d, -0.5).unwrap();
-    let _ = d.axpby(0.75, &tensor, -0.5).unwrap();
-    let _ = tensor.axpby(0.75, &d, -0.5).unwrap();
-    let _ = d.compose(&d).unwrap();
-    let _ = u.compose(&d).unwrap();
-    let _ = d.compose(&vh).unwrap();
+    let _ = d.scale(engine, 0.5).unwrap();
+    let _ = d.adjoint(engine).unwrap();
+    let _ = d.axpby(engine, 0.75, &d, -0.5).unwrap();
+    let _ = d.axpby(engine, 0.75, &tensor, -0.5).unwrap();
+    let _ = tensor.axpby(engine, 0.75, &d, -0.5).unwrap();
+    let _ = d.compose(engine, &d).unwrap();
+    let _ = u.compose(engine, &d).unwrap();
+    let _ = d.compose(engine, &vh).unwrap();
     for p in [2.0, f64::INFINITY, 3.0] {
-        let _ = d.norm(p).unwrap();
+        let _ = d.norm(engine, p).unwrap();
     }
-    let _ = d.tr().unwrap();
-    let _ = d.inner(&d).unwrap();
-    let _ = d.exp(&[0], &[1]).unwrap();
-    let _ = d.inv(&[0], &[1]).unwrap();
-    let _ = d.pinv(&[0], &[1], 1e-12).unwrap();
-    let _ = d.map_diagonal(|x| x.abs().sqrt()).unwrap();
+    let _ = d.tr(engine).unwrap();
+    let _ = d.inner(engine, &d).unwrap();
+    let _ = d.exp(engine, &[0], &[1]).unwrap();
+    let _ = d.inv(engine, &[0], &[1]).unwrap();
+    let _ = d.pinv(engine, &[0], &[1], 1e-12).unwrap();
+    let _ = d.map_diagonal(engine, |x| x.abs().sqrt()).unwrap();
     let _ = tensor
         .contract(
+            engine,
             &d,
             &ContractSpec {
                 lhs: &[1],
@@ -669,6 +725,7 @@ fn compact_arms_never_densify_their_spectrum_operand() {
         .unwrap();
     let _ = tensor
         .contract(
+            engine,
             &d,
             &ContractSpec {
                 lhs: &[1],
@@ -680,6 +737,7 @@ fn compact_arms_never_densify_their_spectrum_operand() {
         .unwrap();
     let _ = d
         .contract(
+            engine,
             &tensor,
             &ContractSpec {
                 lhs: &[1],
@@ -691,6 +749,7 @@ fn compact_arms_never_densify_their_spectrum_operand() {
         .unwrap();
     let _ = d
         .contract(
+            engine,
             &d,
             &ContractSpec {
                 lhs: &[1],
@@ -700,44 +759,45 @@ fn compact_arms_never_densify_their_spectrum_operand() {
             },
         )
         .unwrap();
-    let _ = d.permute(&[1], &[0]).unwrap();
-    let _ = d.transpose(&[1], &[0]).unwrap();
-    let _ = d.repartition(1).unwrap();
-    let _ = d.zeros_like().unwrap();
-    let _ = d.convert::<Complex64>();
-    let _ = complex_d.re();
-    let _ = complex_d.im();
-    let _ = d.trace_pairs(&[(0, 1)]).unwrap();
-    let _ = d.diagview().unwrap();
+    let _ = d.permute(engine, &[1], &[0]).unwrap();
+    let _ = d.transpose(engine, &[1], &[0]).unwrap();
+    let _ = d.repartition(engine, 1).unwrap();
+    let _ = d.zeros_like(engine).unwrap();
+    let _ = d.convert::<Complex64>(engine).unwrap();
+    let _ = complex_d.re(engine).unwrap();
+    let _ = complex_d.im(engine).unwrap();
+    let _ = d.trace_pairs(engine, &[(0, 1)]).unwrap();
+    let _ = d.diagview(engine).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
     // A one-term rank-(1,1) braid reads the compact source directly.
-    let _ = d.braid(&[1], &[0], &[0, 1]).unwrap();
+    let _ = d.braid(engine, &[1], &[0], &[0, 1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_arms_never_densify_their_spectrum_operand() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What (#1866): checked Generic takes the same compose, contract,
     // rank-(1,1) transform and full trace arms, so a compact operand is read
     // as a spectrum there too.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     );
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 1], 3)]).unwrap();
     let tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             1.0 + index[0] as f64 - 0.25 * index[1] as f64
         })
         .unwrap();
-    let Svd { u, s: d, vh } = tensor.svd_compact(&[0], &[1]).unwrap();
+    let Svd { u, s: d, vh } = tensor.svd_compact(engine, &[0], &[1]).unwrap();
     let densified = probe::record();
 
-    let _ = d.compose(&d).unwrap();
-    let _ = u.compose(&d).unwrap();
-    let _ = d.compose(&vh).unwrap();
+    let _ = d.compose(engine, &d).unwrap();
+    let _ = u.compose(engine, &d).unwrap();
+    let _ = d.compose(engine, &vh).unwrap();
     for (lhs, rhs, codomain, domain) in [
         (&u, &d, &[0][..], &[1][..]),
         (&u, &d, &[1][..], &[0][..]),
@@ -750,31 +810,32 @@ fn checked_compact_arms_never_densify_their_spectrum_operand() {
             codomain,
             domain,
         };
-        let _ = lhs.contract(rhs, &spec).unwrap();
+        let _ = lhs.contract(engine, rhs, &spec).unwrap();
     }
     // The rank-(1,1) swap stays compact and the braid reads the spectrum.
-    let swapped = d.permute(&[1], &[0]).unwrap();
+    let swapped = d.permute(engine, &[1], &[0]).unwrap();
     assert!(swapped.spectrum().is_some());
-    let _ = d.transpose(&[1], &[0]).unwrap();
-    let _ = d.braid(&[1], &[0], &[0, 1]).unwrap();
+    let _ = d.transpose(engine, &[1], &[0]).unwrap();
+    let _ = d.braid(engine, &[1], &[0], &[0, 1]).unwrap();
     // The full trace reads the spectrum from the compiled trace terms.
-    let _ = d.trace_pairs(&[(0, 1)]).unwrap();
-    let _ = d.trace_pairs(&[(1, 0)]).unwrap();
+    let _ = d.trace_pairs(engine, &[(0, 1)]).unwrap();
+    let _ = d.trace_pairs(engine, &[(1, 0)]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
 #[test]
 fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // This finite witness exercises the one-term admission; structural zeros
     // have no prescribed sign under a fermionic braid.
     use symtn_core::PreparedTreePairOperation;
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! probe {
-        ($rule:expr, $sectors:expr, $negative_zeros:expr) => {{
+        ($engine:ident, $rule:expr, $sectors:expr, $negative_zeros:expr) => {{
             let leg = GradedSpace::try_new(Arc::new($rule), $sectors).unwrap();
             let tensor: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 1617).unwrap();
-            let diagonal = tensor.svd_compact(&[0], &[1]).unwrap().s;
+                TensorMap::rand_with_seed($engine, &runtime, [&leg], [&leg], 1617).unwrap();
+            let diagonal = tensor.svd_compact($engine, &[0], &[1]).unwrap().s;
             let source = diagonal.logical_space().space().structure();
             let prepared = PreparedTreePairOperation::prepare_braid(
                 diagonal.provider(),
@@ -816,12 +877,12 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
             }
             assert!(covered.iter().all(|&seen| seen));
             let densified = probe::record();
-            let result = diagonal.braid(&[1], &[0], &[0, 1]).unwrap();
+            let result = diagonal.braid($engine, &[1], &[0], &[0, 1]).unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
             let dense_oracle = diagonal
-                .materialize()
+                .materialize($engine)
                 .unwrap()
-                .braid(&[1], &[0], &[0, 1])
+                .braid($engine, &[1], &[0], &[0, 1])
                 .unwrap();
             for (&actual, &expected) in result
                 .dense_data()
@@ -832,7 +893,7 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
                 assert!((actual - expected).abs() <= 32.0 * f64::EPSILON * expected.abs().max(1.0));
             }
             assert!(diagonal
-                .diagview()
+                .diagview($engine)
                 .unwrap()
                 .iter()
                 .flat_map(|entry| &entry.values)
@@ -862,11 +923,13 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
         }};
     }
     probe!(
+        engine,
         U1FusionRule,
         [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
         0
     );
     probe!(
+        engine,
         SU2FusionRule,
         [
             (SU2Irrep::from_twice_spin(0), 3),
@@ -875,11 +938,13 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
         0
     );
     probe!(
+        engine,
         FermionParityFusionRule,
         [(Z2Irrep::EVEN, 3), (Z2Irrep::ODD, 2)],
         0
     );
     probe!(
+        engine,
         ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
         [
             (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 3),
@@ -891,13 +956,15 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
 
 #[test]
 fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
     )
     .unwrap();
     let real: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [
@@ -915,14 +982,15 @@ fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
     // A Complex64 payload on a real-coefficient rule: the complex sign comes
     // from the payload, not from a categorical coefficient.
     let complex = real
-        .convert::<Complex64>()
-        .map_diagonal(|value| Complex64::new(value.re, value.re / 4.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .map_diagonal(engine, |value| Complex64::new(value.re, value.re / 4.0))
         .unwrap();
-    let real_output = real.braid(&[1], &[0], &[0, 1]).unwrap();
-    let complex_output = complex.braid(&[1], &[0], &[0, 1]).unwrap();
-    let real_spectra = real_output.diagview().unwrap();
-    let complex_spectra = complex_output.diagview().unwrap();
-    let source_spectra = real.diagview().unwrap();
+    let real_output = real.braid(engine, &[1], &[0], &[0, 1]).unwrap();
+    let complex_output = complex.braid(engine, &[1], &[0], &[0, 1]).unwrap();
+    let real_spectra = real_output.diagview(engine).unwrap();
+    let complex_spectra = complex_output.diagview(engine).unwrap();
+    let source_spectra = real.diagview(engine).unwrap();
     assert_eq!(real_spectra.len(), source_spectra.len());
     assert_eq!(complex_spectra.len(), source_spectra.len());
     for (real_entry, complex_entry) in real_spectra.iter().zip(&complex_spectra) {
@@ -971,31 +1039,34 @@ fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
 
 #[test]
 fn compact_cat_braid_absorb_avoid_dense_source_materializations() {
-    let diagonal = fixture().svd_compact(&[0], &[1]).unwrap().s;
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let diagonal = fixture(engine).svd_compact(engine, &[0], &[1]).unwrap().s;
     let densified = probe::record();
-    let _ = diagonal.cat(&diagonal, Side::Domain).unwrap();
+    let _ = diagonal.cat(engine, &diagonal, Side::Domain).unwrap();
     let cat = densified.get(Event::DiagonalMaterialization);
     let densified = probe::record();
-    let _ = diagonal.braid(&[1], &[0], &[0, 1]).unwrap();
+    let _ = diagonal.braid(engine, &[1], &[0], &[0, 1]).unwrap();
     let braid = densified.get(Event::DiagonalMaterialization);
     let densified = probe::record();
-    let _ = diagonal.absorb(&diagonal).unwrap();
+    let _ = diagonal.absorb(engine, &diagonal).unwrap();
     let absorb = densified.get(Event::DiagonalMaterialization);
     assert_eq!([cat, braid, absorb], [0, 0, 0]);
 }
 
 #[test]
 fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(Z2FusionRule);
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 4)]).unwrap();
     let narrow = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 2)]).unwrap();
     let receiver: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
             1.0 + index[0] as f64 + 10.0 * index[1] as f64
         })
         .unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &narrow,
         [SectorSpectrum {
@@ -1004,7 +1075,7 @@ fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() 
         }],
     )
     .unwrap();
-    let result = receiver.absorb(&source).unwrap();
+    let result = receiver.absorb(engine, &source).unwrap();
     let data = result.dense_data().unwrap();
     let block = result.logical_space().space().structure().block(0).unwrap();
     assert_eq!(block.shape(), &[4, 4]);
@@ -1099,10 +1170,12 @@ fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
 
 #[test]
 fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, 2)]).unwrap();
     let nan = f64::from_bits(0x7ff8_0000_0000_1617);
     let compact: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         [SectorSpectrum {
@@ -1111,9 +1184,9 @@ fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
         }],
     )
     .unwrap();
-    let dense = compact.materialize().unwrap();
-    let compact_cat = compact.cat(&compact, Side::Domain).unwrap();
-    let dense_cat = dense.cat(&dense, Side::Domain).unwrap();
+    let dense = compact.materialize(engine).unwrap();
+    let compact_cat = compact.cat(engine, &compact, Side::Domain).unwrap();
+    let dense_cat = dense.cat(engine, &dense, Side::Domain).unwrap();
     assert_eq!(
         compact_cat
             .dense_data()
@@ -1145,12 +1218,12 @@ fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
         .any(|x| x.to_bits() == 0.0f64.to_bits()));
 
     let receiver: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&bond], [&bond], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], |_, index| {
             10.0 + index[0] as f64 + index[1] as f64
         })
         .unwrap();
-    let compact_absorb = receiver.absorb(&compact).unwrap();
-    let dense_absorb = receiver.absorb(&dense).unwrap();
+    let compact_absorb = receiver.absorb(engine, &compact).unwrap();
+    let dense_absorb = receiver.absorb(engine, &dense).unwrap();
     assert_eq!(
         compact_absorb
             .dense_data()
@@ -1183,15 +1256,17 @@ fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_compact_trace_reads_the_spectrum_after_admission() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     // What (#1866): an inadmissible pair is rejected without touching the
     // spectrum, and the admitted full trace reads it from the compiled terms
     // without materializing (it densified after admission before).
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_core::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
     );
     let leg = GradedSpace::try_new(provider, [(vec![0, 0], 2), (vec![1, 0], 3)]).unwrap();
     let diagonal = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -1211,9 +1286,9 @@ fn checked_compact_trace_reads_the_spectrum_after_admission() {
     )
     .unwrap();
     let densified = probe::record();
-    assert!(diagonal.trace_pairs(&[(0, 0)]).is_err());
+    assert!(diagonal.trace_pairs(engine, &[(0, 0)]).is_err());
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    let result = diagonal.trace_pairs(&[(0, 1)]).unwrap();
+    let result = diagonal.trace_pairs(engine, &[(0, 1)]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     // SU(3) fundamental quantum dimension is 3; vacuum dimension is 1.
     assert!((result.dense_data().unwrap()[0] - Complex64::new(19.0, 4.0)).norm() < 1e-12);

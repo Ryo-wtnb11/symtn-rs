@@ -1,5 +1,5 @@
 error: contract! contracts one product, not a sum; hint: contract each term and add them with `TensorMap::axpby`
- --> tests/ui/sum.rs:4:41
+ --> tests/ui/sum.rs:4:54
   |
-4 |     let _ = contract!([i; j] := a[i; j] + b[i; j]);
-  |                                         ^
+4 |     let _ = contract!(&mut engine, [i; j] := a[i; j] + b[i; j]);
+  |                                                      ^

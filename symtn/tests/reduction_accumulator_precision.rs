@@ -212,11 +212,11 @@ fn dense_oracles(a: &Entries, b: &Entries) -> [Complex64; 5] {
 /// Records every entry `from_subblock_fn` produces, keyed by coupled sector and
 /// block position, with the sector's quantum dimension as its weight.
 macro_rules! recorded_fixture {
-    ($runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr, $entry:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr, $entry:expr) => {{
         let mut entries = Entries::new();
         let mut step = stepper();
         let tensor: TensorMap<_, $dtype> =
-            TensorMap::from_subblock_fn($runtime, [$leg], [$leg], |trees, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [$leg], [$leg], |trees, index| {
                 let value: $dtype = $entry(step());
                 let key = (format!("{:?}", trees.coupled()), index[0], index[1]);
                 entries.insert(key, ($dim(trees.coupled()), $wide(value)));
@@ -228,45 +228,53 @@ macro_rules! recorded_fixture {
 }
 
 macro_rules! dense_reductions {
-    ($out:expr, $prefix:literal, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr) => {{
-        let (a, a_entries) = recorded_fixture!($runtime, $leg, $dtype, $wide, $dim, |step| {
-            <$dtype>::from_parts(real_at(step), other_at(step))
-        });
-        let (b, b_entries) = recorded_fixture!($runtime, $leg, $dtype, $wide, $dim, |step| {
-            <$dtype>::from_parts(other_at(step + 5), real_at(step + 2))
-        });
+    ($engine:ident, $out:expr, $prefix:literal, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr) => {{
+        let (a, a_entries) =
+            recorded_fixture!($engine, $runtime, $leg, $dtype, $wide, $dim, |step| {
+                <$dtype>::from_parts(real_at(step), other_at(step))
+            });
+        let (b, b_entries) =
+            recorded_fixture!($engine, $runtime, $leg, $dtype, $wide, $dim, |step| {
+                <$dtype>::from_parts(other_at(step + 5), real_at(step + 2))
+            });
         let [norm, inner, tr, adjoint_inner, mixed_inner] = dense_oracles(&a_entries, &b_entries);
         let terms = a_entries.len();
 
         $out.push((
             concat!($prefix, " dense norm"),
-            Complex64::new(a.norm(2.0).unwrap(), 0.0),
+            Complex64::new(a.norm($engine, 2.0).unwrap(), 0.0),
             norm,
             terms,
         ));
         $out.push((
             concat!($prefix, " dense inner"),
-            $wide(a.inner(&b).unwrap()),
+            $wide(a.inner($engine, &b).unwrap()),
             inner,
             terms,
         ));
         $out.push((
             concat!($prefix, " dense tr"),
-            $wide(a.tr().unwrap()),
+            $wide(a.tr($engine).unwrap()),
             tr,
             terms,
         ));
+        let b_adjoint = b.adjoint($engine).unwrap();
         // Both operands lazy, then one lazy and one owned: the oriented kernel
         // is reached with a different conjugation pattern each way.
         $out.push((
             concat!($prefix, " lazy adjoint inner"),
-            $wide(a.adjoint().unwrap().inner(&b.adjoint().unwrap()).unwrap()),
+            $wide(
+                a.adjoint($engine)
+                    .unwrap()
+                    .inner($engine, &b_adjoint)
+                    .unwrap(),
+            ),
             adjoint_inner,
             terms,
         ));
         $out.push((
             concat!($prefix, " lazy adjoint mixed inner"),
-            $wide(a.adjoint().unwrap().inner(&b).unwrap()),
+            $wide(a.adjoint($engine).unwrap().inner($engine, &b).unwrap()),
             mixed_inner,
             terms,
         ));
@@ -278,7 +286,7 @@ macro_rules! dense_reductions {
 /// separate from [`dense_reductions`]; checked Generic compact reductions are
 /// covered by `compact_reductions_both_modes.rs`.
 macro_rules! compact_reductions {
-    ($out:expr, $prefix:literal, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr) => {{
+    ($engine:ident, $out:expr, $prefix:literal, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr) => {{
         let mut diagonal = stepper();
         let mut spectrum = || {
             let mut recorded = Vec::new();
@@ -301,9 +309,11 @@ macro_rules! compact_reductions {
             (spectrum, recorded)
         };
         let (values, compact_entries) = spectrum();
-        let compact: TensorMap<_, $dtype> = TensorMap::diagonal($runtime, $leg, values).unwrap();
+        let compact: TensorMap<_, $dtype> =
+            TensorMap::diagonal($engine, $runtime, $leg, values).unwrap();
         let (values, other_entries) = spectrum();
-        let other: TensorMap<_, $dtype> = TensorMap::diagonal($runtime, $leg, values).unwrap();
+        let other: TensorMap<_, $dtype> =
+            TensorMap::diagonal($engine, $runtime, $leg, values).unwrap();
         let terms = compact_entries.len();
         let norm2 = oracle_dot(compact_entries.iter().map(|&(w, x)| (w, x.conj(), x)));
         let inner = oracle_dot(
@@ -316,25 +326,31 @@ macro_rules! compact_reductions {
 
         $out.push((
             concat!($prefix, " compact norm"),
-            Complex64::new(compact.norm(2.0).unwrap(), 0.0),
+            Complex64::new(compact.norm($engine, 2.0).unwrap(), 0.0),
             Complex64::new(norm2.re.sqrt(), 0.0),
             terms,
         ));
         $out.push((
             concat!($prefix, " compact inner"),
-            $wide(compact.inner(&other).unwrap()),
+            $wide(compact.inner($engine, &other).unwrap()),
             inner,
             terms,
         ));
         $out.push((
             concat!($prefix, " compact tr"),
-            $wide(compact.tr().unwrap()),
+            $wide(compact.tr($engine).unwrap()),
             tr,
             terms,
         ));
         $out.push((
             concat!($prefix, " compact full trace"),
-            $wide(compact.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap()),
+            $wide(
+                compact
+                    .trace_pairs($engine, &[(0, 1)])
+                    .unwrap()
+                    .scalar($engine)
+                    .unwrap(),
+            ),
             tr,
             terms,
         ));
@@ -367,52 +383,63 @@ fn su2_dim(sector: &SU2Irrep) -> f64 {
 }
 
 fn double_precision_measurements() -> Vec<Measurement> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let u1 = u1_multi_leg();
     let su2 = su2_leg();
     let real = |v: f64| Complex64::new(v, 0.0);
     let complex = |v| v;
     let mut out = Vec::new();
-    dense_reductions!(out, "f64 u1", &runtime, &u1, f64, real, u1_dim);
-    compact_reductions!(out, "f64 u1", &runtime, &u1, f64, real, u1_dim);
-    dense_reductions!(out, "f64 su2", &runtime, &su2, f64, real, su2_dim);
-    compact_reductions!(out, "f64 su2", &runtime, &su2, f64, real, su2_dim);
-    dense_reductions!(out, "c64 u1", &runtime, &u1, Complex64, complex, u1_dim);
-    compact_reductions!(out, "c64 u1", &runtime, &u1, Complex64, complex, u1_dim);
-    dense_reductions!(out, "c64 su2", &runtime, &su2, Complex64, complex, su2_dim);
-    compact_reductions!(out, "c64 su2", &runtime, &su2, Complex64, complex, su2_dim);
+    dense_reductions!(engine, out, "f64 u1", &runtime, &u1, f64, real, u1_dim);
+    compact_reductions!(engine, out, "f64 u1", &runtime, &u1, f64, real, u1_dim);
+    dense_reductions!(engine, out, "f64 su2", &runtime, &su2, f64, real, su2_dim);
+    compact_reductions!(engine, out, "f64 su2", &runtime, &su2, f64, real, su2_dim);
+    dense_reductions!(engine, out, "c64 u1", &runtime, &u1, Complex64, complex, u1_dim);
+    compact_reductions!(engine, out, "c64 u1", &runtime, &u1, Complex64, complex, u1_dim);
+    dense_reductions!(engine, out, "c64 su2", &runtime, &su2, Complex64, complex, su2_dim);
+    compact_reductions!(engine, out, "c64 su2", &runtime, &su2, Complex64, complex, su2_dim);
 
     // Negative zeros in the payload, carried through the lazy-adjoint kernel.
     // Each operand has `-0.0` in one component and a non-dyadic value in the
     // other, so the conjugation the oriented inner applies shows in the sign
     // of a *nonzero* imaginary part.
     let (signed, signed_entries) =
-        recorded_fixture!(&runtime, &u1, Complex64, complex, u1_dim, |step| {
+        recorded_fixture!(engine, &runtime, &u1, Complex64, complex, u1_dim, |step| {
             Complex64::new(real_at(step), -0.0)
         });
     let (probe, probe_entries) =
-        recorded_fixture!(&runtime, &u1, Complex64, complex, u1_dim, |step| {
+        recorded_fixture!(engine, &runtime, &u1, Complex64, complex, u1_dim, |step| {
             Complex64::new(-0.0, other_at(step))
         });
     let [_, _, tr, adjoint_inner, mixed_inner] = dense_oracles(&signed_entries, &probe_entries);
     let terms = signed_entries.len();
+    let probe_adjoint = probe.adjoint(engine).unwrap();
     out.push((
         "c64 negative zero lazy adjoint inner",
         signed
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .inner(&probe.adjoint().unwrap())
+            .inner(engine, &probe_adjoint)
             .unwrap(),
         adjoint_inner,
         terms,
     ));
     out.push((
         "c64 negative zero lazy adjoint mixed inner",
-        signed.adjoint().unwrap().inner(&probe).unwrap(),
+        signed
+            .adjoint(engine)
+            .unwrap()
+            .inner(engine, &probe)
+            .unwrap(),
         mixed_inner,
         terms,
     ));
-    out.push(("c64 negative zero tr", signed.tr().unwrap(), tr, terms));
+    out.push((
+        "c64 negative zero tr",
+        signed.tr(engine).unwrap(),
+        tr,
+        terms,
+    ));
     out
 }
 
@@ -452,6 +479,7 @@ fn wide_sum(n: usize) -> f64 {
 
 #[test]
 fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = wide_leg();
     let large = PEAK * PEAK;
@@ -463,7 +491,7 @@ fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
     assert_ne!(narrow, 30.0, "fixture must distinguish narrow accumulation");
 
     let real_dense: TensorMap<U1FusionRule, f32> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             if index[0] != index[1] {
                 0.0
             } else if index[0] == 0 {
@@ -476,6 +504,7 @@ fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
         })
         .unwrap();
     let real_compact: TensorMap<U1FusionRule, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -484,24 +513,24 @@ fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
         }],
     )
     .unwrap();
-    let real_lazy = real_dense.adjoint().unwrap();
+    let real_lazy = real_dense.adjoint(engine).unwrap();
     for value in [
-        real_compact.inner(&real_dense).unwrap(),
-        real_dense.inner(&real_compact).unwrap(),
-        real_compact.inner(&real_lazy).unwrap(),
-        real_lazy.inner(&real_compact).unwrap(),
+        real_compact.inner(engine, &real_dense).unwrap(),
+        real_dense.inner(engine, &real_compact).unwrap(),
+        real_compact.inner(engine, &real_lazy).unwrap(),
+        real_lazy.inner(engine, &real_compact).unwrap(),
     ] {
         assert_eq!(value, 30.0);
     }
 
-    let complex_dense = real_dense.convert::<Complex32>();
-    let complex_compact = real_compact.convert::<Complex32>();
-    let complex_lazy = complex_dense.adjoint().unwrap();
+    let complex_dense = real_dense.convert::<Complex32>(engine).unwrap();
+    let complex_compact = real_compact.convert::<Complex32>(engine).unwrap();
+    let complex_lazy = complex_dense.adjoint(engine).unwrap();
     for value in [
-        complex_compact.inner(&complex_dense).unwrap(),
-        complex_dense.inner(&complex_compact).unwrap(),
-        complex_compact.inner(&complex_lazy).unwrap(),
-        complex_lazy.inner(&complex_compact).unwrap(),
+        complex_compact.inner(engine, &complex_dense).unwrap(),
+        complex_dense.inner(engine, &complex_compact).unwrap(),
+        complex_compact.inner(engine, &complex_lazy).unwrap(),
+        complex_lazy.inner(engine, &complex_compact).unwrap(),
     ] {
         assert_eq!(value, Complex32::new(30.0, 0.0));
     }
@@ -509,11 +538,12 @@ fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
 
 #[test]
 fn single_precision_reductions_accumulate_in_double() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = wide_leg();
     let dense_entries = 32 * 32;
     let dense: TensorMap<U1FusionRule, f32> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             if index == [0, 0] {
                 PEAK
             } else {
@@ -531,19 +561,27 @@ fn single_precision_reductions_accumulate_in_double() {
     );
 
     // `inner(self, self)` is `sum |x|^2` unweighted (dim(c) == 1).
-    assert_eq!(dense.inner(&dense).unwrap(), expected as f32, "dense inner");
+    assert_eq!(
+        dense.inner(engine, &dense).unwrap(),
+        expected as f32,
+        "dense inner"
+    );
     // `norm` returns f64, so it shows the accumulator without narrowing.
-    assert_eq!(dense.norm(2.0).unwrap(), expected.sqrt(), "dense norm");
+    assert_eq!(
+        dense.norm(engine, 2.0).unwrap(),
+        expected.sqrt(),
+        "dense norm"
+    );
     assert_ne!(
-        dense.norm(2.0).unwrap(),
+        dense.norm(engine, 2.0).unwrap(),
         f64::from(narrow_sum(dense_entries)).sqrt()
     );
 
     // The lazy-adjoint operands run `oriented_fusion_inner`, a different
     // kernel with its own per-block and cross-block accumulators.
-    let lazy = dense.adjoint().unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     assert_eq!(
-        lazy.inner(&lazy).unwrap(),
+        lazy.inner(engine, &lazy).unwrap(),
         expected as f32,
         "lazy adjoint inner must accumulate like the dense form"
     );
@@ -552,6 +590,7 @@ fn single_precision_reductions_accumulate_in_double() {
     let mut values = vec![1.0f32; 32];
     values[0] = PEAK;
     let compact: TensorMap<U1FusionRule, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -563,12 +602,12 @@ fn single_precision_reductions_accumulate_in_double() {
     let compact_expected = wide_sum(32);
     assert_ne!(compact_expected as f32, narrow_sum(32));
     assert_eq!(
-        compact.inner(&compact).unwrap(),
+        compact.inner(engine, &compact).unwrap(),
         compact_expected as f32,
         "compact inner"
     );
     assert_eq!(
-        compact.norm(2.0).unwrap(),
+        compact.norm(engine, 2.0).unwrap(),
         compact_expected.sqrt(),
         "compact norm"
     );
@@ -576,9 +615,13 @@ fn single_precision_reductions_accumulate_in_double() {
     // Compact `tr` and the compact full trace sum the values themselves, which
     // are exact here; what they must not do is disagree with each other.
     let trace = PEAK + 31.0;
-    assert_eq!(compact.tr().unwrap(), trace, "compact tr");
+    assert_eq!(compact.tr(engine).unwrap(), trace, "compact tr");
     assert_eq!(
-        compact.trace_pairs(&[(0, 1)]).unwrap().scalar().unwrap(),
+        compact
+            .trace_pairs(engine, &[(0, 1)])
+            .unwrap()
+            .scalar(engine)
+            .unwrap(),
         trace,
         "compact full trace"
     );
@@ -586,28 +629,38 @@ fn single_precision_reductions_accumulate_in_double() {
 
 #[test]
 fn complex32_reductions_accumulate_in_double() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let leg = wide_leg();
     let dense_entries = 32 * 32;
     let dense: TensorMap<U1FusionRule, Complex32> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             Complex32::new(if index == [0, 0] { PEAK } else { 1.0 }, 0.0)
         })
         .unwrap();
     let expected = Complex32::new(wide_sum(dense_entries) as f32, 0.0);
     assert_ne!(expected.re, narrow_sum(dense_entries));
-    assert_eq!(dense.inner(&dense).unwrap(), expected, "dense inner");
     assert_eq!(
-        dense.norm(2.0).unwrap(),
+        dense.inner(engine, &dense).unwrap(),
+        expected,
+        "dense inner"
+    );
+    assert_eq!(
+        dense.norm(engine, 2.0).unwrap(),
         wide_sum(dense_entries).sqrt(),
         "dense norm"
     );
-    let lazy = dense.adjoint().unwrap();
-    assert_eq!(lazy.inner(&lazy).unwrap(), expected, "lazy adjoint inner");
+    let lazy = dense.adjoint(engine).unwrap();
+    assert_eq!(
+        lazy.inner(engine, &lazy).unwrap(),
+        expected,
+        "lazy adjoint inner"
+    );
 }
 
 #[test]
 fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // 1e20^2 = 1e40, past the f32 maximum of ~3.4e38: a narrow accumulator
     // saturates to +inf and the storage form would decide the answer.
     let runtime = host_runtime();
@@ -619,8 +672,9 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
     );
 
     let dense: TensorMap<U1FusionRule, f32> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| value).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| value).unwrap();
     let compact: TensorMap<U1FusionRule, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -631,9 +685,12 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
     .unwrap();
 
     for (what, norm) in [
-        ("dense", dense.norm(2.0).unwrap()),
-        ("compact", compact.norm(2.0).unwrap()),
-        ("lazy adjoint", dense.adjoint().unwrap().norm(2.0).unwrap()),
+        ("dense", dense.norm(engine, 2.0).unwrap()),
+        ("compact", compact.norm(engine, 2.0).unwrap()),
+        (
+            "lazy adjoint",
+            dense.adjoint(engine).unwrap().norm(engine, 2.0).unwrap(),
+        ),
     ] {
         assert!(norm.is_finite(), "{what} norm overflowed: {norm}");
     }
@@ -641,10 +698,10 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
     // the `f32` range, so `+inf` there is the correct narrowing of a finite
     // wide accumulator rather than an accumulator that saturated. `norm`
     // above is what distinguishes the two, since it returns `f64`.
-    let lazy = dense.adjoint().unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     for (what, value) in [
-        ("dense inner", dense.inner(&dense).unwrap()),
-        ("lazy adjoint inner", lazy.inner(&lazy).unwrap()),
+        ("dense inner", dense.inner(engine, &dense).unwrap()),
+        ("lazy adjoint inner", lazy.inner(engine, &lazy).unwrap()),
     ] {
         assert!(value.is_infinite(), "{what}: {value}");
     }
@@ -657,6 +714,7 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
 mod checked_generic {
     use super::*;
     use symtn::sector::LieGroupFusionRule;
+    use symtn::typed::Engine;
 
     /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`:
     /// `(p + 1)(q + 1)(p + q + 2) / 2`.
@@ -665,7 +723,7 @@ mod checked_generic {
         (p + 1.0) * (q + 1.0) * (p + q + 2.0) / 2.0
     }
 
-    fn measurements() -> Vec<Measurement> {
+    fn measurements(engine: &mut dyn Engine) -> Vec<Measurement> {
         let runtime = host_runtime();
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
@@ -678,14 +736,15 @@ mod checked_generic {
         let real = |v: f64| Complex64::new(v, 0.0);
         let complex = |v| v;
         let mut out = Vec::new();
-        dense_reductions!(out, "f64 su3", &runtime, &leg, f64, real, su3_dim);
-        dense_reductions!(out, "c64 su3", &runtime, &leg, Complex64, complex, su3_dim);
+        dense_reductions!(engine, out, "f64 su3", &runtime, &leg, f64, real, su3_dim);
+        dense_reductions!(engine, out, "c64 su3", &runtime, &leg, Complex64, complex, su3_dim);
         out
     }
 
     #[test]
     fn checked_generic_reductions_match_a_double_double_oracle() {
-        let measurements = measurements();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let measurements = measurements(engine);
         assert_eq!(measurements.len(), 2 * 5);
         assert_measurements_match_the_oracle(&measurements);
     }
@@ -693,15 +752,16 @@ mod checked_generic {
 
 #[test]
 fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     macro_rules! check {
-        ($rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {
+        ($engine:ident, $rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {
             for len in [0, 8, 13] {
                 let rule = Arc::new($rule);
                 let out = GradedSpace::try_new(rule.clone(), [($sector, len)]).unwrap();
                 let input = GradedSpace::try_new(rule, [($sector, 1)]).unwrap();
                 let a: TensorMap<_, $dtype> =
-                    TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                    TensorMap::from_subblock_fn($engine, &runtime, [&out], [&input], |_, index| {
                         ($cast)(Complex64::new(
                             real_at(index[0] + 1),
                             other_at(index[0] + 2),
@@ -709,7 +769,7 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
                     })
                     .unwrap();
                 let b: TensorMap<_, $dtype> =
-                    TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                    TensorMap::from_subblock_fn($engine, &runtime, [&out], [&input], |_, index| {
                         ($cast)(Complex64::new(
                             other_at(index[0] + 3),
                             real_at(index[0] + 4),
@@ -726,7 +786,7 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
                 // At most `len` bilinear terms, weighted by the known irrep dimension.
                 numerics::assert_close(
                     "dense lane inner",
-                    a.inner(&b).unwrap(),
+                    a.inner($engine, &b).unwrap(),
                     ($cast)(serial * $weight),
                     len,
                 );
@@ -734,9 +794,10 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
         };
     }
     macro_rules! providers {
-        ($dtype:ty, $cast:expr) => {
-            check!(U1FusionRule, U1Irrep::new(0), 1.0, $dtype, $cast);
+        ($engine:ident, $dtype:ty, $cast:expr) => {
+            check!($engine, U1FusionRule, U1Irrep::new(0), 1.0, $dtype, $cast);
             check!(
+                $engine,
                 SU2FusionRule,
                 SU2Irrep::from_twice_spin(1),
                 2.0,
@@ -745,10 +806,10 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
             );
         };
     }
-    providers!(f64, |v: Complex64| v.re);
-    providers!(Complex64, |v: Complex64| v);
-    providers!(f32, |v: Complex64| v.re as f32);
-    providers!(Complex32, |v: Complex64| Complex32::new(
+    providers!(engine, f64, |v: Complex64| v.re);
+    providers!(engine, Complex64, |v: Complex64| v);
+    providers!(engine, f32, |v: Complex64| v.re as f32);
+    providers!(engine, Complex32, |v: Complex64| Complex32::new(
         v.re as f32,
         v.im as f32
     ));
@@ -756,9 +817,10 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
 
 #[test]
 fn dense_inner_cancellation_accumulates_wide() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     macro_rules! check {
-        ($rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {{
+        ($engine:ident, $rule:expr, $sector:expr, $weight:expr, $dtype:ty, $cast:expr) => {{
             let rule = Arc::new($rule);
             let out = GradedSpace::try_new(rule.clone(), [($sector, 17)]).unwrap();
             let input = GradedSpace::try_new(rule, [($sector, 1)]).unwrap();
@@ -770,27 +832,37 @@ fn dense_inner_cancellation_accumulates_wide() {
             let narrow = values.iter().copied().sum::<f32>();
             assert!((narrow - 15.0).abs() > 1.0);
             let a: TensorMap<_, $dtype> =
-                TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, _| ($cast)(1.0))
-                    .unwrap();
+                TensorMap::from_subblock_fn($engine, &runtime, [&out], [&input], |_, _| {
+                    ($cast)(1.0)
+                })
+                .unwrap();
             let b: TensorMap<_, $dtype> =
-                TensorMap::from_subblock_fn(&runtime, [&out], [&input], |_, index| {
+                TensorMap::from_subblock_fn($engine, &runtime, [&out], [&input], |_, index| {
                     ($cast)(values[index[0]])
                 })
                 .unwrap();
             numerics::assert_close(
                 "wide cancellation",
-                a.inner(&b).unwrap(),
+                a.inner($engine, &b).unwrap(),
                 ($cast)(15.0 * $weight),
                 17,
             );
         }};
     }
-    check!(U1FusionRule, U1Irrep::new(0), 1.0, f32, |v| v);
-    check!(SU2FusionRule, SU2Irrep::from_twice_spin(1), 2.0, f32, |v| v);
-    check!(U1FusionRule, U1Irrep::new(0), 1.0, Complex32, |v| {
+    check!(engine, U1FusionRule, U1Irrep::new(0), 1.0, f32, |v| v);
+    check!(
+        engine,
+        SU2FusionRule,
+        SU2Irrep::from_twice_spin(1),
+        2.0,
+        f32,
+        |v| v
+    );
+    check!(engine, U1FusionRule, U1Irrep::new(0), 1.0, Complex32, |v| {
         Complex32::new(v, 0.0)
     });
     check!(
+        engine,
         SU2FusionRule,
         SU2Irrep::from_twice_spin(1),
         2.0,

@@ -1,7 +1,9 @@
 use super::*;
+use symtn::typed::Engine;
 
 #[test]
 fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a 2x3 by 3x4 contraction with `output_axes = [1, 0]` is the
     // transpose of the matrix product, element for element. The values are the
@@ -21,6 +23,7 @@ fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
 
     let contracted = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -41,6 +44,7 @@ fn contract_matches_a_hand_computed_product_with_a_reordered_output() {
 
 #[test]
 fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `0..open_rank` is the identity output order, so the same product
     // comes back untransposed.
@@ -56,6 +60,7 @@ fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
 
     let contracted = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -74,16 +79,17 @@ fn contract_with_the_default_output_order_keeps_the_open_axes_in_place() {
 
 #[test]
 fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the contraction seam is neither abelian- nor real-specific.
     let runtime = runtime();
     let provider = Arc::new(external_su2());
     let leg = su2_leg(&provider, false);
     let mut next = Complex64::new(0.0, 0.0);
-    let build = |next: &mut Complex64| {
+    let mut build = |next: &mut Complex64| {
         let mut step = *next;
         let tensor: TensorMap<ExternalSu2Rule, Complex64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, _| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, _| {
                 step += Complex64::new(1.0, 0.5);
                 step
             })
@@ -98,6 +104,7 @@ fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
     // spin-1 blocks; the pair of contracted legs makes the result rank 4.
     let contracted = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[2, 3],
@@ -118,6 +125,7 @@ fn contract_carries_a_simple_fusion_provider_with_a_complex_payload() {
 
 #[test]
 fn contract_rejects_operands_from_different_runtimes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the runtime is a trust boundary — two runtimes own separate
     // execution state, so mixing them is refused before any provider work.
@@ -134,6 +142,7 @@ fn contract_rejects_operands_from_different_runtimes() {
 
     let error = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -149,6 +158,7 @@ fn contract_rejects_operands_from_different_runtimes() {
 
 #[test]
 fn contract_accepts_separately_allocated_equal_identity_providers() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the counterpart of the distinct-identity rejection — two
     // independent allocations of one rule interoperate in an operation, not
@@ -173,6 +183,7 @@ fn contract_accepts_separately_allocated_equal_identity_providers() {
 
     let contracted = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -191,6 +202,7 @@ fn contract_accepts_separately_allocated_equal_identity_providers() {
 
 #[test]
 fn contract_rejects_operands_with_distinct_rule_identities() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: two providers of one Rust type but different identities are a
     // different algebra. The rejection comes from the expert layer, which is
@@ -213,6 +225,7 @@ fn contract_rejects_operands_with_distinct_rule_identities() {
 
     assert!(lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -229,6 +242,7 @@ fn contract_rejects_operands_with_distinct_rule_identities() {
 
 #[test]
 fn otimes_rejects_runtime_and_rule_identity_mismatches() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let first = runtime();
     let second = runtime();
@@ -246,7 +260,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
         1.0,
     );
     assert!(matches!(
-        lhs.otimes(&other_runtime).unwrap_err(),
+        lhs.otimes(engine, &other_runtime).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     ));
 
@@ -258,7 +272,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
         1.0,
     );
     assert!(lhs
-        .otimes(&other_rule)
+        .otimes(engine, &other_rule)
         .err()
         .unwrap()
         .report()
@@ -267,6 +281,7 @@ fn otimes_rejects_runtime_and_rule_identity_mismatches() {
 
 #[test]
 fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the #595 NoBraiding oracle is TensorKit's own PlanarTrivial
     // category. The previous contract-plus-output-permute route reached its
@@ -282,16 +297,17 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
         .unwrap();
     let rhs_dom = GradedSpace::try_new(Arc::clone(&provider), [(PlanarTrivialSector, 2)]).unwrap();
     let lhs: TensorMap<PlanarTrivialRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&lhs_cod], [&lhs_dom], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&lhs_cod], [&lhs_dom], |_, indices| {
             (1 + indices[0] + 10 * indices[1]) as f64
         })
         .unwrap();
     let rhs: TensorMap<PlanarTrivialRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&rhs_cod], [&rhs_dom], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&rhs_cod], [&rhs_dom], |_, indices| {
             (2 + indices[0] + 10 * indices[1]) as f64
         })
         .unwrap();
     let expected: TensorMap<PlanarTrivialRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&lhs_cod, &rhs_cod],
         [&lhs_dom, &rhs_dom],
@@ -306,6 +322,7 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
     // rejects that braid-requiring route.
     assert!(lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[],
@@ -319,7 +336,7 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
         .report()
         .contains("ordinary contraction requires symmetric"));
 
-    let actual = lhs.otimes(&rhs).unwrap();
+    let actual = lhs.otimes(engine, &rhs).unwrap();
 
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert_eq!(
@@ -335,6 +352,7 @@ fn otimes_matches_tensorkit_planar_trivial_without_requesting_braiding() {
 
 #[test]
 fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Built-in TensorKit-equivalent FermionParity semantics: complex payload
     // multiplication is sign-free because otimes performs no leg crossing.
@@ -349,7 +367,7 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
     )
     .unwrap();
     let lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |sectors, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, _| {
             if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
                 Complex64::new(2.0, 1.0)
             } else {
@@ -358,7 +376,7 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
         })
         .unwrap();
     let rhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |sectors, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |sectors, _| {
             if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
                 Complex64::new(5.0, -1.0)
             } else {
@@ -366,8 +384,12 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
             }
         })
         .unwrap();
-    let expected: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |sectors, _| {
+    let expected: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |sectors, _| {
             let codomain = sectors.codomain_uncoupled();
             let domain = sectors.domain_uncoupled();
             if codomain != domain {
@@ -384,17 +406,19 @@ fn otimes_fz2_complex_oracle_has_no_crossing_phase() {
                 Complex64::new(1.0, 4.0)
             };
             lhs * rhs
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     assert_eq!(
-        lhs.otimes(&rhs).unwrap().dense_data().unwrap(),
+        lhs.otimes(engine, &rhs).unwrap().dense_data().unwrap(),
         expected.dense_data().unwrap()
     );
 }
 
 #[test]
 fn typed_deligne_product_uses_the_explicit_component_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
@@ -403,8 +427,10 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(1), 1)]).unwrap();
     let parity =
         GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&parity], [&parity], |_, _| 3.0).unwrap();
+    let lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
+    let rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&parity], [&parity], |_, _| 3.0).unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
@@ -413,7 +439,7 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
         .unwrap(),
     );
 
-    let result = lhs.deligne_product(&rhs, product).unwrap();
+    let result = lhs.deligne_product(engine, &rhs, product).unwrap();
 
     assert_eq!((result.codomain_rank(), result.domain_rank()), (2, 2));
     assert_eq!(result.dense_data().unwrap(), [6.0]);
@@ -436,6 +462,7 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
 
 #[test]
 fn typed_deligne_product_rejects_a_component_identity_mismatch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let lhs_rule = Arc::new(external_z3_tagged(0));
@@ -448,7 +475,7 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let u1 =
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(0), 1)]).unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&u1], [&u1], |_, _| 3.0).unwrap();
+    let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, _| 3.0).unwrap();
     let wrong = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             external_z3_tagged(1),
@@ -458,13 +485,14 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
     );
 
     assert!(matches!(
-        lhs.deligne_product(&rhs, wrong).unwrap_err(),
+        lhs.deligne_product(engine, &rhs, wrong).unwrap_err(),
         symtn::typed::Error::RuleMismatch
     ));
 }
 
 #[test]
 fn typed_deligne_product_checks_runtime_before_both_component_identities() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let first = runtime();
     let second = runtime();
@@ -491,7 +519,7 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
     );
 
     assert!(matches!(
-        lhs.deligne_product(&rhs, wrong_both).unwrap_err(),
+        lhs.deligne_product(engine, &rhs, wrong_both).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     ));
 
@@ -509,13 +537,14 @@ fn typed_deligne_product_checks_runtime_before_both_component_identities() {
         .unwrap(),
     );
     assert!(matches!(
-        lhs.deligne_product(&rhs, wrong_right).unwrap_err(),
+        lhs.deligne_product(engine, &rhs, wrong_right).unwrap_err(),
         symtn::typed::Error::RuleMismatch
     ));
 }
 
 #[test]
 fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
@@ -554,20 +583,28 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
         ],
     )
     .unwrap();
-    let lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&charge_cod], [&charge_dom], |sectors, _| {
-            Complex64::new(sectors.coupled().charge() as f64, 2.0)
-        })
-        .unwrap();
-    let rhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&parity_cod], [&parity_dom], |sectors, _| {
+    let lhs: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&charge_cod],
+        [&charge_dom],
+        |sectors, _| Complex64::new(sectors.coupled().charge() as f64, 2.0),
+    )
+    .unwrap();
+    let rhs: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&parity_cod],
+        [&parity_dom],
+        |sectors, _| {
             if *sectors.coupled() == symtn::sector::Z2Irrep::EVEN {
                 Complex64::new(3.0, -1.0)
             } else {
                 Complex64::new(-2.0, 4.0)
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
@@ -576,11 +613,15 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
         .unwrap(),
     );
 
-    let actual = lhs.deligne_product(&rhs, product).unwrap();
+    let actual = lhs.deligne_product(engine, &rhs, product).unwrap();
     let codomain = actual.codomain();
     let domain = actual.domain();
-    let expected =
-        TensorMap::from_subblock_fn(&runtime, codomain.iter(), domain.iter(), |sectors, _| {
+    let expected = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        codomain.iter(),
+        domain.iter(),
+        |sectors, _| {
             let codomain = sectors.codomain_uncoupled();
             let domain = sectors.domain_uncoupled();
             if codomain[0].left() == domain[0].left() && codomain[1].right() == domain[1].right() {
@@ -594,8 +635,9 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
             } else {
                 Complex64::new(0.0, 0.0)
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     assert!(actual.subblock_count() > 1);
@@ -611,6 +653,7 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
 
 #[test]
 fn typed_deligne_product_accepts_a_nondefault_product_codec() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     type Codec = symtn::sector::PackedProductCodec<
         symtn::sector::U1SectorLayout,
@@ -623,8 +666,10 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
         GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(2), 1)]).unwrap();
     let parity =
         GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&parity], [&parity], |_, _| 5.0).unwrap();
+    let lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge], [&charge], |_, _| 2.0).unwrap();
+    let rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&parity], [&parity], |_, _| 5.0).unwrap();
     let product = Arc::new(
         symtn::sector::ProductFusionRule::<_, _, Codec>::try_new(
             symtn::sector::U1FusionRule,
@@ -633,7 +678,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
         .unwrap(),
     );
 
-    let result = lhs.deligne_product(&rhs, product).unwrap();
+    let result = lhs.deligne_product(engine, &rhs, product).unwrap();
 
     assert_eq!(result.dense_data().unwrap(), [10.0]);
     assert_eq!(
@@ -647,6 +692,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
 
 #[test]
 fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
@@ -663,9 +709,12 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     let odd =
         GradedSpace::try_new(Arc::clone(&fz2_rule), [(symtn::sector::Z2Irrep::ODD, 1)]).unwrap();
     let lhs =
-        TensorMap::from_subblock_fn(&runtime, charges.iter(), [&charge_total], |_, _| 2.0).unwrap();
-    let rhs =
-        TensorMap::from_subblock_fn(&runtime, [&odd, &odd, &odd], [&odd], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, charges.iter(), [&charge_total], |_, _| {
+            2.0
+        })
+        .unwrap();
+    let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd, &odd, &odd], [&odd], |_, _| 3.0)
+        .unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
@@ -674,7 +723,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
         .unwrap(),
     );
 
-    let result = lhs.deligne_product(&rhs, product).unwrap();
+    let result = lhs.deligne_product(engine, &rhs, product).unwrap();
     let block = result.subblock_fusion_trees(0).unwrap();
 
     assert_eq!(result.dense_data().unwrap(), [6.0]);
@@ -703,6 +752,7 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
 
 #[test]
 fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     type WrongCodec = symtn::sector::PackedProductCodec<
         symtn::sector::U1SectorLayout,
@@ -714,9 +764,11 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
     let charge_one =
         GradedSpace::try_new(Arc::clone(&rule), [(symtn::sector::U1Irrep::new(1), 1)]).unwrap();
     let lhs =
-        TensorMap::from_subblock_fn(&runtime, [&charge_one], [&charge_one], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge_one], [&charge_one], |_, _| 2.0)
+            .unwrap();
     let rhs =
-        TensorMap::from_subblock_fn(&runtime, [&charge_one], [&charge_one], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge_one], [&charge_one], |_, _| 3.0)
+            .unwrap();
     let product = Arc::new(
         symtn::sector::ProductFusionRule::<
             symtn::sector::U1FusionRule,
@@ -730,7 +782,7 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
         structure_cache_info(StructureCacheKind::DegeneracyStructure),
     );
 
-    assert!(lhs.deligne_product(&rhs, product).is_err());
+    assert!(lhs.deligne_product(engine, &rhs, product).is_err());
 
     assert_eq!(
         (
@@ -747,17 +799,19 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
 
 #[test]
 fn contract_ordered_delegates_with_a_nonidentity_output_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let provider = Arc::new(symtn::sector::U1FusionRule);
     let leg = u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let lhs: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [], [&leg], 224_303).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [], [&leg], 224_303).unwrap();
     let rhs: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg, &leg], 224_304).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg, &leg], 224_304).unwrap();
 
     let actual = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[0],
@@ -769,6 +823,7 @@ fn contract_ordered_delegates_with_a_nonidentity_output_order() {
         .unwrap();
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[0],
@@ -778,7 +833,7 @@ fn contract_ordered_delegates_with_a_nonidentity_output_order() {
             },
         )
         .unwrap()
-        .permute(&[], &[1, 0])
+        .permute(engine, &[], &[1, 0])
         .unwrap();
     // The ordered route may run its GEMM on another layout; the contracted
     // leg has dimension 4.
@@ -793,7 +848,7 @@ fn contract_ordered_delegates_with_a_nonidentity_output_order() {
 #[test]
 fn typed_contract_parallel_su2_replay_matches_serial() {
     let _serial = crate::counting_alloc::serial();
-    fn run(runtime: &Runtime) -> Vec<f64> {
+    fn run(engine: &mut dyn Engine, runtime: &Runtime) -> Vec<f64> {
         let provider = Arc::new(SU2FusionRule);
         let leg = GradedSpace::try_new(
             provider,
@@ -805,10 +860,13 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
         )
         .unwrap();
         let lhs: TensorMap<SU2FusionRule, f64> =
-            TensorMap::rand_with_seed(runtime, [&leg, &leg], [&leg, &leg], 224_401).unwrap();
+            TensorMap::rand_with_seed(engine, runtime, [&leg, &leg], [&leg, &leg], 224_401)
+                .unwrap();
         let rhs: TensorMap<SU2FusionRule, f64> =
-            TensorMap::rand_with_seed(runtime, [&leg, &leg], [&leg, &leg], 224_402).unwrap();
+            TensorMap::rand_with_seed(engine, runtime, [&leg, &leg], [&leg, &leg], 224_402)
+                .unwrap();
         lhs.contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[3, 2],
@@ -823,10 +881,10 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
         .to_vec()
     }
 
-    let serial = Runtime::builder().recoupling_threads(1).build().unwrap();
-    let parallel = Runtime::builder().recoupling_threads(2).build().unwrap();
-    let serial = run(&serial);
-    let parallel = run(&parallel);
+    let runtime = Runtime::builder().build().unwrap();
+    let serial = run(&mut symtn::typed::CpuEngine::serial(), &runtime);
+    let pool = symtn::typed::Pool::builder().threads(2).build().unwrap();
+    let parallel = run(&mut symtn::typed::CpuEngine::new(pool), &runtime);
     assert_eq!(serial.len(), parallel.len());
     assert!(serial
         .iter()
@@ -840,12 +898,13 @@ fn typed_contract_parallel_su2_replay_matches_serial() {
     reason = "the test table records axes and expected error class in one fixture row"
 )]
 fn contract_error_classes_and_their_both_defect_precedence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the typed contract reports
     // a bad output order before a simultaneous contracted-leg mismatch.
     let second = runtime();
     let runtime = runtime();
-    let typed_fixture = |runtime: &Runtime| {
+    let typed_fixture = |engine: &mut dyn Engine, runtime: &Runtime| {
         let leg = GradedSpace::try_new(
             Arc::new(symtn::sector::Z2FusionRule),
             [
@@ -854,9 +913,10 @@ fn contract_error_classes_and_their_both_defect_precedence() {
             ],
         )
         .unwrap();
-        TensorMap::from_subblock_fn(runtime, [&leg, &leg], [&leg], typed_fill_value).unwrap()
+        TensorMap::from_subblock_fn(engine, runtime, [&leg, &leg], [&leg], typed_fill_value)
+            .unwrap()
     };
-    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(&runtime);
+    let typed: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(engine, &runtime);
 
     use symtn::typed::{CoreError, OperationError};
     fn axis_count(error: &OperationError) -> bool {
@@ -900,7 +960,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
             codomain,
             domain,
         };
-        let typed_error = typed.contract(&typed, &spec).unwrap_err();
+        let typed_error = typed.contract(engine, &typed, &spec).unwrap_err();
         assert!(class(operation(&typed_error)), "{name}: {typed_error:?}");
     }
 
@@ -914,6 +974,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     )
     .unwrap();
     let typed_narrow: TensorMap<symtn::sector::Z2FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&narrow_leg, &narrow_leg],
         [&narrow_leg],
@@ -922,6 +983,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     .unwrap();
     let typed_error = typed
         .contract(
+            engine,
             &typed_narrow,
             &ContractSpec {
                 lhs: &[2],
@@ -942,6 +1004,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     // Both defects at once: mismatched legs AND a non-permutation output order.
     let typed_both = typed
         .contract(
+            engine,
             &typed_narrow,
             &ContractSpec {
                 lhs: &[2],
@@ -957,10 +1020,11 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     );
 
     // Runtime mismatch stays a facade-level error.
-    let typed_second: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(&second);
+    let typed_second: TensorMap<symtn::sector::Z2FusionRule, f64> = typed_fixture(engine, &second);
     assert!(matches!(
         typed
             .contract(
+                engine,
                 &typed_second,
                 &ContractSpec {
                     lhs: &[2],
@@ -991,6 +1055,7 @@ fn contract_error_classes_and_their_both_defect_precedence() {
     );
     let identity_error = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1022,8 +1087,9 @@ fn probe_matrix<const ANYONIC: bool>(
     runtime: &Runtime,
     offset: f64,
 ) -> TensorMap<RealBraidingProbe<ANYONIC>, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = probe_leg::<ANYONIC>();
-    TensorMap::from_subblock_fn(runtime, [&leg], [&leg], |_, index| {
+    TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |_, index| {
         probe_value(offset, index[0], index[1])
     })
     .unwrap()
@@ -1063,6 +1129,7 @@ fn is_non_symmetric_contraction(error: &symtn::typed::Error) -> bool {
 /// `compose` of the same operands is admitted (TensorKit `blas_contract!`
 /// versus `mul!`).
 fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
     let rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
@@ -1071,6 +1138,7 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
 
     let contract = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1083,6 +1151,7 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
     assert!(is_non_symmetric_contraction(&contract), "{contract:?}");
     let overwrite = lhs
         .contract_into(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1098,10 +1167,10 @@ fn assert_host_contract_entries_reject_but_compose_admits<const ANYONIC: bool>()
     assert!(is_non_symmetric_contraction(&overwrite), "{overwrite:?}");
     assert_eq!(destination.dense_data().unwrap(), &before[..]);
 
-    let composed = lhs.compose(&rhs).unwrap();
+    let composed = lhs.compose(engine, &rhs).unwrap();
     let leg = probe_leg::<ANYONIC>();
     let expected: TensorMap<RealBraidingProbe<ANYONIC>, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             probe_composition(index[0], index[1])
         })
         .unwrap();
@@ -1120,6 +1189,7 @@ fn non_symmetric_contract_entries_reject_canonical_axes_but_compose_admits() {
 
 #[test]
 fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the same one-sector 2x2 operands under a bosonic rule contract on
     // the canonical axes to the composition oracle, so the rejections above
@@ -1130,20 +1200,23 @@ fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
         [(symtn::sector::U1Irrep::new(0), 2)],
     )
     .unwrap();
-    let matrix = |offset: f64| -> TensorMap<symtn::sector::U1FusionRule, f64> {
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
-            probe_value(offset, index[0], index[1])
-        })
-        .unwrap()
-    };
+    let matrix =
+        |engine: &mut dyn Engine, offset: f64| -> TensorMap<symtn::sector::U1FusionRule, f64> {
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
+                probe_value(offset, index[0], index[1])
+            })
+            .unwrap()
+        };
     let expected: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             probe_composition(index[0], index[1])
         })
         .unwrap();
-    let contracted = matrix(1.0)
+    let operand = &matrix(engine, 5.0);
+    let contracted = matrix(engine, 1.0)
         .contract(
-            &matrix(5.0),
+            engine,
+            operand,
             &ContractSpec {
                 lhs: &[1],
                 rhs: &[0],
@@ -1159,9 +1232,11 @@ fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
 }
 
 fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let dense = probe_matrix::<ANYONIC>(&runtime, 1.0);
     let compact: TensorMap<RealBraidingProbe<ANYONIC>, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &probe_leg::<ANYONIC>(),
         [symtn::typed::SectorSpectrum {
@@ -1170,8 +1245,8 @@ fn assert_compact_trace_rejects_like_dense_trace<const ANYONIC: bool>() {
         }],
     )
     .unwrap();
-    let compact_error = compact.trace_pairs(&[(0, 1)]).unwrap_err();
-    let dense_error = dense.trace_pairs(&[(0, 1)]).unwrap_err();
+    let compact_error = compact.trace_pairs(engine, &[(0, 1)]).unwrap_err();
+    let dense_error = dense.trace_pairs(engine, &[(0, 1)]).unwrap_err();
     assert!(
         is_unsupported_contract_scope(&compact_error),
         "{compact_error:?}"
@@ -1189,15 +1264,20 @@ fn non_symmetric_compact_trace_rejects_like_dense_trace() {
 }
 
 #[cfg(feature = "cuda")]
-fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+) {
+    let runtime = Runtime::builder().build().unwrap();
     let host_lhs = probe_matrix::<ANYONIC>(&runtime, 1.0);
     let host_rhs = probe_matrix::<ANYONIC>(&runtime, 5.0);
-    let lhs = host_lhs.to_cuda().unwrap();
-    let rhs = host_rhs.to_cuda().unwrap();
-    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0).to_cuda().unwrap();
+    let lhs = host_lhs.to_cuda(cuda).unwrap();
+    let rhs = host_rhs.to_cuda(cuda).unwrap();
+    let mut destination = probe_matrix::<ANYONIC>(&runtime, 9.0)
+        .to_cuda(cuda)
+        .unwrap();
     let before = destination
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -1206,6 +1286,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
     let transfers = symtn::expert::cuda_transfer_stats();
     let contract = lhs
         .contract(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1217,6 +1298,7 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
         .unwrap_err();
     let overwrite = lhs
         .contract_into(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1234,14 +1316,18 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
         assert!(is_non_symmetric_contraction(error), "{error:?}");
     }
     assert_eq!(
-        destination.to_host().unwrap().dense_data().unwrap(),
+        destination.to_host(cuda).unwrap().dense_data().unwrap(),
         &before[..]
     );
 
-    let composed = lhs.compose(&rhs).unwrap().to_host().unwrap();
+    let composed = lhs.compose(cuda, &rhs).unwrap().to_host(cuda).unwrap();
     assert_eq!(
         composed.dense_data().unwrap(),
-        host_lhs.compose(&host_rhs).unwrap().dense_data().unwrap()
+        host_lhs
+            .compose(engine, &host_rhs)
+            .unwrap()
+            .dense_data()
+            .unwrap()
     );
 }
 
@@ -1252,7 +1338,9 @@ fn assert_device_contract_entries_reject_but_compose_admits<const ANYONIC: bool>
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn non_symmetric_device_contract_entries_reject_but_compose_admits() {
+    let cuda = &mut crate::common::cuda_engine();
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_device_contract_entries_reject_but_compose_admits::<false>();
-    assert_device_contract_entries_reject_but_compose_admits::<true>();
+    assert_device_contract_entries_reject_but_compose_admits::<false>(engine, cuda);
+    assert_device_contract_entries_reject_but_compose_admits::<true>(engine, cuda);
 }

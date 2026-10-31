@@ -7,6 +7,7 @@
 //! for `NoBraiding` in `artin_braid` and `permute`.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::Complex64;
 use symtn::typed::{
@@ -66,7 +67,9 @@ fn seeded(
     domain: &[&GradedSpace<TableRule>],
     seed: u64,
 ) -> TensorMap<TableRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     TensorMap::rand_with_seed(
+        engine,
         runtime,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -89,6 +92,7 @@ fn rep_s3_reports_no_braiding_and_products_inherit_it() {
 
 #[test]
 fn crossing_free_operations_work_without_braiding() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = rep_s3();
     let x = leg(&rule, &[(3, 1)]);
@@ -98,13 +102,19 @@ fn crossing_free_operations_work_without_braiding() {
     // transpose and repartition round trips.
     let t = seeded(&runtime, &[&x, &x, &x], &[&x], 7);
     let back = t
-        .transpose(&[3], &[2, 1, 0])
+        .transpose(engine, &[3], &[2, 1, 0])
         .unwrap()
-        .transpose(&[3, 2, 1], &[0])
+        .transpose(engine, &[3, 2, 1], &[0])
         .unwrap();
     assert_close(&back, &t);
     let m = seeded(&runtime, &[&mixed, &x], &[&mixed], 8);
-    assert_close(&m.repartition(1).unwrap().repartition(2).unwrap(), &m);
+    assert_close(
+        &m.repartition(engine, 1)
+            .unwrap()
+            .repartition(engine, 2)
+            .unwrap(),
+        &m,
+    );
 
     // The crossing-free transpose of the three states of x³ ← x, composed
     // with the dual basis: a unitary 3x3 basis change whose entries agree in
@@ -114,20 +124,29 @@ fn crossing_free_operations_work_without_braiding() {
         .fusion_channels(SectorId::new(2), SectorId::new(2))
         .to_vec();
     assert_eq!(channels.len(), 3);
-    let basis =
-        |space: &GradedSpace<TableRule>, channel: SectorId| -> TensorMap<TableRule, Complex64> {
-            let label = rule.decode_sector(channel).unwrap();
-            TensorMap::from_subblock_fn(&runtime, [space, space, space], [space], |trees, _| {
-                Complex64::new((trees.codomain_innerlines() == [label]) as u8 as f64, 0.0)
-            })
-            .unwrap()
-        };
+    let basis = |engine: &mut dyn Engine,
+                 space: &GradedSpace<TableRule>,
+                 channel: SectorId|
+     -> TensorMap<TableRule, Complex64> {
+        let label = rule.decode_sector(channel).unwrap();
+        TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [space, space, space],
+            [space],
+            |trees, _| Complex64::new((trees.codomain_innerlines() == [label]) as u8 as f64, 0.0),
+        )
+        .unwrap()
+    };
     let mut f = [[Complex64::new(0.0, 0.0); 3]; 3];
     for (column, &c) in channels.iter().enumerate() {
-        let transformed = basis(&x, c).transpose(&[3], &[2, 1, 0]).unwrap();
+        let transformed = basis(engine, &x, c)
+            .transpose(engine, &[3], &[2, 1, 0])
+            .unwrap();
         for (row, &r) in channels.iter().enumerate() {
+            let basis_out = basis(engine, &dual_x, r);
             f[row][column] = transformed
-                .compose(&basis(&dual_x, r))
+                .compose(engine, &basis_out)
                 .unwrap()
                 .dense_data()
                 .unwrap()[0];
@@ -165,15 +184,15 @@ fn crossing_free_operations_work_without_braiding() {
     // compose and otimes.
     let a = seeded(&runtime, &[&mixed], &[&mixed], 9);
     let b = seeded(&runtime, &[&mixed], &[&mixed], 10);
-    assert!(a.compose(&b).is_ok());
-    assert_eq!(a.otimes(&b).unwrap().rank(), 4);
+    assert!(a.compose(engine, &b).is_ok());
+    assert_eq!(a.otimes(engine, &b).unwrap().rank(), 4);
 
     // A braid whose only crossing involves the unit needs no R-symbol
     // (TensorKit `artin_braid` returns coefficient one); the leg reorder
     // leaves the one stored coefficient unchanged up to rounding.
     let unit = leg(&rule, &[(1, 1)]);
     let u = seeded(&runtime, &[&unit, &x], &[&x], 11);
-    let swapped = u.braid(&[1, 0], &[2], &[0, 1, 2]).unwrap();
+    let swapped = u.braid(engine, &[1, 0], &[2], &[0, 1, 2]).unwrap();
     let (a, e) = (swapped.dense_data().unwrap(), u.dense_data().unwrap());
     assert_eq!(a.len(), e.len());
     assert!(a.iter().zip(e.iter()).all(|(x, y)| (x - y).norm() <= BOUND));
@@ -195,6 +214,7 @@ fn is_no_braiding_sector_braid(error: &Error) -> bool {
 
 #[test]
 fn braiding_operations_are_rejected_without_touching_the_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = rep_s3();
     // Mixed blocks: the unit-unit and unit-x crossings are structural, the
@@ -202,13 +222,14 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
     let mixed = leg(&rule, &[(1, 1), (3, 1)]);
     let source = seeded(&runtime, &[&mixed, &mixed], &[&mixed], 12);
 
-    let error = source.braid(&[1, 0], &[2], &[0, 1, 2]).unwrap_err();
+    let error = source.braid(engine, &[1, 0], &[2], &[0, 1, 2]).unwrap_err();
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");
 
     let mut destination = seeded(&runtime, &[&mixed, &mixed], &[&mixed], 13);
     let before = destination.dense_data().unwrap().to_vec();
     let error = source
         .braid_into(
+            engine,
             &[1, 0],
             &[2],
             &[0, 1, 2],
@@ -220,7 +241,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
     assert!(is_no_braiding_sector_braid(&error), "{error:?}");
     assert_eq!(destination.dense_data().unwrap(), &before[..]);
 
-    let error = source.permute(&[1, 0], &[2]).unwrap_err();
+    let error = source.permute(engine, &[1, 0], &[2]).unwrap_err();
     assert!(
         matches!(
             &error,
@@ -238,6 +259,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
     let other = seeded(&runtime, &[&mixed], &[&mixed], 14);
     let error = source
         .contract(
+            engine,
             &other,
             &ContractSpec {
                 lhs: &[0],
@@ -259,6 +281,7 @@ fn braiding_operations_are_rejected_without_touching_the_destination() {
 
 #[test]
 fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_sectors::{product_sector, Z2Irrep};
     let runtime = Runtime::builder().build().unwrap();
     let product = Arc::new(
@@ -278,12 +301,13 @@ fn product_with_a_fusion_only_factor_rejects_braid_into_untouched() {
     )
     .unwrap();
     let source: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 15).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 15).unwrap();
     let mut destination: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg, &leg], [&leg], 16).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg], 16).unwrap();
     let before = destination.dense_data().unwrap().to_vec();
     let error = source
         .braid_into(
+            engine,
             &[1, 0],
             &[2],
             &[0, 1, 2],

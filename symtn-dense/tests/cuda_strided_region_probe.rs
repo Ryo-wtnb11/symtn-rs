@@ -1,8 +1,8 @@
 //! Device probe for the mode count the strided region accumulation behind
 //! symtn's basic device operations (`cuda_region_axpby`) hands to cuTENSOR.
 //!
-//! `cuda_region_axpby` documents that it imposes no rank limit because Tenferro
-//! accepted every mode count up to 72. No adapter-level test can reach a rank
+//! `cuda_region_axpby` imposes no rank limit of its own; Tenferro 0.8 serves a
+//! destination view of at most 8 modes. No adapter-level test can reach a rank
 //! that high (a realizable tensor needs extents of at least 2 on every
 //! non-unit mode), so this file drives Tenferro directly with unit-padded
 //! ranks and records where, if anywhere, the backend starts to reject.
@@ -12,7 +12,7 @@
 
 #![cfg(feature = "cuda")]
 
-use tenferro_gpu::cuda::{upload_tensor, CudaBackend, CudaDeviceId};
+use tenferro_gpu::cuda::{upload_tensor, CudaDeviceId, CudaEngine};
 use tenferro_tensor::{
     DotGeneralAccumulation, DotGeneralConfig, Tensor, TensorDot, TensorRead, TensorScalar,
     TensorWrite,
@@ -20,7 +20,7 @@ use tenferro_tensor::{
 
 use symtn_dense::CudaScalar;
 
-fn upload(backend: &CudaBackend, data: Vec<f64>) -> Tensor {
+fn upload(backend: &CudaEngine, data: Vec<f64>) -> Tensor {
     let len = data.len();
     let host = Tensor::from_vec_col_major(vec![len], data).expect("host tensor");
     upload_tensor(backend.runtime(), &host).expect("upload")
@@ -29,7 +29,7 @@ fn upload(backend: &CudaBackend, data: Vec<f64>) -> Tensor {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
-    let mut backend = CudaBackend::new(CudaDeviceId::from_ordinal(0))
+    let mut backend = CudaEngine::open(CudaDeviceId::from_ordinal(0))
         .expect("CUDA device 0 must be available for the device probe");
     let src = upload(&backend, (0..64).map(|index| index as f64).collect());
     let ones = upload(&backend, vec![1.0]);
@@ -38,31 +38,31 @@ fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
     // Ranks are padded with unit axes, so the payload stays at 8 elements and
     // only the mode count varies. The first rank that fails is the limit.
     let mut first_failure = None;
-    for rank in [8usize, 16, 24, 32, 40, 48, 56, 63, 64, 65, 72] {
+    for rank in [8usize, 9, 16, 24, 32, 40, 48, 56, 63, 64, 65, 72] {
         let mut dims = vec![1usize; rank];
         dims[0] = 8;
-        // `dst = 1 * src` over the region, as a contraction of the rank-N
-        // source plus a trailing unit mode against a 1x1 ones operand.
+        // `dst = 1 * src` over the region, as `cuda_region_axpby` submits it:
+        // the rank-N source plus a trailing unit mode contracted against a
+        // one-element ones operand, into the rank-N destination.
         let mut view_dims = dims.clone();
         view_dims.push(1);
         let strides = vec![1isize; rank + 1];
         let lhs = f64::typed(&src).expect("source dtype").backend_region_view(
-            view_dims.clone(),
+            view_dims,
             strides.clone(),
             0,
         );
-        let rhs =
-            f64::typed(&ones)
-                .expect("ones dtype")
-                .backend_region_view(vec![1, 1], vec![1, 1], 0);
+        let rhs = f64::typed(&ones)
+            .expect("ones dtype")
+            .backend_region_view(vec![1], vec![1], 0);
         let out = f64::typed_mut(&mut dst)
             .expect("destination dtype")
-            .backend_region_view_mut(view_dims, strides, 0);
+            .backend_region_view_mut(dims, strides[..rank].to_vec(), 0);
         let config = DotGeneralConfig {
-            lhs_contracting_dims: vec![rank],
-            rhs_contracting_dims: vec![0],
-            lhs_batch_dims: Vec::new(),
-            rhs_batch_dims: Vec::new(),
+            lhs_contracting_dims: [rank].into_iter().collect(),
+            rhs_contracting_dims: [0].into_iter().collect(),
+            lhs_batch_dims: Default::default(),
+            rhs_batch_dims: Default::default(),
         };
         let accumulation = DotGeneralAccumulation {
             lhs_conj: false,
@@ -98,8 +98,8 @@ fn rank_eight_strided_region_is_accepted_and_the_mode_limit_is_logged() {
         Some((rank, text)) => println!("first rejected rank: {rank} (`{text}`)"),
         None => println!("no mode-count limit reached up to rank 72"),
     }
-    // Every rank symtn can reach through a fusion tree is far below any
-    // plausible cuTENSOR mode limit; the probe only records where it lies.
+    // A rank-8 region must stay usable; where the backend's limit lies above
+    // that is only recorded.
     assert!(
         first_failure.as_ref().map_or(usize::MAX, |(rank, _)| *rank) > 8,
         "rank 8 must be usable"

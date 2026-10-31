@@ -1,46 +1,9 @@
 use super::*;
 
-#[cfg(feature = "cgc-gen")]
-#[test]
-fn checked_generic_contract_reuses_one_runtime_generic_lane() {
-    use symtn_core::LieGroupFusionRule;
-
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let provider =
-        Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1_i64, 1_i64], 1)]).unwrap();
-    let tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
-            trees.codomain_vertices()[0].get() as f64
-        })
-        .unwrap();
-    let identity: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
-
-    for _ in 0..2 {
-        let output = tensor
-            .contract(
-                &identity,
-                &ContractSpec {
-                    lhs: &[2],
-                    rhs: &[0],
-                    codomain: &[0, 1],
-                    domain: &[2],
-                },
-            )
-            .unwrap();
-        assert_eq!(output.dense_data().unwrap(), tensor.dense_data().unwrap());
-        assert!(std::ptr::eq(output.provider(), provider.as_ref()));
-    }
-
-    let mut lease = runtime.lease_context().unwrap();
-    let context = lease.context();
-    assert_eq!(context.generic_lane_uses(), 2);
-}
-
 #[test]
 fn coupled_region_inner_rejects_malformed_scalar_range() {
-    let tensor = su2_lazy_fixture();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = su2_lazy_fixture(engine);
     let structure = owned(&tensor).space.space().structure();
     let data = tensor.dense_data().unwrap();
     let error = coupled_region_inner(

@@ -368,42 +368,6 @@ jobs:
             -- --exact 2>&1 | tee "$test_output"
           grep -Eq '^test result: ok\. 1 passed;' "$test_output"
 
-  # #1531: every Host eager operation must enter its runtime's CPU pool (an
-  # execution lease or an explicit guard). `symtn_scope_audit` turns a Host
-  # replay/compile/strided site reached with no entered pool on a caller
-  # thread into a panic, so an operation that forgets the entry fails here
-  # instead of silently running on Rayon's global pool. Own job: the cfg
-  # changes RUSTFLAGS and would otherwise invalidate the test job's build
-  # cache.
-  host-pool-audit:
-    name: host pool entry audit
-    runs-on: ubuntu-latest
-    env:
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_PROFILE_TEST_DEBUG: '0'
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: symtn
-      - name: Record source revisions
-        run: |
-          git -C symtn log -1 --format='symtn %H'
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: symtn
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: host-pool-audit
-      - uses: ./symtn/.github/actions/cargo-build-script-cache
-        with:
-          key: host-pool-audit
-      - run: |
-          cargo test --locked -p symtn -p symtn-network --tests
-          cargo test --locked -p symtn -p symtn-network --doc
-        working-directory: symtn
-        env:
-          RUSTFLAGS: --cfg symtn_scope_audit
-
   cuda-check:
     name: CUDA compile contract
     # Why: ubuntu-latest moved to 26.04, for which NVIDIA's apt repository
@@ -462,10 +426,6 @@ jobs:
           key: backend-cuda
       - run: cargo check --locked --workspace --all-targets --no-default-features --features cuda,cpu-faer
         working-directory: symtn
-      # GPU-free: the single-stream configuration (#1391) is set and checked
-      # before any device access.
-      - run: cargo test --locked -p symtn-dense --no-default-features --features cuda,cpu-faer --test cuda_stream_config_conflict --test cuda_stream_config_single
-        working-directory: symtn
       - name: Run GPU-free CUDA library tests
         working-directory: symtn
         run: |
@@ -474,8 +434,8 @@ jobs:
           trap 'rm -f "$test_output"' EXIT
           cargo test --locked -p symtn-dense -p symtn --lib --no-default-features --features cuda,cpu-faer \
             -- --color never 2>&1 | tee "$test_output"
-          test "$(grep -Ec '^test cuda_adapter::tests::[^ ]+ \.\.\. ok$' "$test_output")" -ge 9
-          test "$(grep -Ec '^test (runtime::tests::cuda_device_lock_is_one_per_ordinal|typed::batched::contract_batch::fermionic_unit_tests::(signed_direct_can_leave_inactive_destination_blocks|cuda_dynamic_tree_admission_is_single_only)|typed::representation_gates::cuda::[^ ]+|typed::representation_gates::cuda_factorize::typed_cuda_[^ ]+) \.\.\. ok$' "$test_output")" -ge 8
+          test "$(grep -Ec '^test cuda_adapter::tests::[^ ]+ \.\.\. ok$' "$test_output")" -ge 11
+          test "$(grep -Ec '^test (runtime::tests::cuda_call_refuses_a_cpu_engine|typed::batched::contract_batch::fermionic_unit_tests::(signed_direct_can_leave_inactive_destination_blocks|cuda_dynamic_tree_admission_is_single_only)|typed::representation_gates::cuda::[^ ]+|typed::representation_gates::cuda_factorize::typed_cuda_[^ ]+) \.\.\. ok$' "$test_output")" -ge 8
           grep -Fxq 'test typed::batched::contract_batch::fermionic_unit_tests::cuda_dynamic_tree_admission_is_single_only ... ok' "$test_output"
       - name: Run GPU-free CUDA tree-transform admission tests
         working-directory: symtn

@@ -6,7 +6,6 @@ use symtn_core::{CoreError, FusionAlgebraError};
 use symtn_matrixalgebra::TruncationError;
 use symtn_tensors::OperationError;
 
-use crate::runtime::RuntimeConfigError;
 use crate::typed::{BatchMemberRepresentation, SignatureField};
 
 /// Error produced by the user-layer [`crate::typed::TensorMap`] /
@@ -36,13 +35,14 @@ pub enum Error {
     RuleMismatch,
     /// The operands belong to different [`crate::typed::Runtime`]s.
     RuntimeMismatch,
-    /// The operands live on different placements (host vs device, or
-    /// different devices); transfer explicitly with `to_cuda()` / `to_host()`
-    /// first.
+    /// The operands live on different placements (host vs device, different
+    /// devices, or different CUDA engines, which are separate allocation
+    /// domains even on one device); transfer explicitly with `to_cuda` /
+    /// `to_host` first.
     PlacementMismatch,
     /// The operation has no device implementation yet; the message says
     /// which. Device tensors never fall back to host execution silently —
-    /// move the tensor explicitly with `to_host()`.
+    /// move the tensor explicitly with `to_host`.
     UnsupportedOnDevice(String),
     /// Invalid user input (axes, sectors, spaces); the message says what.
     InvalidArgument(String),
@@ -51,9 +51,6 @@ pub enum Error {
     /// too, and replacing it would silently allocate, so the operation does
     /// neither; drop the other handles or pass a tensor of its own.
     DestinationShared,
-    /// [`crate::typed::RuntimeBuilder::build`] rejected contradictory or
-    /// invalid settings.
-    RuntimeConfig(RuntimeConfigError),
     /// A batch operand does not match one structure signature: `member` is
     /// the first differing member of a pack, or `None` when a whole stack
     /// differs from a prepared handle. `field` is the first differing
@@ -120,7 +117,6 @@ impl fmt::Display for Error {
                 f,
                 "the destination shares its storage with another tensor handle"
             ),
-            Self::RuntimeConfig(_) => f.write_str("invalid runtime configuration"),
             Self::BatchSignatureMismatch {
                 member: Some(member),
                 field,
@@ -161,15 +157,8 @@ impl std::error::Error for Error {
             Self::Core(err) => Some(err.as_ref()),
             Self::Operation(err) => Some(err.as_ref()),
             Self::FusionAlgebra(err) => Some(err.as_ref()),
-            Self::RuntimeConfig(err) => Some(err),
             _ => None,
         }
-    }
-}
-
-impl From<RuntimeConfigError> for Error {
-    fn from(err: RuntimeConfigError) -> Self {
-        Self::RuntimeConfig(err)
     }
 }
 

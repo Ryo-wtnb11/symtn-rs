@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -92,6 +93,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     let mut ordinary_swapped = vec![0.0; swapped_dst_bound.space().required_len().unwrap()];
     route_context
         .tensorcontract_prelowered_into(
+            engine,
             &swapped_dst_bound,
             &mut ordinary_swapped,
             crate::FusionOperand::direct(logical_lhs_bound.space()),
@@ -125,6 +127,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     .unwrap();
     let mut padded_artifact_output = vec![0.0; swapped_dst_bound.space().required_len().unwrap()];
     crate::contract::execute_prelowered_dynamic_tree_execution_artifact_for_test(
+        engine,
         provider.as_ref(),
         &reverse_plan,
         swapped_dst_bound.space(),
@@ -145,13 +148,14 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     // of the identity-order column-major oracle below.
     assert_eq!(padded_artifact_output, [0.0, 6.5, 2.0, 13.5]);
 
-    let execute_prelowered =
+    let mut execute_prelowered =
         |context: &mut TensorContractFusionExecutionContext<f64, RuleIdentity>,
          lhs: crate::FusionOperand<'_>,
          lhs_data: &[f64]| {
             let mut output = vec![0.0; dst.required_len().unwrap()];
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &dst_bound,
                     &mut output,
                     lhs,
@@ -217,6 +221,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
     let mut ordinary = vec![0.0; dst.required_len().unwrap()];
     namespace_context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut ordinary,
             crate::FusionOperand::direct(logical_lhs_bound.space()),
@@ -250,6 +255,7 @@ fn prelowered_storage_layouts_and_execution_paths_match_oracle() {
 #[test]
 fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_and_matches_eager()
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
     let rule = FermionParityFusionRule;
@@ -289,6 +295,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
     let mut eager = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut eager,
             crate::FusionOperand::direct(adj_bound.space()),
@@ -304,6 +311,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
     let mut lazy = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut lazy,
             crate::FusionOperand::adjoint(lhs_bound.space()),
@@ -329,6 +337,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
     let mut no_cache_lazy = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     no_cache_context
         .tensorcontract_prelowered_into(
+            engine,
             &dst_bound,
             &mut no_cache_lazy,
             crate::FusionOperand::adjoint(lhs_bound.space()),
@@ -358,6 +367,7 @@ fn tensorcontract_fusion_prelowered_uniform_fermion_twist_takes_the_scaled_core_
 
 #[test]
 fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: direct and lazy-adjoint contractions for a nested non-Abelian
     // product keep the encoded layout/data semantics with and without replay
     // caching, including source transforms and a nonidentity output transform.
@@ -475,6 +485,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
         encoded_context
             .tensorcontract_prelowered_into(
+                engine,
                 &encoded_dst,
                 &mut encoded,
                 crate::FusionOperand::direct(encoded_lhs.space()),
@@ -494,6 +505,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
         lowered_context
             .tensorcontract_prelowered_into(
+                engine,
                 &lowered_dst,
                 &mut lowered,
                 crate::FusionOperand::direct(lowered_lhs.space()),
@@ -518,6 +530,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         let mut warm = vec![0.0; lowered.len()];
         lowered_context
             .tensorcontract_prelowered_into(
+                engine,
                 &lowered_dst,
                 &mut warm,
                 crate::FusionOperand::direct(lowered_lhs.space()),
@@ -574,6 +587,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
     let mut eager_context = TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
     eager_context
         .tensorcontract_prelowered_into(
+            engine,
             &lazy_dst,
             &mut eager,
             crate::FusionOperand::direct(eager_lhs.space()),
@@ -598,6 +612,7 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
         encoded_lazy_context
             .tensorcontract_prelowered_into(
+                engine,
                 &encoded_lazy_dst,
                 &mut encoded_lazy,
                 FusionOperand::adjoint(encoded_lhs.space()),
@@ -621,10 +636,11 @@ fn nested_product_lowered_dynamic_execution_matches_independent_encoded_oracles(
         let mut lazy = vec![0.0; lazy_dst.space().required_len().unwrap()];
         let mut lazy_context =
             TensorContractFusionExecutionContext::<f64, TripleRuleKey>::default();
-        let execute_lazy =
+        let mut execute_lazy =
             |context: &mut TensorContractFusionExecutionContext<f64, TripleRuleKey>,
              output: &mut [f64]| {
                 context.tensorcontract_prelowered_into(
+                    engine,
                     &lazy_dst,
                     output,
                     FusionOperand::adjoint(lowered_lhs.space()),
@@ -736,6 +752,7 @@ fn storage_direct_contraction_refuses_mis_stacked_trees_before_gemm() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What (#1520): checked Generic compose on SU(3), where `8 ⊗ 8 → 8` has
     // vertex multiplicity 2, pairs coupled-sector rows and columns by tree
     // identity (vertex label included) when operands stack those trees in
@@ -961,6 +978,7 @@ fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
         for (rhs_name, (rhs_space, rhs_data)) in &tilings {
             let (space, product) = context
                 .tensorcompose_checked_generic_in(
+                    engine,
                     direct_side(lhs_space, lhs_data),
                     direct_side(rhs_space, rhs_data),
                 )
@@ -1012,6 +1030,7 @@ fn checked_generic_compose_pairs_mis_stacked_multiplicity_trees_by_identity() {
         for (rhs_name, (rhs_space, rhs_data)) in &tilings {
             let (space, product) = context
                 .tensorcompose_checked_generic_in(
+                    engine,
                     (
                         &logical,
                         crate::FusionOperand::adjoint(lhs_space.space()),

@@ -43,32 +43,34 @@ fn pseudo_random(state: &mut u64) -> f64 {
 
 #[test]
 fn typed_cat_uses_one_output_allocation_without_scratch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a warmed typed catdomain owns exactly one output-sized payload
     // and no per-block allocations — the plan executes into the single final
     // buffer.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let codomain = u1_leg(&provider, &[(0, 127)]);
     let left = u1_leg(&provider, &[(0, 251)]);
     let right = u1_leg(&provider, &[(0, 263)]);
     let mut state = 0x5eed_0580u64;
     let lhs: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&codomain], [&left], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&left], |_, _| {
             pseudo_random(&mut state)
         })
         .unwrap();
     let mut state = 0x5eed_0581u64;
     let rhs: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&codomain], [&right], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&right], |_, _| {
             pseudo_random(&mut state)
         })
         .unwrap();
-    let warm: TensorMap<U1FusionRule, f64> = lhs.cat(&rhs, Side::Domain).unwrap();
+    let warm: TensorMap<U1FusionRule, f64> = lhs.cat(engine, &rhs, Side::Domain).unwrap();
     let output_payload = std::mem::size_of_val(warm.dense_data().unwrap());
 
-    let (allocated, payload_allocations) =
-        measured_allocations(output_payload, || lhs.cat(&rhs, Side::Domain).unwrap());
+    let (allocated, payload_allocations) = measured_allocations(output_payload, || {
+        lhs.cat(engine, &rhs, Side::Domain).unwrap()
+    });
 
     assert_eq!(payload_allocations, 1);
     assert!(
@@ -79,13 +81,15 @@ fn typed_cat_uses_one_output_allocation_without_scratch() {
 
 #[test]
 fn typed_absorb_clones_the_destination_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a warmed typed absorb allocates the destination clone and nothing
     // per block — the merge-join writes prefixes in place.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let mut state = 0x5eed_0582u64;
     let destination: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&u1_leg(&provider, &[(0, 251)])],
         [&u1_leg(&provider, &[(0, 127)])],
@@ -94,17 +98,19 @@ fn typed_absorb_clones_the_destination_once() {
     .unwrap();
     let mut state = 0x5eed_0583u64;
     let source: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&u1_leg(&provider, &[(0, 263)])],
         [&u1_leg(&provider, &[(0, 101)])],
         |_, _| pseudo_random(&mut state),
     )
     .unwrap();
-    black_box(destination.absorb(&source).unwrap());
+    black_box(destination.absorb(engine, &source).unwrap());
     let output_payload = std::mem::size_of_val(destination.dense_data().unwrap());
 
-    let (allocated, payload_allocations) =
-        measured_allocations(output_payload, || destination.absorb(&source).unwrap());
+    let (allocated, payload_allocations) = measured_allocations(output_payload, || {
+        destination.absorb(engine, &source).unwrap()
+    });
 
     assert_eq!(payload_allocations, 1);
     assert!(
@@ -115,26 +121,29 @@ fn typed_absorb_clones_the_destination_once() {
 
 #[test]
 fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
     let mut state = 0x5eed_0584u64;
     let tensor: TensorMap<Z2FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| pseudo_random(&mut state))
-            .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
+            pseudo_random(&mut state)
+        })
+        .unwrap();
     // Warm every layout cache with a throwaway spectrum factor.
-    let warmup: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(&[0], &[1]).unwrap().s;
-    black_box(warmup.cat(&warmup, Side::Domain).unwrap());
+    let warmup: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
+    black_box(warmup.cat(engine, &warmup, Side::Domain).unwrap());
 
-    let s: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(&[0], &[1]).unwrap().s;
+    let s: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
     let dense_payload = DEGENERACY * DEGENERACY * std::mem::size_of::<f64>();
     let output_payload = 2 * dense_payload;
     let expected = output_payload as u64;
 
     for call in ["first", "second"] {
         let (bytes, payload_allocations) = measured_allocations(output_payload, || {
-            black_box(s.cat(&s, Side::Domain).unwrap());
+            black_box(s.cat(engine, &s, Side::Domain).unwrap());
         });
         assert_eq!(payload_allocations, 1, "{call} cat");
         assert!(
@@ -146,11 +155,13 @@ fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
 
 #[test]
 fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [symtn::typed::SectorSpectrum {
@@ -159,16 +170,16 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
         }],
     )
     .unwrap();
-    black_box(diagonal.braid(&[1], &[0], &[0, 1]).unwrap());
-    black_box(diagonal.absorb(&diagonal).unwrap());
+    black_box(diagonal.braid(engine, &[1], &[0], &[0, 1]).unwrap());
+    black_box(diagonal.absorb(engine, &diagonal).unwrap());
     let payload = DEGENERACY * DEGENERACY * std::mem::size_of::<f64>();
     let mut counts = [0; 2];
     for (operation, name) in ["braid", "absorb"].into_iter().enumerate() {
         let (bytes, payload_allocations) = measured_allocations(payload, || {
             if operation == 0 {
-                black_box(diagonal.braid(&[1], &[0], &[0, 1]).unwrap());
+                black_box(diagonal.braid(engine, &[1], &[0], &[0, 1]).unwrap());
             } else {
-                black_box(diagonal.absorb(&diagonal).unwrap());
+                black_box(diagonal.absorb(engine, &diagonal).unwrap());
             }
         });
         counts[operation] = payload_allocations;
@@ -182,17 +193,19 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
 
 #[test]
 fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(Z2FusionRule);
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 128)]).unwrap();
     let narrow = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 64)]).unwrap();
     let receiver: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
             1.0 + index[0] as f64 + index[1] as f64
         })
         .unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &narrow,
         [symtn::typed::SectorSpectrum {
@@ -201,11 +214,11 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
         }],
     )
     .unwrap();
-    black_box(receiver.absorb(&source).unwrap());
+    black_box(receiver.absorb(engine, &source).unwrap());
     let output_bytes = 128 * 128 * std::mem::size_of::<f64>();
     let source_bytes = 64 * 64 * std::mem::size_of::<f64>();
     let (allocated, output_allocations) =
-        measured_allocations(output_bytes, || receiver.absorb(&source).unwrap());
+        measured_allocations(output_bytes, || receiver.absorb(engine, &source).unwrap());
     assert_eq!(output_allocations, 1);
     assert!(
         allocated < (output_bytes + source_bytes / 2) as u64,
@@ -215,37 +228,38 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
 
 #[test]
 fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let common = u1_leg(&provider, &[(0, 64)]);
     let left = u1_leg(&provider, &[(0, 192)]);
     let right = u1_leg(&provider, &[(0, 320)]);
     let lhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&left], [&common], 388_001).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&left], [&common], 388_001).unwrap();
     let rhs_parent: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&right], [&common], 388_002).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&right], [&common], 388_002).unwrap();
 
-    let warm_lhs = lhs_parent.adjoint().unwrap();
-    let warm_rhs = rhs_parent.adjoint().unwrap();
-    let warm_output = warm_lhs.cat(&warm_rhs, Side::Domain).unwrap();
+    let warm_lhs = lhs_parent.adjoint(engine).unwrap();
+    let warm_rhs = rhs_parent.adjoint(engine).unwrap();
+    let warm_output = warm_lhs.cat(engine, &warm_rhs, Side::Domain).unwrap();
     let output_payload = std::mem::size_of_val(warm_output.dense_data().unwrap());
     let input_payload = (lhs_parent.dense_data().unwrap().len()
         + rhs_parent.dense_data().unwrap().len()) as u64
         * std::mem::size_of::<Complex64>() as u64;
 
-    let fast_lhs = lhs_parent.adjoint().unwrap();
-    let fast_rhs = rhs_parent.adjoint().unwrap();
+    let fast_lhs = lhs_parent.adjoint(engine).unwrap();
+    let fast_rhs = rhs_parent.adjoint(engine).unwrap();
     let (fast_bytes, payload_allocations) = measured_allocations(output_payload, || {
-        fast_lhs.cat(&fast_rhs, Side::Domain).unwrap()
+        fast_lhs.cat(engine, &fast_rhs, Side::Domain).unwrap()
     });
 
-    let eager_lhs = lhs_parent.adjoint().unwrap();
-    let eager_rhs = rhs_parent.adjoint().unwrap();
+    let eager_lhs = lhs_parent.adjoint(engine).unwrap();
+    let eager_rhs = rhs_parent.adjoint(engine).unwrap();
     let (eager_bytes, _) = measured_allocations(output_payload, || {
-        let lhs = eager_lhs.materialize().unwrap();
-        let rhs = eager_rhs.materialize().unwrap();
-        lhs.cat(&rhs, Side::Domain).unwrap()
+        let lhs = eager_lhs.materialize(engine).unwrap();
+        let rhs = eager_rhs.materialize(engine).unwrap();
+        lhs.cat(engine, &rhs, Side::Domain).unwrap()
     });
 
     assert_eq!(payload_allocations, 1);
@@ -267,13 +281,15 @@ fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
 
 /// Warm allocation calls of one compact-diagonal braid on `$leg`.
 macro_rules! warm_compact_braid_calls {
-    ($leg:expr, $spectrum:expr $(,)?) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let diagonal: TensorMap<_, f64> = TensorMap::diagonal(&runtime, $leg, $spectrum).unwrap();
-        black_box(diagonal.braid(&[1], &[0], &[0, 1]).unwrap());
-        black_box(diagonal.braid(&[1], &[0], &[0, 1]).unwrap());
-        let (output, allocs) =
-            counting_alloc::measure(|| black_box(diagonal.braid(&[1], &[0], &[0, 1]).unwrap()));
+    ($engine:ident, $leg:expr, $spectrum:expr $(,)?) => {{
+        let runtime = Runtime::builder().build().unwrap();
+        let diagonal: TensorMap<_, f64> =
+            TensorMap::diagonal($engine, &runtime, $leg, $spectrum).unwrap();
+        black_box(diagonal.braid($engine, &[1], &[0], &[0, 1]).unwrap());
+        black_box(diagonal.braid($engine, &[1], &[0], &[0, 1]).unwrap());
+        let (output, allocs) = counting_alloc::measure(|| {
+            black_box(diagonal.braid($engine, &[1], &[0], &[0, 1]).unwrap())
+        });
         assert!(output.dense_data().is_ok());
         allocs.calls
     }};
@@ -281,6 +297,7 @@ macro_rules! warm_compact_braid_calls {
 
 #[test]
 fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (#2011): the compact braid sends sector c to its dual. For U(1)
     // charges ±1 that moves each destination to the other ordinal, and the
@@ -292,6 +309,7 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
     )
     .unwrap();
     let self_dual = warm_compact_braid_calls!(
+        engine,
         &z2,
         vec![
             SectorSpectrum {
@@ -306,6 +324,7 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
     );
     let u1 = u1_leg(&Arc::new(U1FusionRule), &[(-1, 2), (1, 3)]);
     let dual_moving = warm_compact_braid_calls!(
+        engine,
         &u1,
         vec![
             SectorSpectrum {

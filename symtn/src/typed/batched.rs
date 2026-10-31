@@ -22,6 +22,7 @@
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     BlockStructureContent, CheckedFusionAlgebra, CoupledSectorRegion, HomSpaceId,
@@ -400,7 +401,8 @@ where
     ///
     /// An index at or past [`Self::len`] is
     /// [`Error::BatchMemberOutOfRange`].
-    pub fn member(&self, i: usize) -> Result<TensorMap<R, D>, Error> {
+    pub fn member(&self, engine: &mut dyn Engine, i: usize) -> Result<TensorMap<R, D>, Error> {
+        super::admit_host_engine(engine)?;
         if i >= self.members {
             return Err(Error::BatchMemberOutOfRange {
                 member: i,
@@ -437,9 +439,9 @@ impl<R, D, S: StackExec<D>> StackedTensorMap<R, D, S> {
     /// member offsets and one Tenferro `gather` launch per call, whatever
     /// `B` and the block structure; the gather allocates the result buffer.
     /// Nothing is downloaded and nothing waits on the device.
-    pub fn select(&self, members: &[usize]) -> Result<Self, Error> {
+    pub fn select(&self, engine: &mut dyn Engine, members: &[usize]) -> Result<Self, Error> {
         let len = self.selection_len(members)?;
-        S::select_members(EXEC, self, members, len)
+        S::select_members(engine, EXEC, self, members, len)
     }
 }
 
@@ -450,7 +452,7 @@ where
     S: StackExec<D>,
 {
     /// Restricts the listed legs of every member: member `i` of the result
-    /// is `self.member(i)?.restrict_leg(legs)?`, bit for bit, with the same
+    /// is `self.member(i)?.restrict_leg(engine, legs)?`, bit for bit, with the same
     /// space and signature.
     ///
     /// One set of selections serves every member, which is what grouping
@@ -482,13 +484,17 @@ where
     /// other than [`LegSelection::parent`] is an [`Error::InvalidArgument`],
     /// a selection of another rule is [`Error::RuleMismatch`]. Nothing is
     /// allocated before every check.
-    pub fn restrict_leg(&self, legs: &[(usize, &LegSelection<R>)]) -> Result<Self, FacadeError<R>>
+    pub fn restrict_leg(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[(usize, &LegSelection<R>)],
+    ) -> Result<Self, FacadeError<R>>
     where
         R::Mode: TypedTensorRootDispatch<R>,
     {
         require_restriction_set(&self.space, legs)?;
         let destination = restricted_space(&self.space, legs)?;
-        Ok(S::restrict_members(EXEC, self, destination, legs)?)
+        Ok(S::restrict_members(engine, EXEC, self, destination, legs)?)
     }
 }
 
@@ -507,6 +513,7 @@ pub trait StackExec<D>: TensorStorage<D> + super::storage::sealed::Sealed + Size
     /// The stack of `stack`'s members `members`, whose checked payload
     /// length is `len`.
     fn select_members<R>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D, Self>,
         members: &[usize],
@@ -516,6 +523,7 @@ pub trait StackExec<D>: TensorStorage<D> + super::storage::sealed::Sealed + Size
     /// The stack over the checked `destination` holding every member of
     /// `stack` restricted by `legs`.
     fn restrict_members<R: TypedSectorAdmission>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D, Self>,
         destination: BoundDynamicFusionMapSpace<R>,
@@ -527,11 +535,13 @@ pub trait StackExec<D>: TensorStorage<D> + super::storage::sealed::Sealed + Size
 
 impl<D: Copy> StackExec<D> for Vec<D> {
     fn select_members<R>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D>,
         members: &[usize],
         len: usize,
     ) -> Result<StackedTensorMap<R, D>, Error> {
+        super::admit_host_engine(engine)?;
         let mut storage = Vec::with_capacity(len);
         for &member in members {
             storage
@@ -541,6 +551,7 @@ impl<D: Copy> StackExec<D> for Vec<D> {
     }
 
     fn restrict_members<R: TypedSectorAdmission>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D>,
         destination: BoundDynamicFusionMapSpace<R>,
@@ -549,7 +560,7 @@ impl<D: Copy> StackExec<D> for Vec<D> {
     where
         D: TensorScalar,
     {
-        let _host_pool = stack.runtime.enter_host_pool();
+        super::admit_host_engine(engine)?;
         let data = symtn_tensors::stacked_fusion_restrict_owned(
             destination.space().structure(),
             FusionOperand::direct(stack.space.space()),
@@ -706,10 +717,13 @@ fn dense_payload<R, D>(tensor: &TensorMap<R, D>) -> Result<&[D], BatchMemberRepr
 
 #[cfg(feature = "cuda")]
 impl<R, D: CudaPayload> StackedTensorMap<R, D> {
-    /// Uploads the whole stack with one host-to-device transfer to this
-    /// stack's Runtime CUDA context.
-    pub fn to_cuda(&self) -> Result<StackedTensorMap<R, D, CudaStorage<D>>, Error> {
-        let lease = self.runtime.lease_cuda()?;
+    /// Uploads the whole stack with one host-to-device transfer into the
+    /// caller's CUDA engine.
+    pub fn to_cuda(
+        &self,
+        engine: &mut dyn Engine,
+    ) -> Result<StackedTensorMap<R, D, CudaStorage<D>>, Error> {
+        let lease = crate::runtime::cuda_call(engine)?;
         let storage = CudaStorage::upload_members(
             &lease,
             self.storage.clone(),
@@ -722,9 +736,10 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D> {
 
 #[cfg(feature = "cuda")]
 impl<R, D: CudaPayload> StackedTensorMap<R, D, CudaStorage<D>> {
-    /// Downloads the whole stack with one device-to-host transfer.
-    pub fn to_host(&self) -> Result<StackedTensorMap<R, D>, Error> {
-        let lease = self.runtime.lease_cuda()?;
+    /// Downloads the whole stack with one device-to-host transfer, through
+    /// the caller's CUDA engine that owns it.
+    pub fn to_host(&self, engine: &mut dyn Engine) -> Result<StackedTensorMap<R, D>, Error> {
+        let lease = crate::runtime::cuda_call(engine)?;
         let storage = self.storage.download(&lease)?;
         Ok(self.with_storage(storage, self.members))
     }
@@ -733,12 +748,13 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D, CudaStorage<D>> {
 #[cfg(feature = "cuda")]
 impl<D: CudaPayload> StackExec<D> for CudaStorage<D> {
     fn select_members<R>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D, Self>,
         members: &[usize],
         _len: usize,
     ) -> Result<StackedTensorMap<R, D, Self>, Error> {
-        let mut lease = stack.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let storage =
             stack
                 .storage
@@ -747,6 +763,7 @@ impl<D: CudaPayload> StackExec<D> for CudaStorage<D> {
     }
 
     fn restrict_members<R: TypedSectorAdmission>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         stack: &StackedTensorMap<R, D, Self>,
         destination: BoundDynamicFusionMapSpace<R>,
@@ -763,7 +780,6 @@ impl<D: CudaPayload> StackExec<D> for CudaStorage<D> {
         // `L`-element iota per call, host work `O(L + L')`, independent of `B`
         // and of the number of restricted legs.
         let elements = {
-            let _host_pool = stack.runtime.enter_host_pool();
             let iota = (0..stack.member_len)
                 .map(i64::try_from)
                 .collect::<Result<Vec<i64>, _>>()
@@ -776,7 +792,7 @@ impl<D: CudaPayload> StackExec<D> for CudaStorage<D> {
             )
             .map_err(Error::from)?
         };
-        let mut lease = stack.runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let storage = stack
             .storage
             .gather_member_elements(&mut lease, stack.member_len, stack.members, elements)

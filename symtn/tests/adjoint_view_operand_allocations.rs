@@ -17,12 +17,13 @@ fn measure(f: impl FnOnce()) -> (u64, u64) {
 }
 
 fn tensor(runtime: &Runtime, degeneracy: usize, seed: u64) -> TensorMap<U1FusionRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         (-2..=2).map(|charge| (U1Irrep::new(charge), degeneracy)),
     )
     .unwrap();
-    TensorMap::rand_with_seed(runtime, [&space, &space], [&space], seed).unwrap()
+    TensorMap::rand_with_seed(engine, runtime, [&space, &space], [&space], seed).unwrap()
 }
 
 /// What: passing `t.adjoint_view()` costs exactly what building the owned
@@ -31,28 +32,31 @@ fn tensor(runtime: &Runtime, degeneracy: usize, seed: u64) -> TensorMap<U1Fusion
 /// payload is copied for the view.
 #[test]
 fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let mut view_costs = Vec::new();
     for degeneracy in [1, 8] {
         let b = tensor(&runtime, degeneracy, 1);
         let a = tensor(&runtime, degeneracy, 2)
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap();
-        black_box(a.inner(b.adjoint_view()).unwrap());
+        black_box(a.inner(engine, b.adjoint_view()).unwrap());
         let view = measure(|| {
-            black_box(a.inner(b.adjoint_view()).unwrap());
+            black_box(a.inner(engine, b.adjoint_view()).unwrap());
         });
         let owned = measure(|| {
-            black_box(a.inner(&b.adjoint().unwrap()).unwrap());
+            let b_adjoint = &b.adjoint(engine).unwrap();
+            black_box(a.inner(engine, b_adjoint).unwrap());
         });
         assert_eq!(view, owned, "degeneracy {degeneracy}: inner");
         view_costs.push(view);
 
         black_box(
             a.contract(
+                engine,
                 b.adjoint_view(),
                 &ContractSpec {
                     lhs: &[2],
@@ -66,6 +70,7 @@ fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
         let contract_view = measure(|| {
             black_box(
                 a.contract(
+                    engine,
                     b.adjoint_view(),
                     &ContractSpec {
                         lhs: &[2],
@@ -78,9 +83,11 @@ fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
             );
         });
         let contract_owned = measure(|| {
+            let b_adjoint = &b.adjoint(engine).unwrap();
             black_box(
                 a.contract(
-                    &b.adjoint().unwrap(),
+                    engine,
+                    b_adjoint,
                     &ContractSpec {
                         lhs: &[2],
                         rhs: &[0],
@@ -105,12 +112,13 @@ fn adjoint_view_operand_costs_the_owned_lazy_adjoint_header() {
 /// What: a plain view `&t` allocates nothing beyond the operation itself.
 #[test]
 fn plain_view_operand_allocates_nothing_extra() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let a = tensor(&runtime, 4, 3);
-    black_box(a.inner(&a).unwrap());
+    black_box(a.inner(engine, &a).unwrap());
     let cost = measure(|| {
-        black_box(a.inner(&a).unwrap());
+        black_box(a.inner(engine, &a).unwrap());
     });
     assert_eq!(cost, (0, 0));
 }

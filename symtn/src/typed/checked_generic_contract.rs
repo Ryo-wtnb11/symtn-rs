@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 impl<R, D> TypedTensorTraceDispatch<R, D> for MultiplicityFreeAdmissionMode
 where
@@ -9,6 +10,7 @@ where
     D: TensorScalar,
 {
     fn trace<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -22,13 +24,22 @@ where
             axes,
             read,
             |structure, compact, nout| {
-                S::trace_owned(EXEC, structure, nout, compact, source, D::from_real(1.0))
-                    .map_err(Error::from)
+                S::trace_owned(
+                    engine,
+                    EXEC,
+                    structure,
+                    nout,
+                    compact,
+                    source,
+                    D::from_real(1.0),
+                )
+                .map_err(Error::from)
             },
         )
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -46,8 +57,17 @@ where
             &destination_space,
             || destination_storage_mut(destination),
             |structure, compact, destination| {
-                S::trace_into(EXEC, structure, compact, source, destination, alpha, beta)
-                    .map_err(Error::from)
+                S::trace_into(
+                    engine,
+                    EXEC,
+                    structure,
+                    compact,
+                    source,
+                    destination,
+                    alpha,
+                    beta,
+                )
+                .map_err(Error::from)
             },
         )
     }
@@ -62,6 +82,7 @@ where
     D: TensorScalar + symtn_tensors::RecouplingCoefficientAction<f64>,
 {
     fn trace<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -75,13 +96,22 @@ where
             axes,
             read,
             |structure, compact, nout| {
-                S::trace_owned(EXEC, structure, nout, compact, source, D::from_real(1.0))
-                    .map_err(checked_generic_exec_error)
+                S::trace_owned(
+                    engine,
+                    EXEC,
+                    structure,
+                    nout,
+                    compact,
+                    source,
+                    D::from_real(1.0),
+                )
+                .map_err(checked_generic_exec_error)
             },
         )
     }
 
     fn trace_into<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -99,8 +129,17 @@ where
             &destination_space,
             || destination_storage_mut(destination).map_err(Self::FacadeError::from),
             |structure, compact, destination| {
-                S::trace_into(EXEC, structure, compact, source, destination, alpha, beta)
-                    .map_err(checked_generic_exec_error)
+                S::trace_into(
+                    engine,
+                    EXEC,
+                    structure,
+                    compact,
+                    source,
+                    destination,
+                    alpha,
+                    beta,
+                )
+                .map_err(checked_generic_exec_error)
             },
         )
     }
@@ -120,6 +159,7 @@ pub trait TraceExec<R, D>: ElementwiseExec<R, D> {
     /// (`dst_nout` its codomain rank), reading `source`'s stored payload (a
     /// lazy adjoint's parent).
     fn trace_owned(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         dst_nout: usize,
@@ -131,7 +171,9 @@ pub trait TraceExec<R, D>: ElementwiseExec<R, D> {
     /// `destination = alpha · trace(source) + beta · destination` into a
     /// destination that passed every admission check, with TensorKit's
     /// `beta` pass over every destination layout first.
+    #[allow(clippy::too_many_arguments)]
     fn trace_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         compact: Option<D>,
@@ -147,6 +189,7 @@ pub trait TraceExec<R, D>: ElementwiseExec<R, D> {
 /// materialized.
 impl<R, D: TensorScalar> TraceExec<R, D> for Vec<D> {
     fn trace_owned(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         dst_nout: usize,
@@ -157,19 +200,26 @@ impl<R, D: TensorScalar> TraceExec<R, D> for Vec<D> {
         if let Some(value) = compact {
             return Ok(vec![value * alpha]);
         }
-        let _host_pool = source.runtime.enter_host_pool();
         let body = source.storage_body();
-        symtn_tensors::tensortrace_fusion_structure_owned_host(
-            structure,
-            dst_nout,
-            body.space.space().structure(),
-            &body.materialized_dense_data(),
-            alpha,
-        )
+        symtn_operations::host_pool::region(
+            engine,
+            symtn_operations::host_pool::HostPoolSite::Strided,
+            |exec| {
+                symtn_tensors::tensortrace_fusion_structure_owned_host(
+                    exec,
+                    structure,
+                    dst_nout,
+                    body.space.space().structure(),
+                    &body.materialized_dense_data(),
+                    alpha,
+                )
+            },
+        )?
         .map_err(TransformExecError::Replay)
     }
 
     fn trace_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         compact: Option<D>,
@@ -186,16 +236,22 @@ impl<R, D: TensorScalar> TraceExec<R, D> for Vec<D> {
             };
             return Ok(());
         }
-        let _host_pool = source.runtime.enter_host_pool();
         let body = source.storage_body();
-        symtn_tensors::tensortrace_fusion_structure_into_host(
-            structure,
-            destination,
-            body.space.space().structure(),
-            &body.materialized_dense_data(),
-            alpha,
-            beta,
-        )
+        symtn_operations::host_pool::region(
+            engine,
+            symtn_operations::host_pool::HostPoolSite::Strided,
+            |exec| {
+                symtn_tensors::tensortrace_fusion_structure_into_host(
+                    exec,
+                    structure,
+                    destination,
+                    body.space.space().structure(),
+                    &body.materialized_dense_data(),
+                    alpha,
+                    beta,
+                )
+            },
+        )?
         .map_err(TransformExecError::Replay)
     }
 }
@@ -371,15 +427,11 @@ where
     /// adjoint traces its parent with the Host's parent axes and a conjugated
     /// read.
     ///
-    /// A warm call transfers only the #740 output initialisation: one H2D of
-    /// `required_len * size_of::<D>()` bytes, one device allocation (the
-    /// output), no download and no new cuTENSOR plan while the trace's
-    /// distinct term signatures fit the plan-cache budget the transform
-    /// executor raises the bound under (about 585 plans together with the
-    /// prepared transforms; beyond it a warm call rebuilds plans). The first
-    /// call whose largest traced extent `prod t_k` exceeds the resident ones
-    /// or scaled template grows it once (one upload each, reported by
-    /// `CudaTreeTransformStats::context_scalar_operand_bytes`).
+    /// A call transfers the #740 output initialisation (one H2D of
+    /// `required_len * size_of::<D>()` bytes, one device allocation: the
+    /// output) and sizes the call's ones and scaled templates to the largest
+    /// traced extent `prod t_k` (one upload each); it downloads nothing.
+    /// cuTENSOR plans are cached by the engine's own fixed-size plan cache.
     /// One submission per term with a non-zero coefficient, plus one device
     /// refill of the scaled template per distinct non-unit coefficient; FLOPs
     /// are the Host's `sum_terms |out| * prod t_k` multiply-adds.
@@ -395,18 +447,24 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?;
-    /// assert_eq!(id.trace_pairs(&[(0, 1)])?.scalar()?, 2.0);
+    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
+    /// assert_eq!(id.trace_pairs(engine, &[(0, 1)])?.scalar(engine)?, 2.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn trace_pairs(&self, pairs: &[(usize, usize)]) -> Result<Self, FacadeError<R>> {
+    pub fn trace_pairs(
+        &self,
+        engine: &mut dyn Engine,
+        pairs: &[(usize, usize)],
+    ) -> Result<Self, FacadeError<R>> {
         let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
             return Ok(self.clone());
         };
         let (space, data) = <R::Mode as TypedTensorTraceDispatch<R, D>>::trace(
+            engine,
             self,
             |structure| self.compact_full_trace(structure),
             source.spec(),
@@ -463,6 +521,7 @@ where
     /// block structure stay intact.
     pub fn trace_pairs_into(
         &self,
+        engine: &mut dyn Engine,
         pairs: &[(usize, usize)],
         destination: &mut Self,
         alpha: D,
@@ -484,11 +543,12 @@ where
         }
         let braiding = <R::Mode as TypedTensorModeDispatch<R>>::braiding_style(self.provider());
         let Some(source) = trace_source(self, braiding, pairs)? else {
-            return Ok(axpby_into_checked(self, destination, alpha, beta)?);
+            return Ok(axpby_into_checked(engine, self, destination, alpha, beta)?);
         };
         // Why the storage body: a lazy adjoint is read through its parent.
         destination_precheck(destination, &source.body.data, S::NOUN)?;
         <R::Mode as TypedTensorTraceDispatch<R, D>>::trace_into(
+            engine,
             self,
             |structure| self.compact_full_trace(structure),
             source.spec(),
@@ -521,6 +581,7 @@ where
 /// context lease, the storage's kernel, then the commit.
 #[allow(private_bounds)]
 fn contract_owned_multiplicity_free<'a, R, D, S>(
+    engine: &mut dyn Engine,
     lhs: &'a TensorMap<R, D, S>,
     rhs: &'a TensorMap<R, D, S>,
     request: impl FnOnce(
@@ -554,16 +615,16 @@ where
     let (lease, resolution) = match staged.try_core::<S::Caps>()? {
         symtn_tensors::CoreRoute::Hit(core) => (None, core),
         symtn_tensors::CoreRoute::Miss(miss) => {
-            let mut lease = lhs.runtime.lease_context()?;
+            let mut lease = crate::runtime::ContextLease::new();
             let resolution = D::lane(lease.context())?
-                .plan_staged_contract_beyond_core::<S::Caps, R>(&mut staged, miss)?;
+                .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?;
             (Some(lease), resolution)
         }
     };
     let data = S::contract_owned(
+        engine,
         EXEC,
         ContractReplay::new::<MultiplicityFreeTreeLane>(
-            &lhs.runtime,
             lease,
             &resolution,
             (staged.destination(), staged.destination_len()),
@@ -577,6 +638,7 @@ where
 
 #[allow(private_bounds)]
 fn contract_multiplicity_free<R, D, S>(
+    engine: &mut dyn Engine,
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
@@ -591,7 +653,7 @@ where
     let output_axes = spec.output_axes();
     #[cfg(test)]
     super::probe::hit(super::probe::Event::ContractSeamCall);
-    contract_owned_multiplicity_free(lhs, rhs, |lhs, rhs| {
+    contract_owned_multiplicity_free(engine, lhs, rhs, |lhs, rhs| {
         contract_request(lhs, rhs, spec, &output_axes, planar)
     })
 }
@@ -601,7 +663,9 @@ where
 /// space against the destination's, its length and ownership, planning, the
 /// storage's write, then the commit.
 #[allow(private_bounds)]
+#[allow(clippy::too_many_arguments)]
 fn contract_into_multiplicity_free<R, D, S>(
+    engine: &mut dyn Engine,
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
@@ -623,7 +687,7 @@ where
     S: ContractExec<R, D>,
 {
     let output_axes = spec.output_axes();
-    let mut lease = lhs.runtime.lease_context()?;
+    let mut lease = crate::runtime::ContextLease::new();
     D::lane(lease.context())?;
     let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
     let mut staged = symtn_tensors::StagedContract::multiplicity_free(
@@ -644,12 +708,12 @@ where
     let resolution = match staged.try_core::<S::Caps>()? {
         symtn_tensors::CoreRoute::Hit(core) => core,
         symtn_tensors::CoreRoute::Miss(miss) => D::lane(lease.context())?
-            .plan_staged_contract_beyond_core::<S::Caps, R>(&mut staged, miss)?,
+            .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?,
     };
     S::contract_into(
+        engine,
         EXEC,
         ContractReplay::new::<MultiplicityFreeTreeLane>(
-            &lhs.runtime,
             Some(lease),
             &resolution,
             (staged.destination(), staged.destination_len()),
@@ -678,15 +742,17 @@ where
     D: TensorScalar + crate::runtime::MultiplicityFreeCoefficientLane<R::Scalar>,
 {
     fn contract<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
         planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_multiplicity_free(lhs, rhs, spec, planar)
+        contract_multiplicity_free(engine, lhs, rhs, spec, planar)
     }
 
     fn contract_into<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
@@ -695,14 +761,17 @@ where
         alpha: Self,
         beta: Self,
     ) -> Result<(), Error> {
-        contract_into_multiplicity_free(lhs, rhs, spec, planar, destination, alpha, beta)
+        contract_into_multiplicity_free(engine, lhs, rhs, spec, planar, destination, alpha, beta)
     }
 
     fn compose<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_owned_multiplicity_free(lhs, rhs, |_, _| symtn_tensors::ContractRequest::Compose)
+        contract_owned_multiplicity_free(engine, lhs, rhs, |_, _| {
+            symtn_tensors::ContractRequest::Compose
+        })
     }
 }
 
@@ -817,6 +886,7 @@ where
 #[cfg(test)]
 mod copy_c_scratch_tests {
     use std::sync::Arc;
+    use symtn_dense::Engine;
 
     use crate::typed::probe::{self, Event};
 
@@ -824,83 +894,17 @@ mod copy_c_scratch_tests {
 
     use crate::typed::{ContractSpec, GradedSpace, Runtime, TensorMap, TypedData, TypedTensorRepr};
 
-    /// Grows the pooled copyC scratch to a length no temporary here reaches;
-    /// a shorter length afterwards proves the copyC route ran.
-    const MARKER_LEN: usize = 100_000;
-
-    fn mark_scratch(runtime: &Runtime) {
-        let mut lease = runtime.lease_context().unwrap();
-        let lane = lease.context().multiplicity_free_lane::<f64>().unwrap();
-        let mut scratch = lane.take_copy_c_scratch();
-        scratch.resize_filled(MARKER_LEN, 0.0);
-        lane.restore_copy_c_scratch(scratch);
-    }
-
-    fn retained_len(runtime: &Runtime) -> usize {
-        let mut lease = runtime.lease_context().unwrap();
-        lease
-            .context()
-            .multiplicity_free_lane::<f64>()
-            .unwrap()
-            .copy_c_scratch_len()
-    }
-
-    /// The copyC temporary lives in the leased context and is sized by the
-    /// latest temporary, so a Runtime retains at most one largest temporary
-    /// per idle context — the same bound as the context's other scratch.
+    /// The copyC route (contract into a temporary, then one transform into
+    /// the result) equals the contraction followed by the explicit permute,
+    /// including the temporary's inactive block.
     #[test]
-    fn copy_c_scratch_holds_the_latest_temporary_only() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let space =
-            |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap();
-        let spec = ContractSpec {
-            lhs: &[2],
-            rhs: &[0],
-            codomain: &[0, 2],
-            domain: &[1],
-        };
-        let run = |n: usize| {
-            let (p, c) = (space(n), space(3));
-            let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&p, &p], [&c], 1)
-                .unwrap();
-            let b = TensorMap::rand_with_seed(&runtime, [&c], [&p], 2).unwrap();
-            drop(a.contract(&b, &spec).unwrap());
-            retained_len(&runtime)
-        };
-        assert_eq!(retained_len(&runtime), 0);
-        assert_eq!(run(5), 125);
-        assert_eq!(run(7), 343);
-        assert_eq!(run(5), 125);
-    }
-
-    /// The pooled temporary is written with a strong-zero `Axpby(0)`, so a
-    /// stale buffer never leaks: a NaN-poisoned buffer longer than the
-    /// temporary (so resizing writes nothing) still gives exactly the
-    /// contract-then-permute result, including the temporary's inactive block.
-    #[test]
-    fn stale_copy_c_scratch_never_reaches_the_result() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let provider = Arc::new(U1FusionRule);
-        // `c` carries charge 0 only, so the temporary `p ⊗ q ← r` block of
-        // coupled charge 1 receives no GEMM contribution.
-        let open = GradedSpace::try_new(
-            Arc::clone(&provider),
-            [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
-        )
-        .unwrap();
-        let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 4)]).unwrap();
-        let a =
-            TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&open, &open], [&bond], 3)
-                .unwrap();
-        let b = TensorMap::rand_with_seed(&runtime, [&bond], [&open], 4).unwrap();
-        let spec = ContractSpec {
-            lhs: &[2],
-            rhs: &[0],
-            codomain: &[0, 2],
-            domain: &[1],
-        };
+    fn copy_c_route_equals_contract_then_permute() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let (a, b) = partial_copy_c_fixture(engine, &runtime);
         let expected = a
             .contract(
+                engine,
                 &b,
                 &ContractSpec {
                     lhs: &[2],
@@ -910,28 +914,22 @@ mod copy_c_scratch_tests {
                 },
             )
             .unwrap()
-            .permute(&[0, 2], &[1])
+            .permute(engine, &[0, 2], &[1])
             .unwrap();
-        const POISONED_LEN: usize = 100_000;
-        {
-            let mut lease = runtime.lease_context().unwrap();
-            let lane = lease.context().multiplicity_free_lane::<f64>().unwrap();
-            let mut scratch = lane.take_copy_c_scratch();
-            scratch.resize_filled(POISONED_LEN, f64::NAN);
-            lane.restore_copy_c_scratch(scratch);
-        }
-        let actual = a.contract(&b, &spec).unwrap();
-        // What: the copyC route ran on the poisoned buffer.
-        assert!(retained_len(&runtime) < POISONED_LEN);
+        let copy_c = probe::record();
+        let actual = a.contract(engine, &b, &MOVED).unwrap();
+        // What: the copyC route ran.
+        assert_eq!(copy_c.get(Event::CopyCReplay), 1);
         assert_eq!(actual.codomain(), expected.codomain());
         assert_eq!(actual.domain(), expected.domain());
         assert_eq!(actual.dense_data().unwrap(), expected.dense_data().unwrap());
     }
 
-    /// The partial-coverage fixture of `stale_copy_c_scratch_never_reaches_the_result`:
+    /// The partial-coverage fixture of `copy_c_route_equals_contract_then_permute`:
     /// `c` carries charge 0 only, so the result's coupled-charge-1 block of
     /// `(p, r | q)` is reached by no GEMM.
     fn partial_copy_c_fixture(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
     ) -> (TensorMap<U1FusionRule, f64>, TensorMap<U1FusionRule, f64>) {
         let provider = Arc::new(U1FusionRule);
@@ -942,8 +940,8 @@ mod copy_c_scratch_tests {
         .unwrap();
         let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 4)]).unwrap();
         (
-            TensorMap::rand_with_seed(runtime, [&open, &open], [&bond], 3).unwrap(),
-            TensorMap::rand_with_seed(runtime, [&bond], [&open], 4).unwrap(),
+            TensorMap::rand_with_seed(engine, runtime, [&open, &open], [&bond], 3).unwrap(),
+            TensorMap::rand_with_seed(engine, runtime, [&bond], [&open], 4).unwrap(),
         )
     }
 
@@ -961,9 +959,10 @@ mod copy_c_scratch_tests {
     /// operands.
     #[test]
     fn copy_c_contract_into_writes_unreached_elements_through_the_transform() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let (a, b) = partial_copy_c_fixture(&runtime);
-        let result = a.contract(&b, &MOVED).unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let (a, b) = partial_copy_c_fixture(engine, &runtime);
+        let result = a.contract(engine, &b, &MOVED).unwrap();
         let unreached: Vec<usize> = result
             .dense_data()
             .unwrap()
@@ -973,40 +972,47 @@ mod copy_c_scratch_tests {
             .map(|(index, _)| index)
             .collect();
         assert!(!unreached.is_empty(), "the fixture must miss a sector");
-        let run =
-            |seed: f64, alpha: f64, beta: f64, operands: (&TensorMap<_, _>, &TensorMap<_, _>)| {
-                let mut destination = result.scale(0.0).unwrap();
-                let TypedTensorRepr::Owned(body) = &mut destination.repr else {
-                    unreachable!("a scaled dense tensor is owned")
-                };
-                let Some(TypedData::Dense(data)) =
-                    Arc::get_mut(body).and_then(|body| Arc::get_mut(&mut body.data))
-                else {
-                    unreachable!("a fresh scaled tensor is uniquely owned and dense")
-                };
-                data.fill(seed);
-                mark_scratch(&runtime);
-                operands
-                    .0
-                    .contract_into(operands.1, &MOVED, &mut destination, alpha, beta)
-                    .unwrap();
-                assert!(
-                    retained_len(&runtime) < MARKER_LEN,
-                    "the copyC route must run"
-                );
-                destination
+        let run = |engine: &mut dyn Engine,
+                   seed: f64,
+                   alpha: f64,
+                   beta: f64,
+                   operands: (&TensorMap<_, _>, &TensorMap<_, _>)| {
+            let mut destination = result.scale(engine, 0.0).unwrap();
+            let TypedTensorRepr::Owned(body) = &mut destination.repr else {
+                unreachable!("a scaled dense tensor is owned")
             };
-        let negative_zero = run(-0.0, 1.0, 1.0, (&a, &b));
+            let Some(TypedData::Dense(data)) =
+                Arc::get_mut(body).and_then(|body| Arc::get_mut(&mut body.data))
+            else {
+                unreachable!("a fresh scaled tensor is uniquely owned and dense")
+            };
+            data.fill(seed);
+            let copy_c = probe::record();
+            operands
+                .0
+                .contract_into(engine, operands.1, &MOVED, &mut destination, alpha, beta)
+                .unwrap();
+            assert_eq!(
+                copy_c.get(Event::CopyCReplay),
+                1,
+                "the copyC route must run"
+            );
+            destination
+        };
+        let negative_zero = run(engine, -0.0, 1.0, 1.0, (&a, &b));
         for &index in &unreached {
             let value = negative_zero.dense_data().unwrap()[index];
             assert_eq!(value.to_bits(), 0.0f64.to_bits(), "-0.0 at {index}");
         }
-        let infinite = run(1.0, f64::INFINITY, 1.0, (&a, &b));
+        let infinite = run(engine, 1.0, f64::INFINITY, 1.0, (&a, &b));
         for &index in &unreached {
             assert!(infinite.dense_data().unwrap()[index].is_nan(), "{index}");
         }
-        let (nan_a, nan_b) = (a.scale(f64::NAN).unwrap(), b.scale(f64::NAN).unwrap());
-        let silent = run(0.5, 0.0, 2.0, (&nan_a, &nan_b));
+        let (nan_a, nan_b) = (
+            a.scale(engine, f64::NAN).unwrap(),
+            b.scale(engine, f64::NAN).unwrap(),
+        );
+        let silent = run(engine, 0.5, 0.0, 2.0, (&nan_a, &nan_b));
         assert!(silent
             .dense_data()
             .unwrap()
@@ -1017,17 +1023,17 @@ mod copy_c_scratch_tests {
     /// #1870: a
     /// reordered `t · D` writes the scaled `t` through one transform `_into`
     /// (TensorKit's `copyC` of a `mul!` with a `Diagonal`), so the compact
-    /// operand is never densified and the contraction's copyC scratch is
-    /// not used.
+    /// operand is never densified and no copyC contraction runs.
     #[test]
     fn reordered_compact_contract_into_scales_without_densifying() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
         let space =
             |n| GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), n)]).unwrap();
         let (p, q, c) = (space(2), space(3), space(4));
-        let t =
-            TensorMap::<U1FusionRule, f64>::rand_with_seed(&runtime, [&p, &q], [&c], 5).unwrap();
+        let t = TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&p, &q], [&c], 5)
+            .unwrap();
         let spectra = c
             .sectors()
             .unwrap()
@@ -1037,15 +1043,19 @@ mod copy_c_scratch_tests {
                 sector,
             })
             .collect::<Vec<_>>();
-        let d = TensorMap::diagonal(&runtime, &c, spectra).unwrap();
-        let mut destination = t.contract(&d, &MOVED).unwrap().scale(1.0).unwrap();
-        mark_scratch(&runtime);
+        let d = TensorMap::diagonal(engine, &runtime, &c, spectra).unwrap();
+        let mut destination = t
+            .contract(engine, &d, &MOVED)
+            .unwrap()
+            .scale(engine, 1.0)
+            .unwrap();
         let densified = probe::record();
-        t.contract_into(&d, &MOVED, &mut destination, 1.0, 0.0)
+        t.contract_into(engine, &d, &MOVED, &mut destination, 1.0, 0.0)
             .unwrap();
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-        assert_eq!(retained_len(&runtime), MARKER_LEN, "no contraction ran");
-        let expected = t.contract(&d.materialize().unwrap(), &MOVED).unwrap();
+        assert_eq!(densified.get(Event::CopyCReplay), 0, "no contraction ran");
+        let dense_d = d.materialize(engine).unwrap();
+        let expected = t.contract(engine, &dense_d, &MOVED).unwrap();
         assert_eq!(
             destination.dense_data().unwrap(),
             expected.dense_data().unwrap()

@@ -68,7 +68,6 @@ fn measure(mut f: impl FnMut()) -> (u128, u128, usize, usize) {
 fn main() {
     let runtime = Runtime::builder()
         .linalg_backend(LinalgBackend::Faer)
-        .dense_threads(1)
         .build()
         .unwrap();
     if std::env::args().any(|arg| arg == "--probe") {

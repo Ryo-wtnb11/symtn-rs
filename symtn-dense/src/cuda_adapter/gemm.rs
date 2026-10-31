@@ -157,14 +157,15 @@ fn cuda_gemm_region_strided_into<D: CudaScalar>(
     let rhs_view = rhs.region_view_strided::<D>([k, n], rhs_strides, rhs_offset)?;
     let dst_view = dst.region_view_mut::<D>(m, n, dst_ld, dst_offset)?;
     let config = DotGeneralConfig {
-        lhs_contracting_dims: vec![1],
-        rhs_contracting_dims: vec![0],
-        lhs_batch_dims: Vec::new(),
-        rhs_batch_dims: Vec::new(),
+        lhs_contracting_dims: [1].into_iter().collect(),
+        rhs_contracting_dims: [0].into_iter().collect(),
+        lhs_batch_dims: Default::default(),
+        rhs_batch_dims: Default::default(),
     };
     let accumulation = DotGeneralAccumulation {
-        lhs_conj,
-        rhs_conj,
+        // Identity on a real payload; see `submit_region_axpby`.
+        lhs_conj: lhs_conj && D::IS_COMPLEX,
+        rhs_conj: rhs_conj && D::IS_COMPLEX,
         alpha: alpha.contraction_scalar(),
         beta: beta.contraction_scalar(),
     };
@@ -298,10 +299,10 @@ pub fn cuda_gemm_region_batched_scaled_into<D: CudaScalar>(
         dst_region.offset_isize()?,
     )?;
     let config = DotGeneralConfig {
-        lhs_contracting_dims: vec![1],
-        rhs_contracting_dims: vec![0],
-        lhs_batch_dims: vec![2],
-        rhs_batch_dims: vec![2],
+        lhs_contracting_dims: [1].into_iter().collect(),
+        rhs_contracting_dims: [0].into_iter().collect(),
+        lhs_batch_dims: [2].into_iter().collect(),
+        rhs_batch_dims: [2].into_iter().collect(),
     };
     let accumulation = DotGeneralAccumulation {
         lhs_conj: false,

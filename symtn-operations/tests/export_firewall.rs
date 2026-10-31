@@ -272,7 +272,6 @@ fn symtn_operations_root_exports_exactly_the_pinned_names() {
         "CudaTreeTransformDestination",
         "CudaTreeTransformExecutor",
         "DEFAULT_COEFFICIENT_BUDGET_BYTES",
-        "DEFAULT_PLAN_CACHE_BUDGET_BYTES",
         // error
         "OperationError",
         // fusion replay

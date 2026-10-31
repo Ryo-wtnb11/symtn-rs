@@ -293,6 +293,53 @@ pub(crate) fn for_each_fused_span<F>(
     }
 }
 
+/// Fused loop nest over a prebaked layout writing into uninitialized memory
+/// (issue #232, condition 2), mirroring `apply_fused_pair_slices` but with
+/// `MaybeUninit::write` for the destination. Each destination offset is visited
+/// exactly once, identical to `layout_linear_offset`'s odometer, so the
+/// write-once-then-`assume_init` invariants of `initialize_owned` (#226/#233)
+/// and of the pack scratch column writer are preserved: the normalization only drops extent-1 axes, reorders, and fuses
+/// contiguous runs — the *set* of visited (dst, src) offsets is unchanged, and
+/// there is no read-after-write within a single writer (`src` is a disjoint,
+/// fully-initialized slice). The caller supplies runtime-length traversal scratch.
+pub(crate) fn write_fused_uninit<D, F>(
+    baked: BakedFusedLayout<'_>,
+    dst: &mut [core::mem::MaybeUninit<D>],
+    src: &[D],
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+    map: F,
+) -> Result<(), OperationError>
+where
+    D: Copy,
+    F: Fn(D) -> D,
+{
+    let dims = baked.dims();
+    let dst_strides = baked.dst_strides();
+    let src_strides = baked.src_strides();
+    let Some(index) = index.get_mut(..dims.len()) else {
+        return Err(OperationError::InvalidArgument {
+            message: "fused traversal scratch is shorter than the normalized rank",
+        });
+    };
+    apply_fused_pair_slices(
+        dst,
+        src,
+        dims,
+        dst_strides,
+        src_strides,
+        dst_offset,
+        src_offset,
+        index,
+        |slot: &mut core::mem::MaybeUninit<D>, value| {
+            slot.write(value);
+        },
+        map,
+    );
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fused_pair<T, Apply, ElementOp>(
     scratch: &mut StridedKernelScratch,

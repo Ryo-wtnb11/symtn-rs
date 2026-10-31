@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{BlockStructure, SectorId};
 use symtn_operations::{
@@ -14,6 +15,7 @@ struct ScalarGemm;
 impl Rank2Gemm<f64> for ScalarGemm {
     fn matmul_rank2(
         &mut self,
+        _engine: &mut dyn Engine,
         dst: &mut [f64],
         lhs: &[f64],
         rhs: &[f64],
@@ -51,6 +53,7 @@ fn scalar_group() -> FusionBlockMatrixGroup {
 
 #[test]
 fn warmed_irregular_group_replay_allocates_nothing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let structure = Arc::new(BlockStructure::trivial(&[1]).unwrap());
     let plan = FusionBlockContractPlan::from_parts(
@@ -73,6 +76,7 @@ fn warmed_irregular_group_replay_allocates_nothing() {
 
     for _ in 0..2 {
         plan.execute_raw(
+            engine,
             &mut kernels,
             &mut gemm,
             &mut workspace,
@@ -89,6 +93,7 @@ fn warmed_irregular_group_replay_allocates_nothing() {
     }
     counting_alloc::start();
     plan.execute_raw(
+        engine,
         &mut kernels,
         &mut gemm,
         &mut workspace,
@@ -113,6 +118,7 @@ fn warmed_irregular_group_replay_allocates_nothing() {
 /// rank 8: the per-call cost is then independent of the call count.
 #[test]
 fn a_fresh_adapter_checked_block_copy_allocates_nothing_up_to_rank_eight() {
+    let mut exec = strided_kernel::Exec::serial();
     let _serial = crate::counting_alloc::serial();
     let shape = [2usize; 8];
     let mut dst_strides = [0isize; 8];
@@ -132,6 +138,7 @@ fn a_fresh_adapter_checked_block_copy_allocates_nothing_up_to_rank_eight() {
     for (alpha, beta) in [(1.0, 0.0), (1.0, 1.0), (2.0, 0.5)] {
         StridedHostKernelAdapter::default()
             .tensoradd_strided_checked(
+                exec.reborrow(),
                 &mut dst,
                 &src,
                 &shape,

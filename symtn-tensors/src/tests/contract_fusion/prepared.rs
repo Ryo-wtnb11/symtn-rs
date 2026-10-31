@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn prepared_tensorcontract_fusion_route_replays_like_the_eager_entry() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let fusion_space = || {
@@ -29,6 +30,7 @@ fn prepared_tensorcontract_fusion_route_replays_like_the_eager_entry() {
         fixture_prepare_contract(&mut context, &rule, &dst_prepared, &lhs, &rhs, axes).unwrap();
     for _ in 0..2 {
         context_contract_into(
+            engine,
             &mut context,
             &rule,
             &mut dst_facade,

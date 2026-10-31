@@ -54,6 +54,7 @@ fn assert_close(what: &str, actual: &[Complex64], expected: &[Complex64]) {
 
 mod u1 {
     use super::*;
+    use symtn::typed::Engine;
     use symtn::typed::PhysicalDense;
 
     fn leg(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
@@ -165,46 +166,62 @@ mod u1 {
     /// both operands bend a leg; the open legs come out swapped.
     #[test]
     fn u1_conjugated_contraction_matches_dense_expansion() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         // `-1` and `1` at different degeneracies: `V ≠ V'`.
         let v = leg(&[(-1, 2), (0, 1), (1, 3)]);
         let w = leg(&[(0, 1), (1, 2), (2, 1)]);
-        let ket = |salt| TensorMap::from_subblock_fn(&runtime, [&v, &v], [&w], fill(salt)).unwrap();
-        let bra = |salt| TensorMap::from_subblock_fn(&runtime, [&w], [&v, &v], fill(salt)).unwrap();
-        let (p, q, s, r) = (ket(1), ket(2), bra(3), bra(4));
+        let ket = |engine: &mut dyn Engine, salt| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&w], fill(salt)).unwrap()
+        };
+        let bra = |engine: &mut dyn Engine, salt| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&w], [&v, &v], fill(salt)).unwrap()
+        };
+        let (p, q, s, r) = (
+            ket(engine, 1),
+            ket(engine, 2),
+            bra(engine, 3),
+            bra(engine, 4),
+        );
         let spec = ContractSpec {
             lhs: &[2, 0],
             rhs: &[0, 2],
             codomain: &[1],
             domain: &[0],
         };
-        let dense = |t: &TensorMap<U1FusionRule, Complex64>| t.to_physical_dense().unwrap();
-        let (p_adj, r_adj) = (p.adjoint().unwrap(), r.adjoint().unwrap());
+        let dense = |engine: &mut dyn Engine, t: &TensorMap<U1FusionRule, Complex64>| {
+            t.to_physical_dense(engine).unwrap()
+        };
+        let (p_adj, r_adj) = (p.adjoint(engine).unwrap(), r.adjoint(engine).unwrap());
         let cases = [
             (
                 "lhs adjoint",
                 &p_adj,
                 &q,
-                adjoint_dense(&dense(&p), 2),
-                dense(&q),
+                adjoint_dense(&dense(engine, &p), 2),
+                dense(engine, &q),
             ),
             (
                 "rhs adjoint",
                 &s,
                 &r_adj,
-                dense(&s),
-                adjoint_dense(&dense(&r), 1),
+                dense(engine, &s),
+                adjoint_dense(&dense(engine, &r), 1),
             ),
             (
                 "both adjoint",
                 &p_adj,
                 &r_adj,
-                adjoint_dense(&dense(&p), 2),
-                adjoint_dense(&dense(&r), 1),
+                adjoint_dense(&dense(engine, &p), 2),
+                adjoint_dense(&dense(engine, &r), 1),
             ),
         ];
         for (what, a, b, a_dense, b_dense) in cases {
-            let actual = a.contract(b, &spec).unwrap().to_physical_dense().unwrap();
+            let actual = a
+                .contract(engine, b, &spec)
+                .unwrap()
+                .to_physical_dense(engine)
+                .unwrap();
             let expected = contract_dense(&a_dense, &b_dense, &spec);
             assert_eq!(actual.shape, [6, 6], "{what}: shape (dim V = 2 + 1 + 3)");
             assert_close(what, &actual.data, &expected);
@@ -216,6 +233,7 @@ mod u1 {
 mod su3 {
     use super::*;
     use symtn::sector::LieGroupFusionRule;
+    use symtn::typed::Engine;
 
     type Matrix = Vec<Vec<Complex64>>;
 
@@ -248,7 +266,8 @@ mod su3 {
     /// each coupled block of the result is one matrix product.
     #[test]
     fn su3_conjugated_contraction_matches_coupled_block_products() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
         );
@@ -265,16 +284,25 @@ mod su3 {
             ],
         )
         .unwrap();
-        let ket = |salt| TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v], fill(salt)).unwrap();
-        let bra = |salt| TensorMap::from_subblock_fn(&runtime, [&v], [&v, &v], fill(salt)).unwrap();
-        let (p, q, s, r) = (ket(1), ket(2), bra(3), bra(4));
+        let ket = |engine: &mut dyn Engine, salt| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v], fill(salt)).unwrap()
+        };
+        let bra = |engine: &mut dyn Engine, salt| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&v], [&v, &v], fill(salt)).unwrap()
+        };
+        let (p, q, s, r) = (
+            ket(engine, 1),
+            ket(engine, 2),
+            bra(engine, 3),
+            bra(engine, 4),
+        );
         let spec = ContractSpec {
             lhs: &[1, 2],
             rhs: &[0, 1],
             codomain: &[0],
             domain: &[1],
         };
-        let (p_adj, r_adj) = (p.adjoint().unwrap(), r.adjoint().unwrap());
+        let (p_adj, r_adj) = (p.adjoint(engine).unwrap(), r.adjoint(engine).unwrap());
         type Oracle<'a> = &'a dyn Fn(&Vec<i64>) -> Matrix;
         let cases: [(&str, _, _, Oracle); 3] = [
             ("lhs adjoint", &p_adj, &q, &|c| {
@@ -288,7 +316,7 @@ mod su3 {
             }),
         ];
         for (what, a, b, oracle) in cases {
-            let result = a.contract(b, &spec).unwrap();
+            let result = a.contract(engine, b, &spec).unwrap();
             let sectors: Vec<Vec<i64>> = p.blocks().unwrap().map(|(c, _)| c).collect();
             assert_eq!(result.blocks().unwrap().len(), sectors.len(), "{what}");
             assert!(sectors.contains(&fundamental), "{what}: 3 is coupled");

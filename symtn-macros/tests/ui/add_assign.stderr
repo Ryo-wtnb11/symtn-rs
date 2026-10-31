@@ -1,5 +1,5 @@
 error: `+=` is not supported: a Network has no destination API; hint: create a new tensor with `:=`
- --> tests/ui/add_assign.rs:4:30
+ --> tests/ui/add_assign.rs:4:43
   |
-4 |     let _ = contract!([i; k] += a[i; j] * b[j; k]);
-  |                              ^
+4 |     let _ = contract!(&mut engine, [i; k] += a[i; j] * b[j; k]);
+  |                                           ^

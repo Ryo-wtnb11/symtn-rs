@@ -2,7 +2,7 @@
 
 `symtn` is the public facade crate of symtn; import it as `use symtn::…`.
 Ordinary applications import `Runtime`, `RuntimeBuilder`, `GradedSpace`,
-`TensorMap`, `LinalgBackend`, and `Truncation` from `symtn::typed`, and the
+`TensorMap`, `CpuEngine`, and `Truncation` from `symtn::typed`, and the
 built-in symmetries such as `U1FusionRule` from `symtn::sector`. Every public
 item has exactly one path.
 
@@ -34,8 +34,8 @@ Contraction-order planners and their configuration (`opt-path`, `cotengra-python
 
 The `krylov` feature makes Host `TensorMap` a vector of the
 [krylov](https://docs.rs/krylov) crate (re-exported as `symtn::krylov`), so
-`eigsolve`, `exponentiate` and `linsolve` run directly on tensors with
-closures as linear maps (`svdsolve` takes a user type implementing
+`eigsolve`, `exponentiate` and `linsolve` run directly on tensors, on the
+caller's `Engine` (krylov's vector context), with closures as linear maps (`svdsolve` takes a user type implementing
 `AdjointMap`); the [krylov correspondence](../docs/krylov.md)
 records the TensorKit and QSpace counterparts. krylov needs a LAPACK provider
 in the final binary: enable a `blas-*` feature or link one yourself (the

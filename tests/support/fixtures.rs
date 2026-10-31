@@ -11,13 +11,7 @@ use symtn::typed::{Runtime, TensorMap};
 /// A host Runtime with one dense thread, so results and allocation counts do
 /// not depend on the machine's core count.
 pub fn host_runtime() -> Runtime {
-    Runtime::builder().dense_threads(1).build().unwrap()
-}
-
-/// [`host_runtime`] bound to CUDA device 0.
-#[cfg(feature = "cuda")]
-pub fn cuda_runtime() -> Runtime {
-    Runtime::builder().cuda(0).dense_threads(1).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 /// The receiver's own split as leg roles: `rows = 0..nout`.
@@ -38,8 +32,7 @@ pub use cuda::*;
 mod cuda {
     use std::sync::{Mutex, MutexGuard, PoisonError};
 
-    use symtn::expert::{CudaPlanCacheStats, CudaTransferStats};
-    use symtn::typed::Runtime;
+    use symtn::expert::CudaTransferStats;
 
     static SERIAL: Mutex<()> = Mutex::new(());
 
@@ -62,9 +55,5 @@ mod cuda {
             copy_calls: after.copy_calls - before.copy_calls,
             gauge_ops: after.gauge_ops - before.gauge_ops,
         }
-    }
-
-    pub fn plans(runtime: &Runtime) -> CudaPlanCacheStats {
-        runtime.cuda_plan_cache_stats().unwrap().unwrap()
     }
 }

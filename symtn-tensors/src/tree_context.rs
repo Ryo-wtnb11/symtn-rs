@@ -2,6 +2,7 @@ use core::ops::{Add, Mul};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_traits::Zero;
 use symtn_core::{
@@ -27,6 +28,7 @@ use symtn_operations::{DenseTreeTransformOperations, TreeTransformBackend};
 #[allow(clippy::too_many_arguments)]
 #[inline]
 pub(crate) fn replay_structure_overwrite<D, C, B>(
+    engine: &mut dyn Engine,
     backend: &mut B,
     workspace: &mut B::Workspace,
     structure: &TreeTransformStructure<C>,
@@ -45,6 +47,7 @@ where
 {
     match profile {
         Some(profile) => backend.tree_transform_structure_overwrite_into_raw_profiled(
+            engine,
             workspace,
             structure,
             dst_structure,
@@ -56,6 +59,7 @@ where
             profile,
         ),
         None => backend.tree_transform_structure_overwrite_into_raw(
+            engine,
             workspace,
             structure,
             dst_structure,
@@ -143,6 +147,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn try_tree_transform_dyn_overwrite_owned<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -155,6 +160,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         let structure = self.tree_structure(
+            engine,
             rule,
             operation,
             dst_structure,
@@ -165,6 +171,7 @@ where
         )?;
         self.backend
             .try_tree_transform_structure_overwrite_owned_raw(
+                engine,
                 &mut self.workspace,
                 &structure,
                 dst_structure,
@@ -195,6 +202,7 @@ where
     #[doc(hidden)]
     pub fn tree_transform_owned_multiplicity_free_in<R>(
         &mut self,
+        engine: &mut dyn Engine,
         src: &BoundDynamicFusionMapSpace<R>,
         src_data: &[D],
         operation: &TreeTransformOperation,
@@ -204,7 +212,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         self.tree_transform_owned_in::<MultiplicityFreeAdmissionMode, R>(
-            src, None, src_data, operation, alpha,
+            engine, src, None, src_data, operation, alpha,
         )
     }
 
@@ -219,6 +227,7 @@ where
     #[doc(hidden)]
     pub fn stage_tree_transform_multiplicity_free_in<'a, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -228,7 +237,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         let resolved = self.stage_resolve::<MultiplicityFreeAdmissionMode, R>(
-            logical, adjoint_of, src_len, operation,
+            engine, logical, adjoint_of, src_len, operation,
         )?;
         Ok(StagedTreeTransform { logical, resolved })
     }
@@ -244,6 +253,7 @@ where
     #[doc(hidden)]
     pub fn stage_tree_transform_into_multiplicity_free_in<'a, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -254,7 +264,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         let resolved = self.stage_into_in::<MultiplicityFreeAdmissionMode, R, OperationError>(
-            logical, adjoint_of, src_len, operation, dst_space,
+            engine, logical, adjoint_of, src_len, operation, dst_space,
         )?;
         Ok(StagedTreeTransform { logical, resolved })
     }
@@ -270,6 +280,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn tree_transform_structure_multiplicity_free_in<R, T>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
         operation: &TreeTransformOperation,
         read: impl FnOnce(&TreeTransformStructure<C>, &BlockStructure) -> Option<T>,
@@ -279,6 +290,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleIdentity>,
     {
         self.tree_transform_structure_in::<MultiplicityFreeAdmissionMode, R, T>(
+            engine,
             logical,
             operation,
             read,
@@ -290,6 +302,7 @@ where
     /// replay, then commit and publish.
     fn tree_transform_owned_in<M, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&BoundDynamicFusionMapSpace<R>>,
         src_data: &[D],
@@ -300,8 +313,8 @@ where
         M: PlanningAlgebra<R, Scalar = C>,
     {
         let resolved =
-            self.stage_resolve::<M, R>(logical, adjoint_of, src_data.len(), operation)?;
-        let data = self.replay_owned(&resolved, src_data, alpha)?;
+            self.stage_resolve::<M, R>(engine, logical, adjoint_of, src_data.len(), operation)?;
+        let data = self.replay_owned(engine, &resolved, src_data, alpha)?;
         let destination = M::commit_transform(logical, resolved.stage, resolved.preview)?;
         Ok((destination, data))
     }
@@ -311,6 +324,7 @@ where
     /// error in every mode, never a checked plan failure.
     fn stage_into_in<'a, M, R, E>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -325,7 +339,9 @@ where
         M::match_and_resolve(
             staged,
             dst_space,
-            |staged, dst| self.resolve_staged::<M, R>(logical, adjoint_of, operation, staged, dst),
+            |staged, dst| {
+                self.resolve_staged::<M, R>(engine, logical, adjoint_of, operation, staged, dst)
+            },
             |resolved| &resolved.stage,
         )?
         .ok_or_else(|| {
@@ -343,6 +359,7 @@ where
     #[allow(clippy::type_complexity)]
     fn tree_transform_structure_in<M, R, T>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
         operation: &TreeTransformOperation,
         read: impl FnOnce(&TreeTransformStructure<C>, &BlockStructure) -> Option<T>,
@@ -357,12 +374,17 @@ where
             .space()
             .required_len()
             .map_err(OperationError::from)?;
-        let resolved = self.stage_resolve::<M, R>(logical, None, src_len, operation)?;
+        let resolved = self.stage_resolve::<M, R>(engine, logical, None, src_len, operation)?;
         let outcome = match read(&resolved.structure, &resolved.preview) {
             Some(value) => StructureOutcome::Read(value),
             None => {
                 let src_data = dense_source()?;
-                StructureOutcome::Replayed(self.replay_owned(&resolved, &src_data, D::one())?)
+                StructureOutcome::Replayed(self.replay_owned(
+                    engine,
+                    &resolved,
+                    &src_data,
+                    D::one(),
+                )?)
             }
         };
         let destination = M::commit_transform(logical, resolved.stage, resolved.preview)?;
@@ -373,6 +395,7 @@ where
     /// resolves the structure with the staging's proof.
     fn stage_resolve<'a, M, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -382,13 +405,14 @@ where
         M: PlanningAlgebra<R, Scalar = C>,
     {
         let staged = M::stage_transform(logical, adjoint_of, src_len, operation)?;
-        self.resolve_staged::<M, R>(logical, adjoint_of, operation, staged, None)
+        self.resolve_staged::<M, R>(engine, logical, adjoint_of, operation, staged, None)
     }
 
     /// Resolves the structure of a staged transform with the staging's
     /// proof, against `dst` or else the staged preview.
     fn resolve_staged<'a, M, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         operation: &TreeTransformOperation,
@@ -424,6 +448,7 @@ where
             ),
         };
         let structure = M::tree_structure_with(
+            engine,
             M::transform_cache(self.planning(), &mut stage),
             logical.provider(),
             operation,
@@ -445,11 +470,13 @@ where
     /// built-in overwrite writer, or else zero-fills and replays.
     fn replay_owned<S>(
         &mut self,
+        engine: &mut dyn Engine,
         resolved: &ResolvedTransform<'_, S, C>,
         src_data: &[D],
         alpha: D,
     ) -> Result<Vec<D>, OperationError> {
         self.replay_tree_transform_dyn_owned(
+            engine,
             &resolved.structure,
             &resolved.preview,
             resolved.src_structure,
@@ -467,8 +494,10 @@ where
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.
     #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
     pub fn replay_tree_transform_dyn_owned(
         &mut self,
+        engine: &mut dyn Engine,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
         src_structure: &Arc<BlockStructure>,
@@ -479,6 +508,7 @@ where
         if let Some(data) = self
             .backend
             .try_tree_transform_structure_overwrite_owned_raw(
+                engine,
                 &mut self.workspace,
                 structure,
                 dst_structure,
@@ -492,6 +522,7 @@ where
         }
         let mut data = vec![D::zero(); dst_structure.required_len().map_err(OperationError::from)?];
         self.tree_transform_structure_into_raw(
+            engine,
             structure,
             dst_structure,
             src_structure,
@@ -672,6 +703,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn tree_transform_owned_checked_generic_in<R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&BoundDynamicFusionMapSpace<R>>,
         src_data: &[D],
@@ -682,7 +714,7 @@ where
         R: CheckedGenericRigidSymbols<Scalar = f64>,
     {
         self.tree_transform_owned_in::<CheckedGenericAdmissionMode, R>(
-            logical, adjoint_of, src_data, operation, alpha,
+            engine, logical, adjoint_of, src_data, operation, alpha,
         )
     }
 
@@ -697,6 +729,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn stage_tree_transform_checked_generic_in<'a, R>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -709,7 +742,7 @@ where
         R: CheckedGenericRigidSymbols<Scalar = f64>,
     {
         let resolved = self.stage_resolve::<CheckedGenericAdmissionMode, R>(
-            logical, adjoint_of, src_len, operation,
+            engine, logical, adjoint_of, src_len, operation,
         )?;
         Ok(StagedTreeTransform::checked(logical, resolved))
     }
@@ -723,6 +756,7 @@ where
     #[doc(hidden)]
     pub fn stage_tree_transform_into_checked_generic_in<'a, R, E>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &'a BoundDynamicFusionMapSpace<R>,
         adjoint_of: Option<&'a BoundDynamicFusionMapSpace<R>>,
         src_len: usize,
@@ -734,7 +768,7 @@ where
         E: From<CheckedGenericPlanError<R::Error>> + From<OperationError>,
     {
         let resolved = self.stage_into_in::<CheckedGenericAdmissionMode, R, E>(
-            logical, adjoint_of, src_len, operation, dst_space,
+            engine, logical, adjoint_of, src_len, operation, dst_space,
         )?;
         Ok(StagedTreeTransform::checked(logical, resolved))
     }
@@ -750,6 +784,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn tree_transform_structure_checked_generic_in<R, T>(
         &mut self,
+        engine: &mut dyn Engine,
         logical: &BoundDynamicFusionMapSpace<R>,
         operation: &TreeTransformOperation,
         read: impl FnOnce(&TreeTransformStructure<f64>, &BlockStructure) -> Option<T>,
@@ -762,6 +797,7 @@ where
         R: CheckedGenericRigidSymbols<Scalar = f64>,
     {
         self.tree_transform_structure_in::<CheckedGenericAdmissionMode, R, T>(
+            engine,
             logical,
             operation,
             read,
@@ -834,6 +870,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn tree_transform_dyn_into<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -847,6 +884,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         self.tree_transform_into_raw_with_storage_conjugation(
+            engine,
             rule,
             operation,
             dst_structure,
@@ -862,6 +900,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn tree_transform_dyn_into_ref<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -875,6 +914,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         let structure = self.tree_structure(
+            engine,
             rule,
             operation,
             dst_structure,
@@ -884,6 +924,7 @@ where
             },
         )?;
         self.backend.tree_transform_structure_into_raw(
+            engine,
             &mut self.workspace,
             &structure,
             dst_structure,
@@ -899,6 +940,7 @@ where
     #[doc(hidden)]
     pub fn tree_transform_dyn_overwrite_into_ref<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -912,8 +954,10 @@ where
         D: RecouplingCoefficientAction<C>,
     {
         self.compile_and_replay_overwrite(
-            |context| {
+            engine,
+            |context, engine| {
                 context.tree_structure(
+                    engine,
                     rule,
                     operation,
                     dst_structure,
@@ -936,6 +980,7 @@ where
     /// [`PlanningAlgebra::tree_structure`] with this context's planning state.
     pub(crate) fn tree_structure<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -945,6 +990,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         <MultiplicityFreeAdmissionMode as PlanningAlgebra<R>>::tree_structure(
+            engine,
             self.planning(),
             rule,
             operation,
@@ -953,18 +999,17 @@ where
         )
     }
 
-    /// This context's multiplicity-free planning state, set to recouple on
-    /// its backend's threads: the [`PlanningAlgebra::StructureCache`] a
-    /// multiplicity-free resolution scope plans with.
+    /// This context's multiplicity-free planning state: the
+    /// [`PlanningAlgebra::StructureCache`] a multiplicity-free resolution
+    /// scope plans with.
     pub(crate) fn planning(&mut self) -> &mut TreeTransformPlanning {
-        self.planning
-            .set_recoupling_threads(self.backend.recoupling_threads());
         &mut self.planning
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tree_transform_into_raw_with_storage_conjugation<R>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: TreeTransformOperation,
         dst_structure: &std::sync::Arc<BlockStructure>,
@@ -979,6 +1024,7 @@ where
         R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
     {
         let structure = self.tree_structure(
+            engine,
             rule,
             &operation,
             dst_structure,
@@ -988,6 +1034,7 @@ where
             },
         )?;
         self.backend.tree_transform_structure_into_raw(
+            engine,
             &mut self.workspace,
             &structure,
             dst_structure,
@@ -1002,6 +1049,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn compile_and_replay_overwrite<F>(
         &mut self,
+        engine: &mut dyn Engine,
         compile: F,
         dst_structure: &Arc<BlockStructure>,
         src_structure: &Arc<BlockStructure>,
@@ -1010,14 +1058,15 @@ where
         alpha: D,
     ) -> Result<(), OperationError>
     where
-        F: FnOnce(&mut Self) -> Result<TreeTransformStructure<C>, OperationError>,
+        F: FnOnce(&mut Self, &mut dyn Engine) -> Result<TreeTransformStructure<C>, OperationError>,
         D: RecouplingCoefficientAction<C>,
     {
-        let structure = compile(self)?;
+        let structure = compile(self, engine)?;
         let Self {
             backend, workspace, ..
         } = self;
         replay_structure_overwrite(
+            engine,
             backend,
             workspace,
             &structure,
@@ -1040,6 +1089,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn replay_tree_transform_dyn_into(
         &mut self,
+        engine: &mut dyn Engine,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
         src_structure: &Arc<BlockStructure>,
@@ -1049,6 +1099,7 @@ where
         beta: D,
     ) -> Result<(), OperationError> {
         self.tree_transform_structure_into_raw(
+            engine,
             structure,
             dst_structure,
             src_structure,
@@ -1062,6 +1113,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn tree_transform_structure_into_raw(
         &mut self,
+        engine: &mut dyn Engine,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
         src_structure: &Arc<BlockStructure>,
@@ -1074,6 +1126,7 @@ where
             backend, workspace, ..
         } = self;
         backend.tree_transform_structure_into_raw(
+            engine,
             workspace,
             structure,
             dst_structure,

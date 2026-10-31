@@ -36,8 +36,8 @@
 use core::ops::{Add, Mul};
 use std::any::{Any, TypeId};
 use std::hash::{Hash, Hasher};
-use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
+use symtn_dense::Engine;
 
 use num_traits::Zero;
 use rustc_hash::FxHashMap;
@@ -109,7 +109,7 @@ fn compile_oriented_tree_pair_structure<R, FAxis>(
     logical_rank: usize,
     projection: &FxHashMap<&FusionTreePairKey, usize>,
     logical_to_storage_axis: FAxis,
-    threads: usize,
+    engine: &mut dyn Engine,
     epoch: usize,
     unique_scratch: &mut UniqueTreePairScratch,
 ) -> Result<TreeTransformStructure<R::Scalar>, OperationError>
@@ -154,7 +154,7 @@ where
         basis_order,
         logical_rank,
         projection,
-        threads,
+        engine,
         Some(&reuse),
     )?;
     reuse.into_pending().publish(epoch);
@@ -847,36 +847,21 @@ where
 }
 
 /// What a context's multiplicity-free resolution needs besides the global
-/// owners (caches 3 and 4): the recoupling worker count, and the Unique
-/// compile's tree-pair scratch, reused across cache-3 misses.
+/// owners (caches 3 and 4): the Unique compile's tree-pair scratch, reused
+/// across cache-3 misses. The compile's parallelism is the caller engine's
+/// token, passed per resolution.
 ///
 /// Why a plain field rather than a `RefCell` behind `&self`: the context
 /// already plans through `&mut`, and a cell would make the planning `!Sync`.
+#[derive(Default)]
 pub(crate) struct TreeTransformPlanning {
-    recoupling_threads: NonZeroUsize,
     unique_scratch: UniqueTreePairScratch,
-}
-
-impl Default for TreeTransformPlanning {
-    fn default() -> Self {
-        Self {
-            recoupling_threads: NonZeroUsize::MIN,
-            unique_scratch: UniqueTreePairScratch::default(),
-        }
-    }
 }
 
 impl std::fmt::Debug for TreeTransformPlanning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeTransformPlanning")
-            .field("recoupling_threads", &self.recoupling_threads)
             .finish_non_exhaustive()
-    }
-}
-
-impl TreeTransformPlanning {
-    pub(crate) fn set_recoupling_threads(&mut self, threads: NonZeroUsize) {
-        self.recoupling_threads = threads;
     }
 }
 
@@ -888,6 +873,7 @@ impl TreeTransformPlanning {
     /// precondition.
     pub(crate) fn resolve_tree_pair<R, T>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -909,7 +895,6 @@ impl TreeTransformPlanning {
             storage_conjugate,
         );
         let may_publish = publishable([dst_structure.as_ref(), src_structure.as_ref()]);
-        let threads = self.recoupling_threads.get();
         resolve(
             key,
             may_publish,
@@ -940,7 +925,7 @@ impl TreeTransformPlanning {
                     operation,
                     dst_structure,
                     src_structure,
-                    threads,
+                    engine,
                     Some(&reuse),
                 )?;
                 reuse.into_pending().publish(epoch);
@@ -960,6 +945,7 @@ impl TreeTransformPlanning {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn resolve_tree_pair_oriented<'p, R, T, FIndices, FAxis>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -978,6 +964,7 @@ impl TreeTransformPlanning {
         FAxis: Fn(usize) -> Result<usize, OperationError>,
     {
         self.resolve_tree_pair_oriented_with(
+            engine,
             rule,
             operation,
             dst_structure,
@@ -1001,6 +988,7 @@ impl TreeTransformPlanning {
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
     pub(crate) fn resolve_tree_pair_oriented_with<'k, 'p, R, T, FProjection, FAxis>(
         &mut self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -1027,7 +1015,6 @@ impl TreeTransformPlanning {
         validate_multiplicity_free_tree_transform_capability(rule, operation)?;
         validate_tree_pair_namespace_before_cache(operation, storage_src_structure)?;
         let storage_conjugate = orientation == FusionTreePairOrientation::Adjoint;
-        let threads = self.recoupling_threads.get();
         // Why lazy: only a miss reads the storage map, so a warm call derives
         // no per-block projection.
         let build = || {
@@ -1050,7 +1037,7 @@ impl TreeTransformPlanning {
                 logical_rank,
                 &projection,
                 logical_to_storage_axis,
-                threads,
+                engine,
                 epoch,
                 &mut self.unique_scratch,
             )
@@ -1098,6 +1085,7 @@ impl TreeTransformPlanning {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn get_or_compile_tree_pair_prelowered<R, T, FBlock, FAxis>(
         &self,
+        engine: &mut dyn Engine,
         rule: &R,
         operation: &TreeTransformOperation,
         dst_structure: &Arc<BlockStructure>,
@@ -1132,7 +1120,7 @@ impl TreeTransformPlanning {
         let plan = super::plan::build_tree_pair_transform_group_plan_validated_with_threads(
             &source_proof,
             operation.clone(),
-            self.recoupling_threads.get(),
+            engine,
         )?;
         plan.compile_shared_structures_with_storage_mapping(
             Arc::clone(dst_structure),

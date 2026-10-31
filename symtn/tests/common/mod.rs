@@ -24,7 +24,7 @@ pub struct Snapshot<S, D> {
 /// Snapshots a `TensorMap` through its public block API.
 #[macro_export]
 macro_rules! snapshot {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let tensor = &$tensor;
         $crate::common::Snapshot {
             nout: tensor.codomain_rank(),
@@ -41,7 +41,12 @@ macro_rules! snapshot {
                     )
                 })
                 .collect(),
-            data: tensor.materialize().unwrap().dense_data().unwrap().to_vec(),
+            data: tensor
+                .materialize($engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .to_vec(),
         }
     }};
 }
@@ -328,4 +333,11 @@ impl<R> DeviceRule for R where
         + symtn::sector::CheckedFusionAlgebra
         + symtn::sector::SectorCodec
 {
+}
+
+/// The CUDA engine of the device suites, on device 0.
+#[cfg(feature = "cuda")]
+pub fn cuda_engine() -> symtn::typed::CudaEngine {
+    symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0))
+        .expect("CUDA device 0 must be available for the device suite")
 }

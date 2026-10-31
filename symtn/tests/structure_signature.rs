@@ -67,12 +67,12 @@ fn assert_differ(left: &StructureSignature, right: &StructureSignature, label: &
 /// changes one sector. A macro because the typed constructors' dispatch
 /// bounds differ per admission mode.
 macro_rules! check_fixture {
-    ($label:expr, $leg:expr) => {{
+    ($engine:ident, $label:expr, $leg:expr) => {{
         let label: &str = $label;
         let leg = $leg;
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let build = |codomain: [_; 2], domain: [_; 1]| {
-            TensorMap::<_, f64>::zeros(&runtime, codomain, domain).unwrap()
+        let runtime = Runtime::builder().build().unwrap();
+        let mut build = |codomain: [_; 2], domain: [_; 1]| {
+            TensorMap::<_, f64>::zeros($engine, &runtime, codomain, domain).unwrap()
         };
         let (a, b) = (leg(0), leg(0));
         let base = build([&a, &a], [&a]).structure_signature();
@@ -97,7 +97,7 @@ macro_rules! check_fixture {
         }
 
         // Same external legs, different coupled sectors and fusion-tree basis.
-        let repartitioned = build([&a, &a], [&a]).repartition(1).unwrap();
+        let repartitioned = build([&a, &a], [&a]).repartition($engine, 1).unwrap();
         assert_differ(
             &base,
             &repartitioned.structure_signature(),
@@ -105,7 +105,10 @@ macro_rules! check_fixture {
         );
         assert_same(
             &base,
-            &repartitioned.repartition(2).unwrap().structure_signature(),
+            &repartitioned
+                .repartition($engine, 2)
+                .unwrap()
+                .structure_signature(),
             &format!("{label} repartition round trip"),
         );
     }};
@@ -113,8 +116,9 @@ macro_rules! check_fixture {
 
 #[test]
 fn fixtures_are_equal_iff_structure_is_equal() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    check_fixture!("U1", |variant| {
+    check_fixture!(engine, "U1", |variant| {
         let q = U1Irrep::new;
         let pairs = match variant {
             0 => [(q(-1), 2), (q(0), 1), (q(1), 3)],
@@ -123,7 +127,7 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         };
         GradedSpace::try_new(Arc::new(U1FusionRule), pairs).unwrap()
     });
-    check_fixture!("SU2", |variant| {
+    check_fixture!(engine, "SU2", |variant| {
         let j = SU2Irrep::from_twice_spin;
         let pairs = match variant {
             0 => [(j(0), 2), (j(1), 2), (j(2), 1)],
@@ -132,7 +136,7 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         };
         GradedSpace::try_new(Arc::new(SU2FusionRule), pairs).unwrap()
     });
-    check_fixture!("fZ2xU1", |variant| {
+    check_fixture!(engine, "fZ2xU1", |variant| {
         let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
         let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
         let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
@@ -144,7 +148,7 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         GradedSpace::try_new(rule, pairs).unwrap()
     });
     #[cfg(feature = "cgc-gen")]
-    check_fixture!("SU3 checked Generic", |variant| {
+    check_fixture!(engine, "SU3 checked Generic", |variant| {
         let rule = Arc::new(
             symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap())
                 .unwrap(),
@@ -161,10 +165,11 @@ fn fixtures_are_equal_iff_structure_is_equal() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_rule_instance_separates_signatures() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: SU(3) and SU(4) trivial legs share hom space and block structure
     // (the unit test checks the fields), so the rule alone separates them.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let rule = |rank: usize| {
         Arc::new(
             symtn::sector::LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(rank).unwrap())
@@ -174,9 +179,9 @@ fn checked_generic_rule_instance_separates_signatures() {
     // Why the rules outlive their signatures: a rule identity holds its group
     // weakly, so signatures of dropped rules equal nothing but their clones.
     let (first_su3, second_su3, su4) = (rule(3), rule(3), rule(4));
-    let signature = |rule: &Arc<symtn::sector::LieGroupFusionRule>, trivial: Vec<i64>| {
+    let mut signature = |rule: &Arc<symtn::sector::LieGroupFusionRule>, trivial: Vec<i64>| {
         let leg = GradedSpace::try_new(Arc::clone(rule), [(trivial, 2)]).unwrap();
-        TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
+        TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
@@ -194,7 +199,8 @@ fn u1_leg(charges: std::ops::RangeInclusive<i32>, degeneracy: usize) -> GradedSp
 }
 
 fn u1_signature(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> StructureSignature {
-    TensorMap::<_, f64>::zeros(runtime, [leg, leg], [leg])
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::<_, f64>::zeros(engine, runtime, [leg, leg], [leg])
         .unwrap()
         .structure_signature()
 }
@@ -203,8 +209,8 @@ fn u1_signature(runtime: &Runtime, leg: &GradedSpace<U1FusionRule>) -> Structure
 fn runtime_identity_separates_signatures() {
     let _serial = crate::counting_alloc::serial();
     let leg = u1_leg(-1..=1, 2);
-    let first = Runtime::builder().dense_threads(1).build().unwrap();
-    let second = Runtime::builder().dense_threads(1).build().unwrap();
+    let first = Runtime::builder().build().unwrap();
+    let second = Runtime::builder().build().unwrap();
     let signature = u1_signature(&first, &leg);
     assert_same(
         &signature,
@@ -215,14 +221,14 @@ fn runtime_identity_separates_signatures() {
 
     // A dead Runtime's signature never matches a Runtime built afterwards.
     drop(first);
-    let third = Runtime::builder().dense_threads(1).build().unwrap();
+    let third = Runtime::builder().build().unwrap();
     assert_differ(&signature, &u1_signature(&third, &leg), "after drop");
 }
 
 #[test]
 fn equal_across_clear_structure_caches() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let before = u1_signature(&runtime, &u1_leg(-2..=2, 3));
     clear_structure_caches();
     let after = u1_signature(&runtime, &u1_leg(-2..=2, 3));
@@ -237,7 +243,7 @@ fn equal_across_clear_structure_caches() {
 #[test]
 fn equal_across_complete_owner_eviction() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let before = u1_signature(&runtime, &u1_leg(-3..=3, 5));
     let cache = StructureCacheKind::DegeneracyStructure;
     let before_info = structure_cache_info(cache);
@@ -259,8 +265,9 @@ fn equal_across_complete_owner_eviction() {
 
 #[test]
 fn equal_for_oversized_structures_above_the_complete_cache_budget() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     // An explicit small budget rejects this otherwise ordinary complete layout.
     // Rejected layouts receive distinct process ids but remain semantically
     // equal while each signature owns its independently constructed content.
@@ -268,8 +275,8 @@ fn equal_for_oversized_structures_above_the_complete_cache_budget() {
     let cache = StructureCacheKind::DegeneracyStructure;
     let budget = structure_cache_info(cache).byte_budget();
     set_structure_cache_byte_budget(cache, 1);
-    let signature = || {
-        TensorMap::<_, f64>::zeros(&runtime, [&leg], [&leg])
+    let mut signature = || {
+        TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&leg])
             .unwrap()
             .structure_signature()
     };
@@ -291,7 +298,7 @@ fn equal_for_oversized_structures_above_the_complete_cache_budget() {
 #[test]
 fn shared_structure_comparison_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = u1_leg(-2..=2, 2);
     let first = u1_signature(&runtime, &leg);
     let second = u1_signature(&runtime, &leg);

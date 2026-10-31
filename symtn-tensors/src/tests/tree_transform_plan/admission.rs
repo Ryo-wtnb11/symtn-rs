@@ -295,6 +295,7 @@ fn callback_builder_rejects_malformed_destination_before_assembly() {
 
 #[test]
 fn warm_structure_aliases_are_rejected_before_owner_lookup() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -312,6 +313,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     let mut cache = crate::tree_transform::TreeTransformPlanning::default();
     cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &operation,
             &valid_structure,
@@ -323,6 +325,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
 
     let error = cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &operation,
             &invalid_structure,
@@ -338,6 +341,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
 
     let error = cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &operation,
             &valid_structure,
@@ -351,6 +355,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
     let mut independent = crate::tree_transform::TreeTransformPlanning::default();
     let error = independent
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &operation,
             &invalid_structure,
@@ -367,6 +372,7 @@ fn warm_structure_aliases_are_rejected_before_owner_lookup() {
 
 #[test]
 fn exact_warm_structure_reuses_prior_local_admission_proof() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -384,7 +390,7 @@ fn exact_warm_structure_reuses_prior_local_admission_proof() {
     let mut cache = crate::tree_transform::TreeTransformPlanning::default();
 
     let cold = cache
-        .resolve_tree_pair(&rule, &operation, &structure, &structure, false)
+        .resolve_tree_pair(engine, &rule, &operation, &structure, &structure, false)
         .unwrap();
     assert!(calls.load(Ordering::Relaxed) > 0);
 
@@ -393,7 +399,14 @@ fn exact_warm_structure_reuses_prior_local_admission_proof() {
     assert_eq!(same_content.content_id(), structure.content_id());
     assert!(!Arc::ptr_eq(&same_content, &structure));
     let warm = cache
-        .resolve_tree_pair(&rule, &operation, &same_content, &same_content, false)
+        .resolve_tree_pair(
+            engine,
+            &rule,
+            &operation,
+            &same_content,
+            &same_content,
+            false,
+        )
         .unwrap();
 
     // What: an exact semantic-key/content replay reuses the LOCAL admission
@@ -404,7 +417,7 @@ fn exact_warm_structure_reuses_prior_local_admission_proof() {
     symtn_core::clear_structure_caches();
     calls.store(0, Ordering::Relaxed);
     cache
-        .resolve_tree_pair(&rule, &operation, &structure, &structure, false)
+        .resolve_tree_pair(engine, &rule, &operation, &structure, &structure, false)
         .unwrap();
 
     // What: clearing retained entries removes proof reuse; the next call
@@ -414,6 +427,7 @@ fn exact_warm_structure_reuses_prior_local_admission_proof() {
 
 #[test]
 fn completed_structure_miss_and_hit_validate_capability_once() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -424,7 +438,14 @@ fn completed_structure_miss_and_hit_validate_capability_once() {
 
     let multiplicity_free_capability_validations_rec = probe::record();
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     assert_eq!(
         multiplicity_free_capability_validations_rec
@@ -434,7 +455,14 @@ fn completed_structure_miss_and_hit_validate_capability_once() {
 
     let multiplicity_free_capability_validations_rec = probe::record();
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
 
     // What: misses hand the prior capability proof to the whole-HomSpace
@@ -448,6 +476,7 @@ fn completed_structure_miss_and_hit_validate_capability_once() {
 
 #[test]
 fn prelowered_same_content_roles_share_one_local_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -468,6 +497,7 @@ fn prelowered_same_content_roles_share_one_local_admission() {
 
     cache
         .get_or_compile_tree_pair_prelowered(
+            engine,
             &rule,
             &TreeTransformOperation::braid([1, 0], [], [0, 1], []),
             &destination,
@@ -486,6 +516,7 @@ fn prelowered_same_content_roles_share_one_local_admission() {
 
 #[test]
 fn expert_layout_tree_transform_paths_compile_without_publishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -513,6 +544,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
     assert_uncached(&mut |cache| {
         cache
             .resolve_tree_pair(
+                engine,
                 &SU2FusionRule,
                 &operation.clone(),
                 dst.structure(),
@@ -523,12 +555,20 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
     });
     assert_uncached(&mut |cache| {
         cache
-            .resolve_tree_pair(&SU2FusionRule, &operation, &structure, &structure, false)
+            .resolve_tree_pair(
+                engine,
+                &SU2FusionRule,
+                &operation,
+                &structure,
+                &structure,
+                false,
+            )
             .unwrap();
     });
     assert_uncached(&mut |cache| {
         cache
             .get_or_compile_tree_pair_prelowered(
+                engine,
                 &SU2FusionRule,
                 &operation,
                 &structure,
@@ -550,6 +590,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
         let storage_indices = (0..logical_keys.len()).collect::<Vec<_>>();
         cache
             .resolve_tree_pair_oriented(
+                engine,
                 &SU2FusionRule,
                 &operation,
                 &structure,
@@ -567,6 +608,7 @@ fn expert_layout_tree_transform_paths_compile_without_publishing() {
 
 #[test]
 fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let make_key = |coupled: usize| {
         let coupled = SectorId::new(coupled);
         FusionTreePairKey::pair(
@@ -622,6 +664,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     let old_cache = crate::tree_transform::TreeTransformPlanning::default();
     let old = old_cache
         .get_or_compile_tree_pair_prelowered(
+            engine,
             &SU2FusionRule,
             &operation,
             &logical,
@@ -635,6 +678,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     let mut oriented_cache = crate::tree_transform::TreeTransformPlanning::default();
     let oriented = oriented_cache
         .resolve_tree_pair_oriented(
+            engine,
             &SU2FusionRule,
             &operation,
             &logical,
@@ -671,6 +715,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &old,
@@ -681,6 +726,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
     )
     .unwrap();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &oriented,
@@ -695,6 +741,7 @@ fn oriented_adjoint_projection_matches_materialized_logical_oracle() {
 
 #[test]
 fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Both trees carry sectors [1, 1], so the parent block set is closed under
     // the adjoint and the ordinary and oriented compilers accept the same
     // destination and parent structures: only the key separates their plans.
@@ -737,12 +784,14 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     let storage_axes = [2, 3, 0, 1];
     let operation = TreeTransformOperation::braid([1, 0], [3, 2], [0, 1], [2, 3]);
     let other_operation = TreeTransformOperation::braid([0, 1], [3, 2], [0, 1], [2, 3]);
-    let oriented = |cache: &mut crate::tree_transform::TreeTransformPlanning,
+    let oriented = |engine: &mut dyn symtn_dense::Engine,
+                    cache: &mut crate::tree_transform::TreeTransformPlanning,
                     operation: &TreeTransformOperation,
                     orientation: symtn_core::FusionTreePairOrientation| {
         let direct = orientation == symtn_core::FusionTreePairOrientation::Direct;
         cache
             .resolve_tree_pair_oriented(
+                engine,
                 &SU2FusionRule,
                 operation,
                 &destination,
@@ -766,8 +815,8 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     owner_activity();
     crate::probe::take_coefficient_group_activity();
 
-    let first = oriented(&mut cache, &operation, adjoint);
-    let second = oriented(&mut cache, &operation, adjoint);
+    let first = oriented(engine, &mut cache, &operation, adjoint);
+    let second = oriented(engine, &mut cache, &operation, adjoint);
 
     // What: the second call hits the published adjoint transformer, keyed by
     // the parent content, orientation and basis order; only the first looks
@@ -789,6 +838,7 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
         let destination = expert_copy(&destination);
         cache
             .resolve_tree_pair_oriented(
+                engine,
                 &SU2FusionRule,
                 &operation,
                 &destination,
@@ -807,12 +857,26 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     owner_activity();
 
     let conjugated = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation, &destination, &storage, true)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation,
+            &destination,
+            &storage,
+            true,
+        )
         .unwrap();
     let plain = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation, &destination, &storage, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation,
+            &destination,
+            &storage,
+            false,
+        )
         .unwrap();
-    let other = oriented(&mut cache, &other_operation, adjoint);
+    let other = oriented(engine, &mut cache, &other_operation, adjoint);
 
     // What: an ordinary transformer with either conjugation flag, and an
     // adjoint one for another operation, each miss instead of aliasing the
@@ -824,8 +888,8 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     assert_eq!((activity.hits, activity.builds), (0, 3));
 
     let direct = symtn_core::FusionTreePairOrientation::Direct;
-    let direct_first = oriented(&mut cache, &operation, direct);
-    let direct_second = oriented(&mut cache, &operation, direct);
+    let direct_first = oriented(engine, &mut cache, &operation, direct);
+    let direct_second = oriented(engine, &mut cache, &operation, direct);
 
     // What: a direct oriented transformer is neither served from nor
     // published under the ordinary tree-pair key it would share.
@@ -838,33 +902,40 @@ fn adjoint_oriented_transformer_is_reused_and_keyed_by_orientation() {
     let activity = owner_activity();
     assert_eq!((activity.hits, activity.publications), (0, 0));
 
-    let storage_ordered = |cache: &mut crate::tree_transform::TreeTransformPlanning| {
-        cache
-            .resolve_tree_pair_oriented(
-                &SU2FusionRule,
-                &operation,
-                &destination,
-                &storage_keys,
-                || Ok(&[0, 1]),
-                &storage,
-                adjoint,
-                crate::tree_transform::OrientedBasisOrder::Storage,
-                4,
-                |axis| Ok(storage_axes[axis]),
-            )
-            .unwrap()
-    };
-    let storage_first = storage_ordered(&mut cache);
+    let storage_ordered =
+        |engine: &mut dyn symtn_dense::Engine,
+         cache: &mut crate::tree_transform::TreeTransformPlanning| {
+            cache
+                .resolve_tree_pair_oriented(
+                    engine,
+                    &SU2FusionRule,
+                    &operation,
+                    &destination,
+                    &storage_keys,
+                    || Ok(&[0, 1]),
+                    &storage,
+                    adjoint,
+                    crate::tree_transform::OrientedBasisOrder::Storage,
+                    4,
+                    |axis| Ok(storage_axes[axis]),
+                )
+                .unwrap()
+        };
+    let storage_first = storage_ordered(engine, &mut cache);
     assert!(!same_core(&first, &storage_first));
-    assert!(same_core(&storage_first, &storage_ordered(&mut cache)));
+    assert!(same_core(
+        &storage_first,
+        &storage_ordered(engine, &mut cache)
+    ));
     assert!(same_core(
         &first,
-        &oriented(&mut cache, &operation, adjoint)
+        &oriented(engine, &mut cache, &operation, adjoint)
     ));
 }
 
 #[test]
 fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -902,11 +973,12 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
             structure([storage_keys[1].clone(), storage_keys[0].clone()]),
         )
     };
-    let oriented =
+    let mut oriented =
         |cache: &mut crate::tree_transform::TreeTransformPlanning,
          (storage, destination): &(Arc<BlockStructure>, Arc<BlockStructure>)| {
             cache
                 .resolve_tree_pair_oriented(
+                    engine,
                     &SU2FusionRule,
                     &operation,
                     destination,
@@ -956,7 +1028,7 @@ fn adjoint_oriented_degeneracy_change_reuses_the_composed_coefficients() {
             crate::tree_transform::OrientedBasisOrder::Canonical,
             4,
             &projection,
-            1,
+            &mut symtn_operations::host_pool::test_engine(1),
             None,
         )
         .unwrap()
@@ -1001,7 +1073,7 @@ fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
     owner_activity();
     crate::probe::take_coefficient_group_activity();
     let mut bound = crate::tree_transform::TreeTransformPlanning::default();
-    bound.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
+    let engine = &mut symtn_operations::host_pool::test_engine(4);
     let mut local = crate::tree_transform::TreeTransformPlanning::default();
     let malformed: [(&[FusionTreePairKey], &[usize]); 4] = [
         (&keys, &[1]),
@@ -1010,9 +1082,10 @@ fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
         (&duplicate, &[1, 2]),
     ];
     for (logical_keys, storage_indices) in malformed {
-        let compile = |cache: &mut crate::tree_transform::TreeTransformPlanning| {
+        let mut compile = |cache: &mut crate::tree_transform::TreeTransformPlanning| {
             let error = cache
                 .resolve_tree_pair_oriented(
+                    engine,
                     &SU2FusionRule,
                     &operation,
                     &storage,
@@ -1045,6 +1118,7 @@ fn runtime_bound_adjoint_oriented_projection_errors_match_the_local_path() {
 
 #[test]
 fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1057,10 +1131,18 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
     owner_activity();
 
     let first_a = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_a, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_a,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     cache
         .get_or_compile_tree_pair_prelowered(
+            engine,
             &SU2FusionRule,
             &operation_b,
             &structure,
@@ -1072,15 +1154,36 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
         )
         .unwrap();
     let warm_a = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_a, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_a,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     assert!(same_core(&first_a, &warm_a));
     assert_eq!(owner_activity().publications, 1);
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_c, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_c,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_b, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_b,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
 
     // What: the prelowered compile never reaches the completed-transformer
@@ -1091,6 +1194,7 @@ fn prelowered_compile_does_not_enter_the_completed_transformer_cache() {
 
 #[test]
 fn failed_structure_compile_publishes_nothing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1126,13 +1230,28 @@ fn failed_structure_compile_publishes_nothing() {
     owner_activity();
 
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_b, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_b,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     let first_a = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_a, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_a,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &operation_b,
             &wrong_destination,
@@ -1144,14 +1263,35 @@ fn failed_structure_compile_publishes_nothing() {
     let activity = owner_activity();
     assert_eq!((activity.builds, activity.publications), (3, 2));
     let warm_a = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_a, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_a,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     assert!(same_core(&first_a, &warm_a));
     cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_c, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_c,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
     let retained_a = cache
-        .resolve_tree_pair(&SU2FusionRule, &operation_a, &structure, &structure, false)
+        .resolve_tree_pair(
+            engine,
+            &SU2FusionRule,
+            &operation_a,
+            &structure,
+            &structure,
+            false,
+        )
         .unwrap();
 
     // What: a failed compile publishes nothing; the A entry stays resident.
@@ -1162,6 +1302,7 @@ fn failed_structure_compile_publishes_nothing() {
 
 #[test]
 fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1176,6 +1317,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
     owner_activity();
     cache
         .get_or_compile_tree_pair_prelowered(
+            engine,
             &SU2FusionRule,
             &operation,
             &valid,
@@ -1195,6 +1337,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
     ] {
         let error = cache
             .get_or_compile_tree_pair_prelowered(
+                engine,
                 &SU2FusionRule,
                 &operation,
                 destination,
@@ -1215,6 +1358,7 @@ fn warm_prelowered_raw_arc_aliases_do_not_observe_or_mutate_cache_state() {
 
 #[test]
 fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1228,6 +1372,7 @@ fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
 
         let error = cache
             .resolve_tree_pair(
+                engine,
                 &SU2FusionRule,
                 &TreeTransformOperation::braid([0, 1], [], [0, 1], []),
                 dst.structure(),
@@ -1248,6 +1393,7 @@ fn invalid_simple_source_does_not_mutate_cached_or_no_cache_state() {
 
 #[test]
 fn malformed_source_precedes_noncategorical_destination_without_cache_mutation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1260,6 +1406,7 @@ fn malformed_source_precedes_noncategorical_destination_without_cache_mutation()
 
     let error = cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &TreeTransformOperation::permute([0, 1], []),
             dst.structure(),
@@ -1281,6 +1428,7 @@ fn malformed_source_precedes_noncategorical_destination_without_cache_mutation()
 
 #[test]
 fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1294,6 +1442,7 @@ fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
     let tree_pair_operation_preparations_rec = probe::record();
     let error = cache
         .resolve_tree_pair(
+            engine,
             &SU2FusionRule,
             &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
             dst.structure(),
@@ -1318,6 +1467,7 @@ fn invalid_operation_precedes_malformed_simple_source_without_cache_mutation() {
 
 #[test]
 fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1339,6 +1489,7 @@ fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation()
 
         let error = cache
             .resolve_tree_pair(
+                engine,
                 &SU2FusionRule,
                 &TreeTransformOperation::permute([0, 0], []),
                 dst.structure(),
@@ -1357,6 +1508,7 @@ fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation()
 
         let error = cache
             .resolve_tree_pair(
+                engine,
                 &SU2FusionRule,
                 &TreeTransformOperation::permute([0, 1], []),
                 dst.structure(),
@@ -1376,6 +1528,7 @@ fn invalid_operation_precedes_non_categorical_namespace_without_cache_mutation()
 
 #[test]
 fn invalid_unique_source_does_not_count_eager_compile_misses() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1407,6 +1560,7 @@ fn invalid_unique_source_does_not_count_eager_compile_misses() {
 
     let error = cache
         .resolve_tree_pair(
+            engine,
             &Z2FusionRule,
             &TreeTransformOperation::permute([0, 1], []),
             dst.structure(),
@@ -1553,6 +1707,7 @@ fn all_codomain_pair_mismatch_is_rejected_before_source_scope() {
 
 #[test]
 fn oriented_cold_and_warm_admission_rejects_equal_key_capability_changes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let storage = simple_su2_vertex_structure(1);
     let BlockKey::FusionTree(parent) = storage.block(0).unwrap().key() else {
         unreachable!()
@@ -1580,9 +1735,10 @@ fn oriented_cold_and_warm_admission_rejects_equal_key_capability_changes() {
         mark_canonical([storage.as_ref(), destination.as_ref()]);
         let mut cache = crate::tree_transform::TreeTransformPlanning::default();
         owner_activity();
-        let compile = |cache: &mut crate::tree_transform::TreeTransformPlanning,
-                       rule: &AdmissionCountingSu2Rule| {
+        let mut compile = |cache: &mut crate::tree_transform::TreeTransformPlanning,
+                           rule: &AdmissionCountingSu2Rule| {
             cache.resolve_tree_pair_oriented(
+                engine,
                 rule,
                 &operation,
                 &destination,
@@ -1634,6 +1790,7 @@ fn oriented_cold_and_warm_admission_rejects_equal_key_capability_changes() {
 
 #[test]
 fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -1678,7 +1835,7 @@ fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
     );
     assert_eq!(
         cache
-            .resolve_tree_pair(&generic, &operation, &structure, &structure, false)
+            .resolve_tree_pair(engine, &generic, &operation, &structure, &structure, false)
             .unwrap_err(),
         rejected(FusionStyleKind::Generic)
     );

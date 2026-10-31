@@ -94,12 +94,16 @@ where
     /// set other than both legs and one selection (call
     /// [`Self::materialize`] first for a dense result). Nothing is allocated
     /// before every check has passed.
-    pub fn restrict_leg(&self, legs: &[(usize, &LegSelection<R>)]) -> Result<Self, FacadeError<R>>
+    pub fn restrict_leg(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[(usize, &LegSelection<R>)],
+    ) -> Result<Self, FacadeError<R>>
     where
         R: TypedSectorAdmission,
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        let _host_pool = self.runtime.enter_host_pool();
+        admit_host_engine(engine)?;
         require_restriction_set(self.logical_space(), legs)?;
         let compact = self
             .spectrum()
@@ -189,6 +193,7 @@ where
     /// written.
     pub fn embed_leg(
         &self,
+        engine: &mut dyn Engine,
         axis: usize,
         selection: &LegSelection<R>,
     ) -> Result<Self, FacadeError<R>>
@@ -197,7 +202,6 @@ where
         R::Mode: TypedTensorRootDispatch<R>,
     {
         self.require_selected_leg(axis, selection.subspace(), "embed_leg")?;
-        let _host_pool = self.runtime.enter_host_pool();
         let destination = self.root_with_replaced_leg(axis, selection.parent().leg())?;
         let len = destination
             .space()
@@ -208,14 +212,21 @@ where
         let mut runs: Vec<symtn_tensors::SectorRunTable<'_>> = vec![None; self.rank()];
         runs[axis] = Some(selection.entries.as_slice());
         let (source, source_data) = self.fusion_operand_and_data();
-        symtn_tensors::fusion_scatter_add_assign(
-            destination.space().structure(),
-            &mut data,
-            self.logical_space().space().structure(),
-            source,
-            &source_data,
-            &runs,
-        )
+        symtn_operations::host_pool::region(
+            engine,
+            symtn_operations::host_pool::HostPoolSite::Strided,
+            |exec| {
+                symtn_tensors::fusion_scatter_add_assign(
+                    exec,
+                    destination.space().structure(),
+                    &mut data,
+                    self.logical_space().space().structure(),
+                    source,
+                    &source_data,
+                    &runs,
+                )
+            },
+        )?
         .map_err(Error::from)?;
         Ok(Self {
             runtime: self.runtime.clone(),

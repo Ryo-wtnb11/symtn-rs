@@ -32,7 +32,10 @@
 use std::sync::Arc;
 
 use symtn_core::{BlockStructure, TensorStorage};
-use symtn_dense::{cuda_region_scale, CudaDenseContext, CudaDenseStorage, CudaRegion, CudaScalar};
+use symtn_dense::{
+    cuda_region_scale, CudaDenseContext, CudaDenseStorage, CudaRegion, CudaScalar,
+    CudaScalarOperands,
+};
 use symtn_operations::cuda::{CudaStackedStorageGemm, CudaStorage, CudaStorageGemm};
 use symtn_operations::cuda_transform::{CudaMemberZeroRegions, CudaSingleMemberRegions};
 use symtn_operations::fusion_replay::{FusionBlockContractPlan, StorageGemm};
@@ -171,6 +174,9 @@ where
     D: CudaScalar + num_traits::Zero,
     C: DenseBlockScalar,
 {
+    // Before the stage admission, which may rebind and upload member scratch.
+    ctx.ensure_owns("cuda_contract", &[&lhs.0, &rhs.0, &dst.0])
+        .map_err(OperationError::Dense)?;
     let (core_alpha, core_init) = match route.output {
         None => (alpha, init),
         Some(_) if St::STALE_CORE_DESTINATION => (D::ONE, ContractDestinationInit::Axpby(D::ZERO)),
@@ -550,6 +556,10 @@ pub struct CudaContractMembersWorkspace<S> {
     /// core plan, each transform and borrow decision, and the core
     /// destination.
     prepared: Option<(Arc<StorageContractResolution<f64>>, usize)>,
+    /// The engine ([`CudaDenseContext::identity`]) every device buffer below
+    /// belongs to; a call on another engine starts from an empty workspace
+    /// instead of submitting this engine's buffers.
+    engine: Option<u64>,
     /// Members every stack in `buffers` holds; never below the prepared `B`.
     capacity: usize,
     /// lhs source, rhs source and output transform regions, by [`Stage`].
@@ -569,6 +579,11 @@ pub struct CudaContractMembersWorkspace<S> {
     /// Member lengths of the core destination, the core's left operand and
     /// its right operand.
     lens: [usize; 3],
+    /// The zero and ones templates of this workspace's fills, lent to each
+    /// call's context so a warm call uploads none of them. Not counted by
+    /// [`Self::retained_bytes`], which reports the stacks and region
+    /// metadata the member count sizes.
+    operands: CudaScalarOperands,
     /// Test seam: the next output transform fails before it submits.
     #[cfg(any(test, feature = "testing"))]
     fail_before_output: bool,
@@ -578,6 +593,7 @@ impl<S> Default for CudaContractMembersWorkspace<S> {
     fn default() -> Self {
         Self {
             prepared: None,
+            engine: None,
             capacity: 0,
             stages: [None, None, None],
             coefficients: [None, None, None],
@@ -585,6 +601,7 @@ impl<S> Default for CudaContractMembersWorkspace<S> {
             core_zeros: Vec::new(),
             core_zero_len: 0,
             lens: [0; 3],
+            operands: CudaScalarOperands::default(),
             #[cfg(any(test, feature = "testing"))]
             fail_before_output: false,
         }
@@ -686,8 +703,9 @@ where
     D: CudaScalar + RecouplingCoefficientAction<f64>,
 {
     /// Validates every structure and region for `members` and
-    /// installs them; nothing is submitted. A changed resolution empties the
-    /// workspace first, so a failure leaves nothing a later call trusts.
+    /// installs them; nothing is submitted. A changed resolution or engine
+    /// empties the workspace first, so a failure leaves nothing a later call
+    /// trusts and no buffer of another engine is ever submitted.
     /// Stacks are replaced only above the high-water capacity (#1746).
     fn prepare(
         &mut self,
@@ -697,12 +715,14 @@ where
         members: usize,
     ) -> Result<(), OperationError> {
         let workspace = &mut *self.workspace;
-        if !workspace
-            .prepared
-            .as_ref()
-            .is_some_and(|(prepared, _)| Arc::ptr_eq(prepared, self.resolution))
+        if workspace.engine != Some(ctx.identity())
+            || !workspace
+                .prepared
+                .as_ref()
+                .is_some_and(|(prepared, _)| Arc::ptr_eq(prepared, self.resolution))
         {
             *workspace = CudaContractMembersWorkspace::default();
+            workspace.engine = Some(ctx.identity());
         }
         let dst_len = dst_structure.required_len()?;
         let core_structure = route.output.map_or(dst_structure, |(_, core)| core);
@@ -845,7 +865,8 @@ where
             .as_ref()
             .is_some_and(|(resolution, prepared)| {
                 *prepared == members && Arc::ptr_eq(resolution, self.resolution)
-            });
+            })
+            && self.workspace.engine == Some(ctx.identity());
         if !prepared {
             self.prepare(ctx, route, dst_structure, members)?;
         }
@@ -1008,7 +1029,8 @@ pub fn execute_storage_contract_members_cuda<D>(
 where
     D: CudaScalar + RecouplingCoefficientAction<f64> + num_traits::Zero,
 {
-    execute_route_cuda(
+    ctx.swap_scalar_operands(&mut workspace.operands);
+    let result = execute_route_cuda(
         &mut MemberCudaStage {
             workspace,
             resolution,
@@ -1021,7 +1043,10 @@ where
         members,
         D::ONE,
         init,
-    )
+    );
+    // Back on every outcome: a failed call keeps what it already uploaded.
+    ctx.swap_scalar_operands(&mut workspace.operands);
+    result
 }
 
 #[cfg(test)]

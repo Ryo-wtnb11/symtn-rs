@@ -169,7 +169,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if source_data.len() != source.storage_space().required_len()?
         || logical_runs.len() != destination.rank()
@@ -206,7 +207,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     let member_len = source.storage_space().required_len()?;
     if Some(source_data.len()) != member_len.checked_mul(members)
@@ -345,6 +347,7 @@ fn piece_offset(origin: isize, position: &[usize], strides: &[isize]) -> Option<
 /// `beta = 1`. One strided add per piece of the per-axis runs' product.
 #[doc(hidden)]
 pub fn fusion_scatter_add_assign<D>(
+    mut exec: symtn_operations::host_pool::Exec<'_>,
     destination: &BlockStructure,
     destination_data: &mut [D],
     logical_source: &BlockStructure,
@@ -360,7 +363,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if destination_data.len() != destination.required_len()?
         || source_data.len() != source.storage_space().required_len()?
@@ -478,6 +482,7 @@ where
                 return Err(OperationError::ElementCountOverflow);
             };
             kernels.tensoradd_strided_checked(
+                exec.reborrow(),
                 destination_data,
                 source_data,
                 piece,
@@ -514,7 +519,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if lhs_data.len() != lhs.storage_space().required_len()?
         || rhs_data.len() != rhs.storage_space().required_len()?
@@ -565,6 +571,7 @@ where
 /// zero(x)`, the destination becoming `beta * destination`.
 #[doc(hidden)]
 pub fn oriented_fusion_axpby_into<D>(
+    mut exec: symtn_operations::host_pool::Exec<'_>,
     destination: &BlockStructure,
     destination_data: &mut [D],
     source: FusionOperand<'_>,
@@ -580,7 +587,8 @@ where
         + Zero
         + One
         + ConjugateValue
-        + strided_kernel::MaybeSendSync,
+        + Send
+        + Sync,
 {
     if destination_data.len() != destination.required_len()?
         || source_data.len() != source.storage_space().required_len()?
@@ -649,6 +657,7 @@ where
             continue;
         }
         kernels.tensoradd_strided_checked(
+            exec.reborrow(),
             destination_data,
             source_data,
             &block.shape,
@@ -903,6 +912,7 @@ mod tests {
         let source = source_with_shapes(&destination, &[vec![1, 2], vec![1, 2]]);
         let mut output = vec![0.0; destination.required_len().unwrap()];
         fusion_scatter_add_assign(
+            strided_kernel::Exec::serial(),
             &destination,
             &mut output,
             source.structure(),
@@ -925,6 +935,7 @@ mod tests {
         let before = output.clone();
         assert!(matches!(
             fusion_scatter_add_assign(
+                strided_kernel::Exec::serial(),
                 &destination,
                 &mut output,
                 source.structure(),
@@ -947,6 +958,7 @@ mod tests {
         let before = output.clone();
         assert!(matches!(
             fusion_scatter_add_assign(
+                strided_kernel::Exec::serial(),
                 &destination,
                 &mut output,
                 source.structure(),
@@ -998,6 +1010,7 @@ mod tests {
         assert_eq!(gathered, vec![0.0, 2.0, 3.0, 5.0, 6.0, 8.0, 9.0, 11.0]);
         let mut scattered = vec![0.0; 12];
         fusion_scatter_add_assign(
+            strided_kernel::Exec::serial(),
             full.structure(),
             &mut scattered,
             restricted.structure(),
@@ -1036,6 +1049,7 @@ mod tests {
         let before = output.clone();
         assert!(matches!(
             fusion_scatter_add_assign(
+                strided_kernel::Exec::serial(),
                 &destination,
                 &mut output,
                 source.structure(),

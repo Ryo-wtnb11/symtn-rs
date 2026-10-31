@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 #[cfg(test)]
 /// Compact (thin, untruncated) fusion-tensor SVD `t = U * S * Vh`
@@ -321,6 +322,7 @@ where
 /// `svd_vals`). Runs the dense SVD per sector through the executor and keeps
 /// only the spectra.
 pub(crate) fn svd_vals<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum>, OperationError>
@@ -329,11 +331,12 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_vals_dyn(dense, &input.dynamic())
+    svd_vals_dyn(engine, dense, &input.dynamic())
 }
 
 /// Dynamic-rank `svd_vals`: the dense stage, the same in every fusion mode.
 pub fn svd_vals_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum>, OperationError>
@@ -350,12 +353,13 @@ where
     // away. Valid no-vector and full-factor drivers can differ in the last
     // bits, so comparisons use dtype-appropriate tolerances.
     let matricizations = value_matricizations(space.structure(), input.data(), space.nout())?;
-    svd_vals_spectra(dense, &matricizations)
+    svd_vals_spectra(engine, dense, &matricizations)
 }
 
 /// Singular values of every coupled-sector matrix through the no-vector SVD,
 /// truncated to the sector rank.
 pub(super) fn svd_vals_spectra<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
 ) -> Result<Vec<SectorSpectrum>, OperationError>
@@ -372,7 +376,7 @@ where
         let input = DenseView::new(matrix.data, &input_shape, &input_strides, 0)
             .map_err(OperationError::Dense)?;
         let s_tensor = dense
-            .svd_vals(D::dense_read(input))
+            .svd_vals(engine, D::dense_read(input))
             .map_err(OperationError::Dense)?;
         let mut s = D::real_spectrum(&s_tensor).map_err(OperationError::Dense)?;
         s.truncate(rank);
@@ -423,6 +427,7 @@ where
 /// executor.
 #[doc(hidden)]
 pub fn svd_vals_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum>, M::Error>
@@ -437,13 +442,14 @@ where
         source,
         Some(FactorFamily::Svd),
         |space, spectrum| svd_vals_diagonal(&M::authority(space), space, spectrum),
-        |dense, input| Ok(svd_vals_dyn(dense, input)?),
+        |dense, input| Ok(svd_vals_dyn(engine, dense, input)?),
     )
 }
 
 #[cfg(test)]
 /// Compact (untruncated) fusion-tensor SVD through the device boundary.
 pub(crate) fn svd_compact<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<SvdCompact<R, D>, OperationError>
@@ -452,7 +458,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = svd_compact_dyn(dense, &input.dynamic())?;
+    let out = svd_compact_dyn(engine, dense, &input.dynamic())?;
     Ok(SvdCompact {
         u: typed_from_bound_factor(out.u)?,
         s: typed_from_bound_factor(out.s)?,
@@ -642,6 +648,7 @@ where
 }
 
 pub(crate) fn svd_compact_factors_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
@@ -650,7 +657,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_compact_factors_dyn_with_gauge(dense, input, CompactSvdGauge::Left)
+    svd_compact_factors_dyn_with_gauge(engine, dense, input, CompactSvdGauge::Left)
 }
 
 /// Compact SVD factors for the logical adjoint without constructing its input:
@@ -658,6 +665,7 @@ where
 /// to the final left factor `V`.
 #[doc(hidden)]
 pub(crate) fn svd_compact_adjoint_factors_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFactorsDyn<R, D>, OperationError>
@@ -666,7 +674,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_compact_factors_dyn_with_gauge(dense, input, CompactSvdGauge::AdjointLeft)
+    svd_compact_factors_dyn_with_gauge(engine, dense, input, CompactSvdGauge::AdjointLeft)
 }
 
 pub(super) struct CompactSvdNumericalStage<D> {
@@ -679,6 +687,7 @@ pub(super) struct CompactSvdNumericalStage<D> {
 }
 
 pub(super) fn compact_svd_numerical_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rows: usize,
@@ -689,6 +698,7 @@ where
     D: FactorScalar,
 {
     compact_svd_stage(
+        engine,
         dense,
         matrix,
         rows,
@@ -704,6 +714,7 @@ where
 /// Compact SVD of one coupled-sector matrix in `gauge`; an empty sector makes
 /// no dense call. `observe` sees the gauged `u` and `vt`.
 pub(super) fn compact_svd_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rows: usize,
@@ -726,7 +737,7 @@ where
             vt: Vec::new(),
         });
     }
-    let (mut u, singular_values, mut vt) = compact_svd_owned(dense, matrix, rows, cols)?;
+    let (mut u, singular_values, mut vt) = compact_svd_owned(engine, dense, matrix, rows, cols)?;
     match gauge {
         CompactSvdGauge::Left => svd_compact_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank),
         CompactSvdGauge::AdjointLeft => {
@@ -746,6 +757,7 @@ where
 
 #[cfg(test)]
 pub(crate) fn compact_svd_numerical_stage_lengths_for_test<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rows: usize,
@@ -755,7 +767,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let stage = compact_svd_numerical_stage(dense, matrix, rows, cols)?;
+    let stage = compact_svd_numerical_stage(engine, dense, matrix, rows, cols)?;
     Ok((stage.u.len(), stage.singular_values.len(), stage.vt.len()))
 }
 
@@ -766,6 +778,7 @@ pub(super) enum CompactSvdGauge {
 }
 
 fn svd_compact_factors_dyn_with_gauge<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     gauge: CompactSvdGauge,
@@ -797,7 +810,7 @@ where
         } else {
             None
         };
-        return svd_compact_direct_regions(dense, input, &plan, gauge, adjoint_spaces);
+        return svd_compact_direct_regions(engine, dense, input, &plan, gauge, adjoint_spaces);
     }
     let matricizations = sector_matricizations(space.structure(), input.data(), space.nout())?;
     #[cfg(test)]
@@ -861,7 +874,7 @@ where
     let u_groups = SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?;
     let vt_groups = SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?;
     let (u_target, vt_target) = (left_space.space(), right_space.space());
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for matrix in &matricizations {
             let CompactSvdNumericalStage {
                 rank,
@@ -870,6 +883,7 @@ where
                 vt,
                 ..
             } = compact_svd_stage(
+                engine,
                 dense,
                 &matrix.data,
                 matrix.rows,
@@ -942,6 +956,7 @@ where
 }
 
 pub(super) fn svd_compact_direct_regions<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     plan: &CompactFactorPlan,
@@ -1047,7 +1062,7 @@ where
             (&input.data()[region.range()], region.rows(), region.cols())
         })
         .collect::<Vec<_>>();
-    let mut factors = compact_svd_owned_batch(dense, &blocks)?.into_iter();
+    let mut factors = compact_svd_owned_batch(engine, dense, &blocks)?.into_iter();
 
     for (route_index, route) in plan.routes.iter().copied().enumerate() {
         let region = &plan.source_regions[route.source_region];
@@ -1229,6 +1244,7 @@ where
 /// Dynamic-rank [`svd_compact`]: the [`svd_compact_factors_dyn`] core plus the
 /// diagonal `S` materialized as a `bond <- bond` tensor.
 pub(crate) fn svd_compact_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdCompactDyn<R, D>, OperationError>
@@ -1237,7 +1253,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let (u, vh, singular_values) = svd_compact_factors_dyn(dense, input)?;
+    let (u, vh, singular_values) = svd_compact_factors_dyn(engine, dense, input)?;
     let s = diagonal_bond_svd_factor(input.space(), &singular_values, &D::from_real)?;
     Ok(SvdCompactDyn {
         u,
@@ -1373,6 +1389,7 @@ impl<R, D> SvdFullDyn<R, D> {
 /// input, the spectrum and unitarity, but the basis spanning the null space is
 /// not unique and differs between them.
 pub(crate) fn svd_full<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<SvdFull<R, D>, OperationError>
@@ -1381,7 +1398,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let out = svd_full_dyn(dense, &input.dynamic())?;
+    let out = svd_full_dyn(engine, dense, &input.dynamic())?;
     Ok(SvdFull {
         u: typed_from_bound_factor(out.u)?,
         s: typed_from_bound_factor(out.s)?,
@@ -1392,6 +1409,7 @@ where
 #[cfg(test)]
 /// Dynamic-rank [`svd_full`].
 pub(crate) fn svd_full_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullDyn<R, D>, OperationError>
@@ -1400,12 +1418,13 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_full_oriented_dyn(dense, input, FactorPlacement::Direct)
+    svd_full_oriented_dyn(engine, dense, input, FactorPlacement::Direct)
 }
 
 /// Full-SVD numerical factors without publishing a dense `S` tensor.
 #[doc(hidden)]
 pub(crate) fn svd_full_factors_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, OperationError>
@@ -1414,11 +1433,12 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_full_oriented_factors_dyn(dense, input, FactorPlacement::Direct)
+    svd_full_oriented_factors_dyn(engine, dense, input, FactorPlacement::Direct)
 }
 
 #[doc(hidden)]
 pub(crate) fn svd_full_adjoint_factors_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, OperationError>
@@ -1427,12 +1447,13 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_full_oriented_factors_dyn(dense, input, FactorPlacement::Adjoint)
+    svd_full_oriented_factors_dyn(engine, dense, input, FactorPlacement::Adjoint)
 }
 
 #[cfg(test)]
 /// Full SVD factors for the logical adjoint without constructing its input.
 pub(crate) fn svd_full_adjoint_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullDyn<R, D>, OperationError>
@@ -1441,7 +1462,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    svd_full_oriented_dyn(dense, input, FactorPlacement::Adjoint)
+    svd_full_oriented_dyn(engine, dense, input, FactorPlacement::Adjoint)
 }
 
 #[expect(
@@ -1449,6 +1470,7 @@ where
     reason = "the private stage returns the fixed dense full-SVD tuple without another wrapper"
 )]
 pub(super) fn owned_full_svd_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     data: &mut Vec<D>,
     rows: usize,
@@ -1469,7 +1491,7 @@ where
         }
     };
     let mut outputs = dense
-        .svd_full_owned(input, rows, cols)
+        .svd_full_owned(engine, input, rows, cols)
         .map_err(OperationError::Dense)?;
     if outputs.len() != 3 {
         return Err(OperationError::Dense(arity_mismatch(
@@ -1528,6 +1550,7 @@ impl<D: FactorScalar> FullSvdWorkspace<D> {
 /// thin `svd_into` completed to square factors.
 #[allow(clippy::type_complexity)]
 pub(super) fn full_svd_numerical_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     data: &mut Vec<D>,
     rows: usize,
@@ -1538,7 +1561,9 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    if let Some((u_full, s_values, vh_full)) = owned_full_svd_stage(dense, data, rows, cols)? {
+    if let Some((u_full, s_values, vh_full)) =
+        owned_full_svd_stage(engine, dense, data, rows, cols)?
+    {
         return Ok((u_full, s_values, FullSvdRight::Vh(vh_full)));
     }
     let rank = rows.min(cols);
@@ -1570,6 +1595,7 @@ where
         .map_err(OperationError::Dense)?;
     dense
         .svd_into(
+            engine,
             D::dense_read(view),
             D::dense_write(u_view),
             D::Real::dense_write(s_view),
@@ -1580,9 +1606,9 @@ where
     let mut vt_thin = vec![D::zero(); rank * cols];
     copy_col_major_strided(&workspace.u, rows, rank, max_rows, &mut u_thin, rows);
     copy_col_major_strided(&workspace.vt, rank, cols, max_rank, &mut vt_thin, rank);
-    let u_full = orthonormal_completion(dense, &u_thin, rows, rank)?;
+    let u_full = orthonormal_completion(engine, dense, &u_thin, rows, rank)?;
     let v_thin = adjoint_col_major(&vt_thin, rank, cols);
-    let v_full = orthonormal_completion(dense, &v_thin, cols, rank)?;
+    let v_full = orthonormal_completion(engine, dense, &v_thin, cols, rank)?;
     let s_values = workspace.s[..rank]
         .iter()
         .copied()
@@ -1593,6 +1619,7 @@ where
 
 #[cfg(test)]
 pub(super) fn svd_full_oriented_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     placement: FactorPlacement,
@@ -1602,7 +1629,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let parts = svd_full_oriented_factors_dyn(dense, input, placement)?;
+    let parts = svd_full_oriented_factors_dyn(engine, dense, input, placement)?;
     let authority = parts.adjoint_space.as_ref().unwrap_or(input.space());
     let s = rectangular_diagonal_bond_tensor(
         &MfAuthority(authority),
@@ -1619,6 +1646,7 @@ where
 }
 
 fn svd_full_oriented_factors_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     placement: FactorPlacement,
@@ -1647,7 +1675,7 @@ where
     for matrix in &mut matricizations {
         let (rows, cols) = (matrix.rows, matrix.cols);
         let (mut u_full, s_values, right) =
-            full_svd_numerical_stage(dense, &mut matrix.data, rows, cols, &mut workspace)?;
+            full_svd_numerical_stage(engine, dense, &mut matrix.data, rows, cols, &mut workspace)?;
         let (mut left, left_rows, mut right, right_leading) = match (placement, right) {
             (FactorPlacement::Direct, FullSvdRight::Vh(vh_full)) => (u_full, rows, vh_full, cols),
             (FactorPlacement::Direct, FullSvdRight::V(v_full)) => {
@@ -1784,6 +1812,7 @@ fn adjoint_col_major_in_place<D: FactorScalar>(data: &mut [D], rows: usize, cols
 /// `m x m` orthonormal basis via [`augmented_identity_qr`] of `[Q1 | I]`;
 /// the first `k` columns are returned unchanged.
 pub(super) fn orthonormal_completion<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     thin: &[D],
     rows: usize,
@@ -1796,7 +1825,7 @@ where
     if rank == rows {
         return Ok(thin.to_vec());
     }
-    let (mut full, _) = augmented_identity_qr(dense, rows, rank, |block| {
+    let (mut full, _) = augmented_identity_qr(engine, dense, rows, rank, |block| {
         block.copy_from_slice(thin);
     })?;
     full[..rows * rank].copy_from_slice(thin);
@@ -2034,6 +2063,7 @@ pub(super) fn unit_phase<D: FactorScalar>(value: Complex64, norm_sqr: f64) -> (D
     reason = "the dense SVD ownership boundary returns its documented U, S, Vt tuple"
 )]
 pub(super) fn compact_svd_owned<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     rows: usize,
@@ -2048,7 +2078,7 @@ where
     let input_view =
         DenseView::new(input, &input_shape, &input_strides, 0).map_err(OperationError::Dense)?;
     let outputs = dense
-        .svd(D::dense_read(input_view))
+        .svd(engine, D::dense_read(input_view))
         .map_err(OperationError::Dense)?;
     compact_svd_outputs(outputs, rows, cols)
 }
@@ -2060,6 +2090,7 @@ where
     reason = "the dense SVD ownership boundary returns its documented U, S, Vt tuple"
 )]
 pub(super) fn compact_svd_owned_batch<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     blocks: &[(&[D], usize, usize)],
 ) -> Result<Vec<(Vec<D>, Vec<f64>, Vec<D>)>, OperationError>
@@ -2067,7 +2098,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    factorize_col_major_batch(dense, DenseFactorization::Svd, blocks)?
+    factorize_col_major_batch(engine, dense, DenseFactorization::Svd, blocks)?
         .into_iter()
         .zip(blocks)
         .map(|(outputs, &(_, rows, cols))| compact_svd_outputs(outputs, rows, cols))
@@ -2135,6 +2166,7 @@ where
 /// output spaces are admitted through the checked staging boundary.
 #[doc(hidden)]
 pub fn svd_compact_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Svd<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -2144,7 +2176,7 @@ where
     D: FactorScalar,
 {
     let (u, vh, singular_values) =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(dense, input)?;
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, dense, input)?;
     let s =
         diagonal_bond_svd_factor_generic_checked(input.space(), &singular_values, &D::from_real)?;
     Ok(Svd { u, s, vh })
@@ -2160,6 +2192,7 @@ pub type CheckedCompactSvdFactorsWithSpectrum<R, D> = (
 /// Checked compact SVD factors and sector values before diagonal publication.
 #[doc(hidden)]
 pub(crate) fn svd_compact_factors_with_spectrum_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<CheckedCompactSvdFactorsWithSpectrum<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -2168,7 +2201,7 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    svd_compact_oriented_factors_dyn_checked_generic(dense, input, FactorPlacement::Direct)
+    svd_compact_oriented_factors_dyn_checked_generic(engine, dense, input, FactorPlacement::Direct)
 }
 
 /// Checked compact SVD factors of the logical adjoint of `parent`, read in
@@ -2176,6 +2209,7 @@ where
 /// phase gauge applied to the final left factor `V` (the multiplicity-free
 /// [`svd_compact_adjoint_factors_dyn`] contract).
 pub(crate) fn svd_compact_adjoint_factors_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<CheckedCompactSvdFactorsWithSpectrum<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -2184,10 +2218,16 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    svd_compact_oriented_factors_dyn_checked_generic(dense, parent, FactorPlacement::Adjoint)
+    svd_compact_oriented_factors_dyn_checked_generic(
+        engine,
+        dense,
+        parent,
+        FactorPlacement::Adjoint,
+    )
 }
 
 fn svd_compact_oriented_factors_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     placement: FactorPlacement,
@@ -2219,7 +2259,7 @@ where
     let mut singular_values = Vec::with_capacity(matrices.len());
     #[cfg(test)]
     let data = input.data();
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
             #[cfg(test)]
@@ -2237,6 +2277,7 @@ where
                 singular_values: values,
                 mut vt,
             } = compact_svd_stage(
+                engine,
                 dense,
                 matrix.data,
                 matrix.rows,
@@ -2323,6 +2364,7 @@ where
 /// publication; checked factor builders then admit square outer factors and
 /// the rectangular diagonal, including unmatched structural sectors.
 pub(crate) fn svd_full_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullDyn<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -2331,7 +2373,7 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    let parts = svd_full_factors_dyn_checked_generic(dense, input)?;
+    let parts = svd_full_factors_dyn_checked_generic(engine, dense, input)?;
     let (u, vh, singular_values, row_dimensions, col_dimensions) = parts.into_parts();
     let s = rectangular_diagonal_bond_tensor(
         &CheckedAuthority(input.space().provider_arc()),
@@ -2350,6 +2392,7 @@ where
 /// Checked full-SVD numerical factors of a dense input, before choosing `S`
 /// storage.
 pub(crate) fn svd_full_factors_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -2358,12 +2401,13 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    svd_full_oriented_factors_dyn_checked_generic(dense, input, FactorPlacement::Direct)
+    svd_full_oriented_factors_dyn_checked_generic(engine, dense, input, FactorPlacement::Direct)
 }
 
 /// Checked full-SVD factors of the logical adjoint of `parent`, read in
 /// place (the multiplicity-free [`svd_full_adjoint_factors_dyn`] contract).
 pub(crate) fn svd_full_adjoint_factors_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -2372,10 +2416,11 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    svd_full_oriented_factors_dyn_checked_generic(dense, parent, FactorPlacement::Adjoint)
+    svd_full_oriented_factors_dyn_checked_generic(engine, dense, parent, FactorPlacement::Adjoint)
 }
 
 fn svd_full_oriented_factors_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     placement: FactorPlacement,
@@ -2402,7 +2447,7 @@ where
     for matrix in &mut matrices {
         let (rows, cols) = (matrix.rows, matrix.cols);
         let (mut u_full, s_values, right) =
-            full_svd_numerical_stage(dense, &mut matrix.data, rows, cols, &mut workspace)?;
+            full_svd_numerical_stage(engine, dense, &mut matrix.data, rows, cols, &mut workspace)?;
         let (mut left, left_rows, mut right, right_leading) = match (placement, right) {
             (FactorPlacement::Direct, FullSvdRight::Vh(vh_full)) => (u_full, rows, vh_full, cols),
             (FactorPlacement::Direct, FullSvdRight::V(v_full)) => {
@@ -2483,6 +2528,7 @@ where
 /// only dense storage leases an executor.
 #[doc(hidden)]
 pub fn svd_compact_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<SvdFactorsDyn<R, D>, M::Error>
@@ -2497,7 +2543,7 @@ where
         source,
         Some(FactorFamily::Svd),
         M::svd_compact_diagonal,
-        M::svd_compact_dense,
+        |dense, input| M::svd_compact_dense(engine, dense, input),
     )
 }
 
@@ -2505,6 +2551,7 @@ where
 /// in fusion mode `M`.
 #[doc(hidden)]
 pub fn svd_compact_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFactorsDyn<R, D>, M::Error>
@@ -2516,7 +2563,7 @@ where
 {
     // The adjoint is finite exactly when its parent is.
     require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Svd)?;
-    lease.run(|dense| M::svd_compact_adjoint_dense(dense, &parent))
+    lease.run(|dense| M::svd_compact_adjoint_dense(engine, dense, &parent))
 }
 
 /// Full SVD factors and singular values of dense `source` in fusion mode
@@ -2525,6 +2572,7 @@ where
 /// mode factors it through [`svd_compact_from_source`].
 #[doc(hidden)]
 pub fn svd_full_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, M::Error>
@@ -2544,7 +2592,7 @@ where
             }
             .into())
         },
-        M::svd_full_dense,
+        |dense, input| M::svd_full_dense(engine, dense, input),
     )
 }
 
@@ -2552,6 +2600,7 @@ where
 /// in fusion mode `M`.
 #[doc(hidden)]
 pub fn svd_full_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<SvdFullFactorsDyn<R, D>, M::Error>
@@ -2562,5 +2611,5 @@ where
     D: FactorScalar,
 {
     require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Svd)?;
-    lease.run(|dense| M::svd_full_adjoint_dense(dense, &parent))
+    lease.run(|dense| M::svd_full_adjoint_dense(engine, dense, &parent))
 }

@@ -62,18 +62,20 @@ fn u1_space(sectors: i32, order: usize) -> GradedSpace<U1FusionRule> {
 }
 
 fn fixture_f64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule, f64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let space = u1_space(sectors, order);
-    TensorMap::from_subblock_fn(&runtime, [&space], [&space], |_, indices| {
+    TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         scale * (1.0 + indices[0] as f64 - 0.5 * indices[1] as f64)
     })
     .unwrap()
 }
 
 fn fixture_c64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule, Complex64> {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let space = u1_space(sectors, order);
-    TensorMap::from_subblock_fn(&runtime, [&space], [&space], |_, indices| {
+    TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         scale
             * Complex64::new(
                 1.0 + indices[0] as f64 - 0.5 * indices[1] as f64,
@@ -84,13 +86,15 @@ fn fixture_c64(sectors: i32, order: usize, scale: f64) -> TensorMap<U1FusionRule
 }
 
 fn warmed_f64(tensor: &TensorMap<U1FusionRule, f64>) -> Sample {
-    black_box(tensor.exp(&[0], &[1]).unwrap());
-    measure(|| tensor.exp(&[0], &[1]).unwrap())
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.exp(engine, &[0], &[1]).unwrap());
+    measure(|| tensor.exp(engine, &[0], &[1]).unwrap())
 }
 
 fn warmed_c64(tensor: &TensorMap<U1FusionRule, Complex64>) -> Sample {
-    black_box(tensor.exp(&[0], &[1]).unwrap());
-    measure(|| tensor.exp(&[0], &[1]).unwrap())
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    black_box(tensor.exp(engine, &[0], &[1]).unwrap());
+    measure(|| tensor.exp(engine, &[0], &[1]).unwrap())
 }
 
 /// Ten matrix buffers are allocated once. Backend scratch may add to the live
@@ -174,15 +178,16 @@ fn general_exp_workspace_is_largest_sector_sized_and_reused() {
 
 #[test]
 fn typed_u1_general_exp_matches_the_upper_triangular_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         (0..3).map(|charge| (U1Irrep::new(charge), 2)),
     )
     .unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&space], [&space], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         match (indices[0], indices[1]) {
             (0, 0) => 1.0,
             (0, 1) => 2.0,
@@ -192,7 +197,7 @@ fn typed_u1_general_exp_matches_the_upper_triangular_oracle() {
     })
     .unwrap();
 
-    let image = source.exp(&[0], &[1]).unwrap();
+    let image = source.exp(engine, &[0], &[1]).unwrap();
     let expected = [
         1.0_f64.exp(),
         0.0,

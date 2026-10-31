@@ -21,7 +21,7 @@ use crate::error::{Alternative, Error};
 use crate::runtime::Runtime;
 
 fn runtime() -> Runtime {
-    Runtime::builder().dense_threads(1).build().unwrap()
+    Runtime::builder().build().unwrap()
 }
 
 /// Runs `f` and returns its value with the number of entries into adjoint
@@ -50,7 +50,7 @@ fn is_unsupported(error: &impl std::fmt::Display, operation: &'static str) -> bo
 }
 
 macro_rules! assert_same_tensor {
-    ($actual:expr, $expected:expr, $what:expr) => {{
+    ($engine:ident, $actual:expr, $expected:expr, $what:expr) => {{
         let (actual, expected) = (&$actual, &$expected);
         assert_eq!(
             actual.codomain(),
@@ -60,8 +60,8 @@ macro_rules! assert_same_tensor {
         );
         assert_eq!(actual.domain(), expected.domain(), "{}: domain", $what);
         assert_eq!(
-            actual.materialize().unwrap().dense_data().unwrap(),
-            expected.materialize().unwrap().dense_data().unwrap(),
+            actual.materialize($engine).unwrap().dense_data().unwrap(),
+            expected.materialize($engine).unwrap().dense_data().unwrap(),
             "{}: payload",
             $what
         );
@@ -84,7 +84,7 @@ macro_rules! direct {
 /// owned lazy adjoint still materializes implicitly (positive control), and
 /// the remedy gives the owned-lazy result.
 macro_rules! refused {
-    ($what:expr, $view_call:expr, $owned_call:expr, $remedy_call:expr) => {{
+    ($engine:ident, $what:expr, $view_call:expr, $owned_call:expr, $remedy_call:expr) => {{
         let (view, entries) = adjoint_entries(|| $view_call);
         assert_eq!(
             entries, 0,
@@ -95,91 +95,95 @@ macro_rules! refused {
         assert!(is_unsupported(&error, $what), "{}: {error}", $what);
         let (owned, owned_entries) = adjoint_entries(|| $owned_call);
         assert!(owned_entries >= 1, "{}: positive control", $what);
-        assert_same_tensor!($remedy_call.unwrap(), owned.unwrap(), $what);
+        assert_same_tensor!($engine, $remedy_call.unwrap(), owned.unwrap(), $what);
     }};
 }
 
 /// Operations every provider mode shares. `a: [V, W] <- [V]`,
 /// `b: [V] <- [V, W]`, and `a` is built in `b'`'s layout.
 macro_rules! shared_suite {
-    ($a:expr, $b:expr, $s:expr, $alpha:expr, $beta:expr, $what:expr) => {{
+    ($engine:ident, $a:expr, $b:expr, $s:expr, $alpha:expr, $beta:expr, $what:expr) => {{
         let (a, b, s, what) = (&$a, &$b, &$s, $what);
-        let lazy = b.adjoint().unwrap();
+        let lazy = b.adjoint($engine).unwrap();
 
-        let (view, owned) = direct!("inner", a.inner(b.adjoint_view()), a.inner(&lazy));
+        let (view, owned) = direct!("inner", a.inner($engine, b.adjoint_view()), a.inner($engine, &lazy));
         assert_eq!(view, owned, "{what}: inner");
 
         let (view, owned) = direct!(
             "axpby",
-            a.axpby($alpha, b.adjoint_view(), $beta),
-            a.axpby($alpha, &lazy, $beta)
+            a.axpby($engine, $alpha, b.adjoint_view(), $beta),
+            a.axpby($engine, $alpha, &lazy, $beta)
         );
-        assert_same_tensor!(view, owned, format!("{what}: axpby"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: axpby"));
 
-        let mut view = a.materialize().unwrap();
-        let mut owned = a.materialize().unwrap();
-        let (result, entries) = adjoint_entries(|| lazy.axpby_into(&mut view, $beta, $alpha));
+        let mut view = a.materialize($engine).unwrap();
+        let mut owned = a.materialize($engine).unwrap();
+        let (result, entries) = adjoint_entries(|| lazy.axpby_into($engine, &mut view, $beta, $alpha));
         assert_eq!(entries, 0, "{what}: axpby_into");
         result.unwrap();
-        lazy.materialize()
+        lazy.materialize($engine)
             .unwrap()
-            .axpby_into(&mut owned, $beta, $alpha)
+            .axpby_into($engine, &mut owned, $beta, $alpha)
             .unwrap();
-        assert_same_tensor!(view, owned, format!("{what}: axpby_into"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: axpby_into"));
 
         let (view, owned) = direct!(
             "cat",
-            a.cat(b.adjoint_view(), Side::Domain),
-            a.cat(&lazy, Side::Domain)
+            a.cat($engine, b.adjoint_view(), Side::Domain),
+            a.cat($engine, &lazy, Side::Domain)
         );
-        assert_same_tensor!(view, owned, format!("{what}: cat"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: cat"));
+let lazy_materialize = &lazy.materialize($engine).unwrap();
 
-        refused!(
+        refused!($engine,
             "solve",
-            s.solve(&[0, 1], &[2, 3], b.adjoint_view(), &[0, 1], &[2]),
-            s.solve(&[0, 1], &[2, 3], &lazy, &[0, 1], &[2]),
-            s.solve(&[0, 1], &[2, 3], &lazy.materialize().unwrap(), &[0, 1], &[2])
+            s.solve($engine, &[0, 1], &[2, 3], b.adjoint_view(), &[0, 1], &[2]),
+            s.solve($engine, &[0, 1], &[2, 3], &lazy, &[0, 1], &[2]),
+            s.solve($engine, &[0, 1], &[2, 3], lazy_materialize, &[0, 1], &[2])
         );
-        refused!(
+        let lazy_materialize = &lazy.materialize($engine).unwrap();
+        refused!($engine,
             "otimes",
-            a.otimes(b.adjoint_view()),
-            a.otimes(&lazy),
-            a.otimes(&lazy.materialize().unwrap())
+            a.otimes($engine, b.adjoint_view()),
+            a.otimes($engine, &lazy),
+            a.otimes($engine, lazy_materialize)
         );
-        refused!(
+        let lazy_materialize = &lazy.materialize($engine).unwrap();
+        refused!($engine,
             "absorb",
-            a.absorb(b.adjoint_view()),
-            a.absorb(&lazy),
-            a.absorb(&lazy.materialize().unwrap())
+            a.absorb($engine, b.adjoint_view()),
+            a.absorb($engine, &lazy),
+            a.absorb($engine, lazy_materialize)
         );
 
         // Refusal precedes the work these operations do on an owned lazy
         // receiver: no entry into materialization at all.
-        let a_lazy = a.adjoint().unwrap();
-        let (view, entries) = adjoint_entries(|| a_lazy.otimes(b.adjoint_view()));
+        let a_lazy = a.adjoint($engine).unwrap();
+        let (view, entries) = adjoint_entries(|| a_lazy.otimes($engine, b.adjoint_view()));
         assert_eq!(entries, 0, "{what}: otimes on a lazy receiver");
         assert!(is_unsupported(&view.err().unwrap(), "otimes"));
-        let s_lazy = s.adjoint().unwrap();
-        let (view, entries) = adjoint_entries(|| s_lazy.solve(&[0, 1], &[2, 3], b.adjoint_view(), &[0, 1], &[2]));
+        let s_lazy = s.adjoint($engine).unwrap();
+        let (view, entries) = adjoint_entries(|| s_lazy.solve($engine, &[0, 1], &[2, 3], b.adjoint_view(), &[0, 1], &[2]));
         assert_eq!(entries, 0, "{what}: solve on a lazy receiver");
         assert!(is_unsupported(&view.err().unwrap(), "solve"));
 
         // The adjoint view of a lazy adjoint is its owned parent.
-        let (view, owned) = direct!("inner of parent", b.inner(lazy.adjoint_view()), b.inner(b));
+        let (view, owned) = direct!("inner of parent", b.inner($engine, lazy.adjoint_view()), b.inner($engine, b));
         assert_eq!(view, owned, "{what}: inner of parent");
     }};
 }
 
 /// Multiplicity-free: contraction and composition consume the view.
 macro_rules! mf_suite {
-    ($a:expr, $b:expr, $s:expr, $alpha:expr, $beta:expr, $what:expr) => {{
-        shared_suite!($a, $b, $s, $alpha, $beta, $what);
+    ($engine:ident, $a:expr, $b:expr, $s:expr, $alpha:expr, $beta:expr, $what:expr) => {{
+        shared_suite!($engine, $a, $b, $s, $alpha, $beta, $what);
         let (a, b, what) = (&$a, &$b, $what);
-        let lazy = b.adjoint().unwrap();
+        let lazy = b.adjoint($engine).unwrap();
 
         let (view, owned) = direct!(
             "contract",
             a.contract(
+                $engine,
                 b.adjoint_view(),
                 &ContractSpec {
                     lhs: &[2],
@@ -189,6 +193,7 @@ macro_rules! mf_suite {
                 }
             ),
             a.contract(
+                $engine,
                 &lazy,
                 &ContractSpec {
                     lhs: &[2],
@@ -198,12 +203,13 @@ macro_rules! mf_suite {
                 }
             )
         );
-        assert_same_tensor!(view, owned, format!("{what}: contract"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: contract"));
 
-        let mut destination = owned.zeros_like().unwrap();
-        let mut expected = owned.zeros_like().unwrap();
+        let mut destination = owned.zeros_like($engine).unwrap();
+        let mut expected = owned.zeros_like($engine).unwrap();
         let (result, entries) = adjoint_entries(|| {
             a.contract_into(
+                $engine,
                 b.adjoint_view(),
                 &ContractSpec {
                     lhs: &[2],
@@ -219,6 +225,7 @@ macro_rules! mf_suite {
         assert_eq!(entries, 0, "{what}: contract_into");
         result.unwrap();
         a.contract_into(
+            $engine,
             &lazy,
             &ContractSpec {
                 lhs: &[2],
@@ -231,25 +238,34 @@ macro_rules! mf_suite {
             $alpha * 0.0,
         )
         .unwrap();
-        assert_same_tensor!(destination, expected, format!("{what}: contract_into"));
+        assert_same_tensor!(
+            $engine,
+            destination,
+            expected,
+            format!("{what}: contract_into")
+        );
 
-        let (view, owned) = direct!("compose", b.compose(b.adjoint_view()), b.compose(&lazy));
-        assert_same_tensor!(view, owned, format!("{what}: compose"));
+        let (view, owned) = direct!(
+            "compose",
+            b.compose($engine, b.adjoint_view()),
+            b.compose($engine, &lazy)
+        );
+        assert_same_tensor!($engine, view, owned, format!("{what}: compose"));
     }};
 }
 
 macro_rules! mf_case {
-    ($v:expr, $w:expr, $dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
+    ($engine:ident, $v:expr, $w:expr, $dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
         let runtime = runtime();
         let (v, w) = ($v, $w);
         let a: TensorMap<_, $dtype> =
             // Built as an adjoint so that it shares the lazy adjoint's layout.
-            TensorMap::rand_with_seed(&runtime, [&v], [&v, &w], 1).unwrap().adjoint().unwrap().materialize().unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&v], [&v, &w], 1).unwrap().adjoint($engine).unwrap().materialize($engine).unwrap();
         let b: TensorMap<_, $dtype> =
-            TensorMap::rand_with_seed(&runtime, [&v], [&v, &w], 2).unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&v], [&v, &w], 2).unwrap();
         let s: TensorMap<_, $dtype> =
-            TensorMap::rand_with_seed(&runtime, [&v, &w], [&v, &w], 3).unwrap();
-        mf_suite!(a, b, s, $alpha, $beta, $what);
+            TensorMap::rand_with_seed($engine, &runtime, [&v, &w], [&v, &w], 3).unwrap();
+        mf_suite!($engine, a, b, s, $alpha, $beta, $what);
     }};
 }
 
@@ -276,22 +292,25 @@ const CX: (Complex64, Complex64) = (Complex64::new(0.5, 0.25), Complex64::new(-1
 
 #[test]
 fn u1_view_matches_owned_lazy_adjoint() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let v = || u1(&[(-1, 2), (0, 1), (1, 3)]);
     let w = || u1(&[(0, 2), (1, 1)]).try_dual().unwrap();
-    mf_case!(v(), w(), f64, RE.0, RE.1, "U1 f64");
-    mf_case!(v(), w(), Complex64, CX.0, CX.1, "U1 c64");
+    mf_case!(engine, v(), w(), f64, RE.0, RE.1, "U1 f64");
+    mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "U1 c64");
 }
 
 #[test]
 fn su2_view_matches_owned_lazy_adjoint() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let v = || su2(&[(0, 2), (1, 1), (2, 2)]);
     let w = || su2(&[(1, 2), (2, 1)]);
-    mf_case!(v(), w(), f64, RE.0, RE.1, "SU2 f64");
-    mf_case!(v(), w(), Complex64, CX.0, CX.1, "SU2 c64");
+    mf_case!(engine, v(), w(), f64, RE.0, RE.1, "SU2 f64");
+    mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "SU2 c64");
 }
 
 #[test]
 fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let leg = |pairs: &[(bool, i32, usize)]| {
         GradedSpace::try_new(
             Arc::new(
@@ -310,17 +329,18 @@ fn fermionic_z2_times_u1_view_matches_owned_lazy_adjoint() {
     };
     let v = || leg(&[(false, 0, 2), (true, 1, 1), (true, -1, 2), (false, 2, 1)]);
     let w = || leg(&[(true, 1, 2), (false, 0, 1)]).try_dual().unwrap();
-    mf_case!(v(), w(), f64, RE.0, RE.1, "fZ2xU1 f64");
-    mf_case!(v(), w(), Complex64, CX.0, CX.1, "fZ2xU1 c64");
+    mf_case!(engine, v(), w(), f64, RE.0, RE.1, "fZ2xU1 f64");
+    mf_case!(engine, v(), w(), Complex64, CX.0, CX.1, "fZ2xU1 c64");
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
     use symtn_core::LieGroupFusionRule;
+    let engine = &mut crate::typed::CpuEngine::serial();
 
     macro_rules! su3_case {
-        ($dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
+        ($engine:ident, $dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
             let runtime = runtime();
             let provider = Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
             // 8 ⊗ 8 → 8 has multiplicity 2.
@@ -329,76 +349,87 @@ fn checked_generic_su3_view_matches_owned_lazy_adjoint() {
                 .unwrap();
             let a: TensorMap<_, $dtype> =
                 // Built as an adjoint so that it shares the lazy adjoint's layout.
-            TensorMap::rand_with_seed(&runtime, [&v], [&v, &w], 1).unwrap().adjoint().unwrap().materialize().unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&v], [&v, &w], 1).unwrap().adjoint($engine).unwrap().materialize($engine).unwrap();
             let b: TensorMap<_, $dtype> =
-                TensorMap::rand_with_seed(&runtime, [&v], [&v, &w], 2).unwrap();
+                TensorMap::rand_with_seed($engine, &runtime, [&v], [&v, &w], 2).unwrap();
             let s: TensorMap<_, $dtype> =
-                TensorMap::rand_with_seed(&runtime, [&v, &w], [&v, &w], 3).unwrap();
-            shared_suite!(a, b, s, $alpha, $beta, $what);
+                TensorMap::rand_with_seed($engine, &runtime, [&v, &w], [&v, &w], 3).unwrap();
+            shared_suite!($engine, a, b, s, $alpha, $beta, $what);
 
             // Contraction, its `_into` (#1870) and composition consume
             // the view as the owned lazy adjoint (#1865).
-            let lazy = b.adjoint().unwrap();
+            let lazy = b.adjoint($engine).unwrap();
             let spec = ContractSpec { lhs: &[2], rhs: &[0], codomain: &[0, 1], domain: &[2, 3] };
             let (view, owned) =
-                direct!("contract", a.contract(b.adjoint_view(), &spec), a.contract(&lazy, &spec));
-            assert_same_tensor!(view, owned, format!("{}: contract", $what));
-            let mut destination = owned.scale($alpha * 0.0).unwrap();
-            let mut expected = owned.scale($alpha * 0.0).unwrap();
+                direct!("contract", a.contract($engine, b.adjoint_view(), &spec), a.contract($engine, &lazy, &spec));
+            assert_same_tensor!($engine, view, owned, format!("{}: contract", $what));
+            let mut destination = owned.scale($engine, $alpha * 0.0).unwrap();
+            let mut expected = owned.scale($engine, $alpha * 0.0).unwrap();
             let (result, entries) = adjoint_entries(|| {
-                a.contract_into(b.adjoint_view(), &spec, &mut destination, $alpha, $alpha * 0.0)
+                a.contract_into($engine, b.adjoint_view(), &spec, &mut destination, $alpha, $alpha * 0.0)
             });
             assert_eq!(entries, 0, "{}: contract_into", $what);
             result.unwrap();
-            a.contract_into(&lazy, &spec, &mut expected, $alpha, $alpha * 0.0).unwrap();
-            assert_same_tensor!(destination, expected, format!("{}: contract_into", $what));
-            let (view, owned) = direct!("compose", b.compose(b.adjoint_view()), b.compose(&lazy));
-            assert_same_tensor!(view, owned, format!("{}: compose", $what));
+            a.contract_into($engine, &lazy, &spec, &mut expected, $alpha, $alpha * 0.0).unwrap();
+            assert_same_tensor!($engine, destination, expected, format!("{}: contract_into", $what));
+            let (view, owned) = direct!("compose", b.compose($engine, b.adjoint_view()), b.compose($engine, &lazy));
+            assert_same_tensor!($engine, view, owned, format!("{}: compose", $what));
         }};
     }
-    su3_case!(f64, RE.0, RE.1, "SU3 f64");
-    su3_case!(Complex64, CX.0, CX.1, "SU3 c64");
+    su3_case!(engine, f64, RE.0, RE.1, "SU3 f64");
+    su3_case!(engine, Complex64, CX.0, CX.1, "SU3 c64");
 }
 
 #[test]
 fn deligne_product_refuses_an_adjoint_view() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let v = u1(&[(0, 2), (1, 1)]);
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 2).unwrap();
+    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 2).unwrap();
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap(),
     );
-    let lazy = b.adjoint().unwrap();
+    let lazy = b.adjoint(engine).unwrap();
+    let lazy_materialize = &lazy.materialize(engine).unwrap();
     refused!(
+        engine,
         "deligne_product",
-        a.deligne_product(b.adjoint_view(), Arc::clone(&product)),
-        a.deligne_product(&lazy, Arc::clone(&product)),
-        a.deligne_product(&lazy.materialize().unwrap(), Arc::clone(&product))
+        a.deligne_product(engine, b.adjoint_view(), Arc::clone(&product)),
+        a.deligne_product(engine, &lazy, Arc::clone(&product)),
+        a.deligne_product(engine, lazy_materialize, Arc::clone(&product))
     );
     // The left operand is not committed before the refusal.
-    let a_lazy = a.adjoint().unwrap();
-    let (view, entries) = adjoint_entries(|| a_lazy.deligne_product(b.adjoint_view(), product));
+    let a_lazy = a.adjoint(engine).unwrap();
+    let (view, entries) =
+        adjoint_entries(|| a_lazy.deligne_product(engine, b.adjoint_view(), product));
     assert_eq!(entries, 0);
     assert!(is_unsupported(&view.err().unwrap(), "deligne_product"));
 }
 
 #[test]
 fn otimes_materializes_a_lazy_operand_and_a_plain_view_is_the_tensor_itself() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let v = u1(&[(0, 2), (1, 1)]);
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v, &v], 1).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 2).unwrap();
-    let lazy = b.adjoint().unwrap();
+    let a: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&v], [&v, &v], 1).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 2).unwrap();
+    let lazy = b.adjoint(engine).unwrap();
     // `&lazy` is not marked: `otimes` materializes an owned lazy adjoint
     // operation-locally, as its cost section documents.
-    let (result, entries) = adjoint_entries(|| a.otimes(&lazy));
+    let (result, entries) = adjoint_entries(|| a.otimes(engine, &lazy));
     assert!(entries >= 1);
     result.unwrap();
     let view: super::TensorRef<'_, _, f64> = (&a).into();
     let copied = view;
-    assert_eq!(a.inner(view).unwrap(), a.inner(&a).unwrap());
-    assert_eq!(a.inner(copied).unwrap(), a.inner(&a).unwrap());
+    assert_eq!(a.inner(engine, view).unwrap(), a.inner(engine, &a).unwrap());
+    assert_eq!(
+        a.inner(engine, copied).unwrap(),
+        a.inner(engine, &a).unwrap()
+    );
 }
 
 #[cfg(feature = "cuda")]
@@ -409,22 +440,28 @@ mod cuda {
     /// device facade has no checked-Generic operations.
     macro_rules! cuda_case {
         ($v:expr, $w:expr, $dtype:ty, $alpha:expr, $beta:expr, $what:expr) => {{
+            let cpu = &mut crate::typed::CpuEngine::serial();
+            let cuda =
+                &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
+                    .unwrap();
             let what = $what;
-            let runtime = Runtime::builder().cuda(0).build().unwrap();
+            let runtime = Runtime::builder().build().unwrap();
             let (v, w) = ($v, $w);
-            let host = |seed| {
-                TensorMap::<_, $dtype>::rand_with_seed(&runtime, [&v], [&v, &w], seed).unwrap()
+            let mut host = |seed| {
+                TensorMap::<_, $dtype>::rand_with_seed(&mut *cpu, &runtime, [&v], [&v, &w], seed)
+                    .unwrap()
             };
-            let b = host(2).to_cuda().unwrap();
-            let c = host(1).to_cuda().unwrap();
-            let lazy = b.adjoint().unwrap();
+            let b = host(2).to_cuda(cuda).unwrap();
+            let c = host(1).to_cuda(cuda).unwrap();
+            let lazy = b.adjoint(cuda).unwrap();
             // `a` is owned in `b'`'s layout; `a_lazy` is a lazy adjoint.
-            let a = c.adjoint().unwrap().materialize().unwrap();
-            let a_lazy = c.adjoint().unwrap();
+            let a = c.adjoint(cuda).unwrap().materialize(cuda).unwrap();
+            let a_lazy = c.adjoint(cuda).unwrap();
 
             let (view, owned) = direct!(
                 "cuda contract",
                 a.contract(
+                    cuda,
                     b.adjoint_view(),
                     &ContractSpec {
                         lhs: &[2],
@@ -434,6 +471,7 @@ mod cuda {
                     }
                 ),
                 a.contract(
+                    cuda,
                     &lazy,
                     &ContractSpec {
                         lhs: &[2],
@@ -444,16 +482,18 @@ mod cuda {
                 )
             );
             assert_same_tensor!(
-                view.to_host().unwrap(),
-                owned.to_host().unwrap(),
+                cpu,
+                view.to_host(cuda).unwrap(),
+                owned.to_host(cuda).unwrap(),
                 format!("{what}: contract")
             );
 
-            let mut destination = owned.zeros_like().unwrap();
-            let mut expected = owned.zeros_like().unwrap();
+            let mut destination = owned.zeros_like(cuda).unwrap();
+            let mut expected = owned.zeros_like(cuda).unwrap();
             let one = <$dtype>::from(1.0);
             let (result, entries) = adjoint_entries(|| {
                 a.contract_into(
+                    cuda,
                     b.adjoint_view(),
                     &ContractSpec {
                         lhs: &[2],
@@ -469,6 +509,7 @@ mod cuda {
             assert_eq!(entries, 0, "{what}: contract_into");
             result.unwrap();
             a.contract_into(
+                cuda,
                 &lazy,
                 &ContractSpec {
                     lhs: &[2],
@@ -482,55 +523,59 @@ mod cuda {
             )
             .unwrap();
             assert_same_tensor!(
-                destination.to_host().unwrap(),
-                expected.to_host().unwrap(),
+                cpu,
+                destination.to_host(cuda).unwrap(),
+                expected.to_host(cuda).unwrap(),
                 format!("{what}: contract_into")
             );
 
             let (view, owned) = direct!(
                 "cuda compose",
-                b.compose(b.adjoint_view()),
-                b.compose(&lazy)
+                b.compose(cuda, b.adjoint_view()),
+                b.compose(cuda, &lazy)
             );
             assert_same_tensor!(
-                view.to_host().unwrap(),
-                owned.to_host().unwrap(),
+                cpu,
+                view.to_host(cuda).unwrap(),
+                owned.to_host(cuda).unwrap(),
                 format!("{what}: compose")
             );
 
             let (view, owned) = direct!(
                 "cuda axpby (both lazy)",
-                a_lazy.axpby($alpha, b.adjoint_view(), $beta),
-                a_lazy.axpby($alpha, &lazy, $beta)
+                a_lazy.axpby(cuda, $alpha, b.adjoint_view(), $beta),
+                a_lazy.axpby(cuda, $alpha, &lazy, $beta)
             );
             assert_same_tensor!(
-                view.to_host().unwrap(),
-                owned.to_host().unwrap(),
+                cpu,
+                view.to_host(cuda).unwrap(),
+                owned.to_host(cuda).unwrap(),
                 format!("{what}: axpby")
             );
 
             let (view, owned) = direct!(
                 "cuda axpby (mixed)",
-                a.axpby($alpha, b.adjoint_view(), $beta),
-                a.axpby($alpha, &lazy, $beta)
+                a.axpby(cuda, $alpha, b.adjoint_view(), $beta),
+                a.axpby(cuda, $alpha, &lazy, $beta)
             );
             assert_same_tensor!(
-                view.to_host().unwrap(),
-                owned.to_host().unwrap(),
+                cpu,
+                view.to_host(cuda).unwrap(),
+                owned.to_host(cuda).unwrap(),
                 format!("{what}: mixed axpby")
             );
 
             // `inner` still rejects a lazy operand on the device.
-            let (view, entries) = adjoint_entries(|| a.inner(b.adjoint_view()));
+            let (view, entries) = adjoint_entries(|| a.inner(cuda, b.adjoint_view()));
             assert_eq!(entries, 0);
             assert_eq!(
                 view.err().unwrap(),
-                a.inner(&lazy).err().unwrap(),
+                a.inner(cuda, &lazy).err().unwrap(),
                 "{what}: inner"
             );
 
             // Positive control for the device probe.
-            let (_, entries) = adjoint_entries(|| lazy.materialize().unwrap());
+            let (_, entries) = adjoint_entries(|| lazy.materialize(cuda).unwrap());
             assert_eq!(entries, 1, "{what}: device probe");
         }};
     }
@@ -573,7 +618,7 @@ mod cuda {
 /// in place (`scaled_axis`, compact `solve` through `compose`, compact
 /// `axpby`/`inner`), bit-identical to `&x.adjoint()?`.
 macro_rules! compact_suite {
-    ($bond:expr, $v:expr, $dtype:ty, $value:expr, $alpha:expr, $beta:expr, $what:expr) => {{
+    ($engine:ident, $bond:expr, $v:expr, $dtype:ty, $value:expr, $alpha:expr, $beta:expr, $what:expr) => {{
         let (bond, v, what) = ($bond, $v, $what);
         let value: fn(f64) -> $dtype = $value;
         let runtime = runtime();
@@ -589,38 +634,40 @@ macro_rules! compact_suite {
                 sector,
             })
             .collect::<Vec<_>>();
-        let d: TensorMap<_, $dtype> = TensorMap::diagonal(&runtime, &bond, spectra).unwrap();
+        let d: TensorMap<_, $dtype> =
+            TensorMap::diagonal($engine, &runtime, &bond, spectra).unwrap();
         // x: [v] <- [bond], so x': [bond] <- [v].
         let x: TensorMap<_, $dtype> =
-            TensorMap::rand_with_seed(&runtime, [&v], [&bond], 5).unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&v], [&bond], 5).unwrap();
         // y: [bond] <- [v], so y': [v] <- [bond].
         let y: TensorMap<_, $dtype> =
-            TensorMap::rand_with_seed(&runtime, [&bond], [&v], 6).unwrap();
-        let x_lazy = x.adjoint().unwrap();
-        let y_lazy = y.adjoint().unwrap();
-        let d_adjoint = d.adjoint().unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&bond], [&v], 6).unwrap();
+        let x_lazy = x.adjoint($engine).unwrap();
+        let y_lazy = y.adjoint($engine).unwrap();
+        let d_adjoint = d.adjoint($engine).unwrap();
 
         let (view, owned) = direct!(
             "D.compose(x')",
-            d.compose(x.adjoint_view()),
-            d.compose(&x_lazy)
+            d.compose($engine, x.adjoint_view()),
+            d.compose($engine, &x_lazy)
         );
-        assert_same_tensor!(view, owned, format!("{what}: D.compose(x')"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: D.compose(x')"));
         let (view, owned) = direct!(
             "y'.compose(D')",
-            y_lazy.compose(d.adjoint_view()),
-            y_lazy.compose(&d_adjoint)
+            y_lazy.compose($engine, d.adjoint_view()),
+            y_lazy.compose($engine, &d_adjoint)
         );
-        assert_same_tensor!(view, owned, format!("{what}: y'.compose(D')"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: y'.compose(D')"));
         let (view, owned) = direct!(
             "x.compose(D')",
-            x.compose(d.adjoint_view()),
-            x.compose(&d_adjoint)
+            x.compose($engine, d.adjoint_view()),
+            x.compose($engine, &d_adjoint)
         );
-        assert_same_tensor!(view, owned, format!("{what}: x.compose(D')"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: x.compose(D')"));
         let (view, owned) = direct!(
             "D.contract(x')",
             d.contract(
+                $engine,
                 x.adjoint_view(),
                 &ContractSpec {
                     lhs: &[1],
@@ -630,6 +677,7 @@ macro_rules! compact_suite {
                 }
             ),
             d.contract(
+                $engine,
                 &x_lazy,
                 &ContractSpec {
                     lhs: &[1],
@@ -639,35 +687,41 @@ macro_rules! compact_suite {
                 }
             )
         );
-        assert_same_tensor!(view, owned, format!("{what}: D.contract(x')"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: D.contract(x')"));
         let (view, owned) = direct!(
             "compact solve",
-            d.solve(&[0], &[1], x.adjoint_view(), &[0], &[1]),
-            d.solve(&[0], &[1], &x_lazy, &[0], &[1])
+            d.solve($engine, &[0], &[1], x.adjoint_view(), &[0], &[1]),
+            d.solve($engine, &[0], &[1], &x_lazy, &[0], &[1])
         );
-        assert_same_tensor!(view, owned, format!("{what}: compact solve"));
+        assert_same_tensor!($engine, view, owned, format!("{what}: compact solve"));
 
         // e: [bond] <- [bond] dense, so e' has D's hom space.
         let e: TensorMap<_, $dtype> =
-            TensorMap::rand_with_seed(&runtime, [&bond], [&bond], 7).unwrap();
-        let e_lazy = e.adjoint().unwrap();
+            TensorMap::rand_with_seed($engine, &runtime, [&bond], [&bond], 7).unwrap();
+        let e_lazy = e.adjoint($engine).unwrap();
         let (view, owned) = direct!(
             "compact axpby",
-            d.axpby($alpha, e.adjoint_view(), $beta),
-            d.axpby($alpha, &e_lazy, $beta)
+            d.axpby($engine, $alpha, e.adjoint_view(), $beta),
+            d.axpby($engine, $alpha, &e_lazy, $beta)
         );
-        assert_same_tensor!(view, owned, format!("{what}: compact axpby"));
-        let (view, owned) = direct!("compact inner", d.inner(e.adjoint_view()), d.inner(&e_lazy));
+        assert_same_tensor!($engine, view, owned, format!("{what}: compact axpby"));
+        let (view, owned) = direct!(
+            "compact inner",
+            d.inner($engine, e.adjoint_view()),
+            d.inner($engine, &e_lazy)
+        );
         assert_eq!(view, owned, "{what}: compact inner");
     }};
 }
 
 #[test]
 fn compact_diagonal_partners_read_the_view_in_place() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let bond = || u1(&[(-1, 2), (0, 3), (1, 1)]);
     let v = || u1(&[(-1, 1), (0, 2), (1, 2)]);
-    compact_suite!(bond(), v(), f64, |x| x, RE.0, RE.1, "U1 f64");
+    compact_suite!(engine, bond(), v(), f64, |x| x, RE.0, RE.1, "U1 f64");
     compact_suite!(
+        engine,
         bond(),
         v(),
         Complex64,
@@ -678,8 +732,9 @@ fn compact_diagonal_partners_read_the_view_in_place() {
     );
     let bond = || su2(&[(0, 2), (1, 1), (2, 2)]);
     let v = || su2(&[(0, 1), (1, 2), (2, 1)]);
-    compact_suite!(bond(), v(), f64, |x| x, RE.0, RE.1, "SU2 f64");
+    compact_suite!(engine, bond(), v(), f64, |x| x, RE.0, RE.1, "SU2 f64");
     compact_suite!(
+        engine,
         bond(),
         v(),
         Complex64,
@@ -694,24 +749,32 @@ fn compact_diagonal_partners_read_the_view_in_place() {
 /// public geometry is known to reach; the test hook forces the decline.
 #[test]
 fn cat_refuses_an_adjoint_view_when_its_plan_declines() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let v = u1(&[(-1, 2), (0, 1), (1, 3)]);
     let w = u1(&[(0, 2), (1, 1)]);
     let a: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&v, &v], [&w], 1).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&w], 1).unwrap();
     let b: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&w], [&v, &v], 2).unwrap();
-    let lazy = b.adjoint().unwrap();
-    let fast = a.cat(&lazy, Side::Domain).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&w], [&v, &v], 2).unwrap();
+    let lazy = b.adjoint(engine).unwrap();
+    let fast = a.cat(engine, &lazy, Side::Domain).unwrap();
     probe::with_routes(DECLINE_ORIENTED_CAT, || {
+        let lazy_materialize = &lazy.materialize(engine).unwrap();
         refused!(
+            engine,
             "cat",
-            a.cat(b.adjoint_view(), Side::Domain),
-            a.cat(&lazy, Side::Domain),
-            a.cat(&lazy.materialize().unwrap(), Side::Domain)
+            a.cat(engine, b.adjoint_view(), Side::Domain),
+            a.cat(engine, &lazy, Side::Domain),
+            a.cat(engine, lazy_materialize, Side::Domain)
         );
         // The declined fallback of the owned lazy adjoint equals the plan result.
-        assert_same_tensor!(a.cat(&lazy, Side::Domain).unwrap(), fast, "cat fallback");
+        assert_same_tensor!(
+            engine,
+            a.cat(engine, &lazy, Side::Domain).unwrap(),
+            fast,
+            "cat fallback"
+        );
     });
 }
 
@@ -719,6 +782,7 @@ fn cat_refuses_an_adjoint_view_when_its_plan_declines() {
 /// compact diagonal directly. The result is bitwise the fast-plan result.
 #[test]
 fn cat_fallback_reads_compact_operand_without_densifying() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let bond = u1(&[(-1, 2), (0, 1), (1, 3)]);
     let spectra = bond
@@ -733,11 +797,13 @@ fn cat_fallback_reads_compact_operand_without_densifying() {
             sector,
         })
         .collect::<Vec<_>>();
-    let d: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &bond, spectra).unwrap();
-    let x: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&bond], [&bond], 7).unwrap();
-    let y: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&bond], [&bond], 8).unwrap();
-    let lazy = y.adjoint().unwrap();
-    let eager = lazy.materialize().unwrap();
+    let d: TensorMap<_, f64> = TensorMap::diagonal(engine, &runtime, &bond, spectra).unwrap();
+    let x: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&bond], [&bond], 7).unwrap();
+    let y: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&bond], [&bond], 8).unwrap();
+    let lazy = y.adjoint(engine).unwrap();
+    let eager = lazy.materialize(engine).unwrap();
     let bits = |t: &TensorMap<_, f64>| {
         t.dense_data()
             .unwrap()
@@ -762,14 +828,16 @@ fn cat_fallback_reads_compact_operand_without_densifying() {
             } else {
                 rhs
             };
+            let oracle_rhs_materialize = &oracle_rhs.materialize(engine).unwrap();
             let oracle = oracle_lhs
-                .materialize()
+                .materialize(engine)
                 .unwrap()
-                .cat(&oracle_rhs.materialize().unwrap(), side)
+                .cat(engine, oracle_rhs_materialize, side)
                 .unwrap();
-            let fast = lhs.cat(rhs, side).unwrap();
+            let fast = lhs.cat(engine, rhs, side).unwrap();
             let diagonal = probe::record();
-            let slow = probe::with_routes(DECLINE_ORIENTED_CAT, || lhs.cat(rhs, side).unwrap());
+            let slow =
+                probe::with_routes(DECLINE_ORIENTED_CAT, || lhs.cat(engine, rhs, side).unwrap());
             let entries = diagonal.get(Event::DiagonalMaterialization);
             assert_eq!(
                 bits(&slow),
@@ -795,19 +863,21 @@ fn cat_fallback_reads_compact_operand_without_densifying() {
 /// entering neither adjoint materialization nor diagonal densification.
 #[test]
 fn dense_data_borrows_dense_storage_and_never_materializes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let v = su2(&[(0, 2), (1, 1)]);
-    let t: TensorMap<_, Complex64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 3).unwrap();
+    let t: TensorMap<_, Complex64> =
+        TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 3).unwrap();
     let (dense, entries) = adjoint_entries(|| t.dense_data().unwrap());
     assert_eq!(entries, 0);
     assert_eq!(dense.as_ptr(), t.dense_data().unwrap().as_ptr());
 
-    let adjoint = t.adjoint().unwrap();
+    let adjoint = t.adjoint(engine).unwrap();
     let (refused, entries) = adjoint_entries(|| adjoint.dense_data().map(<[_]>::len));
     assert_eq!(entries, 0, "dense_data entered adjoint materialization");
     assert!(is_unsupported(&refused.unwrap_err(), "dense_data"));
     // Positive control: the explicit path enters the probe.
-    let (materialized, entries) = adjoint_entries(|| adjoint.materialize().unwrap());
+    let (materialized, entries) = adjoint_entries(|| adjoint.materialize(engine).unwrap());
     assert_eq!(entries, 1);
     assert_eq!(materialized.dense_data().unwrap().len(), dense.len());
 
@@ -821,7 +891,7 @@ fn dense_data_borrows_dense_storage_and_never_materializes() {
             sector,
         })
         .collect::<Vec<_>>();
-    let d: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &bond, spectra).unwrap();
+    let d: TensorMap<_, f64> = TensorMap::diagonal(engine, &runtime, &bond, spectra).unwrap();
     let densified = probe::record();
     assert!(is_unsupported(&d.dense_data().unwrap_err(), "dense_data"));
     assert!(is_unsupported(
@@ -833,7 +903,7 @@ fn dense_data_borrows_dense_storage_and_never_materializes() {
         0,
         "dense_data densified a compact diagonal"
     );
-    let dense_d = d.materialize().unwrap();
+    let dense_d = d.materialize(engine).unwrap();
     assert_eq!(dense_d.dense_data().unwrap().len(), 2 * 2 + 1);
     assert!(dense_d.subblocks().is_ok());
     let (refused, entries) = adjoint_entries(|| adjoint.subblocks().map(|_| ()));

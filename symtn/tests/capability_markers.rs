@@ -20,46 +20,49 @@ use symtn::typed::{AdvancedLinalgScalar, FactorizationScalar, TensorMap, TensorS
 
 /// Base family: everything admitted by [`TensorScalar`] alone.
 fn base_family<D: TensorScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-    let _ = tensor.norm(2.0);
-    let _ = tensor.norm(f64::INFINITY);
-    let _ = tensor.inner(tensor);
-    let _ = tensor.tr();
-    let _ = tensor.adjoint();
-    let _ = tensor.permute(&[0], &[1]);
-    let _ = tensor.transpose(&[1], &[0]);
-    let _ = tensor.repartition(1);
-    let _ = tensor.twist(&[0], Direction::Forward);
-    let _ = tensor.compose(tensor);
-    let _ = tensor.otimes(tensor);
-    let _ = tensor.trace_pairs(&[(0, 1)]);
-    let _ = tensor.diagview();
-    let _ = tensor.map_diagonal(|value| value);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let _ = tensor.norm(engine, 2.0);
+    let _ = tensor.norm(engine, f64::INFINITY);
+    let _ = tensor.inner(engine, tensor);
+    let _ = tensor.tr(engine);
+    let _ = tensor.adjoint(engine);
+    let _ = tensor.permute(engine, &[0], &[1]);
+    let _ = tensor.transpose(engine, &[1], &[0]);
+    let _ = tensor.repartition(engine, 1);
+    let _ = tensor.twist(engine, &[0], Direction::Forward);
+    let _ = tensor.compose(engine, tensor);
+    let _ = tensor.otimes(engine, tensor);
+    let _ = tensor.trace_pairs(engine, &[(0, 1)]);
+    let _ = tensor.diagview(engine);
+    let _ = tensor.map_diagonal(engine, |value| value);
     let _ = tensor.subblocks();
 }
 
 /// Factorization family: needs [`FactorizationScalar`], not more.
 fn factorization_family<D: FactorizationScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-    let _ = tensor.qr_compact(&[0], &[1]);
-    let _ = tensor.qr_full(&[0], &[1]);
-    let _ = tensor.lq_compact(&[0], &[1]);
-    let _ = tensor.lq_full(&[0], &[1]);
-    let _ = tensor.svd_compact(&[0], &[1]);
-    let _ = tensor.svd_full(&[0], &[1]);
-    let _ = tensor.svd_vals(&[0], &[1]);
-    let _ = tensor.eigh_full(&[0], &[1], HermitianTol::DEFAULT);
-    let _ = tensor.eigh_vals(&[0], &[1], HermitianTol::DEFAULT);
-    let _ = tensor.left_null(&[0], &[1]);
-    let _ = tensor.right_null(&[0], &[1]);
-    let _ = tensor.left_polar(&[0], &[1]);
-    let _ = tensor.right_polar(&[0], &[1]);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let _ = tensor.qr_compact(engine, &[0], &[1]);
+    let _ = tensor.qr_full(engine, &[0], &[1]);
+    let _ = tensor.lq_compact(engine, &[0], &[1]);
+    let _ = tensor.lq_full(engine, &[0], &[1]);
+    let _ = tensor.svd_compact(engine, &[0], &[1]);
+    let _ = tensor.svd_full(engine, &[0], &[1]);
+    let _ = tensor.svd_vals(engine, &[0], &[1]);
+    let _ = tensor.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT);
+    let _ = tensor.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT);
+    let _ = tensor.left_null(engine, &[0], &[1]);
+    let _ = tensor.right_null(engine, &[0], &[1]);
+    let _ = tensor.left_polar(engine, &[0], &[1]);
+    let _ = tensor.right_polar(engine, &[0], &[1]);
 }
 
 /// Advanced linear algebra: needs [`AdvancedLinalgScalar`].
 fn advanced_family<D: AdvancedLinalgScalar>(tensor: &TensorMap<U1FusionRule, D>) {
-    let _ = tensor.exp(&[0], &[1]);
-    let _ = tensor.inv(&[0], &[1]);
-    let _ = tensor.pinv(&[0], &[1], 0.0);
-    let _ = tensor.solve(&[0], &[1], tensor, &[0], &[1]);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let _ = tensor.exp(engine, &[0], &[1]);
+    let _ = tensor.inv(engine, &[0], &[1]);
+    let _ = tensor.pinv(engine, &[0], &[1], 0.0);
+    let _ = tensor.solve(engine, &[0], &[1], tensor, &[0], &[1]);
 }
 
 /// The general (non-Hermitian) eigendecomposition also needs its factor dtype
@@ -70,8 +73,9 @@ where
     D: AdvancedLinalgScalar,
     D::Eig: TensorScalar,
 {
-    let _ = tensor.eig_full(&[0], &[1]);
-    let _ = tensor.eig_vals(&[0], &[1]);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let _ = tensor.eig_full(engine, &[0], &[1]);
+    let _ = tensor.eig_vals(engine, &[0], &[1]);
 }
 
 /// Instantiating the helpers for every admitted payload dtype is the

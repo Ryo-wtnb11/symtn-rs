@@ -67,6 +67,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     FermionParityFusionRule, SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule,
@@ -128,7 +129,8 @@ fn close(got: Complex64, want: Complex64) -> bool {
 
 /// The dense image of `t`, materializing a lazy adjoint or compact diagonal.
 fn dense<R, D: Lane + symtn::typed::TensorScalar>(t: &TensorMap<R, D>) -> Vec<Complex64> {
-    t.materialize()
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    t.materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -192,11 +194,11 @@ macro_rules! entries {
 /// One cell per `β`: `$into` on a fresh `dst₀` on eager's legs equals
 /// `α·eager + β·dst₀` and keeps the destination's allocation and provider.
 macro_rules! cell {
-    ($rows:expr, $runtime:expr, $source:expr, $key:expr, $d:ty, $name:expr,
+    ($engine:ident, $rows:expr, $runtime:expr, $source:expr, $key:expr, $d:ty, $name:expr,
      |$t:ident| $eager:expr, |$dst:ident, $a:ident, $b:ident| $into:expr) => {
-        cell!(dense; $rows, $runtime, $source, $key, $d, $name, |$t| $eager, |$dst, $a, $b| $into)
+        cell!($engine, dense; $rows, $runtime, $source, $key, $d, $name, |$t| $eager, |$dst, $a, $b| $into)
     };
-    ($kind:ident; $rows:expr, $runtime:expr, $source:expr, $key:expr, $d:ty, $name:expr,
+    ($engine:ident, $kind:ident; $rows:expr, $runtime:expr, $source:expr, $key:expr, $d:ty, $name:expr,
      |$t:ident| $eager:expr, |$dst:ident, $a:ident, $b:ident| $into:expr) => {{
         let cold = $source.dense_data().is_err();
         let eager = {
@@ -204,11 +206,11 @@ macro_rules! cell {
             $eager.unwrap()
         };
         let oracle = {
-            let materialized = $source.materialize().unwrap();
+            let materialized = $source.materialize($engine).unwrap();
             let $t = &materialized;
             $eager.unwrap()
         };
-        beta_cells!(
+        beta_cells!($engine,
             $kind,
             $rows,
             $runtime,
@@ -231,17 +233,19 @@ macro_rules! cell {
 /// One cell per `β` for `$lhs.contract_into($rhs_arg, ..)`: the oracle
 /// contracts the materialized operands, and both operands stay cold.
 macro_rules! contract_cell {
-    ($rows:expr, $runtime:expr, $lhs:expr, $rhs:expr, $rhs_arg:expr, $spec:expr, $key:expr,
+    ($engine:ident, $rows:expr, $runtime:expr, $lhs:expr, $rhs:expr, $rhs_arg:expr, $spec:expr, $key:expr,
      $d:ty, $name:expr) => {{
         let spec = $spec;
         let cold = ($lhs.dense_data().is_err(), $rhs.dense_data().is_err());
-        let eager = $lhs.contract($rhs_arg, &spec).unwrap();
+        let eager = $lhs.contract($engine, $rhs_arg, &spec).unwrap();
+        let dense_rhs = $rhs.materialize($engine).unwrap();
         let oracle = $lhs
-            .materialize()
+            .materialize($engine)
             .unwrap()
-            .contract(&$rhs.materialize().unwrap(), &spec)
+            .contract($engine, &dense_rhs, &spec)
             .unwrap();
         beta_cells!(
+            $engine,
             dense,
             $rows,
             $runtime,
@@ -250,7 +254,7 @@ macro_rules! contract_cell {
             $key,
             $d,
             $name,
-            |d, a, b| $lhs.contract_into($rhs_arg, &spec, d, a, b),
+            |d, a, b| $lhs.contract_into($engine, $rhs_arg, &spec, d, a, b),
             || assert_eq!(
                 ($lhs.dense_data().is_err(), $rhs.dense_data().is_err()),
                 cold,
@@ -267,15 +271,22 @@ macro_rules! contract_cell {
 /// fresh payload (`scale` needs a real-symbol rule, so `dense` cells, which
 /// include complex-symbol rules, never name it).
 macro_rules! seeded_destination {
-    (dense, $runtime:expr, $eager:expr, $seed:expr) => {
-        TensorMap::from_subblock_fn($runtime, &$eager.codomain(), &$eager.domain(), $seed).unwrap()
+    ($engine:ident, dense, $runtime:expr, $eager:expr, $seed:expr) => {
+        TensorMap::from_subblock_fn(
+            $engine,
+            $runtime,
+            &$eager.codomain(),
+            &$eager.domain(),
+            $seed,
+        )
+        .unwrap()
     };
-    (traced, $runtime:expr, $eager:expr, $seed:expr) => {
+    ($engine:ident, traced, $runtime:expr, $eager:expr, $seed:expr) => {
         if $eager.rank() == 0 {
             let (trees, _) = $eager.subblocks().unwrap().next().unwrap();
-            $eager.scale($seed(&trees, &[])).unwrap()
+            $eager.scale($engine, $seed(&trees, &[])).unwrap()
         } else {
-            seeded_destination!(dense, $runtime, $eager, $seed)
+            seeded_destination!($engine, dense, $runtime, $eager, $seed)
         }
     };
 }
@@ -284,7 +295,7 @@ macro_rules! seeded_destination {
 /// then `$into` on a fresh `dst₀` equals `α·eager + β·dst₀`, keeps the
 /// destination's allocation and provider, and `$cold` holds.
 macro_rules! beta_cells {
-    ($kind:ident, $rows:expr, $runtime:expr, $eager:expr, $oracle:expr, $key:expr, $d:ty, $name:expr,
+    ($engine:ident, $kind:ident, $rows:expr, $runtime:expr, $eager:expr, $oracle:expr, $key:expr, $d:ty, $name:expr,
      |$dst:ident, $a:ident, $b:ident| $into:expr, $cold:expr) => {{
         let key = $key;
         let eager = $eager;
@@ -303,7 +314,7 @@ macro_rules! beta_cells {
                 }
             };
             let mut destination: TensorMap<_, $d> =
-                seeded_destination!($kind, $runtime, eager, seed);
+                seeded_destination!($engine, $kind, $runtime, eager, seed);
             let before = dense(&destination);
             let payload = destination.dense_data().unwrap().as_ptr();
             let provider = destination.provider() as *const _;
@@ -338,67 +349,73 @@ macro_rules! beta_cells {
 
 /// Every tree-transform `_into` of a compact rank-(1, 1) diagonal `$source`.
 macro_rules! bond_cells {
-    ($runtime:expr, $source:expr, $key:expr, $d:ty) => {{
+    ($engine:ident, $runtime:expr, $source:expr, $key:expr, $d:ty) => {{
         let mut rows: Rows = Vec::new();
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond identity permute",
-            |t| t.permute(&[0], &[1]),
-            |d, a, b| $source.permute_into(&[0], &[1], d, a, b)
+            |t| t.permute($engine, &[0], &[1]),
+            |d, a, b| $source.permute_into($engine, &[0], &[1], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond swap permute",
-            |t| t.permute(&[1], &[0]),
-            |d, a, b| $source.permute_into(&[1], &[0], d, a, b)
+            |t| t.permute($engine, &[1], &[0]),
+            |d, a, b| $source.permute_into($engine, &[1], &[0], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond swap transpose",
-            |t| t.transpose(&[1], &[0]),
-            |d, a, b| $source.transpose_into(&[1], &[0], d, a, b)
+            |t| t.transpose($engine, &[1], &[0]),
+            |d, a, b| $source.transpose_into($engine, &[1], &[0], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond braid",
-            |t| t.braid(&[1], &[0], &[0, 1]),
-            |d, a, b| $source.braid_into(&[1], &[0], &[0, 1], d, a, b)
+            |t| t.braid($engine, &[1], &[0], &[0, 1]),
+            |d, a, b| $source.braid_into($engine, &[1], &[0], &[0, 1], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond repartition (0, 2)",
-            |t| t.repartition(0),
-            |d, a, b| $source.repartition_into(d, a, b)
+            |t| t.repartition($engine, 0),
+            |d, a, b| $source.repartition_into($engine, d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "bond repartition (2, 0)",
-            |t| t.repartition(2),
-            |d, a, b| $source.repartition_into(d, a, b)
+            |t| t.repartition($engine, 2),
+            |d, a, b| $source.repartition_into($engine, d, a, b)
         );
         rows
     }};
@@ -407,7 +424,7 @@ macro_rules! bond_cells {
 /// A compact diagonal on `$leg` whose entries are fixed by the sector's
 /// provider-neutral `$name` and the index only, lifted by `$lift`.
 macro_rules! bond {
-    ($runtime:expr, $leg:expr, $sectors:expr, $name:expr, $d:ty, $lift:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr, $sectors:expr, $name:expr, $d:ty, $lift:expr) => {{
         let (lift, name) = ($lift, $name);
         let spectra = $sectors
             .into_iter()
@@ -418,53 +435,57 @@ macro_rules! bond {
                 sector,
             })
             .collect::<Vec<_>>();
-        TensorMap::<_, $d>::diagonal($runtime, &$leg, spectra).unwrap()
+        TensorMap::<_, $d>::diagonal($engine, $runtime, &$leg, spectra).unwrap()
     }};
 }
 
 /// Every tree-transform `_into` of an owned dense rank-(2, 2) `$source`.
 macro_rules! transform_cells {
-    ($runtime:expr, $source:expr, $key:expr, $d:ty) => {{
+    ($engine:ident, $runtime:expr, $source:expr, $key:expr, $d:ty) => {{
         let mut rows: Rows = Vec::new();
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "permute",
-            |t| t.permute(&[2, 0], &[1, 3]),
-            |d, a, b| $source.permute_into(&[2, 0], &[1, 3], d, a, b)
+            |t| t.permute($engine, &[2, 0], &[1, 3]),
+            |d, a, b| $source.permute_into($engine, &[2, 0], &[1, 3], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "braid",
-            |t| t.braid(&[1, 0], &[3, 2], &[0, 1, 2, 3]),
-            |d, a, b| $source.braid_into(&[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
+            |t| t.braid($engine, &[1, 0], &[3, 2], &[0, 1, 2, 3]),
+            |d, a, b| $source.braid_into($engine, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "transpose",
-            |t| t.transpose(&[1, 3], &[0, 2]),
-            |d, a, b| $source.transpose_into(&[1, 3], &[0, 2], d, a, b)
+            |t| t.transpose($engine, &[1, 3], &[0, 2]),
+            |d, a, b| $source.transpose_into($engine, &[1, 3], &[0, 2], d, a, b)
         );
         cell!(
+            $engine,
             rows,
             $runtime,
             $source,
             $key,
             $d,
             "repartition",
-            |t| t.repartition(1),
-            |d, a, b| $source.repartition_into(d, a, b)
+            |t| t.repartition($engine, 1),
+            |d, a, b| $source.repartition_into($engine, d, a, b)
         );
         rows
     }};
@@ -473,11 +494,11 @@ macro_rules! transform_cells {
 /// A rank-(2, 2) source `[v, w'] ← [v, w']` with a dual leg on each side,
 /// as f64.
 macro_rules! source {
-    ($runtime:expr, $v:expr, $w:expr, $key:expr) => {{
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $key:expr) => {{
         let key = $key;
         let w = $w.try_dual().unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn($runtime, [&$v, &w], [&$v, &w], |trees, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [&$v, &w], [&$v, &w], |trees, index| {
                 value(&key(trees), index)
             })
             .unwrap();
@@ -542,29 +563,32 @@ fn debug_key<S: std::fmt::Debug>(trees: &BlockFusionTrees<S>) -> String {
 /// The owned dense and lazy-adjoint rows of both lanes:
 /// `[owned f64, owned c64, lazy f64, lazy c64]`.
 macro_rules! both_lanes {
-    ($runtime:expr, $v:expr, $w:expr, $key:expr) => {{
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $key:expr) => {{
         let f64_rows = {
-            let source = source!($runtime, $v, $w, $key);
-            transform_cells!($runtime, source, $key, f64)
+            let source = source!($engine, $runtime, $v, $w, $key);
+            transform_cells!($engine, $runtime, source, $key, f64)
         };
         // `1 + 2i` makes a lost or doubled conjugation visible.
-        let c64 = || {
-            source!($runtime, $v, $w, $key)
-                .convert::<Complex64>()
-                .scale(Complex64::new(1.0, 2.0))
+        let c64 = |$engine: &mut dyn Engine| {
+            source!($engine, $runtime, $v, $w, $key)
+                .convert::<Complex64>($engine)
+                .unwrap()
+                .scale($engine, Complex64::new(1.0, 2.0))
                 .unwrap()
         };
         let c64_rows = {
-            let source = c64();
-            transform_cells!($runtime, source, $key, Complex64)
+            let source = c64($engine);
+            transform_cells!($engine, $runtime, source, $key, Complex64)
         };
         let lazy_f64_rows = {
-            let source = source!($runtime, $v, $w, $key).adjoint().unwrap();
-            transform_cells!($runtime, source, $key, f64)
+            let source = source!($engine, $runtime, $v, $w, $key)
+                .adjoint($engine)
+                .unwrap();
+            transform_cells!($engine, $runtime, source, $key, f64)
         };
         let lazy_c64_rows = {
-            let source = c64().adjoint().unwrap();
-            transform_cells!($runtime, source, $key, Complex64)
+            let source = c64($engine).adjoint($engine).unwrap();
+            transform_cells!($engine, $runtime, source, $key, Complex64)
         };
         [f64_rows, c64_rows, lazy_f64_rows, lazy_c64_rows]
     }};
@@ -572,38 +596,47 @@ macro_rules! both_lanes {
 
 /// The compact rows of both lanes on `$leg`: `[f64, c64]`.
 macro_rules! bond_lanes {
-    ($runtime:expr, $leg:expr, $sectors:expr, $name:expr, $key:expr) => {{
-        let source = bond!($runtime, $leg, $sectors, $name, f64, |x: f64| x);
-        let f64_rows = bond_cells!($runtime, source, $key, f64);
-        let source = bond!($runtime, $leg, $sectors, $name, Complex64, |x: f64| {
-            Complex64::new(x, 2.0 * x)
-        });
-        let c64_rows = bond_cells!($runtime, source, $key, Complex64);
+    ($engine:ident, $runtime:expr, $leg:expr, $sectors:expr, $name:expr, $key:expr) => {{
+        let source = bond!($engine, $runtime, $leg, $sectors, $name, f64, |x: f64| x);
+        let f64_rows = bond_cells!($engine, $runtime, source, $key, f64);
+        let source = bond!(
+            $engine,
+            $runtime,
+            $leg,
+            $sectors,
+            $name,
+            Complex64,
+            |x: f64| { Complex64::new(x, 2.0 * x) }
+        );
+        let c64_rows = bond_cells!($engine, $runtime, source, $key, Complex64);
         [f64_rows, c64_rows]
     }};
 }
 
 #[test]
 fn multiplicity_free_real_symbol_transform_into_is_alpha_eager_plus_beta_destination() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
-    both_lanes!(&runtime, v, w, debug_key::<U1Irrep>);
+    both_lanes!(engine, &runtime, v, w, debug_key::<U1Irrep>);
     let (v, w) = fz2_legs();
-    both_lanes!(&runtime, v, w, debug_key::<Z2Irrep>);
+    both_lanes!(engine, &runtime, v, w, debug_key::<Z2Irrep>);
     let v = su2_leg();
-    both_lanes!(&runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    both_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {
+        twice(t, su2_spin)
+    });
 }
 
 #[test]
 fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta_destination() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     // Non-self-dual U(1): a swap moves each spectrum to the dual sector.
     let (v, _) = u1_legs();
     bond_lanes!(
+        engine,
         &runtime,
         v,
         [
@@ -617,6 +650,7 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
     // Fermion parity on a dual leg: the odd sector carries the swap sign.
     let (v, _) = fz2_legs();
     bond_lanes!(
+        engine,
         &runtime,
         v.try_dual().unwrap(),
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
@@ -625,6 +659,7 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
     );
     let v = su2_leg();
     bond_lanes!(
+        engine,
         &runtime,
         v,
         SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
@@ -635,6 +670,7 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
 
 #[test]
 fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let leg = GradedSpace::try_new(
@@ -643,49 +679,58 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
     )
     .unwrap();
     let key = debug_key::<TableSector>;
-    let source: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, index| {
+    let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, index| {
             Complex64::new(
                 value(&key(trees), index),
                 value(&format!("im{}", key(trees)), index),
             )
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let mut rows: Rows = Vec::new();
     cell!(
+        engine,
         rows,
         &runtime,
         source,
         key,
         Complex64,
         "braid",
-        |t| t.braid(&[1, 0], &[3, 2], &[0, 1, 2, 3]),
-        |d, a, b| source.braid_into(&[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
+        |t| t.braid(engine, &[1, 0], &[3, 2], &[0, 1, 2, 3]),
+        |d, a, b| source.braid_into(engine, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, a, b)
     );
     cell!(
+        engine,
         rows,
         &runtime,
         source,
         key,
         Complex64,
         "transpose",
-        |t| t.transpose(&[1, 3], &[0, 2]),
-        |d, a, b| source.transpose_into(&[1, 3], &[0, 2], d, a, b)
+        |t| t.transpose(engine, &[1, 3], &[0, 2]),
+        |d, a, b| source.transpose_into(engine, &[1, 3], &[0, 2], d, a, b)
     );
     cell!(
+        engine,
         rows,
         &runtime,
         source,
         key,
         Complex64,
         "repartition",
-        |t| t.repartition(1),
-        |d, a, b| source.repartition_into(d, a, b)
+        |t| t.repartition(engine, 1),
+        |d, a, b| source.repartition_into(engine, d, a, b)
     );
     assert_eq!(rows.len(), 3 * BETAS.len());
 
     // A compact Fibonacci bond: everything but the anyonic permute.
     let bond = bond!(
+        engine,
         &runtime,
         leg,
         [(TableSector::new(1), 2), (TableSector::new(2), 3)],
@@ -695,43 +740,49 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
     );
     let mut rows: Rows = Vec::new();
     cell!(
+        engine,
         rows,
         &runtime,
         bond,
         key,
         Complex64,
         "bond swap transpose",
-        |t| t.transpose(&[1], &[0]),
-        |d, a, b| bond.transpose_into(&[1], &[0], d, a, b)
+        |t| t.transpose(engine, &[1], &[0]),
+        |d, a, b| bond.transpose_into(engine, &[1], &[0], d, a, b)
     );
     cell!(
+        engine,
         rows,
         &runtime,
         bond,
         key,
         Complex64,
         "bond braid",
-        |t| t.braid(&[1], &[0], &[0, 1]),
-        |d, a, b| bond.braid_into(&[1], &[0], &[0, 1], d, a, b)
+        |t| t.braid(engine, &[1], &[0], &[0, 1]),
+        |d, a, b| bond.braid_into(engine, &[1], &[0], &[0, 1], d, a, b)
     );
     cell!(
+        engine,
         rows,
         &runtime,
         bond,
         key,
         Complex64,
         "bond repartition (2, 0)",
-        |t| t.repartition(2),
-        |d, a, b| bond.repartition_into(d, a, b)
+        |t| t.repartition(engine, 2),
+        |d, a, b| bond.repartition_into(engine, d, a, b)
     );
     assert_eq!(rows.len(), 3 * BETAS.len());
 
     // Anyonic: `permute` is refused alike, and the destination is untouched.
-    let eager = source.permute(&[2, 0], &[1, 3]).unwrap_err();
-    let mut destination = source.braid(&[1, 0], &[3, 2], &[0, 1, 2, 3]).unwrap();
+    let eager = source.permute(engine, &[2, 0], &[1, 3]).unwrap_err();
+    let mut destination = source
+        .braid(engine, &[1, 0], &[3, 2], &[0, 1, 2, 3])
+        .unwrap();
     let before = dense(&destination);
     let into = source
         .permute_into(
+            engine,
             &[1, 0],
             &[3, 2],
             &mut destination,
@@ -751,17 +802,23 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
 #[test]
 fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
-    let mf_rows = both_lanes!(&runtime, mf, mf, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
-    let checked_rows = both_lanes!(&runtime, checked, checked, |t: &BlockFusionTrees<
-        Vec<i64>,
-    >| twice(t, sun_spin));
+    let mf_rows = both_lanes!(engine, &runtime, mf, mf, |t: &BlockFusionTrees<
+        SU2Irrep,
+    >| twice(t, su2_spin));
+    let checked_rows = both_lanes!(
+        engine,
+        &runtime,
+        checked,
+        checked,
+        |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin)
+    );
     let mf_bond = bond_lanes!(
+        engine,
         &runtime,
         mf,
         SU2_SECTORS.map(|(s, k)| (SU2Irrep::from_twice_spin(s), k)),
@@ -769,6 +826,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
     );
     let checked_bond = bond_lanes!(
+        engine,
         &runtime,
         checked,
         SU2_SECTORS.map(|(s, k)| (vec![s as i64], k)),
@@ -807,7 +865,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
-    both_lanes!(&runtime, v, v, debug_key::<Vec<i64>>);
+    both_lanes!(engine, &runtime, v, v, debug_key::<Vec<i64>>);
     // A non-self-dual SU(3) bond on a dual leg.
     let leg = GradedSpace::try_new(
         Arc::new(
@@ -820,6 +878,7 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
     .try_dual()
     .unwrap();
     bond_lanes!(
+        engine,
         &runtime,
         leg,
         // The dual leg holds the conjugate labels.
@@ -835,24 +894,26 @@ fn checked_generic_transform_into_is_alpha_eager_plus_beta_destination_and_match
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_warm_transform_into_allocates_no_result_payload() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let v = sun2_leg();
-    let source = source!(&runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| twice(
-        t, sun_spin
-    ));
-    let mut destination = source.permute(&[2, 0], &[1, 3]).unwrap();
+    let source = source!(engine, &runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| {
+        twice(t, sun_spin)
+    });
+    let mut destination = source.permute(engine, &[2, 0], &[1, 3]).unwrap();
     let payload_bytes = std::mem::size_of_val(destination.dense_data().unwrap());
     for _ in 0..2 {
-        drop(source.permute(&[2, 0], &[1, 3]).unwrap());
+        drop(source.permute(engine, &[2, 0], &[1, 3]).unwrap());
         source
-            .permute_into(&[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
             .unwrap();
     }
-    let (_, eager) = counting_alloc::measure(|| drop(source.permute(&[2, 0], &[1, 3]).unwrap()));
+    let (_, eager) =
+        counting_alloc::measure(|| drop(source.permute(engine, &[2, 0], &[1, 3]).unwrap()));
     let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
         source
-            .permute_into(&[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
             .unwrap()
     });
     assert_eq!(into.matched_calls, 0, "{into:?}");
@@ -866,21 +927,21 @@ fn checked_generic_warm_transform_into_allocates_no_result_payload() {
 /// allocation as large as the parent payload: the source is read through its
 /// parent's storage, never materialized.
 macro_rules! lazy_into_allocations {
-    ($source:expr) => {{
+    ($engine:ident, $source:expr) => {{
         let parent = $source;
-        let lazy = parent.adjoint().unwrap();
+        let lazy = parent.adjoint($engine).unwrap();
         let mut destination = lazy
-            .permute(&[2, 0], &[1, 3])
+            .permute($engine, &[2, 0], &[1, 3])
             .unwrap()
-            .materialize()
+            .materialize($engine)
             .unwrap();
         let payload_bytes = std::mem::size_of_val(parent.dense_data().unwrap());
         for _ in 0..2 {
-            lazy.permute_into(&[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            lazy.permute_into($engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
                 .unwrap();
         }
         let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
-            lazy.permute_into(&[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
+            lazy.permute_into($engine, &[2, 0], &[1, 3], &mut destination, 1.0, 0.5)
                 .unwrap()
         });
         assert_eq!(into.matched_calls, 0, "{into:?}, payload {payload_bytes}");
@@ -890,6 +951,7 @@ macro_rules! lazy_into_allocations {
 
 #[test]
 fn lazy_adjoint_transform_into_allocates_no_parent_sized_buffer() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
@@ -902,13 +964,19 @@ fn lazy_adjoint_transform_into_allocates_no_parent_sized_buffer() {
         ],
     )
     .unwrap();
-    lazy_into_allocations!(source!(&runtime, v, v, debug_key::<U1Irrep>));
+    lazy_into_allocations!(
+        engine,
+        source!(engine, &runtime, v, v, debug_key::<U1Irrep>)
+    );
     #[cfg(feature = "cgc-gen")]
     {
         let v = sun2_leg();
-        lazy_into_allocations!(source!(&runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| {
-            twice(t, sun_spin)
-        }));
+        lazy_into_allocations!(
+            engine,
+            source!(engine, &runtime, v, v, |t: &BlockFusionTrees<Vec<i64>>| {
+                twice(t, sun_spin)
+            })
+        );
     }
 }
 
@@ -922,10 +990,10 @@ const TRACE_PAIRS: [(&str, &[(usize, usize)]); 3] = [
 
 /// Every `trace_pairs_into` of a rank-(2, 2) `$source`.
 macro_rules! trace_cells {
-    ($runtime:expr, $source:expr, $key:expr, $d:ty) => {{
+    ($engine:ident, $runtime:expr, $source:expr, $key:expr, $d:ty) => {{
         let mut rows: Rows = Vec::new();
         for (name, pairs) in TRACE_PAIRS {
-            cell!(
+            cell!($engine,
                 traced;
                 rows,
                 $runtime,
@@ -933,8 +1001,8 @@ macro_rules! trace_cells {
                 $key,
                 $d,
                 name,
-                |t| t.trace_pairs(pairs),
-                |d, a, b| $source.trace_pairs_into(pairs, d, a, b)
+                |t| t.trace_pairs($engine, pairs),
+                |d, a, b| $source.trace_pairs_into($engine, pairs, d, a, b)
             );
         }
         rows
@@ -945,33 +1013,33 @@ macro_rules! trace_cells {
 /// c64, compact f64, compact c64]`; the compact source is a diagonal on
 /// `$v` traced over its only pair.
 macro_rules! trace_lanes {
-    ($runtime:expr, $v:expr, $w:expr, $sectors:expr, $name:expr, $key:expr) => {{
-        let c64 = || {
-            source!($runtime, $v, $w, $key)
-                .convert::<Complex64>()
-                .scale(Complex64::new(1.0, 2.0))
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $sectors:expr, $name:expr, $key:expr) => {{
+        let c64 = |$engine: &mut dyn Engine| {
+            source!($engine, $runtime, $v, $w, $key)
+                .convert::<Complex64>($engine).unwrap()
+                .scale($engine, Complex64::new(1.0, 2.0))
                 .unwrap()
         };
         let owned_f64 = {
-            let source = source!($runtime, $v, $w, $key);
-            trace_cells!($runtime, source, $key, f64)
+            let source = source!($engine, $runtime, $v, $w, $key);
+            trace_cells!($engine, $runtime, source, $key, f64)
         };
         let owned_c64 = {
-            let source = c64();
-            trace_cells!($runtime, source, $key, Complex64)
+            let source = c64($engine);
+            trace_cells!($engine, $runtime, source, $key, Complex64)
         };
         let lazy_f64 = {
-            let source = source!($runtime, $v, $w, $key).adjoint().unwrap();
-            trace_cells!($runtime, source, $key, f64)
+            let source = source!($engine, $runtime, $v, $w, $key).adjoint($engine).unwrap();
+            trace_cells!($engine, $runtime, source, $key, f64)
         };
         let lazy_c64 = {
-            let source = c64().adjoint().unwrap();
-            trace_cells!($runtime, source, $key, Complex64)
+            let source = c64($engine).adjoint($engine).unwrap();
+            trace_cells!($engine, $runtime, source, $key, Complex64)
         };
         let compact_f64 = {
             let mut rows: Rows = Vec::new();
-            let bond = bond!($runtime, $v, $sectors, $name, f64, |x: f64| x);
-            cell!(
+            let bond = bond!($engine, $runtime, $v, $sectors, $name, f64, |x: f64| x);
+            cell!($engine,
                 traced;
                 rows,
                 $runtime,
@@ -979,17 +1047,17 @@ macro_rules! trace_lanes {
                 $key,
                 f64,
                 "compact full trace",
-                |t| t.trace_pairs(&[(0, 1)]),
-                |d, a, b| bond.trace_pairs_into(&[(0, 1)], d, a, b)
+                |t| t.trace_pairs($engine, &[(0, 1)]),
+                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], d, a, b)
             );
             rows
         };
         let compact_c64 = {
             let mut rows: Rows = Vec::new();
-            let bond = bond!($runtime, $v, $sectors, $name, Complex64, |x: f64| {
+            let bond = bond!($engine, $runtime, $v, $sectors, $name, Complex64, |x: f64| {
                 Complex64::new(x, 2.0 * x)
             });
-            cell!(
+            cell!($engine,
                 traced;
                 rows,
                 $runtime,
@@ -997,8 +1065,8 @@ macro_rules! trace_lanes {
                 $key,
                 Complex64,
                 "compact full trace",
-                |t| t.trace_pairs(&[(0, 1)]),
-                |d, a, b| bond.trace_pairs_into(&[(0, 1)], d, a, b)
+                |t| t.trace_pairs($engine, &[(0, 1)]),
+                |d, a, b| bond.trace_pairs_into($engine, &[(0, 1)], d, a, b)
             );
             rows
         };
@@ -1008,10 +1076,12 @@ macro_rules! trace_lanes {
 
 #[test]
 fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_destination() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
     trace_lanes!(
+        engine,
         &runtime,
         v,
         w,
@@ -1026,6 +1096,7 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
     // Fermion parity with a dual leg: the supertrace twist.
     let (v, w) = fz2_legs();
     trace_lanes!(
+        engine,
         &runtime,
         v,
         w,
@@ -1035,6 +1106,7 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
     );
     let v = su2_leg();
     trace_lanes!(
+        engine,
         &runtime,
         v,
         v,
@@ -1048,11 +1120,13 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
 #[test]
 fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
     let mf_rows = trace_lanes!(
+        engine,
         &runtime,
         mf,
         mf,
@@ -1061,6 +1135,7 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
         |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin)
     );
     let checked_rows = trace_lanes!(
+        engine,
         &runtime,
         checked,
         checked,
@@ -1097,6 +1172,7 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
     )
     .unwrap();
     trace_lanes!(
+        engine,
         &runtime,
         v,
         v,
@@ -1112,6 +1188,7 @@ fn checked_generic_trace_pairs_into_is_alpha_eager_plus_beta_destination_and_mat
 /// spectrum is read from the compiled terms).
 #[test]
 fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
@@ -1125,29 +1202,33 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     )
     .unwrap();
     macro_rules! lazy_trace {
-        ($parent:expr) => {{
+        ($engine:ident, $parent:expr) => {{
             let parent = $parent;
-            let lazy = parent.adjoint().unwrap();
-            let mut destination = lazy.trace_pairs(&[(0, 2)]).unwrap();
+            let lazy = parent.adjoint($engine).unwrap();
+            let mut destination = lazy.trace_pairs($engine, &[(0, 2)]).unwrap();
             let payload_bytes = std::mem::size_of_val(parent.dense_data().unwrap());
             for _ in 0..2 {
-                lazy.trace_pairs_into(&[(0, 2)], &mut destination, 1.0, 0.5)
+                lazy.trace_pairs_into($engine, &[(0, 2)], &mut destination, 1.0, 0.5)
                     .unwrap();
             }
             let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
-                lazy.trace_pairs_into(&[(0, 2)], &mut destination, 1.0, 0.5)
+                lazy.trace_pairs_into($engine, &[(0, 2)], &mut destination, 1.0, 0.5)
                     .unwrap()
             });
             assert_eq!(into.matched_calls, 0, "{into:?}, payload {payload_bytes}");
             assert!(lazy.dense_data().is_err(), "the lazy source materialized");
         }};
     }
-    lazy_trace!(source!(&runtime, v, v, debug_key::<U1Irrep>));
+    lazy_trace!(
+        engine,
+        source!(engine, &runtime, v, v, debug_key::<U1Irrep>)
+    );
 
     // One sector of degeneracy k = 128: the dense image is P = k² entries.
     let k = 128;
     let leg = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), k)]).unwrap();
     let bond = bond!(
+        engine,
         &runtime,
         leg,
         [(U1Irrep::new(0), k)],
@@ -1155,14 +1236,14 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
         f64,
         |x: f64| x
     );
-    let mut destination = bond.trace_pairs(&[(0, 1)]).unwrap();
+    let mut destination = bond.trace_pairs(engine, &[(0, 1)]).unwrap();
     let p_bytes = k * k * std::mem::size_of::<f64>();
     for _ in 0..2 {
-        bond.trace_pairs_into(&[(0, 1)], &mut destination, 1.0, 0.5)
+        bond.trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
             .unwrap();
     }
     let (_, into) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
-        bond.trace_pairs_into(&[(0, 1)], &mut destination, 1.0, 0.5)
+        bond.trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
             .unwrap()
     });
     assert_eq!(into.matched_calls, 0, "{into:?}, P {p_bytes}");
@@ -1173,11 +1254,11 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     );
     // The control: its dense twin's trace reads the P-sized payload, which
     // the probe would see if the compact read declined.
-    let dense_twin = bond.materialize().unwrap();
+    let dense_twin = bond.materialize(engine).unwrap();
     let (_, control) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
-        drop(bond.materialize().unwrap());
+        drop(bond.materialize(engine).unwrap());
         dense_twin
-            .trace_pairs_into(&[(0, 1)], &mut destination, 1.0, 0.5)
+            .trace_pairs_into(engine, &[(0, 1)], &mut destination, 1.0, 0.5)
             .unwrap()
     });
     assert!(control.matched_calls >= 1, "{control:?}");
@@ -1186,7 +1267,7 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     {
         let v = sun2_leg();
         let key = |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin);
-        lazy_trace!(source!(&runtime, v, v, key));
+        lazy_trace!(engine, source!(engine, &runtime, v, v, key));
         // A large untraced leg, so the result payload dominates the staging.
         let w = GradedSpace::try_new(
             Arc::new(
@@ -1198,19 +1279,20 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
             [(vec![0i64], 24), (vec![1], 24), (vec![2], 24)],
         )
         .unwrap();
-        let source = source!(&runtime, v, w, key);
-        let mut destination = source.trace_pairs(&[(0, 2)]).unwrap();
+        let source = source!(engine, &runtime, v, w, key);
+        let mut destination = source.trace_pairs(engine, &[(0, 2)]).unwrap();
         let payload_bytes = std::mem::size_of_val(destination.dense_data().unwrap());
         for _ in 0..2 {
-            drop(source.trace_pairs(&[(0, 2)]).unwrap());
+            drop(source.trace_pairs(engine, &[(0, 2)]).unwrap());
             source
-                .trace_pairs_into(&[(0, 2)], &mut destination, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], &mut destination, 1.0, 0.5)
                 .unwrap();
         }
-        let (_, eager) = counting_alloc::measure(|| drop(source.trace_pairs(&[(0, 2)]).unwrap()));
+        let (_, eager) =
+            counting_alloc::measure(|| drop(source.trace_pairs(engine, &[(0, 2)]).unwrap()));
         let (_, into) = counting_alloc::measure_matching(payload_bytes..=usize::MAX, || {
             source
-                .trace_pairs_into(&[(0, 2)], &mut destination, 1.0, 0.5)
+                .trace_pairs_into(engine, &[(0, 2)], &mut destination, 1.0, 0.5)
                 .unwrap()
         });
         assert_eq!(into.matched_calls, 0, "{into:?}");
@@ -1235,10 +1317,10 @@ const CONTRACT_ORDERS: [(&str, &[usize], &[usize]); 3] = [
 /// `[v, w'] ← [v]` operand: owned `$rhs`, and `$rhs_parent`'s lazy adjoint
 /// and adjoint view; `$lazy_lhs` (`[v, w'] ← [v, w']`) against the owned one.
 macro_rules! contract_cells {
-    ($runtime:expr, $lhs:expr, $lazy_lhs:expr, $rhs:expr, $rhs_parent:expr, $key:expr,
+    ($engine:ident, $runtime:expr, $lhs:expr, $lazy_lhs:expr, $rhs:expr, $rhs_parent:expr, $key:expr,
      $d:ty) => {{
         let mut rows: Rows = Vec::new();
-        let lazy_rhs = $rhs_parent.adjoint().unwrap();
+        let lazy_rhs = $rhs_parent.adjoint($engine).unwrap();
         for (order, codomain, domain) in CONTRACT_ORDERS {
             let spec = ContractSpec {
                 lhs: &[2, 3],
@@ -1247,6 +1329,7 @@ macro_rules! contract_cells {
                 domain,
             };
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 $lhs,
@@ -1258,6 +1341,7 @@ macro_rules! contract_cells {
                 format!("contract O·O {order}")
             );
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 $lazy_lhs,
@@ -1269,6 +1353,7 @@ macro_rules! contract_cells {
                 format!("contract L·O {order}")
             );
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 $lhs,
@@ -1280,6 +1365,7 @@ macro_rules! contract_cells {
                 format!("contract O·L {order}")
             );
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 $lhs,
@@ -1297,41 +1383,49 @@ macro_rules! contract_cells {
 
 /// The contraction rows of both lanes on `[v, w'] ← [v, w']`: `[f64, c64]`.
 macro_rules! contract_lanes {
-    ($runtime:expr, $v:expr, $w:expr, $key:expr) => {{
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $key:expr) => {{
         let key = $key;
         let w = $w.try_dual().unwrap();
         let rhs: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn($runtime, [&$v, &w], [&$v], |trees, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [&$v, &w], [&$v], |trees, index| {
                 value(&format!("rhs{}", key(trees)), index)
             })
             .unwrap();
         let rhs_parent: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn($runtime, [&$v], [&$v, &w], |trees, index| {
+            TensorMap::from_subblock_fn($engine, $runtime, [&$v], [&$v, &w], |trees, index| {
                 value(&format!("parent{}", key(trees)), index)
             })
             .unwrap();
-        let lhs = source!($runtime, $v, $w, key);
-        let lazy_lhs = source!($runtime, $v, $w, key)
-            .scale(-0.75)
+        let lhs = source!($engine, $runtime, $v, $w, key);
+        let lazy_lhs = source!($engine, $runtime, $v, $w, key)
+            .scale($engine, -0.75)
             .unwrap()
-            .adjoint()
+            .adjoint($engine)
             .unwrap();
-        let f64_rows = contract_cells!($runtime, lhs, lazy_lhs, rhs, rhs_parent, key, f64);
+        let f64_rows = contract_cells!($engine, $runtime, lhs, lazy_lhs, rhs, rhs_parent, key, f64);
         // `1 + 2i` makes a lost or doubled conjugation visible.
-        let c64 = |t: &TensorMap<_, f64>| {
-            t.convert::<Complex64>()
-                .scale(Complex64::new(1.0, 2.0))
+        let c64 = |$engine: &mut dyn Engine, t: &TensorMap<_, f64>| {
+            t.convert::<Complex64>($engine)
+                .unwrap()
+                .scale($engine, Complex64::new(1.0, 2.0))
                 .unwrap()
         };
-        let lazy_lhs = c64(&source!($runtime, $v, $w, key).scale(-0.75).unwrap())
-            .adjoint()
+        let scaled = source!($engine, $runtime, $v, $w, key)
+            .scale($engine, -0.75)
             .unwrap();
+        let lazy_lhs = c64($engine, &scaled).adjoint($engine).unwrap();
+        let (c64_lhs, c64_rhs, c64_rhs_parent) = (
+            c64($engine, &lhs),
+            c64($engine, &rhs),
+            c64($engine, &rhs_parent),
+        );
         let c64_rows = contract_cells!(
+            $engine,
             $runtime,
-            c64(&lhs),
+            c64_lhs,
             lazy_lhs,
-            c64(&rhs),
-            c64(&rhs_parent),
+            c64_rhs,
+            c64_rhs_parent,
             key,
             Complex64
         );
@@ -1345,7 +1439,7 @@ macro_rules! contract_lanes {
 /// `t`, `D · D`), each in its own order and reordered, plus the two-axis
 /// `D · D` the arm declines.
 macro_rules! compact_contract_cells {
-    ($runtime:expr, $v:expr, $w:expr, $b:expr, $sectors:expr, $name:expr, $key:expr, $d:ty,
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $b:expr, $sectors:expr, $name:expr, $key:expr, $d:ty,
      $lift:expr) => {{
         let (key, lift) = ($key, $lift);
         let w = $w.try_dual().unwrap();
@@ -1354,22 +1448,26 @@ macro_rules! compact_contract_cells {
                 lift(value(&format!("{prefix}{}", key(trees)), index))
             }
         };
-        let d1 = bond!($runtime, $b, $sectors, $name, $d, lift);
-        let d2 = bond!($runtime, $b, $sectors, $name, $d, |x: f64| lift(0.5 - x));
+        let d1 = bond!($engine, $runtime, $b, $sectors, $name, $d, lift);
+        let d2 = bond!($engine, $runtime, $b, $sectors, $name, $d, |x: f64| lift(
+            0.5 - x
+        ));
         // `t · D`: `[v, w'] ← [b]`, owned and as the adjoint of `[b] ← [v, w']`.
         let t: TensorMap<_, $d> =
-            TensorMap::from_subblock_fn($runtime, [&$v, &w], [&$b], fill("t")).unwrap();
-        let lazy_t = TensorMap::<_, $d>::from_subblock_fn($runtime, [&$b], [&$v, &w], fill("lt"))
-            .unwrap()
-            .adjoint()
-            .unwrap();
+            TensorMap::from_subblock_fn($engine, $runtime, [&$v, &w], [&$b], fill("t")).unwrap();
+        let lazy_t =
+            TensorMap::<_, $d>::from_subblock_fn($engine, $runtime, [&$b], [&$v, &w], fill("lt"))
+                .unwrap()
+                .adjoint($engine)
+                .unwrap();
         // `D · t`: `[b, v] ← [w']`, owned and as the adjoint of `[w'] ← [b, v]`.
         let u: TensorMap<_, $d> =
-            TensorMap::from_subblock_fn($runtime, [&$b, &$v], [&w], fill("u")).unwrap();
-        let lazy_u = TensorMap::<_, $d>::from_subblock_fn($runtime, [&w], [&$b, &$v], fill("lu"))
-            .unwrap()
-            .adjoint()
-            .unwrap();
+            TensorMap::from_subblock_fn($engine, $runtime, [&$b, &$v], [&w], fill("u")).unwrap();
+        let lazy_u =
+            TensorMap::<_, $d>::from_subblock_fn($engine, $runtime, [&w], [&$b, &$v], fill("lu"))
+                .unwrap()
+                .adjoint($engine)
+                .unwrap();
         let mut rows: Rows = Vec::new();
         for (pattern, codomain, domain) in [
             ("own order", &[0usize, 1][..], &[2usize][..]),
@@ -1382,6 +1480,7 @@ macro_rules! compact_contract_cells {
                 domain,
             };
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 t,
@@ -1393,6 +1492,7 @@ macro_rules! compact_contract_cells {
                 format!("compact t·D {pattern}")
             );
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 lazy_t,
@@ -1410,6 +1510,7 @@ macro_rules! compact_contract_cells {
                 domain,
             };
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 d1,
@@ -1421,6 +1522,7 @@ macro_rules! compact_contract_cells {
                 format!("compact D·t {pattern}")
             );
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 d1,
@@ -1445,6 +1547,7 @@ macro_rules! compact_contract_cells {
                 domain,
             };
             contract_cell!(
+                $engine,
                 rows,
                 $runtime,
                 d1,
@@ -1459,7 +1562,7 @@ macro_rules! compact_contract_cells {
         // Both legs of `D` against `[v, b] ← [b]`: two contracted axes, so
         // the arm declines and `D` is densified (TensorKit copies it too).
         let x: TensorMap<_, $d> =
-            TensorMap::from_subblock_fn($runtime, [&$v, &$b], [&$b], fill("x")).unwrap();
+            TensorMap::from_subblock_fn($engine, $runtime, [&$v, &$b], [&$b], fill("x")).unwrap();
         let spec = ContractSpec {
             lhs: &[2, 1],
             rhs: &[0, 1],
@@ -1467,6 +1570,7 @@ macro_rules! compact_contract_cells {
             domain: &[],
         };
         contract_cell!(
+            $engine,
             rows,
             $runtime,
             x,
@@ -1483,10 +1587,22 @@ macro_rules! compact_contract_cells {
 
 /// The compact contraction rows of both lanes: `[f64, c64]`.
 macro_rules! compact_contract_lanes {
-    ($runtime:expr, $v:expr, $w:expr, $b:expr, $sectors:expr, $name:expr, $key:expr) => {{
+    ($engine:ident, $runtime:expr, $v:expr, $w:expr, $b:expr, $sectors:expr, $name:expr, $key:expr) => {{
         [
-            compact_contract_cells!($runtime, $v, $w, $b, $sectors, $name, $key, f64, |x: f64| x),
             compact_contract_cells!(
+                $engine,
+                $runtime,
+                $v,
+                $w,
+                $b,
+                $sectors,
+                $name,
+                $key,
+                f64,
+                |x: f64| x
+            ),
+            compact_contract_cells!(
+                $engine,
                 $runtime,
                 $v,
                 $w,
@@ -1503,11 +1619,13 @@ macro_rules! compact_contract_lanes {
 
 #[test]
 fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destination() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let (v, w) = u1_legs();
-    contract_lanes!(&runtime, v, w, debug_key::<U1Irrep>);
+    contract_lanes!(engine, &runtime, v, w, debug_key::<U1Irrep>);
     compact_contract_lanes!(
+        engine,
         &runtime,
         v,
         w,
@@ -1521,8 +1639,9 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         debug_key::<U1Irrep>
     );
     let (v, w) = fz2_legs();
-    contract_lanes!(&runtime, v, w, debug_key::<Z2Irrep>);
+    contract_lanes!(engine, &runtime, v, w, debug_key::<Z2Irrep>);
     compact_contract_lanes!(
+        engine,
         &runtime,
         v,
         w,
@@ -1535,6 +1654,7 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
     // every arm decline to the dense route (TensorKit's `copyA`/`copyB`).
     let dual = w.try_dual().unwrap();
     compact_contract_lanes!(
+        engine,
         &runtime,
         v,
         w,
@@ -1544,10 +1664,11 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         debug_key::<Z2Irrep>
     );
     let v = su2_leg();
-    contract_lanes!(&runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| twice(
-        t, su2_spin
-    ));
+    contract_lanes!(engine, &runtime, v, v, |t: &BlockFusionTrees<SU2Irrep>| {
+        twice(t, su2_spin)
+    });
     compact_contract_lanes!(
+        engine,
         &runtime,
         v,
         v,
@@ -1562,15 +1683,17 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
 #[test]
 fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matches_multiplicity_free(
 ) {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let mf = su2_leg();
     let checked = sun2_leg();
     let mf_key = |t: &BlockFusionTrees<SU2Irrep>| twice(t, su2_spin);
     let checked_key = |t: &BlockFusionTrees<Vec<i64>>| twice(t, sun_spin);
-    let mf_rows = contract_lanes!(&runtime, mf, mf, mf_key);
-    let checked_rows = contract_lanes!(&runtime, checked, checked, checked_key);
+    let mf_rows = contract_lanes!(engine, &runtime, mf, mf, mf_key);
+    let checked_rows = contract_lanes!(engine, &runtime, checked, checked, checked_key);
     let mf_compact = compact_contract_lanes!(
+        engine,
         &runtime,
         mf,
         mf,
@@ -1580,6 +1703,7 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
         mf_key
     );
     let checked_compact = compact_contract_lanes!(
+        engine,
         &runtime,
         checked,
         checked,
@@ -1620,8 +1744,9 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
         [(vec![0i64, 0], 2), (vec![1, 1], 2), (vec![1, 0], 1)],
     )
     .unwrap();
-    contract_lanes!(&runtime, v, v, debug_key::<Vec<i64>>);
+    contract_lanes!(engine, &runtime, v, v, debug_key::<Vec<i64>>);
     compact_contract_lanes!(
+        engine,
         &runtime,
         v,
         v,
@@ -1639,7 +1764,7 @@ fn checked_generic_contract_into_is_alpha_eager_plus_beta_destination_and_matche
 /// two-axis control declines and densifies `D`. `$v` (`dim 4`) and the bond
 /// `$b` (`k = 128`) hold one sector, so `P` dominates `n_C`.
 macro_rules! compact_contract_allocations {
-    ($runtime:expr, $v:expr, $b:expr, $sector:expr) => {{
+    ($engine:ident, $runtime:expr, $v:expr, $b:expr, $sector:expr) => {{
         let k = 128;
         let spectrum = |offset: f64| {
             vec![SectorSpectrum {
@@ -1649,20 +1774,23 @@ macro_rules! compact_contract_allocations {
                     .collect::<Vec<f64>>(),
             }]
         };
-        let d1 = TensorMap::<_, f64>::diagonal($runtime, &$b, spectrum(1.0)).unwrap();
-        let d2 = TensorMap::<_, f64>::diagonal($runtime, &$b, spectrum(-0.5)).unwrap();
+        let d1 = TensorMap::<_, f64>::diagonal($engine, $runtime, &$b, spectrum(1.0)).unwrap();
+        let d2 = TensorMap::<_, f64>::diagonal($engine, $runtime, &$b, spectrum(-0.5)).unwrap();
         let fill = |_: &BlockFusionTrees<_>, index: &[usize]| value("t", index);
-        let t = TensorMap::<_, f64>::from_subblock_fn($runtime, [&$v], [&$b], fill).unwrap();
-        let lazy_t = TensorMap::<_, f64>::from_subblock_fn($runtime, [&$b], [&$v], fill)
+        let t =
+            TensorMap::<_, f64>::from_subblock_fn($engine, $runtime, [&$v], [&$b], fill).unwrap();
+        let lazy_t = TensorMap::<_, f64>::from_subblock_fn($engine, $runtime, [&$b], [&$v], fill)
             .unwrap()
-            .adjoint()
+            .adjoint($engine)
             .unwrap();
-        let u = TensorMap::<_, f64>::from_subblock_fn($runtime, [&$b], [&$v], fill).unwrap();
-        let lazy_u = TensorMap::<_, f64>::from_subblock_fn($runtime, [&$v], [&$b], fill)
+        let u =
+            TensorMap::<_, f64>::from_subblock_fn($engine, $runtime, [&$b], [&$v], fill).unwrap();
+        let lazy_u = TensorMap::<_, f64>::from_subblock_fn($engine, $runtime, [&$v], [&$b], fill)
             .unwrap()
-            .adjoint()
+            .adjoint($engine)
             .unwrap();
-        let x = TensorMap::<_, f64>::from_subblock_fn($runtime, [&$v, &$b], [&$b], fill).unwrap();
+        let x = TensorMap::<_, f64>::from_subblock_fn($engine, $runtime, [&$v, &$b], [&$b], fill)
+            .unwrap();
         let p_bytes = k * k * std::mem::size_of::<f64>();
         let n_c_bytes = 4 * k * std::mem::size_of::<f64>();
         let own: (&[usize], &[usize]) = (&[0], &[1]);
@@ -1776,13 +1904,17 @@ macro_rules! compact_contract_allocations {
                 codomain,
                 domain,
             };
-            let mut destination = lhs.contract(rhs, &spec).unwrap().materialize().unwrap();
+            let mut destination = lhs
+                .contract($engine, rhs, &spec)
+                .unwrap()
+                .materialize($engine)
+                .unwrap();
             for _ in 0..2 {
-                lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5)
+                lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
                     .unwrap();
             }
             let (_, large) = counting_alloc::measure_matching(p_bytes..=usize::MAX, || {
-                lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5)
+                lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
                     .unwrap()
             });
             if declines {
@@ -1795,7 +1927,7 @@ macro_rules! compact_contract_allocations {
             assert!((large.bytes as usize) < p_bytes, "{name}: {large:?}");
             if direct {
                 let (_, result) = counting_alloc::measure_matching(n_c_bytes..=usize::MAX, || {
-                    lhs.contract_into(rhs, &spec, &mut destination, 1.0, 0.5)
+                    lhs.contract_into($engine, rhs, &spec, &mut destination, 1.0, 0.5)
                         .unwrap()
                 });
                 assert_eq!(result.matched_calls, 0, "{name}: {result:?}");
@@ -1806,12 +1938,13 @@ macro_rules! compact_contract_allocations {
 
 #[test]
 fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 4)]).unwrap();
     let b = GradedSpace::try_new(rule, [(U1Irrep::new(0), 128)]).unwrap();
-    compact_contract_allocations!(&runtime, v, b, U1Irrep::new(0));
+    compact_contract_allocations!(engine, &runtime, v, b, U1Irrep::new(0));
     #[cfg(feature = "cgc-gen")]
     {
         let rule = Arc::new(
@@ -1820,7 +1953,7 @@ fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
         );
         let v = GradedSpace::try_new(Arc::clone(&rule), [(vec![0i64], 4)]).unwrap();
         let b = GradedSpace::try_new(rule, [(vec![0i64], 128)]).unwrap();
-        compact_contract_allocations!(&runtime, v, b, vec![0i64]);
+        compact_contract_allocations!(engine, &runtime, v, b, vec![0i64]);
     }
 }
 
@@ -2168,6 +2301,7 @@ fn complex_value(key: &str, index: &[usize]) -> Complex64 {
 
 #[test]
 fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol lane contracts (eager and `_into`), and on
     // the `Complex64` embedding of U(1) it is the real-symbol lane's value,
@@ -2194,23 +2328,26 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
         }};
     }
     macro_rules! operands {
-        ($rule:expr) => {{
+        ($engine:ident, $rule:expr) => {{
             let (v, w) = legs!($rule);
-            let lhs: TensorMap<_, Complex64> =
-                TensorMap::from_subblock_fn(&runtime, [&v, &w], [&v, &w], |trees, index| {
-                    complex_value(&debug_key(trees), index)
-                })
-                .unwrap();
+            let lhs: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+                $engine,
+                &runtime,
+                [&v, &w],
+                [&v, &w],
+                |trees, index| complex_value(&debug_key(trees), index),
+            )
+            .unwrap();
             let rhs: TensorMap<_, Complex64> =
-                TensorMap::from_subblock_fn(&runtime, [&v, &w], [&v], |trees, index| {
+                TensorMap::from_subblock_fn($engine, &runtime, [&v, &w], [&v], |trees, index| {
                     complex_value(&format!("rhs{}", debug_key(trees)), index)
                 })
                 .unwrap();
             (lhs, rhs)
         }};
     }
-    let (lhs, rhs) = operands!(ComplexU1);
-    let (real_lhs, real_rhs) = operands!(U1FusionRule);
+    let (lhs, rhs) = operands!(engine, ComplexU1);
+    let (real_lhs, real_rhs) = operands!(engine, U1FusionRule);
     let key = debug_key::<U1Irrep>;
     let mut rows: Rows = Vec::new();
     for (order, codomain, domain) in CONTRACT_ORDERS {
@@ -2221,11 +2358,15 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
             domain,
         };
         assert_eq!(
-            fold_zero(entries!(lhs.contract(&rhs, &spec).unwrap(), key)),
-            fold_zero(entries!(real_lhs.contract(&real_rhs, &spec).unwrap(), key)),
+            fold_zero(entries!(lhs.contract(engine, &rhs, &spec).unwrap(), key)),
+            fold_zero(entries!(
+                real_lhs.contract(engine, &real_rhs, &spec).unwrap(),
+                key
+            )),
             "{order}"
         );
         contract_cell!(
+            engine,
             rows,
             &runtime,
             lhs,
@@ -2247,6 +2388,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
         (U1Irrep::new(2), 1),
     ];
     let d1 = bond!(
+        engine,
         &runtime,
         v,
         sectors,
@@ -2255,6 +2397,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
         lift
     );
     let d2 = bond!(
+        engine,
         &runtime,
         v,
         sectors,
@@ -2268,11 +2411,11 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
         }
     };
     let t: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &w], [&v], fill("t")).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &w], [&v], fill("t")).unwrap();
     let u: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &v], [&w], fill("u")).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&w], fill("u")).unwrap();
     let x: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v], fill("x")).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v], fill("x")).unwrap();
     for (pattern, codomain, domain) in [
         ("own order", &[0usize, 1][..], &[2usize][..]),
         ("reordered", &[2, 0][..], &[1][..]),
@@ -2284,6 +2427,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
             domain,
         };
         contract_cell!(
+            engine,
             rows,
             &runtime,
             t,
@@ -2301,6 +2445,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
             domain,
         };
         contract_cell!(
+            engine,
             rows,
             &runtime,
             d1,
@@ -2324,6 +2469,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
             domain,
         };
         contract_cell!(
+            engine,
             rows,
             &runtime,
             d1,
@@ -2342,6 +2488,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
         domain: &[],
     };
     contract_cell!(
+        engine,
         rows,
         &runtime,
         x,
@@ -2357,6 +2504,7 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
 
 #[test]
 fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `[v, w] ← [x]` contracted with `[x] ← [y]` over `x`, with the
     // output codomain legs swapped, is TensorKit's `blas_contract!` followed
@@ -2388,13 +2536,13 @@ fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
         };
         let b_value = |x: (u8, u8), index: &[usize]| complex_value(&format!("B{x:?}"), index);
         let a: TensorMap<_, Complex64> =
-            TensorMap::from_subblock_fn(&runtime, [&v, &w], [&x], |trees, index| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&v, &w], [&x], |trees, index| {
                 let (cod, dom) = (trees.codomain_uncoupled(), trees.domain_uncoupled());
                 a_value(cod[0], cod[1], dom[0], index)
             })
             .unwrap();
         let b: TensorMap<_, Complex64> =
-            TensorMap::from_subblock_fn(&runtime, [&x], [&x], |trees, index| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&x], [&x], |trees, index| {
                 b_value(trees.domain_uncoupled()[0], index)
             })
             .unwrap();
@@ -2410,7 +2558,7 @@ fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
                 codomain,
                 domain: &[2],
             };
-            let c = a.contract(&b, &spec).unwrap();
+            let c = a.contract(engine, &b, &spec).unwrap();
             let mut blocks = 0;
             for (trees, view) in c.subblocks().unwrap() {
                 let cod = trees.codomain_uncoupled();
@@ -2449,6 +2597,7 @@ fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
             }
             assert!(blocks > 0, "{order}");
             contract_cell!(
+                engine,
                 rows,
                 &runtime,
                 a,
@@ -2466,6 +2615,7 @@ fn alternating_z3_squared_contraction_carries_the_braiding_phase() {
 
 #[test]
 fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Fibonacci stays outside `contract` (anyonic), and `_into` refuses it
     // with eager's error, before touching the destination.
@@ -2477,7 +2627,7 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
     .unwrap();
     let key = debug_key::<TableSector>;
     let a: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, index| {
             complex_value(&key(trees), index)
         })
         .unwrap();
@@ -2487,15 +2637,16 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
         codomain: &[0],
         domain: &[1],
     };
-    let eager = a.contract(&a, &spec).unwrap_err();
+    let eager = a.contract(engine, &a, &spec).unwrap_err();
     let mut destination: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, index| {
             complex_value(&format!("dst{}", key(trees)), index)
         })
         .unwrap();
     let before = dense(&destination);
     let into = a
         .contract_into(
+            engine,
             &a,
             &spec,
             &mut destination,

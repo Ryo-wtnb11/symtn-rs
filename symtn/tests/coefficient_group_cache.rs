@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};
 use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector};
+use symtn::typed::Engine;
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 
 use crate::numerics;
@@ -41,27 +42,34 @@ fn bits(data: &[f64]) -> Vec<u64> {
 /// dual flags, and its trees depend on those sectors alone, so the groups a
 /// sector change adds are exactly the external-sector tuples it adds.
 macro_rules! source_groups {
-    ($runtime:expr, $leg:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
         let dual = leg.try_dual().unwrap();
         let mut groups = HashSet::new();
-        TensorMap::<_, f64>::from_subblock_fn($runtime, [leg, &dual], [leg, &dual], |trees, _| {
-            groups.insert(format!(
-                "{:?}",
-                (trees.codomain_uncoupled(), trees.domain_uncoupled())
-            ));
-            0.0
-        })
+        TensorMap::<_, f64>::from_subblock_fn(
+            $engine,
+            $runtime,
+            [leg, &dual],
+            [leg, &dual],
+            |trees, _| {
+                groups.insert(format!(
+                    "{:?}",
+                    (trees.codomain_uncoupled(), trees.domain_uncoupled())
+                ));
+                0.0
+            },
+        )
         .unwrap();
         groups
     }};
 }
 
 macro_rules! tensor {
-    ($runtime:expr, $leg:expr) => {{
+    ($engine:ident, $runtime:expr, $leg:expr) => {{
         let leg = $leg;
         let dual = leg.try_dual().unwrap();
-        TensorMap::<_, f64>::rand_with_seed($runtime, [leg, &dual], [leg, &dual], 17).unwrap()
+        TensorMap::<_, f64>::rand_with_seed($engine, $runtime, [leg, &dual], [leg, &dual], 17)
+            .unwrap()
     }};
 }
 
@@ -69,11 +77,11 @@ macro_rules! tensor {
 /// compose exactly the groups that `c` adds and reuse every other one.
 /// `$exact` asks for bit equality with a cold build.
 macro_rules! check_rule {
-    ($label:literal, $a:expr, $c:expr, exact: $exact:expr) => {{
+    ($engine:ident, $label:literal, $a:expr, $c:expr, exact: $exact:expr) => {{
         let (a, c) = ($a, $c);
-        let probe = Runtime::builder().dense_threads(1).build().unwrap();
-        let before = source_groups!(&probe, &a);
-        let after = source_groups!(&probe, &c);
+        let probe = Runtime::builder().build().unwrap();
+        let before = source_groups!($engine, &probe, &a);
+        let after = source_groups!($engine, &probe, &c);
         assert!(
             before.is_subset(&after),
             "{}: fixture must only add groups",
@@ -82,21 +90,34 @@ macro_rules! check_rule {
         let changed = after.difference(&before).count();
         assert!(changed > 0 && changed < after.len(), "{}: fixture", $label);
 
-        let operations: [(&str, &dyn Fn(&TensorMap<_, f64>) -> TensorMap<_, f64>); 4] = [
-            ("permute", &|t| t.permute(&[2, 0], &[3, 1]).unwrap()),
-            ("braid", &|t| {
-                t.braid(&[1, 3], &[0, 2], &[0, 1, 2, 3]).unwrap()
+        let operations: [(
+            &str,
+            &dyn Fn(&mut dyn Engine, &TensorMap<_, f64>) -> TensorMap<_, f64>,
+        ); 4] = [
+            ("permute", &|engine, t| {
+                t.permute(engine, &[2, 0], &[3, 1]).unwrap()
             }),
-            ("transpose", &|t| t.transpose(&[1, 3], &[0, 2]).unwrap()),
-            ("adjoint permute", &|t| {
-                t.adjoint().unwrap().permute(&[2, 0], &[3, 1]).unwrap()
+            ("braid", &|engine, t| {
+                t.braid(engine, &[1, 3], &[0, 2], &[0, 1, 2, 3]).unwrap()
+            }),
+            ("transpose", &|engine, t| {
+                t.transpose(engine, &[1, 3], &[0, 2]).unwrap()
+            }),
+            ("adjoint permute", &|engine, t| {
+                t.adjoint(engine)
+                    .unwrap()
+                    .permute(engine, &[2, 0], &[3, 1])
+                    .unwrap()
             }),
         ];
         for (name, operation) in operations {
             let what = format!("{} {name}", $label);
             symtn::cache::clear();
-            let warm = Runtime::builder().dense_threads(1).build().unwrap();
-            let _ = operation(&tensor!(&warm, &a));
+            let warm = Runtime::builder().build().unwrap();
+            let _ = {
+                let tensor = tensor!($engine, &warm, &a);
+                operation($engine, &tensor)
+            };
             let groups_before = groups();
             assert_eq!(
                 groups_before.misses(),
@@ -104,7 +125,10 @@ macro_rules! check_rule {
                 "{what}: the cold transform composes every source group once"
             );
 
-            let sector_change = operation(&tensor!(&warm, &c));
+            let sector_change = {
+                let tensor = tensor!($engine, &warm, &c);
+                operation($engine, &tensor)
+            };
             let groups = groups();
             assert_eq!(
                 groups.misses() - groups_before.misses(),
@@ -119,14 +143,23 @@ macro_rules! check_rule {
             assert_eq!(groups.evictions(), 0, "{what}: fixture exceeds the cache");
 
             symtn::cache::clear();
-            let cold = Runtime::builder().dense_threads(1).build().unwrap();
-            let expected = operation(&tensor!(&cold, &c));
+            let cold = Runtime::builder().build().unwrap();
+            let expected = {
+                let tensor = tensor!($engine, &cold, &c);
+                operation($engine, &tensor)
+            };
             assert_eq!(sector_change.codomain(), expected.codomain(), "{what}");
             assert_eq!(sector_change.domain(), expected.domain(), "{what}");
             if $exact {
                 assert_eq!(
-                    bits(sector_change.materialize().unwrap().dense_data().unwrap()),
-                    bits(expected.materialize().unwrap().dense_data().unwrap()),
+                    bits(
+                        sector_change
+                            .materialize($engine)
+                            .unwrap()
+                            .dense_data()
+                            .unwrap()
+                    ),
+                    bits(expected.materialize($engine).unwrap().dense_data().unwrap()),
                     "{what}: partially reused plan differs from a cold Runtime"
                 );
             } else {
@@ -134,8 +167,12 @@ macro_rules! check_rule {
                 // bounded well below 64 for these rank-4 fixtures.
                 numerics::assert_slices_close(
                     &what,
-                    sector_change.materialize().unwrap().dense_data().unwrap(),
-                    expected.materialize().unwrap().dense_data().unwrap(),
+                    sector_change
+                        .materialize($engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap(),
+                    expected.materialize($engine).unwrap().dense_data().unwrap(),
                     64,
                 );
             }
@@ -143,7 +180,8 @@ macro_rules! check_rule {
     }};
 }
 
-type Su2Operation = dyn Fn(&TensorMap<SU2FusionRule, f64>) -> TensorMap<SU2FusionRule, f64>;
+type Su2Operation =
+    dyn Fn(&mut dyn Engine, &TensorMap<SU2FusionRule, f64>) -> TensorMap<SU2FusionRule, f64>;
 
 fn su2_leg(sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
     GradedSpace::try_new(
@@ -157,9 +195,10 @@ fn su2_leg(sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
 
 #[test]
 fn su2_sector_change_rebuilds_only_changed_groups() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    check_rule!(
+    check_rule!(engine,
         "SU(2)",
         su2_leg(&[(0, 2), (1, 2), (2, 1)]),
         su2_leg(&[(0, 2), (1, 2), (2, 1), (3, 1)]),
@@ -170,6 +209,7 @@ fn su2_sector_change_rebuilds_only_changed_groups() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     use symtn::sector::LieGroupFusionRule;
@@ -183,7 +223,7 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
         )
         .unwrap()
     };
-    check_rule!(
+    check_rule!(engine,
         "SU(3)",
         leg(&[([1, 0], 2), ([1, 1], 1)]),
         leg(&[([0, 0], 1), ([1, 0], 2), ([1, 1], 1)]),
@@ -199,6 +239,7 @@ fn checked_generic_su3_sector_change_rebuilds_only_changed_groups() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn equal_lie_groups_share_structure_cache_entries() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     use symtn::sector::LieGroupFusionRule;
@@ -223,14 +264,14 @@ fn equal_lie_groups_share_structure_cache_entries() {
         ),
     );
     symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let _ = tensor!(&runtime, &leg(&first))
-        .permute(&[2, 0], &[3, 1])
+    let runtime = Runtime::builder().build().unwrap();
+    let _ = tensor!(engine, &runtime, &leg(&first))
+        .permute(engine, &[2, 0], &[3, 1])
         .unwrap();
     let (hits, misses) = totals();
     assert!(misses > 0, "the first transform must build its structures");
-    let _ = tensor!(&runtime, &leg(&second))
-        .permute(&[2, 0], &[3, 1])
+    let _ = tensor!(engine, &runtime, &leg(&second))
+        .permute(engine, &[2, 0], &[3, 1])
         .unwrap();
     let (warm_hits, warm_misses) = totals();
     assert_eq!(warm_misses, misses, "an equal group must not rebuild");
@@ -241,8 +282,8 @@ fn equal_lie_groups_share_structure_cache_entries() {
     drop((first, second));
     let third =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let _ = tensor!(&runtime, &leg(&third))
-        .permute(&[2, 0], &[3, 1])
+    let _ = tensor!(engine, &runtime, &leg(&third))
+        .permute(engine, &[2, 0], &[3, 1])
         .unwrap();
     let (_, cold_misses) = totals();
     assert!(
@@ -253,11 +294,14 @@ fn equal_lie_groups_share_structure_cache_entries() {
 
 #[test]
 fn clear_resets_the_coefficient_cache() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = su2_leg(&[(0, 1), (1, 1)]);
-    let _ = tensor!(&runtime, &leg).permute(&[2, 0], &[3, 1]).unwrap();
+    let _ = tensor!(engine, &runtime, &leg)
+        .permute(engine, &[2, 0], &[3, 1])
+        .unwrap();
     let before = groups();
     assert!(before.entries() > 0 && before.charged_bytes() > 0);
     assert!(before.charged_bytes() <= before.byte_budget());
@@ -274,33 +318,45 @@ fn clear_resets_the_coefficient_cache() {
 /// the byte budget binds.
 #[test]
 fn shared_runtime_keeps_every_unchanged_group_across_operations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     let (a, c) = (
         su2_leg(&[(0, 2), (1, 2), (2, 1)]),
         su2_leg(&[(0, 2), (1, 2), (2, 1), (3, 1)]),
     );
-    let probe = Runtime::builder().dense_threads(1).build().unwrap();
-    let before = source_groups!(&probe, &a).len();
-    let after = source_groups!(&probe, &c).len();
+    let probe = Runtime::builder().build().unwrap();
+    let before = source_groups!(engine, &probe, &a).len();
+    let after = source_groups!(engine, &probe, &c).len();
     let operations: [&Su2Operation; 5] = [
-        &|t| t.permute(&[2, 0], &[3, 1]).unwrap(),
-        &|t| t.permute(&[1, 3], &[0, 2]).unwrap(),
-        &|t| t.permute(&[0, 2], &[1, 3]).unwrap(),
-        &|t| t.transpose(&[1, 3], &[0, 2]).unwrap(),
+        &|engine, t| t.permute(engine, &[2, 0], &[3, 1]).unwrap(),
+        &|engine, t| t.permute(engine, &[1, 3], &[0, 2]).unwrap(),
+        &|engine, t| t.permute(engine, &[0, 2], &[1, 3]).unwrap(),
+        &|engine, t| t.transpose(engine, &[1, 3], &[0, 2]).unwrap(),
         // Why not `[2, 0], [3, 1]`: on this self-adjoint space that adjoint
         // permute reads storage like the direct `[0, 2], [1, 3]` above and is
         // served by the completed-structure tier without a plan lookup.
-        &|t| t.adjoint().unwrap().permute(&[1, 0], &[3, 2]).unwrap(),
+        &|engine, t| {
+            t.adjoint(engine)
+                .unwrap()
+                .permute(engine, &[1, 0], &[3, 2])
+                .unwrap()
+        },
     ];
     symtn::cache::clear();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for operation in operations {
-        let _ = operation(&tensor!(&runtime, &a));
+        let _ = {
+            let tensor = tensor!(engine, &runtime, &a);
+            operation(engine, &tensor)
+        };
     }
     let warm = groups();
     for operation in operations {
-        let _ = operation(&tensor!(&runtime, &c));
+        let _ = {
+            let tensor = tensor!(engine, &runtime, &c);
+            operation(engine, &tensor)
+        };
     }
     let info = groups();
     let n = operations.len();
@@ -325,29 +381,47 @@ fn shared_runtime_keeps_every_unchanged_group_across_operations() {
 /// the key's orientation jointly with the conjugated binding.
 #[test]
 fn shared_runtime_distinguishes_operations_on_the_same_groups() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _serial = serial();
     symtn::cache::clear();
     let leg = su2_leg(&[(0, 2), (1, 2), (2, 1)]);
     let operations: [(&str, &Su2Operation); 5] = [
-        ("permute p1", &|t| t.permute(&[2, 0], &[3, 1]).unwrap()),
-        ("permute p2", &|t| t.permute(&[3, 1], &[2, 0]).unwrap()),
-        ("transpose", &|t| t.transpose(&[1, 3], &[0, 2]).unwrap()),
-        ("direct permute", &|t| t.permute(&[1, 0], &[3, 2]).unwrap()),
-        ("adjoint permute", &|t| {
-            t.adjoint().unwrap().permute(&[1, 0], &[3, 2]).unwrap()
+        ("permute p1", &|engine, t| {
+            t.permute(engine, &[2, 0], &[3, 1]).unwrap()
+        }),
+        ("permute p2", &|engine, t| {
+            t.permute(engine, &[3, 1], &[2, 0]).unwrap()
+        }),
+        ("transpose", &|engine, t| {
+            t.transpose(engine, &[1, 3], &[0, 2]).unwrap()
+        }),
+        ("direct permute", &|engine, t| {
+            t.permute(engine, &[1, 0], &[3, 2]).unwrap()
+        }),
+        ("adjoint permute", &|engine, t| {
+            t.adjoint(engine)
+                .unwrap()
+                .permute(engine, &[1, 0], &[3, 2])
+                .unwrap()
         }),
     ];
-    let shared = Runtime::builder().dense_threads(1).build().unwrap();
-    let warm_results = operations.map(|(_, operation)| operation(&tensor!(&shared, &leg)));
+    let shared = Runtime::builder().build().unwrap();
+    let warm_results = operations.map(|(_, operation)| {
+        let tensor = tensor!(engine, &shared, &leg);
+        operation(engine, &tensor)
+    });
     for ((name, operation), warm) in operations.into_iter().zip(warm_results) {
         symtn::cache::clear();
-        let cold_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let cold = operation(&tensor!(&cold_runtime, &leg));
+        let cold_runtime = Runtime::builder().build().unwrap();
+        let cold = {
+            let tensor = tensor!(engine, &cold_runtime, &leg);
+            operation(engine, &tensor)
+        };
         assert_eq!(warm.codomain(), cold.codomain(), "{name}");
         assert_eq!(
-            bits(warm.materialize().unwrap().dense_data().unwrap()),
-            bits(cold.materialize().unwrap().dense_data().unwrap()),
+            bits(warm.materialize(engine).unwrap().dense_data().unwrap()),
+            bits(cold.materialize(engine).unwrap().dense_data().unwrap()),
             "{name}: shared-Runtime result differs from a cold Runtime"
         );
     }
@@ -358,12 +432,13 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
         [(TableSector::new(1), 2), (TableSector::new(2), 2)],
     )
     .unwrap();
-    let fib_tensor = |runtime: &Runtime| {
+    let fib_tensor = |engine: &mut dyn Engine, runtime: &Runtime| {
         let dual = fib.try_dual().unwrap();
-        TensorMap::<_, Complex64>::rand_with_seed(runtime, [&fib, &dual], [&fib, &dual], 5).unwrap()
+        TensorMap::<_, Complex64>::rand_with_seed(engine, runtime, [&fib, &dual], [&fib, &dual], 5)
+            .unwrap()
     };
-    let complex_bits = |t: &TensorMap<TableRule, Complex64>| {
-        t.materialize()
+    let complex_bits = |engine: &mut dyn Engine, t: &TensorMap<TableRule, Complex64>| {
+        t.materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -372,26 +447,26 @@ fn shared_runtime_distinguishes_operations_on_the_same_groups() {
             .collect::<Vec<_>>()
     };
     symtn::cache::clear();
-    let shared = Runtime::builder().dense_threads(1).build().unwrap();
-    let under = fib_tensor(&shared)
-        .braid(&[1, 3], &[0, 2], &[0, 1, 2, 3])
+    let shared = Runtime::builder().build().unwrap();
+    let under = fib_tensor(engine, &shared)
+        .braid(engine, &[1, 3], &[0, 2], &[0, 1, 2, 3])
         .unwrap();
-    let over = fib_tensor(&shared)
-        .braid(&[1, 3], &[0, 2], &[3, 2, 1, 0])
+    let over = fib_tensor(engine, &shared)
+        .braid(engine, &[1, 3], &[0, 2], &[3, 2, 1, 0])
         .unwrap();
     assert_ne!(
-        complex_bits(&under),
-        complex_bits(&over),
+        complex_bits(engine, &under),
+        complex_bits(engine, &over),
         "fixture: levels matter"
     );
     symtn::cache::clear();
-    let cold_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let cold_over = fib_tensor(&cold_runtime)
-        .braid(&[1, 3], &[0, 2], &[3, 2, 1, 0])
+    let cold_runtime = Runtime::builder().build().unwrap();
+    let cold_over = fib_tensor(engine, &cold_runtime)
+        .braid(engine, &[1, 3], &[0, 2], &[3, 2, 1, 0])
         .unwrap();
     assert_eq!(
-        complex_bits(&over),
-        complex_bits(&cold_over),
+        complex_bits(engine, &over),
+        complex_bits(engine, &cold_over),
         "Fibonacci braid levels: shared-Runtime result differs from a cold Runtime"
     );
 }

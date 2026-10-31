@@ -9,16 +9,20 @@ fn fail_second_qr() -> SpyExecutor {
 
 #[test]
 fn svd_vals_reads_the_parent_without_materializing_the_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: values-only SVD preserves typed sector spectra across cold,
     // repeated, cloned, and concurrent lazy-adjoint reads.
     macro_rules! assert_fixture {
-        ($source:expr) => {{
+        ($engine:ident, $source:expr) => {{
             let source = $source;
-            let expected = source.svd_vals(&[0, 1], &[2]).unwrap();
-            let lazy = source.adjoint().unwrap();
-            assert_eq!(lazy.svd_vals(&[0], &[1, 2]).unwrap(), expected);
-            assert_eq!(lazy.svd_vals(&[0], &[1, 2]).unwrap(), expected);
-            assert_eq!(lazy.clone().svd_vals(&[0], &[1, 2]).unwrap(), expected);
+            let expected = source.svd_vals($engine, &[0, 1], &[2]).unwrap();
+            let lazy = source.adjoint($engine).unwrap();
+            assert_eq!(lazy.svd_vals($engine, &[0], &[1, 2]).unwrap(), expected);
+            assert_eq!(lazy.svd_vals($engine, &[0], &[1, 2]).unwrap(), expected);
+            assert_eq!(
+                lazy.clone().svd_vals($engine, &[0], &[1, 2]).unwrap(),
+                expected
+            );
             let TypedTensorRepr::Adjoint(view) = &lazy.repr else {
                 unreachable!()
             };
@@ -28,18 +32,33 @@ fn svd_vals_reads_the_parent_without_materializing_the_adjoint() {
             ));
         }};
     }
-    assert_fixture!(u1_lazy_fixture());
-    assert_fixture!(u1_lazy_fixture().convert::<Complex64>());
-    assert_fixture!(su2_lazy_fixture());
-    assert_fixture!(su2_lazy_fixture().convert::<Complex64>());
+    assert_fixture!(engine, u1_lazy_fixture(engine));
+    assert_fixture!(
+        engine,
+        u1_lazy_fixture(engine)
+            .convert::<Complex64>(engine)
+            .unwrap()
+    );
+    assert_fixture!(engine, su2_lazy_fixture(engine));
+    assert_fixture!(
+        engine,
+        su2_lazy_fixture(engine)
+            .convert::<Complex64>(engine)
+            .unwrap()
+    );
 
-    let source = u1_lazy_fixture().convert::<Complex64>();
-    let expected = source.svd_vals(&[0, 1], &[2]).unwrap();
-    let lazy = source.adjoint().unwrap();
+    let source = u1_lazy_fixture(engine)
+        .convert::<Complex64>(engine)
+        .unwrap();
+    let expected = source.svd_vals(engine, &[0, 1], &[2]).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let threads: Vec<_> = (0..4)
         .map(|_| {
             let lazy = lazy.clone();
-            std::thread::spawn(move || lazy.svd_vals(&[0], &[1, 2]).unwrap())
+            std::thread::spawn(move || {
+                let engine = &mut symtn_dense::CpuEngine::serial();
+                lazy.svd_vals(engine, &[0], &[1, 2]).unwrap()
+            })
         })
         .collect();
     for thread in threads {
@@ -50,7 +69,7 @@ fn svd_vals_reads_the_parent_without_materializing_the_adjoint() {
     };
 }
 
-fn assert_compact_svd_reads_parent<R, D>(source: &TensorMap<R, D>)
+fn assert_compact_svd_reads_parent<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -62,9 +81,9 @@ where
     D: FactorizationScalar + core::fmt::Debug,
 {
     let eager = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
-    let actual = lazy.svd_compact(&[0], &[1, 2]).unwrap();
-    let expected = eager.svd_compact(&[0], &[1, 2]).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let actual = lazy.svd_compact(engine, &[0], &[1, 2]).unwrap();
+    let expected = eager.svd_compact(engine, &[0], &[1, 2]).unwrap();
 
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
@@ -83,22 +102,22 @@ where
             source.logical_space().provider_arc()
         ));
         assert!(actual
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
-            .zip(expected.materialize().unwrap().dense_data().unwrap())
+            .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
             .all(|(&left, &right)| {
                 (left.widen_complex() - right.widen_complex()).norm() < 1e-12
             }));
     }
-    assert!(is_isometric!(actual.u, 1e-12));
+    assert!(is_isometric!(engine, actual.u, 1e-12));
     let rebuilt = actual
         .u
-        .compose(&actual.s)
+        .compose(engine, &actual.s)
         .unwrap()
-        .compose(&actual.vh)
+        .compose(engine, &actual.vh)
         .unwrap();
     assert!(rebuilt
         .dense_data()
@@ -110,18 +129,22 @@ where
 
 #[test]
 fn compact_svd_reads_the_parent_without_materializing_the_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: typed compact factors keep the eager logical-adjoint semantics,
     // provider authority, final gauge, and reconstruction without an input copy.
-    let u1 = u1_lazy_fixture();
-    let su2 = su2_lazy_fixture();
-    assert_compact_svd_reads_parent(&u1);
-    assert_compact_svd_reads_parent(&genuinely_complex(&u1));
-    assert_compact_svd_reads_parent(&su2);
-    assert_compact_svd_reads_parent(&genuinely_complex(&su2));
+    let u1 = u1_lazy_fixture(engine);
+    let su2 = su2_lazy_fixture(engine);
+    assert_compact_svd_reads_parent(engine, &u1);
+    assert_compact_svd_reads_parent(engine, &genuinely_complex(&u1));
+    assert_compact_svd_reads_parent(engine, &su2);
+    assert_compact_svd_reads_parent(engine, &genuinely_complex(&su2));
 }
 
-fn assert_full_svd_reads_parent<R, D>(source: &TensorMap<R, D>, compare_factor_bytes: bool)
-where
+fn assert_full_svd_reads_parent<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+    compare_factor_bytes: bool,
+) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -132,12 +155,12 @@ where
     D: FactorizationScalar + core::fmt::Debug,
 {
     let eager = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let actual = lazy
-        .svd_full(&codomain_axes(&lazy), &domain_axes(&lazy))
+        .svd_full(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
         .unwrap();
     let expected = eager
-        .svd_full(&codomain_axes(&eager), &domain_axes(&eager))
+        .svd_full(engine, &codomain_axes(&eager), &domain_axes(&eager))
         .unwrap();
 
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
@@ -176,13 +199,13 @@ where
                 }));
         }
     }
-    assert!(is_isometric!(actual.u, 1e-12));
-    assert!(is_isometric!(actual.vh, 1e-12));
+    assert!(is_isometric!(engine, actual.u, 1e-12));
+    assert!(is_isometric!(engine, actual.vh, 1e-12));
     let rebuilt = actual
         .u
-        .compose(&actual.s)
+        .compose(engine, &actual.s)
         .unwrap()
-        .compose(&actual.vh)
+        .compose(engine, &actual.vh)
         .unwrap();
     assert!(rebuilt
         .dense_data()
@@ -194,53 +217,57 @@ where
 
 #[test]
 fn full_svd_adjoint_rectangular_matched_matches_materialized_oracle() {
-    let matched = u1_matrix_fixture([(0, 2)], [(0, 3)]);
-    assert_full_svd_reads_parent(&matched, true);
-    assert_full_svd_reads_parent(&genuinely_complex(&matched), true);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let matched = u1_matrix_fixture(engine, [(0, 2)], [(0, 3)]);
+    assert_full_svd_reads_parent(engine, &matched, true);
+    assert_full_svd_reads_parent(engine, &genuinely_complex(&matched), true);
 }
 
 #[test]
 fn full_svd_adjoint_unmatched_row_only_matches_materialized_oracle() {
-    let source = u1_matrix_fixture([(0, 2), (1, 1)], [(0, 3)]);
-    assert_full_svd_reads_parent(&source, false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(0, 2), (1, 1)], [(0, 3)]);
+    assert_full_svd_reads_parent(engine, &source, false);
 }
 
 #[test]
 fn full_svd_adjoint_unmatched_column_only_matches_materialized_oracle() {
-    let source = u1_matrix_fixture([(0, 2)], [(0, 3), (1, 1)]);
-    assert_full_svd_reads_parent(&source, false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(0, 2)], [(0, 3), (1, 1)]);
+    assert_full_svd_reads_parent(engine, &source, false);
 }
 
 #[test]
 fn full_svd_adjoint_disjoint_matches_materialized_oracle() {
-    let source = u1_matrix_fixture([(1, 2)], [(0, 3)]);
-    assert_full_svd_reads_parent(&source, false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(1, 2)], [(0, 3)]);
+    assert_full_svd_reads_parent(engine, &source, false);
 }
 
 #[test]
 fn full_svd_adjoint_multitree_matches_materialized_oracle() {
-    let multitree = su2_lazy_fixture();
-    assert_full_svd_reads_parent(&multitree, false);
-    assert_full_svd_reads_parent(&genuinely_complex(&multitree), false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let multitree = su2_lazy_fixture(engine);
+    assert_full_svd_reads_parent(engine, &multitree, false);
+    assert_full_svd_reads_parent(engine, &genuinely_complex(&multitree), false);
 }
 
 #[test]
 fn full_svd_late_failure_does_not_publish_the_adjoint_cache() {
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(fail_second_svd(&Arc::default())))
-        .build()
-        .unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })
     .unwrap();
     let before = source.dense_data().unwrap().to_vec();
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     assert!(matches!(
-        lazy.svd_full(&[0], &[1]),
+        lazy.svd_full(engine, &[0], &[1]),
         Err(Error::Operation(_))
     ));
     assert_eq!(source.dense_data().unwrap(), before);
@@ -249,7 +276,7 @@ fn full_svd_late_failure_does_not_publish_the_adjoint_cache() {
     };
 }
 
-fn assert_null_redirect<R, D>(source: &TensorMap<R, D>)
+fn assert_null_redirect<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -261,21 +288,21 @@ where
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     for (actual, expected, left) in [
         (
-            lazy.left_null(&codomain_axes(&lazy), &domain_axes(&lazy))
+            lazy.left_null(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
                 .unwrap(),
             target
-                .left_null(&codomain_axes(&target), &domain_axes(&target))
+                .left_null(engine, &codomain_axes(&target), &domain_axes(&target))
                 .unwrap(),
             true,
         ),
         (
-            lazy.right_null(&codomain_axes(&lazy), &domain_axes(&lazy))
+            lazy.right_null(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
                 .unwrap(),
             target
-                .right_null(&codomain_axes(&target), &domain_axes(&target))
+                .right_null(engine, &codomain_axes(&target), &domain_axes(&target))
                 .unwrap(),
             false,
         ),
@@ -290,14 +317,24 @@ where
             source.logical_space().provider_arc()
         ));
         let actual_projector = if left {
-            actual.compose(&actual.adjoint().unwrap()).unwrap()
+            let actual_adjoint = &actual.adjoint(engine).unwrap();
+            actual.compose(engine, actual_adjoint).unwrap()
         } else {
-            actual.adjoint().unwrap().compose(&actual).unwrap()
+            actual
+                .adjoint(engine)
+                .unwrap()
+                .compose(engine, &actual)
+                .unwrap()
         };
         let expected_projector = if left {
-            expected.compose(&expected.adjoint().unwrap()).unwrap()
+            let expected_adjoint = &expected.adjoint(engine).unwrap();
+            expected.compose(engine, expected_adjoint).unwrap()
         } else {
-            expected.adjoint().unwrap().compose(&expected).unwrap()
+            expected
+                .adjoint(engine)
+                .unwrap()
+                .compose(engine, &expected)
+                .unwrap()
         };
         assert!(actual_projector
             .dense_data()
@@ -308,15 +345,22 @@ where
                 (actual.widen_complex() - expected.widen_complex()).norm() < 1e-11
             }));
         let residual = if left {
-            actual.adjoint().unwrap().compose(&target).unwrap()
+            actual
+                .adjoint(engine)
+                .unwrap()
+                .compose(engine, &target)
+                .unwrap()
         } else {
-            target.compose(&actual.adjoint().unwrap()).unwrap()
+            let actual_adjoint = &actual.adjoint(engine).unwrap();
+            target.compose(engine, actual_adjoint).unwrap()
         };
-        assert!(residual.norm(2.0).unwrap() < 1e-10 * (1.0 + target.norm(2.0).unwrap()));
+        assert!(
+            residual.norm(engine, 2.0).unwrap() < 1e-10 * (1.0 + target.norm(engine, 2.0).unwrap())
+        );
         assert!(if left {
-            is_isometric!(actual, 1e-11)
+            is_isometric!(engine, actual, 1e-11)
         } else {
-            is_isometric!(actual.adjoint().unwrap(), 1e-11)
+            is_isometric!(engine, actual.adjoint(engine).unwrap(), 1e-11)
         });
         let _ = actual.dense_data().unwrap();
     }
@@ -327,27 +371,26 @@ where
 
 #[test]
 fn null_spaces_redirect_through_the_parent_without_materializing_the_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let fixtures = [
-        u1_matrix_fixture([(0, 3)], [(0, 2)]),
-        u1_matrix_fixture([(0, 3), (1, 2)], [(0, 2)]),
-        u1_matrix_fixture([(0, 3)], [(0, 2), (1, 2)]),
-        u1_matrix_fixture([(1, 2)], [(0, 3)]),
-        u1_matrix_fixture([(0, 3)], [(0, 3)]),
+        u1_matrix_fixture(engine, [(0, 3)], [(0, 2)]),
+        u1_matrix_fixture(engine, [(0, 3), (1, 2)], [(0, 2)]),
+        u1_matrix_fixture(engine, [(0, 3)], [(0, 2), (1, 2)]),
+        u1_matrix_fixture(engine, [(1, 2)], [(0, 3)]),
+        u1_matrix_fixture(engine, [(0, 3)], [(0, 3)]),
     ];
     for source in &fixtures {
-        assert_null_redirect(source);
-        assert_null_redirect(&genuinely_complex(source));
+        assert_null_redirect(engine, source);
+        assert_null_redirect(engine, &genuinely_complex(source));
     }
-    let multitree = su2_lazy_fixture();
-    assert_null_redirect(&multitree);
-    assert_null_redirect(&genuinely_complex(&multitree));
+    let multitree = su2_lazy_fixture(engine);
+    assert_null_redirect(engine, &multitree);
+    assert_null_redirect(engine, &genuinely_complex(&multitree));
 }
 
-fn assert_null_late_failure(left: bool) {
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(fail_second_qr()))
-        .build()
-        .unwrap();
+fn assert_null_late_failure(engine: &mut dyn Engine, left: bool) {
+    let _dense = probe::inject_dense(Box::new(fail_second_qr()));
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let short = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -363,17 +406,18 @@ fn assert_null_late_failure(left: bool) {
     } else {
         (&long, &short)
     };
-    let source = TensorMap::from_subblock_fn(&runtime, [codomain], [domain], |_, indices| {
-        (indices.iter().sum::<usize>() + 1) as f64
-    })
-    .unwrap();
+    let source =
+        TensorMap::from_subblock_fn(engine, &runtime, [codomain], [domain], |_, indices| {
+            (indices.iter().sum::<usize>() + 1) as f64
+        })
+        .unwrap();
     let before = source.dense_data().unwrap().to_vec();
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     let result = if left {
-        lazy.left_null(&[0], &[1])
+        lazy.left_null(engine, &[0], &[1])
     } else {
-        lazy.right_null(&[0], &[1])
+        lazy.right_null(engine, &[0], &[1])
     };
     assert!(matches!(result, Err(Error::Operation(_))));
     assert_eq!(source.dense_data().unwrap(), before);
@@ -384,11 +428,12 @@ fn assert_null_late_failure(left: bool) {
 
 #[test]
 fn null_space_late_failure_leaves_parent_and_adjoint_cache_unchanged() {
-    assert_null_late_failure(true);
-    assert_null_late_failure(false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    assert_null_late_failure(engine, true);
+    assert_null_late_failure(engine, false);
 }
 
-fn assert_polar_redirect<R, D>(source: &TensorMap<R, D>, left: bool)
+fn assert_polar_redirect<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>, left: bool)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -400,30 +445,33 @@ where
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let actual = if left {
-        lazy.left_polar(&[0], &[1]).unwrap().pair()
+        lazy.left_polar(engine, &[0], &[1]).unwrap().pair()
     } else {
-        lazy.right_polar(&codomain_axes(&lazy), &domain_axes(&lazy))
+        lazy.right_polar(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
             .unwrap()
             .pair()
     };
     let expected = if left {
-        target.left_polar(&[0], &[1]).unwrap().pair()
+        target.left_polar(engine, &[0], &[1]).unwrap().pair()
     } else {
         target
-            .right_polar(&codomain_axes(&target), &domain_axes(&target))
+            .right_polar(engine, &codomain_axes(&target), &domain_axes(&target))
             .unwrap()
             .pair()
     };
-    assert_polar_factors(source, &target, &actual, &expected, left);
+    assert_polar_factors(engine, source, &target, &actual, &expected, left);
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
     };
 }
 
-fn assert_rank_deficient_polar_support<R, D>(source: &TensorMap<R, D>, left: bool)
-where
+fn assert_rank_deficient_polar_support<R, D>(
+    engine: &mut dyn Engine,
+    source: &TensorMap<R, D>,
+    left: bool,
+) where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
             Error = FusionAlgebraError,
@@ -434,41 +482,42 @@ where
     D: AdvancedLinalgScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
-    let target_pinv = target.pinv(&[0], &[1], 1e-10).unwrap();
-    let target_codomain = target.compose(&target_pinv).unwrap();
-    let target_domain = target_pinv.compose(&target).unwrap();
-    let lazy = source.adjoint().unwrap();
+    let target_pinv = target.pinv(engine, &[0], &[1], 1e-10).unwrap();
+    let target_codomain = target.compose(engine, &target_pinv).unwrap();
+    let target_domain = target_pinv.compose(engine, &target).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let factors = if left {
-        lazy.left_polar(&[0], &[1]).unwrap().pair()
+        lazy.left_polar(engine, &[0], &[1]).unwrap().pair()
     } else {
-        lazy.right_polar(&[0], &[1]).unwrap().pair()
+        lazy.right_polar(engine, &[0], &[1]).unwrap().pair()
     };
     let (positive, isometry) = if left {
         (&factors.1, &factors.0)
     } else {
         (&factors.0, &factors.1)
     };
-    let positive_pinv = positive.pinv(&[0], &[1], 1e-10).unwrap();
+    let positive_pinv = positive.pinv(engine, &[0], &[1], 1e-10).unwrap();
     if left {
-        let support = positive_pinv.compose(positive).unwrap();
-        assert_typed_map_close(&support, &target_domain, 1e-9);
+        let support = positive_pinv.compose(engine, positive).unwrap();
+        assert_typed_map_close(engine, &support, &target_domain, 1e-9);
+        let isometry_adjoint = &isometry.adjoint(engine).unwrap();
         let image = isometry
-            .compose(&support)
+            .compose(engine, &support)
             .unwrap()
-            .compose(&isometry.adjoint().unwrap())
+            .compose(engine, isometry_adjoint)
             .unwrap();
-        assert_typed_map_close(&image, &target_codomain, 1e-9);
+        assert_typed_map_close(engine, &image, &target_codomain, 1e-9);
     } else {
-        let support = positive.compose(&positive_pinv).unwrap();
-        assert_typed_map_close(&support, &target_codomain, 1e-9);
+        let support = positive.compose(engine, &positive_pinv).unwrap();
+        assert_typed_map_close(engine, &support, &target_codomain, 1e-9);
         let image = isometry
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .compose(&support)
+            .compose(engine, &support)
             .unwrap()
-            .compose(isometry)
+            .compose(engine, isometry)
             .unwrap();
-        assert_typed_map_close(&image, &target_domain, 1e-9);
+        assert_typed_map_close(engine, &image, &target_domain, 1e-9);
     }
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
         unreachable!()
@@ -477,22 +526,24 @@ where
 
 #[test]
 fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
-    let tall = u1_matrix_fixture([(0, 3)], [(0, 2)]);
-    assert_polar_redirect(&tall, false);
-    assert_polar_redirect(&genuinely_complex(&tall), false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tall = u1_matrix_fixture(engine, [(0, 3)], [(0, 2)]);
+    assert_polar_redirect(engine, &tall, false);
+    assert_polar_redirect(engine, &genuinely_complex(&tall), false);
 
-    let wide = u1_matrix_fixture([(0, 2)], [(0, 3)]);
-    assert_polar_redirect(&wide, true);
+    let wide = u1_matrix_fixture(engine, [(0, 2)], [(0, 3)]);
+    assert_polar_redirect(engine, &wide, true);
 
-    let codomain_only = u1_matrix_fixture([(0, 2), (1, 2)], [(0, 2)]);
-    assert_polar_redirect(&codomain_only, false);
-    let domain_only = u1_matrix_fixture([(0, 2)], [(0, 2), (1, 2)]);
-    assert_polar_redirect(&domain_only, true);
+    let codomain_only = u1_matrix_fixture(engine, [(0, 2), (1, 2)], [(0, 2)]);
+    assert_polar_redirect(engine, &codomain_only, false);
+    let domain_only = u1_matrix_fixture(engine, [(0, 2)], [(0, 2), (1, 2)]);
+    assert_polar_redirect(engine, &domain_only, true);
 
     let provider = Arc::new(SU2FusionRule);
     let half = GradedSpace::try_new(provider, [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
     let multitree = TensorMap::from_subblock_fn(
-        &Runtime::builder().dense_threads(1).build().unwrap(),
+        engine,
+        &Runtime::builder().build().unwrap(),
         [&half, &half, &half],
         [&half],
         |_, indices| (indices.iter().sum::<usize>() + 1) as f64,
@@ -503,56 +554,59 @@ fn polar_redirects_through_parent_with_owned_psd_factors_and_a_cold_receiver() {
         2
     );
     let multitree = genuinely_complex(&multitree);
-    assert_polar_redirect(&multitree, false);
+    assert_polar_redirect(engine, &multitree, false);
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
-    let rank_deficient = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        let value = ((indices[0] + 1) * (indices[1] + 1)) as f64;
-        num_complex::Complex64::new(value, value / 3.0)
-    })
-    .unwrap();
-    assert_polar_redirect(&rank_deficient, true);
-    assert_polar_redirect(&rank_deficient, false);
-    assert_rank_deficient_polar_support(&rank_deficient, true);
-    assert_rank_deficient_polar_support(&rank_deficient, false);
+    let rank_deficient =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
+            let value = ((indices[0] + 1) * (indices[1] + 1)) as f64;
+            num_complex::Complex64::new(value, value / 3.0)
+        })
+        .unwrap();
+    assert_polar_redirect(engine, &rank_deficient, true);
+    assert_polar_redirect(engine, &rank_deficient, false);
+    assert_rank_deficient_polar_support(engine, &rank_deficient, true);
+    assert_rank_deficient_polar_support(engine, &rank_deficient, false);
 }
 
 #[test]
 fn polar_redirect_repeats_clones_and_runs_concurrently_without_warming_receiver() {
-    let source = genuinely_complex(&u1_matrix_fixture([(0, 3)], [(0, 3)]));
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = genuinely_complex(&u1_matrix_fixture(engine, [(0, 3)], [(0, 3)]));
     let target = eager_adjoint_oracle(&source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     for left in [true, false] {
         let expected = if left {
-            target.left_polar(&[0], &[1]).unwrap().pair()
+            target.left_polar(engine, &[0], &[1]).unwrap().pair()
         } else {
-            target.right_polar(&[0], &[1]).unwrap().pair()
+            target.right_polar(&mut *engine, &[0], &[1]).unwrap().pair()
         };
         for _ in 0..2 {
             let actual = if left {
-                lazy.clone().left_polar(&[0], &[1]).unwrap().pair()
+                lazy.clone().left_polar(engine, &[0], &[1]).unwrap().pair()
             } else {
-                lazy.clone().right_polar(&[0], &[1]).unwrap().pair()
+                lazy.clone().right_polar(engine, &[0], &[1]).unwrap().pair()
             };
-            assert_polar_factors(&source, &target, &actual, &expected, left);
+            assert_polar_factors(engine, &source, &target, &actual, &expected, left);
         }
         let calls = (0..4)
             .map(|_| {
                 let clone = lazy.clone();
                 std::thread::spawn(move || {
+                    let engine = &mut symtn_dense::CpuEngine::serial();
                     if left {
-                        clone.left_polar(&[0], &[1]).unwrap().pair()
+                        clone.left_polar(engine, &[0], &[1]).unwrap().pair()
                     } else {
-                        clone.right_polar(&[0], &[1]).unwrap().pair()
+                        clone.right_polar(engine, &[0], &[1]).unwrap().pair()
                     }
                 })
             })
             .collect::<Vec<_>>();
         for call in calls {
             let actual = call.join().unwrap();
-            assert_polar_factors(&source, &target, &actual, &expected, left);
+            assert_polar_factors(engine, &source, &target, &actual, &expected, left);
         }
     }
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
@@ -562,9 +616,10 @@ fn polar_redirect_repeats_clones_and_runs_concurrently_without_warming_receiver(
 
 #[test]
 fn polar_redirect_wrong_direction_keeps_requested_name_and_receiver_cold() {
-    let source = u1_matrix_fixture([(0, 3)], [(0, 2)]);
-    let lazy = source.adjoint().unwrap();
-    let error = lazy.left_polar(&[0], &[1]).unwrap_err();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(0, 3)], [(0, 2)]);
+    let lazy = source.adjoint(engine).unwrap();
+    let error = lazy.left_polar(engine, &[0], &[1]).unwrap_err();
     assert!(matches!(
         error,
         Error::Operation(error)
@@ -575,9 +630,9 @@ fn polar_redirect_wrong_direction_keeps_requested_name_and_receiver_cold() {
             )
     ));
 
-    let source = u1_matrix_fixture([(0, 2)], [(0, 3)]);
-    let lazy = source.adjoint().unwrap();
-    let error = lazy.right_polar(&[0], &[1]).unwrap_err();
+    let source = u1_matrix_fixture(engine, [(0, 2)], [(0, 3)]);
+    let lazy = source.adjoint(engine).unwrap();
+    let error = lazy.right_polar(engine, &[0], &[1]).unwrap_err();
     assert!(matches!(
         error,
         Error::Operation(error)
@@ -591,30 +646,29 @@ fn polar_redirect_wrong_direction_keeps_requested_name_and_receiver_cold() {
 
 #[test]
 fn polar_redirect_late_failure_leaves_parent_and_receiver_unchanged() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for left in [true, false] {
         // Sectors stream, so the first sector's W/P GEMMs run before the
         // second SVD fails.
-        let runtime = Runtime::builder()
-            .with_dense_executor(Box::new(SpyExecutor::counting(&Arc::default()).failing(
-                POLAR_SVD,
-                Some(2),
-                "injected second-sector failure",
-            )))
-            .build()
-            .unwrap();
+        let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&Arc::default()).failing(
+            POLAR_SVD,
+            Some(2),
+            "injected second-sector failure",
+        )));
+        let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
         let leg =
             GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
-        let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             (indices.iter().sum::<usize>() + 1) as f64
         })
         .unwrap();
         let before = source.dense_data().unwrap().to_vec();
-        let lazy = source.adjoint().unwrap();
+        let lazy = source.adjoint(engine).unwrap();
         let result = if left {
-            lazy.left_polar(&[0], &[1]).map(drop)
+            lazy.left_polar(engine, &[0], &[1]).map(drop)
         } else {
-            lazy.right_polar(&[0], &[1]).map(drop)
+            lazy.right_polar(engine, &[0], &[1]).map(drop)
         };
         assert!(matches!(result, Err(Error::Operation(_))));
         assert_eq!(source.dense_data().unwrap(), before);
@@ -625,6 +679,7 @@ fn polar_redirect_late_failure_leaves_parent_and_receiver_unchanged() {
 }
 
 fn assert_qr_lq_factors<R, D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<R, D>,
     target: &TensorMap<R, D>,
     actual: &(TensorMap<R, D>, TensorMap<R, D>),
@@ -663,12 +718,12 @@ fn assert_qr_lq_factors<R, D>(
         }
     }
     let isometry = if qr {
-        is_isometric!(actual.0, 1e-12)
+        is_isometric!(engine, actual.0, 1e-12)
     } else {
-        is_isometric!(actual.1.adjoint().unwrap(), 1e-12)
+        is_isometric!(engine, actual.1.adjoint(engine).unwrap(), 1e-12)
     };
     assert!(isometry);
-    let rebuilt = actual.0.compose(&actual.1).unwrap();
+    let rebuilt = actual.0.compose(engine, &actual.1).unwrap();
     assert!(rebuilt
         .dense_data()
         .unwrap()
@@ -677,7 +732,7 @@ fn assert_qr_lq_factors<R, D>(
         .all(|(&left, &right)| { (left.widen_complex() - right.widen_complex()).norm() < 1e-12 }));
 }
 
-fn assert_qr_lq_keeps_input_cache_cold<R, D>(source: &TensorMap<R, D>)
+fn assert_qr_lq_keeps_input_cache_cold<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -689,65 +744,73 @@ where
     D: FactorizationScalar + core::fmt::Debug,
 {
     let target = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     let actual = lazy
-        .qr_compact(&codomain_axes(&lazy), &domain_axes(&lazy))
+        .qr_compact(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
+        .unwrap()
+        .pair();
+    let target_qr_compact = &target
+        .qr_compact(engine, &codomain_axes(&target), &domain_axes(&target))
         .unwrap()
         .pair();
     assert_qr_lq_factors(
+        engine,
         source,
         &target,
         &actual,
-        &target
-            .qr_compact(&codomain_axes(&target), &domain_axes(&target))
-            .unwrap()
-            .pair(),
+        target_qr_compact,
         true,
         true,
     );
     let actual = lazy
-        .lq_compact(&codomain_axes(&lazy), &domain_axes(&lazy))
+        .lq_compact(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
+        .unwrap()
+        .pair();
+    let target_lq_compact = &target
+        .lq_compact(engine, &codomain_axes(&target), &domain_axes(&target))
         .unwrap()
         .pair();
     assert_qr_lq_factors(
+        engine,
         source,
         &target,
         &actual,
-        &target
-            .lq_compact(&codomain_axes(&target), &domain_axes(&target))
-            .unwrap()
-            .pair(),
+        target_lq_compact,
         false,
         true,
     );
     let actual = lazy
-        .qr_full(&codomain_axes(&lazy), &domain_axes(&lazy))
+        .qr_full(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
+        .unwrap()
+        .pair();
+    let target_qr_full = &target
+        .qr_full(engine, &codomain_axes(&target), &domain_axes(&target))
         .unwrap()
         .pair();
     assert_qr_lq_factors(
+        engine,
         source,
         &target,
         &actual,
-        &target
-            .qr_full(&codomain_axes(&target), &domain_axes(&target))
-            .unwrap()
-            .pair(),
+        target_qr_full,
         true,
         false,
     );
     let actual = lazy
-        .lq_full(&codomain_axes(&lazy), &domain_axes(&lazy))
+        .lq_full(engine, &codomain_axes(&lazy), &domain_axes(&lazy))
+        .unwrap()
+        .pair();
+    let target_lq_full = &target
+        .lq_full(engine, &codomain_axes(&target), &domain_axes(&target))
         .unwrap()
         .pair();
     assert_qr_lq_factors(
+        engine,
         source,
         &target,
         &actual,
-        &target
-            .lq_full(&codomain_axes(&target), &domain_axes(&target))
-            .unwrap()
-            .pair(),
+        target_lq_full,
         false,
         false,
     );
@@ -759,46 +822,36 @@ where
 
 #[test]
 fn qr_lq_adjoint_dispatch_covers_unique_simple_dtypes_and_rectangles() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: adjoint QR uses an operation-local logical copy while LQ uses
     // the parent QR, preserving compact gauge, full semantics, and provider authority.
-    let tall = u1_matrix_fixture([(-2, 1), (0, 3)], [(-2, 1), (0, 1)]);
-    let wide = u1_matrix_fixture([(-2, 1), (0, 1)], [(-2, 1), (0, 3)]);
-    assert_qr_lq_keeps_input_cache_cold(&tall);
-    assert_qr_lq_keeps_input_cache_cold(&genuinely_complex(&tall));
-    assert_qr_lq_keeps_input_cache_cold(&wide);
-    assert_qr_lq_keeps_input_cache_cold(&genuinely_complex(&wide));
+    let tall = u1_matrix_fixture(engine, [(-2, 1), (0, 3)], [(-2, 1), (0, 1)]);
+    let wide = u1_matrix_fixture(engine, [(-2, 1), (0, 1)], [(-2, 1), (0, 3)]);
+    assert_qr_lq_keeps_input_cache_cold(engine, &tall);
+    assert_qr_lq_keeps_input_cache_cold(engine, &genuinely_complex(&tall));
+    assert_qr_lq_keeps_input_cache_cold(engine, &wide);
+    assert_qr_lq_keeps_input_cache_cold(engine, &genuinely_complex(&wide));
 
-    let multitree = su2_lazy_fixture();
-    assert_qr_lq_keeps_input_cache_cold(&multitree);
-    assert_qr_lq_keeps_input_cache_cold(&genuinely_complex(&multitree));
+    let multitree = su2_lazy_fixture(engine);
+    assert_qr_lq_keeps_input_cache_cold(engine, &multitree);
+    assert_qr_lq_keeps_input_cache_cold(engine, &genuinely_complex(&multitree));
 }
 
 #[test]
 fn full_qr_lq_adjoint_dispatch_handles_unmatched_and_disjoint_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     for source in [
-        u1_matrix_fixture([(0, 2), (1, 1)], [(0, 3)]),
-        u1_matrix_fixture([(0, 2)], [(0, 3), (1, 1)]),
+        u1_matrix_fixture(engine, [(0, 2), (1, 1)], [(0, 3)]),
+        u1_matrix_fixture(engine, [(0, 2)], [(0, 3), (1, 1)]),
     ] {
         let target = eager_adjoint_oracle(&source);
-        let lazy = source.adjoint().unwrap();
-        let qr = lazy.qr_full(&[0], &[1]).unwrap().pair();
-        assert_qr_lq_factors(
-            &source,
-            &target,
-            &qr,
-            &target.qr_full(&[0], &[1]).unwrap().pair(),
-            true,
-            false,
-        );
-        let lq = lazy.lq_full(&[0], &[1]).unwrap().pair();
-        assert_qr_lq_factors(
-            &source,
-            &target,
-            &lq,
-            &target.lq_full(&[0], &[1]).unwrap().pair(),
-            false,
-            false,
-        );
+        let lazy = source.adjoint(engine).unwrap();
+        let qr = lazy.qr_full(engine, &[0], &[1]).unwrap().pair();
+        let target_qr_full = &target.qr_full(engine, &[0], &[1]).unwrap().pair();
+        assert_qr_lq_factors(engine, &source, &target, &qr, target_qr_full, true, false);
+        let lq = lazy.lq_full(engine, &[0], &[1]).unwrap().pair();
+        let target_lq_full = &target.lq_full(engine, &[0], &[1]).unwrap().pair();
+        assert_qr_lq_factors(engine, &source, &target, &lq, target_lq_full, false, false);
         let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
             unreachable!()
         };
@@ -807,39 +860,54 @@ fn full_qr_lq_adjoint_dispatch_handles_unmatched_and_disjoint_sectors() {
 
 #[test]
 fn qr_lq_adjoint_dispatch_handles_an_empty_homspace() {
-    let source = u1_matrix_fixture([(1, 2)], [(0, 3)]);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = u1_matrix_fixture(engine, [(1, 2)], [(0, 3)]);
     assert!(source.dense_data().unwrap().is_empty());
-    assert_qr_lq_keeps_input_cache_cold(&source);
+    assert_qr_lq_keeps_input_cache_cold(engine, &source);
 }
 
 #[test]
 fn qr_lq_uncached_owned_outputs_repeat_clone_and_run_concurrently() {
-    let source = genuinely_complex(&su2_lazy_fixture());
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = genuinely_complex(&su2_lazy_fixture(engine));
     let target = eager_adjoint_oracle(&source);
-    let lazy = source.adjoint().unwrap();
-    let expected_qr = lazy.qr_compact(&[0], &[1, 2]).unwrap().pair();
-    let expected_lq = lazy.lq_full(&[0], &[1, 2]).unwrap().pair();
+    let lazy = source.adjoint(engine).unwrap();
+    let expected_qr = lazy.qr_compact(engine, &[0], &[1, 2]).unwrap().pair();
+    let expected_lq = lazy.lq_full(engine, &[0], &[1, 2]).unwrap().pair();
     for _ in 0..2 {
-        let qr = lazy.clone().qr_compact(&[0], &[1, 2]).unwrap().pair();
-        let lq = lazy.clone().lq_full(&[0], &[1, 2]).unwrap().pair();
-        assert_qr_lq_factors(&source, &target, &qr, &expected_qr, true, true);
-        assert_qr_lq_factors(&source, &target, &lq, &expected_lq, false, false);
+        let qr = lazy
+            .clone()
+            .qr_compact(engine, &[0], &[1, 2])
+            .unwrap()
+            .pair();
+        let lq = lazy.clone().lq_full(engine, &[0], &[1, 2]).unwrap().pair();
+        assert_qr_lq_factors(engine, &source, &target, &qr, &expected_qr, true, true);
+        assert_qr_lq_factors(engine, &source, &target, &lq, &expected_lq, false, false);
     }
     std::thread::scope(|scope| {
         let calls: Vec<_> = (0..4)
             .map(|_| {
                 let lazy = lazy.clone();
                 scope.spawn(move || {
-                    let qr = lazy.qr_compact(&[0], &[1, 2]).unwrap().pair();
-                    let lq = lazy.lq_full(&[0], &[1, 2]).unwrap().pair();
+                    let engine = &mut symtn_dense::CpuEngine::serial();
+                    let qr = lazy.qr_compact(engine, &[0], &[1, 2]).unwrap().pair();
+                    let lq = lazy.lq_full(engine, &[0], &[1, 2]).unwrap().pair();
                     (qr, lq)
                 })
             })
             .collect();
         for call in calls {
             let (qr, lq) = call.join().unwrap();
-            assert_qr_lq_factors(&source, &target, &qr, &expected_qr, true, true);
-            assert_qr_lq_factors(&source, &target, &lq, &expected_lq, false, false);
+            assert_qr_lq_factors(engine, &source, &target, &qr, &expected_qr, true, true);
+            assert_qr_lq_factors(
+                &mut *engine,
+                &source,
+                &target,
+                &lq,
+                &expected_lq,
+                false,
+                false,
+            );
         }
     });
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {
@@ -847,24 +915,22 @@ fn qr_lq_uncached_owned_outputs_repeat_clone_and_run_concurrently() {
     };
 }
 
-fn assert_full_qr_lq_late_failure(qr: bool) {
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(fail_second_qr()))
-        .build()
-        .unwrap();
+fn assert_full_qr_lq_late_failure(engine: &mut dyn Engine, qr: bool) {
+    let _dense = probe::inject_dense(Box::new(fail_second_qr()));
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
-    let source = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })
     .unwrap();
     let before = source.dense_data().unwrap().to_vec();
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
 
     let result = if qr {
-        lazy.qr_full(&[0], &[1]).map(drop)
+        lazy.qr_full(engine, &[0], &[1]).map(drop)
     } else {
-        lazy.lq_full(&[0], &[1]).map(drop)
+        lazy.lq_full(engine, &[0], &[1]).map(drop)
     };
     assert!(matches!(result, Err(Error::Operation(_))));
     assert_eq!(source.dense_data().unwrap(), before);
@@ -875,11 +941,12 @@ fn assert_full_qr_lq_late_failure(qr: bool) {
 
 #[test]
 fn full_qr_lq_late_failure_leaves_parent_and_adjoint_cache_unchanged() {
-    assert_full_qr_lq_late_failure(true);
-    assert_full_qr_lq_late_failure(false);
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    assert_full_qr_lq_late_failure(engine, true);
+    assert_full_qr_lq_late_failure(engine, false);
 }
 
-fn assert_truncated_svd_reads_parent<R, D>(source: &TensorMap<R, D>)
+fn assert_truncated_svd_reads_parent<R, D>(engine: &mut dyn Engine, source: &TensorMap<R, D>)
 where
     R: TypedSectorAdmission<
             Sector = <R as SectorCodec>::Sector,
@@ -899,7 +966,11 @@ where
         singular_values: Vec<SectorSpectrum<R::Sector, f64>>,
         error: f64,
     }
-    fn truncated<R, D>(tensor: &TensorMap<R, D>, truncation: &Truncation) -> Truncated<R, D>
+    fn truncated<R, D>(
+        engine: &mut dyn Engine,
+        tensor: &TensorMap<R, D>,
+        truncation: &Truncation,
+    ) -> Truncated<R, D>
     where
         R: TypedSectorAdmission<
                 Sector = <R as SectorCodec>::Sector,
@@ -910,18 +981,18 @@ where
             + SectorCodec,
         D: FactorizationScalar + SpectrumMagnitude,
     {
-        let Svd { u, s, vh } = tensor.svd_compact(&[0], &[1, 2]).unwrap();
+        let Svd { u, s, vh } = tensor.svd_compact(engine, &[0], &[1, 2]).unwrap();
         let found = s.domain()[0]
-            .find_truncated(&s.diagview().unwrap(), truncation)
+            .find_truncated(&s.diagview(engine).unwrap(), truncation)
             .unwrap();
         let s = s
-            .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+            .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
             .unwrap();
         Truncated {
-            u: u.restrict_leg(&[(u.codomain_rank(), &found.selection)])
+            u: u.restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
                 .unwrap(),
             singular_values: s
-                .diagview()
+                .diagview(engine)
                 .unwrap()
                 .into_iter()
                 .map(|entry| SectorSpectrum {
@@ -930,15 +1001,15 @@ where
                 })
                 .collect(),
             s,
-            vh: vh.restrict_leg(&[(0, &found.selection)]).unwrap(),
+            vh: vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap(),
             error: found.error,
         }
     }
     let eager = eager_adjoint_oracle(source);
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     let truncation = Truncation::rank(1);
-    let actual = truncated(&lazy, &truncation);
-    let expected = truncated(&eager, &truncation);
+    let actual = truncated(engine, &lazy, &truncation);
+    let expected = truncated(engine, &eager, &truncation);
 
     // The lazy route factors the parent while the oracle factors the
     // materialized adjoint, so kept sectors and counts match exactly and
@@ -978,43 +1049,45 @@ where
             source.logical_space().provider_arc()
         ));
         assert!(actual
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
-            .zip(expected.materialize().unwrap().dense_data().unwrap())
+            .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
             .all(|(&left, &right)| {
                 (left.widen_complex() - right.widen_complex()).norm() < 1e-12
             }));
     }
-    assert!(is_isometric!(actual.u, 1e-12));
+    assert!(is_isometric!(engine, actual.u, 1e-12));
 }
 
 #[test]
 fn truncated_svd_reads_the_parent_without_materializing_the_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: truncation selection, error, factor gauge, and typed provider
     // authority match an eager logical-adjoint oracle without an input copy.
-    let u1 = u1_lazy_fixture();
-    let su2 = su2_lazy_fixture();
-    assert_truncated_svd_reads_parent(&u1);
-    assert_truncated_svd_reads_parent(&genuinely_complex(&u1));
-    assert_truncated_svd_reads_parent(&su2);
-    assert_truncated_svd_reads_parent(&genuinely_complex(&su2));
+    let u1 = u1_lazy_fixture(engine);
+    let su2 = su2_lazy_fixture(engine);
+    assert_truncated_svd_reads_parent(engine, &u1);
+    assert_truncated_svd_reads_parent(engine, &genuinely_complex(&u1));
+    assert_truncated_svd_reads_parent(engine, &su2);
+    assert_truncated_svd_reads_parent(engine, &genuinely_complex(&su2));
 }
 
 #[test]
 fn rejected_truncation_does_not_materialize_the_adjoint() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the parent-native path preserves typed truncation errors
     // without publishing the logical-adjoint payload first.
-    let source = u1_lazy_fixture();
+    let source = u1_lazy_fixture(engine);
     let foreign =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 1)]).unwrap();
-    let lazy = source.adjoint().unwrap();
-    let Svd { s, .. } = lazy.svd_compact(&[0], &[1, 2]).unwrap();
+    let lazy = source.adjoint(engine).unwrap();
+    let Svd { s, .. } = lazy.svd_compact(engine, &[0], &[1, 2]).unwrap();
     assert!(matches!(s.domain()[0]
         .find_truncated(
-            &s.diagview().unwrap(),
+            &s.diagview(engine).unwrap(),
             &Truncation::space(foreign.truncspace())
         ), Err(Error::Operation(e)) if matches!(*e, OperationError::InvalidArgument { message } if message.contains("different fusion rule"))));
     let TypedTensorRepr::Adjoint(_) = &lazy.repr else {

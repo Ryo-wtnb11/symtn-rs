@@ -56,9 +56,10 @@ where
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     check_identity(case);
     if case.dense {
-        let host = case.host().to_physical_dense().unwrap().data;
+        let host = case.host().to_physical_dense(engine).unwrap().data;
         numerics::assert_nonzero_slices_close(case.name, &host, &dense_trace(case), case.terms());
     }
 }

@@ -39,10 +39,11 @@ where
     /// An infinite *complex* entry instead becomes NaN in both components,
     /// because the device always multiplies where Host copies a factor-1 block
     /// (the #1301 deviation, disclosed by `cuda_region_axpby`); `f64` and every
-    /// finite payload are exact. No θ table is uploaded. A warm call therefore transfers only the #740 output
-    /// initialisation — one H2D of the output bytes — downloads nothing,
-    /// allocates exactly one device buffer and submits one strided move per
-    /// non-empty block. Residual: a whole-buffer bitwise device copy followed
+    /// finite payload are exact. No θ table is uploaded. An eager call keeps
+    /// no device state between calls, so every call transfers the #740 output
+    /// initialisation (one H2D of the output bytes) and the region's
+    /// one-element `1` template (one H2D of one element): two H2D, two device
+    /// allocations, no download, and one strided move per non-empty block. Residual: a whole-buffer bitwise device copy followed
     /// by in-place per-block scaling would submit fewer kernels, but Tenferro
     /// has no in-place strided scale (`cuda_region_axpby` cannot alias its
     /// source and destination), so it is not expressible.
@@ -57,7 +58,12 @@ where
     /// Non-unit NoBraiding legs are invalid. Checked-Generic pivotal failures
     /// retain their typed provider error, and no result is published until all
     /// selected twist values have been staged successfully.
-    pub fn twist(&self, legs: &[usize], direction: Direction) -> Result<Self, FacadeError<R>> {
+    pub fn twist(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
         let inverse = direction.is_inverse();
         let rank = self.rank();
         let name = if inverse { "inverse twist" } else { "twist" };
@@ -68,6 +74,7 @@ where
             .into());
         }
         if legs.is_empty() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         let provider = self.provider();
@@ -90,9 +97,11 @@ where
                     .into());
                 }
             }
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         if braiding.is_bosonic() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
@@ -106,15 +115,20 @@ where
             // the provider after all fallible twist values had been staged.
             return Ok(self
                 .parent_of(view)
-                .twist_owned(&axes, !inverse)?
+                .twist_owned(engine, &axes, !inverse)?
                 .lazy_adjoint_on(&view.logical_space)?);
         }
-        self.twist_owned(legs, inverse)
+        self.twist_owned(engine, legs, inverse)
     }
 
     /// The twist of an owned tensor on its own space: unless every twist value
     /// is one, one scaled copy of the compact spectrum or the dense payload.
-    fn twist_owned(&self, legs: &[usize], inverse: bool) -> Result<Self, FacadeError<R>> {
+    fn twist_owned(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        inverse: bool,
+    ) -> Result<Self, FacadeError<R>> {
         let nout = self.codomain_rank();
         let space = self.logical_space();
         let Some(theta) = <R::Mode as TypedTensorTwistDispatch<R, D>>::twist_values(
@@ -124,8 +138,12 @@ where
             legs,
         )?
         else {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         };
+        if S::as_host(EXEC, self).is_some_and(|t| t.spectrum().is_some()) {
+            admit_host_engine(engine)?;
+        }
         if let Some(compact) = S::as_host(EXEC, self)
             .and_then(|t| compact_arms::twist_spectrum(t, legs, inverse, &theta))
         {
@@ -133,6 +151,7 @@ where
         }
         let name = if inverse { "inverse twist" } else { "twist" };
         Ok(S::scale_blocks(
+            engine,
             EXEC,
             self,
             &twist_block_factor(&theta, nout, legs, inverse),
@@ -172,6 +191,7 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
     /// scaled by `factor_of(block key)`; `operation` names the call in a
     /// capability error.
     fn scale_blocks<C: TwistCoefficient<D>>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         factor_of: &dyn Fn(&BlockKey) -> C,
@@ -181,11 +201,13 @@ pub trait TwistExec<R, D>: TypedStorage<R, D> {
 
 impl<R, D: TensorScalar> TwistExec<R, D> for Vec<D> {
     fn scale_blocks<C: TwistCoefficient<D>>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         t: &TensorMap<R, D>,
         factor_of: &dyn Fn(&BlockKey) -> C,
         _: &'static str,
     ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         let space = t.logical_space();
         let mut data = t
             .owned_body()
@@ -241,7 +263,13 @@ where
     /// [`Error::Core`] from the layout derivation of the toggled hom space.
     /// Checked-Generic admission and pivotal failures retain their typed
     /// [`GenericTensorError`] variants.
-    pub fn flip(&self, legs: &[usize], direction: Direction) -> Result<Self, FacadeError<R>> {
+    pub fn flip(
+        &self,
+        engine: &mut dyn Engine,
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let inverse = direction.is_inverse();
         let rank = self.rank();
         let name = if inverse { "inverse flip" } else { "flip" };

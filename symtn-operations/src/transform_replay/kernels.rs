@@ -17,6 +17,7 @@ pub(crate) fn validate_replay_storage_len(
 }
 
 pub(crate) fn zero_tree_transform_destination<A, D>(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     dst_structure: &BlockStructure,
@@ -39,6 +40,7 @@ where
                 .push(isize::try_from(stride).map_err(|_| OperationError::ElementCountOverflow)?);
         }
         kernels.copy_scale_strided_baked(
+            exec.reborrow(),
             dst_data,
             &zero,
             block.shape(),
@@ -57,6 +59,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_with_strided_kernel<A, D, C>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -77,6 +80,7 @@ where
 {
     let role = layouts.role(dst_index)?;
     kernels.transform_strided_baked(
+        exec,
         zero_strides,
         dst_data,
         src_data,
@@ -106,6 +110,7 @@ where
 /// only for adapters without a dense executor. Job offsets are relative to the
 /// supplied chunk scratch, matching the trusted-view validation contract.
 pub(super) fn recoupling_gemm_batch<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     destination: &mut [D],
     source: &[D],
@@ -141,6 +146,7 @@ where
     ));
     dense
         .matmul_batch_axpby_into(
+            engine,
             output,
             lhs,
             rhs,
@@ -155,6 +161,7 @@ where
 #[cfg(any(test, feature = "testing"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_multi_with_pack_gemm_scatter<A, D, C>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     workspace: &mut TreeTransformWorkspace<D>,
     layouts: &TreeTransformLayoutTable,
@@ -189,6 +196,7 @@ where
         ..
     } = workspace;
     tree_transform_multi_with_scratch_buffers(
+        exec,
         kernels,
         zero_strides,
         Some(fused_indices.as_mut_slice()),
@@ -217,6 +225,7 @@ pub(super) fn tree_transform_multi_with_scratch_buffers<
     SourceScratch,
     DestinationScratch,
 >(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     mut fused_index: Option<&mut [usize]>,
@@ -243,6 +252,7 @@ where
 {
     for src_index in 0..src_count {
         pack_layout_into_column(
+            exec.reborrow(),
             kernels,
             fused_index.as_deref_mut(),
             layouts,
@@ -257,6 +267,7 @@ where
     {
         let (source, destination) = scratch.source_and_destination_mut();
         kernels.recoupling_src_times_u_transpose(
+            exec.reborrow(),
             destination.as_mut_slice(),
             source.as_slice(),
             recoupling_coefficients_dst_src,
@@ -268,6 +279,7 @@ where
 
     for dst_index in 0..dst_count {
         scatter_column_into_layout(
+            exec.reborrow(),
             kernels,
             zero_strides,
             fused_index.as_deref_mut(),
@@ -283,11 +295,13 @@ where
     Ok(())
 }
 
+#[cfg(any(test, feature = "testing"))]
 #[expect(
     clippy::too_many_arguments,
     reason = "the packing kernel keeps layout authority, source and destination slices, offset, and conjugation explicit"
 )]
 pub(super) fn pack_layout_into_column<A, T>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     fused_index: Option<&mut [usize]>,
     layouts: &TreeTransformLayoutTable,
@@ -304,6 +318,7 @@ where
     let role = layouts.role(entry_index)?;
     let packed_offset = offset_to_isize(packed_offset)?;
     kernels.copy_scale_strided_baked(
+        exec,
         packed,
         src_data,
         role.dims(),
@@ -320,6 +335,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_into_layout<A, T>(
+    exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -342,6 +358,7 @@ where
         DestinationMode::Axpby(beta) => {
             zero_strides.clear();
             kernels.axpby_strided_baked(
+                exec,
                 dst_data,
                 packed,
                 role.dims(),
@@ -356,6 +373,7 @@ where
             )
         }
         DestinationMode::Overwrite => kernels.copy_scale_strided_baked(
+            exec,
             dst_data,
             packed,
             role.dims(),
@@ -399,6 +417,7 @@ pub(super) fn recoupling_multi_block<C: Copy>(
 }
 
 pub(super) fn scale_inactive_destinations<A, D, C>(
+    mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     task: TreeTransformTaskView<'_, C>,
@@ -420,6 +439,7 @@ where
             for &layout_index in task.inactive_destination_layouts() {
                 let (dims, strides) = task.layouts().inactive_role(layout_index)?;
                 kernels.scale_strided(
+                    exec.reborrow(),
                     dst_data,
                     dims,
                     strides,
@@ -435,6 +455,7 @@ where
                 zero_strides.clear();
                 zero_strides.resize(dims.len(), 0);
                 kernels.copy_scale_strided_baked(
+                    exec.reborrow(),
                     dst_data,
                     &zero,
                     dims,
@@ -465,20 +486,33 @@ mod allocation_replay_tests {
     struct NoAllocDenseExecutor;
 
     impl DenseExecutor for NoAllocDenseExecutor {
-        fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn svd(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("tree replay does not call SVD")
         }
 
-        fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn qr(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("tree replay does not call QR")
         }
 
-        fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        fn eigh(
+            &mut self,
+            _engine: &mut dyn Engine,
+            _input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
             unreachable!("tree replay does not call EIGH")
         }
 
         fn dot_general_into(
             &mut self,
+            _engine: &mut dyn Engine,
             _output: DenseWrite<'_>,
             _lhs: DenseRead<'_>,
             _rhs: DenseRead<'_>,
@@ -489,6 +523,7 @@ mod allocation_replay_tests {
 
         fn matmul_batch_axpby_into(
             &mut self,
+            _engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
@@ -556,13 +591,11 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
+        let mut pool = crate::host_pool::test_pool(3);
 
-        let mut replay = || {
+        let mut replay = |engine: &mut dyn Engine| {
             tree_transform_structure_with_structural_recoupling_raw(
+                engine,
                 &mut kernels,
                 &mut dense,
                 &mut workspace,
@@ -580,9 +613,9 @@ mod allocation_replay_tests {
 
         pool.install(&mut replay);
         let (joins, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|| {
+            pool.install(|engine| {
                 allocation_oracle::with_measurement(|| {
-                    replay();
+                    replay(engine);
                     allocation_oracle::join_entries()
                 })
             })
@@ -621,14 +654,12 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
+        let mut pool = crate::host_pool::test_pool(3);
 
-        let mut replay = || {
+        let mut replay = |engine: &mut dyn Engine| {
             dst.fill(f64::NAN);
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
                 &mut kernels,
                 &mut dense,
                 &mut workspace,
@@ -646,7 +677,7 @@ mod allocation_replay_tests {
 
         pool.install(&mut replay);
         let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|| allocation_oracle::with_measurement(&mut replay))
+            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
         });
         assert_eq!(allocations, 0);
         assert_eq!(dst, expected);
@@ -654,6 +685,7 @@ mod allocation_replay_tests {
 
     #[test]
     fn rank_ten_multi_replay_matches_literal_oracle_without_owned_allocations() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         const RANK: usize = 10;
         const GROUPS: usize = 4;
         const BLOCKS: usize = 2 * GROUPS;
@@ -698,6 +730,7 @@ mod allocation_replay_tests {
 
         let mut serial = vec![0.0; src.len()];
         tree_transform_structure_with_structural_recoupling_raw(
+            engine,
             &mut StridedHostKernelAdapter::default(),
             &mut NoAllocDenseExecutor,
             &mut TreeTransformWorkspace::default(),
@@ -717,12 +750,10 @@ mod allocation_replay_tests {
         let mut kernels = StridedHostKernelAdapter::default();
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(3)
-            .build()
-            .unwrap();
-        pool.install(|| {
+        let mut pool = crate::host_pool::test_pool(3);
+        pool.install(|engine| {
             tree_transform_structure_with_structural_recoupling_raw(
+                engine,
                 &mut kernels,
                 &mut dense,
                 &mut workspace,
@@ -741,9 +772,10 @@ mod allocation_replay_tests {
         assert_eq!(threaded, expected);
         threaded.fill(0.0);
         let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|| {
+            pool.install(|engine| {
                 allocation_oracle::with_measurement(|| {
                     tree_transform_structure_with_structural_recoupling_raw(
+                        engine,
                         &mut kernels,
                         &mut dense,
                         &mut workspace,

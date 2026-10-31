@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 /// QR of `source` in fusion mode `M`: a compact diagonal factors directly on
 /// its bond (`family` names its finite-input error), dense storage runs
@@ -46,6 +47,7 @@ where
 /// Compact QR of `source` in fusion mode `M`.
 #[doc(hidden)]
 pub fn qr_compact_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Qr<FactorOutput<R, D>>, M::Error>
@@ -55,12 +57,15 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, M::qr_compact_dense)
+    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, |dense, input| {
+        M::qr_compact_dense(engine, dense, input)
+    })
 }
 
 /// Full QR of `source` in fusion mode `M`.
 #[doc(hidden)]
 pub fn qr_full_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Qr<FactorOutput<R, D>>, M::Error>
@@ -70,7 +75,9 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, M::qr_full_dense)
+    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, |dense, input| {
+        M::qr_full_dense(engine, dense, input)
+    })
 }
 
 /// LQ of `source` in fusion mode `M`: a compact diagonal's `l` holds the
@@ -121,6 +128,7 @@ where
 /// Compact LQ of `source` in fusion mode `M`.
 #[doc(hidden)]
 pub fn lq_compact_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Lq<FactorOutput<R, D>>, M::Error>
@@ -130,12 +138,15 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    lq_from_source::<M, _, _, _, _>(lease, source, M::lq_compact_dense)
+    lq_from_source::<M, _, _, _, _>(lease, source, |dense, input| {
+        M::lq_compact_dense(engine, dense, input)
+    })
 }
 
 /// Full LQ of `source` in fusion mode `M`.
 #[doc(hidden)]
 pub fn lq_full_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Lq<FactorOutput<R, D>>, M::Error>
@@ -145,10 +156,13 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    lq_from_source::<M, _, _, _, _>(lease, source, M::lq_full_dense)
+    lq_from_source::<M, _, _, _, _>(lease, source, |dense, input| {
+        M::lq_full_dense(engine, dense, input)
+    })
 }
 
 pub(super) fn full_qr_numerical_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     rows: usize,
@@ -162,11 +176,12 @@ where
         let mut q = vec![D::zero(); rows * rows];
         let mut r = vec![D::zero(); rows * cols];
         qr_into_workspace(
-            dense, input, rows, cols, rows, &mut q, rows, rows, rows, &mut r, rows, cols, rows,
+            engine, dense, input, rows, cols, rows, &mut q, rows, rows, rows, &mut r, rows, cols,
+            rows,
         )?;
         (q, r)
     } else {
-        let (q, work_r) = augmented_identity_qr(dense, rows, cols, |block| {
+        let (q, work_r) = augmented_identity_qr(engine, dense, rows, cols, |block| {
             block.copy_from_slice(input);
         })?;
         (q, work_r[..rows * cols].to_vec())
@@ -189,6 +204,7 @@ where
 /// [`orthonormal_completion`](super::svd::orthonormal_completion), and the
 /// shape-based `left_null`/`right_null` kernel (`qr_null_basis`).
 pub(super) fn augmented_identity_qr<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     m: usize,
     n: usize,
@@ -206,6 +222,7 @@ where
     let mut q = vec![D::zero(); m * m];
     let mut r = vec![D::zero(); m * (n + m)];
     qr_into_workspace(
+        engine,
         dense,
         &augmented,
         m,
@@ -255,6 +272,7 @@ pub(super) fn scale_row<D: FactorScalar>(
 /// from one economy QR, augmenting with identity columns only when `m > n`.
 /// The positive-diagonal gauge is applied (MAK / TensorKit 0.17 default).
 pub(crate) fn qr_full<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Qr<BoundTensorMap<R, D>>, OperationError>
@@ -263,7 +281,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let Qr { q, r } = qr_full_dyn(dense, &input.dynamic())?;
+    let Qr { q, r } = qr_full_dyn(engine, dense, &input.dynamic())?;
     Ok(Qr {
         q: typed_from_bound_factor(q)?,
         r: typed_from_bound_factor(r)?,
@@ -272,6 +290,7 @@ where
 
 /// Provider-bound dynamic-rank [`qr_full`].
 pub(crate) fn qr_full_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Qr<BoundDynFactor<R, D>>, OperationError>
@@ -288,7 +307,7 @@ where
         let matrix = matrices.get(index)?;
         let rows = matrix.rows;
         let cols = matrix.cols;
-        let (q, r) = full_qr_numerical_stage(dense, matrix.data, rows, cols)?;
+        let (q, r) = full_qr_numerical_stage(engine, dense, matrix.data, rows, cols)?;
         pairs.push(FactorPair {
             sector: matrix.sector,
             kept: rows,
@@ -325,6 +344,7 @@ where
 /// QR of the adjoint sector matrices.
 /// The positive-diagonal gauge is applied (MAK / TensorKit 0.17 default).
 pub(crate) fn lq_full<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Lq<BoundTensorMap<R, D>>, OperationError>
@@ -333,7 +353,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let Lq { l, q } = lq_full_dyn(dense, &input.dynamic())?;
+    let Lq { l, q } = lq_full_dyn(engine, dense, &input.dynamic())?;
     Ok(Lq {
         l: typed_from_bound_factor(l)?,
         q: typed_from_bound_factor(q)?,
@@ -342,6 +362,7 @@ where
 
 /// Provider-bound dynamic-rank [`lq_full`].
 pub(crate) fn lq_full_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
@@ -353,7 +374,7 @@ where
     let space = input.space().space();
     let matrices =
         multiplicity_free_input_matricizations(space.structure(), input.data(), space.nout())?;
-    let mut pairs = full_lq_pairs(dense, &matrices, FactorPlacement::Direct)?;
+    let mut pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Direct)?;
     let dimensions = MfAuthority(input.space()).coupled_dimensions(space.homspace().domain())?;
     with_input_geometry!(&matrices, |geometry| Ok(Lq {
         l: build_bound_factor(
@@ -382,6 +403,7 @@ where
 /// positive-diagonal gauge is applied (MAK / TensorKit 0.17 default
 /// `positive = true`): `R`'s diagonal is real non-negative per sector.
 pub(crate) fn qr_compact<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Qr<BoundTensorMap<R, D>>, OperationError>
@@ -390,7 +412,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let Qr { q, r } = qr_compact_dyn(dense, &input.dynamic())?;
+    let Qr { q, r } = qr_compact_dyn(engine, dense, &input.dynamic())?;
     Ok(Qr {
         q: typed_from_bound_factor(q)?,
         r: typed_from_bound_factor(r)?,
@@ -399,6 +421,7 @@ where
 
 /// Provider-bound compact QR used by authority-preserving callers.
 pub(crate) fn qr_compact_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Qr<BoundDynFactor<R, D>>, OperationError>
@@ -411,7 +434,7 @@ where
     // provider-built factor spaces before any dense work, and the checked
     // contract reports dense errors before provider errors (#1960).
     if let Some(plan) = compact_factor_plan(input.space())? {
-        return qr_compact_direct_regions(dense, input, &plan).map(|(q, r)| Qr { q, r });
+        return qr_compact_direct_regions(engine, dense, input, &plan).map(|(q, r)| Qr { q, r });
     }
     let space = input.space().space();
     let matricizations = sector_matricizations(space.structure(), input.data(), space.nout())?;
@@ -422,7 +445,7 @@ where
             .iter()
             .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
     );
-    let mut pairs = compact_qr_pairs(dense, matricizations.as_slice(), |_| {})?;
+    let mut pairs = compact_qr_pairs(engine, dense, matricizations.as_slice(), |_| {})?;
     #[cfg(test)]
     for pair in &pairs {
         crate::probe::output_scatter::<D>(crate::probe::CopyOp::Qr, 1, pair.left.len());
@@ -436,6 +459,7 @@ where
 /// positive-diagonal gauge, as `q` (left) and `r` (right) factor pairs.
 /// `observe` sees each matrix before the dense call.
 pub(super) fn compact_qr_pairs<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
     mut observe: impl FnMut(&SectorMatrixRef<'_, D>),
@@ -450,7 +474,7 @@ where
         observe(&matrix);
         blocks.push((matrix.data, matrix.rows, matrix.cols));
     }
-    let factors = compact_qr_owned_batch(dense, &blocks)?;
+    let factors = compact_qr_owned_batch(engine, dense, &blocks)?;
     let mut pairs = Vec::with_capacity(blocks.len());
     for (index, (mut q, mut r)) in factors.into_iter().enumerate() {
         let (_, rows, cols) = blocks[index];
@@ -496,6 +520,7 @@ fn lq_qr_input<'a, D: FactorScalar>(
 /// each sector's `X` shape (`rows x cols`), rank, and gauged `Q'`
 /// (`cols x rank`) and `R'` (`rank x rows`), whose adjoints are `q` and `l`.
 fn for_each_compact_lq<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + Sync + ?Sized),
     placement: FactorPlacement,
@@ -513,7 +538,7 @@ where
         }
     }
     let mut scratch = Vec::with_capacity(scratch_len);
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
             let rank = matrix.rows.min(matrix.cols);
@@ -521,7 +546,7 @@ where
             if matches!(placement, FactorPlacement::Direct) {
                 observe(&matrix, qr_input);
             }
-            let (mut q_prime, mut r_prime) = compact_qr_owned(dense, qr_input, cols, rows)?;
+            let (mut q_prime, mut r_prime) = compact_qr_owned(engine, dense, qr_input, cols, rows)?;
             positive_diagonal_gauge_strided(
                 &mut q_prime,
                 cols,
@@ -540,6 +565,7 @@ where
 /// [`for_each_compact_lq`] as `l` (left) and `q` (right) factor pairs owned
 /// per sector, for the publishers that place each sector separately.
 pub(super) fn compact_lq_pairs<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + Sync + ?Sized),
     placement: FactorPlacement,
@@ -551,6 +577,7 @@ where
 {
     let mut pairs = Vec::with_capacity(matrices.len());
     for_each_compact_lq(
+        engine,
         dense,
         matrices,
         placement,
@@ -574,6 +601,7 @@ where
 /// those buffers as they are when its output is canonical, as TensorKit's
 /// `lq_compact!` writes each block of its preallocated `L`/`Q` in place.
 pub(super) fn compact_lq_packed<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + Sync + ?Sized),
     placement: FactorPlacement,
@@ -601,6 +629,7 @@ where
         right: Vec::with_capacity(right_len),
     };
     for_each_compact_lq(
+        engine,
         dense,
         matrices,
         placement,
@@ -626,6 +655,7 @@ where
 /// as `l` (left) and square `q` (right) factor pairs; `placement` as for
 /// [`compact_lq_pairs`].
 fn full_lq_pairs<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
     placement: FactorPlacement,
@@ -639,7 +669,7 @@ where
         let matrix = matrices.get(index)?;
         let mut adjoint = Vec::new();
         let (rows, cols, qr_input) = lq_qr_input(&matrix, placement, &mut adjoint);
-        let (q_prime, r_prime) = full_qr_numerical_stage(dense, qr_input, cols, rows)?;
+        let (q_prime, r_prime) = full_qr_numerical_stage(engine, dense, qr_input, cols, rows)?;
         pairs.push(FactorPair {
             sector: matrix.sector,
             kept: cols,
@@ -734,6 +764,7 @@ fn adjoint_parent_regions(
 /// `Q^H` copies `k (m + n) >= m n` elements per sector; here they are written
 /// once, as LQ of the materialized adjoint writes them.
 fn lq_adjoint_by_tree<M, E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     full: bool,
@@ -746,9 +777,15 @@ where
     let space = parent.space().space();
     let matrices = generic_input_matricizations(space.structure(), parent.data(), space.nout())?;
     let mut pairs = if full {
-        full_lq_pairs(dense, &matrices, FactorPlacement::Adjoint)?
+        full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?
     } else {
-        compact_lq_pairs(dense, &matrices, FactorPlacement::Adjoint, |_, _| {})?
+        compact_lq_pairs(
+            engine,
+            dense,
+            &matrices,
+            FactorPlacement::Adjoint,
+            |_, _| {},
+        )?
     };
     let authority = M::authority(parent.space());
     // The bond of full LQ is the domain of `A^H`, the codomain of `A`.
@@ -786,6 +823,7 @@ where
 /// materialized adjoint runs) reads each QR input from the parent in place;
 /// otherwise [`lq_adjoint_by_tree`].
 pub(crate) fn lq_compact_adjoint_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -807,11 +845,11 @@ where
                 regions: &regions,
                 by_adjoint: &by_adjoint,
             });
-            return lq_compact_direct_regions(dense, adjoint_space, reader, &plan)
+            return lq_compact_direct_regions(engine, dense, adjoint_space, reader, &plan)
                 .map(|(l, q)| Lq { l, q });
         }
     }
-    lq_adjoint_by_tree::<MultiplicityFreeAdmissionMode, _, _, _>(dense, parent, false)
+    lq_adjoint_by_tree::<MultiplicityFreeAdmissionMode, _, _, _>(engine, dense, parent, false)
 }
 
 /// A lazy adjoint's own region tiling and the parent regions it adjoints.
@@ -846,6 +884,7 @@ fn adjoint_layout_parent<R, D>(
 /// parent blocks in place, published on `adjoint_space` as LQ of the
 /// materialized adjoint publishes them; otherwise [`lq_adjoint_by_tree`].
 pub(crate) fn lq_full_adjoint_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -860,14 +899,16 @@ where
         parent: (regions, by_adjoint),
     }) = adjoint_layout_parent(parent, adjoint_space)?
     else {
-        return lq_adjoint_by_tree::<MultiplicityFreeAdmissionMode, _, _, _>(dense, parent, true);
+        return lq_adjoint_by_tree::<MultiplicityFreeAdmissionMode, _, _, _>(
+            engine, dense, parent, true,
+        );
     };
     let matrices = AdjointParentMatrices {
         data: parent.data(),
         regions: &regions,
         by_adjoint: &by_adjoint,
     };
-    let mut pairs = full_lq_pairs(dense, &matrices, FactorPlacement::Adjoint)?;
+    let mut pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?;
     let space = adjoint_space.space();
     let dimensions = MfAuthority(adjoint_space).coupled_dimensions(space.homspace().domain())?;
     let mut publish = |side| {
@@ -889,6 +930,7 @@ where
 /// Checked-Generic compact LQ of the lazy adjoint of `parent`; see
 /// [`lq_full_adjoint_dyn`].
 pub(crate) fn lq_compact_adjoint_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -903,14 +945,22 @@ where
         parent: (regions, by_adjoint),
     }) = adjoint_layout_parent(parent, adjoint_space)?
     else {
-        return lq_adjoint_by_tree::<CheckedGenericAdmissionMode, _, _, _>(dense, parent, false);
+        return lq_adjoint_by_tree::<CheckedGenericAdmissionMode, _, _, _>(
+            engine, dense, parent, false,
+        );
     };
     let matrices = AdjointParentMatrices {
         data: parent.data(),
         regions: &regions,
         by_adjoint: &by_adjoint,
     };
-    let pairs = compact_lq_packed(dense, &matrices, FactorPlacement::Adjoint, |_, _| {})?;
+    let pairs = compact_lq_packed(
+        engine,
+        dense,
+        &matrices,
+        FactorPlacement::Adjoint,
+        |_, _| {},
+    )?;
     build_left_right_bound_pair_generic_checked(
         adjoint_space.provider_arc(),
         adjoint_space.space().homspace(),
@@ -923,6 +973,7 @@ where
 /// Checked-Generic full LQ of the lazy adjoint of `parent`; see
 /// [`lq_full_adjoint_dyn`].
 pub(crate) fn lq_full_adjoint_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -937,14 +988,16 @@ where
         parent: (regions, by_adjoint),
     }) = adjoint_layout_parent(parent, adjoint_space)?
     else {
-        return lq_adjoint_by_tree::<CheckedGenericAdmissionMode, _, _, _>(dense, parent, true);
+        return lq_adjoint_by_tree::<CheckedGenericAdmissionMode, _, _, _>(
+            engine, dense, parent, true,
+        );
     };
     let matrices = AdjointParentMatrices {
         data: parent.data(),
         regions: &regions,
         by_adjoint: &by_adjoint,
     };
-    let pairs = full_lq_pairs(dense, &matrices, FactorPlacement::Adjoint)?;
+    let pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?;
     let provider = adjoint_space.provider_arc();
     let homspace = adjoint_space.space().homspace();
     let dimensions = CheckedAuthority(provider).coupled_dimensions(homspace.domain())?;
@@ -957,6 +1010,7 @@ where
 /// of the materialized adjoint would publish (see [`lq_adjoint_by_tree`]).
 #[doc(hidden)]
 pub fn lq_compact_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -969,13 +1023,14 @@ where
 {
     // The adjoint is finite exactly when its parent is.
     require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Lq)?;
-    lease.run(|dense| M::lq_compact_adjoint_dense(dense, &parent, adjoint_space))
+    lease.run(|dense| M::lq_compact_adjoint_dense(engine, dense, &parent, adjoint_space))
 }
 
 /// Full LQ of the lazy adjoint of the dense `parent`, read in place, in
 /// fusion mode `M` (see [`lq_compact_adjoint_from_parent`]).
 #[doc(hidden)]
 pub fn lq_full_adjoint_from_parent<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     parent: BoundDynamicTensorRef<'_, R, D>,
     adjoint_space: &BoundDynamicFusionMapSpace<R>,
@@ -987,10 +1042,11 @@ where
     D: FactorScalar,
 {
     require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Lq)?;
-    lease.run(|dense| M::lq_full_adjoint_dense(dense, &parent, adjoint_space))
+    lease.run(|dense| M::lq_full_adjoint_dense(engine, dense, &parent, adjoint_space))
 }
 
 pub(super) fn qr_compact_direct_regions<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     plan: &CompactFactorPlan,
@@ -1024,7 +1080,7 @@ where
             (&input.data()[source.range()], source.rows(), source.cols())
         })
         .collect::<Vec<_>>();
-    let factors = compact_qr_owned_batch(dense, &blocks)?;
+    let factors = compact_qr_owned_batch(engine, dense, &blocks)?;
     for (route, (mut left_data, mut right_data)) in routes.into_iter().zip(factors) {
         let source = &plan.source_regions[route.source_region];
         positive_diagonal_gauge_strided(
@@ -1057,6 +1113,7 @@ where
 /// applied (MAK / TensorKit 0.17 default `positive = true`): `L`'s diagonal
 /// is real non-negative per sector.
 pub(crate) fn lq_compact<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Lq<BoundTensorMap<R, D>>, OperationError>
@@ -1065,7 +1122,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    let Lq { l, q } = lq_compact_dyn(dense, &input.dynamic())?;
+    let Lq { l, q } = lq_compact_dyn(engine, dense, &input.dynamic())?;
     Ok(Lq {
         l: typed_from_bound_factor(l)?,
         q: typed_from_bound_factor(q)?,
@@ -1074,6 +1131,7 @@ where
 
 /// Provider-bound compact LQ used by authority-preserving callers.
 pub(crate) fn lq_compact_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Lq<BoundDynFactor<R, D>>, OperationError>
@@ -1084,6 +1142,7 @@ where
 {
     if let Some(plan) = compact_factor_plan(input.space())? {
         return lq_compact_direct_regions(
+            engine,
             dense,
             input.space(),
             LqRegionSource::Input(input.data()),
@@ -1101,6 +1160,7 @@ where
             .map(|matrix| std::mem::size_of_val(&matrix.data[..])),
     );
     let mut pairs = compact_lq_pairs(
+        engine,
         dense,
         matricizations.as_slice(),
         FactorPlacement::Direct,
@@ -1125,6 +1185,7 @@ pub(super) enum LqRegionSource<'a, D> {
 
 /// Compact LQ of `input_space` over the direct-region `plan`, reading `reader`.
 pub(super) fn lq_compact_direct_regions<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input_space: &BoundDynamicFusionMapSpace<R>,
     reader: LqRegionSource<'_, D>,
@@ -1167,7 +1228,7 @@ where
     #[cfg(test)]
     crate::probe::lq_scratch::<D>(max_adjoint_len);
 
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for route in plan.routes.iter().copied() {
             if route.rank == 0 {
                 continue;
@@ -1195,7 +1256,7 @@ where
             };
 
             let (mut q_prime, mut r_prime) =
-                compact_qr_owned(dense, qr_input, source.cols(), source.rows())?;
+                compact_qr_owned(engine, dense, qr_input, source.cols(), source.rows())?;
             positive_diagonal_gauge_strided(
                 &mut q_prime,
                 source.cols(),
@@ -1365,6 +1426,7 @@ pub(super) fn adjoint_col_major_into<D: FactorScalar>(
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn qr_into_workspace<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     input_rows: usize,
@@ -1395,6 +1457,7 @@ where
     let r_view = DenseViewMut::new(r, &r_shape, &r_strides, 0).map_err(OperationError::Dense)?;
     dense
         .qr_into(
+            engine,
             D::dense_read(input_view),
             D::dense_write(q_view),
             D::dense_write(r_view),
@@ -1405,6 +1468,7 @@ where
 /// Compact QR owns both dense outputs, so it can transfer the executor's host
 /// buffers directly. Full QR keeps its caller-owned workspace contract above.
 pub(super) fn compact_qr_owned<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     rows: usize,
@@ -1419,7 +1483,7 @@ where
     let input_view =
         DenseView::new(input, &input_shape, &input_strides, 0).map_err(OperationError::Dense)?;
     let outputs = dense
-        .qr(D::dense_read(input_view))
+        .qr(engine, D::dense_read(input_view))
         .map_err(OperationError::Dense)?;
     compact_qr_outputs(outputs, rows, cols)
 }
@@ -1431,6 +1495,7 @@ where
     reason = "the dense QR ownership boundary returns one documented Q, R pair per block"
 )]
 pub(super) fn compact_qr_owned_batch<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     blocks: &[(&[D], usize, usize)],
 ) -> Result<Vec<(Vec<D>, Vec<D>)>, OperationError>
@@ -1438,7 +1503,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    factorize_col_major_batch(dense, DenseFactorization::Qr, blocks)?
+    factorize_col_major_batch(engine, dense, DenseFactorization::Qr, blocks)?
         .into_iter()
         .zip(blocks)
         .map(|(outputs, &(_, rows, cols))| compact_qr_outputs(outputs, rows, cols))
@@ -1468,6 +1533,7 @@ pub(super) fn compact_qr_outputs<D: FactorScalar>(
 /// queries and therefore needs no Tenferro-specific capability.
 #[doc(hidden)]
 pub(crate) fn qr_compact_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Qr<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -1491,7 +1557,7 @@ where
     }
     #[cfg(test)]
     let data = input.data();
-    let pairs = compact_qr_pairs(dense, &matrices, |_matrix| {
+    let pairs = compact_qr_pairs(engine, dense, &matrices, |_matrix| {
         #[cfg(test)]
         crate::probe::checked_compact_input(
             crate::probe::CheckedCompactOperation::Qr,
@@ -1508,6 +1574,7 @@ where
 /// adjoint-plus-QR boundary; no borrowed conjugated-dot capability is needed.
 #[doc(hidden)]
 pub(crate) fn lq_compact_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Lq<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -1532,6 +1599,7 @@ where
     #[cfg(test)]
     let data = input.data();
     let pairs = compact_lq_packed(
+        engine,
         dense,
         &matrices,
         FactorPlacement::Direct,
@@ -1555,6 +1623,7 @@ where
 /// Checked-Generic full QR, augmenting only sectors that require completion.
 #[doc(hidden)]
 pub(crate) fn qr_full_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Qr<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -1574,7 +1643,7 @@ where
             .map_err(CheckedGenericFactorPlanError::from)?;
         let rows = matrix.rows;
         let cols = matrix.cols;
-        let (q, r) = full_qr_numerical_stage(dense, matrix.data, rows, cols)
+        let (q, r) = full_qr_numerical_stage(engine, dense, matrix.data, rows, cols)
             .map_err(CheckedGenericFactorPlanError::from)?;
         pairs.push(FactorPair {
             sector: matrix.sector,
@@ -1599,6 +1668,7 @@ where
 /// Checked-Generic full LQ via the full QR of each sector's adjoint matrix.
 #[doc(hidden)]
 pub(crate) fn lq_full_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Lq<BoundDynFactor<R, D>>, CheckedGenericFactorPlanError<R::Error>>
@@ -1611,7 +1681,7 @@ where
     let space = input.space().space();
     let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
-    let pairs = full_lq_pairs(dense, &matrices, FactorPlacement::Direct)
+    let pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Direct)
         .map_err(CheckedGenericFactorPlanError::from)?;
     let dimensions = CheckedAuthority(provider).coupled_dimensions(space.homspace().domain())?;
     with_input_geometry!(&matrices, |geometry| checked_full_factor_pair(

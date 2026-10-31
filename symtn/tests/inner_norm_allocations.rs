@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::hint::black_box;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
@@ -62,23 +63,24 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
 
 #[test]
 fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: cold region compilation is observable, while explicit warm-up
     // leaves both public reductions allocation-free on the caller thread.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = non_abelian_space();
     let lhs: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 282_401).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 282_401).unwrap();
     let rhs: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 282_402).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 282_402).unwrap();
 
-    let (cold, cold_allocations) = measured(|| lhs.inner(&rhs).unwrap());
+    let (cold, cold_allocations) = measured(|| lhs.inner(engine, &rhs).unwrap());
     eprintln!("cold coupled-region initialization: {cold_allocations} allocations");
     black_box(cold);
-    black_box(lhs.norm(2.0).unwrap());
+    black_box(lhs.norm(engine, 2.0).unwrap());
 
-    let (inner, inner_allocations) = measured(|| lhs.inner(&rhs).unwrap());
-    let (norm, norm_allocations) = measured(|| lhs.norm(2.0).unwrap());
+    let (inner, inner_allocations) = measured(|| lhs.inner(engine, &rhs).unwrap());
+    let (norm, norm_allocations) = measured(|| lhs.norm(engine, 2.0).unwrap());
     black_box((inner, norm));
 
     assert_eq!(inner_allocations, 0);
@@ -86,12 +88,12 @@ fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
 
     // Out-of-range payloads take the rescaling passes, which add none either.
     for scale in [1e200, 1e-200] {
-        let extreme = lhs.scale(Complex64::new(scale, 0.0)).unwrap();
-        black_box(extreme.norm(2.0).unwrap());
-        let (value, allocations) = measured(|| extreme.norm(2.0).unwrap());
+        let extreme = lhs.scale(engine, Complex64::new(scale, 0.0)).unwrap();
+        black_box(extreme.norm(engine, 2.0).unwrap());
+        let (value, allocations) = measured(|| extreme.norm(engine, 2.0).unwrap());
         assert!(value.is_finite() && value > 0.0, "{scale:e}: {value:e}");
         assert_eq!(allocations, 0, "rescaled norm at {scale:e}");
-        let (value, allocations) = measured(|| extreme.norm(3.0).unwrap());
+        let (value, allocations) = measured(|| extreme.norm(engine, 3.0).unwrap());
         assert!(value.is_finite() && value > 0.0, "{scale:e}: {value:e}");
         assert_eq!(allocations, 0, "rescaled norm(3) at {scale:e}");
     }
@@ -99,18 +101,25 @@ fn warmed_non_abelian_inner_and_norm_do_not_allocate() {
 
 #[test]
 fn warmed_non_abelian_trace_does_not_allocate() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = non_abelian_space();
-    let owned: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 282_403).unwrap();
-    let lazy = owned.adjoint().unwrap();
+    let owned: TensorMap<Fz2U1Su2Rule, Complex64> = TensorMap::rand_with_seed(
+        engine,
+        &runtime,
+        [&space, &space],
+        [&space, &space],
+        282_403,
+    )
+    .unwrap();
+    let lazy = owned.adjoint(engine).unwrap();
 
-    black_box(owned.tr().unwrap());
-    black_box(lazy.tr().unwrap());
+    black_box(owned.tr(engine).unwrap());
+    black_box(lazy.tr(engine).unwrap());
     for (row, (value, allocations)) in [
-        ("owned trace", measured(|| owned.tr().unwrap())),
-        ("lazy trace", measured(|| lazy.tr().unwrap())),
+        ("owned trace", measured(|| owned.tr(engine).unwrap())),
+        ("lazy trace", measured(|| lazy.tr(engine).unwrap())),
     ] {
         black_box(value);
         assert_eq!(allocations, 0, "{row}");
@@ -119,29 +128,30 @@ fn warmed_non_abelian_trace_does_not_allocate() {
 
 #[test]
 fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = non_abelian_space();
     let lhs_parent: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 666_301).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 666_301).unwrap();
     let rhs_parent: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 666_302).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 666_302).unwrap();
     let owned: TensorMap<Fz2U1Su2Rule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space, &space], 666_303).unwrap();
-    let warm_lhs = lhs_parent.adjoint().unwrap();
-    let warm_rhs = rhs_parent.adjoint().unwrap();
-    black_box(warm_lhs.inner(&owned).unwrap());
-    black_box(owned.inner(&warm_lhs).unwrap());
-    black_box(warm_lhs.inner(&warm_rhs).unwrap());
+        TensorMap::rand_with_seed(engine, &runtime, [&space], [&space, &space], 666_303).unwrap();
+    let warm_lhs = lhs_parent.adjoint(engine).unwrap();
+    let warm_rhs = rhs_parent.adjoint(engine).unwrap();
+    black_box(warm_lhs.inner(engine, &owned).unwrap());
+    black_box(owned.inner(engine, &warm_lhs).unwrap());
+    black_box(warm_lhs.inner(engine, &warm_rhs).unwrap());
 
-    let lhs_mixed_left = lhs_parent.adjoint().unwrap();
-    let lhs_mixed_right = lhs_parent.adjoint().unwrap();
-    let lhs_double = lhs_parent.adjoint().unwrap();
-    let rhs_double = rhs_parent.adjoint().unwrap();
+    let lhs_mixed_left = lhs_parent.adjoint(engine).unwrap();
+    let lhs_mixed_right = lhs_parent.adjoint(engine).unwrap();
+    let lhs_double = lhs_parent.adjoint(engine).unwrap();
+    let rhs_double = rhs_parent.adjoint(engine).unwrap();
     for (value, allocations) in [
-        measured(|| lhs_mixed_left.inner(&owned).unwrap()),
-        measured(|| owned.inner(&lhs_mixed_right).unwrap()),
-        measured(|| lhs_double.inner(&rhs_double).unwrap()),
+        measured(|| lhs_mixed_left.inner(engine, &owned).unwrap()),
+        measured(|| owned.inner(engine, &lhs_mixed_right).unwrap()),
+        measured(|| lhs_double.inner(engine, &rhs_double).unwrap()),
     ] {
         black_box(value);
         // Zero allocations also rules out an operation-local materialization.
@@ -151,13 +161,15 @@ fn warmed_lazy_adjoint_inner_does_not_allocate_in_mixed_or_double_orientation() 
 
 #[test]
 fn warmed_compact_dense_inner_does_not_allocate() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let spin0 = SU2Irrep::from_twice_spin(0);
     let spin_half = SU2Irrep::from_twice_spin(1);
     let space =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 3), (spin_half, 2)]).unwrap();
     let compact = TensorMap::diagonal(
+        engine,
         &runtime,
         &space,
         [
@@ -173,14 +185,14 @@ fn warmed_compact_dense_inner_does_not_allocate() {
     )
     .unwrap();
     let dense: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space], [&space], 1_616).unwrap();
-    let lazy = dense.adjoint().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space], [&space], 1_616).unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
 
     for (value, allocations) in [
-        measured(|| compact.inner(&dense).unwrap()),
-        measured(|| dense.inner(&compact).unwrap()),
-        measured(|| compact.inner(&lazy).unwrap()),
-        measured(|| lazy.inner(&compact).unwrap()),
+        measured(|| compact.inner(engine, &dense).unwrap()),
+        measured(|| dense.inner(engine, &compact).unwrap()),
+        measured(|| compact.inner(engine, &lazy).unwrap()),
+        measured(|| lazy.inner(engine, &compact).unwrap()),
     ] {
         black_box(value);
         assert_eq!(allocations, 0);
@@ -226,11 +238,12 @@ macro_rules! coupled_sector_count {
 
 #[test]
 fn warmed_checked_generic_reductions_do_not_allocate() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: checked Generic reductions take their `dim(c)` weights
     // through one fallible closure and never build a per-call weight map
     // (a std `HashMap`, #1219), for owned and lazy-adjoint inputs alike.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -238,50 +251,54 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
     )
     .unwrap();
     let lhs: TensorMap<GenericToy, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], block_value).unwrap();
-    let rhs: TensorMap<GenericToy, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-            block_value::<Complex64>(trees, indices) * Complex64::new(0.5, -1.5)
-        })
-        .unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], block_value)
+            .unwrap();
+    let rhs: TensorMap<GenericToy, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, indices| block_value::<Complex64>(trees, indices) * Complex64::new(0.5, -1.5),
+    )
+    .unwrap();
     assert!(lhs.subblock_count() > coupled_sector_count!(lhs));
-    let lazy_lhs = lhs.adjoint().unwrap();
-    let lazy_rhs = rhs.adjoint().unwrap();
+    let lazy_lhs = lhs.adjoint(engine).unwrap();
+    let lazy_rhs = rhs.adjoint(engine).unwrap();
 
-    let (cold, cold_allocations) = measured(|| lhs.inner(&rhs).unwrap());
+    let (cold, cold_allocations) = measured(|| lhs.inner(engine, &rhs).unwrap());
     eprintln!("cold checked coupled-region initialization: {cold_allocations} allocations");
     black_box(cold);
-    black_box(lhs.norm(2.0).unwrap());
-    black_box(lazy_lhs.inner(&lazy_rhs).unwrap());
-    black_box(lazy_lhs.inner(&rhs).unwrap());
-    black_box(lazy_lhs.norm(2.0).unwrap());
-    black_box(lhs.tr().unwrap());
-    black_box(lazy_lhs.tr().unwrap());
+    black_box(lhs.norm(engine, 2.0).unwrap());
+    black_box(lazy_lhs.inner(engine, &lazy_rhs).unwrap());
+    black_box(lazy_lhs.inner(engine, &rhs).unwrap());
+    black_box(lazy_lhs.norm(engine, 2.0).unwrap());
+    black_box(lhs.tr(engine).unwrap());
+    black_box(lazy_lhs.tr(engine).unwrap());
 
     for (row, (value, allocations)) in [
-        ("owned inner", measured(|| lhs.inner(&rhs).unwrap())),
+        ("owned inner", measured(|| lhs.inner(engine, &rhs).unwrap())),
         (
             "owned norm",
-            measured(|| Complex64::from(lhs.norm(2.0).unwrap())),
+            measured(|| Complex64::from(lhs.norm(engine, 2.0).unwrap())),
         ),
         (
             "lazy-lazy inner",
-            measured(|| lazy_lhs.inner(&lazy_rhs).unwrap()),
+            measured(|| lazy_lhs.inner(engine, &lazy_rhs).unwrap()),
         ),
         (
             "lazy-owned inner",
-            measured(|| lazy_lhs.inner(&rhs).unwrap()),
+            measured(|| lazy_lhs.inner(engine, &rhs).unwrap()),
         ),
         (
             "owned-lazy inner",
-            measured(|| rhs.inner(&lazy_lhs).unwrap()),
+            measured(|| rhs.inner(engine, &lazy_lhs).unwrap()),
         ),
         (
             "lazy norm",
-            measured(|| Complex64::from(lazy_lhs.norm(2.0).unwrap())),
+            measured(|| Complex64::from(lazy_lhs.norm(engine, 2.0).unwrap())),
         ),
-        ("owned trace", measured(|| lhs.tr().unwrap())),
-        ("lazy trace", measured(|| lazy_lhs.tr().unwrap())),
+        ("owned trace", measured(|| lhs.tr(engine).unwrap())),
+        ("lazy trace", measured(|| lazy_lhs.tr(engine).unwrap())),
     ] {
         black_box(value);
         assert_eq!(allocations, 0, "{row}");
@@ -291,13 +308,16 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
     // commutes with the norm, so `norm(s * t) = s * norm(t)` within the
     // workspace rule taken relative to the result (the payload's entry count
     // bounds the terms of the sum).
-    let norm = lhs.norm(2.0).unwrap();
+    let norm = lhs.norm(engine, 2.0).unwrap();
     for scale in [1e200, 1e-200] {
-        let extreme = lhs.scale(Complex64::new(scale, 0.0)).unwrap();
-        let lazy = extreme.adjoint().unwrap();
-        black_box((extreme.norm(2.0).unwrap(), lazy.norm(2.0).unwrap()));
+        let extreme = lhs.scale(engine, Complex64::new(scale, 0.0)).unwrap();
+        let lazy = extreme.adjoint(engine).unwrap();
+        black_box((
+            extreme.norm(engine, 2.0).unwrap(),
+            lazy.norm(engine, 2.0).unwrap(),
+        ));
         for (row, tensor) in [("owned", &extreme), ("lazy", &lazy)] {
-            let (value, allocations) = measured(|| tensor.norm(2.0).unwrap());
+            let (value, allocations) = measured(|| tensor.norm(engine, 2.0).unwrap());
             assert_eq!(allocations, 0, "{row} rescaled norm at {scale:e}");
             let want = scale * norm;
             let bound =
@@ -316,23 +336,32 @@ fn warmed_checked_generic_reductions_do_not_allocate() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 0], 2)]).unwrap();
-    let lhs: TensorMap<LieGroupFusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
+    let lhs: TensorMap<LieGroupFusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, indices| {
             trees.codomain_vertices()[0].get() as f64 + indices.iter().sum::<usize>() as f64
-        })
-        .unwrap();
-    let rhs: TensorMap<LieGroupFusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-            2.0 * trees.domain_vertices()[0].get() as f64 - indices[0] as f64
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
+    let rhs: TensorMap<LieGroupFusionRule, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, indices| 2.0 * trees.domain_vertices()[0].get() as f64 - indices[0] as f64,
+    )
+    .unwrap();
     let coupled = (0..lhs.subblock_count())
         .map(|index| {
             lhs.subblock_fusion_trees(index)
@@ -354,21 +383,24 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
             allocations
         })
         .sum();
-    let lazy_lhs = lhs.adjoint().unwrap();
-    let lazy_rhs = rhs.adjoint().unwrap();
-    black_box(lhs.inner(&rhs).unwrap());
-    black_box(lhs.norm(2.0).unwrap());
-    black_box(lazy_lhs.inner(&lazy_rhs).unwrap());
-    black_box(lazy_lhs.norm(2.0).unwrap());
+    let lazy_lhs = lhs.adjoint(engine).unwrap();
+    let lazy_rhs = rhs.adjoint(engine).unwrap();
+    black_box(lhs.inner(engine, &rhs).unwrap());
+    black_box(lhs.norm(engine, 2.0).unwrap());
+    black_box(lazy_lhs.inner(engine, &lazy_rhs).unwrap());
+    black_box(lazy_lhs.norm(engine, 2.0).unwrap());
 
     for (row, (value, allocations)) in [
-        ("owned inner", measured(|| lhs.inner(&rhs).unwrap())),
-        ("owned norm", measured(|| lhs.norm(2.0).unwrap())),
+        ("owned inner", measured(|| lhs.inner(engine, &rhs).unwrap())),
+        ("owned norm", measured(|| lhs.norm(engine, 2.0).unwrap())),
         (
             "lazy inner",
-            measured(|| lazy_lhs.inner(&lazy_rhs).unwrap()),
+            measured(|| lazy_lhs.inner(engine, &lazy_rhs).unwrap()),
         ),
-        ("lazy norm", measured(|| lazy_lhs.norm(2.0).unwrap())),
+        (
+            "lazy norm",
+            measured(|| lazy_lhs.norm(engine, 2.0).unwrap()),
+        ),
     ] {
         black_box(value);
         eprintln!(
@@ -390,8 +422,9 @@ fn warmed_su3_checked_inner_and_norm_allocate_only_through_the_provider() {
 /// once `|t|²` is `f32`-subnormal) cannot meet.
 #[test]
 fn checked_generic_single_precision_norm_accumulates_wide() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(GenericToy);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -399,39 +432,57 @@ fn checked_generic_single_precision_norm_accumulates_wide() {
     )
     .unwrap();
 
-    let check = |what: &str,
-                 value: &dyn Fn(
+    let mut check = |what: &str,
+                     value: &dyn Fn(
         &symtn::typed::BlockFusionTrees<GenericLabel>,
         &[usize],
     ) -> Complex32| {
-        let real32: TensorMap<GenericToy, f32> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-                value(trees, indices).re
-            })
-            .unwrap();
-        let real64: TensorMap<GenericToy, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-                f64::from(value(trees, indices).re)
-            })
-            .unwrap();
-        let complex32: TensorMap<GenericToy, Complex32> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
-                value(trees, indices)
-            })
-            .unwrap();
-        let complex64: TensorMap<GenericToy, Complex64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
+        let real32: TensorMap<GenericToy, f32> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg, &leg],
+            |trees, indices| value(trees, indices).re,
+        )
+        .unwrap();
+        let real64: TensorMap<GenericToy, f64> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg, &leg],
+            |trees, indices| f64::from(value(trees, indices).re),
+        )
+        .unwrap();
+        let complex32: TensorMap<GenericToy, Complex32> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg, &leg],
+            |trees, indices| value(trees, indices),
+        )
+        .unwrap();
+        let complex64: TensorMap<GenericToy, Complex64> = TensorMap::from_subblock_fn(
+            engine,
+            &runtime,
+            [&leg, &leg],
+            [&leg, &leg],
+            |trees, indices| {
                 let z = value(trees, indices);
                 Complex64::new(z.re.into(), z.im.into())
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         let terms = real64.dense_data().unwrap().len() as f64;
         for (row, got, want) in [
-            ("f32", real32.norm(2.0).unwrap(), real64.norm(2.0).unwrap()),
+            (
+                "f32",
+                real32.norm(engine, 2.0).unwrap(),
+                real64.norm(engine, 2.0).unwrap(),
+            ),
             (
                 "c32",
-                complex32.norm(2.0).unwrap(),
-                complex64.norm(2.0).unwrap(),
+                complex32.norm(engine, 2.0).unwrap(),
+                complex64.norm(engine, 2.0).unwrap(),
             ),
         ] {
             let bound = 32.0 * terms.sqrt() * f64::EPSILON * want;
@@ -466,11 +517,13 @@ fn checked_generic_single_precision_norm_accumulates_wide() {
 /// densified copy of the compact operand.
 #[test]
 fn warmed_checked_generic_compact_reductions_do_not_densify() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const K: usize = 16;
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(GenericToy), [(GenericLabel::X, K)]).unwrap();
     let compact = TensorMap::<_, Complex64>::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -482,42 +535,73 @@ fn warmed_checked_generic_compact_reductions_do_not_densify() {
     )
     .unwrap();
     let dense: TensorMap<GenericToy, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&leg], [&leg], 1_867).unwrap();
-    let lazy = dense.adjoint().unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 1_867).unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     // One `K x K` complex payload: the result. A densified compact operand
     // would be a second allocation of exactly this size.
     let payload = K * K * std::mem::size_of::<Complex64>();
     for (row, call) in [
         (
             "axpby(compact, lazy)",
-            &(|| compact.axpby(Complex64::new(0.5, 0.0), &lazy, Complex64::new(2.0, 0.0)))
-                as &dyn Fn() -> _,
+            &(|engine: &mut dyn Engine| {
+                compact.axpby(
+                    engine,
+                    Complex64::new(0.5, 0.0),
+                    &lazy,
+                    Complex64::new(2.0, 0.0),
+                )
+            }) as &dyn Fn(&mut dyn Engine) -> _,
         ),
-        ("axpby(lazy, compact)", &|| {
-            lazy.axpby(Complex64::new(2.0, 0.0), &compact, Complex64::new(0.5, 0.0))
+        ("axpby(lazy, compact)", &|engine: &mut dyn Engine| {
+            lazy.axpby(
+                engine,
+                Complex64::new(2.0, 0.0),
+                &compact,
+                Complex64::new(0.5, 0.0),
+            )
         }),
     ] {
-        black_box(call().unwrap());
-        let (value, allocations) = counting_alloc::measure_matching(payload..=payload, call);
+        black_box(call(engine).unwrap());
+        let (value, allocations) =
+            counting_alloc::measure_matching(payload..=payload, || call(engine));
         black_box(value.unwrap());
         assert_eq!(allocations.matched_calls, 1, "{row}");
     }
 
-    let rows: [(&str, &dyn Fn() -> Complex64); 10] = [
-        ("compact inner", &|| compact.inner(&compact).unwrap()),
-        ("compact-dense inner", &|| compact.inner(&dense).unwrap()),
-        ("dense-compact inner", &|| dense.inner(&compact).unwrap()),
-        ("compact-lazy inner", &|| compact.inner(&lazy).unwrap()),
-        ("lazy-compact inner", &|| lazy.inner(&compact).unwrap()),
-        ("norm(1)", &|| compact.norm(1.0).unwrap().into()),
-        ("norm(2)", &|| compact.norm(2.0).unwrap().into()),
-        ("norm(3)", &|| compact.norm(3.0).unwrap().into()),
-        ("norm(Inf)", &|| compact.norm(f64::INFINITY).unwrap().into()),
-        ("tr", &|| compact.tr().unwrap()),
+    type Row<'a> = (&'a str, &'a dyn Fn(&mut dyn Engine) -> Complex64);
+    let rows: [Row<'_>; 10] = [
+        ("compact inner", &|engine: &mut dyn Engine| {
+            compact.inner(engine, &compact).unwrap()
+        }),
+        ("compact-dense inner", &|engine: &mut dyn Engine| {
+            compact.inner(engine, &dense).unwrap()
+        }),
+        ("dense-compact inner", &|engine: &mut dyn Engine| {
+            dense.inner(engine, &compact).unwrap()
+        }),
+        ("compact-lazy inner", &|engine: &mut dyn Engine| {
+            compact.inner(engine, &lazy).unwrap()
+        }),
+        ("lazy-compact inner", &|engine: &mut dyn Engine| {
+            lazy.inner(engine, &compact).unwrap()
+        }),
+        ("norm(1)", &|engine: &mut dyn Engine| {
+            compact.norm(engine, 1.0).unwrap().into()
+        }),
+        ("norm(2)", &|engine: &mut dyn Engine| {
+            compact.norm(engine, 2.0).unwrap().into()
+        }),
+        ("norm(3)", &|engine: &mut dyn Engine| {
+            compact.norm(engine, 3.0).unwrap().into()
+        }),
+        ("norm(Inf)", &|engine: &mut dyn Engine| {
+            compact.norm(engine, f64::INFINITY).unwrap().into()
+        }),
+        ("tr", &|engine: &mut dyn Engine| compact.tr(engine).unwrap()),
     ];
     for (row, call) in rows {
-        black_box(call());
-        let (value, allocations) = measured(call);
+        black_box(call(engine));
+        let (value, allocations) = measured(|| call(engine));
         black_box(value);
         assert_eq!(allocations, 0, "{row}");
     }
@@ -525,12 +609,13 @@ fn warmed_checked_generic_compact_reductions_do_not_densify() {
 
 #[test]
 fn warmed_complex_symbol_reductions_do_not_allocate() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the complex-symbol lane (#2281) reads the real quantum dimension
     // through the same seam, so warm Ising `inner`, `norm` and `tr` stay
     // allocation-free on the caller thread, owned and lazy.
     use symtn::sector::{TableRule, TableSector};
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = GradedSpace::try_new(
         Arc::new(TableRule::ising()),
         [
@@ -540,23 +625,35 @@ fn warmed_complex_symbol_reductions_do_not_allocate() {
         ],
     )
     .unwrap();
-    let lhs: TensorMap<TableRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 228_101).unwrap();
-    let rhs: TensorMap<TableRule, Complex64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 228_102).unwrap();
-    let lazy = lhs.adjoint().unwrap();
+    let lhs: TensorMap<TableRule, Complex64> = TensorMap::rand_with_seed(
+        engine,
+        &runtime,
+        [&space, &space],
+        [&space, &space],
+        228_101,
+    )
+    .unwrap();
+    let rhs: TensorMap<TableRule, Complex64> = TensorMap::rand_with_seed(
+        engine,
+        &runtime,
+        [&space, &space],
+        [&space, &space],
+        228_102,
+    )
+    .unwrap();
+    let lazy = lhs.adjoint(engine).unwrap();
 
-    black_box(lhs.inner(&rhs).unwrap());
-    black_box(lhs.norm(2.0).unwrap());
-    black_box(lhs.tr().unwrap());
-    black_box(lazy.tr().unwrap());
-    black_box(lazy.norm(2.0).unwrap());
+    black_box(lhs.inner(engine, &rhs).unwrap());
+    black_box(lhs.norm(engine, 2.0).unwrap());
+    black_box(lhs.tr(engine).unwrap());
+    black_box(lazy.tr(engine).unwrap());
+    black_box(lazy.norm(engine, 2.0).unwrap());
     for (row, allocations) in [
-        ("inner", measured(|| lhs.inner(&rhs).unwrap()).1),
-        ("norm", measured(|| lhs.norm(2.0).unwrap()).1),
-        ("tr", measured(|| lhs.tr().unwrap()).1),
-        ("lazy tr", measured(|| lazy.tr().unwrap()).1),
-        ("lazy norm", measured(|| lazy.norm(2.0).unwrap()).1),
+        ("inner", measured(|| lhs.inner(engine, &rhs).unwrap()).1),
+        ("norm", measured(|| lhs.norm(engine, 2.0).unwrap()).1),
+        ("tr", measured(|| lhs.tr(engine).unwrap()).1),
+        ("lazy tr", measured(|| lazy.tr(engine).unwrap()).1),
+        ("lazy norm", measured(|| lazy.norm(engine, 2.0).unwrap()).1),
     ] {
         assert_eq!(allocations, 0, "{row}");
     }

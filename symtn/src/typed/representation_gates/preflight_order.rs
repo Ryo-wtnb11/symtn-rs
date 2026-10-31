@@ -75,13 +75,13 @@ where
 
 /// The misuse matrix of one rule: `v` and `w` are non-isomorphic legs.
 macro_rules! misuse {
-    ($v:expr, $w:expr, $dtype:ty, $value:expr) => {{
+    ($engine:ident, $v:expr, $w:expr, $dtype:ty, $value:expr) => {{
         let (v, w) = (&$v, &$w);
         let value: fn(f64) -> $dtype = $value;
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let other = Runtime::builder().dense_threads(1).build().unwrap();
-        let rand = |rt: &Runtime, cod: &GradedSpace<_>, dom: &GradedSpace<_>, seed| {
-            TensorMap::<_, $dtype>::rand_with_seed(rt, [cod], [dom], seed).unwrap()
+        let runtime = Runtime::builder().build().unwrap();
+        let other = Runtime::builder().build().unwrap();
+        let mut rand = |rt: &Runtime, cod: &GradedSpace<_>, dom: &GradedSpace<_>, seed| {
+            TensorMap::<_, $dtype>::rand_with_seed($engine, rt, [cod], [dom], seed).unwrap()
         };
         let vv = rand(&runtime, v, v, 1);
         let vw = rand(&runtime, v, w, 2);
@@ -89,9 +89,15 @@ macro_rules! misuse {
         let wv_other = rand(&other, w, v, 4);
         let vw_other = rand(&other, v, w, 5);
         let y = rand(&runtime, v, v, 6);
-        let d: TensorMap<_, $dtype> =
-            TensorMap::diagonal(&runtime, v, spectrum(v, |k| value(1.0 + 0.5 * k as f64))).unwrap();
+        let d: TensorMap<_, $dtype> = TensorMap::diagonal(
+            $engine,
+            &runtime,
+            v,
+            spectrum(v, |k| value(1.0 + 0.5 * k as f64)),
+        )
+        .unwrap();
         let singular: TensorMap<_, $dtype> = TensorMap::diagonal(
+            $engine,
             &runtime,
             v,
             spectrum(v, |k| {
@@ -99,52 +105,68 @@ macro_rules! misuse {
             }),
         )
         .unwrap();
-        let solve = |lhs: &TensorMap<_, $dtype>, rhs: TensorRef<'_, _, $dtype>| {
-            text(&lhs.solve(&[0], &[1], rhs, &[0], &[1]))
+        let solve = |$engine: &mut dyn Engine,
+                     lhs: &TensorMap<_, $dtype>,
+                     rhs: TensorRef<'_, _, $dtype>| {
+            text(&lhs.solve($engine, &[0], &[1], rhs, &[0], &[1]))
         };
-        let lazy_wv = wv.adjoint().unwrap();
-        let (lazy_exp, lazy_exp_copies) = materializations(|| lazy_wv.exp(&[0], &[1]));
+        let lazy_wv = wv.adjoint($engine).unwrap();
+        let (lazy_exp, lazy_exp_copies) = materializations(|| lazy_wv.exp($engine, &[0], &[1]));
 
         // `D \ y'` reads the view: equal to the owned adjoint, and to the
         // dense LU route on the materialized divisor (an independent oracle).
         let (compact_view, copies) =
-            materializations(|| d.solve(&[0], &[1], y.adjoint_view(), &[0], &[1]));
-        let y_owned = y.adjoint().unwrap().materialize().unwrap();
+            materializations(|| d.solve($engine, &[0], &[1], y.adjoint_view(), &[0], &[1]));
+        let y_owned = y.adjoint($engine).unwrap().materialize($engine).unwrap();
         let compact_view_ok = compact_view.as_ref().map(|x| {
             let lu = d
-                .materialize()
+                .materialize($engine)
                 .unwrap()
-                .solve(&[0], &[1], &y_owned, &[0], &[1])
+                .solve($engine, &[0], &[1], &y_owned, &[0], &[1])
                 .unwrap();
-            let owned = d.solve(&[0], &[1], &y_owned, &[0], &[1]).unwrap();
+            let owned = d.solve($engine, &[0], &[1], &y_owned, &[0], &[1]).unwrap();
             assert_eq!(x.dense_data().unwrap(), owned.dense_data().unwrap());
             let diff = x
-                .axpby(<$dtype>::from_real(1.0), &lu, <$dtype>::from_real(-1.0))
+                .axpby(
+                    $engine,
+                    <$dtype>::from_real(1.0),
+                    &lu,
+                    <$dtype>::from_real(-1.0),
+                )
                 .unwrap()
-                .norm(2.0)
+                .norm($engine, 2.0)
                 .unwrap();
-            assert!(diff < 1e-12 * lu.norm(2.0).unwrap().max(1.0), "{diff}");
+            assert!(
+                diff < 1e-12 * lu.norm($engine, 2.0).unwrap().max(1.0),
+                "{diff}"
+            );
             copies
         });
 
         vec![
-            ("solve runtime", solve(&vw, (&wv_other).into())),
+            ("solve runtime", solve($engine, &vw, (&wv_other).into())),
             (
                 "solve runtime borrowed",
-                solve(&vw, vw_other.adjoint_view()),
+                solve($engine, &vw, vw_other.adjoint_view()),
             ),
-            ("solve codomain", solve(&vv, (&wv).into())),
+            ("solve codomain", solve($engine, &vv, (&wv).into())),
             (
                 "solve codomain and non-isomorphic",
-                solve(&vw, (&wv).into()),
+                solve($engine, &vw, (&wv).into()),
             ),
-            ("solve codomain borrowed", solve(&vv, vw.adjoint_view())),
-            ("solve non-isomorphic", solve(&vw, (&vv).into())),
+            (
+                "solve codomain borrowed",
+                solve($engine, &vv, vw.adjoint_view()),
+            ),
+            ("solve non-isomorphic", solve($engine, &vw, (&vv).into())),
             (
                 "solve non-isomorphic borrowed",
-                solve(&vw, y.adjoint_view()),
+                solve($engine, &vw, y.adjoint_view()),
             ),
-            ("solve borrowed dense divisor", solve(&vv, y.adjoint_view())),
+            (
+                "solve borrowed dense divisor",
+                solve($engine, &vv, y.adjoint_view()),
+            ),
             (
                 "solve borrowed compact divisor",
                 match compact_view_ok {
@@ -154,20 +176,23 @@ macro_rules! misuse {
             ),
             (
                 "solve singular compact divisor",
-                solve(&singular, (&y).into()),
+                solve($engine, &singular, (&y).into()),
             ),
             (
                 "solve singular compact divisor borrowed",
-                solve(&singular, y.adjoint_view()),
+                solve($engine, &singular, y.adjoint_view()),
             ),
-            ("inv non-isomorphic", text(&vw.inv(&[0], &[1]))),
-            ("inv non-isomorphic lazy", text(&lazy_wv.inv(&[0], &[1]))),
-            ("exp non-endomorphic", text(&vw.exp(&[0], &[1]))),
+            ("inv non-isomorphic", text(&vw.inv($engine, &[0], &[1]))),
+            (
+                "inv non-isomorphic lazy",
+                text(&lazy_wv.inv($engine, &[0], &[1])),
+            ),
+            ("exp non-endomorphic", text(&vw.exp($engine, &[0], &[1]))),
             (
                 "exp non-endomorphic lazy",
                 format!("{}, {lazy_exp_copies} copies", text(&lazy_exp)),
             ),
-            ("pinv rcond", text(&vw.pinv(&[0], &[1], -1.0))),
+            ("pinv rcond", text(&vw.pinv($engine, &[0], &[1], -1.0))),
         ]
     }};
 }
@@ -213,6 +238,7 @@ fn differing(name: &str, actual: &[(&str, String)], expected: &[(&str, String)])
 
 #[test]
 fn misuse_reports_one_first_error_in_both_modes() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let u1 = Arc::new(U1FusionRule);
     let u1_leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -247,7 +273,13 @@ fn misuse_reports_one_first_error_in_both_modes() {
 
     // The singular-divisor error is the dense route's own, in every mode;
     // take its text from one row and require every rule and dtype to agree.
-    let reference = misuse!(u1_leg(&[(0, 2), (1, 3)]), u1_leg(&[(0, 2)]), f64, real);
+    let reference = misuse!(
+        engine,
+        u1_leg(&[(0, 2), (1, 3)]),
+        u1_leg(&[(0, 2)]),
+        f64,
+        real
+    );
     let singular = reference
         .iter()
         .find(|(op, _)| *op == "solve singular compact divisor")
@@ -263,6 +295,7 @@ fn misuse_reports_one_first_error_in_both_modes() {
     assert_rows(
         "U1 c64",
         &misuse!(
+            engine,
             u1_leg(&[(0, 2), (1, 3)]),
             u1_leg(&[(0, 2)]),
             Complex64,
@@ -272,12 +305,19 @@ fn misuse_reports_one_first_error_in_both_modes() {
     );
     assert_rows(
         "SU2 f64",
-        &misuse!(su2_leg(&[(0, 2), (1, 3)]), su2_leg(&[(0, 2)]), f64, real),
+        &misuse!(
+            engine,
+            su2_leg(&[(0, 2), (1, 3)]),
+            su2_leg(&[(0, 2)]),
+            f64,
+            real
+        ),
         &expected,
     );
     assert_rows(
         "SU2 c64",
         &misuse!(
+            engine,
             su2_leg(&[(0, 2), (1, 3)]),
             su2_leg(&[(0, 2)]),
             Complex64,
@@ -289,6 +329,7 @@ fn misuse_reports_one_first_error_in_both_modes() {
     assert_rows(
         "SU3 checked f64",
         &misuse!(
+            engine,
             su3_leg(&[(&[0, 0], 2), (&[1, 0], 3)]),
             su3_leg(&[(&[0, 0], 2)]),
             f64,
@@ -300,6 +341,7 @@ fn misuse_reports_one_first_error_in_both_modes() {
     assert_rows(
         "SU3 checked c64",
         &misuse!(
+            engine,
             su3_leg(&[(&[0, 0], 2), (&[1, 0], 3)]),
             su3_leg(&[(&[0, 0], 2)]),
             Complex64,
@@ -313,37 +355,40 @@ fn misuse_reports_one_first_error_in_both_modes() {
 /// A rule mismatch precedes every later check, including a borrowed rhs and
 /// one whose moved roles would copy it.
 macro_rules! rule_rows {
-    ($divisor_leg:expr, $rhs_leg:expr, $dtype:ty) => {{
+    ($engine:ident, $divisor_leg:expr, $rhs_leg:expr, $dtype:ty) => {{
         let (a, b) = (&$divisor_leg, &$rhs_leg);
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-        let other = Runtime::builder().dense_threads(1).build().unwrap();
-        let divisor = TensorMap::<_, $dtype>::rand_with_seed(&runtime, [a], [a], 1).unwrap();
-        let rhs = TensorMap::<_, $dtype>::rand_with_seed(&runtime, [b], [b], 2).unwrap();
-        let rhs_other = TensorMap::<_, $dtype>::rand_with_seed(&other, [b], [b], 3).unwrap();
+        let runtime = Runtime::builder().build().unwrap();
+        let other = Runtime::builder().build().unwrap();
+        let divisor =
+            TensorMap::<_, $dtype>::rand_with_seed($engine, &runtime, [a], [a], 1).unwrap();
+        let rhs = TensorMap::<_, $dtype>::rand_with_seed($engine, &runtime, [b], [b], 2).unwrap();
+        let rhs_other =
+            TensorMap::<_, $dtype>::rand_with_seed($engine, &other, [b], [b], 3).unwrap();
         vec![
-            text(&divisor.solve(&[0], &[1], &rhs, &[0], &[1])),
-            text(&divisor.solve(&[0], &[1], rhs.adjoint_view(), &[0], &[1])),
-            text(&divisor.solve(&[1], &[0], rhs.adjoint_view(), &[1], &[0])),
+            text(&divisor.solve($engine, &[0], &[1], &rhs, &[0], &[1])),
+            text(&divisor.solve($engine, &[0], &[1], rhs.adjoint_view(), &[0], &[1])),
+            text(&divisor.solve($engine, &[1], &[0], rhs.adjoint_view(), &[1], &[0])),
             // Malformed roles: the rule still precedes the permute's own error,
             // for an owned and a borrowed rhs alike.
-            text(&divisor.solve(&[5], &[0], &rhs, &[0], &[1])),
-            text(&divisor.solve(&[5], &[0], rhs.adjoint_view(), &[0], &[1])),
+            text(&divisor.solve($engine, &[5], &[0], &rhs, &[0], &[1])),
+            text(&divisor.solve($engine, &[5], &[0], rhs.adjoint_view(), &[0], &[1])),
             // Runtime precedes rule.
-            text(&divisor.solve(&[0], &[1], &rhs_other, &[0], &[1])),
+            text(&divisor.solve($engine, &[0], &[1], &rhs_other, &[0], &[1])),
         ]
     }};
 }
 
 #[test]
 fn rule_mismatch_is_the_first_error_in_both_modes() {
+    let engine = &mut crate::typed::CpuEngine::serial();
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let za = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2), (z2.irrep(1), 1)]).unwrap();
     let zb = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
     let mut expected = vec![RULE.to_string(); 5];
     expected.push(RUNTIME.to_string());
-    assert_eq!(rule_rows!(za, zb, f64), expected, "Z2/Z3 f64");
-    assert_eq!(rule_rows!(za, zb, Complex64), expected, "Z2/Z3 c64");
+    assert_eq!(rule_rows!(engine, za, zb, f64), expected, "Z2/Z3 f64");
+    assert_eq!(rule_rows!(engine, za, zb, Complex64), expected, "Z2/Z3 c64");
     #[cfg(feature = "cgc-gen")]
     {
         let su3 = Arc::new(
@@ -355,8 +400,12 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
         let sa =
             GradedSpace::try_new(Arc::clone(&su3), [(vec![0, 0], 2), (vec![1, 0], 1)]).unwrap();
         let sb = GradedSpace::try_new(Arc::clone(&su4), [(vec![0, 0, 0], 1)]).unwrap();
-        assert_eq!(rule_rows!(sa, sb, f64), expected, "SU3/SU4 f64");
-        assert_eq!(rule_rows!(sa, sb, Complex64), expected, "SU3/SU4 c64");
+        assert_eq!(rule_rows!(engine, sa, sb, f64), expected, "SU3/SU4 f64");
+        assert_eq!(
+            rule_rows!(engine, sa, sb, Complex64),
+            expected,
+            "SU3/SU4 c64"
+        );
     }
 }
 
@@ -398,7 +447,8 @@ fn padded(
 /// `D \ D'` stays compact on `D`'s own space (`d1.domain`), expert or not.
 #[test]
 fn compact_divisor_solve_lands_on_the_documented_spaces() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&u1),
@@ -418,8 +468,8 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
             })
             .collect::<Vec<_>>()
     };
-    let d: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &v, by_row(&v, 1.0)).unwrap();
-    let canonical = owned(&TensorMap::<_, f64>::zeros(&runtime, [&v], [&v]).unwrap())
+    let d: TensorMap<_, f64> = TensorMap::diagonal(engine, &runtime, &v, by_row(&v, 1.0)).unwrap();
+    let canonical = owned(&TensorMap::<_, f64>::zeros(engine, &runtime, [&v], [&v]).unwrap())
         .space
         .clone();
 
@@ -439,7 +489,7 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
         runtime: runtime.clone(),
         repr: owned_repr(TypedTensorBody::dense(expert.clone(), data)),
     };
-    let solved = d.solve(&[0], &[1], &rhs, &[0], &[1]).unwrap();
+    let solved = d.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
     let body = owned(&solved);
     assert_eq!(
         body.space.space().structure(),
@@ -470,14 +520,14 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
         runtime: runtime.clone(),
         repr: owned_repr(TypedTensorBody::diagonal(
             expert.clone(),
-            TensorMap::<_, f64>::diagonal(&runtime, &v, by_row(&v, 2.0))
+            TensorMap::<_, f64>::diagonal(engine, &runtime, &v, by_row(&v, 2.0))
                 .unwrap()
                 .spectrum()
                 .unwrap()
                 .to_vec(),
         )),
     };
-    let quotient = d_expert.solve(&[0], &[1], &d, &[0], &[1]).unwrap();
+    let quotient = d_expert.solve(engine, &[0], &[1], &d, &[0], &[1]).unwrap();
     let body = owned(&quotient);
     assert_eq!(body.space.space().structure(), expert.space().structure());
     let TypedData::Diagonal(spectrum) = body.data.as_ref() else {
@@ -493,7 +543,8 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
 /// the `_into` seams assume an admitted operand.
 #[test]
 fn isomorphism_is_checked_per_coupled_sector() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = Arc::new(U1FusionRule);
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
@@ -506,10 +557,15 @@ fn isomorphism_is_checked_per_coupled_sector() {
         (leg(&[(0, 1), (1, 1)]), leg(&[(0, 1)])),
         (leg(&[(0, 1), (1, 1)]), leg(&[(0, 1), (2, 1)])),
     ] {
-        let t = TensorMap::<_, f64>::rand_with_seed(&runtime, [&codomain], [&domain], 1).unwrap();
+        let t = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&codomain], [&domain], 1)
+            .unwrap();
         let rhs =
-            TensorMap::<_, f64>::rand_with_seed(&runtime, [&codomain], [&codomain], 2).unwrap();
-        assert_eq!(text(&t.inv(&[0], &[1])), NOT_ISO_INV);
-        assert_eq!(text(&t.solve(&[0], &[1], &rhs, &[0], &[1])), NOT_ISO_SOLVE);
+            TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&codomain], [&codomain], 2)
+                .unwrap();
+        assert_eq!(text(&t.inv(engine, &[0], &[1])), NOT_ISO_INV);
+        assert_eq!(
+            text(&t.solve(engine, &[0], &[1], &rhs, &[0], &[1])),
+            NOT_ISO_SOLVE
+        );
     }
 }

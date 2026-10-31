@@ -94,15 +94,17 @@ where
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     /// let runtime = Runtime::builder().build().unwrap();
+    /// # let engine = &mut symtn::typed::CpuEngine::serial();
     /// let tau = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
     ///     [(TableSector::new(2), 1)],
     /// ).unwrap();
     /// // A complex categorical coefficient cannot act on a real payload.
     /// let _: TensorMap<TableRule, f64> =
-    ///     TensorMap::zeros(&runtime, [&tau], [&tau]).unwrap();
+    ///     TensorMap::zeros(engine, &runtime, [&tau], [&tau]).unwrap();
     /// ```
     pub fn zeros<'a, Codomain, Domain>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
         domain: Domain,
@@ -112,6 +114,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -137,6 +140,7 @@ where
     /// One layout admission, one decode per stored block, and one callback per
     /// stored element.
     pub fn from_subblock_fn<'a, Codomain, Domain, F>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
         domain: Domain,
@@ -148,6 +152,7 @@ where
         F: FnMut(&BlockFusionTrees<R::Sector>, &[usize]) -> D,
         R: 'a,
     {
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -195,6 +200,7 @@ where
     ///
     /// One layout admission and one `O(stored_len)` payload allocation/fill.
     pub fn rand_with_seed<'a, Codomain, Domain>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
         domain: Domain,
@@ -205,6 +211,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
+        admit_host_engine(engine)?;
         let codomain: Vec<_> = codomain.into_iter().collect();
         let domain: Vec<_> = domain.into_iter().collect();
         let legs: Vec<_> = codomain.iter().chain(&domain).copied().collect();
@@ -330,6 +337,7 @@ where
     /// One fused-content fold over the legs, one sort of each coupled block's
     /// trees, plus one `O(stored_len)` payload.
     pub fn isomorphism<'a, C, M>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: C,
         domain: M,
@@ -339,6 +347,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
+        admit_host_engine(engine)?;
         Self::structural(runtime, codomain, domain, false)
     }
 
@@ -365,6 +374,7 @@ where
     /// One fused-content fold over the legs, one sort of each coupled block's
     /// trees, plus one `O(stored_len)` payload.
     pub fn isometry<'a, C, M>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: C,
         domain: M,
@@ -374,6 +384,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
+        admit_host_engine(engine)?;
         Self::structural(runtime, codomain, domain, true)
     }
 }
@@ -390,12 +401,13 @@ where
     /// Dense and compact payloads are freshly initialized to exact positive
     /// zero, independently of non-finite source values. A lazy adjoint zeros
     /// its canonical parent and stays a lazy adjoint.
-    pub fn zeros_like(&self) -> Result<Self, FacadeError<R>> {
+    pub fn zeros_like(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self.parent_of(view).zeros_like()?;
+            let parent = self.parent_of(view).zeros_like(engine)?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         if let Some(spectrum) = self.spectrum() {
+            admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
                 spectrum
                     .iter()
@@ -406,6 +418,6 @@ where
                     .collect(),
             ));
         }
-        Ok(S::zeros(EXEC, self)?)
+        Ok(S::zeros(engine, EXEC, self)?)
     }
 }

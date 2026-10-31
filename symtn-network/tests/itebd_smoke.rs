@@ -3,6 +3,7 @@
 //! Charges label twice Sz: -1 and +1. Exact energy per bond: `1/4 - ln 2`.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Truncation;
@@ -25,8 +26,12 @@ fn space<const N: usize>(
     .unwrap()
 }
 
-fn heisenberg_two_site(rt: &Runtime, p: &GradedSpace<U1FusionRule>) -> Map {
-    TensorMap::from_subblock_fn(rt, [p, p], [p, p], |trees, _| {
+fn heisenberg_two_site(
+    engine: &mut dyn Engine,
+    rt: &Runtime,
+    p: &GradedSpace<U1FusionRule>,
+) -> Map {
+    TensorMap::from_subblock_fn(engine, rt, [p, p], [p, p], |trees, _| {
         let cod = trees.codomain_uncoupled();
         let dom = trees.domain_uncoupled();
         if cod == dom {
@@ -44,6 +49,7 @@ fn heisenberg_two_site(rt: &Runtime, p: &GradedSpace<U1FusionRule>) -> Map {
 
 /// One Vidal bond update; returns `(g1', l_mid', g2')`.
 fn bond_update(
+    engine: &mut dyn Engine,
     gate: &Map,
     l_out: &Map,
     g1: &Map,
@@ -63,39 +69,47 @@ fn bond_update(
         &["l", "pa"],
         &["pb", "r"],
     )
-    .contract(&[l_out, g1, l_mid, g2, l_out, gate])
+    .contract(engine, &[l_out, g1, l_mid, g2, l_out, gate])
     .unwrap();
-    let Svd { u, s, vh } = theta.svd_compact(&[0, 1], &[2, 3]).unwrap();
+    let Svd { u, s, vh } = theta.svd_compact(engine, &[0, 1], &[2, 3]).unwrap();
     let found = s.domain()[0]
-        .find_truncated(&s.diagview().unwrap(), trunc)
+        .find_truncated(&s.diagview(engine).unwrap(), trunc)
         .unwrap();
     let u = u
-        .restrict_leg(&[(u.codomain_rank(), &found.selection)])
+        .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
         .unwrap();
     let s = s
-        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
         .unwrap();
-    let vh = vh.restrict_leg(&[(0, &found.selection)]).unwrap();
-    let l_new = s.scale(1.0 / s.norm(2.0).unwrap()).unwrap();
-    let l_out_inv = l_out.pinv(&[0], &[1], 1e-12).unwrap();
+    let vh = vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap();
+    let inverse_norm = 1.0 / s.norm(engine, 2.0).unwrap();
+    let l_new = s.scale(engine, inverse_norm).unwrap();
+    let l_out_inv = l_out.pinv(engine, &[0], &[1], 1e-12).unwrap();
     let g1_new = net(
         &[op(&["l"], &["x"]), op(&["x", "pa"], &["m"])],
         &["l", "pa"],
         &["m"],
     )
-    .contract(&[&l_out_inv, &u])
+    .contract(engine, &[&l_out_inv, &u])
     .unwrap();
     let g2_new = net(
         &[op(&["m"], &["pb", "x"]), op(&["x"], &["r"])],
         &["m", "pb"],
         &["r"],
     )
-    .contract(&[&vh, &l_out_inv])
+    .contract(engine, &[&vh, &l_out_inv])
     .unwrap();
     (g1_new, l_new, g2_new)
 }
 
-fn bond_energy(h: &Map, l_out: &Map, g1: &Map, l_mid: &Map, g2: &Map) -> f64 {
+fn bond_energy(
+    engine: &mut dyn Engine,
+    h: &Map,
+    l_out: &Map,
+    g1: &Map,
+    l_mid: &Map,
+    g2: &Map,
+) -> f64 {
     let theta = net(
         &[
             op(&["l"], &["x"]),
@@ -107,7 +121,7 @@ fn bond_energy(h: &Map, l_out: &Map, g1: &Map, l_mid: &Map, g2: &Map) -> f64 {
         &["l", "pa", "pb"],
         &["r"],
     )
-    .contract(&[l_out, g1, l_mid, g2, l_out])
+    .contract(engine, &[l_out, g1, l_mid, g2, l_out])
     .unwrap();
     let num = net(
         &[
@@ -118,38 +132,43 @@ fn bond_energy(h: &Map, l_out: &Map, g1: &Map, l_mid: &Map, g2: &Map) -> f64 {
         &[],
         &[],
     )
-    .contract(&[&theta, h, &theta])
+    .contract(engine, &[&theta, h, &theta])
     .unwrap()
-    .scalar()
+    .scalar(engine)
     .unwrap();
-    num / theta.inner(&theta).unwrap()
+    num / theta.inner(engine, &theta).unwrap()
 }
 
 /// Runs the schedule from a Neel state; returns the energy per bond.
-fn run_itebd(chi: usize, schedule: &[(f64, usize)]) -> f64 {
+fn run_itebd(engine: &mut dyn Engine, chi: usize, schedule: &[(f64, usize)]) -> f64 {
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let p = space(&rule, [(1, 1), (-1, 1)]);
-    let h = heisenberg_two_site(&rt, &p);
+    let h = heisenberg_two_site(engine, &rt, &p);
     let trunc = Truncation::rank(chi).and(Truncation::relative_cutoff(1e-8).unwrap());
 
     // Charge-balanced entangled start (converges faster than a product
     // state; a strict Neel start also works, see the regression test below).
     let vb = space(&rule, [(0, 1)]);
     let va = space(&rule, [(1, 1), (-1, 1)]);
-    let mut ga = TensorMap::from_subblock_fn(&rt, [&vb, &p], [&va], |_, _| 1.0).unwrap();
-    let mut la = TensorMap::from_subblock_fn(&rt, [&va], [&va], |_, _| 1.0).unwrap();
-    let mut gb = TensorMap::from_subblock_fn(&rt, [&va, &p], [&vb], |_, _| 1.0).unwrap();
-    let mut lb = TensorMap::from_subblock_fn(&rt, [&vb], [&vb], |_, _| 1.0).unwrap();
+    let mut ga = TensorMap::from_subblock_fn(engine, &rt, [&vb, &p], [&va], |_, _| 1.0).unwrap();
+    let mut la = TensorMap::from_subblock_fn(engine, &rt, [&va], [&va], |_, _| 1.0).unwrap();
+    let mut gb = TensorMap::from_subblock_fn(engine, &rt, [&va, &p], [&vb], |_, _| 1.0).unwrap();
+    let mut lb = TensorMap::from_subblock_fn(engine, &rt, [&vb], [&vb], |_, _| 1.0).unwrap();
 
     for &(dt, steps) in schedule {
-        let gate = h.scale(-dt).unwrap().exp(&[0, 1], &[2, 3]).unwrap();
+        let gate = h
+            .scale(engine, -dt)
+            .unwrap()
+            .exp(engine, &[0, 1], &[2, 3])
+            .unwrap();
         for _ in 0..steps {
-            (ga, la, gb) = bond_update(&gate, &lb, &ga, &la, &gb, &trunc);
-            (gb, lb, ga) = bond_update(&gate, &la, &gb, &lb, &ga, &trunc);
+            (ga, la, gb) = bond_update(engine, &gate, &lb, &ga, &la, &gb, &trunc);
+            (gb, lb, ga) = bond_update(engine, &gate, &la, &gb, &lb, &ga, &trunc);
         }
     }
-    0.5 * (bond_energy(&h, &lb, &ga, &la, &gb) + bond_energy(&h, &la, &gb, &lb, &ga))
+    0.5 * (bond_energy(engine, &h, &lb, &ga, &la, &gb)
+        + bond_energy(engine, &h, &la, &gb, &lb, &ga))
 }
 
 /// Regression: a strict Neel product state built on the FULL physical space.
@@ -163,18 +182,19 @@ fn run_itebd(chi: usize, schedule: &[(f64, usize)]) -> f64 {
 /// must work.
 #[test]
 fn neel_product_state_contracts_with_the_full_gate() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let p = space(&rule, [(1, 1), (-1, 1)]);
-    let h = heisenberg_two_site(&rt, &p);
+    let h = heisenberg_two_site(engine, &rt, &p);
 
     // |up dn>: bonds {0} -> {+1} -> {0}; a has no tree with phys charge -1,
     // b none with +1.
     let vl = space(&rule, [(0, 1)]);
     let vm = space(&rule, [(1, 1)]);
     let vr = space(&rule, [(0, 1)]);
-    let a = TensorMap::from_subblock_fn(&rt, [&vl, &p], [&vm], |_, _| 1.0).unwrap();
-    let b = TensorMap::from_subblock_fn(&rt, [&vm, &p], [&vr], |_, _| 1.0).unwrap();
+    let a = TensorMap::from_subblock_fn(engine, &rt, [&vl, &p], [&vm], |_, _| 1.0).unwrap();
+    let b = TensorMap::from_subblock_fn(engine, &rt, [&vm, &p], [&vr], |_, _| 1.0).unwrap();
 
     // The legs report the full graded space, not just populated sectors.
     assert_eq!(a.leg_dims().unwrap(), vec![1, 2, 1]);
@@ -185,9 +205,9 @@ fn neel_product_state_contracts_with_the_full_gate() {
         &["l", "pa", "pb"],
         &["r"],
     )
-    .contract(&[&a, &b])
+    .contract(engine, &[&a, &b])
     .unwrap();
-    assert!((psi.norm(2.0).unwrap() - 1.0).abs() < 1e-12);
+    assert!((psi.norm(engine, 2.0).unwrap() - 1.0).abs() < 1e-12);
 
     // theta = h |psi>: this contraction must not be rejected with a leg
     // dimension mismatch against the gate's full physical leg.
@@ -200,7 +220,7 @@ fn neel_product_state_contracts_with_the_full_gate() {
         &["l", "pa", "pb"],
         &["r"],
     )
-    .contract(&[&a, &b, &h])
+    .contract(engine, &[&a, &b, &h])
     .unwrap();
 
     // h |up dn> = -1/4 |up dn> + 1/2 |dn up>, so <psi|h|psi> = -1/4 and
@@ -214,12 +234,12 @@ fn neel_product_state_contracts_with_the_full_gate() {
         &[],
         &[],
     )
-    .contract(&[&psi, &h, &psi])
+    .contract(engine, &[&psi, &h, &psi])
     .unwrap()
-    .scalar()
+    .scalar(engine)
     .unwrap();
     assert!((energy - (-0.25)).abs() < 1e-12, "energy = {energy}");
-    let theta_norm = theta.norm(2.0).unwrap();
+    let theta_norm = theta.norm(engine, 2.0).unwrap();
     assert!(
         (theta_norm - (5.0f64 / 16.0).sqrt()).abs() < 1e-12,
         "|h psi| = {theta_norm}"
@@ -229,7 +249,8 @@ fn neel_product_state_contracts_with_the_full_gate() {
 /// Tiny chi and few steps, loose tolerance.
 #[test]
 fn ground_state_energy_converges_coarsely() {
-    let energy = run_itebd(8, &[(0.1, 100), (0.05, 100)]);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let energy = run_itebd(engine, 8, &[(0.1, 100), (0.05, 100)]);
     assert!(
         (energy - E_EXACT).abs() < 5e-2,
         "E/bond = {energy} vs exact {E_EXACT}"

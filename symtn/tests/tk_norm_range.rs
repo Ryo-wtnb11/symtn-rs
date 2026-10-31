@@ -33,6 +33,7 @@
 //! formula's conventions (quantum-dimension weight, complex modulus).
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
@@ -114,23 +115,23 @@ fn fz2() -> (
 }
 
 macro_rules! tensor {
-    ($spaces:expr, $d:ty, $fill:expr) => {{
+    ($engine:ident, $spaces:expr, $d:ty, $fill:expr) => {{
         let (v, w) = $spaces;
         let tensor: TensorMap<_, $d> =
-            TensorMap::from_subblock_fn(&host_runtime(), [&v], [&w], $fill).unwrap();
+            TensorMap::from_subblock_fn($engine, &host_runtime(), [&v], [&w], $fill).unwrap();
         tensor
     }};
 }
 
 /// `[norm(1), norm(2), norm(3), norm(Inf)]`.
 macro_rules! norms {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let tensor = &$tensor;
         [
-            tensor.norm(1.0).unwrap(),
-            tensor.norm(2.0).unwrap(),
-            tensor.norm(3.0).unwrap(),
-            tensor.norm(f64::INFINITY).unwrap(),
+            tensor.norm($engine, 1.0).unwrap(),
+            tensor.norm($engine, 2.0).unwrap(),
+            tensor.norm($engine, 3.0).unwrap(),
+            tensor.norm($engine, f64::INFINITY).unwrap(),
         ]
     }};
 }
@@ -215,6 +216,7 @@ fn expected(
 #[test]
 #[allow(clippy::excessive_precision)]
 fn formula_and_symtn_reproduce_tensorkit_at_unit_scale() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // TensorKit f87ca7f `[norm(t, p) for p in (1, 2, 3, Inf)]`.
     let u1_big_f64 = [91.75, 13.975424859373685, 7.749999999999999, 3.5];
     let su2_f64 = [55.5, 9.656603957913982, 5.588779616741119, 2.5];
@@ -245,19 +247,22 @@ fn formula_and_symtn_reproduce_tensorkit_at_unit_scale() {
 
     assert_rows::<f64>(
         "u1big",
-        norms!(tensor!(u1_big(), f64, |_, i| real_fill(i))),
+        norms!(engine, tensor!(engine, u1_big(), f64, |_, i| real_fill(i))),
         u1_big_f64,
         53,
     );
     assert_rows::<f64>(
         "su2",
-        norms!(tensor!(su2(), f64, |_, i| real_fill(i))),
+        norms!(engine, tensor!(engine, su2(), f64, |_, i| real_fill(i))),
         su2_f64,
         21,
     );
     assert_rows::<Complex64>(
         "fz2",
-        norms!(tensor!(fz2(), Complex64, |_, i| complex_fill(i))),
+        norms!(
+            engine,
+            tensor!(engine, fz2(), Complex64, |_, i| complex_fill(i))
+        ),
         fz2_c64,
         13,
     );
@@ -265,34 +270,35 @@ fn formula_and_symtn_reproduce_tensorkit_at_unit_scale() {
 
 #[test]
 fn unique_fusion_norms_rescale_at_1e200_and_1e_minus_200() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // TensorKit agrees here: Julia's `generic_norm2` (U1, 21 entries) and
     // OpenBLAS `nrm2` (U1_BIG, 53 entries, past NRM2_CUTOFF) both rescale.
     for s in [1e200, 1e-200] {
-        let f = tensor!(u1(), f64, |_, i| s * real_fill(i));
+        let f = tensor!(engine, u1(), f64, |_, i| s * real_fill(i));
         assert_rows::<f64>(
             &format!("u1 f64 x{s:e}"),
-            norms!(f),
+            norms!(engine, f),
             expected(&U1, |_| s, real_abs),
             21,
         );
-        let c = tensor!(u1(), Complex64, |_, i| complex_fill(i) * s);
+        let c = tensor!(engine, u1(), Complex64, |_, i| complex_fill(i) * s);
         assert_rows::<Complex64>(
             &format!("u1 c64 x{s:e}"),
-            norms!(c),
+            norms!(engine, c),
             expected(&U1, |_| s, complex_abs),
             21,
         );
-        let f = tensor!(u1_big(), f64, |_, i| s * real_fill(i));
+        let f = tensor!(engine, u1_big(), f64, |_, i| s * real_fill(i));
         assert_rows::<f64>(
             &format!("u1big f64 x{s:e}"),
-            norms!(f),
+            norms!(engine, f),
             expected(&U1_BIG, |_| s, real_abs),
             53,
         );
-        let c = tensor!(u1_big(), Complex64, |_, i| complex_fill(i) * s);
+        let c = tensor!(engine, u1_big(), Complex64, |_, i| complex_fill(i) * s);
         assert_rows::<Complex64>(
             &format!("u1big c64 x{s:e}"),
-            norms!(c),
+            norms!(engine, c),
             expected(&U1_BIG, |_| s, complex_abs),
             53,
         );
@@ -301,18 +307,19 @@ fn unique_fusion_norms_rescale_at_1e200_and_1e_minus_200() {
 
 #[test]
 fn fermionic_norms_rescale_across_the_range() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     for s in [1e200, 1e-200] {
-        let f = tensor!(fz2(), f64, |_, i| s * real_fill(i));
+        let f = tensor!(engine, fz2(), f64, |_, i| s * real_fill(i));
         assert_rows::<f64>(
             &format!("fz2 f64 x{s:e}"),
-            norms!(f),
+            norms!(engine, f),
             expected(&FZ2, |_| s, real_abs),
             13,
         );
-        let c = tensor!(fz2(), Complex64, |_, i| complex_fill(i) * s);
+        let c = tensor!(engine, fz2(), Complex64, |_, i| complex_fill(i) * s);
         assert_rows::<Complex64>(
             &format!("fz2 c64 x{s:e}"),
-            norms!(c),
+            norms!(engine, c),
             expected(&FZ2, |_| s, complex_abs),
             13,
         );
@@ -321,26 +328,27 @@ fn fermionic_norms_rescale_across_the_range() {
 
 #[test]
 fn weighted_su2_norms_stay_representable_where_tensorkit_does_not() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // TensorKit f87ca7f prints, for p = (1, 2, 3, Inf):
     //   x1e200:  [5.55e201, Inf, Inf, 2.4999999999999998e200] (c64 alike)
     //   x1e-200: [5.550000000000001e-199, 0.0, 0.0, 2.5e-200]
     // Its p = 1 and Inf entries agree with the formula; p = 2 and 3 are its
     // unscaled `dim(c) * norm(b)^p` overflowing or flushing.
     for s in [1e200, 1e-200] {
-        let f = tensor!(su2(), f64, |_, i| s * real_fill(i));
+        let f = tensor!(engine, su2(), f64, |_, i| s * real_fill(i));
         let want = expected(&SU2, |_| s, real_abs);
-        assert_rows::<f64>(&format!("su2 f64 x{s:e}"), norms!(f), want, 21);
-        let c = tensor!(su2(), Complex64, |_, i| complex_fill(i) * s);
+        assert_rows::<f64>(&format!("su2 f64 x{s:e}"), norms!(engine, f), want, 21);
+        let c = tensor!(engine, su2(), Complex64, |_, i| complex_fill(i) * s);
         assert_rows::<Complex64>(
             &format!("su2 c64 x{s:e}"),
-            norms!(c),
+            norms!(engine, c),
             expected(&SU2, |_| s, complex_abs),
             21,
         );
         // A lazy adjoint reads its parent's payload.
         assert_rows::<f64>(
             &format!("lazy su2 f64 x{s:e}"),
-            norms!(f.adjoint().unwrap()),
+            norms!(engine, f.adjoint(engine).unwrap()),
             want,
             21,
         );
@@ -349,32 +357,33 @@ fn weighted_su2_norms_stay_representable_where_tensorkit_does_not() {
 
 #[test]
 fn single_precision_norms_near_the_f32_range_edges() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // SU(2): TensorKit adds `dim(c) * norm(b)^2` in Float32 and prints
     // [5.55f31, Inf, Inf, 2.5f30] at 1e30 and [5.55f-29, 0, 0, 2.5f-30] at
     // 1e-30; symtn accumulates in f64, so the formula applies.
     for s in [1e30_f32, 1e-30] {
         let wide = f64::from(s);
-        let f = tensor!(u1(), f32, |_, i| s * real_fill(i) as f32);
+        let f = tensor!(engine, u1(), f32, |_, i| s * real_fill(i) as f32);
         assert_rows::<f32>(
             &format!("u1 f32 x{s:e}"),
-            norms!(f),
+            norms!(engine, f),
             expected(&U1, |_| wide, real_abs),
             21,
         );
-        let c = tensor!(u1(), Complex32, |_, i| {
+        let c = tensor!(engine, u1(), Complex32, |_, i| {
             let z = complex_fill(i);
             Complex32::new(z.re as f32, z.im as f32) * s
         });
         assert_rows::<Complex32>(
             &format!("u1 c32 x{s:e}"),
-            norms!(c),
+            norms!(engine, c),
             expected(&U1, |_| wide, complex_abs),
             21,
         );
-        let f = tensor!(su2(), f32, |_, i| s * real_fill(i) as f32);
+        let f = tensor!(engine, su2(), f32, |_, i| s * real_fill(i) as f32);
         assert_rows::<f32>(
             &format!("su2 f32 x{s:e}"),
-            norms!(f),
+            norms!(engine, f),
             expected(&SU2, |_| wide, real_abs),
             21,
         );
@@ -383,43 +392,62 @@ fn single_precision_norms_near_the_f32_range_edges() {
 
 #[test]
 fn mixed_magnitudes_keep_the_dominant_block() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Only the charge +1 block (block 2) is scaled.
     let plus_one =
         |trees: &symtn::typed::BlockFusionTrees<U1Irrep>| *trees.coupled() == U1Irrep::new(1);
     for s in [1e200, 1e-200] {
-        let t = tensor!(u1(), f64, |trees, i| if plus_one(trees) {
+        let t = tensor!(engine, u1(), f64, |trees, i| if plus_one(trees) {
             s * real_fill(i)
         } else {
             real_fill(i)
         });
         let want = expected(&U1, |block| if block == 2 { s } else { 1.0 }, real_abs);
-        assert_rows::<f64>(&format!("u1 +1 block x{s:e}"), norms!(t), want, 21);
+        assert_rows::<f64>(&format!("u1 +1 block x{s:e}"), norms!(engine, t), want, 21);
     }
 }
 
 #[test]
 fn non_finite_entries_follow_julia() {
-    let at_plus_one = |value: f64, second: f64| {
-        tensor!(u1(), f64, move |trees: &symtn::typed::BlockFusionTrees<
-            U1Irrep,
-        >,
-                                 i: &[usize]| {
-            match (*trees.coupled() == U1Irrep::new(1), i) {
-                (true, [0, 0]) => value,
-                (true, [1, 0]) => second,
-                _ => real_fill(i),
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let at_plus_one = |engine: &mut dyn Engine, value: f64, second: f64| {
+        tensor!(
+            engine,
+            u1(),
+            f64,
+            move |trees: &symtn::typed::BlockFusionTrees<U1Irrep>, i: &[usize]| {
+                match (*trees.coupled() == U1Irrep::new(1), i) {
+                    (true, [0, 0]) => value,
+                    (true, [1, 0]) => second,
+                    _ => real_fill(i),
+                }
             }
-        })
+        )
     };
     let nan = [f64::NAN; 4];
     let inf = [f64::INFINITY; 4];
     // TensorKit: NaN -> all NaN; ±Inf -> all Inf; Inf beside NaN -> all NaN.
-    assert_rows::<f64>("NaN", norms!(at_plus_one(f64::NAN, 1.5)), nan, 21);
-    assert_rows::<f64>("Inf", norms!(at_plus_one(f64::INFINITY, 1.5)), inf, 21);
-    assert_rows::<f64>("-Inf", norms!(at_plus_one(f64::NEG_INFINITY, 1.5)), inf, 21);
+    assert_rows::<f64>(
+        "NaN",
+        norms!(engine, at_plus_one(engine, f64::NAN, 1.5)),
+        nan,
+        21,
+    );
+    assert_rows::<f64>(
+        "Inf",
+        norms!(engine, at_plus_one(engine, f64::INFINITY, 1.5)),
+        inf,
+        21,
+    );
+    assert_rows::<f64>(
+        "-Inf",
+        norms!(engine, at_plus_one(engine, f64::NEG_INFINITY, 1.5)),
+        inf,
+        21,
+    );
     assert_rows::<f64>(
         "Inf and NaN",
-        norms!(at_plus_one(f64::INFINITY, f64::NAN)),
+        norms!(engine, at_plus_one(engine, f64::INFINITY, f64::NAN)),
         nan,
         21,
     );
@@ -428,39 +456,52 @@ fn non_finite_entries_follow_julia() {
     // generic_norm2 returns it: TensorKit prints all Inf on these 21 entries.
     // (Past NRM2_CUTOFF OpenBLAS `dznrm2` returns NaN for p = 2 instead; symtn
     // follows the generic_norm2 rule at every length.)
-    let mixed = tensor!(u1(), Complex64, |trees, i| {
+    let mixed = tensor!(engine, u1(), Complex64, |trees, i| {
         if *trees.coupled() == U1Irrep::new(1) && i == [0, 0] {
             Complex64::new(f64::NAN, f64::INFINITY)
         } else {
             complex_fill(i)
         }
     });
-    assert_rows::<Complex64>("NaN + Inf i", norms!(mixed), inf, 21);
+    assert_rows::<Complex64>("NaN + Inf i", norms!(engine, mixed), inf, 21);
 
     // Weighted SU(2): TensorKit prints all NaN and all Inf.
-    let su2_with = |value: f64| {
-        tensor!(su2(), f64, move |trees: &symtn::typed::BlockFusionTrees<
-            SU2Irrep,
-        >,
-                                  i: &[usize]| {
-            if *trees.coupled() == SU2Irrep::from_twice_spin(2) && i == [0, 0] {
-                value
-            } else {
-                real_fill(i)
+    let su2_with = |engine: &mut dyn Engine, value: f64| {
+        tensor!(
+            engine,
+            su2(),
+            f64,
+            move |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>, i: &[usize]| {
+                if *trees.coupled() == SU2Irrep::from_twice_spin(2) && i == [0, 0] {
+                    value
+                } else {
+                    real_fill(i)
+                }
             }
-        })
+        )
     };
-    assert_rows::<f64>("su2 NaN", norms!(su2_with(f64::NAN)), nan, 21);
-    assert_rows::<f64>("su2 Inf", norms!(su2_with(f64::INFINITY)), inf, 21);
+    assert_rows::<f64>(
+        "su2 NaN",
+        norms!(engine, su2_with(engine, f64::NAN)),
+        nan,
+        21,
+    );
+    assert_rows::<f64>(
+        "su2 Inf",
+        norms!(engine, su2_with(engine, f64::INFINITY)),
+        inf,
+        21,
+    );
 }
 
 #[test]
 fn zero_and_empty_payloads_have_zero_norm() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let zeros: TensorMap<SU2FusionRule, Complex64> = {
         let (v, w) = su2();
-        TensorMap::zeros(&host_runtime(), [&v], [&w]).unwrap()
+        TensorMap::zeros(engine, &host_runtime(), [&v], [&w]).unwrap()
     };
-    assert_rows::<f64>("zeros", norms!(zeros), [0.0; 4], 21);
+    assert_rows::<f64>("zeros", norms!(engine, zeros), [0.0; 4], 21);
 
     // TensorKit: `U1Space(0 => 2) ← U1Space(1 => 3)` has no block and every
     // norm is 0.0.
@@ -468,12 +509,13 @@ fn zero_and_empty_payloads_have_zero_norm() {
     let only_zero = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)]).unwrap();
     let only_one = GradedSpace::try_new(rule, [(U1Irrep::new(1), 3)]).unwrap();
     let empty: TensorMap<U1FusionRule, f64> =
-        TensorMap::zeros(&host_runtime(), [&only_zero], [&only_one]).unwrap();
-    assert_rows::<f64>("empty", norms!(empty), [0.0; 4], 1);
+        TensorMap::zeros(engine, &host_runtime(), [&only_zero], [&only_one]).unwrap();
+    assert_rows::<f64>("empty", norms!(engine, empty), [0.0; 4], 1);
 }
 
 #[test]
 fn compact_diagonal_norms_rescale_with_quantum_dimensions() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Hand oracle: spins 0, 1/2, 1 carry dim 1, 2, 3, so
     //   Σ dim·v   = 1·5 + 2·10 + 3·9       = 52
     //   Σ dim·v²  = 1·13 + 2·42 + 3·25     = 172
@@ -482,6 +524,7 @@ fn compact_diagonal_norms_rescale_with_quantum_dimensions() {
     let (bond, _) = su2();
     for s in [1e200, 1e-200] {
         let compact = TensorMap::<_, f64>::diagonal(
+            engine,
             &host_runtime(),
             &bond,
             [
@@ -495,12 +538,12 @@ fn compact_diagonal_norms_rescale_with_quantum_dimensions() {
             }),
         )
         .unwrap();
-        assert!(symtn::expert::diagonal_spectrum(&compact)
+        assert!(symtn::expert::diagonal_spectrum(engine, &compact)
             .unwrap()
             .is_some());
         assert_rows::<f64>(
             &format!("compact su2 x{s:e}"),
-            norms!(compact),
+            norms!(engine, compact),
             scaled(s, [52.0, 172f64.sqrt(), 658f64.cbrt(), 5.0]),
             9,
         );

@@ -43,7 +43,9 @@ fn delta(before: CudaTransferStats) -> CudaTransferStats {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
-    let runtime = Runtime::builder().cuda(0).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let bytes = |len: usize| (len * std::mem::size_of::<f64>()) as u64;
     for charges in [1_usize, 9] {
         let half = charges as i32 / 2;
@@ -52,21 +54,21 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
             (-half..=half).map(|charge| (U1Irrep::new(charge), 3)),
         )
         .unwrap();
-        let host = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, index| {
+        let host = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
             1.0 + ((index[0] * 3 + index[1] * 5) % 7) as f64
         })
         .unwrap();
-        let device = host.to_cuda().unwrap();
+        let device = host.to_cuda(cuda).unwrap();
 
         let before = cuda_transfer_stats();
         let Svd { u, s, vh } = device
-            .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+            .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
             .unwrap();
         let svd = delta(before);
         let (u, s, vh) = (
-            u.to_host().unwrap(),
-            s.to_host().unwrap(),
-            vh.to_host().unwrap(),
+            u.to_host(cuda).unwrap(),
+            s.to_host(cuda).unwrap(),
+            vh.to_host(cuda).unwrap(),
         );
         // Only the finite-input scan's one real scalar (#2038) comes back.
         assert_eq!(
@@ -81,9 +83,9 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         assert_eq!(
             svd.h2d_bytes,
             bytes(
-                u.materialize().unwrap().dense_data().unwrap().len()
-                    + s.materialize().unwrap().dense_data().unwrap().len()
-                    + vh.materialize().unwrap().dense_data().unwrap().len()
+                u.materialize(engine).unwrap().dense_data().unwrap().len()
+                    + s.materialize(engine).unwrap().dense_data().unwrap().len()
+                    + vh.materialize(engine).unwrap().dense_data().unwrap().len()
                     + 3
             ),
             "{charges} sectors"
@@ -92,31 +94,33 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         // each side; the gauge never downloads (checked above).
         assert_eq!(svd.gauge_ops, 17 * charges as u64, "{charges} sectors");
         let Svd { s: expected, .. } = host
-            .svd_compact(&codomain_axes(&host), &domain_axes(&host))
+            .svd_compact(engine, &codomain_axes(&host), &domain_axes(&host))
             .unwrap();
         for (device, host) in s
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
-            .zip(expected.materialize().unwrap().dense_data().unwrap())
+            .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
         {
             assert!((device - host).abs() <= 1e-12 * host.abs().max(1.0));
         }
 
-        let hermitian = host.axpby(1.0, &host.adjoint().unwrap(), 1.0).unwrap();
-        let device = hermitian.to_cuda().unwrap();
+        let host_adjoint = host.adjoint(engine).unwrap();
+        let hermitian = host.axpby(engine, 1.0, &host_adjoint, 1.0).unwrap();
+        let device = hermitian.to_cuda(cuda).unwrap();
         let before = cuda_transfer_stats();
         let Eigh { d, v } = device
             .eigh_full(
+                cuda,
                 &codomain_axes(&device),
                 &domain_axes(&device),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
         let eigh = delta(before);
-        let (d, v) = (d.to_host().unwrap(), v.to_host().unwrap());
+        let (d, v) = (d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap());
         let eigenvalues = 3 * charges;
         // The eigenvalues must reach the host; the rest of the download is
         // the O(1)-per-sector Hermiticity verdicts.
@@ -125,8 +129,8 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         // remainder is per-sector scalars. cuSOLVER's order is already the
         // published ascending one (#1985), so no `n_c x n_c` selector is
         // uploaded.
-        let d_len = d.materialize().unwrap().dense_data().unwrap().len();
-        let v_len = v.materialize().unwrap().dense_data().unwrap().len();
+        let d_len = d.materialize(engine).unwrap().dense_data().unwrap().len();
+        let v_len = v.materialize(engine).unwrap().dense_data().unwrap().len();
         assert!(
             eigh.h2d_bytes >= bytes(d_len + v_len),
             "{charges}: {eigh:?}"
@@ -137,18 +141,19 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         );
         let Eigh { d: expected, .. } = hermitian
             .eigh_full(
+                engine,
                 &codomain_axes(&hermitian),
                 &domain_axes(&hermitian),
                 HermitianTol::DEFAULT,
             )
             .unwrap();
         for (device, host) in d
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
-            .zip(expected.materialize().unwrap().dense_data().unwrap())
+            .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
         {
             assert!((device - host).abs() <= 1e-10 * host.abs().max(1.0));
         }

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use num_complex::Complex64;
 use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep};
 use symtn::typed::__network::NetworkReuseClass;
-use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
+use symtn::typed::{Engine, GradedSpace, SectorSpectrum, TensorMap};
 
 use crate::fixtures;
 
@@ -47,28 +47,37 @@ fn form<R, D>(t: &TensorMap<R, D>) -> NetworkReuseClass {
 /// (and the compact bond `leg <- leg`) and returns the dense stored length,
 /// which equal reduced-block structures share across modes.
 macro_rules! zeros_rows {
-    ($leg:expr, $D:ty, $conv:expr) => {
-        zeros_rows!($leg, $D, $conv, |t: &TensorMap<_, $D>| Some(
-            t.adjoint().unwrap()
-        ))
+    ($engine:ident, $leg:expr, $D:ty, $conv:expr) => {
+        zeros_rows!(
+            $engine,
+            $leg,
+            $D,
+            $conv,
+            |engine: &mut dyn Engine, t: &TensorMap<_, $D>| Some(t.adjoint(engine).unwrap())
+        )
     };
-    ($leg:expr, $D:ty, $conv:expr, $adjoint:expr) => {{
+    ($engine:ident, $leg:expr, $D:ty, $conv:expr, $adjoint:expr) => {{
         let adjoint = $adjoint;
         let runtime = host_runtime();
         let leg = $leg;
         let dual = leg.try_dual().unwrap();
         let conv = $conv;
         let mut n = 0;
-        let dense =
-            TensorMap::<_, $D>::from_subblock_fn(&runtime, [&leg, &dual], [&leg], |_, _| {
+        let dense = TensorMap::<_, $D>::from_subblock_fn(
+            $engine,
+            &runtime,
+            [&leg, &dual],
+            [&leg],
+            |_, _| {
                 n += 1;
                 conv(source(n))
-            })
-            .unwrap();
+            },
+        )
+        .unwrap();
         assert!(n > 0, "the fixture stores entries");
 
         // Dense: same spaces, fresh exact-zero payload.
-        let zero = dense.zeros_like().unwrap();
+        let zero = dense.zeros_like($engine).unwrap();
         assert_eq!(zero.codomain(), dense.codomain());
         assert_eq!(zero.domain(), dense.domain());
         assert!(form(&zero) == NetworkReuseClass::OwnedDense);
@@ -78,8 +87,8 @@ macro_rules! zeros_rows {
         assert_ne!(data.as_ptr(), dense.dense_data().unwrap().as_ptr());
 
         // Lazy adjoint: stays lazy, over a zero parent.
-        if let Some(lazy) = adjoint(&dense) {
-            let zero_lazy = lazy.zeros_like().unwrap();
+        if let Some(lazy) = adjoint($engine, &dense) {
+            let zero_lazy = lazy.zeros_like($engine).unwrap();
             assert_eq!(zero_lazy.codomain(), lazy.codomain());
             assert_eq!(zero_lazy.domain(), lazy.domain());
             assert!(form(&lazy) == NetworkReuseClass::LazyAdjoint);
@@ -88,12 +97,12 @@ macro_rules! zeros_rows {
                 "lazy stays lazy"
             );
             assert!(exact_zeros(
-                adjoint(&zero_lazy).unwrap().dense_data().unwrap()
+                adjoint($engine, &zero_lazy).unwrap().dense_data().unwrap()
             ));
             // Materializing conjugates (and may apply a recoupling sign), so
             // `-0.0` is allowed here; the parent above is bit-exact.
             assert!(zero_lazy
-                .materialize()
+                .materialize($engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -114,9 +123,9 @@ macro_rules! zeros_rows {
                 sector,
             })
             .collect();
-        let compact = TensorMap::<_, $D>::diagonal(&runtime, &leg, spectra).unwrap();
-        for operand in std::iter::once(compact.clone()).chain(adjoint(&compact)) {
-            let zero = operand.zeros_like().unwrap();
+        let compact = TensorMap::<_, $D>::diagonal($engine, &runtime, &leg, spectra).unwrap();
+        for operand in std::iter::once(compact.clone()).chain(adjoint($engine, &compact)) {
+            let zero = operand.zeros_like($engine).unwrap();
             assert_eq!(zero.codomain(), operand.codomain());
             assert_eq!(zero.domain(), operand.domain());
             assert!(form(&operand) == NetworkReuseClass::Compact);
@@ -124,7 +133,10 @@ macro_rules! zeros_rows {
                 form(&zero) == NetworkReuseClass::Compact,
                 "compact stays compact"
             );
-            let (zeros, source) = (zero.materialize().unwrap(), operand.materialize().unwrap());
+            let (zeros, source) = (
+                zero.materialize($engine).unwrap(),
+                operand.materialize($engine).unwrap(),
+            );
             assert_eq!(
                 zeros.dense_data().unwrap().len(),
                 source.dense_data().unwrap().len()
@@ -175,23 +187,28 @@ const COMPLEX: fn(Complex64) -> Complex64 = |z| z;
 
 #[test]
 fn multiplicity_free_zeros_like_keeps_space_and_form() {
-    zeros_rows!(u1_leg(), f64, REAL);
-    zeros_rows!(u1_leg(), Complex64, COMPLEX);
-    zeros_rows!(su2_leg(), f64, REAL);
-    zeros_rows!(su2_leg(), Complex64, COMPLEX);
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    zeros_rows!(engine, u1_leg(), f64, REAL);
+    zeros_rows!(engine, u1_leg(), Complex64, COMPLEX);
+    zeros_rows!(engine, su2_leg(), f64, REAL);
+    zeros_rows!(engine, su2_leg(), Complex64, COMPLEX);
 }
 
 #[test]
 fn complex_symbol_zeros_like_keeps_space_and_form() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // Fibonacci has complex F/R symbols (`Scalar = Complex64`). Its payload
     // is complex and it has no `adjoint` (both compile-time absent), so the
     // lane has the dense and compact rows.
-    zeros_rows!(fibonacci_leg(), Complex64, COMPLEX, |_: &TensorMap<
-        TableRule,
+    zeros_rows!(
+        engine,
+        fibonacci_leg(),
         Complex64,
-    >| {
-        None::<TensorMap<TableRule, Complex64>>
-    });
+        COMPLEX,
+        |_: &mut dyn Engine, _: &TensorMap<TableRule, Complex64>| {
+            None::<TensorMap<TableRule, Complex64>>
+        }
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -221,14 +238,15 @@ mod checked {
 
     #[test]
     fn checked_generic_zeros_like_matches_the_multiplicity_free_rule() {
+        let engine = &mut symtn::typed::CpuEngine::serial();
         for (mf, checked) in [
             (
-                zeros_rows!(su2_leg(), f64, REAL),
-                zeros_rows!(checked_su2_leg(), f64, REAL),
+                zeros_rows!(engine, su2_leg(), f64, REAL),
+                zeros_rows!(engine, checked_su2_leg(), f64, REAL),
             ),
             (
-                zeros_rows!(su2_leg(), Complex64, COMPLEX),
-                zeros_rows!(checked_su2_leg(), Complex64, COMPLEX),
+                zeros_rows!(engine, su2_leg(), Complex64, COMPLEX),
+                zeros_rows!(engine, checked_su2_leg(), Complex64, COMPLEX),
             ),
         ] {
             assert_eq!(mf, checked, "same SU(2) reduced blocks in both modes");
@@ -237,7 +255,8 @@ mod checked {
 
     #[test]
     fn su3_zeros_like_keeps_space_and_form() {
-        zeros_rows!(su3_leg(), f64, REAL);
-        zeros_rows!(su3_leg(), Complex64, COMPLEX);
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        zeros_rows!(engine, su3_leg(), f64, REAL);
+        zeros_rows!(engine, su3_leg(), Complex64, COMPLEX);
     }
 }

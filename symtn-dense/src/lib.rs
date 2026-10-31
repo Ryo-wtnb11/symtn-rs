@@ -28,10 +28,6 @@ mod cuda_hermitian;
 #[cfg(any(feature = "cuda", test))]
 #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 mod cuda_region;
-// Pure host arithmetic: compiled (and tested) without the `cuda` feature.
-#[cfg(any(feature = "cuda", test))]
-#[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-mod plan_ledger;
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]
@@ -52,16 +48,19 @@ pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
 #[cfg(feature = "tenferro")]
-pub use tenferro_adapter::{
-    cpu_session_stats, reset_cpu_session_stats, CpuSessionStats, DefaultDenseExecutor,
-    SharedCpuContext,
-};
+pub use tenferro_adapter::{DefaultDenseExecutor, DenseGemmBatchBinding};
 
-/// CPU linear-algebra provider selector (faer vs system BLAS/LAPACK), re-exported
-/// from tenferro so runtimes can pick a backend via
-/// [`DefaultDenseExecutor::with_kind`] without depending on tenferro directly.
+/// The execution resource every numerical entry takes as
+/// `engine: &mut dyn Engine`: tenferro's engine trait, re-exported so callers
+/// and custom executors need no direct tenferro dependency. The caller owns
+/// the engine; symtn stores none.
+pub use tenferro_tensor::Engine;
+
+/// The caller-owned CPU engine ([`CpuEngine::serial`], or
+/// [`CpuEngine::new`] over a [`Pool`]) and its thread pool, re-exported from
+/// tenferro.
 #[cfg(feature = "tenferro")]
-pub use tenferro_cpu::CpuBackendKind;
+pub use tenferro_cpu::{CpuEngine, Pool};
 
 #[cfg(feature = "cuda")]
 pub use cuda_adapter::{
@@ -76,7 +75,7 @@ pub use cuda_adapter::{
     cuda_hermitian_regions, cuda_matmul_region_into, cuda_qr_region, cuda_region_axpby,
     cuda_region_scale, cuda_region_trace_accumulate, cuda_region_zero, cuda_svd_region,
     cuda_transfer_stats, cuda_widen, reset_cuda_transfer_stats, CudaDenseContext, CudaDenseStorage,
-    CudaPlanCacheStats, CudaRealScalar, CudaRegionBeta, CudaRegionCoefficient, CudaScalar,
+    CudaRealScalar, CudaRegionBeta, CudaRegionCoefficient, CudaScalar, CudaScalarOperands,
     CudaTransferStats,
 };
 #[cfg(feature = "cuda")]
@@ -86,5 +85,10 @@ pub use cuda_adapter::{
 };
 #[cfg(feature = "cuda")]
 pub use cuda_region::CudaRegion;
+
+/// The caller-owned CUDA engine and the device id it opens on
+/// (`CudaEngine::open(CudaDeviceId::from_ordinal(0))`), re-exported from
+/// tenferro. Every device operation borrows the engine for its own duration;
+/// symtn stores none.
 #[cfg(feature = "cuda")]
-pub use plan_ledger::{plan_cache_entries_for, DEFAULT_PLAN_CACHE_BUDGET_BYTES};
+pub use tenferro_gpu::cuda::{CudaDeviceId, CudaEngine};

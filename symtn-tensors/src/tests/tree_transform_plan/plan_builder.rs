@@ -454,6 +454,7 @@ fn tree_transform_plan_builder_accepts_simple_multi_destination_callback() {
 
 #[test]
 fn tree_transform_plan_builder_lowers_injective_singleton_rows_in_source_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a nonidentity monomial group is represented by ordered direct
     // specs even when its coefficients are neither inferred nor unit-valued.
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
@@ -529,6 +530,7 @@ fn tree_transform_plan_builder_lowers_injective_singleton_rows_in_source_order()
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -592,6 +594,7 @@ fn tree_transform_plan_builder_keeps_destination_collisions_in_multi() {
 
 #[test]
 fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the first-vertex SU(2) R move is direct for every fusion channel,
     // while preserving the channel-dependent coefficients returned by core.
     let keys = [[0, 1], [2, 1]].map(|inner| {
@@ -678,6 +681,7 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -697,9 +701,9 @@ fn su2_first_pair_braid_lowers_nonidentity_monomial_group_to_singles() {
     );
 
     dst.data_mut().fill(f64::NAN);
-    backend.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
-    backend.set_transform_parallel_min_len(0);
+    let parallel_engine = &mut symtn_operations::host_pool::eager_test_engine(4);
     replay_overwrite_into(
+        parallel_engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -778,6 +782,7 @@ fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
 
 #[test]
 fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -842,6 +847,7 @@ fn multiplicity_free_su2_plan_builder_creates_generic_recoupling_block() {
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -910,6 +916,7 @@ fn tree_pair_transform_public_helper_executes_su2_recoupling_block() {
 
 #[test]
 fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficients() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -954,6 +961,7 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
     let mut workspace = TreeTransformWorkspace::default();
 
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -969,6 +977,7 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
 
     dst.data_mut().fill(Complex64::new(0.0, 0.0));
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -1036,6 +1045,7 @@ fn tree_transform_recoupling_plan_groups_same_shape_multi_blocks() {
 
 #[test]
 fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let src_key0 = all_codomain_fusion_tree_test_key_for_rule(
         &SU2FusionRule,
         [1, 1, 1, 1],
@@ -1085,6 +1095,7 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
 
     assert!(structure.has_pack_gemm_scatter_blocks());
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1103,6 +1114,7 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
     src.data_mut().copy_from_slice(&[3.0, -4.0]);
     dst.data_mut().copy_from_slice(&[1.0, 2.0]);
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &structure,
@@ -1158,7 +1170,7 @@ fn parallel_plan_compile_matches_serial_plan() {
         build_tree_pair_transform_group_plan_validated_with_threads(
             &proof,
             operation.clone(),
-            threads,
+            &mut symtn_operations::host_pool::test_engine(threads),
         )
         .unwrap()
     };
@@ -1243,7 +1255,7 @@ fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
     let source_structure = packed_fixture_structure(4, [(source_key, vec![1usize; 4])]).unwrap();
     let operation = TreeTransformOperation::braid([0, 1, 3], [2], [0, 1], [2, 3]);
     let expected = multiplicity_free_repartition_tree_pair(&SU2FusionRule, &source, 3).unwrap();
-    let build = |threads| {
+    let build = |threads: &mut dyn symtn_dense::Engine| {
         let proof = validate_multiplicity_free_tree_pair_preflight(
             &SU2FusionRule,
             &operation,
@@ -1258,8 +1270,8 @@ fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
         .unwrap()
     };
 
-    let serial = build(1);
-    let parallel = build(8);
+    let serial = build(&mut symtn_operations::host_pool::test_engine(1));
+    let parallel = build(&mut symtn_operations::host_pool::test_engine(8));
     assert_eq!(parallel, serial);
 
     let spec = &serial.specs()[0];
@@ -1269,6 +1281,7 @@ fn split_only_repartition_plan_matches_serial_and_parallel_builders() {
 
 #[test]
 fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an identity operation over a multi-tree SU2 fusion group compiles
     // to independent direct copies for every supported facade and worker count.
     use crate::tree_transform::{
@@ -1290,7 +1303,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
     let structure =
         packed_fixture_structure(4, keys.iter().map(|key| (key.clone(), vec![1usize; 4]))).unwrap();
     let operation = TreeTransformOperation::braid([0, 1, 2, 3], [], [17, 3, 11, 5], []);
-    let build = |threads| {
+    let build = |threads: &mut dyn symtn_dense::Engine| {
         let proof =
             validate_multiplicity_free_tree_pair_preflight(&SU2FusionRule, &operation, &structure)
                 .unwrap();
@@ -1302,8 +1315,8 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
         .unwrap()
     };
 
-    let serial = build(1);
-    let parallel = build(8);
+    let serial = build(&mut symtn_operations::host_pool::test_engine(1));
+    let parallel = build(&mut symtn_operations::host_pool::test_engine(8));
     assert_eq!(parallel, serial);
     assert_eq!(serial.specs().len(), keys.len());
     for spec in serial.specs() {
@@ -1357,6 +1370,7 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
     let mut backend = DenseTreeTransformOperations::default();
     let mut workspace = TreeTransformWorkspace::default();
     replay_into(
+        engine,
         &mut backend,
         &mut workspace,
         &compiled,
@@ -1369,9 +1383,9 @@ fn identity_group_plan_lowers_each_su2_tree_to_a_direct_single() {
     assert_eq!(dst.data(), &[17.0, 22.0, 27.0, 32.0]);
 
     dst.data_mut().fill(f64::NAN);
-    backend.set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
-    backend.set_transform_parallel_min_len(0);
+    let parallel_engine = &mut symtn_operations::host_pool::eager_test_engine(4);
     replay_overwrite_into(
+        parallel_engine,
         &mut backend,
         &mut workspace,
         &compiled,

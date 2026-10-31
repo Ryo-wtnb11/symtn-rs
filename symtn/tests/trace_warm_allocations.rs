@@ -40,11 +40,12 @@ fn fz2u1_leg(charges: i32) -> GradedSpace<Fz2U1> {
 /// `(source blocks, warm trace_pairs calls, warm trace_pairs_into calls)` of
 /// `[V^half] ← [V^half]` traced over `pairs`, after three warm-ups.
 macro_rules! warm_trace_calls {
-    ($leg:expr, $half:expr, $pairs:expr) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $leg:expr, $half:expr, $pairs:expr) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let leg = $leg;
         let legs = vec![&leg; $half];
         let source = TensorMap::<_, f64>::rand_with_seed(
+            $engine,
             &runtime,
             legs.iter().copied(),
             legs.iter().copied(),
@@ -52,17 +53,18 @@ macro_rules! warm_trace_calls {
         )
         .unwrap();
         let pairs: &[(usize, usize)] = $pairs;
-        let mut destination = source.trace_pairs(pairs).unwrap();
+        let mut destination = source.trace_pairs($engine, pairs).unwrap();
         for _ in 0..3 {
-            black_box(source.trace_pairs(pairs).unwrap());
+            black_box(source.trace_pairs($engine, pairs).unwrap());
             source
-                .trace_pairs_into(pairs, &mut destination, 1.0, 0.5)
+                .trace_pairs_into($engine, pairs, &mut destination, 1.0, 0.5)
                 .unwrap();
         }
-        let (output, owned) = counting_alloc::measure(|| black_box(source.trace_pairs(pairs)));
+        let (output, owned) =
+            counting_alloc::measure(|| black_box(source.trace_pairs($engine, pairs)));
         output.unwrap();
         let (result, into) = counting_alloc::measure(|| {
-            source.trace_pairs_into(pairs, black_box(&mut destination), 1.0, 0.5)
+            source.trace_pairs_into($engine, pairs, black_box(&mut destination), 1.0, 0.5)
         });
         result.unwrap();
         (source.subblock_count(), owned.calls, into.calls)
@@ -77,6 +79,7 @@ macro_rules! warm_trace_calls {
 /// traced pairs, a bosonic and a fermionic rule.
 #[test]
 fn warm_unique_trace_allocations_do_not_grow_with_terms() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let check = |label: &str, small: (usize, u64, u64), large: (usize, u64, u64)| {
         assert!(
@@ -100,13 +103,13 @@ fn warm_unique_trace_allocations_do_not_grow_with_terms() {
     ] {
         check(
             "U(1)",
-            warm_trace_calls!(u1_leg(1), half, pairs),
-            warm_trace_calls!(u1_leg(3), half, pairs),
+            warm_trace_calls!(engine, u1_leg(1), half, pairs),
+            warm_trace_calls!(engine, u1_leg(3), half, pairs),
         );
         check(
             "fZ2xU(1)",
-            warm_trace_calls!(fz2u1_leg(1), half, pairs),
-            warm_trace_calls!(fz2u1_leg(3), half, pairs),
+            warm_trace_calls!(engine, fz2u1_leg(1), half, pairs),
+            warm_trace_calls!(engine, fz2u1_leg(3), half, pairs),
         );
     }
 }

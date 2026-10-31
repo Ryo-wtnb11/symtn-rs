@@ -1,6 +1,7 @@
 use std::fmt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use symtn::typed::Engine;
 use symtn::typed::HermitianTol;
 
 use symtn::sector::TypedSectorAdmission;
@@ -228,21 +229,27 @@ fn dense_leg_degeneracy_offsets(bytes: &[u8]) -> Vec<usize> {
 
 #[test]
 fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(GenericToy);
     let codec = GenericCodec {
         provider: Arc::clone(&provider),
     };
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(GenericLabel::X, 1)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, indices| {
+    let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&leg, &leg],
+        |trees, indices| {
             let coupled = usize::from(*trees.coupled() == GenericLabel::X);
             let codomain_mu = trees.codomain_vertices()[0].get();
             let domain_mu = trees.domain_vertices()[0].get();
             (1000 * coupled + 100 * codomain_mu + 10 * domain_mu + indices.iter().sum::<usize>())
                 as f64
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     let keys = (0..source.subblock_count())
         .map(|index| source.subblock_fusion_trees(index).unwrap())
@@ -274,6 +281,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
 
     let bytes = source.to_bytes_with(&codec).unwrap();
     let restored = TensorMap::<GenericToy, f64>::from_bytes_with(
+        engine,
         &runtime,
         &bytes,
         DecodeLimits::default(),
@@ -308,10 +316,12 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
     }
 
     let complex = source
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, -0.25))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, -0.25))
         .unwrap();
     let restored_complex = TensorMap::<GenericToy, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &complex.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -333,8 +343,9 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
                 == (expected.re.to_bits(), expected.im.to_bits())
         }));
 
-    let complex_lazy = complex.adjoint().unwrap();
+    let complex_lazy = complex.adjoint(engine).unwrap();
     let restored_complex_lazy = TensorMap::<GenericToy, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &complex_lazy.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -350,20 +361,27 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         NetworkReuseClass::LazyAdjoint
     ));
     assert!(restored_complex_lazy
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(complex_lazy.materialize().unwrap().dense_data().unwrap())
+        .zip(
+            complex_lazy
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        )
         .all(|(actual, expected)| {
             (actual.re.to_bits(), actual.im.to_bits())
                 == (expected.re.to_bits(), expected.im.to_bits())
         }));
+    let source_adjoint = &source.adjoint(engine).unwrap();
 
-    let hermitian = source.axpby(1.0, &source.adjoint().unwrap(), 1.0).unwrap();
+    let hermitian = source.axpby(engine, 1.0, source_adjoint, 1.0).unwrap();
     let factor = hermitian
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap()
         .d;
     assert!(matches!(
@@ -371,12 +389,13 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         NetworkReuseClass::Compact
     ));
     // TensorKit `adjoint(::DiagonalTensorMap)` is again a diagonal (#1449).
-    let factor_adjoint = factor.adjoint().unwrap();
+    let factor_adjoint = factor.adjoint(engine).unwrap();
     assert!(matches!(
         symtn::typed::__network::network_reuse_class(&factor_adjoint, false),
         NetworkReuseClass::Compact
     ));
     let restored_adjoint = TensorMap::<GenericToy, f64>::from_bytes_with(
+        engine,
         &runtime,
         &factor_adjoint.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -390,26 +409,35 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
     );
     assert_eq!(
         restored_adjoint
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
-        factor_adjoint.materialize().unwrap().dense_data().unwrap()
+        factor_adjoint
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
     );
     assert!(matches!(
-        symtn::typed::__network::network_reuse_class(&restored_adjoint.adjoint().unwrap(), false),
+        symtn::typed::__network::network_reuse_class(
+            &restored_adjoint.adjoint(engine).unwrap(),
+            false
+        ),
         NetworkReuseClass::Compact
     ));
+    let complex_adjoint = &complex.adjoint(engine).unwrap();
 
     let complex_hermitian = complex
         .axpby(
+            engine,
             Complex64::new(1.0, 0.0),
-            &complex.adjoint().unwrap(),
+            complex_adjoint,
             Complex64::new(1.0, 0.0),
         )
         .unwrap();
     let complex_factor = complex_hermitian
-        .eigh_full(&[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap()
         .d;
     assert!(matches!(
@@ -417,6 +445,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         NetworkReuseClass::Compact
     ));
     let restored_complex_factor = TensorMap::<GenericToy, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &complex_factor.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -432,19 +461,26 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         NetworkReuseClass::Compact
     ));
     assert!(restored_complex_factor
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(complex_factor.materialize().unwrap().dense_data().unwrap())
+        .zip(
+            complex_factor
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        )
         .all(|(actual, expected)| {
             (actual.re.to_bits(), actual.im.to_bits())
                 == (expected.re.to_bits(), expected.im.to_bits())
         }));
 
-    let complex_factor_lazy = complex_factor.adjoint().unwrap();
+    let complex_factor_lazy = complex_factor.adjoint(engine).unwrap();
     let restored_complex_factor_lazy = TensorMap::<GenericToy, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &complex_factor_lazy.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -460,14 +496,14 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         NetworkReuseClass::Compact
     ));
     assert!(restored_complex_factor_lazy
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
         .zip(
             complex_factor_lazy
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -478,7 +514,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
         }));
     assert!(matches!(
         symtn::typed::__network::network_reuse_class(
-            &restored_complex_factor_lazy.adjoint().unwrap(),
+            &restored_complex_factor_lazy.adjoint(engine).unwrap(),
             false
         ),
         NetworkReuseClass::Compact
@@ -487,6 +523,7 @@ fn checked_generic_multiplicity_keys_payload_and_resolver_arc_roundtrip() {
 
 #[test]
 fn admitted_shape_limit_precedes_dense_payload_allocation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(GenericToy);
     let codec = GenericCodec {
@@ -494,7 +531,8 @@ fn admitted_shape_limit_precedes_dense_payload_allocation() {
     };
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(GenericLabel::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |_, _| 1.0)
+            .unwrap();
     let mut forged = source.to_bytes_with(&codec).unwrap();
     let offsets = dense_leg_degeneracy_offsets(&forged);
     assert_eq!(offsets.len(), 4);
@@ -504,7 +542,7 @@ fn admitted_shape_limit_precedes_dense_payload_allocation() {
 
     let limit = source.dense_data().unwrap().len();
     assert!(matches!(
-        TensorMap::<GenericToy, f64>::from_bytes_with(
+        TensorMap::<GenericToy, f64>::from_bytes_with(engine,
             &runtime,
             &forged,
             DecodeLimits {
@@ -523,15 +561,20 @@ fn admitted_shape_limit_precedes_dense_payload_allocation() {
 
 #[test]
 fn graded_space_roundtrip_keeps_duality_exact_arc_and_deterministic_bytes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let source = su2_leg(&provider, true);
 
     let bytes = source.to_bytes_with(&codec).unwrap();
     assert_eq!(source.to_bytes_with(&codec).unwrap(), bytes);
-    let restored =
-        GradedSpace::<SU2FusionRule>::from_bytes_with(&bytes, DecodeLimits::default(), &codec)
-            .unwrap();
+    let restored = GradedSpace::<SU2FusionRule>::from_bytes_with(
+        engine,
+        &bytes,
+        DecodeLimits::default(),
+        &codec,
+    )
+    .unwrap();
 
     assert!(std::ptr::eq(restored.provider(), provider.as_ref()));
     assert!(restored.is_dual());
@@ -541,6 +584,7 @@ fn graded_space_roundtrip_keeps_duality_exact_arc_and_deterministic_bytes() {
 
 #[test]
 fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let codec = U1Codec {
         provider: Arc::clone(&provider),
@@ -551,6 +595,7 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
     assert_eq!(source.sectors().unwrap(), [U1Irrep::new(-3)]);
 
     let restored = GradedSpace::<U1FusionRule>::from_bytes_with(
+        engine,
         &source.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
         &codec,
@@ -565,6 +610,7 @@ fn non_self_dual_u1_space_roundtrip_does_not_dualize_twice() {
 
 #[test]
 fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
@@ -576,6 +622,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
         0x7ff8_0000_0000_0042,
     ];
     let real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&codomain, &codomain, &codomain],
         [&domain],
@@ -587,6 +634,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
     )
     .unwrap();
     let complex: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&codomain, &codomain, &codomain],
         [&domain],
@@ -609,6 +657,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
 
     let real_bytes = real.to_bytes_with(&codec).unwrap();
     let restored_real = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        engine,
         &runtime,
         &real_bytes,
         DecodeLimits::default(),
@@ -617,6 +666,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
     .unwrap();
     let complex_bytes = complex.to_bytes_with(&codec).unwrap();
     let restored_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &complex_bytes,
         DecodeLimits::default(),
@@ -669,6 +719,7 @@ fn dense_su2_f64_and_c64_roundtrip_exact_bits_and_semantic_blocks() {
 
 #[test]
 fn compact_and_lazy_representations_survive_roundtrip() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
@@ -683,8 +734,10 @@ fn compact_and_lazy_representations_survive_roundtrip() {
             values: vec![2.0, f64::from_bits(0x7ff8_0000_0000_0007)],
         },
     ];
-    let compact = TensorMap::<SU2FusionRule, f64>::diagonal(&runtime, &leg, spectrum).unwrap();
+    let compact =
+        TensorMap::<SU2FusionRule, f64>::diagonal(engine, &runtime, &leg, spectrum).unwrap();
     let restored_compact = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        engine,
         &runtime,
         &compact.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -695,7 +748,7 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         symtn::typed::__network::network_reuse_class(&restored_compact, false),
         NetworkReuseClass::Compact
     ));
-    let actual = symtn::expert::diagonal_spectrum(&restored_compact)
+    let actual = symtn::expert::diagonal_spectrum(engine, &restored_compact)
         .unwrap()
         .unwrap();
     assert_eq!(actual.len(), 2);
@@ -716,8 +769,10 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         },
     ];
     let compact_complex =
-        TensorMap::<SU2FusionRule, Complex64>::diagonal(&runtime, &leg, complex_spectrum).unwrap();
+        TensorMap::<SU2FusionRule, Complex64>::diagonal(engine, &runtime, &leg, complex_spectrum)
+            .unwrap();
     let restored_compact_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &compact_complex.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -733,12 +788,18 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         NetworkReuseClass::Compact
     ));
     assert!(restored_compact_complex
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(compact_complex.materialize().unwrap().dense_data().unwrap())
+        .zip(
+            compact_complex
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        )
         .all(|(actual, expected)| {
             (actual.re.to_bits(), actual.im.to_bits())
                 == (expected.re.to_bits(), expected.im.to_bits())
@@ -746,12 +807,13 @@ fn compact_and_lazy_representations_survive_roundtrip() {
 
     // Multiplicity-free compact adjoint is an owned conjugated compact value,
     // not a lazy parent-backed view.
-    let compact_complex_adjoint = compact_complex.adjoint().unwrap();
+    let compact_complex_adjoint = compact_complex.adjoint(engine).unwrap();
     assert!(matches!(
         symtn::typed::__network::network_reuse_class(&compact_complex_adjoint, false),
         NetworkReuseClass::Compact
     ));
     let restored_compact_adjoint = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &compact_complex_adjoint.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -767,14 +829,14 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         NetworkReuseClass::Compact
     ));
     assert!(restored_compact_adjoint
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
         .zip(
             compact_complex_adjoint
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -785,12 +847,13 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         }));
 
     let dense: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             (1 + indices.iter().sum::<usize>()) as f64
         })
         .unwrap();
-    let lazy = dense.adjoint().unwrap();
+    let lazy = dense.adjoint(engine).unwrap();
     let restored_lazy = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        engine,
         &runtime,
         &lazy.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -803,14 +866,14 @@ fn compact_and_lazy_representations_survive_roundtrip() {
     ));
     assert_eq!(
         restored_lazy
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
             .map(|x| x.to_bits())
             .collect::<Vec<_>>(),
-        lazy.materialize()
+        lazy.materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -820,11 +883,13 @@ fn compact_and_lazy_representations_survive_roundtrip() {
     );
 
     let dense_complex = dense
-        .convert::<Complex64>()
-        .scale(Complex64::new(1.0, 0.5))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(1.0, 0.5))
         .unwrap();
-    let lazy_complex = dense_complex.adjoint().unwrap();
+    let lazy_complex = dense_complex.adjoint(engine).unwrap();
     let restored_lazy_complex = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &lazy_complex.to_bytes_with(&codec).unwrap(),
         DecodeLimits::default(),
@@ -840,12 +905,18 @@ fn compact_and_lazy_representations_survive_roundtrip() {
         NetworkReuseClass::LazyAdjoint
     ));
     assert!(restored_lazy_complex
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(lazy_complex.materialize().unwrap().dense_data().unwrap())
+        .zip(
+            lazy_complex
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        )
         .all(|(actual, expected)| {
             (actual.re.to_bits(), actual.im.to_bits())
                 == (expected.re.to_bits(), expected.im.to_bits())
@@ -857,10 +928,12 @@ fn compact_and_lazy_representations_survive_roundtrip() {
 /// owned compact diagonal.
 #[test]
 fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let diagonal = TensorMap::<_, Complex64>::diagonal(
+        engine,
         &runtime,
         &su2_leg(&provider, false),
         [
@@ -880,7 +953,7 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
     assert_eq!(bytes[repr], 2, "diagonal record tag");
     bytes.insert(repr, 3);
     assert!(
-        matches!(TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        matches!(TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(engine,
             &runtime,
             &bytes,
             DecodeLimits::default(),
@@ -891,11 +964,12 @@ fn lazy_adjoint_record_with_a_diagonal_parent_is_rejected() {
 
 #[test]
 fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let bytes = su2_leg(&provider, true).to_bytes_with(&codec).unwrap();
-    let decode = |input: &[u8], limits, codec: &Su2Codec| {
-        GradedSpace::<SU2FusionRule>::from_bytes_with(input, limits, codec)
+    let mut decode = |input: &[u8], limits, codec: &Su2Codec| {
+        GradedSpace::<SU2FusionRule>::from_bytes_with(engine, input, limits, codec)
     };
 
     for (offset, value) in [(0, b'X'), (10, 2), (11, 1)] {
@@ -964,16 +1038,18 @@ fn malformed_framing_limits_and_provider_failures_are_typed_and_ordered() {
 
 #[test]
 fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(SU2Irrep::from_twice_spin(0), 1)]).unwrap();
     let tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [], |_, _| 3.0).unwrap();
     let bytes = tensor.to_bytes_with(&codec).unwrap();
-    let decode = |input: &[u8]| {
+    let mut decode = |input: &[u8]| {
         TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+            engine,
             &runtime,
             input,
             DecodeLimits::default(),
@@ -1030,7 +1106,9 @@ fn malformed_tensor_tags_and_duplicate_or_missing_blocks_are_rejected() {
         },
     ] {
         assert!(matches!(
-            TensorMap::<SU2FusionRule, f64>::from_bytes_with(&runtime, &bytes, limits, &codec),
+            TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+                engine, &runtime, &bytes, limits, &codec
+            ),
             Err(DecodeError::LimitExceeded { .. })
         ));
     }
@@ -1050,9 +1128,11 @@ fn golden_dense_f64(
     runtime: &Runtime,
     provider: &Arc<SU2FusionRule>,
 ) -> TensorMap<SU2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let codomain = su2_leg(provider, false);
     let domain = su2_leg(provider, true);
     TensorMap::from_subblock_fn(
+        engine,
         runtime,
         [&codomain, &codomain],
         [&domain],
@@ -1069,6 +1149,7 @@ fn golden_diagonal_c64(
     runtime: &Runtime,
     provider: &Arc<SU2FusionRule>,
 ) -> TensorMap<SU2FusionRule, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let spectrum = vec![
         SectorSpectrum {
             sector: SU2Irrep::from_twice_spin(0),
@@ -1085,17 +1166,19 @@ fn golden_diagonal_c64(
             ],
         },
     ];
-    TensorMap::diagonal(runtime, &su2_leg(provider, false), spectrum).unwrap()
+    TensorMap::diagonal(engine, runtime, &su2_leg(provider, false), spectrum).unwrap()
 }
 
 #[test]
 fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(SU2FusionRule);
     let codec = Su2Codec::new(Arc::clone(&provider));
     let golden = |name: &str| std::fs::read(format!("{GOLDEN_DIR}/{name}")).unwrap();
-    let decode_f64 = |bytes: &[u8]| {
+    let mut decode_f64 = |bytes: &[u8]| {
         TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+            engine,
             &runtime,
             bytes,
             DecodeLimits::default(),
@@ -1125,11 +1208,16 @@ fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
         NetworkReuseClass::LazyAdjoint
     ));
     assert_eq!(
-        adjoint.materialize().unwrap().dense_data().unwrap().bits(),
-        expected
-            .adjoint()
+        adjoint
+            .materialize(engine)
             .unwrap()
-            .materialize()
+            .dense_data()
+            .unwrap()
+            .bits(),
+        expected
+            .adjoint(engine)
+            .unwrap()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -1139,6 +1227,7 @@ fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
 
     let diagonal_bytes = golden("su2_diagonal_c64_v1.bin");
     let diagonal = TensorMap::<SU2FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &diagonal_bytes,
         DecodeLimits::default(),
@@ -1151,14 +1240,25 @@ fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
         NetworkReuseClass::Compact
     ));
     assert_eq!(
-        diagonal.materialize().unwrap().dense_data().unwrap().bits(),
-        expected.materialize().unwrap().dense_data().unwrap().bits()
+        diagonal
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .bits(),
+        expected
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .bits()
     );
     assert_eq!(diagonal.to_bytes_with(&codec).unwrap(), diagonal_bytes);
     assert_eq!(expected.to_bytes_with(&codec).unwrap(), diagonal_bytes);
 
     let space_bytes = golden("su2_space_v1.bin");
     let space = GradedSpace::<SU2FusionRule>::from_bytes_with(
+        engine,
         &space_bytes,
         DecodeLimits::default(),
         &codec,
@@ -1250,6 +1350,7 @@ macro_rules! single_precision_roundtrip {
     ($name:ident, $scalar:ty, $value:expr) => {
         #[test]
         fn $name() {
+            let engine = &mut symtn::typed::CpuEngine::serial();
             let runtime = host_runtime();
             let value: fn(usize) -> $scalar = $value;
 
@@ -1263,15 +1364,26 @@ macro_rules! single_precision_roundtrip {
                 C: TypedPersistenceCodec<R>,
                 TensorMap<R, $scalar>: RoundTrip<R, C>,
             {
+                let engine = &mut symtn_dense::CpuEngine::serial();
                 assert!(symtn::typed::__network::network_reuse_class(&source, false) == class);
                 let bytes = source.encode(codec);
                 assert_eq!(bytes[11], <$scalar as Tag>::TAG);
-                let restored = TensorMap::<R, $scalar>::decode(runtime, &bytes, codec);
+                let restored = TensorMap::<R, $scalar>::decode(engine, runtime, &bytes, codec);
                 assert!(std::ptr::eq(restored.provider(), source.provider()));
                 assert!(symtn::typed::__network::network_reuse_class(&restored, false) == class);
                 assert_eq!(
-                    restored.materialize().unwrap().dense_data().unwrap().bits(),
-                    source.materialize().unwrap().dense_data().unwrap().bits()
+                    restored
+                        .materialize(engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .bits(),
+                    source
+                        .materialize(engine)
+                        .unwrap()
+                        .dense_data()
+                        .unwrap()
+                        .bits()
                 );
                 // The snapshot carries every block's fusion-tree key, so equal
                 // re-encoded bytes also prove the block keys were restored.
@@ -1293,22 +1405,28 @@ macro_rules! single_precision_roundtrip {
             )
             .unwrap();
             let dual = leg.try_dual().unwrap();
-            let dense: TensorMap<_, $scalar> =
-                TensorMap::from_subblock_fn(&runtime, [&leg, &dual], [&leg], |trees, indices| {
+            let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
+                engine,
+                &runtime,
+                [&leg, &dual],
+                [&leg],
+                |trees, indices| {
                     value(
                         trees.coupled().charge().unsigned_abs() as usize
                             + indices.iter().sum::<usize>(),
                     )
-                })
-                .unwrap();
+                },
+            )
+            .unwrap();
             check(&runtime, &codec, &dense, NetworkReuseClass::OwnedDense);
             check(
                 &runtime,
                 &codec,
-                &dense.adjoint().unwrap(),
+                &dense.adjoint(engine).unwrap(),
                 NetworkReuseClass::LazyAdjoint,
             );
             let diagonal = TensorMap::<_, $scalar>::diagonal(
+                engine,
                 &runtime,
                 &leg,
                 [
@@ -1332,7 +1450,7 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &diagonal.adjoint().unwrap(),
+                &diagonal.adjoint(engine).unwrap(),
                 NetworkReuseClass::Compact,
             );
 
@@ -1342,6 +1460,7 @@ macro_rules! single_precision_roundtrip {
             let codomain = su2_leg(&provider, false);
             let domain = su2_leg(&provider, true);
             let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
+                engine,
                 &runtime,
                 [&codomain, &codomain, &codomain],
                 [&domain],
@@ -1361,10 +1480,11 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &dense.adjoint().unwrap(),
+                &dense.adjoint(engine).unwrap(),
                 NetworkReuseClass::LazyAdjoint,
             );
             let diagonal = TensorMap::<_, $scalar>::diagonal(
+                engine,
                 &runtime,
                 &codomain,
                 [
@@ -1383,7 +1503,7 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &diagonal.adjoint().unwrap(),
+                &diagonal.adjoint(engine).unwrap(),
                 NetworkReuseClass::Compact,
             );
 
@@ -1398,19 +1518,25 @@ macro_rules! single_precision_roundtrip {
             )
             .unwrap();
             let dual = leg.try_dual().unwrap();
-            let dense: TensorMap<_, $scalar> =
-                TensorMap::from_subblock_fn(&runtime, [&leg, &dual], [&leg], |trees, indices| {
+            let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
+                engine,
+                &runtime,
+                [&leg, &dual],
+                [&leg],
+                |trees, indices| {
                     value(usize::from(trees.coupled().parity()) + indices.iter().sum::<usize>())
-                })
-                .unwrap();
+                },
+            )
+            .unwrap();
             check(&runtime, &codec, &dense, NetworkReuseClass::OwnedDense);
             check(
                 &runtime,
                 &codec,
-                &dense.adjoint().unwrap(),
+                &dense.adjoint(engine).unwrap(),
                 NetworkReuseClass::LazyAdjoint,
             );
             let diagonal = TensorMap::<_, $scalar>::diagonal(
+                engine,
                 &runtime,
                 &leg,
                 [
@@ -1429,7 +1555,7 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &diagonal.adjoint().unwrap(),
+                &diagonal.adjoint(engine).unwrap(),
                 NetworkReuseClass::Compact,
             );
 
@@ -1441,6 +1567,7 @@ macro_rules! single_precision_roundtrip {
             };
             let leg = GradedSpace::try_new(Arc::clone(&provider), [(GenericLabel::X, 2)]).unwrap();
             let dense: TensorMap<_, $scalar> = TensorMap::from_subblock_fn(
+                engine,
                 &runtime,
                 [&leg, &leg],
                 [&leg, &leg],
@@ -1465,10 +1592,11 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &dense.adjoint().unwrap(),
+                &dense.adjoint(engine).unwrap(),
                 NetworkReuseClass::LazyAdjoint,
             );
             let diagonal = TensorMap::<_, $scalar>::diagonal(
+                engine,
                 &runtime,
                 &leg,
                 [SectorSpectrum {
@@ -1481,7 +1609,7 @@ macro_rules! single_precision_roundtrip {
             check(
                 &runtime,
                 &codec,
-                &diagonal.adjoint().unwrap(),
+                &diagonal.adjoint(engine).unwrap(),
                 NetworkReuseClass::Compact,
             );
         }
@@ -1514,7 +1642,7 @@ impl Tag for Complex32 {
 /// Unwrapping front end over the per-dtype inherent persistence methods.
 trait RoundTrip<R: TypedSectorAdmission, C: TypedPersistenceCodec<R>>: Sized {
     fn encode(&self, codec: &C) -> Vec<u8>;
-    fn decode(runtime: &Runtime, bytes: &[u8], codec: &C) -> Self;
+    fn decode(engine: &mut dyn Engine, runtime: &Runtime, bytes: &[u8], codec: &C) -> Self;
 }
 
 macro_rules! impl_round_trip {
@@ -1524,8 +1652,8 @@ macro_rules! impl_round_trip {
                 self.to_bytes_with(codec).unwrap()
             }
 
-            fn decode(runtime: &Runtime, bytes: &[u8], codec: &C) -> Self {
-                Self::from_bytes_with(runtime, bytes, DecodeLimits::default(), codec).unwrap()
+            fn decode(engine: &mut dyn Engine, runtime: &Runtime, bytes: &[u8], codec: &C) -> Self {
+                Self::from_bytes_with(engine, runtime, bytes, DecodeLimits::default(), codec).unwrap()
             }
         }
     )+};
@@ -1561,8 +1689,8 @@ single_precision_roundtrip!(
 /// dtype succeeds, and every other request is a typed scalar mismatch rather
 /// than a conversion.
 macro_rules! assert_decode_as {
-    ($runtime:expr, $codec:expr, $bytes:expr, $stored:ty, $requested:ty) => {{
-        let result = TensorMap::<U1FusionRule, $requested>::from_bytes_with(
+    ($engine:ident, $runtime:expr, $codec:expr, $bytes:expr, $stored:ty, $requested:ty) => {{
+        let result = TensorMap::<U1FusionRule, $requested>::from_bytes_with($engine,
             $runtime,
             $bytes,
             DecodeLimits::default(),
@@ -1586,59 +1714,63 @@ macro_rules! assert_decode_as {
 }
 
 macro_rules! assert_only_decodes_as {
-    ($runtime:expr, $codec:expr, $bytes:expr, $stored:ty) => {{
-        assert_decode_as!($runtime, $codec, $bytes, $stored, f64);
-        assert_decode_as!($runtime, $codec, $bytes, $stored, Complex64);
-        assert_decode_as!($runtime, $codec, $bytes, $stored, f32);
-        assert_decode_as!($runtime, $codec, $bytes, $stored, Complex32);
+    ($engine:ident, $runtime:expr, $codec:expr, $bytes:expr, $stored:ty) => {{
+        assert_decode_as!($engine, $runtime, $codec, $bytes, $stored, f64);
+        assert_decode_as!($engine, $runtime, $codec, $bytes, $stored, Complex64);
+        assert_decode_as!($engine, $runtime, $codec, $bytes, $stored, f32);
+        assert_decode_as!($engine, $runtime, $codec, $bytes, $stored, Complex32);
     }};
 }
 
 #[test]
 fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(U1FusionRule);
     let codec = U1Codec {
         provider: Arc::clone(&provider),
     };
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
-    let f64_bytes = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0)
-        .unwrap()
-        .to_bytes_with(&codec)
-        .unwrap();
+    let f64_bytes =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0)
+            .unwrap()
+            .to_bytes_with(&codec)
+            .unwrap();
     let c64_bytes =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+        TensorMap::<_, Complex64>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             Complex64::new(1.0, -0.0)
         })
         .unwrap()
         .to_bytes_with(&codec)
         .unwrap();
-    let f32_bytes = TensorMap::<_, f32>::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0)
-        .unwrap()
-        .to_bytes_with(&codec)
-        .unwrap();
+    let f32_bytes =
+        TensorMap::<_, f32>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0)
+            .unwrap()
+            .to_bytes_with(&codec)
+            .unwrap();
     let c32_bytes =
-        TensorMap::<_, Complex32>::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
+        TensorMap::<_, Complex32>::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             Complex32::new(1.0, -0.0)
         })
         .unwrap()
         .to_bytes_with(&codec)
         .unwrap();
 
-    assert_only_decodes_as!(&runtime, &codec, &f64_bytes, f64);
-    assert_only_decodes_as!(&runtime, &codec, &c64_bytes, Complex64);
-    assert_only_decodes_as!(&runtime, &codec, &f32_bytes, f32);
-    assert_only_decodes_as!(&runtime, &codec, &c32_bytes, Complex32);
+    assert_only_decodes_as!(engine, &runtime, &codec, &f64_bytes, f64);
+    assert_only_decodes_as!(engine, &runtime, &codec, &c64_bytes, Complex64);
+    assert_only_decodes_as!(engine, &runtime, &codec, &f32_bytes, f32);
+    assert_only_decodes_as!(engine, &runtime, &codec, &c32_bytes, Complex32);
 
     // The mismatch is reported from the header, before the resolver runs.
     let missing = Su2Codec::missing(Arc::new(SU2FusionRule));
     let su2_leg = su2_leg(&Arc::new(SU2FusionRule), false);
     let su2: TensorMap<_, f32> =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, _| 1.0).unwrap();
     let su2_bytes = su2
         .to_bytes_with(&Su2Codec::new(Arc::new(SU2FusionRule)))
         .unwrap();
     let error = TensorMap::<SU2FusionRule, f64>::from_bytes_with(
+        engine,
         &runtime,
         &su2_bytes,
         DecodeLimits::default(),
@@ -1661,12 +1793,13 @@ fn every_scalar_mismatch_direction_is_typed_and_precedes_provider_resolution() {
 
     // A tensor snapshot is never a graded space, whatever its scalar tag.
     assert!(
-        matches!(GradedSpace::<U1FusionRule>::from_bytes_with(&f32_bytes, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("wrong object kind"))
+        matches!(GradedSpace::<U1FusionRule>::from_bytes_with(engine, &f32_bytes, DecodeLimits::default(), &codec), Err(DecodeError::InvalidFormat(m)) if m.contains("wrong object kind"))
     );
 }
 
 #[test]
 fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(U1FusionRule);
     let codec = U1Codec {
@@ -1677,6 +1810,7 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
         .try_dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1685,14 +1819,15 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
         }],
     )
     .unwrap();
-    let qr = input.qr_compact(&[0], &[1]).unwrap();
-    let lq = input.lq_full(&[0], &[1]).unwrap();
-    let left = input.left_polar(&[0], &[1]).unwrap();
-    let right = input.right_polar(&[0], &[1]).unwrap();
+    let qr = input.qr_compact(engine, &[0], &[1]).unwrap();
+    let lq = input.lq_full(engine, &[0], &[1]).unwrap();
+    let left = input.left_polar(engine, &[0], &[1]).unwrap();
+    let right = input.right_polar(engine, &[0], &[1]).unwrap();
     for factor in [qr.q, qr.r, lq.l, lq.q, left.w, left.p, right.p, right.wh] {
         let bytes = factor.to_bytes_with(&codec).unwrap();
         let restored: TensorMap<_, Complex64> =
             TensorMap::<U1FusionRule, Complex64>::from_bytes_with(
+                engine,
                 &runtime,
                 &bytes,
                 DecodeLimits::default(),
@@ -1701,7 +1836,10 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
             .unwrap();
         assert_eq!(restored.codomain(), input.codomain());
         assert_eq!(restored.domain(), input.domain());
-        assert_eq!(restored.diagview().unwrap(), factor.diagview().unwrap());
+        assert_eq!(
+            restored.diagview(engine).unwrap(),
+            factor.diagview(engine).unwrap()
+        );
         assert!(restored.dense_data().is_err());
         assert_eq!(restored.to_bytes_with(&codec).unwrap(), bytes);
     }
@@ -1709,6 +1847,7 @@ fn dual_compact_factor_roundtrip_preserves_space_and_storage() {
 
 #[test]
 fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
     let provider = Arc::new(U1FusionRule);
     let codec = U1Codec {
@@ -1719,6 +1858,7 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
         .try_dual()
         .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1731,9 +1871,10 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
         }],
     )
     .unwrap();
-    let factor = input.svd_full(&[0], &[1]).unwrap().s;
+    let factor = input.svd_full(engine, &[0], &[1]).unwrap().s;
     let bytes = factor.to_bytes_with(&codec).unwrap();
     let restored = TensorMap::<U1FusionRule, Complex64>::from_bytes_with(
+        engine,
         &runtime,
         &bytes,
         DecodeLimits::default(),
@@ -1744,7 +1885,7 @@ fn dual_diagonal_full_svd_s_roundtrip_preserves_bond_and_storage() {
     assert_eq!(restored.domain(), factor.domain());
     assert_ne!(restored.domain(), input.domain());
     assert_eq!(
-        restored.diagview().unwrap()[0].values,
+        restored.diagview(engine).unwrap()[0].values,
         vec![
             Complex64::new(5.0, 0.0),
             Complex64::new(2.0, 0.0),

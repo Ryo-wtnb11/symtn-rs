@@ -2,8 +2,8 @@
 //! across the codomain/domain split is one contraction into one retained
 //! buffer, not a contraction followed by a separate permute call into a
 //! second one. On the copyC route the data moved is the same (GEMM into the
-//! pooled temporary, then one transform); the saving is the separate call and
-//! its second buffer.
+//! per-call temporary, then one transform); the saving is the separate call
+//! and its second retained buffer.
 //!
 //! This test, with the step loop's structure (no permute path per step), is
 //! the evidence for #1614's gate: symtn-network has no transform-seam
@@ -11,6 +11,7 @@
 //! bytes stand in for it.
 
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
@@ -34,13 +35,14 @@ fn transform_lookups(_: &Runtime) -> usize {
 
 #[test]
 fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // a[x; c] · b[c; y, z, u] runs first (x < w), giving (x | y, z, u). Its
     // consumer contracts y and z with t[y, z; w], so the next-use orientation
     // is (x, u | y, z) as lhs or (y, z | x, u) as rhs: two codomain legs where
     // the default split has one, a split move either way. Distinct prime
     // degeneracies keep the intermediate payload size unique in the run.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let space = |n| GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), n)]).unwrap();
     let (x, c, y, z, u, w) = (
         space(11),
@@ -50,12 +52,12 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
         space(23),
         space(29),
     );
-    let a = Map::rand_with_seed(&runtime, [&x], [&c], 1).unwrap();
-    let b = Map::rand_with_seed(&runtime, [&c], [&y, &z, &u], 2).unwrap();
-    let t = Map::rand_with_seed(&runtime, [&y, &z], [&w], 3).unwrap();
+    let a = Map::rand_with_seed(engine, &runtime, [&x], [&c], 1).unwrap();
+    let b = Map::rand_with_seed(engine, &runtime, [&c], [&y, &z, &u], 2).unwrap();
+    let t = Map::rand_with_seed(engine, &runtime, [&y, &z], [&w], 3).unwrap();
     let intermediate_bytes = 11 * 17 * 19 * 23 * size_of::<f64>();
 
-    let run = || {
+    let run = |engine: &mut dyn Engine| {
         net(
             &[
                 op(&["x"], &["c"]),
@@ -65,11 +67,12 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
             &["x", "u"],
             &["w"],
         )
-        .contract(&[&a, &b, &t])
+        .contract(engine, &[&a, &b, &t])
         .unwrap()
     };
     let oracle = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[1],
@@ -80,6 +83,7 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
         )
         .unwrap()
         .contract(
+            engine,
             &t,
             &ContractSpec {
                 lhs: &[1, 2],
@@ -90,7 +94,7 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
         )
         .unwrap();
     for _ in 0..2 {
-        let output = run();
+        let output = run(engine);
         numerics::assert_slices_close(
             "network vs chained contract",
             output.dense_data().unwrap(),
@@ -101,13 +105,17 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
 
     let lookups_before = transform_lookups(&runtime);
     let ((), allocs) =
-        counting_alloc::measure_matching(intermediate_bytes..=intermediate_bytes, || drop(run()));
+        counting_alloc::measure_matching(intermediate_bytes..=intermediate_bytes, || {
+            drop(run(engine))
+        });
     let warm_allocs = allocs.matched_calls;
     let warm_lookups = transform_lookups(&runtime) - lookups_before;
     let retained = plan_cache_stats(&runtime).retained_workspace_bytes;
 
-    // What: the intermediate's buffer is reused, not reallocated.
-    assert_eq!(warm_allocs, 0, "warm intermediate-sized allocations");
+    // What: the intermediate's buffer is reused, not reallocated; the one
+    // intermediate-sized allocation is the step's per-call copyC temporary
+    // (the Runtime keeps no execution pool).
+    assert_eq!(warm_allocs, 1, "warm intermediate-sized allocations");
     // What: one transform for the one split-moving intermediate — the
     // step's own output permute (copyC). An operand-rebuilding route would
     // look up three.

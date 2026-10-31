@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use num_traits::{One, Zero};
 use symtn_core::{HostReadableStorage, HostWritableStorage, Placement, TensorStorage};
-use symtn_dense::strided_batch_runs;
+use symtn_dense::{strided_batch_runs, Engine};
 
 use crate::fusion_replay::{FusionBlockContractPlan, Rank2Gemm, Rank2GemmBatchJob};
 use crate::RecouplingCoefficientAction;
@@ -316,6 +316,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn execute_host<A, G, D, SD, SL, SR>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         dst: &mut StackedStorageViewMut<'_, SD>,
@@ -331,7 +332,7 @@ where
         SL: HostReadableStorage<D>,
         SR: HostReadableStorage<D>,
     {
-        self.execute_host_with_alpha(kernels, gemm, dst, lhs, rhs, zero_inactive, None)
+        self.execute_host_with_alpha(engine, kernels, gemm, dst, lhs, rhs, zero_inactive, None)
     }
 
     /// Replays exact +1 and -1 classes in at most two batch submissions.
@@ -339,6 +340,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn execute_signed_host<A, G, D, SD, SL, SR>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         dst: &mut StackedStorageViewMut<'_, SD>,
@@ -356,6 +358,7 @@ where
         SR: HostReadableStorage<D>,
     {
         self.execute_host_with_alpha(
+            engine,
             kernels,
             gemm,
             dst,
@@ -369,6 +372,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn execute_host_with_alpha<A, G, D, SD, SL, SR>(
         &self,
+        engine: &mut dyn Engine,
         kernels: &mut A,
         gemm: &mut G,
         dst: &mut StackedStorageViewMut<'_, SD>,
@@ -405,24 +409,29 @@ where
         let dst_data = dst.storage.as_mut_slice();
         if zero_inactive {
             let zero = [D::zero()];
-            for (shape, strides, offset) in &self.inactive {
-                kernels.copy_scale_strided_baked(
-                    dst_data,
-                    &zero,
-                    shape,
-                    strides,
-                    &self.zero_strides[..shape.len()],
-                    *offset,
-                    0,
-                    false,
-                    D::one(),
-                    None,
-                    None,
-                )?;
-            }
+            crate::host_pool::with_exec(engine, |mut exec| {
+                for (shape, strides, offset) in &self.inactive {
+                    kernels.copy_scale_strided_baked(
+                        exec.reborrow(),
+                        dst_data,
+                        &zero,
+                        shape,
+                        strides,
+                        &self.zero_strides[..shape.len()],
+                        *offset,
+                        0,
+                        false,
+                        D::one(),
+                        None,
+                        None,
+                    )?;
+                }
+                Ok(())
+            })?;
         }
         if !self.jobs.is_empty() {
             gemm.matmul_rank2_batch(
+                engine,
                 dst_data,
                 lhs.storage.as_slice(),
                 rhs.storage.as_slice(),
@@ -434,6 +443,7 @@ where
         }
         if let Some(alpha) = negative_alpha.filter(|_| !self.negative_jobs.is_empty()) {
             gemm.matmul_rank2_batch(
+                engine,
                 dst_data,
                 lhs.storage.as_slice(),
                 rhs.storage.as_slice(),

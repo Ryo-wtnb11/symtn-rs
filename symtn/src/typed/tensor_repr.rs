@@ -120,11 +120,13 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
 /// use symtn::sector::{U1FusionRule, U1Irrep};
 /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
 ///
+/// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-/// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1)?;
-/// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 2)?;
-/// assert_eq!(a.inner(b.adjoint_view())?, a.inner(&b.adjoint()?)?);
+/// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
+/// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
+/// let b_adjoint = b.adjoint(engine)?;
+/// assert_eq!(a.inner(engine, b.adjoint_view())?, a.inner(engine, &b_adjoint)?);
 /// # Ok::<(), symtn::typed::Error>(())
 /// ```
 pub struct TensorRef<'a, R, D, S = Vec<D>> {
@@ -798,8 +800,12 @@ where
     ///
     /// An adjoint view `source` (`t.adjoint_view()`) returns
     /// [`Error::Unsupported`]: this operation would copy it. Pass
-    /// `&t.adjoint()?.materialize()?` instead.
-    pub fn absorb<'a>(&self, source: impl Into<TensorRef<'a, R, D>>) -> Result<Self, Error> {
+    /// `&t.adjoint(engine)?.materialize(engine)?` instead.
+    pub fn absorb<'a>(
+        &self,
+        engine: &mut dyn Engine,
+        source: impl Into<TensorRef<'a, R, D>>,
+    ) -> Result<Self, Error> {
         let source = source.into().operand()?;
         let source = &*source;
         source.refuse_borrowed_view("absorb")?;
@@ -846,8 +852,8 @@ where
             }
         }
         // A lazy input still takes an operation-local dense payload.
-        let destination = self.materialized_tensor_uncached()?;
-        let source = source.materialized_tensor_uncached()?;
+        let destination = self.materialized_tensor_uncached(engine)?;
+        let source = source.materialized_tensor_uncached(engine)?;
         let destination_body = destination
             .owned_body()
             .expect("uncached materialization is owned");
@@ -987,20 +993,23 @@ where
     ///   result would accept less than the owned one `to_c64` always
     ///   returned. Why not one fused pass: `materialize_adjoint_data_dyn` has
     ///   no mapped variant, and adding one would duplicate its block walk.
-    fn convert_payload<E>(&self, convert: impl Fn(D) -> E) -> TensorMap<R, E> {
+    fn convert_payload<E>(
+        &self,
+        engine: &mut dyn Engine,
+        convert: impl Fn(D) -> E,
+    ) -> Result<TensorMap<R, E>, Error> {
         let body = match &self.repr {
             TypedTensorRepr::Owned(body) => body.convert_payload(convert),
             TypedTensorRepr::Adjoint(_) => self
-                .materialized_tensor_uncached()
-                .expect("a pre-admitted typed adjoint must materialize")
+                .materialized_tensor_uncached(engine)?
                 .owned_body()
                 .expect("uncached materialization is owned")
                 .convert_payload(convert),
         };
-        TensorMap {
+        Ok(TensorMap {
             runtime: self.runtime.clone(),
             repr: TypedTensorRepr::Owned(body),
-        }
+        })
     }
 }
 
@@ -1095,19 +1104,20 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
     ///     [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
     /// )?;
-    /// let single: TensorMap<_, f32> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 7)?;
-    /// let double = single.convert::<f64>();
-    /// assert_eq!(double.convert::<f32>().dense_data()?, single.dense_data()?);
+    /// let single: TensorMap<_, f32> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 7)?;
+    /// let double = single.convert::<f64>(engine)?;
+    /// assert_eq!(double.convert::<f32>(engine)?.dense_data()?, single.dense_data()?);
     ///
-    /// let widened = double.convert::<Complex64>();
+    /// let widened = double.convert::<Complex64>(engine)?;
     /// // The real part round-trips exactly; the imaginary part is zero.
-    /// assert_eq!(widened.re().dense_data()?, double.dense_data()?);
-    /// assert_eq!(widened.im().norm(2.0)?, 0.0);
+    /// assert_eq!(widened.re(engine)?.dense_data()?, double.dense_data()?);
+    /// assert_eq!(widened.im(engine)?.norm(engine, 2.0)?, 0.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -1118,8 +1128,8 @@ where
     /// use symtn::sector::U1FusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn mixed(a: &TensorMap<U1FusionRule, f32>, b: &TensorMap<U1FusionRule, f64>) {
-    ///     let _ = a.axpby(1.0, b, 1.0);
+    /// fn mixed(engine: &mut dyn symtn::typed::Engine, a: &TensorMap<U1FusionRule, f32>, b: &TensorMap<U1FusionRule, f64>) {
+    ///     let _ = a.axpby(engine, 1.0, b, 1.0);
     /// }
     /// ```
     ///
@@ -1141,8 +1151,8 @@ where
     /// use symtn::sector::U1FusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn real(a: &TensorMap<U1FusionRule, Complex64>) -> TensorMap<U1FusionRule, f64> {
-    ///     a.convert::<f64>()
+    /// fn real(engine: &mut dyn symtn::typed::Engine, a: &TensorMap<U1FusionRule, Complex64>) -> TensorMap<U1FusionRule, f64> {
+    ///     a.convert::<f64>(engine)
     /// }
     /// ```
     ///
@@ -1160,14 +1170,14 @@ where
     ///     fn placement(&self) -> Placement { Placement::Cuda(0) }
     /// }
     ///
-    /// fn device(tensor: &TensorMap<U1FusionRule, f32, DeviceStorage>) {
-    ///     let _ = tensor.convert::<f64>();
+    /// fn device(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<U1FusionRule, f32, DeviceStorage>) {
+    ///     let _ = tensor.convert::<f64>(engine);
     /// }
     /// ```
-    pub fn convert<To>(&self) -> TensorMap<R, To>
+    pub fn convert<To>(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, To>, Error>
     where
         D: PayloadConversion<To>,
     {
-        self.convert_payload(PayloadConversion::convert_value)
+        self.convert_payload(engine, PayloadConversion::convert_value)
     }
 }

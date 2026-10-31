@@ -1,4 +1,5 @@
 use super::*;
+use symtn::typed::Engine;
 
 // ---------------------------------------------------------------------------
 // `inv`.
@@ -9,23 +10,27 @@ use super::*;
 /// blocks, so `inv` on it would be testing the singular path instead. Adding a
 /// multiple of the identity is the cheapest fix.
 fn z2_invertible(runtime: &Runtime) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let typed = z2_endomorphism(runtime);
-    let typed_id = TensorMap::isomorphism(runtime, &typed.domain(), &typed.domain()).unwrap();
-    typed.axpby(1.0, &typed_id, 100.0).unwrap()
+    let typed_id =
+        TensorMap::isomorphism(engine, runtime, &typed.domain(), &typed.domain()).unwrap();
+    typed.axpby(engine, 1.0, &typed_id, 100.0).unwrap()
 }
 
 #[test]
 fn inv_is_a_two_sided_inverse() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
     let typed = z2_invertible(&runtime);
 
-    let typed_inverse = typed.inv(&[0], &[1]).unwrap();
+    let typed_inverse = typed.inv(engine, &[0], &[1]).unwrap();
     let expected =
-        TensorMap::<_, f64>::isomorphism(&runtime, &typed.domain(), &typed.domain()).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, &typed.domain(), &typed.domain())
+            .unwrap();
     for (name, identity) in [
-        ("t * inv(t)", typed.compose(&typed_inverse).unwrap()),
-        ("inv(t) * t", typed_inverse.compose(&typed).unwrap()),
+        ("t * inv(t)", typed.compose(engine, &typed_inverse).unwrap()),
+        ("inv(t) * t", typed_inverse.compose(engine, &typed).unwrap()),
     ] {
         let error = identity
             .dense_data()
@@ -40,20 +45,25 @@ fn inv_is_a_two_sided_inverse() {
 
 #[test]
 fn inv_of_a_compact_spectrum_is_the_elementwise_reciprocal() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the O(rank) arm. A spectrum's inverse is `1/s_i` on the stored
     // values.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
-    let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
+    let typed_s = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
     // The fixture is rank deficient, so the full spectrum contains zeros that
     // `inv` must refuse; keep only the nonzero part.
-    let (_, typed_s, _, _) = truncated_svd!(typed_s, Truncation::Rank(2));
+    let (_, typed_s, _, _) = truncated_svd!(engine, typed_s, Truncation::Rank(2));
 
-    let inverse = typed_s.inv(&[0], &[1]).unwrap();
-    let source_spectrum = symtn::expert::diagonal_spectrum(&typed_s).unwrap().unwrap();
-    let inverse_spectrum = symtn::expert::diagonal_spectrum(&inverse).unwrap().unwrap();
+    let inverse = typed_s.inv(engine, &[0], &[1]).unwrap();
+    let source_spectrum = symtn::expert::diagonal_spectrum(engine, &typed_s)
+        .unwrap()
+        .unwrap();
+    let inverse_spectrum = symtn::expert::diagonal_spectrum(engine, &inverse)
+        .unwrap()
+        .unwrap();
     assert_eq!(source_spectrum.len(), inverse_spectrum.len());
     for (source, image) in source_spectrum.iter().zip(&inverse_spectrum) {
         assert_eq!(source.sector, image.sector);
@@ -62,11 +72,12 @@ fn inv_of_a_compact_spectrum_is_the_elementwise_reciprocal() {
         }
     }
     // `s * s^-1` is the identity on the bond.
-    let product = typed_s.compose(&inverse).unwrap();
+    let product = typed_s.compose(engine, &inverse).unwrap();
     let expected =
-        TensorMap::<_, f64>::isomorphism(&runtime, &typed_s.domain(), &typed_s.domain()).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, &typed_s.domain(), &typed_s.domain())
+            .unwrap();
     let error = product
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -79,6 +90,7 @@ fn inv_of_a_compact_spectrum_is_the_elementwise_reciprocal() {
 
 #[test]
 fn inv_reports_a_singular_input_as_a_typed_error() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: singular input is a `Result`, never a panic, and both storages
     // report it as the same numerical failure although the compact arm
@@ -90,7 +102,12 @@ fn inv_reports_a_singular_input_as_a_typed_error() {
     // Compact: a spectrum scaled to exactly zero. Why not the tail of a
     // rank-deficient SVD: those singular values come back tiny but nonzero, and
     // the arm under test compares against exact zero, not a tolerance.
-    let spectrum = typed.svd_compact(&[0], &[1]).unwrap().s.scale(0.0).unwrap();
+    let spectrum = typed
+        .svd_compact(engine, &[0], &[1])
+        .unwrap()
+        .s
+        .scale(engine, 0.0)
+        .unwrap();
     let singular = |result: Result<_, symtn::typed::Error>| {
         matches!(
             result,
@@ -100,15 +117,16 @@ fn inv_reports_a_singular_input_as_a_typed_error() {
             )
         )
     };
-    assert!(singular(spectrum.inv(&[0], &[1])));
+    assert!(singular(spectrum.inv(engine, &[0], &[1])));
 
     // Dense: an all-zero endomorphism.
-    let zeros = typed.scale(0.0).unwrap();
-    assert!(singular(zeros.inv(&[0], &[1])));
+    let zeros = typed.scale(engine, 0.0).unwrap();
+    assert!(singular(zeros.inv(engine, &[0], &[1])));
 }
 
 #[test]
 fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: TensorKit's `inv` asks for `codomain ≅ domain`, not `==`, and
     // returns `domain <- codomain`. The seam agrees: a rank-one codomain and a
@@ -136,17 +154,18 @@ fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
     )
     .unwrap();
     let mut next = 0.0;
-    let tensor = TensorMap::from_subblock_fn(&runtime, [&wide], [&narrow, &narrow], |_, _| {
-        next += 1.0;
-        next * next
-    })
-    .unwrap();
+    let tensor =
+        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&narrow, &narrow], |_, _| {
+            next += 1.0;
+            next * next
+        })
+        .unwrap();
 
-    let inverse = tensor.inv(&[0], &[1, 2]).unwrap();
+    let inverse = tensor.inv(engine, &[0], &[1, 2]).unwrap();
     assert_eq!(inverse.codomain().len(), 2);
     assert_eq!(inverse.domain().len(), 1);
-    let identity = tensor.compose(&inverse).unwrap();
-    let expected = TensorMap::<_, f64>::isomorphism(&runtime, [&wide], [&wide]).unwrap();
+    let identity = tensor.compose(engine, &inverse).unwrap();
+    let expected = TensorMap::<_, f64>::isomorphism(engine, &runtime, [&wide], [&wide]).unwrap();
     let error = identity
         .dense_data()
         .unwrap()
@@ -163,6 +182,7 @@ fn inv_accepts_isomorphic_but_unequal_codomain_and_domain() {
 
 #[test]
 fn pinv_satisfies_the_moore_penrose_identities() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // The fixture is deliberately rank deficient: a full-rank one would let a
     // broken cutoff pass as an ordinary inverse.
@@ -172,15 +192,16 @@ fn pinv_satisfies_the_moore_penrose_identities() {
     // `rcond` is well above the fixture's numerically-zero singular values and
     // well below its real ones, so the cutoff drops exactly the null directions
     // — inverting those instead would amplify rounding into the millions of ulp.
-    let pseudo = typed.pinv(&[0], &[1], 1e-6).unwrap();
-    let left_support = typed.compose(&pseudo).unwrap();
-    let right_support = pseudo.compose(&typed).unwrap();
+    let pseudo = typed.pinv(engine, &[0], &[1], 1e-6).unwrap();
+    let left_support = typed.compose(engine, &pseudo).unwrap();
+    let right_support = pseudo.compose(engine, &typed).unwrap();
     let assert_close =
-        |name: &str,
+        |engine: &mut dyn Engine,
+         name: &str,
          actual: &TensorMap<symtn::sector::Z2FusionRule, f64>,
          expected: &TensorMap<symtn::sector::Z2FusionRule, f64>| {
             let error = actual
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap()
@@ -189,41 +210,42 @@ fn pinv_satisfies_the_moore_penrose_identities() {
                 .map(|(a, b)| (a - b).abs())
                 .fold(0.0f64, f64::max);
             assert!(
-                error < 1e-9 * expected.norm(2.0).unwrap().max(1.0),
+                error < 1e-9 * expected.norm(engine, 2.0).unwrap().max(1.0),
                 "{name}: {error}"
             );
         };
+    let left_support_compose = &left_support.compose(engine, &typed).unwrap();
+    assert_close(engine, "t t^+ t != t", left_support_compose, &typed);
+    let right_support_compose = &right_support.compose(engine, &pseudo).unwrap();
+    assert_close(engine, "t^+ t t^+ != t^+", right_support_compose, &pseudo);
+    let left_support_adjoint = &left_support.adjoint(engine).unwrap();
     assert_close(
-        "t t^+ t != t",
-        &left_support.compose(&typed).unwrap(),
-        &typed,
-    );
-    assert_close(
-        "t^+ t t^+ != t^+",
-        &right_support.compose(&pseudo).unwrap(),
-        &pseudo,
-    );
-    assert_close(
+        engine,
         "(t t^+)† != t t^+",
-        &left_support.adjoint().unwrap(),
+        left_support_adjoint,
         &left_support,
     );
+    let right_support_adjoint = &right_support.adjoint(engine).unwrap();
     assert_close(
+        engine,
         "(t^+ t)† != t^+ t",
-        &right_support.adjoint().unwrap(),
+        right_support_adjoint,
         &right_support,
     );
 }
 
 #[test]
 fn pinv_of_a_compact_spectrum_is_the_elementwise_cutoff_reciprocal() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the O(rank) arm — an elementwise cutoff and reciprocal, whose own
     // singular values are `|entry|`, so no SVD runs at all.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
-    let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
-    let source = symtn::expert::diagonal_spectrum(&typed_s).unwrap().unwrap();
+    let typed_s = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let source = symtn::expert::diagonal_spectrum(engine, &typed_s)
+        .unwrap()
+        .unwrap();
     let sigma_max = source
         .iter()
         .flat_map(|entry| &entry.values)
@@ -231,7 +253,8 @@ fn pinv_of_a_compact_spectrum_is_the_elementwise_cutoff_reciprocal() {
         .fold(0.0, f64::max);
 
     for rcond in [0.0, 1e-12, 1e-3] {
-        let image = symtn::expert::diagonal_spectrum(&typed_s.pinv(&[0], &[1], rcond).unwrap())
+        let typed_s_pinv = typed_s.pinv(engine, &[0], &[1], rcond).unwrap();
+        let image = symtn::expert::diagonal_spectrum(engine, &typed_s_pinv)
             .unwrap()
             .unwrap();
         let cutoff = rcond * sigma_max;
@@ -251,6 +274,7 @@ fn pinv_of_a_compact_spectrum_is_the_elementwise_cutoff_reciprocal() {
 
 #[test]
 fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the boundary. The comparison is `sigma > rcond * sigma_max`, so a
     // singular value at *exactly* the cutoff is discarded, not kept — on both
@@ -265,19 +289,20 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
     // Diagonal with entries 4 and 1: sigma_max is 4, so rcond = 0.25 puts the
     // second singular value exactly on the cutoff. Both are powers of two, so
     // the product is exact and the comparison is not floating-point weather.
-    let tensor = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices: &[usize]| {
-        if indices[0] != indices[1] {
-            0.0
-        } else if indices[0] == 0 {
-            4.0
-        } else {
-            1.0
-        }
-    })
-    .unwrap();
+    let tensor =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices: &[usize]| {
+            if indices[0] != indices[1] {
+                0.0
+            } else if indices[0] == 0 {
+                4.0
+            } else {
+                1.0
+            }
+        })
+        .unwrap();
     assert_eq!(0.25 * 4.0, 1.0, "the fixture's cutoff must be exact");
 
-    let dense_pinv = tensor.pinv(&[0], &[1], 0.25).unwrap();
+    let dense_pinv = tensor.pinv(engine, &[0], &[1], 0.25).unwrap();
     // Kept: 1/4 for the surviving value. Cut: an exact 0 where 1/1 would be.
     let mut kept: Vec<f64> = dense_pinv
         .dense_data()
@@ -292,7 +317,7 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
     // A discarded nonzero mode makes this the exact Moore-Penrose inverse of
     // the hard-thresholded effective-rank tensor, not of the original tensor.
     let thresholded =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices: &[usize]| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices: &[usize]| {
             if indices[0] == 0 && indices[1] == 0 {
                 4.0
             } else {
@@ -301,9 +326,9 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
         })
         .unwrap();
     let triple = tensor
-        .compose(&dense_pinv)
+        .compose(engine, &dense_pinv)
         .unwrap()
-        .compose(&tensor)
+        .compose(engine, &tensor)
         .unwrap();
     assert_eq!(
         triple.dense_data().unwrap(),
@@ -312,10 +337,10 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
     assert_ne!(triple.dense_data().unwrap(), tensor.dense_data().unwrap());
 
     // And on the compact arm.
-    let spectrum = tensor.svd_compact(&[0], &[1]).unwrap().s;
-    let compact_pinv = spectrum.pinv(&[0], &[1], 0.25).unwrap();
+    let spectrum = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let compact_pinv = spectrum.pinv(engine, &[0], &[1], 0.25).unwrap();
     let mut kept: Vec<f64> = compact_pinv
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -333,25 +358,26 @@ fn pinv_cuts_a_singular_value_sitting_exactly_on_the_cutoff() {
 
 #[test]
 fn pinv_rejects_a_nonfinite_or_negative_rcond_before_any_work() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `rcond` is validated at the facade, so a bad one never reaches the
     // SVD — and the compact arm validates it too, which a guard placed only on
     // the dense route would miss.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
-    let spectrum = typed.svd_compact(&[0], &[1]).unwrap().s;
+    let spectrum = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
 
     for rcond in [-1.0, f64::NAN, f64::INFINITY] {
         assert!(
             matches!(
-                typed.pinv(&[0], &[1], rcond),
+                typed.pinv(engine, &[0], &[1], rcond),
                 Err(symtn::typed::Error::InvalidArgument(_))
             ),
             "dense pinv accepted rcond {rcond}"
         );
         assert!(
             matches!(
-                spectrum.pinv(&[0], &[1], rcond),
+                spectrum.pinv(engine, &[0], &[1], rcond),
                 Err(symtn::typed::Error::InvalidArgument(_))
             ),
             "compact pinv accepted rcond {rcond}"
@@ -361,6 +387,7 @@ fn pinv_rejects_a_nonfinite_or_negative_rcond_before_any_work() {
 
 #[test]
 fn pinv_uses_one_global_sigma_max_across_every_sector() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the cutoff is relative to the largest singular value of the *whole*
     // tensor, not of each coupled sector — the deliberate divergence from
@@ -386,7 +413,7 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
     // per-sector sigma_max would be the entry itself and nothing could ever be
     // cut; and the global maximum is not in the sector a first-sector-only fold
     // would find.
-    let tensor = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |trees, _| {
+    let tensor = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, _| {
         if *trees.coupled() == symtn::sector::Z2Irrep::EVEN {
             1.0
         } else {
@@ -395,7 +422,7 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
     })
     .unwrap();
 
-    let pseudo = tensor.pinv(&[0], &[1], 0.5).unwrap();
+    let pseudo = tensor.pinv(engine, &[0], &[1], 0.5).unwrap();
     let mut kept: Vec<f64> = pseudo
         .dense_data()
         .unwrap()
@@ -410,11 +437,11 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
         "a per-sector cutoff kept the small sector"
     );
     // The compact arm's own `max|entry|` is global for the same reason.
-    let spectrum = tensor.svd_compact(&[0], &[1]).unwrap().s;
+    let spectrum = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
     let kept = spectrum
-        .pinv(&[0], &[1], 0.5)
+        .pinv(engine, &[0], &[1], 0.5)
         .unwrap()
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -431,21 +458,27 @@ fn pinv_uses_one_global_sigma_max_across_every_sector() {
 
 #[test]
 fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: like TensorKit's `exp`, a general per-block Pade approximant
     // with no hermiticity gate (#577). `exp(A) exp(-A) = id` pins the actual exponential.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
-    assert!(!is_hermitian!(typed, 1e-9));
-    let typed_exp = typed.exp(&[0], &[1]).unwrap();
+    assert!(!is_hermitian!(engine, typed, 1e-9));
+    let typed_exp = typed.exp(engine, &[0], &[1]).unwrap();
 
     // exp(A) exp(-A) = id, evaluated through the typed composition.
-    let inverse = typed.scale(-1.0).unwrap().exp(&[0], &[1]).unwrap();
+    let inverse = typed
+        .scale(engine, -1.0)
+        .unwrap()
+        .exp(engine, &[0], &[1])
+        .unwrap();
     let identity =
-        TensorMap::<_, f64>::isomorphism(&runtime, &typed.domain(), &typed.domain()).unwrap();
+        TensorMap::<_, f64>::isomorphism(engine, &runtime, &typed.domain(), &typed.domain())
+            .unwrap();
     let residual = typed_exp
-        .compose(&inverse)
+        .compose(engine, &inverse)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -458,6 +491,7 @@ fn exp_accepts_a_non_hermitian_endomorphism_and_inverts_under_negation() {
 
 #[test]
 fn exp_of_a_compact_spectrum_stays_compact_and_is_elementwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `exp(s_i)` on the `Σ_c k_c` stored values, matching TensorKit's
     // `exp(::DiagonalTensorMap)` law.
@@ -467,22 +501,22 @@ fn exp_of_a_compact_spectrum_stays_compact_and_is_elementwise() {
     // `exp` of it overflows to infinity, which no comparison can separate from
     // a wrong infinity.
     let typed_s = typed
-        .svd_compact(&[0], &[1])
+        .svd_compact(engine, &[0], &[1])
         .unwrap()
         .s
-        .scale(1e-3)
+        .scale(engine, 1e-3)
         .unwrap();
 
-    let typed_exp = typed_s.exp(&[0], &[1]).unwrap();
+    let typed_exp = typed_s.exp(engine, &[0], &[1]).unwrap();
     // Every stored value is `exp` of the source's: the elementwise claim, read
     // off the materialized diagonal so it does not need a compact accessor.
     for (index, (source, image)) in typed_s
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(typed_exp.materialize().unwrap().dense_data().unwrap())
+        .zip(typed_exp.materialize(engine).unwrap().dense_data().unwrap())
         .enumerate()
     {
         let expected = if *source == 0.0 && !on_diagonal(&typed_s, index) {
@@ -519,6 +553,7 @@ where
 
 #[test]
 fn exp_of_a_complex_compact_spectrum_takes_the_complex_elementwise_branch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the compact arm is TensorKit's `exp(::DiagonalTensorMap)`, which is
     // unconditionally elementwise — so a c64 spectrum with a nonreal entry, the
@@ -531,20 +566,21 @@ fn exp_of_a_complex_compact_spectrum_takes_the_complex_elementwise_branch() {
         [(symtn::sector::Z2Irrep::EVEN, 2)],
     )
     .unwrap();
-    let dense = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices: &[usize]| {
-        if indices[0] == indices[1] {
-            Complex64::new(0.0, indices[0] as f64)
-        } else {
-            Complex64::new(0.0, 0.0)
-        }
-    })
-    .unwrap();
+    let dense =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices: &[usize]| {
+            if indices[0] == indices[1] {
+                Complex64::new(0.0, indices[0] as f64)
+            } else {
+                Complex64::new(0.0, 0.0)
+            }
+        })
+        .unwrap();
     // Dense storage of the very same matrix: since issue #577 it is accepted
     // too, through the general Pade arm — and because this particular matrix is
     // already diagonal, the two arms must agree entry for entry. Storage no
     // longer decides *whether* `exp` is defined, only how it is computed.
-    assert!(!is_hermitian!(dense, 1e-9));
-    let dense_exponential = dense.exp(&[0], &[1]).unwrap();
+    assert!(!is_hermitian!(engine, dense, 1e-9));
+    let dense_exponential = dense.exp(engine, &[0], &[1]).unwrap();
     for (index, (source, value)) in dense
         .dense_data()
         .unwrap()
@@ -559,25 +595,25 @@ fn exp_of_a_complex_compact_spectrum_takes_the_complex_elementwise_branch() {
         };
         assert!(
             (value - expected).norm() < 1e-12,
-            "dense entry {index}: {value} is not exp({source})"
+            "dense entry {index}: {value} is not exp(engine, {source})"
         );
     }
 
     // Compact storage of the same values: accepted, elementwise.
     let spectrum = dense
-        .eig_full(&[0], &[1])
+        .eig_full(engine, &[0], &[1])
         .unwrap()
         .d
-        .scale(Complex64::new(1.0, 0.0))
+        .scale(engine, Complex64::new(1.0, 0.0))
         .unwrap();
-    let image = spectrum.exp(&[0], &[1]).unwrap();
+    let image = spectrum.exp(engine, &[0], &[1]).unwrap();
     for (index, (source, value)) in spectrum
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(image.materialize().unwrap().dense_data().unwrap())
+        .zip(image.materialize(engine).unwrap().dense_data().unwrap())
         .enumerate()
     {
         let expected = if *source == Complex64::new(0.0, 0.0) && !on_diagonal(&spectrum, index) {
@@ -598,6 +634,7 @@ fn bits_f64(values: &[f64]) -> Vec<u64> {
 
 #[test]
 fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the result is the compact diagonal whose values are `f` of the
     // stored values, sector by sector, on the receiver's own (dual) bond.
@@ -617,6 +654,7 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
     assert!(bond.is_dual());
     let q = symtn::sector::U1Irrep::new;
     let source: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -627,8 +665,9 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
     )
     .unwrap();
 
-    let root = source.map_diagonal(f64::sqrt).unwrap();
+    let root = source.map_diagonal(engine, f64::sqrt).unwrap();
     let expected: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -640,14 +679,18 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
     .unwrap();
     assert_eq!(root.codomain(), vec![bond.clone()]);
     assert_eq!(root.domain(), vec![bond.clone()]);
-    assert_eq!(root.diagview().unwrap(), expected.diagview().unwrap());
     assert_eq!(
-        bits_f64(root.materialize().unwrap().dense_data().unwrap()),
-        bits_f64(expected.materialize().unwrap().dense_data().unwrap())
+        root.diagview(engine).unwrap(),
+        expected.diagview(engine).unwrap()
+    );
+    assert_eq!(
+        bits_f64(root.materialize(engine).unwrap().dense_data().unwrap()),
+        bits_f64(expected.materialize(engine).unwrap().dense_data().unwrap())
     );
 
-    let reciprocal = source.map_diagonal(|value| 1.0 / value).unwrap();
+    let reciprocal = source.map_diagonal(engine, |value| 1.0 / value).unwrap();
     let expected: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -658,12 +701,19 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
     )
     .unwrap();
     assert_eq!(
-        bits_f64(reciprocal.materialize().unwrap().dense_data().unwrap()),
-        bits_f64(expected.materialize().unwrap().dense_data().unwrap())
+        bits_f64(
+            reciprocal
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        ),
+        bits_f64(expected.materialize(engine).unwrap().dense_data().unwrap())
     );
 
     // Complex payload: `f` decides the branch; `Complex64::sqrt` is principal.
     let source: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -679,7 +729,7 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
         ]),
     )
     .unwrap();
-    let root = source.map_diagonal(|value| value.sqrt()).unwrap();
+    let root = source.map_diagonal(engine, |value| value.sqrt()).unwrap();
     let expected = [
         Complex64::new(0.0, 1.0),
         Complex64::new(2.0, 0.0),
@@ -688,7 +738,7 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
         Complex64::new(0.0, 2.0),
     ];
     let actual: Vec<_> = root
-        .diagview()
+        .diagview(engine)
         .unwrap()
         .into_iter()
         .flat_map(|entry| entry.values)
@@ -705,6 +755,7 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
 
 #[test]
 fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: `f` acts on the reduced values once per degeneracy index, and the
     // physical-basis expansion repeats each result `2j + 1` times on the
@@ -714,6 +765,7 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
     let bond =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 1), (j(2), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -723,8 +775,9 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
         ]),
     )
     .unwrap();
-    let root = source.map_diagonal(f64::sqrt).unwrap();
+    let root = source.map_diagonal(engine, f64::sqrt).unwrap();
     let expected: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &bond,
         spectra(&[
@@ -734,13 +787,16 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
         ]),
     )
     .unwrap();
-    assert_eq!(root.diagview().unwrap(), expected.diagview().unwrap());
     assert_eq!(
-        bits_f64(root.materialize().unwrap().dense_data().unwrap()),
-        bits_f64(expected.materialize().unwrap().dense_data().unwrap())
+        root.diagview(engine).unwrap(),
+        expected.diagview(engine).unwrap()
+    );
+    assert_eq!(
+        bits_f64(root.materialize(engine).unwrap().dense_data().unwrap()),
+        bits_f64(expected.materialize(engine).unwrap().dense_data().unwrap())
     );
 
-    let physical = root.to_physical_dense().unwrap();
+    let physical = root.to_physical_dense(engine).unwrap();
     assert_eq!(physical.shape, vec![10, 10]);
     let mut diagonal = Vec::new();
     for row in 0..10 {
@@ -763,15 +819,25 @@ fn map_diagonal_on_su2_repeats_each_value_over_its_carrier_dimension() {
 
 #[test]
 fn map_diagonal_keeps_the_result_compact() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the result is stored as a compact diagonal (no dense payload), for
     // the `s` of `svd_compact` and for the compact adjoint of a c64 diagonal.
     let runtime = runtime();
-    let s = z2_endomorphism(&runtime).svd_compact(&[0], &[1]).unwrap().s;
-    assert!(symtn::expert::diagonal_spectrum(&s).unwrap().is_some());
-    let root = s.map_diagonal(f64::sqrt).unwrap();
-    let stored = symtn::expert::diagonal_spectrum(&root).unwrap().unwrap();
-    let source = symtn::expert::diagonal_spectrum(&s).unwrap().unwrap();
+    let s = z2_endomorphism(&runtime)
+        .svd_compact(engine, &[0], &[1])
+        .unwrap()
+        .s;
+    assert!(symtn::expert::diagonal_spectrum(engine, &s)
+        .unwrap()
+        .is_some());
+    let root = s.map_diagonal(engine, f64::sqrt).unwrap();
+    let stored = symtn::expert::diagonal_spectrum(engine, &root)
+        .unwrap()
+        .unwrap();
+    let source = symtn::expert::diagonal_spectrum(engine, &s)
+        .unwrap()
+        .unwrap();
     for (root, source) in stored.iter().zip(&source) {
         assert_eq!(root.sector, source.sector);
         let expected: Vec<_> = source.values.iter().map(|value| value.sqrt()).collect();
@@ -779,16 +845,20 @@ fn map_diagonal_keeps_the_result_compact() {
     }
 
     let complex = s
-        .convert::<Complex64>()
-        .scale(Complex64::new(0.0, 1.0))
+        .convert::<Complex64>(engine)
+        .unwrap()
+        .scale(engine, Complex64::new(0.0, 1.0))
         .unwrap();
-    let adjoint = complex.adjoint().unwrap();
-    let mapped = adjoint.map_diagonal(|value| value * value).unwrap();
-    assert!(symtn::expert::diagonal_spectrum(&mapped).unwrap().is_some());
+    let adjoint = complex.adjoint(engine).unwrap();
+    let mapped = adjoint.map_diagonal(engine, |value| value * value).unwrap();
+    assert!(symtn::expert::diagonal_spectrum(engine, &mapped)
+        .unwrap()
+        .is_some());
 }
 
 #[test]
 fn map_diagonal_rejects_dense_storage() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: dense storage is refused with a typed error naming the expected
     // input, even when the dense blocks happen to be diagonal, and a lazy
@@ -800,17 +870,17 @@ fn map_diagonal_rejects_dense_storage() {
     )
     .unwrap();
     let dense_diagonal: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, ij: &[usize]| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij: &[usize]| {
             f64::from(ij[0] == ij[1])
         })
         .unwrap();
     for (name, tensor) in [
         ("dense diagonal", dense_diagonal.clone()),
-        ("lazy adjoint", dense_diagonal.adjoint().unwrap()),
+        ("lazy adjoint", dense_diagonal.adjoint(engine).unwrap()),
         ("dense endomorphism", z2_endomorphism(&runtime)),
         ("non-bond", z2_tensor(&runtime)),
     ] {
-        match tensor.map_diagonal(f64::sqrt) {
+        match tensor.map_diagonal(engine, f64::sqrt) {
             Err(symtn::typed::Error::InvalidArgument(message)) => assert!(
                 message.contains("compact diagonal") && message.contains("dense storage"),
                 "{name}: {message}"
@@ -822,6 +892,7 @@ fn map_diagonal_rejects_dense_storage() {
 
 #[test]
 fn c64_compact_inv_and_pinv_are_elementwise_reciprocals() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // A c64 tensor's singular values are stored in the payload dtype, so both
     // compact matrix functions must apply their laws directly to those values.
@@ -841,19 +912,24 @@ fn c64_compact_inv_and_pinv_are_elementwise_reciprocals() {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
         complex(((state >> 33) as f64) / (u32::MAX as f64) + 0.5)
     };
-    let typed = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| next()).unwrap();
-    let typed_s = typed.svd_compact(&[0], &[1]).unwrap().s;
-    let source = symtn::expert::diagonal_spectrum(&typed_s).unwrap().unwrap();
+    let typed =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| next()).unwrap();
+    let typed_s = typed.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let source = symtn::expert::diagonal_spectrum(engine, &typed_s)
+        .unwrap()
+        .unwrap();
     let sigma_max = source
         .iter()
         .flat_map(|entry| &entry.values)
         .map(|value| value.norm())
         .fold(0.0, f64::max);
     let rcond = 1e-12;
-    let inverse = symtn::expert::diagonal_spectrum(&typed_s.inv(&[0], &[1]).unwrap())
+    let typed_s_inv = typed_s.inv(engine, &[0], &[1]).unwrap();
+    let inverse = symtn::expert::diagonal_spectrum(engine, &typed_s_inv)
         .unwrap()
         .unwrap();
-    let pseudo = symtn::expert::diagonal_spectrum(&typed_s.pinv(&[0], &[1], rcond).unwrap())
+    let typed_s_pinv = typed_s.pinv(engine, &[0], &[1], rcond).unwrap();
+    let pseudo = symtn::expert::diagonal_spectrum(engine, &typed_s_pinv)
         .unwrap()
         .unwrap();
     for ((source, inverse), pseudo) in source.iter().zip(&inverse).zip(&pseudo) {

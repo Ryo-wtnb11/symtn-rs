@@ -32,10 +32,11 @@ fn measure_value<T>(f: impl FnOnce() -> T) -> (T, usize, usize, u128) {
 
 #[test]
 fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a warmed multiplicity-free non-Abelian permutation reuses its
     // compiled plan and replay workspace without allocating on the caller.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
     );
@@ -62,17 +63,17 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 197).unwrap();
-    let mut destination = source.permute(&[1], &[2, 0]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 197).unwrap();
+    let mut destination = source.permute(engine, &[1], &[2, 0]).unwrap();
 
     source
-        .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
         .unwrap();
     let destination_data = destination.dense_data().unwrap().as_ptr();
 
     let cost = measure(|| {
         source
-            .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
             .unwrap();
     });
     black_box(destination.dense_data().unwrap());
@@ -84,10 +85,11 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
 
 #[test]
 fn cached_u1_permute_overwrite_does_not_allocate_on_the_caller_thread() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a warmed UniqueFusion permutation reuses its completed transformer
     // and replay workspace without allocating on the caller.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -99,17 +101,17 @@ fn cached_u1_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     )
     .unwrap();
     let source: TensorMap<U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 418).unwrap();
-    let mut destination = source.permute(&[1], &[2, 0]).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 418).unwrap();
+    let mut destination = source.permute(engine, &[1], &[2, 0]).unwrap();
 
     source
-        .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+        .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
         .unwrap();
     let destination_data = destination.dense_data().unwrap().as_ptr();
 
     let cost = measure(|| {
         source
-            .permute_into(&[1], &[2, 0], &mut destination, 1.0, 0.0)
+            .permute_into(engine, &[1], &[2, 0], &mut destination, 1.0, 0.0)
             .unwrap();
     });
     black_box(destination.dense_data().unwrap());
@@ -130,26 +132,28 @@ fn warm_calls(mut into: impl FnMut()) -> usize {
 
 #[test]
 fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: a warm multiplicity-free non-Abelian `permute_into` submits each
     // Multi block's recoupling GEMM without a per-block allocation, so its
     // caller-thread allocation calls are the same for B and > 3B blocks
     // (#2184). Degeneracies stay small so no GEMM reaches the dense provider's
     // own packing workspace.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
-    let warm = |spins: usize| {
+    let mut warm = |spins: usize| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
             (0..spins).map(|twice_spin| (SU2Irrep::from_twice_spin(twice_spin), 2)),
         )
         .unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 2184).unwrap();
-        let mut destination = source.permute(&[1, 3], &[0, 2]).unwrap();
+            TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space, &space], 2184)
+                .unwrap();
+        let mut destination = source.permute(engine, &[1, 3], &[0, 2]).unwrap();
         let calls = warm_calls(|| {
             source
-                .permute_into(&[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
+                .permute_into(engine, &[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
                 .unwrap()
         });
         black_box(destination.dense_data().unwrap());
@@ -158,6 +162,11 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
     let (small_blocks, small_calls) = warm(3);
     let (large_blocks, large_calls) = warm(4);
     assert!(large_blocks > 3 * small_blocks);
+    // Why raw equality holds for a BLAS provider too: each distinct GEMM
+    // descriptor keeps its plan in its own engine cache slot, so the warm-up
+    // calls build every block's plan and the measured call rebuilds none. A
+    // vendor plan rebuild allocates, so a plan miss fails this test just as a
+    // per-block symtn temporary does.
     assert_eq!(large_calls, small_calls);
 }
 
@@ -166,22 +175,24 @@ fn warm_recoupling_permute_into_allocations_do_not_grow_with_block_count() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let warm = |labels: &[Vec<i64>]| {
+    let mut warm = |labels: &[Vec<i64>]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
             labels.iter().map(|label| (label.clone(), 2)),
         )
         .unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 2184).unwrap();
-        let mut destination = source.permute(&[1, 3], &[0, 2]).unwrap();
+            TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space, &space], 2184)
+                .unwrap();
+        let mut destination = source.permute(engine, &[1, 3], &[0, 2]).unwrap();
         let calls = warm_calls(|| {
             source
-                .permute_into(&[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
+                .permute_into(engine, &[1, 3], &[0, 2], &mut destination, 1.0, 0.0)
                 .unwrap()
         });
         black_box(destination.dense_data().unwrap());
@@ -201,20 +212,23 @@ fn warm_checked_generic_permute_into_allocations_do_not_grow_with_block_count() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
-    let warm = |labels: &[Vec<i64>]| {
+    let mut warm = |labels: &[Vec<i64>]| {
         let space = GradedSpace::try_new(
             Arc::clone(&provider),
             labels.iter().map(|label| (label.clone(), 2)),
         )
         .unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::rand_with_seed(&runtime, [&space, &space], [&space, &space], 2233).unwrap();
+            TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space, &space], 2233)
+                .unwrap();
         symtn::cache::clear();
-        let calls = warm_calls(|| drop(black_box(source.permute(&[1, 3], &[0, 2]).unwrap())));
+        let calls =
+            warm_calls(|| drop(black_box(source.permute(engine, &[1, 3], &[0, 2]).unwrap())));
         (source.subblock_count(), calls)
     };
     let (small_blocks, small_calls) = warm(&[vec![1, 0], vec![0, 1]]);
@@ -225,10 +239,11 @@ fn warm_checked_generic_permute_of_an_evicted_source_does_not_readmit_its_trees(
 
 #[test]
 fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the shared typed destination seam also reuses admitted full,
     // explicit, and repartition transpose operations without caller allocation.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -240,42 +255,42 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
     )
     .unwrap();
     let source: TensorMap<U1FusionRule, f64> =
-        TensorMap::rand_with_seed(&runtime, [&space, &space], [&space], 779).unwrap();
+        TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 779).unwrap();
 
-    let mut full = source.transpose(&[2], &[1, 0]).unwrap();
+    let mut full = source.transpose(engine, &[2], &[1, 0]).unwrap();
     source
-        .transpose_into(&[2], &[1, 0], &mut full, 1.0, 0.0)
+        .transpose_into(engine, &[2], &[1, 0], &mut full, 1.0, 0.0)
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .transpose_into(&[2], &[1, 0], &mut full, 1.0, 0.0)
+                .transpose_into(engine, &[2], &[1, 0], &mut full, 1.0, 0.0)
                 .unwrap()
         }),
         (0, 0)
     );
 
-    let mut explicit = source.transpose(&[1, 2], &[0]).unwrap();
+    let mut explicit = source.transpose(engine, &[1, 2], &[0]).unwrap();
     source
-        .transpose_into(&[1, 2], &[0], &mut explicit, 1.0, 0.0)
+        .transpose_into(engine, &[1, 2], &[0], &mut explicit, 1.0, 0.0)
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .transpose_into(&[1, 2], &[0], &mut explicit, 1.0, 0.0)
+                .transpose_into(engine, &[1, 2], &[0], &mut explicit, 1.0, 0.0)
                 .unwrap()
         }),
         (0, 0)
     );
 
-    let mut repartitioned = source.repartition(1).unwrap();
+    let mut repartitioned = source.repartition(engine, 1).unwrap();
     source
-        .repartition_into(&mut repartitioned, 1.0, 0.0)
+        .repartition_into(engine, &mut repartitioned, 1.0, 0.0)
         .unwrap();
     assert_eq!(
         measure(|| {
             source
-                .repartition_into(&mut repartitioned, 1.0, 0.0)
+                .repartition_into(engine, &mut repartitioned, 1.0, 0.0)
                 .unwrap()
         }),
         (0, 0)
@@ -318,6 +333,7 @@ fn assert_same_checked_tensor(
 #[test]
 #[ignore = "benchmark: run via benchmarks.yml"]
 fn checked_generic_public_transform_measurement() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const CASE_ENV: &str = "SYMTN_CHECKED_GENERIC_MEASUREMENT_CASE";
     const TEST_NAME: &str =
@@ -361,7 +377,7 @@ fn checked_generic_public_transform_measurement() {
     println!("case={case} allocation_scope=caller_thread_requested");
 
     if case == "su2_permute_control" {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(SU2FusionRule);
         let half = SU2Irrep::from_twice_spin(1);
         let half_leg = GradedSpace::try_new(Arc::clone(&provider), [(half, 1)]).unwrap();
@@ -373,20 +389,25 @@ fn checked_generic_public_transform_measurement() {
             ],
         )
         .unwrap();
-        let source: TensorMap<_, f64> =
-            TensorMap::rand_with_seed(&runtime, [&half_leg, &half_leg], [&coupled_leg], 783)
-                .unwrap();
+        let source: TensorMap<_, f64> = TensorMap::rand_with_seed(
+            engine,
+            &runtime,
+            [&half_leg, &half_leg],
+            [&coupled_leg],
+            783,
+        )
+        .unwrap();
         assert_eq!(source.subblock_count(), 2);
         let runtime_before = completed_transformers();
         let (first, first_allocations, first_bytes, first_ns) =
-            measure_value(|| source.permute(&[1, 0], &[2]).unwrap());
+            measure_value(|| source.permute(engine, &[1, 0], &[2]).unwrap());
         let runtime_after_first = completed_transformers();
         let mut repeat_ns = Vec::with_capacity(7);
         let mut repeat_allocations = Vec::with_capacity(7);
         let mut repeat_bytes = Vec::with_capacity(7);
         for _ in 0..7 {
             let (repeated, allocations, bytes, ns) =
-                measure_value(|| source.permute(&[1, 0], &[2]).unwrap());
+                measure_value(|| source.permute(engine, &[1, 0], &[2]).unwrap());
             assert_eq!(repeated.dense_data().unwrap(), first.dense_data().unwrap());
             repeat_ns.push(ns);
             repeat_allocations.push(allocations);
@@ -416,19 +437,19 @@ fn checked_generic_public_transform_measurement() {
         "su4_repartition" => (4, vec![1, 0, 1], "repartition"),
         _ => panic!("unknown measurement case: {case}"),
     };
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
-    let apply = |source: &TensorMap<LieGroupFusionRule, f64>| match operation {
-        "permute" => source.permute(&[1, 0], &[2]).unwrap(),
-        "braid" => source.braid(&[1, 0], &[2], &[0, 1, 2]).unwrap(),
-        "repartition" => source.repartition(1).unwrap(),
+    let mut apply = |source: &TensorMap<LieGroupFusionRule, f64>| match operation {
+        "permute" => source.permute(engine, &[1, 0], &[2]).unwrap(),
+        "braid" => source.braid(engine, &[1, 0], &[2], &[0, 1, 2]).unwrap(),
+        "repartition" => source.repartition(engine, 1).unwrap(),
         _ => unreachable!(),
     };
 

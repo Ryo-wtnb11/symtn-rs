@@ -12,13 +12,15 @@ use crate::runtime::Runtime;
 use symtn_core::{U1FusionRule, U1Irrep};
 
 fn misses_and_data(groups: usize) -> (usize, Vec<f64>) {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let sectors: Vec<_> = (0..groups as i32)
         .map(|k| U1Irrep::new(31 * k - 15_000))
         .collect();
     let bond =
         GradedSpace::try_new(Arc::new(U1FusionRule), sectors.iter().map(|&s| (s, 1))).unwrap();
     let compact = TensorMap::<U1FusionRule, f64>::diagonal(
+        engine,
         &runtime,
         &bond,
         sectors

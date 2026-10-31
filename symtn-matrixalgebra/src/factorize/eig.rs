@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 pub(super) trait HermitianReal: Float {
     fn from_f64(value: f64) -> Self;
@@ -172,6 +173,7 @@ impl<R, D> EighFullDyn<R, D> {
 /// Before any dense call, every coupled-sector block must pass the
 /// Hermiticity admission at [`HermitianTol::DEFAULT`].
 pub(crate) fn eigh_full<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<EighFull<R, D>, OperationError>
@@ -181,7 +183,7 @@ where
     D: FactorScalar,
 {
     let dynamic = input.dynamic();
-    let out = eigh_full_dyn(dense, &dynamic, HermitianTol::DEFAULT)?;
+    let out = eigh_full_dyn(engine, dense, &dynamic, HermitianTol::DEFAULT)?;
     // Materialize the dense diagonal here (this wrapper returns a dense `D`);
     // the dyn producer does not build it.
     let d = diagonal_bond_svd_factor(dynamic.space(), &out.eigenvalues, &D::from_real)?;
@@ -195,6 +197,7 @@ where
 /// Dynamic-rank `eigh_full`: the shared core, admitting Hermitian blocks
 /// at `hermitian_tol`.
 pub fn eigh_full_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     hermitian_tol: HermitianTol,
@@ -209,7 +212,7 @@ where
     if let Some(plan) = compact_factor_plan(input.space())? {
         // The plan proves the stacking.
         require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
-        return eigh_full_direct_regions(dense, input, &plan, hermitian_tol);
+        return eigh_full_direct_regions(engine, dense, input, &plan, hermitian_tol);
     }
     let matricizations = admit_endomorphism_stacking(
         space,
@@ -232,6 +235,7 @@ where
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
     matricizations.validate_hermitian(hermitian_tol)?;
     with_input_geometry!(&matricizations, |geometry| eigh_full_scattered(
+        engine,
         dense,
         input,
         &matricizations,
@@ -242,6 +246,7 @@ where
 /// Eigendecomposition of an input whose tree order the positional direct
 /// path cannot prove; eigenvectors scatter by tree identity.
 pub(super) fn eigh_full_scattered<E, R, D, M>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     matricizations: &InputMatricizations<'_, D>,
@@ -278,11 +283,12 @@ where
     let index = PlacementIndex::new(geometry, &[FactorSide::Left]);
     let v_groups = SectorBlockGroups::new(v_space.space().structure(), FactorSide::Left)?;
     let v_target = v_space.space();
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for (position, sector_geometry) in geometry.iter().enumerate() {
             let matrix = matricizations.get(position)?;
             let n = matrix.rows;
-            let (sorted_values, vectors) = eigh_sector_stage(dense, matrix.data, n, &mut scratch)?;
+            let (sorted_values, vectors) =
+                eigh_sector_stage(engine, dense, matrix.data, n, &mut scratch)?;
             eigenvalues.push(SectorSpectrum {
                 sector: matrix.sector,
                 values: sorted_values,
@@ -311,6 +317,7 @@ where
 }
 
 pub(super) fn eigh_full_direct_regions<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     plan: &CompactFactorPlan,
@@ -344,7 +351,7 @@ where
     let mut output = None;
 
     let data = input.data();
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for route in plan.routes.iter().copied() {
             let source = &plan.source_regions[route.source_region];
             let n = source.rows();
@@ -356,7 +363,7 @@ where
                 continue;
             }
             let (sorted_values, vectors) =
-                eigh_sector_stage(dense, &data[source.range()], n, &mut scratch)?;
+                eigh_sector_stage(engine, dense, &data[source.range()], n, &mut scratch)?;
             regions[route.left_region.expect("nonzero route has left region")] = Some(vectors);
             while next_left_region < plan.left_regions.len() {
                 if plan.left_regions[next_left_region].range().is_empty() {
@@ -551,6 +558,7 @@ impl<R, D: FactorScalar> EigFullDyn<R, D> {
 #[cfg(test)]
 /// Full general eigendecomposition through the device boundary.
 pub(crate) fn eig_full<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<EigFull<R, D>, OperationError>
@@ -560,7 +568,7 @@ where
     D: FactorScalar,
 {
     let dynamic = input.dynamic();
-    let out = eig_full_dyn::<E, R, D>(dense, &dynamic)?;
+    let out = eig_full_dyn::<E, R, D>(engine, dense, &dynamic)?;
     // Materialize the dense diagonal here (this wrapper returns a dense `D`); the
     // dyn producer does not build it.
     let d = diagonal_bond_svd_factor(
@@ -577,6 +585,7 @@ where
 
 /// Dynamic-rank `eig_full`.
 pub fn eig_full_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<EigFullDyn<R, D>, OperationError>
@@ -599,7 +608,7 @@ where
     for index in 0..matricizations.len() {
         let matrix = matricizations.get(index)?;
         let n = matrix.rows;
-        let (sorted_values, sorted_vectors) = eig_sector_stage(dense, matrix.data, n)?;
+        let (sorted_values, sorted_vectors) = eig_sector_stage(engine, dense, matrix.data, n)?;
         eigenvalues.push(SectorSpectrum {
             sector: matrix.sector,
             values: sorted_values,
@@ -887,6 +896,7 @@ fn missing_compact_plan() -> OperationError {
 ///
 /// Admits Hermitian blocks at [`HermitianTol::DEFAULT`].
 pub(crate) fn eigh_vals<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum>, OperationError>
@@ -895,11 +905,12 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    eigh_vals_dyn(dense, &input.dynamic(), HermitianTol::DEFAULT)
+    eigh_vals_dyn(engine, dense, &input.dynamic(), HermitianTol::DEFAULT)
 }
 
 /// Dynamic-rank `eigh_vals`: the dense stage, the same in every fusion mode.
 pub fn eigh_vals_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     hermitian_tol: HermitianTol,
@@ -921,13 +932,14 @@ where
     )?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eigh)?;
     matricizations.validate_hermitian(hermitian_tol)?;
-    eigh_vals_spectra(dense, &matricizations)
+    eigh_vals_spectra(engine, dense, &matricizations)
 }
 
 #[cfg(test)]
 /// All general eigenvalues per coupled sector in [`lexicographic_eig_order`]
 /// (MatrixAlgebraKit `eig_vals`).
 pub(crate) fn eig_vals<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundTensorMapRef<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum<Complex64>>, OperationError>
@@ -936,11 +948,12 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
 {
-    eig_vals_dyn::<E, R, D>(dense, &input.dynamic())
+    eig_vals_dyn::<E, R, D>(engine, dense, &input.dynamic())
 }
 
 /// Dynamic-rank `eig_vals`: the dense stage, the same in every fusion mode.
 pub fn eig_vals_dyn<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum<Complex64>>, OperationError>
@@ -960,7 +973,7 @@ where
         value_matricizations,
     )?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Eig)?;
-    eig_vals_spectra(dense, &matricizations)
+    eig_vals_spectra(engine, dense, &matricizations)
 }
 
 /// Reorder scratch for [`eigh_sector_stage`] and [`eigh_sector_into`], sized
@@ -1018,6 +1031,7 @@ fn order_eigh_sector<D: FactorScalar>(
 /// phase-gauged ([`order_eigh_sector`]).
 #[inline]
 fn eigh_sector_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     n: usize,
@@ -1027,7 +1041,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (real_values, mut vectors) = compact_eigh_owned(dense, matrix, n)?;
+    let (real_values, mut vectors) = compact_eigh_owned(engine, dense, matrix, n)?;
     let sorted_values = if order_eigh_sector(&real_values, &mut vectors, n, scratch)? {
         scratch
             .order
@@ -1052,6 +1066,7 @@ where
 /// more than the one contiguous copy the caller makes.
 #[doc(hidden)]
 pub fn eigh_sector_into<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     n: usize,
@@ -1062,7 +1077,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (values_tensor, vectors_tensor) = compact_eigh_outputs(dense, matrix, n)?;
+    let (values_tensor, vectors_tensor) = compact_eigh_outputs(engine, dense, matrix, n)?;
     let mut real = std::mem::take(&mut scratch.real);
     let result = (|| {
         D::real_spectrum_into(&values_tensor, &mut real).map_err(OperationError::Dense)?;
@@ -1109,6 +1124,7 @@ pub fn require_finite_eigh_input<D: FactorScalar>(data: &[D]) -> Result<(), Oper
 /// inputs. The callers' strict finite-input stage is symtn's approved
 /// deviation (#1983); MAK passes non-finite input to LAPACK.
 fn eig_sector_stage<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     n: usize,
@@ -1121,7 +1137,7 @@ where
     let strides = [1usize, n];
     let view = DenseView::new(matrix, &shape, &strides, 0).map_err(OperationError::Dense)?;
     let outputs = dense
-        .eig(D::dense_read(view))
+        .eig(engine, D::dense_read(view))
         .map_err(OperationError::Dense)?;
     if outputs.len() != 2 {
         return Err(OperationError::Dense(arity_mismatch(
@@ -1186,6 +1202,7 @@ fn unit_norm_column_into<D: FactorScalar>(source: &[D], dest: &mut [D]) {
 /// Hermitian eigenvalues of every sector through the no-vector solver,
 /// ascending.
 fn eigh_vals_spectra<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
 ) -> Result<Vec<SectorSpectrum>, OperationError>
@@ -1202,7 +1219,7 @@ where
         let view =
             DenseView::new(matrix.data, &shape, &strides, 0).map_err(OperationError::Dense)?;
         let values_tensor = dense
-            .eigh_vals(D::dense_read(view))
+            .eigh_vals(engine, D::dense_read(view))
             .map_err(OperationError::Dense)?;
         let mut sorted = D::real_spectrum(&values_tensor).map_err(OperationError::Dense)?;
         sorted.truncate(n);
@@ -1219,6 +1236,7 @@ where
 /// General eigenvalues of every sector through the no-vector solver, in
 /// [`lexicographic_eig_order`].
 fn eig_vals_spectra<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
 ) -> Result<Vec<SectorSpectrum<Complex64>>, OperationError>
@@ -1235,7 +1253,7 @@ where
         let view =
             DenseView::new(matrix.data, &shape, &strides, 0).map_err(OperationError::Dense)?;
         let values_tensor = dense
-            .eig_vals(D::dense_read(view))
+            .eig_vals(engine, D::dense_read(view))
             .map_err(OperationError::Dense)?;
         validate_dense_shape(values_tensor.shape(), &[n])?;
         let values =
@@ -1252,6 +1270,7 @@ where
 }
 
 pub(crate) fn compact_eigh_owned<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     order: usize,
@@ -1260,7 +1279,7 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (values, vectors) = compact_eigh_outputs(dense, input, order)?;
+    let (values, vectors) = compact_eigh_outputs(engine, dense, input, order)?;
     let values = compact_real_spectrum_owned::<D>(values, &[order], "eigh_into")?;
     let vectors = compact_factor_output_owned::<D>(vectors, &[order, order], "eigh_into")?;
     Ok((values, vectors))
@@ -1269,6 +1288,7 @@ where
 /// The executor's `(values, vectors)` of one `order x order` Hermitian
 /// matrix, arity checked.
 fn compact_eigh_outputs<E, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &[D],
     order: usize,
@@ -1281,7 +1301,7 @@ where
     let strides = [1usize, order];
     let input = DenseView::new(input, &shape, &strides, 0).map_err(OperationError::Dense)?;
     let outputs = dense
-        .eigh(D::dense_read(input))
+        .eigh(engine, D::dense_read(input))
         .map_err(OperationError::Dense)?;
     let [values, vectors]: [DenseTensor; 2] = outputs.try_into().map_err(|outputs: Vec<_>| {
         OperationError::Dense(arity_mismatch("eigh_into", 2, outputs.len()))
@@ -1637,6 +1657,7 @@ pub(super) fn validate_complex_eigenvalues(values: &[Complex64]) -> Result<(), O
 /// provider remains the authority for the eigenvector factor.
 #[doc(hidden)]
 pub(crate) fn eigh_full_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
     hermitian_tol: HermitianTol,
@@ -1671,11 +1692,12 @@ where
     let mut scratch = EighScratch::for_order(max_n);
     let mut eigenvalues = Vec::with_capacity(matrices.len());
     let mut pairs = Vec::with_capacity(matrices.len());
-    in_linalg_scope(dense, |dense| {
+    in_linalg_scope(engine, dense, |dense, engine| {
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
             let n = matrix.rows;
-            let (sorted_values, vectors) = eigh_sector_stage(dense, matrix.data, n, &mut scratch)?;
+            let (sorted_values, vectors) =
+                eigh_sector_stage(engine, dense, matrix.data, n, &mut scratch)?;
             eigenvalues.push(SectorSpectrum {
                 sector: matrix.sector,
                 values: sorted_values,
@@ -1719,6 +1741,7 @@ where
 /// admit either output factor.
 #[doc(hidden)]
 pub(crate) fn eig_full_dyn_checked_generic<E, R, D>(
+    engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
 ) -> Result<EigFullDyn<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -1756,8 +1779,8 @@ where
             .get(index)
             .map_err(CheckedGenericFactorPlanError::from)?;
         let n = matrix.rows;
-        let (sorted_values, sorted_vectors) =
-            eig_sector_stage(dense, matrix.data, n).map_err(CheckedGenericFactorPlanError::from)?;
+        let (sorted_values, sorted_vectors) = eig_sector_stage(engine, dense, matrix.data, n)
+            .map_err(CheckedGenericFactorPlanError::from)?;
         eigenvalues.push(SectorSpectrum {
             sector: matrix.sector,
             values: sorted_values,
@@ -1794,6 +1817,7 @@ where
 /// dense storage leases an executor.
 #[doc(hidden)]
 pub fn eigh_vals_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
     hermitian_tol: HermitianTol,
@@ -1809,7 +1833,7 @@ where
         source,
         None,
         |space, spectrum| eigh_vals_diagonal(&M::authority(space), space, spectrum, hermitian_tol),
-        |dense, input| Ok(eigh_vals_dyn(dense, input, hermitian_tol)?),
+        |dense, input| Ok(eigh_vals_dyn(engine, dense, input, hermitian_tol)?),
     )
 }
 
@@ -1818,6 +1842,7 @@ where
 /// dense storage leases an executor.
 #[doc(hidden)]
 pub fn eig_vals_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<Vec<SectorSpectrum<Complex64>>, M::Error>
@@ -1832,7 +1857,7 @@ where
         source,
         None,
         |space, spectrum| eig_vals_diagonal(&M::authority(space), space, spectrum),
-        |dense, input| Ok(eig_vals_dyn(dense, input)?),
+        |dense, input| Ok(eig_vals_dyn(engine, dense, input)?),
     )
 }
 
@@ -1840,6 +1865,7 @@ where
 /// only dense storage leases an executor.
 #[doc(hidden)]
 pub fn eigh_full_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
     hermitian_tol: HermitianTol,
@@ -1855,7 +1881,7 @@ where
         source,
         None,
         |space, spectrum| M::eigh_full_diagonal(space, spectrum, hermitian_tol),
-        |dense, input| M::eigh_full_dense(dense, input, hermitian_tol),
+        |dense, input| M::eigh_full_dense(engine, dense, input, hermitian_tol),
     )
 }
 
@@ -1863,6 +1889,7 @@ where
 /// only dense storage leases an executor.
 #[doc(hidden)]
 pub fn eig_full_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
 ) -> Result<EigFullDyn<R, D>, M::Error>
@@ -1872,7 +1899,9 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    factor_from_source(lease, source, None, M::eig_full_diagonal, M::eig_full_dense)
+    factor_from_source(lease, source, None, M::eig_full_diagonal, |dense, input| {
+        M::eig_full_dense(engine, dense, input)
+    })
 }
 
 /// The dense route's eigenvalue check (`validate_complex_eigenvalues`) on a

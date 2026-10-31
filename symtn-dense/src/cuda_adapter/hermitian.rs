@@ -1,54 +1,5 @@
 use super::*;
 
-/// Uploads a rank-0 operand in the payload's **real** lane.
-///
-/// The lane is not a symmetry: Tenferro rejects an `F64` rank-0 operand
-/// against an `F32` or `C32` tensor as a dtype mismatch, and rejects a
-/// *payload*-typed complex operand as a shape mismatch, so "complex tensor
-/// with a real rank-0 scalar" is the one production shape (probe
-/// `cuda-single-precision-probe-2026-09-20.md`, finding 3).
-fn upload_scalar<R: CudaRealScalar>(
-    ctx: &CudaDenseContext,
-    op: &'static str,
-    value: f64,
-) -> Result<Tensor, DenseError> {
-    let host = R::into_tensor(vec![], vec![R::narrow(value)]).map_err(|err| cuda_error(op, err))?;
-    let tensor = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(op, err))?;
-    record_h2d(std::mem::size_of::<R>());
-    Ok(tensor)
-}
-/// The rank-0 lane operand through which [`scale_by_power_of_two`] multiplies
-/// a payload by the exact power of two `normalizer`.
-fn power_of_two_operand<D: CudaScalar>(
-    ctx: &CudaDenseContext,
-    op: &'static str,
-    normalizer: f64,
-) -> Result<Tensor, DenseError> {
-    let operand = if D::IS_COMPLEX {
-        normalizer
-    } else {
-        // Exact: the reciprocal of a power of two inside the lane's range.
-        normalizer.recip()
-    };
-    upload_scalar::<D::Real>(ctx, op, operand)
-}
-/// Multiplies a payload tensor by the power of two that `operand` encodes.
-fn scale_by_power_of_two<D: CudaScalar>(
-    ctx: &mut CudaDenseContext,
-    op: &'static str,
-    tensor: &Tensor,
-    operand: &Tensor,
-) -> Result<Tensor, DenseError> {
-    if D::IS_COMPLEX {
-        ctx.backend.mul(tensor, operand)
-    } else {
-        // Why not `mul`: Tenferro 0.7.1's real `mul` does not broadcast a
-        // rank-0 operand, while its real `div` does and, unlike the
-        // complex-by-real one, never squares the divisor.
-        ctx.backend.div(tensor, operand)
-    }
-    .map_err(|err| cuda_error(op, err))
-}
 /// Real magnitudes of a device tensor, so the real-only sum-of-squares
 /// reduction sees `|z|^2` for a complex payload. `abs` leaves an `f64` tensor
 /// numerically unchanged under that reduction, so the extra pass is skipped
@@ -62,7 +13,7 @@ fn magnitudes_for_sum_squares<D: CudaScalar>(
         return Ok(None);
     }
     ctx.backend
-        .abs(tensor)
+        .abs_read(TensorRead::from_tensor(tensor))
         .map(Some)
         .map_err(|err| cuda_error(op, err))
 }
@@ -112,8 +63,8 @@ pub fn cuda_hermitian_regions<D: CudaScalar>(
 /// would change the acceptance of the small ones.
 ///
 /// Real payloads only: a complex payload returns [`DenseError::Unsupported`].
-/// Why: Tenferro 0.7.1 scales a complex tensor by a real operand only when the
-/// operand is rank 0, so a per-member real normalizer has no complex form.
+/// The scaling itself has a complex form (see `MemberScale`), but the complex
+/// stack has no device coverage yet, so it stays refused at this boundary.
 #[doc(hidden)]
 pub fn cuda_hermitian_regions_batched<D: CudaScalar>(
     ctx: &mut CudaDenseContext,
@@ -235,11 +186,11 @@ fn admit_regions<D: CudaScalar>(
         let normal = members.materialize::<D>(ctx, src, n, [1, n], offset)?;
         let input_abs = ctx
             .backend
-            .abs(&normal)
+            .abs_read(TensorRead::from_tensor(&normal))
             .map_err(|err| cuda_error(op, err))?;
         maxima.push(
             ctx.backend
-                .reduce_max(&input_abs, &[0, 1])
+                .reduce_max_read(TensorRead::from_tensor(&input_abs), &[0, 1])
                 .map_err(|err| cuda_error(op, err))?,
         );
         inputs.push((index, normal));
@@ -271,27 +222,30 @@ fn admit_regions<D: CudaScalar>(
         // Conjugation is a backend op on the transposed copy, never a symtn loop.
         let transpose = if D::IS_COMPLEX {
             ctx.backend
-                .conj(&transpose)
+                .conj_read(TensorRead::from_tensor(&transpose))
                 .map_err(|err| cuda_error(op, err))?
         } else {
             transpose
         };
         let scale = MemberScale::upload::<D>(ctx, op, &normalizers, n)?;
-        let normal_scaled = scale.apply::<D>(ctx, op, &normal)?;
+        let normal_scaled = scale.apply(ctx, op, &normal)?;
         drop(normal);
-        let transpose_scaled = scale.apply::<D>(ctx, op, &transpose)?;
+        let transpose_scaled = scale.apply(ctx, op, &transpose)?;
         input_sums.push(sum_of_squares::<D>(ctx, op, &normal_scaled)?);
         let residual = ctx
             .backend
-            .sub(&normal_scaled, &transpose_scaled)
+            .sub_read(
+                TensorRead::from_tensor(&normal_scaled),
+                TensorRead::from_tensor(&transpose_scaled),
+            )
             .map_err(|err| cuda_error(op, err))?;
         let residual_abs = ctx
             .backend
-            .abs(&residual)
+            .abs_read(TensorRead::from_tensor(&residual))
             .map_err(|err| cuda_error(op, err))?;
         residual_maxima.push(
             ctx.backend
-                .reduce_max(&residual_abs, &[0, 1])
+                .reduce_max_read(TensorRead::from_tensor(&residual_abs), &[0, 1])
                 .map_err(|err| cuda_error(op, err))?,
         );
         residuals.push((index, residual, normalizers));
@@ -334,7 +288,7 @@ fn admit_regions<D: CudaScalar>(
         }
         let (_, n) = regions[index];
         let scale = MemberScale::upload::<D>(ctx, op, &normalizers, n)?;
-        let residual_normalized = scale.apply::<D>(ctx, op, &residual)?;
+        let residual_normalized = scale.apply(ctx, op, &residual)?;
         residual_sums.push(sum_of_squares::<D>(ctx, op, &residual_normalized)?);
         undecided.push((index, pending));
     }
@@ -355,14 +309,14 @@ fn admit_regions<D: CudaScalar>(
 /// The device operand that multiplies member `b` of an `[n, n, members]`
 /// payload by its exact power-of-two normalizer; a member the stage already
 /// decided (`None`) is multiplied by one and its reductions are ignored.
-enum MemberScale {
-    /// One member: a rank-0 lane operand. Also the only form a complex
-    /// payload has (see [`cuda_hermitian_regions_batched`]), and one
-    /// broadcast kernel fewer than the per-member form.
-    Scalar(Tensor),
-    /// One real divisor per member, broadcast over the matrix modes.
-    PerMember(Tensor),
-}
+///
+/// Payload-typed and full-shape because Tenferro 0.8's elementwise ops take
+/// two operands of one shape and one dtype. A complex payload is multiplied
+/// by `(s, 0)`, which scales each component by `s` exactly for a finite
+/// entry, and only finite payloads reach a normalizer (stage 1 rejects a
+/// non-finite maximum). The broadcast is one device kernel and the upload is
+/// `members` payload values.
+struct MemberScale(Tensor);
 impl MemberScale {
     fn upload<D: CudaScalar>(
         ctx: &mut CudaDenseContext,
@@ -370,32 +324,31 @@ impl MemberScale {
         normalizers: &[Option<f64>],
         n: usize,
     ) -> Result<Self, DenseError> {
-        let normalizer = |value: &Option<f64>| value.unwrap_or(1.0);
-        match normalizers {
-            [single] => power_of_two_operand::<D>(ctx, op, normalizer(single)).map(Self::Scalar),
-            _ => {
-                // Exact: the reciprocal of a power of two inside the lane.
-                let divisors: Vec<f64> = normalizers
-                    .iter()
-                    .map(|value| normalizer(value).recip())
-                    .collect();
-                broadcast_member_divisors::<D>(ctx, &divisors, n, op).map(Self::PerMember)
-            }
-        }
+        let values: Vec<D> = normalizers
+            .iter()
+            .map(|value| D::from(<D::Real as CudaRealScalar>::narrow(value.unwrap_or(1.0))))
+            .collect();
+        let members = values.len();
+        let host = D::into_tensor(vec![members], values).map_err(|err| cuda_error(op, err))?;
+        let tensor = upload_tensor(&ctx.runtime, &host).map_err(|err| cuda_error(op, err))?;
+        record_h2d(members * std::mem::size_of::<D>());
+        ctx.backend
+            .broadcast_in_dim_read(TensorRead::from_tensor(&tensor), &[n, n, members], &[2])
+            .map(Self)
+            .map_err(|err| cuda_error(op, err))
     }
-    fn apply<D: CudaScalar>(
+    fn apply(
         &self,
         ctx: &mut CudaDenseContext,
         op: &'static str,
         tensor: &Tensor,
     ) -> Result<Tensor, DenseError> {
-        match self {
-            Self::Scalar(operand) => scale_by_power_of_two::<D>(ctx, op, tensor, operand),
-            Self::PerMember(divisor) => ctx
-                .backend
-                .div(tensor, divisor)
-                .map_err(|err| cuda_error(op, err)),
-        }
+        ctx.backend
+            .mul_read(
+                TensorRead::from_tensor(tensor),
+                TensorRead::from_tensor(&self.0),
+            )
+            .map_err(|err| cuda_error(op, err))
     }
 }
 /// Materializes `members` stacked `n x n` regions (element strides `strides`
@@ -425,32 +378,6 @@ fn contiguous_stack<D: CudaScalar>(
     ctx.backend
         .to_contiguous_read(TensorRead::from_view(view))
         .map_err(|err| cuda_error(OP, err))
-}
-/// Uploads one real divisor per member and broadcasts it over the matrix
-/// modes of an `[n, n, members]` payload, so one elementwise `div` scales
-/// every member by its own power of two.
-///
-/// Why broadcast rather than a rank-0 operand per member: Tenferro 0.7.1's
-/// elementwise ops take equal shapes or a rank-0 operand, so a per-member
-/// divisor needs the full shape; the broadcast is one device kernel, and the
-/// upload is `members` real values.
-fn broadcast_member_divisors<D: CudaScalar>(
-    ctx: &mut CudaDenseContext,
-    divisors: &[f64],
-    n: usize,
-    op: &'static str,
-) -> Result<Tensor, DenseError> {
-    let values: Vec<D::Real> = divisors
-        .iter()
-        .map(|&value| <D::Real as CudaRealScalar>::narrow(value))
-        .collect();
-    let host =
-        D::Real::into_tensor(vec![divisors.len()], values).map_err(|err| cuda_error(op, err))?;
-    let tensor = upload_tensor(ctx.backend.runtime(), &host).map_err(|err| cuda_error(op, err))?;
-    record_h2d(divisors.len() * std::mem::size_of::<D::Real>());
-    ctx.backend
-        .broadcast_in_dim(&tensor, &[n, n, divisors.len()], &[2])
-        .map_err(|err| cuda_error(op, err))
 }
 /// Downloads rank-1 real reductions of `members` values each with one
 /// transfer (concatenated on device first). No parts means no transfer.

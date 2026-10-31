@@ -68,6 +68,9 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let lhs_axes: Vec<_> = (lhs.codomain_rank()..lhs.rank()).collect();
     let rhs_axes: Vec<_> = (0..rhs.codomain_rank()).collect();
     let output_axes: Vec<_> = (0..lhs.codomain_rank() + rhs.domain_rank()).collect();
@@ -78,31 +81,35 @@ where
         codomain,
         domain,
     };
-    let expected_contract = lhs.contract(rhs, &spec).unwrap();
-    let expected_compose = lhs.compose(rhs).unwrap();
+    let expected_contract = lhs.contract(cpu, rhs, &spec).unwrap();
+    let expected_compose = lhs.compose(cpu, rhs).unwrap();
     let provider = lhs.provider() as *const R;
     let runtime = lhs.runtime().identity();
 
     for (lhs_adjoint, rhs_adjoint) in [(false, false), (true, false), (false, true), (true, true)] {
-        let device_operand = |logical: &TensorMap<R, f64>, adjoint: bool| {
+        let mut device_operand = |logical: &TensorMap<R, f64>, adjoint: bool| {
             if adjoint {
                 eager_adjoint_oracle(logical)
-                    .to_cuda()
+                    .to_cuda(cuda)
                     .unwrap()
-                    .adjoint()
+                    .adjoint(cuda)
                     .unwrap()
             } else {
-                logical.to_cuda().unwrap()
+                logical.to_cuda(cuda).unwrap()
             }
         };
         let lhs_device = device_operand(lhs, lhs_adjoint);
         let rhs_device = device_operand(rhs, rhs_adjoint);
         let contract = lhs_device
-            .contract(&rhs_device, &spec)
+            .contract(cuda, &rhs_device, &spec)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
-        let compose = lhs_device.compose(&rhs_device).unwrap().to_host().unwrap();
+        let compose = lhs_device
+            .compose(cuda, &rhs_device)
+            .unwrap()
+            .to_host(cuda)
+            .unwrap();
 
         assert_cuda_tensor_matches_host(&contract, &expected_contract, provider, &runtime);
         assert_cuda_tensor_matches_host(&compose, &expected_compose, provider, &runtime);
@@ -111,41 +118,29 @@ where
 
 #[cfg(feature = "cuda")]
 #[test]
-fn typed_cuda_owned_metadata_validation_orders_ordinal_before_length() {
+fn typed_cuda_owned_length_validation_names_the_payload_length() {
     type DeviceTensor = TensorMap<U1FusionRule, f64, CudaStorage>;
-    assert!(DeviceTensor::validate_cuda_owned_metadata(
-        Placement::Cuda(0),
-        Placement::Cuda(0),
-        7,
-        7
-    )
-    .is_ok());
-    assert_eq!(
-        DeviceTensor::validate_cuda_owned_metadata(Placement::Cuda(1), Placement::Cuda(0), 7, 6)
-            .unwrap_err(),
-        Error::PlacementMismatch
-    );
+    assert!(DeviceTensor::validate_cuda_owned_len(7, 7).is_ok());
     assert!(matches!(
-        DeviceTensor::validate_cuda_owned_metadata(
-            Placement::Cuda(0),
-            Placement::Cuda(0),
-            7,
-            6
-        ),
+        DeviceTensor::validate_cuda_owned_len(7, 6),
         Err(Error::InvalidArgument(message)) if message.contains("payload length")
     ));
 }
 
 #[cfg(feature = "cuda")]
 #[test]
-fn missing_cuda_context_precedes_compact_expansion_and_lazy_materialization() {
+fn a_cpu_engine_upload_is_refused_before_compact_expansion_and_lazy_materialization() {
+    // What: `to_cuda` needs the caller's CUDA engine. A CPU engine is a typed
+    // refusal before the compact factor is expanded or the lazy adjoint
+    // materialized, so even a malformed compact payload is never read.
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let densified = probe::record();
-    let source = u1_lazy_fixture();
+    let source = u1_lazy_fixture(cpu);
     let diagonal = source
-        .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+        .svd_compact(cpu, &codomain_axes(&source), &domain_axes(&source))
         .unwrap()
         .s;
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(cpu).unwrap();
     let TypedData::Diagonal(spectrum) = owned(&diagonal).data.as_ref() else {
         unreachable!("SVD factor is compact")
     };
@@ -171,13 +166,14 @@ fn missing_cuda_context_precedes_compact_expansion_and_lazy_materialization() {
             malformed_spectrum,
         )),
     };
-    let missing_context = Error::InvalidArgument(
-        "this runtime was built without a CUDA device; use Runtime::builder().cuda(device)"
-            .to_string(),
-    );
-
-    assert_eq!(malformed.to_cuda().unwrap_err(), missing_context);
-    assert!(matches!(lazy.to_cuda(), Err(error) if error == missing_context));
+    let refused = |error: Error| {
+        assert!(
+            error_chain(&error).contains("CUDA engine"),
+            "a CPU engine is refused as such: {error}"
+        );
+    };
+    refused(malformed.to_cuda(cpu).unwrap_err());
+    refused(lazy.to_cuda(cpu).unwrap_err());
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
@@ -185,8 +181,11 @@ fn missing_cuda_context_precedes_compact_expansion_and_lazy_materialization() {
 #[test]
 #[ignore]
 fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let densified = probe::record();
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -194,13 +193,13 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     )
     .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
 
     let diagonal = source
-        .svd_compact(&codomain_axes(&source), &domain_axes(&source))
+        .svd_compact(cpu, &codomain_axes(&source), &domain_axes(&source))
         .unwrap()
         .s;
     let TypedData::Diagonal(spectrum) = owned(&diagonal).data.as_ref() else {
@@ -212,10 +211,10 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
         &|value| value,
     )
     .unwrap();
-    let diagonal_device = diagonal.to_cuda().unwrap();
+    let diagonal_device = diagonal.to_cuda(cuda).unwrap();
     assert_eq!(diagonal_device.placement(), Placement::Cuda(0));
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    let diagonal_host = diagonal_device.to_host().unwrap();
+    let diagonal_host = diagonal_device.to_host(cuda).unwrap();
     assert!(matches!(
         owned(&diagonal_host).data.as_ref(),
         TypedData::Dense(_)
@@ -223,21 +222,22 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     assert_eq!(diagonal_host.dense_data().unwrap(), expected_diagonal);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(cpu).unwrap();
     let expected_lazy = symtn_tensors::materialize_adjoint_data_dyn(
         source.logical_space().space(),
         lazy.logical_space().space(),
         source.dense_data().unwrap(),
     )
     .unwrap();
-    let lazy_device = lazy.to_cuda().unwrap();
+    let lazy_device = lazy.to_cuda(cuda).unwrap();
     let TypedTensorRepr::Adjoint(device_view) = &lazy_device.repr else {
         unreachable!("transfer preserves the lazy view")
     };
-    let expected_norm = source.norm(2.0).unwrap();
+    let expected_norm = source.norm(cpu, 2.0).unwrap();
     let recording = probe::record();
     assert!(
-        (lazy_device.norm(2.0).unwrap() - expected_norm).abs() <= 1e-12 * (1.0 + expected_norm)
+        (lazy_device.norm(cuda, 2.0).unwrap() - expected_norm).abs()
+            <= 1e-12 * (1.0 + expected_norm)
     );
     let observed = reduction(&recording);
     let sector_count = sector_regions(
@@ -250,16 +250,23 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     assert!(source.dense_data().unwrap().len() > sector_count.max(1));
 
     // `$arithmetic` is `(zero uploads, kernels)`. The thread's transfer
-    // counters pin that the output's zero initialization is the only upload:
-    // no coefficient is uploaded (#2187) and nothing is downloaded.
+    // counters pin that the output's zero initialization and, when a kernel
+    // runs, the call's one-element `1` operand are the only uploads: no
+    // coefficient is uploaded (#2187) and nothing is downloaded. The `1` is
+    // per call because an eager operation's CUDA context is (it was once per
+    // Runtime); the output upload is the eager owned-output cost.
     macro_rules! observed_arithmetic {
         ($expression:expr, $arithmetic:expr, $reduction:expr) => {{
             let recording = probe::record();
             let before = symtn_dense::cuda_transfer_stats();
             let result = $expression;
             let after = symtn_dense::cuda_transfer_stats();
-            let (zero_uploads, _): (usize, usize) = $arithmetic;
-            assert_eq!(after.h2d_calls - before.h2d_calls, zero_uploads as u64);
+            let (zero_uploads, kernels): (usize, usize) = $arithmetic;
+            let one = u64::from(kernels > 0);
+            assert_eq!(
+                after.h2d_calls - before.h2d_calls,
+                zero_uploads as u64 + one
+            );
             assert_eq!(after.d2h_calls, before.d2h_calls);
             assert_eq!(arithmetic(&recording), $arithmetic);
             assert_eq!(reduction(&recording), $reduction);
@@ -267,10 +274,10 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
         }};
     }
 
-    let source_device = source.to_cuda().unwrap();
+    let source_device = source.to_cuda(cuda).unwrap();
     let empty_storage = {
-        let lease = runtime.lease_cuda().unwrap();
-        CudaStorage::<f64>::upload(&lease, &[]).unwrap()
+        let call = crate::runtime::cuda_call(cuda).unwrap();
+        CudaStorage::<f64>::upload(&call, &[]).unwrap()
     };
     let malformed_length = TensorMap {
         runtime: runtime.clone(),
@@ -281,42 +288,39 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     };
     let recording = probe::record();
     assert!(matches!(
-        malformed_length.scale(2.0),
+        malformed_length.scale(cuda, 2.0),
         Err(Error::InvalidArgument(message)) if message.contains("payload length")
     ));
     assert_eq!(arithmetic(&recording), (0, 0));
 
     // One `combine` body for every representation (#2187): one zero upload,
     // then one strided read per stored block of each nonzero-coefficient
-    // operand, an owned operand being one packed block. The first call
-    // uploads the context's shared `1` once per dtype; warm it outside the
-    // windows.
+    // operand, an owned operand being one packed block.
     let owned_reads = 1;
-    source_device.scale(1.5).unwrap();
-    observed_arithmetic!(source_device.scale(-2.0), (1, owned_reads), (0, 0, 0)).unwrap();
+    observed_arithmetic!(source_device.scale(cuda, -2.0), (1, owned_reads), (0, 0, 0)).unwrap();
     observed_arithmetic!(
-        source_device.axpby(2.0, &source_device, -3.0),
+        source_device.axpby(cuda, 2.0, &source_device, -3.0),
         (1, 2 * owned_reads),
         (0, 0, 0)
     )
     .unwrap();
     observed_arithmetic!(
-        source_device.axpby(0.0, &source_device, -3.0),
+        source_device.axpby(cuda, 0.0, &source_device, -3.0),
         (1, owned_reads),
         (0, 0, 0)
     )
     .unwrap();
-    observed_arithmetic!(source_device.zeros_like(), (1, 0), (0, 0, 0)).unwrap();
+    observed_arithmetic!(source_device.zeros_like(cuda), (1, 0), (0, 0, 0)).unwrap();
 
     let lazy_scale =
-        observed_arithmetic!(lazy_device.scale(-2.0), (1, owned_reads), (0, 0, 0)).unwrap();
+        observed_arithmetic!(lazy_device.scale(cuda, -2.0), (1, owned_reads), (0, 0, 0)).unwrap();
     let lazy_add = observed_arithmetic!(
-        lazy_device.axpby(2.0, &lazy_device, -3.0),
+        lazy_device.axpby(cuda, 2.0, &lazy_device, -3.0),
         (1, 2 * owned_reads),
         (0, 0, 0)
     )
     .unwrap();
-    let lazy_zero = observed_arithmetic!(lazy_device.zeros_like(), (1, 0), (0, 0, 0)).unwrap();
+    let lazy_zero = observed_arithmetic!(lazy_device.zeros_like(cuda), (1, 0), (0, 0, 0)).unwrap();
     for result in [&lazy_scale, &lazy_add, &lazy_zero] {
         assert!(matches!(result.repr, TypedTensorRepr::Adjoint(_)));
     }
@@ -328,15 +332,15 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
         .structure()
         .block_count();
     let mixed = observed_arithmetic!(
-        lazy_device.axpby(2.0, &source_device, -3.0),
+        lazy_device.axpby(cuda, 2.0, &source_device, -3.0),
         (1, blocks + owned_reads),
         (0, 0, 0)
     )
     .unwrap();
     assert!(matches!(mixed.repr, TypedTensorRepr::Owned(_)));
-    let expected_mixed = lazy.axpby(2.0, &source, -3.0).unwrap();
+    let expected_mixed = lazy.axpby(cpu, 2.0, &source, -3.0).unwrap();
     for (device, host) in mixed
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -345,38 +349,44 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     {
         assert!((device - host).abs() <= 1e-12 * (1.0 + host.abs()));
     }
-    // A warm lazy-source `axpby_into` (#1874) reads the parent in place:
-    // no transfer in either direction and no device allocation.
+    // A warm lazy-source `axpby_into` (#1874) reads the parent in place: no
+    // download and no payload upload. An eager `*_into` has no workspace to
+    // keep its call's one-element `1` operand in, so that one element is
+    // uploaded (and allocated) per call.
     let mut destination = mixed;
-    lazy_device.axpby_into(&mut destination, 2.0, 0.0).unwrap();
+    lazy_device
+        .axpby_into(cuda, &mut destination, 2.0, 0.0)
+        .unwrap();
     let before = symtn_dense::cuda_transfer_stats();
-    lazy_device.axpby_into(&mut destination, -1.5, 0.5).unwrap();
+    lazy_device
+        .axpby_into(cuda, &mut destination, -1.5, 0.5)
+        .unwrap();
     let after = symtn_dense::cuda_transfer_stats();
-    assert_eq!(after.h2d_calls, before.h2d_calls);
+    assert_eq!(after.h2d_calls - before.h2d_calls, 1);
+    assert_eq!(after.h2d_bytes - before.h2d_bytes, 8);
     assert_eq!(after.d2h_calls, before.d2h_calls);
-    assert_eq!(after.device_allocs, before.device_allocs);
+    assert_eq!(after.device_allocs - before.device_allocs, 1);
 
     assert!(matches!(
-        lazy_device.inner(&lazy_device),
+        lazy_device.inner(cuda, &lazy_device),
         Err(Error::UnsupportedOnDevice(_))
     ));
     assert!(matches!(
-        lazy_device.inner(&lazy_device),
+        lazy_device.inner(cuda, &lazy_device),
         Err(Error::UnsupportedOnDevice(_))
     ));
 
-    let mut missing_context = lazy_device.clone();
-    missing_context.runtime = Runtime::builder().build().unwrap();
+    // A CPU engine on device storage is refused before any device work.
     let recording = probe::record();
     assert!(matches!(
-        missing_context.norm(2.0),
-        Err(Error::InvalidArgument(message)) if message.contains("without a CUDA device")
+        lazy_device.norm(cpu, 2.0),
+        Err(error) if error_chain(&error).contains("CUDA engine")
     ));
     assert_eq!(reduction(&recording), (0, 0, 0));
     let recording = probe::record();
     assert!(matches!(
-        missing_context.zeros_like(),
-        Err(Error::InvalidArgument(message)) if message.contains("without a CUDA device")
+        lazy_device.zeros_like(cpu),
+        Err(error) if error_chain(&error).contains("CUDA engine")
     ));
     assert_eq!(arithmetic(&recording), (0, 0));
     let device_clone = lazy_device.clone();
@@ -385,12 +395,12 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     };
     assert!(Arc::ptr_eq(device_view, clone_view));
 
-    let lazy_host = device_clone.to_host().unwrap();
+    let lazy_host = device_clone.to_host(cuda).unwrap();
     let TypedTensorRepr::Adjoint(_) = &lazy_host.repr else {
         unreachable!("roundtrip preserves the lazy view")
     };
     assert_eq!(
-        lazy_host.materialize().unwrap().dense_data().unwrap(),
+        lazy_host.materialize(cpu).unwrap().dense_data().unwrap(),
         expected_lazy
     );
 }
@@ -403,7 +413,10 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
@@ -411,12 +424,12 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
     )
     .unwrap();
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
             let ramp = indices.iter().sum::<usize>() as f64;
             Complex64::new(ramp + 1.0, -(ramp + 1.75))
         })
@@ -428,16 +441,19 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
         (arithmetic(&recording), reduction(&recording))
     }
 
-    let real_device = real.to_cuda().unwrap();
-    let complex_device = complex.to_cuda().unwrap();
+    let real_device = real.to_cuda(cuda).unwrap();
+    let complex_device = complex.to_cuda(cuda).unwrap();
     assert_eq!(
-        observe(|| real_device.scale(-2.0).unwrap()),
-        observe(|| complex_device.scale(Complex64::new(-2.0, 0.5)).unwrap())
+        observe(|| real_device.scale(cuda, -2.0).unwrap()),
+        observe(|| complex_device
+            .scale(cuda, Complex64::new(-2.0, 0.5))
+            .unwrap())
     );
     assert_eq!(
-        observe(|| real_device.axpby(2.0, &real_device, -3.0).unwrap()),
+        observe(|| real_device.axpby(cuda, 2.0, &real_device, -3.0).unwrap()),
         observe(|| complex_device
             .axpby(
+                cuda,
                 Complex64::new(2.0, 1.0),
                 &complex_device,
                 Complex64::new(-3.0, 0.25)
@@ -445,12 +461,12 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
             .unwrap())
     );
     assert_eq!(
-        observe(|| real_device.zeros_like().unwrap()),
-        observe(|| complex_device.zeros_like().unwrap())
+        observe(|| real_device.zeros_like(cuda).unwrap()),
+        observe(|| complex_device.zeros_like(cuda).unwrap())
     );
     assert_eq!(
-        observe(|| real_device.inner(&real_device).unwrap()),
-        observe(|| complex_device.inner(&complex_device).unwrap())
+        observe(|| real_device.inner(cuda, &real_device).unwrap()),
+        observe(|| complex_device.inner(cuda, &complex_device).unwrap())
     );
     // Contraction allocates its destination and runs its kernels inside
     // the replay seam, which has no arithmetic/reduction hooks: both
@@ -460,6 +476,7 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
     assert_eq!(
         observe(|| real_device
             .contract(
+                cuda,
                 &real_device,
                 &ContractSpec {
                     lhs: &[1],
@@ -474,6 +491,7 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
     assert_eq!(
         observe(|| complex_device
             .contract(
+                cuda,
                 &complex_device,
                 &ContractSpec {
                     lhs: &[1],
@@ -489,44 +507,28 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
 
 #[cfg(feature = "cuda")]
 #[test]
-fn typed_cuda_reduction_placement_validation_is_exact() {
-    assert!(validate_cuda_reduction_placement(
-        Placement::Cuda(0),
-        Placement::Cuda(0),
-        Placement::Cuda(0)
-    )
-    .is_ok());
-    assert_eq!(
-        validate_cuda_reduction_placement(
-            Placement::Cuda(1),
-            Placement::Cuda(0),
-            Placement::Cuda(0)
-        )
-        .unwrap_err(),
-        Error::PlacementMismatch
-    );
-}
-
-#[cfg(feature = "cuda")]
-#[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = |degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
     };
     let (m, k, n) = (2, 3, 4);
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&leg(m)], [&leg(k)], |_, indices| {
+    let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg(m)], [&leg(k)], |_, indices| {
         (indices[0] + m * indices[1]) as f64 + 1.0
     })
     .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&leg(k)], [&leg(n)], |_, indices| {
+    let rhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg(k)], [&leg(n)], |_, indices| {
         (2 * indices[0] + indices[1]) as f64 + 1.0
     })
     .unwrap();
     let expected_contract = lhs
         .contract(
+            cpu,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -536,27 +538,28 @@ fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles()
             },
         )
         .unwrap();
-    let expected_compose = lhs.compose(&rhs).unwrap();
+    let expected_compose = lhs.compose(cpu, &rhs).unwrap();
 
     for upload_parent_first in [false, true] {
         for (lhs_adjoint, rhs_adjoint) in
             [(false, false), (true, false), (false, true), (true, true)]
         {
-            let device_operand = |logical: &TensorMap<U1FusionRule, f64>, adjoint: bool| {
+            let mut device_operand = |logical: &TensorMap<U1FusionRule, f64>, adjoint: bool| {
                 if !adjoint {
-                    return logical.to_cuda().unwrap();
+                    return logical.to_cuda(cuda).unwrap();
                 }
                 let parent = eager_adjoint_oracle(logical);
                 if upload_parent_first {
-                    parent.to_cuda().unwrap().adjoint().unwrap()
+                    parent.to_cuda(cuda).unwrap().adjoint(cuda).unwrap()
                 } else {
-                    parent.adjoint().unwrap().to_cuda().unwrap()
+                    parent.adjoint(&mut *cpu).unwrap().to_cuda(cuda).unwrap()
                 }
             };
             let lhs_device = device_operand(&lhs, lhs_adjoint);
             let rhs_device = device_operand(&rhs, rhs_adjoint);
             let contracted = lhs_device
                 .contract(
+                    cuda,
                     &rhs_device,
                     &ContractSpec {
                         lhs: &[1],
@@ -566,9 +569,9 @@ fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles()
                     },
                 )
                 .unwrap();
-            let composed = lhs_device.compose(&rhs_device).unwrap();
-            let contracted = contracted.to_host().unwrap();
-            let composed = composed.to_host().unwrap();
+            let composed = lhs_device.compose(cuda, &rhs_device).unwrap();
+            let contracted = contracted.to_host(cuda).unwrap();
+            let composed = composed.to_host(cuda).unwrap();
 
             assert_eq!(
                 contracted.logical_space().space(),
@@ -598,34 +601,39 @@ fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles()
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(FermionParityFusionRule);
     let odd = |is_dual| {
         GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)])
             .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
             .unwrap()
     };
-    let lhs =
-        TensorMap::from_subblock_fn(&runtime, [&odd(false)], [&odd(true)], |_, _| 2.0).unwrap();
-    let rhs =
-        TensorMap::from_subblock_fn(&runtime, [&odd(true)], [&odd(false)], |_, _| 3.0).unwrap();
+    let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&odd(false)], [&odd(true)], |_, _| 2.0)
+        .unwrap();
+    let rhs = TensorMap::from_subblock_fn(cpu, &runtime, [&odd(true)], [&odd(false)], |_, _| 3.0)
+        .unwrap();
 
     for (lhs_adjoint, rhs_adjoint) in [(false, false), (true, false), (false, true), (true, true)] {
-        let device_operand = |logical: &TensorMap<FermionParityFusionRule, f64>, adjoint: bool| {
+        let mut device_operand = |logical: &TensorMap<FermionParityFusionRule, f64>,
+                                  adjoint: bool| {
             if adjoint {
                 eager_adjoint_oracle(logical)
-                    .to_cuda()
+                    .to_cuda(cuda)
                     .unwrap()
-                    .adjoint()
+                    .adjoint(cuda)
                     .unwrap()
             } else {
-                logical.to_cuda().unwrap()
+                logical.to_cuda(cuda).unwrap()
             }
         };
         let lhs_device = device_operand(&lhs, lhs_adjoint);
         let rhs_device = device_operand(&rhs, rhs_adjoint);
         let contract = lhs_device
             .contract(
+                cuda,
                 &rhs_device,
                 &ContractSpec {
                     lhs: &[1],
@@ -635,9 +643,13 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
                 },
             )
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap();
-        let compose = lhs_device.compose(&rhs_device).unwrap().to_host().unwrap();
+        let compose = lhs_device
+            .compose(cuda, &rhs_device)
+            .unwrap()
+            .to_host(cuda)
+            .unwrap();
 
         assert_eq!(contract.dense_data().unwrap(), &[-6.0]);
         assert_eq!(compose.dense_data().unwrap(), &[6.0]);
@@ -648,7 +660,8 @@ fn typed_cuda_lazy_adjoint_preserves_fermionic_contract_sign() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
 
     let su2_provider = Arc::new(SU2FusionRule);
     let su2 = GradedSpace::try_new(
@@ -659,16 +672,22 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
         ],
     )
     .unwrap();
-    let su2_lhs =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2, &su2], [&su2, &su2], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
-    let su2_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2, &su2, &su2], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 3.0
-        })
-        .unwrap();
+    let su2_lhs = TensorMap::from_subblock_fn(
+        cpu,
+        &runtime,
+        [&su2, &su2, &su2],
+        [&su2, &su2],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
+    let su2_rhs = TensorMap::from_subblock_fn(
+        cpu,
+        &runtime,
+        [&su2, &su2],
+        [&su2, &su2, &su2],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 3.0,
+    )
+    .unwrap();
     assert_cuda_lazy_contract_orientations(&su2_lhs, &su2_rhs);
 
     let product_provider = Arc::new(
@@ -683,143 +702,63 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
     )
     .unwrap();
     let product_lhs =
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&product], [&product], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
     let product_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&product], [&product], |_, indices| {
+        TensorMap::from_subblock_fn(cpu, &runtime, [&product], [&product], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 4.0
         })
         .unwrap();
     assert_cuda_lazy_contract_orientations(&product_lhs, &product_rhs);
 }
 
-/// GL-3 (#1281): a device operation must not need the coarse Runtime
-/// state mutex. The reverse direction is the observable one: Host
-/// standalone contraction never takes `state`, so only a parked holder of
-/// that lock can prove a device operation is independent of it.
+/// A device operation runs only on the caller's CUDA engine and a Host
+/// operation only on its CPU engine: either given the other kind is a typed
+/// refusal, and a refused `*_into` leaves its destination untouched.
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn device_work_completes_while_another_thread_holds_the_runtime_state_lock() {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::mpsc;
-    use std::sync::Barrier;
-    use std::time::Duration;
-
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-    let provider = Arc::new(U1FusionRule);
+fn device_and_host_operations_refuse_the_other_engine_kind() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
-        Arc::clone(&provider),
+        Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
     )
     .unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        indices[0] as f64 + 1.0
-    })
-    .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        indices[1] as f64 + 2.0
-    })
-    .unwrap();
+    let host = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&leg], [&leg], 3).unwrap();
+    let device = host.to_cuda(cuda).unwrap();
+    let mut destination = host.scale(cpu, 2.0).unwrap().to_cuda(cuda).unwrap();
+    let before = destination.to_host(cuda).unwrap();
 
-    // Independent oracle for the device result, computed on Host before
-    // the state lock is parked.
-    let host_expected = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-        indices[0] as f64 + 1.0
-    })
-    .unwrap()
-    .contract(
-        &TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
-            indices[1] as f64 + 2.0
-        })
-        .unwrap(),
-        &ContractSpec {
-            lhs: &[1],
-            rhs: &[0],
-            codomain: &[0],
-            domain: &[1],
-        },
-    )
-    .unwrap();
-
-    let holding = Arc::new(Barrier::new(2));
-    let release = Arc::new(AtomicBool::new(false));
-    let (sender, receiver) = mpsc::channel();
-
-    let values = std::thread::scope(|scope| {
-        let holder_runtime = runtime.clone();
-        let holder_barrier = Arc::clone(&holding);
-        let holder_release = Arc::clone(&release);
-        scope.spawn(move || {
-            let _state = holder_runtime.lock();
-            holder_barrier.wait();
-            while !holder_release.load(Ordering::SeqCst) {
-                std::thread::yield_now();
-            }
-        });
-
-        holding.wait();
-        scope.spawn(move || {
-            let device = lhs
-                .to_cuda()
-                .and_then(|lhs| Ok((lhs, rhs.to_cuda()?)))
-                .and_then(|(lhs, rhs)| {
-                    lhs.contract(
-                        &rhs,
-                        &ContractSpec {
-                            lhs: &[1],
-                            rhs: &[0],
-                            codomain: &[0],
-                            domain: &[1],
-                        },
-                    )
-                })
-                .and_then(|out| out.to_host());
-            let _ = sender.send(device.map(|out| out.dense_data().unwrap().to_vec()));
-        });
-
-        let outcome = receiver.recv_timeout(Duration::from_secs(30));
-        release.store(true, Ordering::SeqCst);
-        outcome
-            .expect("device transfer and contraction blocked on the Runtime state lock")
-            .expect("device contraction failed")
-    });
-
-    // The device result under the parked state lock is the Host result.
-    assert_eq!(values.len(), host_expected.dense_data().unwrap().len());
-    assert!(values.iter().any(|value| *value != 0.0));
-    for (actual, expected) in values.iter().zip(host_expected.dense_data().unwrap()) {
-        assert!(
-            (actual - expected).abs() < 1.0e-12,
-            "device value {actual} differs from the Host oracle {expected}"
-        );
+    let transfers = symtn_dense::cuda_transfer_stats();
+    for error in [
+        device.norm(cpu, 2.0).map(|_| ()).unwrap_err(),
+        device.scale(cpu, 2.0).map(|_| ()).unwrap_err(),
+        device
+            .axpby_into(cpu, &mut destination, 1.0, 0.5)
+            .unwrap_err(),
+    ] {
+        assert!(error_chain(&error).contains("CUDA engine"), "{error}");
     }
-}
+    assert_eq!(symtn_dense::cuda_transfer_stats(), transfers);
+    assert_eq!(
+        destination.to_host(cuda).unwrap().dense_data().unwrap(),
+        before.dense_data().unwrap()
+    );
 
-/// GL-3 (#1281): the device lock nests with the CPU leases in either
-/// order without deadlocking, because it is a separate mutex.
-#[cfg(feature = "cuda")]
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn device_lease_nests_with_cpu_leases_in_both_orders() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-
-    {
-        let cuda = runtime.lease_cuda().unwrap();
-        let context = runtime.lease_context().unwrap();
-        let dense = runtime.lease_dense();
-        drop(dense);
-        // A CPU lease released under the device guard must not deadlock.
-        drop(context);
-        drop(cuda);
-    }
-
-    let context = runtime.lease_context().unwrap();
-    let cuda = runtime.lease_cuda().unwrap();
-    drop(context);
-    drop(cuda);
+    let spec = ContractSpec {
+        lhs: &[1],
+        rhs: &[0],
+        codomain: &[0],
+        domain: &[1],
+    };
+    let error = host.contract(cuda, &host, &spec).unwrap_err();
+    assert!(error_chain(&error).contains("CPU engine"), "{error}");
 }
 
 /// GL-3 (#1281): device lowering touches no execution context, so a
@@ -828,35 +767,39 @@ fn device_lease_nests_with_cpu_leases_in_both_orders() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_contraction_leaves_the_tree_transform_cache_unchanged() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_DEVICE_CONTRACTION_CACHE_ISOLATED",
         "typed::representation_gates::cuda::device_contraction_leaves_the_tree_transform_cache_unchanged",
     ) {
         return;
     }
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
     )
     .unwrap();
-    let lhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
         indices[0] as f64 + 1.0
     })
     .unwrap()
-    .to_cuda()
+    .to_cuda(cuda)
     .unwrap();
-    let rhs = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let rhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
         indices[1] as f64 + 2.0
     })
     .unwrap()
-    .to_cuda()
+    .to_cuda(cuda)
     .unwrap();
 
     let before = crate::test_cache::completed();
     let product = lhs
         .contract(
+            cuda,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -870,17 +813,19 @@ fn device_contraction_leaves_the_tree_transform_cache_unchanged() {
     assert_eq!(crate::test_cache::completed(), before);
 }
 
-/// A destination whose device is not the Runtime's is rejected before any
-/// device work, its bytes untouched (#1551). The public API cannot build
-/// one — a tensor's storage lives on its own Runtime's device, and the
-/// Runtime check comes first — so this in-crate gate forges it from a
-/// second device's tensor.
+/// A destination owned by another CUDA engine — here a second engine on the
+/// same device, which is a different allocation domain — is rejected before
+/// any device work, its bytes untouched (#1551).
 #[cfg(feature = "cuda")]
 #[test]
-#[ignore = "requires two real CUDA devices"]
-fn typed_cuda_into_rejects_a_foreign_device_destination_untouched() {
-    let rt0 = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
-    let rt1 = Runtime::builder().cuda(1).dense_threads(1).build().unwrap();
+#[ignore = "requires a real CUDA device"]
+fn typed_cuda_into_rejects_another_engines_destination_untouched() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let cuda =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let other =
+        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -891,84 +836,86 @@ fn typed_cuda_into_rejects_a_foreign_device_destination_untouched() {
     )
     .unwrap();
     let w = v.try_dual().unwrap();
-    let host_t = TensorMap::<_, f64>::rand_with_seed(&rt0, [&v, &w], [&v, &w], 1).unwrap();
-    let host_rhs = TensorMap::<_, f64>::rand_with_seed(&rt0, [&v, &w], [&v], 2).unwrap();
-    let (t, rhs) = (host_t.to_cuda().unwrap(), host_rhs.to_cuda().unwrap());
+    let host_t = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &w], [&v, &w], 1).unwrap();
+    let host_rhs = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &w], [&v], 2).unwrap();
+    let (t, rhs) = (
+        host_t.to_cuda(cuda).unwrap(),
+        host_rhs.to_cuda(cuda).unwrap(),
+    );
     let spec = ContractSpec {
         lhs: &[2, 3],
         rhs: &[0, 1],
         codomain: &[2, 0],
         domain: &[1],
     };
-    let foreign = |like: TensorMap<U1FusionRule, f64>| {
-        let (codomain, domain) = (like.codomain(), like.domain());
-        let mut next = 0u64;
-        let mut device = TensorMap::<_, f64>::from_subblock_fn(&rt1, &codomain, &domain, |_, _| {
-            next += 1;
-            std::f64::consts::PI * next as f64
-        })
-        .unwrap()
-        .to_cuda()
-        .unwrap();
-        let before: Vec<u64> = device
-            .to_host()
-            .unwrap()
-            .dense_data()
-            .unwrap()
-            .iter()
-            .map(|x| x.to_bits())
-            .collect();
-        device.runtime = rt0.clone();
-        (device, before)
-    };
+    let oracle = &mut crate::typed::CpuEngine::serial();
     type Device = TensorMap<U1FusionRule, f64, CudaStorage<f64>>;
-    let check = |what: &str,
-                 (mut device, before): (Device, Vec<u64>),
-                 call: &dyn Fn(&mut Device) -> Result<(), Error>| {
-        assert_eq!(call(&mut device), Err(Error::PlacementMismatch), "{what}");
-        device.runtime = rt1.clone();
-        let after: Vec<u64> = device
-            .to_host()
+    let bits = |other: &mut crate::typed::CudaEngine, device: &Device| -> Vec<u64> {
+        device
+            .to_host(other)
             .unwrap()
             .dense_data()
             .unwrap()
             .iter()
             .map(|x| x.to_bits())
-            .collect();
-        assert_eq!(after, before, "{what}: destination changed");
+            .collect()
     };
+    let mut check =
+        |what: &str,
+         like: TensorMap<U1FusionRule, f64>,
+         call: &dyn Fn(&mut dyn Engine, &mut Device) -> Result<(), Error>| {
+            let mut next = 0u64;
+            let mut device = TensorMap::<_, f64>::from_subblock_fn(
+                &mut *cpu,
+                &runtime,
+                &like.codomain(),
+                &like.domain(),
+                |_, _| {
+                    next += 1;
+                    std::f64::consts::PI * next as f64
+                },
+            )
+            .unwrap()
+            .to_cuda(&mut *other)
+            .unwrap();
+            let before = bits(other, &device);
+            assert!(call(&mut *cuda, &mut device).is_err(), "{what}");
+            assert_eq!(bits(other, &device), before, "{what}: destination changed");
+        };
     check(
         "permute_into",
-        foreign(host_t.permute(&[2, 0], &[1, 3]).unwrap()),
-        &|d| t.permute_into(&[2, 0], &[1, 3], d, 1.0, 0.5),
+        host_t.permute(oracle, &[2, 0], &[1, 3]).unwrap(),
+        &|e, d| t.permute_into(e, &[2, 0], &[1, 3], d, 1.0, 0.5),
     );
     check(
         "braid_into",
-        foreign(host_t.braid(&[1, 0], &[3, 2], &[0, 1, 2, 3]).unwrap()),
-        &|d| t.braid_into(&[1, 0], &[3, 2], &[0, 1, 2, 3], d, 1.0, 0.5),
+        host_t
+            .braid(oracle, &[1, 0], &[3, 2], &[0, 1, 2, 3])
+            .unwrap(),
+        &|e, d| t.braid_into(e, &[1, 0], &[3, 2], &[0, 1, 2, 3], d, 1.0, 0.5),
     );
     check(
         "transpose_into",
-        foreign(host_t.transpose(&[1, 3], &[0, 2]).unwrap()),
-        &|d| t.transpose_into(&[1, 3], &[0, 2], d, 1.0, 0.5),
+        host_t.transpose(oracle, &[1, 3], &[0, 2]).unwrap(),
+        &|e, d| t.transpose_into(e, &[1, 3], &[0, 2], d, 1.0, 0.5),
     );
     check(
         "repartition_into",
-        foreign(host_t.repartition(1).unwrap()),
-        &|d| t.repartition_into(d, 1.0, 0.5),
+        host_t.repartition(oracle, 1).unwrap(),
+        &|e, d| t.repartition_into(e, d, 1.0, 0.5),
     );
     check(
         "trace_pairs_into",
-        foreign(host_t.trace_pairs(&[(0, 2)]).unwrap()),
-        &|d| t.trace_pairs_into(&[(0, 2)], d, 1.0, 0.5),
+        host_t.trace_pairs(oracle, &[(0, 2)]).unwrap(),
+        &|e, d| t.trace_pairs_into(e, &[(0, 2)], d, 1.0, 0.5),
     );
     check(
         "contract_into",
-        foreign(host_t.contract(&host_rhs, &spec).unwrap()),
-        &|d| t.contract_into(&rhs, &spec, d, 1.0, 0.5),
+        host_t.contract(oracle, &host_rhs, &spec).unwrap(),
+        &|e, d| t.contract_into(e, &rhs, &spec, d, 1.0, 0.5),
     );
-    check("axpby_into", foreign(host_t.clone()), &|d| {
-        t.axpby_into(d, 1.0, 0.5)
+    check("axpby_into", host_t.clone(), &|e, d| {
+        t.axpby_into(e, d, 1.0, 0.5)
     });
 }
 
@@ -994,8 +941,9 @@ where
         + SectorCodec,
     D: CudaPayload + std::fmt::Debug,
 {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     let what = format!("{legs:?} {direction:?}");
-    let expected = t.twist(legs, direction).unwrap();
+    let expected = t.twist(cpu, legs, direction).unwrap();
     let (source, twisted, legs, inverse) = match (&t.repr, &expected.repr) {
         (TypedTensorRepr::Adjoint(view), TypedTensorRepr::Adjoint(result)) => (
             t.parent_of(view),
@@ -1087,6 +1035,7 @@ where
 #[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     fn fill<S>(_: &crate::typed::BlockFusionTrees<S>, ix: &[usize]) -> f64 {
         ix.iter().enumerate().fold(0.37, |value, (axis, &i)| {
             value * 1.7 + (i as f64 + 1.0) * (axis as f64 + 2.0)
@@ -1096,7 +1045,7 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
         let re = fill(trees, ix);
         Complex64::new(re, 0.25 - 0.5 * re)
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let directions = [Direction::Forward, Direction::Inverse];
 
     // fZ2 with a dual codomain leg: both sides, both dualities, repeated legs.
@@ -1107,9 +1056,10 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     .unwrap();
     let dual = fz2.try_dual().unwrap();
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &dual], [&fz2, &fz2], fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &dual], [&fz2, &fz2], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &dual], [&fz2, &fz2], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &dual], [&fz2, &fz2], complex_fill)
+            .unwrap();
     for legs in [
         &[0usize][..],
         &[1],
@@ -1125,11 +1075,16 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     }
 
     // A lazy adjoint input lowers onto its parent with the inverse direction.
-    let lazy =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&fz2, &dual], [&fz2], complex_fill)
-            .unwrap()
-            .adjoint()
-            .unwrap();
+    let lazy = TensorMap::<_, Complex64>::from_subblock_fn(
+        cpu,
+        &runtime,
+        [&fz2, &dual],
+        [&fz2],
+        complex_fill,
+    )
+    .unwrap()
+    .adjoint(cpu)
+    .unwrap();
     for legs in [&[0usize][..], &[1], &[2], &[0, 1]] {
         for direction in directions {
             assert!(assert_cuda_twist_lowering_matches_host(&lazy, legs, direction) > 0);
@@ -1150,7 +1105,7 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     )
     .unwrap();
     let t: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&fu1, &fu1], [&fu1, &fu1], fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fu1, &fu1], [&fu1, &fu1], fill).unwrap();
     for legs in [&[1usize][..], &[2], &[0, 2]] {
         for direction in directions {
             assert!(assert_cuda_twist_lowering_matches_host(&t, legs, direction) > 0);
@@ -1177,7 +1132,7 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     )
     .unwrap();
     let t: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&fsu2, &fsu2], [&fsu2, &fsu2], complex_fill)
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fsu2, &fsu2], [&fsu2, &fsu2], complex_fill)
             .unwrap();
     for legs in [&[0usize][..], &[3], &[1, 3]] {
         for direction in directions {
@@ -1195,8 +1150,8 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     )
     .unwrap();
     let t: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2], fill).unwrap();
-    let twisted = t.twist(&[0, 2], Direction::Forward).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], fill).unwrap();
+    let twisted = t.twist(cpu, &[0, 2], Direction::Forward).unwrap();
     assert!(Arc::ptr_eq(
         &t.owned_body().unwrap().data,
         &twisted.owned_body().unwrap().data
@@ -1250,7 +1205,8 @@ where
         + SectorCodec,
     D: CudaPayload + std::fmt::Debug,
 {
-    let lazy = t.adjoint().unwrap();
+    let cpu = &mut crate::typed::CpuEngine::serial();
+    let lazy = t.adjoint(cpu).unwrap();
     let TypedTensorRepr::Adjoint(view) = &lazy.repr else {
         panic!("dense adjoint is lazy");
     };
@@ -1373,13 +1329,14 @@ where
         symtn_tensors::materialize_adjoint_data_dyn(parent_space, &adjoint_space, parent).unwrap();
     assert_eq!(output, expected);
     if !zero_blocks {
-        assert_eq!(output, lazy.materialize().unwrap().dense_data().unwrap());
+        assert_eq!(output, lazy.materialize(cpu).unwrap().dense_data().unwrap());
     }
 }
 
 #[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
+    let cpu = &mut crate::typed::CpuEngine::serial();
     fn fill<S>(_: &crate::typed::BlockFusionTrees<S>, ix: &[usize]) -> f64 {
         ix.iter().enumerate().fold(0.37, |value, (axis, &i)| {
             value * 1.7 + (i as f64 + 1.0) * (axis as f64 + 2.0)
@@ -1389,7 +1346,7 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         let re = fill(trees, ix);
         Complex64::new(re, 0.25 - 0.5 * re)
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
 
     // U(1) `[V, V*] <- [V]`, with and without zero blocks.
     let u1 = GradedSpace::try_new(
@@ -1403,9 +1360,9 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     .unwrap();
     let u1_dual = u1.try_dual().unwrap();
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1], fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&u1, &u1_dual], [&u1], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1, &u1_dual], [&u1], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&u1, &u1_dual], [&u1], complex_fill).unwrap();
     for zero_blocks in [false, true] {
         assert_cuda_adjoint_lowering_matches_hand(&real, zero_blocks);
         assert_cuda_adjoint_lowering_matches_hand(&complex, zero_blocks);
@@ -1423,9 +1380,9 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     )
     .unwrap();
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2], fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
     for zero_blocks in [false, true] {
         assert_cuda_adjoint_lowering_matches_hand(&real, zero_blocks);
         assert_cuda_adjoint_lowering_matches_hand(&complex, zero_blocks);
@@ -1439,15 +1396,16 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     .unwrap();
     let fz2_dual = fz2.try_dual().unwrap();
     let complex: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &fz2_dual], [&fz2], complex_fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &fz2_dual], [&fz2], complex_fill)
+            .unwrap();
     assert_cuda_adjoint_lowering_matches_hand(&complex, false);
     let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&fz2, &fz2_dual], [&fz2], fill).unwrap();
+        TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &fz2_dual], [&fz2], fill).unwrap();
     assert_cuda_adjoint_lowering_matches_hand(&real, true);
 
     // A parent without the swapped pair: the map's `MissingBlockKey`, the
     // Host error, on the device lowering too (§4 L6).
-    let lazy = complex.adjoint().unwrap();
+    let lazy = complex.adjoint(cpu).unwrap();
     let TypedTensorRepr::Adjoint(view) = &lazy.repr else {
         panic!("dense adjoint is lazy");
     };

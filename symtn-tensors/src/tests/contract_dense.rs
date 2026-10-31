@@ -1,4 +1,5 @@
 use super::*;
+use symtn_dense::Engine;
 
 #[test]
 fn tensorcontract_block_spec_new_supports_complex_coefficients() {
@@ -396,20 +397,33 @@ struct MatmulOnlyDenseExecutor {
 }
 
 impl DenseExecutor for MatmulOnlyDenseExecutor {
-    fn svd(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn svd(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("rank-2 matmul boundary does not call svd")
     }
 
-    fn qr(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn qr(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("rank-2 matmul boundary does not call qr")
     }
 
-    fn eigh(&mut self, _input: DenseRead<'_>) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
+    fn eigh(
+        &mut self,
+        _engine: &mut dyn Engine,
+        _input: DenseRead<'_>,
+    ) -> Result<Vec<symtn_dense::DenseTensor>, DenseError> {
         unreachable!("rank-2 matmul boundary does not call eigh")
     }
 
     fn dot_general_into(
         &mut self,
+        _engine: &mut dyn Engine,
         _output: DenseWrite<'_>,
         _lhs: DenseRead<'_>,
         _rhs: DenseRead<'_>,
@@ -420,6 +434,7 @@ impl DenseExecutor for MatmulOnlyDenseExecutor {
 
     fn matmul_into(
         &mut self,
+        _engine: &mut dyn Engine,
         output: DenseWrite<'_>,
         lhs: DenseRead<'_>,
         rhs: DenseRead<'_>,
@@ -446,6 +461,7 @@ impl DenseExecutor for MatmulOnlyDenseExecutor {
 
 #[test]
 fn tensorcontract_backend_rank2_matmul_uses_matmul_boundary_not_descriptor_replay() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut backend = DenseTreeTransformOperations::new(MatmulOnlyDenseExecutor::default());
     let mut workspace = TensorContractWorkspace::<f64>::default();
     let lhs = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
@@ -455,7 +471,7 @@ fn tensorcontract_backend_rank2_matmul_uses_matmul_boundary_not_descriptor_repla
     <DenseTreeTransformOperations<MatmulOnlyDenseExecutor> as TensorContractBackend<
         f64,
         f64,
-    >>::matmul_rank2_into_raw(&mut backend, &mut workspace, &mut dst, &lhs, &rhs, 2, 3, 2)
+    >>::matmul_rank2_into_raw(&mut backend, engine, &mut workspace, &mut dst, &lhs, &rhs, 2, 3, 2)
     .unwrap();
 
     assert_eq!(backend.dense().matmul_into_calls, 1);
@@ -1023,6 +1039,7 @@ fn issue311_contract_specs() -> [TensorContractBlockSpec; 2] {
 
 #[test]
 fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
@@ -1042,6 +1059,7 @@ fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
         for _ in 0..2 {
             let mut dst = [10.0, -777.0, 20.0];
             crate::contract::tensorcontract_structure_with_dense_executor_raw(
+                engine,
                 &mut symtn_dense::DefaultDenseExecutor::new(),
                 &mut TensorContractWorkspace::default(),
                 &structure,
@@ -1063,6 +1081,7 @@ fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
 
 #[test]
 fn inactive_scaling_waits_for_complete_raw_replay_validation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
@@ -1078,6 +1097,7 @@ fn inactive_scaling_waits_for_complete_raw_replay_validation() {
     let mut dst = [10.0, -777.0, 20.0];
 
     let error = crate::contract::tensorcontract_structure_with_dense_executor_raw(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &mut TensorContractWorkspace::default(),
         &structure,
@@ -1104,6 +1124,7 @@ fn inactive_scaling_waits_for_complete_raw_replay_validation() {
 
 #[test]
 fn complex_structure_scales_inactive_destination_without_norm_projection() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
@@ -1138,6 +1159,7 @@ fn complex_structure_scales_inactive_destination_without_norm_projection() {
     let mut dst = initial;
 
     crate::contract::tensorcontract_structure_with_dense_executor_raw(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &mut TensorContractWorkspace::default(),
         &structure,
@@ -1236,6 +1258,7 @@ fn tensorcontract_structure_rejects_zero_stride_self_overlap() {
 
 #[test]
 fn tensorcontract_structure_accepts_interleaved_disjoint_destinations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let lhs = BlockStructure::from_blocks_with_rank(
         2,
         vec![BlockSpec::column_major_with_key(BlockKey::ordinal(0), vec![2, 1], 0).unwrap()],
@@ -1268,6 +1291,7 @@ fn tensorcontract_structure_accepts_interleaved_disjoint_destinations() {
     let mut data = [7.0, 11.0, 13.0, 17.0];
 
     crate::contract::tensorcontract_structure_with_dense_executor_raw(
+        engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
         &mut TensorContractWorkspace::default(),
         &structure,

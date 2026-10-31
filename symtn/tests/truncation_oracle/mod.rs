@@ -190,10 +190,10 @@ pub fn assemble<S: PartialEq + Clone, K: Ord + Clone>(
 /// Matrix)>`. The including crate declares `numerics` at its root.
 #[macro_export]
 macro_rules! sector_matrices {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         // The oracle reads values, so a lazy or compact input is
         // materialized explicitly.
-        let tensor = $tensor.materialize().unwrap();
+        let tensor = $tensor.materialize($engine).unwrap();
         let blocks = tensor
             .subblocks()
             .unwrap()
@@ -583,8 +583,8 @@ pub fn kept_pairs<S: Ord + Clone>(offers: &[Offer<S>], kept: &[Vec<usize>]) -> V
 /// to its quantum dimension.
 #[macro_export]
 macro_rules! singular_offers {
-    ($tensor:expr, $dim:expr) => {{
-        sector_matrices!($tensor)
+    ($engine:ident, $tensor:expr, $dim:expr) => {{
+        sector_matrices!($engine, $tensor)
             .iter()
             .map(|(sector, matrix)| $crate::truncation_oracle::Offer {
                 sector: sector.clone(),
@@ -694,9 +694,10 @@ macro_rules! assert_kept_bond {
 /// i.e. that of a fresh `zeros` on the same spaces.
 #[macro_export]
 macro_rules! assert_canonical_layout {
-    ($tensor:expr, $what:expr) => {{
+    ($engine:ident, $tensor:expr, $what:expr) => {{
         let got = &$tensor;
         let want: symtn::typed::TensorMap<_, f64> = symtn::typed::TensorMap::zeros(
+            $engine,
             got.runtime(),
             got.codomain().iter(),
             got.domain().iter(),

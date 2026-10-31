@@ -32,14 +32,25 @@ fn fermionic_compose_pair(
     TensorMap<symtn::sector::FermionParityFusionRule, f64>,
     TensorMap<symtn::sector::FermionParityFusionRule, f64>,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = fermionic_leg_with(&[1, 2]);
     let leg_dual = leg.try_dual().unwrap();
-    let typed_a =
-        TensorMap::from_subblock_fn(runtime, [&leg], [&leg_dual, &leg], fermionic_typed_fill)
-            .unwrap();
-    let typed_b =
-        TensorMap::from_subblock_fn(runtime, [&leg_dual, &leg], [&leg], fermionic_typed_fill)
-            .unwrap();
+    let typed_a = TensorMap::from_subblock_fn(
+        engine,
+        runtime,
+        [&leg],
+        [&leg_dual, &leg],
+        fermionic_typed_fill,
+    )
+    .unwrap();
+    let typed_b = TensorMap::from_subblock_fn(
+        engine,
+        runtime,
+        [&leg_dual, &leg],
+        [&leg],
+        fermionic_typed_fill,
+    )
+    .unwrap();
     (typed_a, typed_b)
 }
 
@@ -59,6 +70,7 @@ fn fermionic_leg_with(
 
 #[test]
 fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the exact relation between the two contraction semantics —
     // `compose(a, b) == contract(a, twist(b, b's dual codomain legs))`. The
@@ -70,8 +82,12 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
 
     let leg = fermionic_leg_with(&[1, 2]);
     let leg_dual = leg.try_dual().unwrap();
-    let twisted_b =
-        TensorMap::from_subblock_fn(&runtime, [&leg_dual, &leg], [&leg], |sectors, indices| {
+    let twisted_b = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg_dual, &leg],
+        [&leg],
+        |sectors, indices| {
             // Codomain leg 0 is the dual one; leg 1 is contracted too but is
             // not dual, so theta does not act on it.
             let theta = if sectors.codomain_uncoupled()[0] == symtn::sector::Z2Irrep::ODD {
@@ -80,8 +96,9 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
                 1.0
             };
             theta * fermionic_typed_fill(sectors, indices)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
 
     let spec = ContractSpec {
         lhs: &[1, 2],
@@ -89,11 +106,11 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
         codomain: &[0],
         domain: &[1],
     };
-    let composed = typed_a.compose(&typed_b).unwrap();
+    let composed = typed_a.compose(engine, &typed_b).unwrap();
     assert_eq!(
         composed.dense_data().unwrap(),
         typed_a
-            .contract(&twisted_b, &spec)
+            .contract(engine, &twisted_b, &spec)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -103,7 +120,7 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
     assert_ne!(
         composed.dense_data().unwrap(),
         typed_a
-            .contract(&typed_b, &spec)
+            .contract(engine, &typed_b, &spec)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -112,18 +129,20 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
 
 #[test]
 fn bosonic_compose_is_contract_with_the_identity_output_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: for a symmetric braiding the supertrace twist is the identity, so
     // the two semantics coincide.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 
-    let composed = typed.compose(&typed).unwrap();
+    let composed = typed.compose(engine, &typed).unwrap();
 
     assert_eq!(
         composed.dense_data().unwrap(),
         typed
             .contract(
+                engine,
                 &typed,
                 &ContractSpec {
                     lhs: &[1],
@@ -140,6 +159,7 @@ fn bosonic_compose_is_contract_with_the_identity_output_order() {
 
 #[test]
 fn compose_contracts_the_whole_domain_against_the_whole_codomain() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the derived axes. `[v, v] <- [v]` composed with `[v] <- [v, v]`
     // contracts exactly the one shared leg and leaves `[v, v] <- [v, v]`, and
@@ -149,13 +169,14 @@ fn compose_contracts_the_whole_domain_against_the_whole_codomain() {
     let tall = z2_tensor_split(&runtime, 2);
     let wide = z2_tensor_split(&runtime, 1);
 
-    let composed = tall.compose(&wide).unwrap();
+    let composed = tall.compose(engine, &wide).unwrap();
 
     assert_eq!(composed.codomain().len(), 2);
     assert_eq!(composed.domain().len(), 2);
     assert_eq!(
         composed.dense_data().unwrap(),
         tall.contract(
+            engine,
             &wide,
             &ContractSpec {
                 lhs: &[2],
@@ -172,18 +193,20 @@ fn compose_contracts_the_whole_domain_against_the_whole_codomain() {
 
 #[test]
 fn compose_rejects_operands_from_different_runtimes() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let left = z2_endomorphism(&runtime());
     let right = z2_endomorphism(&runtime());
 
     assert!(matches!(
-        left.compose(&right).unwrap_err(),
+        left.compose(engine, &right).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     ));
 }
 
 #[test]
 fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // A rank mismatch and a matching-rank but non-dual leg mismatch, both from
     // the expert layer rather than from a pre-check here.
@@ -195,10 +218,10 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
     // Rank mismatch in both directions: one domain leg against two codomain
     // legs, and two domain legs against one codomain leg.
     assert!(
-        matches!(endo.compose(&tall), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 1, .. }))
+        matches!(endo.compose(engine, &tall), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 1, .. }))
     );
     assert!(
-        matches!(wide.compose(&endo), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 2, .. }))
+        matches!(wide.compose(engine, &endo), Err(symtn::typed::Error::Operation(error)) if matches!(*error, symtn::typed::OperationError::ContractAxisCountMismatch { lhs: 2, .. }))
     );
 
     // Matching ranks, mismatched legs: the degeneracies differ, so the two do
@@ -212,11 +235,16 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
         ],
     )
     .unwrap();
-    let narrow =
-        TensorMap::from_subblock_fn(&runtime, [&narrow_leg], [&narrow_leg], typed_fill_value)
-            .unwrap();
+    let narrow = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&narrow_leg],
+        [&narrow_leg],
+        typed_fill_value,
+    )
+    .unwrap();
     assert!(endo
-        .compose(&narrow)
+        .compose(engine, &narrow)
         .unwrap_err()
         .report()
         .contains("leg degeneracy mismatch"));
@@ -232,17 +260,22 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
     .and_then(|space| space.try_dual())
     .unwrap();
     let dual_endo =
-        TensorMap::from_subblock_fn(&runtime, [&wide_leg], [&wide_leg], typed_fill_value).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&wide_leg], [&wide_leg], typed_fill_value)
+            .unwrap();
     // The error names both operands' axes and external-axis flags: `endo`'s
     // domain axis 1 is `V'` and `dual_endo`'s codomain axis 0 is `V'` too.
-    assert!(endo.compose(&dual_endo).unwrap_err().report().ends_with(
-        "contracted fusion leg duality flags do not match: lhs axis 1 (is_dual = true) \
+    assert!(endo
+        .compose(engine, &dual_endo)
+        .unwrap_err()
+        .report()
+        .ends_with(
+            "contracted fusion leg duality flags do not match: lhs axis 1 (is_dual = true) \
          and rhs axis 0 (is_dual = true) must have opposite duality flags"
-    ));
+        ));
     // `contract` reports the axes the caller named.
     let tall = z2_tensor_split(&runtime, 2);
     assert!(tall
-        .contract(&dual_endo, &ContractSpec { lhs: &[2], rhs: &[0], codomain: &[0, 1], domain: &[2] })
+        .contract(engine, &dual_endo, &ContractSpec { lhs: &[2], rhs: &[0], codomain: &[0, 1], domain: &[2] })
         .unwrap_err()
         .report()
         .ends_with("lhs axis 2 (is_dual = true) and rhs axis 0 (is_dual = true) must have opposite duality flags"));
@@ -250,11 +283,16 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
     // Matching ranks and flags, different sector content.
     let even_only =
         GradedSpace::try_new(Arc::clone(&z2), [(symtn::sector::Z2Irrep::EVEN, 2)]).unwrap();
-    let even_endo =
-        TensorMap::from_subblock_fn(&runtime, [&even_only], [&even_only], typed_fill_value)
-            .unwrap();
+    let even_endo = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&even_only],
+        [&even_only],
+        typed_fill_value,
+    )
+    .unwrap();
     assert!(endo
-        .compose(&even_endo)
+        .compose(engine, &even_endo)
         .unwrap_err()
         .report()
         .contains("dimension mismatch"));
@@ -266,27 +304,30 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 
 #[test]
 fn id_composes_as_the_identity_on_both_sides() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the defining property, as a byte oracle against the source tensor.
     // `[v, v] <- [v]`, so the two sides exercise different ranks.
     let runtime = runtime();
     let typed = z2_tensor(&runtime);
 
-    let left = TensorMap::isomorphism(&runtime, &typed.codomain(), &typed.codomain()).unwrap();
-    let right = TensorMap::isomorphism(&runtime, &typed.domain(), &typed.domain()).unwrap();
+    let left =
+        TensorMap::isomorphism(engine, &runtime, &typed.codomain(), &typed.codomain()).unwrap();
+    let right = TensorMap::isomorphism(engine, &runtime, &typed.domain(), &typed.domain()).unwrap();
 
     assert_eq!(
-        left.compose(&typed).unwrap().dense_data().unwrap(),
+        left.compose(engine, &typed).unwrap().dense_data().unwrap(),
         typed.dense_data().unwrap()
     );
     assert_eq!(
-        typed.compose(&right).unwrap().dense_data().unwrap(),
+        typed.compose(engine, &right).unwrap().dense_data().unwrap(),
         typed.dense_data().unwrap()
     );
 }
 
 #[test]
 fn id_composes_as_the_identity_for_a_fermionic_provider() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: no stray sign. A fermionic identity is still the plain diagonal —
     // the twist question belongs to the contracted legs, and composition does
@@ -294,15 +335,24 @@ fn id_composes_as_the_identity_for_a_fermionic_provider() {
     let runtime = runtime();
     let (typed_a, _) = fermionic_compose_pair(&runtime);
 
-    let left = TensorMap::isomorphism(&runtime, &typed_a.codomain(), &typed_a.codomain()).unwrap();
-    let right = TensorMap::isomorphism(&runtime, &typed_a.domain(), &typed_a.domain()).unwrap();
+    let left =
+        TensorMap::isomorphism(engine, &runtime, &typed_a.codomain(), &typed_a.codomain()).unwrap();
+    let right =
+        TensorMap::isomorphism(engine, &runtime, &typed_a.domain(), &typed_a.domain()).unwrap();
 
     assert_eq!(
-        left.compose(&typed_a).unwrap().dense_data().unwrap(),
+        left.compose(engine, &typed_a)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         typed_a.dense_data().unwrap()
     );
     assert_eq!(
-        typed_a.compose(&right).unwrap().dense_data().unwrap(),
+        typed_a
+            .compose(engine, &right)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         typed_a.dense_data().unwrap()
     );
 }

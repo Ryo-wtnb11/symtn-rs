@@ -22,19 +22,30 @@ where
         + SectorCodec,
     D: OracleScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     assert_eq!(actual.codomain(), expected.codomain());
     assert_eq!(actual.domain(), expected.domain());
     assert_eq!(
-        actual.materialize().unwrap().dense_data().unwrap().len(),
-        expected.materialize().unwrap().dense_data().unwrap().len()
+        actual
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len(),
+        expected
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .len()
     );
     for (&got, &want) in actual
-        .materialize()
+        .materialize(engine)
         .unwrap()
         .dense_data()
         .unwrap()
         .iter()
-        .zip(expected.materialize().unwrap().dense_data().unwrap())
+        .zip(expected.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert!(
             got.error(want) <= 1.0e-11 * (1.0 + want.magnitude()),
@@ -91,7 +102,8 @@ where
         + SectorCodec,
     D: OracleScalar,
 {
-    TensorMap::from_subblock_fn(runtime, [codomain], [domain], |trees, ij| {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    TensorMap::from_subblock_fn(engine, runtime, [codomain], [domain], |trees, ij| {
         D::sample(salt + sector_tag(trees.coupled()) + 0.1 * ij[0] as f64 + 0.01 * ij[1] as f64)
     })
     .unwrap()
@@ -112,10 +124,12 @@ fn assert_reordered_overwrite<R, D>(
         + SectorCodec,
     D: OracleScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let old_lhs = matrix::<_, D>(runtime, space, space, 11.0, sector_tag);
     let old_rhs = matrix::<_, D>(runtime, space, space, 12.0, sector_tag);
     let mut destination = old_lhs
         .contract(
+            engine,
             &old_rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -129,6 +143,7 @@ fn assert_reordered_overwrite<R, D>(
     let rhs = matrix::<_, D>(runtime, space, space, 112.0, sector_tag);
     let expected = lhs
         .contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -180,6 +195,7 @@ fn assert_reordered_overwrite<R, D>(
     };
     assert_oracle(&expected);
     lhs.contract_into(
+        engine,
         &rhs,
         &ContractSpec {
             lhs: &[1],
@@ -198,7 +214,7 @@ fn assert_reordered_overwrite<R, D>(
 
 #[test]
 fn contract_overwrite_reorders_non_self_dual_unequal_blocks() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let u1_provider = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_provider),

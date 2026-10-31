@@ -18,6 +18,7 @@
 
 use crate::contract_cases;
 use crate::numerics;
+use symtn::typed::Engine;
 
 use std::hint::black_box;
 use symtn::typed::ContractSpec;
@@ -36,10 +37,11 @@ use crate::counting_alloc;
 
 /// Values against `oracle`, then the warm route evidence on `f64`.
 fn check<R, D>(
+    engine: &mut dyn Engine,
     runtime: &Runtime,
     v: &GradedSpace<R>,
     symmetry: &str,
-    oracle: impl Fn(&Case<R, D>) -> TensorMap<R, D>,
+    oracle: impl Fn(&mut dyn Engine, &Case<R, D>) -> TensorMap<R, D>,
 ) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -50,11 +52,11 @@ fn check<R, D>(
         + SectorCodec,
     D: Payload,
 {
-    for (case, _) in probes::<R, D>(runtime, v) {
-        let expected = oracle(&case);
+    for (case, _) in probes::<R, D>(engine, runtime, v) {
+        let expected = oracle(engine, &case);
         numerics::assert_nonzero_slices_close(
             &format!("{symmetry} {}", case.name),
-            case.host().dense_data().unwrap(),
+            case.host(engine).dense_data().unwrap(),
             expected.dense_data().unwrap(),
             case.terms(),
         );
@@ -72,9 +74,10 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let call = || {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let mut call = || {
         black_box(&case.lhs)
-            .contract(&case.rhs, &case.spec())
+            .contract(engine, &case.rhs, &case.spec())
             .unwrap()
     };
     call();
@@ -89,7 +92,7 @@ where
     (allocs.calls, allocs.bytes, lookups() - before)
 }
 
-fn assert_warm_zero_copy<R>(v: &GradedSpace<R>, symmetry: &str)
+fn assert_warm_zero_copy<R>(engine: &mut dyn Engine, v: &GradedSpace<R>, symmetry: &str)
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -99,8 +102,8 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let probes = probes::<R, f64>(&runtime, v);
+    let runtime = Runtime::builder().build().unwrap();
+    let probes = probes::<R, f64>(engine, &runtime, v);
     let measured: Vec<_> = probes
         .iter()
         .map(|(case, control)| (case.name, *control, warm(&runtime, case)))
@@ -128,40 +131,54 @@ where
 
 #[test]
 fn zero_copy_candidates_run_no_transform_and_allocate_like_literal_core() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
-    assert_warm_zero_copy(&u1_non_self_dual(), "U(1)");
-    assert_warm_zero_copy(&su2(), "SU(2)");
-    assert_warm_zero_copy(&fermion_u1(), "fZ2xU(1)");
+    assert_warm_zero_copy(engine, &u1_non_self_dual(), "U(1)");
+    assert_warm_zero_copy(engine, &su2(), "SU(2)");
+    assert_warm_zero_copy(engine, &fermion_u1(), "fZ2xU(1)");
 }
 
-fn bosonic_values<D: Payload>() {
+fn bosonic_values<D: Payload>(engine: &mut dyn Engine) {
     let runtime = Runtime::builder().build().unwrap();
-    check::<_, D>(&runtime, &u1_non_self_dual(), "U(1)", blas_contract_oracle);
-    check::<_, D>(&runtime, &su2(), "SU(2)", blas_contract_oracle);
+    check::<_, D>(
+        engine,
+        &runtime,
+        &u1_non_self_dual(),
+        "U(1)",
+        blas_contract_oracle,
+    );
+    check::<_, D>(engine, &runtime, &su2(), "SU(2)", blas_contract_oracle);
 }
 
 #[test]
 fn zero_copy_candidates_match_the_tensorkit_blas_contract_sequence() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    bosonic_values::<f64>();
-    bosonic_values::<Complex64>();
-    bosonic_values::<f32>();
-    bosonic_values::<Complex32>();
+    bosonic_values::<f64>(engine);
+    bosonic_values::<Complex64>(engine);
+    bosonic_values::<f32>(engine);
+    bosonic_values::<Complex32>(engine);
 }
 
 fn fermionic_values<D: Payload>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let twist =
-        |t: &TensorMap<FermionU1, D>, legs: &[usize]| t.twist(legs, Direction::Forward).unwrap();
+    let twist = |engine: &mut dyn Engine, t: &TensorMap<FermionU1, D>, legs: &[usize]| {
+        t.twist(engine, legs, Direction::Forward).unwrap()
+    };
     // The literal sequence of C2 and L5 contracts B legs that are dual, so
     // `blas_contract!` twists there even though the selected swapped
     // candidate needs no twist; either twist role is the oracle.
     for role in [TwistRole::B, TwistRole::A] {
-        check::<_, D>(&runtime, &fermion_u1(), "fZ2xU(1)", |case| {
-            fermionic_blas_contract_oracle(case, role, twist)
-        });
+        check::<_, D>(
+            engine,
+            &runtime,
+            &fermion_u1(),
+            "fZ2xU(1)",
+            |engine, case| fermionic_blas_contract_oracle(engine, case, role, twist),
+        );
     }
 
     // Twisted control: `A: V⊗V ← V*⊗V*` with `B` (or `P'`) `V*⊗V* ← V⊗V`
@@ -170,13 +187,34 @@ fn fermionic_values<D: Payload>() {
     // must match TensorKit's B-role twist, not the untwisted sequence.
     let v = fermion_u1();
     let v_dual = v.try_dual().unwrap();
-    let a = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v_dual, &v_dual], fill(4))
-        .unwrap();
-    let b = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v_dual, &v_dual], [&v, &v], fill(5))
-        .unwrap();
-    let p = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v_dual, &v_dual], fill(6))
-        .unwrap();
-    for (name, rhs) in [("twisted C1", b), ("twisted L7", p.adjoint().unwrap())] {
+    let a = TensorMap::<_, D>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&v, &v],
+        [&v_dual, &v_dual],
+        fill(4),
+    )
+    .unwrap();
+    let b = TensorMap::<_, D>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&v_dual, &v_dual],
+        [&v, &v],
+        fill(5),
+    )
+    .unwrap();
+    let p = TensorMap::<_, D>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&v, &v],
+        [&v_dual, &v_dual],
+        fill(6),
+    )
+    .unwrap();
+    for (name, rhs) in [
+        ("twisted C1", b),
+        ("twisted L7", p.adjoint(engine).unwrap()),
+    ] {
         let case = Case {
             name,
             lhs: a.clone(),
@@ -186,15 +224,15 @@ fn fermionic_values<D: Payload>() {
             output_axes: vec![0, 1, 2, 3],
             dense: false,
         };
-        let host = case.host();
-        let twisted = fermionic_blas_contract_oracle(&case, TwistRole::B, twist);
+        let host = case.host(engine);
+        let twisted = fermionic_blas_contract_oracle(engine, &case, TwistRole::B, twist);
         numerics::assert_nonzero_slices_close(
             name,
             host.dense_data().unwrap(),
             twisted.dense_data().unwrap(),
             case.terms(),
         );
-        let untwisted = fermionic_blas_contract_oracle(&case, TwistRole::None, twist);
+        let untwisted = fermionic_blas_contract_oracle(engine, &case, TwistRole::None, twist);
         assert!(
             host.dense_data()
                 .unwrap()
@@ -239,10 +277,15 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let w_dual = w.try_dual().unwrap();
     let v_dual = v.try_dual().unwrap();
-    let tensor = |codomain: &[&GradedSpace<R>], domain: &[&GradedSpace<R>], salt| {
+    let tensor = |engine: &mut dyn Engine,
+                  codomain: &[&GradedSpace<R>],
+                  domain: &[&GradedSpace<R>],
+                  salt| {
         TensorMap::<R, D>::from_subblock_fn(
+            engine,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -262,8 +305,8 @@ where
     vec![
         case(
             "N1",
-            tensor(&[v, w], &[w, v], 71),
-            tensor(&[w, v], &[v], 72),
+            tensor(engine, &[v, w], &[w, v], 71),
+            tensor(engine, &[w, v], &[v], 72),
             &[3, 2],
             &[1, 0],
             &[0, 1, 2],
@@ -271,8 +314,8 @@ where
         ),
         case(
             "D1",
-            tensor(&[v, &w_dual], &[&w_dual, &v_dual], 73),
-            tensor(&[&w_dual, &v_dual], &[w], 74),
+            tensor(engine, &[v, &w_dual], &[&w_dual, &v_dual], 73),
+            tensor(engine, &[&w_dual, &v_dual], &[w], 74),
             &[3, 2],
             &[1, 0],
             &[0, 1, 2],
@@ -280,8 +323,10 @@ where
         ),
         case(
             "S1",
-            tensor(&[w, v], &[v, &w_dual], 75).adjoint().unwrap(),
-            tensor(&[w, v], &[v, &w_dual], 76),
+            tensor(engine, &[w, v], &[v, &w_dual], 75)
+                .adjoint(engine)
+                .unwrap(),
+            tensor(engine, &[w, v], &[v, &w_dual], 76),
             &[0, 1],
             &[2, 3],
             &[2, 3, 0, 1],
@@ -289,8 +334,8 @@ where
         ),
         case(
             "S2",
-            tensor(&[w], &[v, &w_dual], 77),
-            tensor(&[v, w], &[w], 78),
+            tensor(engine, &[w], &[v, &w_dual], 77),
+            tensor(engine, &[v, w], &[w], 78),
             &[0],
             &[2],
             &[2, 3, 0, 1],
@@ -311,19 +356,20 @@ where
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     for case in mixed_cases::<R, D>(&runtime, v, w) {
         let what = format!("{symmetry} {} [{}]", case.name, D::NAME);
-        let host = case.host();
+        let host = case.host(engine);
         numerics::assert_nonzero_slices_close(
             &what,
             host.dense_data().unwrap(),
-            blas_contract_oracle(&case).dense_data().unwrap(),
+            blas_contract_oracle(engine, &case).dense_data().unwrap(),
             case.terms(),
         );
         if case.dense {
-            let (shape, expected) = dense_oracle(&case);
-            let actual = host.to_physical_dense().unwrap();
+            let (shape, expected) = dense_oracle(engine, &case);
+            let actual = host.to_physical_dense(engine).unwrap();
             assert_eq!(actual.shape, shape, "{what}");
             numerics::assert_nonzero_slices_close(&what, &actual.data, &expected, case.terms());
         }
@@ -340,7 +386,7 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for case in mixed_cases::<R, f64>(&runtime, v, w) {
         let (_, _, lookups) = warm(&runtime, &case);
         // What: the selected candidate transforms neither source nor output.
@@ -402,8 +448,9 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (temporary, codomain, domain) = copy_c_steps(case, swapped);
-    temporary.permute(&codomain, &domain).unwrap()
+    temporary.permute(engine, &codomain, &domain).unwrap()
 }
 
 /// TensorKit `copyC`'s two steps spelled with public operations: the
@@ -420,6 +467,7 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let lhs_open = case.lhs.rank() - case.lhs_axes.len();
     let rhs_open = case.rhs.rank() - case.rhs_axes.len();
     let (temporary, position): (_, Box<dyn Fn(usize) -> usize>) = if swapped {
@@ -427,6 +475,7 @@ where
         (
             case.rhs
                 .contract(
+                    engine,
                     &case.lhs,
                     &ContractSpec {
                         lhs: &case.rhs_axes,
@@ -449,6 +498,7 @@ where
         (
             case.lhs
                 .contract(
+                    engine,
                     &case.rhs,
                     &ContractSpec {
                         lhs: &case.lhs_axes,
@@ -470,7 +520,7 @@ where
     (temporary, codomain, domain)
 }
 
-fn assert_output_permute_budget<R>(v: &GradedSpace<R>, symmetry: &str)
+fn assert_output_permute_budget<R>(engine: &mut dyn Engine, v: &GradedSpace<R>, symmetry: &str)
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -480,8 +530,8 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    for (case, swapped) in copy_c_probes::<R, f64>(&runtime, v) {
+    let runtime = Runtime::builder().build().unwrap();
+    for (case, swapped) in copy_c_probes::<R, f64>(engine, &runtime, v) {
         let (calls, bytes, lookups) = warm(&runtime, &case);
         contract_then_permute(&case, swapped);
         let before = transform_lookups(&runtime);
@@ -514,11 +564,12 @@ where
 
 #[test]
 fn zero_copy_candidates_with_an_output_permute_allocate_like_contract_then_permute() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Its helper serializes: sibling tests read process-global lookup counts.
-    assert_output_permute_budget(&u1_non_self_dual(), "U(1)");
-    assert_output_permute_budget(&su2(), "SU(2)");
-    assert_output_permute_budget(&fermion_u1(), "fZ2xU(1)");
+    assert_output_permute_budget(engine, &u1_non_self_dual(), "U(1)");
+    assert_output_permute_budget(engine, &su2(), "SU(2)");
+    assert_output_permute_budget(engine, &fermion_u1(), "fZ2xU(1)");
 }
 
 /// `S3`: rank 3 × 4 with open counts 2 and 3, so the swapped candidate's own
@@ -536,14 +587,15 @@ where
         + SectorCodec,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let w_dual = w.try_dual().unwrap();
     Case {
         name: "S3",
-        lhs: TensorMap::from_subblock_fn(runtime, [v, &w_dual], [w], fill(84))
+        lhs: TensorMap::from_subblock_fn(engine, runtime, [v, &w_dual], [w], fill(84))
             .unwrap()
-            .adjoint()
+            .adjoint(engine)
             .unwrap(),
-        rhs: TensorMap::from_subblock_fn(runtime, [w, v, v], [w], fill(85)).unwrap(),
+        rhs: TensorMap::from_subblock_fn(engine, runtime, [w, v, v], [w], fill(85)).unwrap(),
         lhs_axes: vec![0],
         rhs_axes: vec![3],
         output_axes: vec![2, 0, 1, 3, 4],
@@ -563,26 +615,27 @@ where
         + symtn::sector::PhysicalFusionBasis<Scalar = f64>,
     D: Payload,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let cases = copy_c_probes::<R, D>(&runtime, v)
+    let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .map(|(case, _)| case)
         .chain([uneven_swap::<R, D>(&runtime, v, w)]);
     for case in cases {
         let what = format!("{symmetry} {} [{}]", case.name, D::NAME);
-        let host = case.host();
+        let host = case.host(engine);
         // What: the left-authority provider rule holds after a swap.
         assert!(std::ptr::eq(host.provider(), case.lhs.provider()), "{what}");
         assert_eq!(host.codomain_rank(), case.lhs.rank() - case.lhs_axes.len());
         numerics::assert_nonzero_slices_close(
             &what,
             host.dense_data().unwrap(),
-            blas_contract_oracle(&case).dense_data().unwrap(),
+            blas_contract_oracle(engine, &case).dense_data().unwrap(),
             case.terms(),
         );
         if case.dense {
-            let (shape, expected) = dense_oracle(&case);
-            let actual = host.to_physical_dense().unwrap();
+            let (shape, expected) = dense_oracle(engine, &case);
+            let actual = host.to_physical_dense(engine).unwrap();
             assert_eq!(actual.shape, shape, "{what}");
             numerics::assert_nonzero_slices_close(&what, &actual.data, &expected, case.terms());
         }
@@ -605,8 +658,12 @@ fn zero_copy_candidates_with_an_output_permute_match_tensorkit_and_the_dense_exp
 
 /// #1626: the pooled copyC temporary changes no arithmetic. Every probe
 /// equals its literal zero-copy contraction then permute, bit for bit.
-fn output_permute_bits<R, D>(v: &GradedSpace<R>, w: &GradedSpace<R>, symmetry: &str)
-where
+fn output_permute_bits<R, D>(
+    engine: &mut dyn Engine,
+    v: &GradedSpace<R>,
+    w: &GradedSpace<R>,
+    symmetry: &str,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -617,14 +674,14 @@ where
     D: Payload + PartialEq,
 {
     let runtime = Runtime::builder().build().unwrap();
-    let cases = copy_c_probes::<R, D>(&runtime, v)
+    let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .chain([(uneven_swap::<R, D>(&runtime, v, w), true)]);
     for (case, swapped) in cases {
         let what = format!("{symmetry} {} [{}]", case.name, D::NAME);
         let expected = contract_then_permute(&case, swapped);
         for _ in 0..2 {
-            let actual = case.host();
+            let actual = case.host(engine);
             assert_eq!(actual.codomain(), expected.codomain(), "{what}");
             assert_eq!(actual.domain(), expected.domain(), "{what}");
             assert!(
@@ -652,27 +709,28 @@ where
         + SectorCodec,
     D: Payload + PartialEq,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let cases = copy_c_probes::<R, D>(&runtime, v)
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let cases = copy_c_probes::<R, D>(engine, &runtime, v)
         .into_iter()
         .chain([(uneven_swap::<R, D>(&runtime, v, w), true)]);
     let alpha = D::entry(1.25, -0.5);
     for (case, swapped) in cases {
         let (temporary, codomain, domain) = copy_c_steps(&case, swapped);
-        let result = case.host();
+        let result = case.host(engine);
         for (beta, seed) in [
             (D::entry(0.0, 0.0), D::entry(f64::NAN, 0.0)),
             (D::entry(1.0, 0.0), D::entry(0.75, 0.125)),
             (D::entry(-0.625, 0.25), D::entry(0.75, 0.125)),
         ] {
             let what = format!("{symmetry} {} [{}] beta {beta:?}", case.name, D::NAME);
-            let mut expected = result.scale(seed).unwrap();
+            let mut expected = result.scale(engine, seed).unwrap();
             temporary
-                .permute_into(&codomain, &domain, &mut expected, alpha, beta)
+                .permute_into(engine, &codomain, &domain, &mut expected, alpha, beta)
                 .unwrap();
-            let mut actual = result.scale(seed).unwrap();
+            let mut actual = result.scale(engine, seed).unwrap();
             case.lhs
-                .contract_into(&case.rhs, &case.spec(), &mut actual, alpha, beta)
+                .contract_into(engine, &case.rhs, &case.spec(), &mut actual, alpha, beta)
                 .unwrap();
             assert!(
                 actual.dense_data().unwrap() == expected.dense_data().unwrap(),
@@ -680,10 +738,11 @@ where
             );
         }
 
-        let mut destination = result.scale(D::entry(1.0, 0.0)).unwrap();
-        let into = |destination: &mut TensorMap<R, D>| {
+        let mut destination = result.scale(engine, D::entry(1.0, 0.0)).unwrap();
+        let mut into = |destination: &mut TensorMap<R, D>| {
             case.lhs
                 .contract_into(
+                    engine,
                     &case.rhs,
                     &case.spec(),
                     destination,
@@ -697,9 +756,9 @@ where
         let before = transform_lookups(&runtime);
         into(&mut destination);
         let into_lookups = transform_lookups(&runtime) - before;
-        drop(case.host());
+        drop(case.host(engine));
         let before = transform_lookups(&runtime);
-        drop(case.host());
+        drop(case.host(engine));
         let contract_lookups = transform_lookups(&runtime) - before;
         // What: the output permute is the only transform (no operand is
         // rebuilt), and never more lookups than the owned route, whose owned
@@ -726,16 +785,17 @@ fn contract_into_takes_the_copy_c_route_of_contract() {
 
 #[test]
 fn zero_copy_candidates_with_an_output_permute_equal_contract_then_permute_bitwise() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    output_permute_bits::<_, f64>(&u1_non_self_dual(), &u1_second(), "U(1)");
-    output_permute_bits::<_, Complex64>(&su2(), &su2_second(), "SU(2)");
+    output_permute_bits::<_, f64>(engine, &u1_non_self_dual(), &u1_second(), "U(1)");
+    output_permute_bits::<_, Complex64>(engine, &su2(), &su2_second(), "SU(2)");
 }
 
 #[test]
 fn uneven_swapped_candidate_with_an_output_permute_runs_one_transform() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let case = uneven_swap::<_, f64>(&runtime, &u1_non_self_dual(), &u1_second());
     let (_, _, lookups) = warm(&runtime, &case);
     contract_then_permute(&case, true);
@@ -750,18 +810,20 @@ fn uneven_swapped_candidate_with_an_output_permute_runs_one_transform() {
 }
 
 fn fermionic_output_permute_values<D: Payload>() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let twist =
-        |t: &TensorMap<FermionU1, D>, legs: &[usize]| t.twist(legs, Direction::Forward).unwrap();
+    let twist = |engine: &mut dyn Engine, t: &TensorMap<FermionU1, D>, legs: &[usize]| {
+        t.twist(engine, legs, Direction::Forward).unwrap()
+    };
     // As for the identity-output probes, the literal sequence of the swapped
     // probes twists dual `B` legs that the selected candidate does not, so
     // either twist role is the oracle.
     for role in [TwistRole::B, TwistRole::A] {
-        for (case, _) in copy_c_probes::<_, D>(&runtime, &fermion_u1()) {
-            let expected = fermionic_blas_contract_oracle(&case, role, twist);
+        for (case, _) in copy_c_probes::<_, D>(engine, &runtime, &fermion_u1()) {
+            let expected = fermionic_blas_contract_oracle(engine, &case, role, twist);
             numerics::assert_nonzero_slices_close(
                 &format!("fZ2xU(1) {} [{}]", case.name, D::NAME),
-                case.host().dense_data().unwrap(),
+                case.host(engine).dense_data().unwrap(),
                 expected.dense_data().unwrap(),
                 case.terms(),
             );
@@ -773,23 +835,35 @@ fn fermionic_output_permute_values<D: Payload>() {
     // and the result must carry TensorKit's B-role twist.
     let v = fermion_u1();
     let v_dual = v.try_dual().unwrap();
-    let a = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v_dual, &v_dual], fill(86))
-        .unwrap();
-    let p = TensorMap::<_, D>::from_subblock_fn(&runtime, [&v, &v], [&v_dual, &v_dual], fill(87))
-        .unwrap();
+    let a = TensorMap::<_, D>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&v, &v],
+        [&v_dual, &v_dual],
+        fill(86),
+    )
+    .unwrap();
+    let p = TensorMap::<_, D>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&v, &v],
+        [&v_dual, &v_dual],
+        fill(87),
+    )
+    .unwrap();
     let case = Case {
         name: "twisted L7p",
         lhs: a,
-        rhs: p.adjoint().unwrap(),
+        rhs: p.adjoint(engine).unwrap(),
         lhs_axes: vec![3, 2],
         rhs_axes: vec![1, 0],
         output_axes: vec![1, 0, 2, 3],
         dense: false,
     };
-    let expected = fermionic_blas_contract_oracle(&case, TwistRole::B, twist);
+    let expected = fermionic_blas_contract_oracle(engine, &case, TwistRole::B, twist);
     numerics::assert_nonzero_slices_close(
         case.name,
-        case.host().dense_data().unwrap(),
+        case.host(engine).dense_data().unwrap(),
         expected.dense_data().unwrap(),
         case.terms(),
     );
@@ -817,15 +891,24 @@ fn zero_copy_fermionic_candidates_with_an_output_permute_match_tensorkit() {
 /// - `R3` the owned sort `A[3,2]·B[1,0] → [2,3,0,1]`;
 /// - `R4` the #1466 core form `A[2,3]·B[0,1] → [2,3,0,1]`.
 fn large_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule, f64>> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let v = u1(&[(-1, 16), (0, 16), (1, 16)]);
     let c = u1(&[(0, 1)]);
-    let tensor = |codomain: [&GradedSpace<_>; 2], domain: [&GradedSpace<_>; 2], salt| {
-        TensorMap::<_, f64>::from_subblock_fn(runtime, codomain, domain, fill(salt)).unwrap()
+    let tensor = |engine: &mut dyn Engine,
+                  codomain: [&GradedSpace<_>; 2],
+                  domain: [&GradedSpace<_>; 2],
+                  salt| {
+        TensorMap::<_, f64>::from_subblock_fn(engine, runtime, codomain, domain, fill(salt))
+            .unwrap()
     };
-    let a = tensor([&v, &v], [&c, &c], 91);
-    let q = tensor([&v, &v], [&c, &c], 92).adjoint().unwrap();
-    let p = tensor([&c, &c], [&v, &v], 93).adjoint().unwrap();
-    let b = tensor([&c, &c], [&v, &v], 94);
+    let a = tensor(engine, [&v, &v], [&c, &c], 91);
+    let q = tensor(engine, [&v, &v], [&c, &c], 92)
+        .adjoint(engine)
+        .unwrap();
+    let p = tensor(engine, [&c, &c], [&v, &v], 93)
+        .adjoint(engine)
+        .unwrap();
+    let b = tensor(engine, [&c, &c], [&v, &v], 94);
     let case =
         |name, lhs: &TensorMap<_, f64>, rhs: &TensorMap<_, f64>, l: [usize; 2], r: [usize; 2]| {
             Case {
@@ -856,11 +939,16 @@ fn large_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule
 /// - `X4` the #1466 core form `A[2]·B[0] → [2,3,0,1]` with
 ///   `A: v⊗v ← u`, `B: u ← v⊗v`, `u = u1{0:500}`.
 fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule, f64>> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let v = u1(&[(-3, 8), (-2, 8), (-1, 8), (0, 8), (1, 8), (2, 8), (3, 8)]);
     let w = u1(&[(0, 20)]);
     let u = u1(&[(0, 500)]);
-    let tensor = |codomain: &[&GradedSpace<_>], domain: &[&GradedSpace<_>], salt| {
+    let tensor = |engine: &mut dyn Engine,
+                  codomain: &[&GradedSpace<_>],
+                  domain: &[&GradedSpace<_>],
+                  salt| {
         TensorMap::<_, f64>::from_subblock_fn(
+            engine,
             runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -868,10 +956,14 @@ fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionR
         )
         .unwrap()
     };
-    let a = tensor(&[&v, &v], &[&w, &w], 95);
-    let b = tensor(&[&w, &w], &[&v, &v], 96);
-    let q = tensor(&[&v, &v], &[&w, &w], 97).adjoint().unwrap();
-    let p = tensor(&[&w, &w], &[&v, &v], 98).adjoint().unwrap();
+    let a = tensor(engine, &[&v, &v], &[&w, &w], 95);
+    let b = tensor(engine, &[&w, &w], &[&v, &v], 96);
+    let q = tensor(engine, &[&v, &v], &[&w, &w], 97)
+        .adjoint(engine)
+        .unwrap();
+    let p = tensor(engine, &[&w, &w], &[&v, &v], 98)
+        .adjoint(engine)
+        .unwrap();
     let case =
         |name, lhs: &TensorMap<_, f64>, rhs: &TensorMap<_, f64>, l: &[usize], r: &[usize]| Case {
             name,
@@ -888,8 +980,8 @@ fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionR
         case("X3", &p, &b, &[3, 2], &[1, 0]),
         case(
             "X4",
-            &tensor(&[&v, &v], &[&u], 99),
-            &tensor(&[&u], &[&v, &v], 100),
+            &tensor(engine, &[&v, &v], &[&u], 99),
+            &tensor(engine, &[&u], &[&v, &v], 100),
             &[2],
             &[0],
         ),
@@ -898,26 +990,37 @@ fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionR
 
 #[test]
 fn large_output_from_small_operands_copies_the_operands_not_c() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for case in large_output_cases(&runtime)
         .into_iter()
         .chain(inactive_output_cases(&runtime))
     {
         let name = case.name;
-        let host = case.host();
+        let host = case.host(engine);
         let output_bytes = std::mem::size_of_val(host.dense_data().unwrap()) as u64;
         numerics::assert_nonzero_slices_close(
             name,
             host.dense_data().unwrap(),
-            blas_contract_oracle(&case).dense_data().unwrap(),
+            blas_contract_oracle(engine, &case).dense_data().unwrap(),
             case.terms(),
         );
         let (calls, bytes, lookups) = warm(&runtime, &case);
+        let (result, large) =
+            counting_alloc::measure_matching(output_bytes as usize..=usize::MAX, || {
+                black_box(&case.lhs)
+                    .contract(engine, &case.rhs, &case.spec())
+                    .unwrap()
+            });
+        drop(result);
         eprintln!("U(1) {name}: {calls} calls, {bytes} B, {lookups} transform lookups, dim(C) {output_bytes} B");
-        // What: only the output is allocated, not a `dim(C)` temporary as well.
-        assert!(
-            bytes < output_bytes + output_bytes / 2,
+        // What: the output is the only `dim(C)`-sized allocation, no `dim(C)`
+        // temporary as well. The copied operands are smaller per-call scratch
+        // (the Runtime keeps no execution pool), so total bytes are not the
+        // measure.
+        assert_eq!(
+            large.matched_calls, 1,
             "{name}: {bytes} B allocated for a {output_bytes} B output"
         );
     }
@@ -932,7 +1035,7 @@ fn large_output_from_small_operands_copies_the_operands_not_c() {
 #[test]
 fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for case in inactive_output_cases(&runtime) {
         let (calls, bytes, _) = warm(&runtime, &case);
         let name = case.name;
@@ -961,12 +1064,14 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
 /// `contract_route_host_allocations`'s contract.
 #[test]
 fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1(&[(-1, 8), (0, 8), (1, 8)]);
     let c = u1(&[(0, 2), (1, 1)]);
-    let tensor = |codomain: [&GradedSpace<_>; 2], domain: [&GradedSpace<_>; 2], salt| {
-        TensorMap::<_, f64>::from_subblock_fn(&runtime, codomain, domain, fill(salt)).unwrap()
+    let mut tensor = |codomain: [&GradedSpace<_>; 2], domain: [&GradedSpace<_>; 2], salt| {
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, codomain, domain, fill(salt))
+            .unwrap()
     };
     let case = |name, lhs, rhs, l: [usize; 2], r: [usize; 2], out: [usize; 4]| Case {
         name,
@@ -999,8 +1104,8 @@ fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
         let name = case.name;
         numerics::assert_nonzero_slices_close(
             name,
-            case.host().dense_data().unwrap(),
-            blas_contract_oracle(case).dense_data().unwrap(),
+            case.host(engine).dense_data().unwrap(),
+            blas_contract_oracle(engine, case).dense_data().unwrap(),
             case.terms(),
         );
         let (calls, bytes, lookups) = warm(&runtime, case);
@@ -1017,12 +1122,14 @@ fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
 /// decision against full scoring; the value is TensorKit's.
 #[test]
 fn swapped_tie_with_an_identity_output_matches_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // Serial: sibling tests read process-global transformer lookup counts.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let v = u1_non_self_dual();
-    let tensor =
-        |salt| TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v, &v], [&v, &v], fill(salt));
+    let mut tensor = |salt| {
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], fill(salt))
+    };
     let case = Case {
         name: "T1",
         lhs: tensor(105).unwrap(),
@@ -1034,8 +1141,8 @@ fn swapped_tie_with_an_identity_output_matches_tensorkit() {
     };
     numerics::assert_nonzero_slices_close(
         case.name,
-        case.host().dense_data().unwrap(),
-        blas_contract_oracle(&case).dense_data().unwrap(),
+        case.host(engine).dense_data().unwrap(),
+        blas_contract_oracle(engine, &case).dense_data().unwrap(),
         case.terms(),
     );
 }

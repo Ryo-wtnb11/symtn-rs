@@ -20,7 +20,6 @@ where
         R: TypedSectorAdmission,
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        let _host_pool = self.runtime.enter_host_pool();
         if matches!(
             &self.repr,
             TypedTensorRepr::Owned(body) if matches!(body.data.as_ref(), TypedData::Diagonal(_))
@@ -239,6 +238,7 @@ where
     /// Adds every source block into the matching destination block rectangle.
     pub(crate) fn network_scatter_add_assign(
         &mut self,
+        engine: &mut dyn Engine,
         source: &Self,
         ranges: &[Option<std::ops::Range<usize>>],
     ) -> Result<(), Error> {
@@ -246,7 +246,6 @@ where
             return Err(Error::RuntimeMismatch);
         }
         let destination_space = self.logical_space().space();
-        let _host_pool = self.runtime.enter_host_pool();
         let source_space = source.logical_space().space();
         if destination_space.nout() != source_space.nout()
             || destination_space.nin() != source_space.nin()
@@ -357,14 +356,21 @@ where
                 "network slice accumulator must have dense payload".to_string(),
             ));
         };
-        symtn_tensors::fusion_scatter_add_assign(
-            &destination_structure,
-            destination_data,
-            source_structure,
-            source_operand,
-            &source_data,
-            &scatter_ranges,
-        )
+        symtn_operations::host_pool::region(
+            engine,
+            symtn_operations::host_pool::HostPoolSite::Strided,
+            |exec| {
+                symtn_tensors::fusion_scatter_add_assign(
+                    exec,
+                    &destination_structure,
+                    destination_data,
+                    source_structure,
+                    source_operand,
+                    &source_data,
+                    &scatter_ranges,
+                )
+            },
+        )?
         .map_err(Error::from)
     }
 }

@@ -383,10 +383,11 @@ fn fixture<D>(
 where
     D: TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mixed =
         GradedSpace::try_new(Arc::clone(provider), [(Label::Unit, 1), (Label::X, 2)]).unwrap();
     let x = GradedSpace::try_new(Arc::clone(provider), [(Label::X, 1)]).unwrap();
-    TensorMap::from_subblock_fn(runtime, [&mixed, &x], [&x], |trees, indices| {
+    TensorMap::from_subblock_fn(engine, runtime, [&mixed, &x], [&x], |trees, indices| {
         value(
             tree_marker(trees)
                 + indices
@@ -433,7 +434,8 @@ fn assert_nontrivial_case<D>(value: impl Fn(usize) -> D + Copy)
 where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(1, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, value);
     let before = source.dense_data().unwrap().to_vec();
@@ -452,7 +454,7 @@ where
     assert!(saw_vertex_two);
 
     provider.reset_ledger(2);
-    let codomain = source.twist(&[0], Direction::Forward).unwrap();
+    let codomain = source.twist(engine, &[0], Direction::Forward).unwrap();
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 1);
     assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 2);
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
@@ -478,7 +480,7 @@ where
     });
 
     provider.reset_ledger(1);
-    let domain = source.twist(&[2], Direction::Inverse).unwrap();
+    let domain = source.twist(engine, &[2], Direction::Inverse).unwrap();
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 1);
     assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 1);
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
@@ -486,28 +488,32 @@ where
     assert_values(&domain, value, |_| -1.0);
 
     provider.reset_ledger(2);
-    let repeated = source.twist(&[0, 0], Direction::Forward).unwrap();
+    let repeated = source.twist(engine, &[0, 0], Direction::Forward).unwrap();
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
     provider.finish_observation();
     assert_values(&repeated, value, |_| 1.0);
 
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     // What: logical adjoint axis 1 maps to parent codomain axis 0; logical
     // axis 0 would instead map to the uniformly-X parent domain axis 2.
     provider.reset_ledger(2);
-    let lazy_twisted = lazy.twist(&[1], Direction::Forward).unwrap();
+    let lazy_twisted = lazy.twist(engine, &[1], Direction::Forward).unwrap();
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 1);
     assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 2);
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
     provider.finish_observation();
     let direct = source
-        .twist(&[0], Direction::Inverse)
+        .twist(engine, &[0], Direction::Inverse)
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     assert_eq!(
-        lazy_twisted.materialize().unwrap().dense_data().unwrap(),
-        direct.materialize().unwrap().dense_data().unwrap()
+        lazy_twisted
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
+        direct.materialize(engine).unwrap().dense_data().unwrap()
     );
     assert!(std::ptr::eq(lazy_twisted.provider(), provider.as_ref()));
     assert_eq!(source.dense_data().unwrap(), before);
@@ -525,18 +531,19 @@ fn checked_generic_twist_scales_full_keys_for_real_and_complex_payloads() {
 
 #[test]
 fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: index and empty requests precede every provider query; NoBraiding
     // rejection is an early facade error, while a staged pivotal failure keeps
     // its provider type and leaves the source payload unchanged.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(2, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
     let before = source.dense_data().unwrap().to_vec();
 
     provider.reset_ledger(0);
     assert!(matches!(
-        source.twist(&[source.rank()], Direction::Forward),
+        source.twist(engine, &[source.rank()], Direction::Forward),
         Err(GenericTensorError::Facade(Error::InvalidArgument(_)))
     ));
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 0);
@@ -544,7 +551,7 @@ fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing
     assert_eq!(provider.other_queries.load(Ordering::Relaxed), 0);
 
     provider.reset_ledger(0);
-    let empty = source.twist(&[], Direction::Forward).unwrap();
+    let empty = source.twist(engine, &[], Direction::Forward).unwrap();
     assert_eq!(
         empty.dense_data().unwrap().as_ptr(),
         source.dense_data().unwrap().as_ptr()
@@ -556,7 +563,7 @@ fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing
     provider.reset_ledger(2);
     provider.fail_twist_on.store(2, Ordering::Relaxed);
     assert!(matches!(
-        source.twist(&[0], Direction::Forward),
+        source.twist(engine, &[0], Direction::Forward),
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
             PivotalError::Twist
         )))
@@ -569,11 +576,12 @@ fn checked_generic_twist_precedence_and_late_failure_are_typed_and_nonpublishing
 
 #[test]
 fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: TensorKit's NoBraiding unit carve-out and bosonic short circuit
     // share storage without pivotal queries; an anyonic all-one provider stages
     // values once and then takes the same identity-sharing path.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
 
     let no_braiding = Arc::new(CheckedPivotalToy::new(
         3,
@@ -582,9 +590,11 @@ fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing(
     ));
     let unit = GradedSpace::try_new(Arc::clone(&no_braiding), [(Label::Unit, 1)]).unwrap();
     let unit_tensor: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&unit], [&unit], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, _| 3.0).unwrap();
     no_braiding.reset_ledger(0);
-    let unit_twist = unit_tensor.twist(&[0, 1], Direction::Forward).unwrap();
+    let unit_twist = unit_tensor
+        .twist(engine, &[0, 1], Direction::Forward)
+        .unwrap();
     assert_eq!(
         unit_twist.dense_data().unwrap().as_ptr(),
         unit_tensor.dense_data().unwrap().as_ptr()
@@ -597,7 +607,7 @@ fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing(
     let before = nonunit.dense_data().unwrap().to_vec();
     no_braiding.reset_ledger(0);
     assert!(matches!(
-        nonunit.twist(&[0], Direction::Forward),
+        nonunit.twist(engine, &[0], Direction::Forward),
         Err(GenericTensorError::Facade(Error::InvalidArgument(_)))
     ));
     assert_eq!(no_braiding.style_queries.load(Ordering::Relaxed), 1);
@@ -608,7 +618,9 @@ fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing(
     let bosonic = Arc::new(CheckedPivotalToy::new(4, BraidingStyleKind::Bosonic, -1.0));
     let bosonic_tensor = fixture(&runtime, &bosonic, |marker| marker as f64);
     bosonic.reset_ledger(0);
-    let bosonic_twist = bosonic_tensor.twist(&[0], Direction::Forward).unwrap();
+    let bosonic_twist = bosonic_tensor
+        .twist(engine, &[0], Direction::Forward)
+        .unwrap();
     assert_eq!(
         bosonic_twist.dense_data().unwrap().as_ptr(),
         bosonic_tensor.dense_data().unwrap().as_ptr()
@@ -620,7 +632,9 @@ fn checked_generic_twist_handles_nobraiding_bosonic_and_staged_identity_sharing(
     let identity = Arc::new(CheckedPivotalToy::new(5, BraidingStyleKind::Anyonic, 1.0));
     let identity_tensor = fixture(&runtime, &identity, |marker| marker as f64);
     identity.reset_ledger(2);
-    let identity_twist = identity_tensor.twist(&[0], Direction::Forward).unwrap();
+    let identity_twist = identity_tensor
+        .twist(engine, &[0], Direction::Forward)
+        .unwrap();
     assert_eq!(identity.post_stage_queries.load(Ordering::Relaxed), 0);
     assert_eq!(identity.twist_queries.load(Ordering::Relaxed), 2);
     identity.finish_observation();
@@ -635,7 +649,8 @@ fn assert_flip_nontrivial_case<D>(value: impl Fn(usize) -> D + Copy)
 where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(6, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, value);
     let before = source.dense_data().unwrap().to_vec();
@@ -643,7 +658,7 @@ where
     let source_domain = source.domain();
 
     provider.reset_ledger(2);
-    let codomain = source.flip(&[0], Direction::Inverse).unwrap();
+    let codomain = source.flip(engine, &[0], Direction::Inverse).unwrap();
     assert_eq!(provider.fs_queries.load(Ordering::Relaxed), 2);
     assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 2);
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
@@ -662,14 +677,14 @@ where
     });
 
     provider.reset_ledger(2);
-    let domain = source.flip(&[2], Direction::Forward).unwrap();
+    let domain = source.flip(engine, &[2], Direction::Forward).unwrap();
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
     provider.finish_observation();
     assert_eq!(domain.domain()[0].is_dual(), !source.domain()[0].is_dual());
     assert_values(&domain, value, |_| -1.0);
 
     provider.reset_ledger(0);
-    match source.flip(&[0, 0], Direction::Forward) {
+    match source.flip(engine, &[0, 0], Direction::Forward) {
         Err(GenericTensorError::Facade(Error::InvalidArgument(message))) => {
             assert!(message.contains("listed more than once"), "{message}");
         }
@@ -687,9 +702,9 @@ where
     }
     provider.finish_observation();
 
-    let lazy = source.adjoint().unwrap();
+    let lazy = source.adjoint(engine).unwrap();
     provider.reset_ledger(2);
-    let lazy_flipped = lazy.flip(&[1], Direction::Forward).unwrap();
+    let lazy_flipped = lazy.flip(engine, &[1], Direction::Forward).unwrap();
     assert_eq!(provider.post_stage_queries.load(Ordering::Relaxed), 0);
     provider.finish_observation();
     assert_eq!(
@@ -698,14 +713,18 @@ where
     );
     provider.reset_ledger(2);
     let direct = source
-        .flip(&[0], Direction::Inverse)
+        .flip(engine, &[0], Direction::Inverse)
         .unwrap()
-        .adjoint()
+        .adjoint(engine)
         .unwrap();
     provider.finish_observation();
     assert_eq!(
-        lazy_flipped.materialize().unwrap().dense_data().unwrap(),
-        direct.materialize().unwrap().dense_data().unwrap()
+        lazy_flipped
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
+        direct.materialize(engine).unwrap().dense_data().unwrap()
     );
     assert_eq!(lazy_flipped.codomain(), direct.codomain());
     assert_eq!(lazy_flipped.domain(), direct.domain());
@@ -729,8 +748,9 @@ fn checked_generic_flip_scales_full_keys_and_lazy_duality_for_real_and_complex_p
 
 #[test]
 fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(
         7,
         BraidingStyleKind::NoBraiding,
@@ -739,7 +759,7 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
     let source = fixture(&runtime, &provider, |marker| marker as f64);
 
     provider.reset_ledger(0);
-    match source.flip(&[0, 0], Direction::Forward) {
+    match source.flip(engine, &[0, 0], Direction::Forward) {
         Err(GenericTensorError::Facade(Error::InvalidArgument(message))) => {
             assert!(message.contains("listed more than once"), "{message}");
         }
@@ -749,7 +769,7 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
 
     provider.reset_ledger(0);
     assert!(matches!(
-        source.flip(&[0], Direction::Forward),
+        source.flip(engine, &[0], Direction::Forward),
         Err(GenericTensorError::Facade(Error::InvalidArgument(_)))
     ));
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 1);
@@ -760,15 +780,16 @@ fn checked_generic_flip_rejects_nobraiding_before_pivotal_queries() {
 
 #[test]
 fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(8, BraidingStyleKind::Anyonic, -1.0));
     let source = fixture(&runtime, &provider, |marker| marker as f64);
     let before = source.dense_data().unwrap().to_vec();
 
     provider.reset_ledger(0);
     assert!(matches!(
-        source.flip(&[source.rank()], Direction::Forward),
+        source.flip(engine, &[source.rank()], Direction::Forward),
         Err(GenericTensorError::Facade(Error::InvalidArgument(_)))
     ));
     assert_eq!(provider.style_queries.load(Ordering::Relaxed), 0);
@@ -776,7 +797,7 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
     assert_eq!(provider.twist_queries.load(Ordering::Relaxed), 0);
 
     provider.reset_ledger(0);
-    let empty = source.flip(&[], Direction::Forward).unwrap();
+    let empty = source.flip(engine, &[], Direction::Forward).unwrap();
     assert_eq!(
         empty.dense_data().unwrap().as_ptr(),
         source.dense_data().unwrap().as_ptr()
@@ -788,7 +809,7 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
     provider.reset_ledger(0);
     provider.fail_fs_on.store(2, Ordering::Relaxed);
     assert!(matches!(
-        source.flip(&[0], Direction::Forward),
+        source.flip(engine, &[0], Direction::Forward),
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
             PivotalError::FrobeniusSchur
         )))
@@ -798,7 +819,7 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
     provider.reset_ledger(0);
     provider.fail_twist_on.store(2, Ordering::Relaxed);
     assert!(matches!(
-        source.flip(&[0], Direction::Forward),
+        source.flip(engine, &[0], Direction::Forward),
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(
             PivotalError::Twist
         )))
@@ -808,8 +829,9 @@ fn checked_generic_flip_precedence_and_staged_failures_are_nonpublishing() {
 
 #[test]
 fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::with_fs(
         9,
         BraidingStyleKind::Anyonic,
@@ -820,13 +842,13 @@ fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
         .and_then(|space| space.try_dual())
         .unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&x_dual], [&x_dual], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&x_dual], [&x_dual], |_, _| 3.0).unwrap();
 
-    let codomain = source.flip(&[0], Direction::Forward).unwrap();
-    let domain = source.flip(&[1], Direction::Forward).unwrap();
+    let codomain = source.flip(engine, &[0], Direction::Forward).unwrap();
+    let domain = source.flip(engine, &[1], Direction::Forward).unwrap();
     assert_eq!(codomain.dense_data().unwrap(), &[-3.0]);
     assert_eq!(domain.dense_data().unwrap(), &[-3.0]);
-    let roundtrip = codomain.flip(&[0], Direction::Inverse).unwrap();
+    let roundtrip = codomain.flip(engine, &[0], Direction::Inverse).unwrap();
     assert_eq!(
         roundtrip.dense_data().unwrap(),
         source.dense_data().unwrap()
@@ -836,19 +858,24 @@ fn checked_generic_flip_uses_staged_nontrivial_fs_and_twist_factors() {
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_sun_identity_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D)
-where
+fn assert_sun_identity_case<D>(
+    engine: &mut dyn symtn::typed::Engine,
+    n: usize,
+    label: Vec<i64>,
+    value: impl Fn(usize) -> D,
+) where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&legs[0], &legs[1], &legs[2]],
         [],
@@ -857,7 +884,9 @@ where
         },
     )
     .unwrap();
-    let twisted = source.twist(&[0, 1, 2], Direction::Forward).unwrap();
+    let twisted = source
+        .twist(engine, &[0, 1, 2], Direction::Forward)
+        .unwrap();
     assert_eq!(
         twisted.dense_data().unwrap().as_ptr(),
         source.dense_data().unwrap().as_ptr()
@@ -880,33 +909,39 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_twist_identity_shares_exact_provider_and_layout() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the checked SU(3)/SU(4) pivotal implementation is θ=1, so all four
     // provider/dtype cases share payload and preserve the admitted layout.
-    assert_sun_identity_case(3, vec![2, 2], |value| value as f64);
-    assert_sun_identity_case(3, vec![2, 2], |value| {
+    assert_sun_identity_case(engine, 3, vec![2, 2], |value| value as f64);
+    assert_sun_identity_case(engine, 3, vec![2, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_sun_identity_case(4, vec![2, 0, 2], |value| value as f64);
-    assert_sun_identity_case(4, vec![2, 0, 2], |value| {
+    assert_sun_identity_case(engine, 4, vec![2, 0, 2], |value| value as f64);
+    assert_sun_identity_case(engine, 4, vec![2, 0, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_sun_flip_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D)
-where
+fn assert_sun_flip_case<D>(
+    engine: &mut dyn symtn::typed::Engine,
+    n: usize,
+    label: Vec<i64>,
+    value: impl Fn(usize) -> D,
+) where
     D: TensorScalar + fmt::Debug + PartialEq,
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let legs = [2, 1, 2].map(|degeneracy| {
         GradedSpace::try_new(Arc::clone(&provider), [(label.clone(), degeneracy)]).unwrap()
     });
     let source: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&legs[0], &legs[1], &legs[2]],
         [],
@@ -915,7 +950,7 @@ where
         },
     )
     .unwrap();
-    let flipped = source.flip(&[0, 2], Direction::Forward).unwrap();
+    let flipped = source.flip(engine, &[0, 2], Direction::Forward).unwrap();
     assert!(std::ptr::eq(flipped.provider(), provider.as_ref()));
     assert!(flipped.codomain()[0].is_dual());
     assert!(flipped.codomain()[2].is_dual());
@@ -936,7 +971,7 @@ where
         assert_eq!(after.offset(), before.offset());
     }
     assert!(saw_vertex_two);
-    let roundtrip = flipped.flip(&[0, 2], Direction::Inverse).unwrap();
+    let roundtrip = flipped.flip(engine, &[0, 2], Direction::Inverse).unwrap();
     assert_eq!(
         roundtrip.dense_data().unwrap(),
         source.dense_data().unwrap()
@@ -947,13 +982,14 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_flip_preserves_full_key_layout_and_inverse_roundtrip() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_sun_flip_case(3, vec![2, 2], |value| value as f64);
-    assert_sun_flip_case(3, vec![2, 2], |value| {
+    assert_sun_flip_case(engine, 3, vec![2, 2], |value| value as f64);
+    assert_sun_flip_case(engine, 3, vec![2, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
-    assert_sun_flip_case(4, vec![2, 0, 2], |value| value as f64);
-    assert_sun_flip_case(4, vec![2, 0, 2], |value| {
+    assert_sun_flip_case(engine, 4, vec![2, 0, 2], |value| value as f64);
+    assert_sun_flip_case(engine, 4, vec![2, 0, 2], |value| {
         Complex64::new(value as f64, -(value as f64))
     });
 }
@@ -1063,14 +1099,16 @@ fn assert_compose_any_braiding<D>(
 ) where
     D: TensorScalar + symtn::typed::AdvancedLinalgScalar + Into<Complex64>,
 {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, -1.0));
     let v = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 1), (Label::X, 2)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2), (Label::X, 3)]).unwrap();
-    let filled = |offset: usize,
-                  codomain: &[&GradedSpace<CheckedPivotalToy>],
-                  domain: &[&GradedSpace<CheckedPivotalToy>]| {
+    let mut filled = |offset: usize,
+                      codomain: &[&GradedSpace<CheckedPivotalToy>],
+                      domain: &[&GradedSpace<CheckedPivotalToy>]| {
         TensorMap::from_subblock_fn(
+            engine,
             &runtime,
             codomain.to_vec(),
             domain.to_vec(),
@@ -1099,10 +1137,10 @@ fn assert_compose_any_braiding<D>(
     // Empty middle (outer product through the unit): V ← () and () ← W.
     let column = filled(11, &[&v], &[]);
     let row = filled(13, &[], &[&w]);
-    let composed = |lhs: &TensorMap<CheckedPivotalToy, D>,
-                    rhs: &TensorMap<CheckedPivotalToy, D>| {
+    let mut composed = |lhs: &TensorMap<CheckedPivotalToy, D>,
+                        rhs: &TensorMap<CheckedPivotalToy, D>| {
         let composed = lhs
-            .compose(rhs)
+            .compose(engine, rhs)
             .unwrap_or_else(|error| panic!("{braiding:?}: {error:?}"));
         assert!(std::ptr::eq(composed.provider(), provider.as_ref()));
         assert_eq!(composed.codomain(), lhs.codomain());
@@ -1121,13 +1159,13 @@ fn assert_compose_any_braiding<D>(
     }
     // One self-composition of the endomorphism A∘B.
     let endomorphism = composed(&a, &b);
-    let squared = endomorphism.compose(&endomorphism).unwrap();
+    let squared = endomorphism.compose(engine, &endomorphism).unwrap();
     assert_compose_oracle(&endomorphism, &endomorphism, &squared);
     // Composition is not a contraction over mismatched spaces; a lazy
     // adjoint operand composes as its materialization does (TensorKit
     // `mul!` over `block(a, c)'`).
     assert!(matches!(
-        a.compose(&a),
+        a.compose(engine, &a),
         Err(GenericTensorError::Plan(
             CheckedGenericPlanError::Operation(OperationError::ContractAxisCountMismatch {
                 lhs: 1,
@@ -1135,9 +1173,9 @@ fn assert_compose_any_braiding<D>(
             })
         ))
     ));
-    let adjoint = a.adjoint().unwrap();
-    let got = adjoint.compose(&a).unwrap();
-    assert_compose_oracle(&adjoint.materialize().unwrap(), &a, &got);
+    let adjoint = a.adjoint(engine).unwrap();
+    let got = adjoint.compose(engine, &a).unwrap();
+    assert_compose_oracle(&adjoint.materialize(engine).unwrap(), &a, &got);
 }
 
 #[test]
@@ -1163,13 +1201,14 @@ fn checked_generic_compose_admits_every_braiding_like_tensorkit_mul() {
 
 #[test]
 fn checked_generic_contract_keeps_its_braiding_boundaries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (#1372, #1378): general `contract` shares the ordinary contraction's
     // symmetric-braiding boundary, canonical axes included, and the checked
     // Generic engine keeps Fermionic general contraction explicitly
     // unsupported (it needs the supertrace twist). `compose` on the same
     // operands succeeds for every style; bosonic contracts to the hand oracle.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for (tag, braiding) in [
         (20, BraidingStyleKind::NoBraiding),
         (21, BraidingStyleKind::Anyonic),
@@ -1178,23 +1217,25 @@ fn checked_generic_contract_keeps_its_braiding_boundaries() {
     ] {
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
         let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
-        let matrix = |offset: f64| -> TensorMap<_, f64> {
-            TensorMap::from_subblock_fn(&runtime, [&unit], [&unit], |_, index| {
+        let mut matrix = |offset: f64| -> TensorMap<_, f64> {
+            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
                 offset + (2 * index[0] + index[1]) as f64
             })
             .unwrap()
         };
         let (lhs, rhs) = (matrix(1.0), matrix(5.0));
         // Hand oracle: the one block is [[1,2],[3,4]]·[[5,6],[7,8]].
-        let expected = TensorMap::from_subblock_fn(&runtime, [&unit], [&unit], |_, index| {
-            [[19.0, 22.0], [43.0, 50.0]][index[0]][index[1]]
-        })
-        .unwrap();
+        let expected =
+            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
+                [[19.0, 22.0], [43.0, 50.0]][index[0]][index[1]]
+            })
+            .unwrap();
         assert_eq!(
-            lhs.compose(&rhs).unwrap().dense_data().unwrap(),
+            lhs.compose(engine, &rhs).unwrap().dense_data().unwrap(),
             expected.dense_data().unwrap()
         );
         let contract = lhs.contract(
+            engine,
             &rhs,
             &ContractSpec {
                 lhs: &[1],
@@ -1234,12 +1275,13 @@ fn checked_generic_contract_keeps_its_braiding_boundaries() {
 
 #[test]
 fn checked_generic_planar_contract_is_bosonic_only() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (#2284): a Bosonic checked provider's planar contraction is its
     // ordinary contraction; every other style is the typed
     // `UnsupportedTensorContractScope` (the checked engine has no planar
     // route), eager and `_into`, with the destination untouched.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let spec = ContractSpec {
         lhs: &[1],
         rhs: &[0],
@@ -1254,8 +1296,8 @@ fn checked_generic_planar_contract_is_bosonic_only() {
     ] {
         let provider = Arc::new(CheckedPivotalToy::new(tag, braiding, 1.0));
         let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
-        let matrix = |offset: f64| -> TensorMap<_, f64> {
-            TensorMap::from_subblock_fn(&runtime, [&unit], [&unit], |_, index| {
+        let mut matrix = |offset: f64| -> TensorMap<_, f64> {
+            TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&unit], |_, index| {
                 offset + (2 * index[0] + index[1]) as f64
             })
             .unwrap()
@@ -1263,12 +1305,15 @@ fn checked_generic_planar_contract_is_bosonic_only() {
         let (lhs, rhs) = (matrix(1.0), matrix(5.0));
         let mut destination = matrix(-3.0);
         let before = destination.dense_data().unwrap().to_vec();
-        let eager = lhs.planar_contract(&rhs, &spec);
-        let into = lhs.planar_contract_into(&rhs, &spec, &mut destination, 1.0, 1.0);
+        let eager = lhs.planar_contract(engine, &rhs, &spec);
+        let into = lhs.planar_contract_into(engine, &rhs, &spec, &mut destination, 1.0, 1.0);
         if braiding == BraidingStyleKind::Bosonic {
             assert_eq!(
                 eager.unwrap().dense_data().unwrap(),
-                lhs.contract(&rhs, &spec).unwrap().dense_data().unwrap()
+                lhs.contract(engine, &rhs, &spec)
+                    .unwrap()
+                    .dense_data()
+                    .unwrap()
             );
             into.unwrap();
             continue;
@@ -1302,22 +1347,23 @@ fn checked_generic_planar_contract_is_bosonic_only() {
 
 #[test]
 fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What (#1553, #1620): factorization and solve leg roles are a `permute`, so a split
     // other than the current one needs a symmetric braiding. The anyonic
     // provider refuses it with the permute's typed error before any
     // factorization work, while its current split, which needs no braid,
     // factorizes.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(40, BraidingStyleKind::Anyonic, 1.0));
     let unit = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 2)]).unwrap();
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::Unit, 3)]).unwrap();
     let t: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&unit], [&wide], |_, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&unit], [&wide], |_, index| {
             1.0 + (3 * index[0] + index[1]) as f64
         })
         .unwrap();
-    assert!(t.svd_compact(&[0], &[1]).is_ok());
+    assert!(t.svd_compact(engine, &[0], &[1]).is_ok());
     let anyonic_permute = |error: &GenericTensorError<_>| {
         matches!(
             cause::<OperationError>(error),
@@ -1328,18 +1374,27 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
         )
     };
     for error in [
-        t.svd_compact(&[1], &[0]).err().unwrap(),
-        t.qr_compact(&[1], &[0]).err().unwrap(),
-        t.left_null(&[1], &[0]).err().unwrap(),
+        t.svd_compact(engine, &[1], &[0]).err().unwrap(),
+        t.qr_compact(engine, &[1], &[0]).err().unwrap(),
+        t.left_null(engine, &[1], &[0]).err().unwrap(),
     ] {
         assert!(anyonic_permute(&error), "{error:?}");
     }
 
-    let square: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&unit], [&unit]).unwrap();
-    assert!(square.solve(&[0], &[1], &square, &[0], &[1]).is_ok());
+    let square: TensorMap<_, f64> =
+        TensorMap::isomorphism(engine, &runtime, [&unit], [&unit]).unwrap();
+    assert!(square
+        .solve(engine, &[0], &[1], &square, &[0], &[1])
+        .is_ok());
     for error in [
-        square.solve(&[1], &[0], &square, &[0], &[1]).err().unwrap(),
-        square.solve(&[0], &[1], &square, &[1], &[0]).err().unwrap(),
+        square
+            .solve(engine, &[1], &[0], &square, &[0], &[1])
+            .err()
+            .unwrap(),
+        square
+            .solve(engine, &[0], &[1], &square, &[1], &[0])
+            .err()
+            .unwrap(),
     ] {
         assert!(anyonic_permute(&error), "{error:?}");
     }
@@ -1347,11 +1402,12 @@ fn factorization_leg_roles_keep_the_permute_braiding_boundary() {
 
 #[test]
 fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: as TensorKit `trace_permute!`, the braiding gate comes before any
     // index handling, so a non-symmetric provider's trace fails even with an
     // empty or malformed pair list (#1872).
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for braiding in [
         BraidingStyleKind::NoBraiding,
         BraidingStyleKind::Anyonic,
@@ -1360,12 +1416,13 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
     ] {
         let provider = Arc::new(CheckedPivotalToy::new(9, braiding, -1.0));
         let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-        let square = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&x], [&x], |_, indices| {
-            indices.iter().sum::<usize>() as f64
-        })
-        .unwrap();
+        let square =
+            TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&x], [&x], |_, indices| {
+                indices.iter().sum::<usize>() as f64
+            })
+            .unwrap();
         for pairs in [vec![], vec![(0, 1)], vec![(0, 0)], vec![(0, 7)]] {
-            let result = square.trace_pairs(&pairs).map(|_| ());
+            let result = square.trace_pairs(engine, &pairs).map(|_| ());
             if braiding.is_symmetric() {
                 let malformed = pairs.iter().any(|&(lhs, rhs)| lhs == rhs || rhs > 1);
                 assert_eq!(
@@ -1391,6 +1448,7 @@ fn checked_generic_trace_gates_non_symmetric_braiding_before_the_pair_list() {
 
 #[test]
 fn checked_trace_pivotal_failure_does_not_publish_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     const ISOLATED: &str = "SYMTN_CHECKED_TRACE_PUBLICATION_ISOLATED";
     if std::env::var_os(ISOLATED).is_none() {
@@ -1414,13 +1472,14 @@ fn checked_trace_pivotal_failure_does_not_publish_destination() {
         return;
     }
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedPivotalToy::new(51, BraidingStyleKind::Bosonic, 1.0));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-    let source = TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&x], [&x], |_, indices| {
-        Complex64::new((indices[0] + 2 * indices[1]) as f64, 0.5)
-    })
-    .unwrap();
+    let source =
+        TensorMap::<_, Complex64>::from_subblock_fn(engine, &runtime, [&x], [&x], |_, indices| {
+            Complex64::new((indices[0] + 2 * indices[1]) as f64, 0.5)
+        })
+        .unwrap();
     let payload = source.dense_data().unwrap().as_ptr();
     symtn_core::clear_structure_caches();
     let owner = || {
@@ -1433,7 +1492,7 @@ fn checked_trace_pivotal_failure_does_not_publish_destination() {
     provider.reset_ledger(0);
     provider.fail_twist_on.store(1, Ordering::Relaxed);
 
-    let result = source.trace_pairs(&[(0, 1)]);
+    let result = source.trace_pairs(engine, &[(0, 1)]);
     assert!(matches!(
         result,
         Err(GenericTensorError::Plan(CheckedGenericPlanError::Provider(

@@ -36,6 +36,7 @@ fn raw_combine_actions_allocate_nothing_at_any_rank() {
             for (a, b) in [(one, zero), (alpha, zero), (alpha, one)] {
                 let mut run = || {
                     tensoradd_raw_strided_kernel(
+                        strided_kernel::Exec::serial(),
                         &mut zero_strides,
                         black_box(&mut dst),
                         black_box(&src),
@@ -65,7 +66,7 @@ fn parallel_copy_matches_oracle_without_caller_allocations() {
     let _serial = crate::counting_alloc::serial();
     // What: a transposed 256 x 512 copy (131072 elements, above Strided's
     // 32768-element parallel threshold), plain and conjugating, run inside an
-    // explicit 4-thread Rayon pool so `CopyPlan` fans out. Every element
+    // explicit 4-thread engine so `CopyPlan` fans out on its token. Every element
     // equals the transposed (conjugated) source bit for bit, and the thread
     // running the call allocates nothing once warm.
     const THREADS: usize = 4;
@@ -77,38 +78,36 @@ fn parallel_copy_matches_oracle_without_caller_allocations() {
     let src: Vec<Complex64> = (0..len)
         .map(|i| Complex64::new(i as f64 + 0.25, -(i as f64) - 0.5))
         .collect();
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(THREADS)
-        .build()
-        .unwrap();
-    // Why not assert on one counted call: std's pthread `Mutex` and `Condvar`
-    // box their OS object on first use (`OnceBox::get_or_init`), and each
-    // rayon worker owns one of each in `WorkerSleepState`. The counted thread
-    // boxes its own on its first `Sleep::sleep` and a peer's mutex on its first
-    // `Sleep::wake_specific_thread`, so a call can pay up to
-    // 2 * THREADS pool start-up allocations whenever a worker has not parked or
-    // been woken yet; no idle window guarantees that. Those boxes are made once
-    // per pool, so a replay that itself allocates can never reach a zero run
-    // within that many retries, while an allocation-free one must.
+    let mut pool = symtn_operations::host_pool::test_pool(THREADS);
+    // Why not assert on one counted call: the pool's workers box their
+    // OS sleep objects on first use, so a call can pay up to 2 * THREADS pool
+    // start-up allocations whenever a worker has not parked or been woken yet;
+    // no idle window guarantees that. Those boxes are made once per pool, so a
+    // copy that itself allocates can never reach a zero run within that many
+    // retries, while an allocation-free one must.
     for conjugate in [false, true] {
-        let (dst, allocations) = pool.install(|| {
-            assert_eq!(rayon::current_num_threads(), THREADS);
+        symtn_operations::host_pool::take_host_pool_observations();
+        symtn_operations::host_pool::observe_host_pools(true);
+        let (dst, allocations) = pool.install(|engine| {
             let mut dst = vec![Complex64::new(0.0, 0.0); len];
             let mut zero_strides = Vec::new();
             let mut run = |dst: &mut [Complex64]| {
-                tensoradd_raw_strided_kernel(
-                    &mut zero_strides,
-                    black_box(dst),
-                    black_box(&src),
-                    &shape,
-                    &dst_strides,
-                    &src_strides,
-                    0,
-                    0,
-                    conjugate,
-                    Complex64::new(1.0, 0.0),
-                    Complex64::new(0.0, 0.0),
-                )
+                symtn_operations::host_pool::with_exec(engine, |exec| {
+                    tensoradd_raw_strided_kernel(
+                        exec,
+                        &mut zero_strides,
+                        black_box(dst),
+                        black_box(&src),
+                        &shape,
+                        &dst_strides,
+                        &src_strides,
+                        0,
+                        0,
+                        conjugate,
+                        Complex64::new(1.0, 0.0),
+                        Complex64::new(0.0, 0.0),
+                    )
+                })
                 .unwrap()
             };
             run(&mut dst);
@@ -122,6 +121,16 @@ fn parallel_copy_matches_oracle_without_caller_allocations() {
             }
             (dst, allocations)
         });
+        symtn_operations::host_pool::observe_host_pools(false);
+        // What: the copy ran as a strided region on the engine's full token.
+        let observations = symtn_operations::host_pool::take_host_pool_observations();
+        assert!(
+            !observations.is_empty()
+                && observations.iter().all(|o| o.site
+                    == symtn_operations::host_pool::HostPoolSite::Strided
+                    && o.token_budget == THREADS),
+            "{observations:?}"
+        );
         assert_eq!(
             allocations.last(),
             Some(&0),
@@ -197,6 +206,7 @@ fn raw_rank_twelve_fusing_to_eight_allocates_like_native_rank_eight() {
             let calls = native_and_raw_twelve().map(|(shape, dst_strides, src_strides)| {
                 let mut run = || {
                     tensoradd_raw_strided_kernel(
+                        strided_kernel::Exec::serial(),
                         &mut zero_strides,
                         black_box(&mut dst),
                         black_box(&src),

@@ -197,6 +197,7 @@ fn alternating_bicharacter_permute_and_braid_apply_source_order_r_symbol() {
 
 #[test]
 fn alternating_bicharacter_contract_into_swapped_output_applies_source_order_r_symbol() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: contracting A: v ⊗ w ← c with B: c ← c into the output order
     // (w, v) ← c equals ω² · A·B, the braid of the source pair (v, w).
     let rule = AlternatingZ3SquaredRule;
@@ -204,6 +205,7 @@ fn alternating_bicharacter_contract_into_swapped_output_applies_source_order_r_s
     let rhs = single_block([VW], [VW], Complex64::new(-0.75, 2.0));
     let mut dst = single_block([W, V], [VW], Complex64::zero());
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,

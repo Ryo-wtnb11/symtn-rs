@@ -3,15 +3,17 @@ use super::*;
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let legs =
         [2, 3, 5].map(|n| GradedSpace::try_new(Arc::clone(&provider), [(vec![1, 1], n)]).unwrap());
     let source = TensorMap::<_, f64>::from_subblock_fn(
+        engine,
         &runtime,
         [&legs[0], &legs[1]],
         [&legs[2]],
@@ -34,19 +36,19 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
     ];
     for (output, shape, dual, literal) in [
         (
-            source.transpose(&[0], &[2, 1]).unwrap(),
+            source.transpose(engine, &[0], &[2, 1]).unwrap(),
             [2, 5, 3],
             [false, true],
             bend,
         ),
         (
-            source.repartition(1).unwrap(),
+            source.repartition(engine, 1).unwrap(),
             [2, 5, 3],
             [false, true],
             bend,
         ),
         (
-            source.transpose(&[1], &[0, 2]).unwrap(),
+            source.transpose(engine, &[1], &[0, 2]).unwrap(),
             [3, 2, 5],
             [true, false],
             fold,
@@ -95,13 +97,17 @@ fn su3_octet_vertex_moves_preserve_unequal_degeneracy_blocks() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
     use symtn::sector::{U1FusionRule, U1Irrep};
 
-    fn bits<R: TypedSectorAdmission>(tensor: &TensorMap<R, Complex64>) -> Vec<(u64, u64)> {
+    fn bits<R: TypedSectorAdmission>(
+        engine: &mut dyn Engine,
+        tensor: &TensorMap<R, Complex64>,
+    ) -> Vec<(u64, u64)> {
         tensor
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -111,10 +117,11 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     }
     // Each structural zero must be `+0 + 0i`; an `im` of `-0` fails.
     fn assert_positive_zeros<R: TypedSectorAdmission>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, Complex64>,
         count: usize,
     ) {
-        let zeros: Vec<_> = bits(tensor)
+        let zeros: Vec<_> = bits(engine, tensor)
             .into_iter()
             .filter(|&(re, im)| f64::from_bits(re) == 0.0 && f64::from_bits(im) == 0.0)
             .collect();
@@ -127,14 +134,15 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             .collect()
     };
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(provider, [(vec![2i64, 1], 3), (vec![0, 0], 2)]).unwrap();
     let big = [(1.5, 0.5), (-2.0, -1.0), (0.25, 3.0)];
     let small = [(3.0, -0.75), (-0.5, 2.0)];
-    let su3 = |conj: bool| {
+    let su3 = |engine: &mut dyn Engine, conj: bool| {
         TensorMap::<_, Complex64>::diagonal(
+            engine,
             &runtime,
             &leg,
             [
@@ -150,23 +158,24 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         )
         .unwrap()
     };
-    let s = su3(false);
-    let adjoint = s.adjoint().unwrap();
+    let s = su3(engine, false);
+    let adjoint = s.adjoint(engine).unwrap();
     // Hand-conjugated values are the oracle.
-    let expected = su3(true);
+    let expected = su3(engine, true);
     // 3x3 [2,1] and 2x2 [0,0] blocks: 6 + 2 off-diagonal entries.
-    assert_positive_zeros(&adjoint, 8);
-    assert_eq!(bits(&adjoint), bits(&expected));
+    assert_positive_zeros(engine, &adjoint, 8);
+    assert_eq!(bits(engine, &adjoint), bits(engine, &expected));
     assert!(
         symtn::typed::__network::network_reuse_class(&adjoint, false) == NetworkReuseClass::Compact
     );
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&adjoint).unwrap(),
-        symtn::expert::diagonal_spectrum(&expected).unwrap()
+        symtn::expert::diagonal_spectrum(engine, &adjoint).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &expected).unwrap()
     );
+    let adjoint_adjoint = &adjoint.adjoint(engine).unwrap();
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&adjoint.adjoint().unwrap()).unwrap(),
-        symtn::expert::diagonal_spectrum(&s).unwrap()
+        symtn::expert::diagonal_spectrum(engine, adjoint_adjoint).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &s).unwrap()
     );
 
     let assert_close = |got: &[Complex64], want: &[Complex64], what: &str| {
@@ -176,23 +185,27 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         }
     };
     // Consumers take the owned compact form as they take `s` itself.
-    let Qr { q, r } = adjoint.qr_compact(&[0], &[1]).unwrap();
-    let qr = q.compose(&r).unwrap();
+    let Qr { q, r } = adjoint.qr_compact(engine, &[0], &[1]).unwrap();
+    let qr = q.compose(engine, &r).unwrap();
     assert!(qr.dense_data().is_err(), "D * D stays compact");
     assert_close(
-        qr.materialize().unwrap().dense_data().unwrap(),
-        adjoint.materialize().unwrap().dense_data().unwrap(),
+        qr.materialize(engine).unwrap().dense_data().unwrap(),
+        adjoint.materialize(engine).unwrap().dense_data().unwrap(),
         "qr",
     );
-    let Svd { u, s: sigma, vh } = adjoint.svd_compact(&[0], &[1]).unwrap();
-    let reconstructed = u.compose(&sigma).unwrap().compose(&vh).unwrap();
+    let Svd { u, s: sigma, vh } = adjoint.svd_compact(engine, &[0], &[1]).unwrap();
+    let reconstructed = u
+        .compose(engine, &sigma)
+        .unwrap()
+        .compose(engine, &vh)
+        .unwrap();
     assert_close(
         reconstructed.dense_data().unwrap(),
-        adjoint.materialize().unwrap().dense_data().unwrap(),
+        adjoint.materialize(engine).unwrap().dense_data().unwrap(),
         "svd",
     );
     // s^† s is diagonal with |s|^2 entries.
-    let gram = adjoint.compose(&s).unwrap();
+    let gram = adjoint.compose(engine, &s).unwrap();
     let norms = |values: &[(f64, f64)]| -> Vec<Complex64> {
         values
             .iter()
@@ -200,6 +213,7 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
             .collect()
     };
     let expected_gram = TensorMap::<_, Complex64>::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -216,13 +230,13 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     .unwrap();
     // D * D stays compact (TensorKit `compose_dest(::Diagonal, ::Diagonal)`).
     assert_close(
-        &symtn::expert::diagonal_spectrum(&gram)
+        &symtn::expert::diagonal_spectrum(engine, &gram)
             .unwrap()
             .expect("compact")
             .into_iter()
             .flat_map(|entry| entry.values)
             .collect::<Vec<_>>(),
-        &symtn::expert::diagonal_spectrum(&expected_gram)
+        &symtn::expert::diagonal_spectrum(engine, &expected_gram)
             .unwrap()
             .expect("compact")
             .into_iter()
@@ -242,8 +256,9 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         .unwrap();
     let triplets = [(0.5, -1.25), (2.0, 0.75)];
     let antitriplet = [(-1.0, 4.0)];
-    let chiral_diagonal = |conj: bool| {
+    let chiral_diagonal = |engine: &mut dyn Engine, conj: bool| {
         TensorMap::<_, Complex64>::diagonal(
+            engine,
             &runtime,
             &chiral,
             [
@@ -259,21 +274,24 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         )
         .unwrap()
     };
-    let source = chiral_diagonal(false);
-    let chiral_adjoint = source.adjoint().unwrap();
+    let source = chiral_diagonal(engine, false);
+    let chiral_adjoint = source.adjoint(engine).unwrap();
     assert_eq!(chiral_adjoint.codomain(), source.codomain());
     assert_eq!(chiral_adjoint.domain(), source.domain());
     assert_eq!(chiral_adjoint.codomain()[0], chiral);
+    let operand = &chiral_diagonal(engine, true);
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&chiral_adjoint).unwrap(),
-        symtn::expert::diagonal_spectrum(&chiral_diagonal(true)).unwrap()
+        symtn::expert::diagonal_spectrum(engine, &chiral_adjoint).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, operand).unwrap()
     );
-    assert_eq!(bits(&chiral_adjoint), bits(&chiral_diagonal(true)));
+    let operand = &chiral_diagonal(engine, true);
+    assert_eq!(bits(engine, &chiral_adjoint), bits(engine, operand));
     // 2x2 [0,1] block and 1x1 [1,0] block: 2 off-diagonal entries.
-    assert_positive_zeros(&chiral_adjoint, 2);
+    assert_positive_zeros(engine, &chiral_adjoint, 2);
 
     // A real diagonal is its own adjoint (TensorKit returns `d`).
     let real = TensorMap::<_, f64>::diagonal(
+        engine,
         &runtime,
         &chiral,
         [
@@ -288,15 +306,15 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         ],
     )
     .unwrap();
-    let real_adjoint = real.adjoint().unwrap();
+    let real_adjoint = real.adjoint(engine).unwrap();
     assert!(
         symtn::typed::__network::network_reuse_class(&real_adjoint, false)
             == NetworkReuseClass::Compact
     );
     assert_eq!(real_adjoint.codomain(), real.codomain());
     assert_eq!(
-        symtn::expert::diagonal_spectrum(&real_adjoint).unwrap(),
-        symtn::expert::diagonal_spectrum(&real).unwrap()
+        symtn::expert::diagonal_spectrum(engine, &real_adjoint).unwrap(),
+        symtn::expert::diagonal_spectrum(engine, &real).unwrap()
     );
 
     // The multiplicity-free path gives the same representation and zeros.
@@ -305,8 +323,9 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         [(U1Irrep::new(1), 3), (U1Irrep::new(0), 2)],
     )
     .unwrap();
-    let u1_diagonal = |conj: bool| {
+    let u1_diagonal = |engine: &mut dyn Engine, conj: bool| {
         TensorMap::<_, Complex64>::diagonal(
+            engine,
             &runtime,
             &u1,
             [
@@ -322,23 +341,25 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
         )
         .unwrap()
     };
-    let mf_adjoint = u1_diagonal(false).adjoint().unwrap();
+    let mf_adjoint = u1_diagonal(engine, false).adjoint(engine).unwrap();
     assert!(
         symtn::typed::__network::network_reuse_class(&mf_adjoint, false)
             == NetworkReuseClass::Compact
     );
-    assert_eq!(bits(&mf_adjoint), bits(&u1_diagonal(true)));
-    assert_positive_zeros(&mf_adjoint, 8);
+    let operand = &u1_diagonal(engine, true);
+    assert_eq!(bits(engine, &mf_adjoint), bits(engine, operand));
+    assert_positive_zeros(engine, &mf_adjoint, 8);
 }
 
 #[test]
 fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg, &leg], [], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg, &leg], [], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
@@ -349,13 +370,13 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
     };
     let source_snapshot = snapshot(&source);
     provider.coefficient_queries.store(0, Ordering::Relaxed);
-    let error = source.braid(&[1, 0, 2], &[], &[0, 1]).unwrap_err();
+    let error = source.braid(engine, &[1, 0, 2], &[], &[0, 1]).unwrap_err();
     assert!(matches!(error, GenericTensorError::Facade(_)));
     assert_eq!(provider.coefficient_queries.load(Ordering::Relaxed), 0);
 
-    let permuted = source.permute(&[1, 0, 2], &[]).unwrap();
+    let permuted = source.permute(engine, &[1, 0, 2], &[]).unwrap();
     assert!(std::ptr::eq(permuted.provider(), provider.as_ref()));
-    let restored = permuted.permute(&[1, 0, 2], &[]).unwrap();
+    let restored = permuted.permute(engine, &[1, 0, 2], &[]).unwrap();
     assert_eq!(snapshot(&restored), source_snapshot);
     for (actual, expected) in restored
         .dense_data()
@@ -366,14 +387,14 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
         assert!((actual - expected).abs() <= 1e-12);
     }
 
-    let braided = source.braid(&[1, 0, 2], &[], &[0, 1, 2]).unwrap();
+    let braided = source.braid(engine, &[1, 0, 2], &[], &[0, 1, 2]).unwrap();
     assert!(std::ptr::eq(braided.provider(), provider.as_ref()));
 
     // A permutation this source has not taken: a warm one answers from its
     // destination memo and completed transformer without the provider
     // (#2154), so only a cold call reaches the failing algebra.
     provider.fail_algebra.store(true, Ordering::Relaxed);
-    let error = source.permute(&[2, 1, 0], &[]).unwrap_err();
+    let error = source.permute(engine, &[2, 1, 0], &[]).unwrap_err();
     assert!(matches!(
         error,
         GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Provider(
@@ -385,10 +406,11 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for n in [3, 4] {
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
@@ -396,18 +418,18 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
         let label = if n == 3 { vec![1, 1] } else { vec![1, 0, 1] };
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(label, 1)]).unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
 
-        assert!(source.remove_unit(0).is_err());
+        assert!(source.remove_unit(engine, 0).is_err());
         let inserted = source
-            .insert_unit(0, Side::Domain, symtn::typed::Duality::Plain)
+            .insert_unit(engine, 0, Side::Domain, symtn::typed::Duality::Plain)
             .unwrap();
         assert!(std::ptr::eq(inserted.provider(), provider.as_ref()));
         assert_eq!(
             inserted.dense_data().unwrap().as_ptr(),
             source.dense_data().unwrap().as_ptr()
         );
-        let removed = inserted.remove_unit(0).unwrap();
+        let removed = inserted.remove_unit(engine, 0).unwrap();
         assert!(std::ptr::eq(removed.provider(), provider.as_ref()));
         assert_eq!(
             removed.dense_data().unwrap().as_ptr(),
@@ -418,7 +440,7 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
         // The seam decides only the boundary slot `position == codomain_rank`.
         for (seam, codomain_rank) in [(Side::Codomain, 2), (Side::Domain, 1)] {
             let inserted = source
-                .insert_unit(1, seam, symtn::typed::Duality::Dual)
+                .insert_unit(engine, 1, seam, symtn::typed::Duality::Dual)
                 .unwrap();
             assert_eq!(inserted.codomain_rank(), codomain_rank, "{seam:?}");
             let unit = match seam {
@@ -437,6 +459,7 @@ fn sun_checked_generic_unit_insert_remove_preserves_authority_and_payload() {
 
 #[test]
 fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_CHECKED_UNIT_INSERT_CORRESPONDENCE_FAILURE_ISOLATED",
@@ -444,11 +467,11 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(241));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&x], [&x, &x], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&x], [&x, &x], |_, _| 3.0).unwrap();
 
     // Negative fixture only: after the source exists, claim a second channel
     // for 1 x X. Destination preparation succeeds, but the larger layout no
@@ -461,7 +484,7 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
     assert_eq!(before.entries(), 0);
 
     let error = source
-        .insert_unit(0, Side::Codomain, symtn::typed::Duality::Plain)
+        .insert_unit(engine, 0, Side::Codomain, symtn::typed::Duality::Plain)
         .unwrap_err();
 
     assert!(matches!(
@@ -480,6 +503,7 @@ fn checked_unit_insert_correspondence_failure_does_not_publish_destination() {
 
 #[test]
 fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
         "SYMTN_CHECKED_UNIT_REMOVE_CORRESPONDENCE_FAILURE_ISOLATED",
@@ -487,14 +511,14 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(242));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let vacuum = GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 1)]).unwrap();
     let base: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&x, &x], [&vacuum], |_, _| 5.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&x, &x], [&vacuum], |_, _| 5.0).unwrap();
     let source = base
-        .insert_unit(0, Side::Codomain, symtn::typed::Duality::Plain)
+        .insert_unit(engine, 0, Side::Codomain, symtn::typed::Duality::Plain)
         .unwrap();
 
     // Negative fixture only: rebuild the destination after suppressing the
@@ -506,7 +530,7 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
     );
     assert_eq!(before.entries(), 0);
 
-    let error = source.remove_unit(0).unwrap_err();
+    let error = source.remove_unit(engine, 0).unwrap_err();
 
     assert!(matches!(
         error,
@@ -524,12 +548,13 @@ fn checked_unit_remove_correspondence_failure_does_not_publish_destination() {
 
 #[test]
 fn checked_unit_final_provider_guard_remains_structure_typed() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(243));
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&x], [&x], |_, _| 7.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&x], [&x], |_, _| 7.0).unwrap();
     let payload = source.dense_data().unwrap().as_ptr();
 
     reset_provider_queries(&provider);
@@ -537,7 +562,7 @@ fn checked_unit_final_provider_guard_remains_structure_typed() {
         .invalid_style_after_first_query
         .store(true, Ordering::Relaxed);
     let error = source
-        .insert_unit(0, Side::Codomain, symtn::typed::Duality::Plain)
+        .insert_unit(engine, 0, Side::Codomain, symtn::typed::Duality::Plain)
         .unwrap_err();
 
     assert!(matches!(
@@ -556,25 +581,34 @@ fn checked_unit_final_provider_guard_remains_structure_typed() {
 
 #[test]
 fn checked_only_contract_and_compose_keep_left_authority() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let left_provider = Arc::new(CheckedOnlyToy::new(124));
     let right_provider = Arc::new(CheckedOnlyToy::new(124));
     let left_leg = GradedSpace::try_new(Arc::clone(&left_provider), [(Label::X, 1)]).unwrap();
     let right_leg = GradedSpace::try_new(Arc::clone(&right_provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&left_leg], [&left_leg], |_, _| 1.0).unwrap();
-    let nontrivial: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&left_leg, &left_leg], [&left_leg], |_, _| 1.0)
+        TensorMap::from_subblock_fn(engine, &runtime, [&left_leg], [&left_leg], |_, _| 1.0)
             .unwrap();
+    let nontrivial: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&left_leg, &left_leg],
+        [&left_leg],
+        |_, _| 1.0,
+    )
+    .unwrap();
     let identity: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&right_leg], [&right_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&right_leg], [&right_leg], |_, _| 1.0)
+            .unwrap();
     left_provider.r_queries.store(0, Ordering::Relaxed);
 
     for output in [
         source
             .contract(
+                engine,
                 &identity,
                 &ContractSpec {
                     lhs: &[1],
@@ -584,7 +618,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
                 },
             )
             .unwrap(),
-        source.compose(&identity).unwrap(),
+        source.compose(engine, &identity).unwrap(),
     ] {
         assert!(std::ptr::eq(output.provider(), left_provider.as_ref()));
         assert_eq!(output.dense_data().unwrap(), source.dense_data().unwrap());
@@ -597,14 +631,20 @@ fn checked_only_contract_and_compose_keep_left_authority() {
     }
     assert_eq!(left_provider.r_queries.load(Ordering::Relaxed), 0);
 
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let foreign_runtime_identity: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&other_runtime, [&right_leg], [&right_leg], |_, _| 1.0)
-            .unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
+    let foreign_runtime_identity: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &other_runtime,
+        [&right_leg],
+        [&right_leg],
+        |_, _| 1.0,
+    )
+    .unwrap();
     left_provider.algebra_queries.store(0, Ordering::Relaxed);
     right_provider.algebra_queries.store(0, Ordering::Relaxed);
     assert!(matches!(
         source.contract(
+            engine,
             &foreign_runtime_identity,
             &ContractSpec {
                 lhs: &[1],
@@ -623,11 +663,13 @@ fn checked_only_contract_and_compose_keep_left_authority() {
     let wrong_provider = Arc::new(CheckedOnlyToy::new(1));
     let wrong_leg = GradedSpace::try_new(Arc::clone(&wrong_provider), [(Label::X, 1)]).unwrap();
     let wrong_identity: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&wrong_leg], [&wrong_leg], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&wrong_leg], [&wrong_leg], |_, _| 1.0)
+            .unwrap();
     left_provider.algebra_queries.store(0, Ordering::Relaxed);
     wrong_provider.algebra_queries.store(0, Ordering::Relaxed);
     assert!(matches!(
         source.contract(
+            engine,
             &wrong_identity,
             &ContractSpec {
                 lhs: &[1],
@@ -650,6 +692,7 @@ fn checked_only_contract_and_compose_keep_left_authority() {
     left_provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = nontrivial
         .contract(
+            engine,
             &identity,
             &ContractSpec {
                 lhs: &[2],
@@ -669,12 +712,13 @@ fn checked_only_contract_and_compose_keep_left_authority() {
 
 #[test]
 fn checked_only_identity_transforms_make_no_provider_queries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
         })
         .unwrap();
@@ -692,10 +736,10 @@ fn checked_only_identity_transforms_make_no_provider_queries() {
     }
 
     for output in [
-        source.permute(&[0, 1], &[2]).unwrap(),
-        source.braid(&[0, 1], &[2], &[2, 1, 0]).unwrap(),
-        source.transpose(&[0, 1], &[2]).unwrap(),
-        source.repartition(2).unwrap(),
+        source.permute(engine, &[0, 1], &[2]).unwrap(),
+        source.braid(engine, &[0, 1], &[2], &[2, 1, 0]).unwrap(),
+        source.transpose(engine, &[0, 1], &[2]).unwrap(),
+        source.repartition(engine, 2).unwrap(),
     ] {
         assert!(std::ptr::eq(output.provider(), provider.as_ref()));
         assert_eq!(
@@ -718,19 +762,20 @@ fn checked_only_identity_transforms_make_no_provider_queries() {
 
 #[test]
 fn checked_only_otimes_preserves_typed_late_f_failures() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
     let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg, &leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], |trees, _| {
             trees.codomain_vertices()[0].get() as f64
                 - 2.0 * trees.domain_vertices()[0].get() as f64
         })
         .unwrap();
 
     provider.f_queries.store(0, Ordering::Relaxed);
-    source.otimes(&source).unwrap();
+    source.otimes(engine, &source).unwrap();
     let final_f_query = provider.f_queries.load(Ordering::Relaxed);
     assert!(final_f_query > 1);
     provider.f_queries.store(0, Ordering::Relaxed);
@@ -738,7 +783,7 @@ fn checked_only_otimes_preserves_typed_late_f_failures() {
     provider
         .fail_f_on_query
         .store(final_f_query, Ordering::Relaxed);
-    let error = source.otimes(&source).unwrap_err();
+    let error = source.otimes(engine, &source).unwrap_err();
     assert!(matches!(
         error,
         GenericTensorError::TensorProduct(CheckedGenericTensorProductError::Provider(
@@ -752,7 +797,7 @@ fn checked_only_otimes_preserves_typed_late_f_failures() {
     provider.f_queries.store(0, Ordering::Relaxed);
     provider.reset_commit_spy();
     provider.malformed_f.store(true, Ordering::Relaxed);
-    let error = source.otimes(&source).unwrap_err();
+    let error = source.otimes(engine, &source).unwrap_err();
     assert!(matches!(
         error,
         GenericTensorError::TensorProduct(CheckedGenericTensorProductError::SymbolShape {
@@ -766,17 +811,24 @@ fn checked_only_otimes_preserves_typed_late_f_failures() {
 
 #[test]
 fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new(0));
     let mismatched = Arc::new(CheckedOnlyToy::new(1));
     let first_leg = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 1)]).unwrap();
     let mismatched_leg = GradedSpace::try_new(Arc::clone(&mismatched), [(Label::X, 1)]).unwrap();
-    let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&first_leg, &first_leg], [&first_leg], |_, _| 1.0)
-            .unwrap();
+    let lhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&first_leg, &first_leg],
+        [&first_leg],
+        |_, _| 1.0,
+    )
+    .unwrap();
     let wrong_runtime: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &other_runtime,
         [&first_leg, &first_leg],
         [&first_leg],
@@ -784,6 +836,7 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
     )
     .unwrap();
     let wrong_identity: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&mismatched_leg, &mismatched_leg],
         [&mismatched_leg],
@@ -796,13 +849,13 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
     mismatched.coefficient_queries.store(0, Ordering::Relaxed);
 
     assert!(matches!(
-        lhs.otimes(&wrong_runtime),
+        lhs.otimes(engine, &wrong_runtime),
         Err(GenericTensorError::Facade(
             symtn::typed::Error::RuntimeMismatch
         ))
     ));
     assert!(matches!(
-        lhs.otimes(&wrong_identity),
+        lhs.otimes(engine, &wrong_identity),
         Err(GenericTensorError::TensorProduct(
             CheckedGenericTensorProductError::Core(
                 symtn_core::CoreError::FusionRuleMismatch { .. }
@@ -811,7 +864,7 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
     ));
     first.invalid_style.store(true, Ordering::Relaxed);
     assert!(matches!(
-        lhs.otimes(&lhs),
+        lhs.otimes(engine, &lhs),
         Err(GenericTensorError::TensorProduct(
             CheckedGenericTensorProductError::Core(symtn_core::CoreError::UnsupportedFusionStyle {
                 actual: symtn::sector::FusionStyleKind::Unique,
@@ -827,9 +880,10 @@ fn checked_only_otimes_rejects_runtime_identity_and_style_before_algebra() {
 
 #[test]
 fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_shared();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let first = Arc::new(CheckedOnlyToy::new_product_probe(9));
     let second = Arc::new(CheckedOnlyToy::new_product_probe(9));
     let x2 = GradedSpace::try_new(Arc::clone(&first), [(Label::X, 2)]).unwrap();
@@ -838,18 +892,21 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
     let y1 = GradedSpace::try_new(Arc::clone(&second), [(Label::One, 1)]).unwrap();
     let rhs_x1 = GradedSpace::try_new(Arc::clone(&second), [(Label::X, 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&x2, &x1], [&x1, &x1], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&x2, &x1], [&x1, &x1], |trees, index| {
             100.0 * trees.codomain_vertices()[0].get() as f64
                 + 10.0 * trees.domain_vertices()[0].get() as f64
                 + index[0] as f64
                 + 1.0
         })
         .unwrap();
-    let rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&y3, &rhs_x1], [&y1, &rhs_x1], |_, index| {
-            index[0] as f64 + 1.0
-        })
-        .unwrap();
+    let rhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&y3, &rhs_x1],
+        [&y1, &rhs_x1],
+        |_, index| index[0] as f64 + 1.0,
+    )
+    .unwrap();
     for provider in [&first, &second] {
         provider.identity_queries.store(0, Ordering::Relaxed);
         provider.style_queries.store(0, Ordering::Relaxed);
@@ -859,7 +916,7 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
         provider.f_queries.store(0, Ordering::Relaxed);
         provider.reset_commit_spy();
     }
-    let output = lhs.otimes(&rhs).unwrap();
+    let output = lhs.otimes(engine, &rhs).unwrap();
     assert!(std::ptr::eq(output.provider(), first.as_ref()));
     // The sector-structure cache key (#2030) and the final commit guard
     // reuse the identity the checked walk admitted (#2046).
@@ -951,7 +1008,7 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
     );
 
     let complex_lhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&x2, &x1], [&x1, &x1], |trees, index| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&x2, &x1], [&x1, &x1], |trees, index| {
             Complex64::new(1.0, 1.0)
                 * (100.0 * trees.codomain_vertices()[0].get() as f64
                     + 10.0 * trees.domain_vertices()[0].get() as f64
@@ -959,14 +1016,17 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
                     + 1.0)
         })
         .unwrap();
-    let complex_rhs: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(&runtime, [&y3, &rhs_x1], [&y1, &rhs_x1], |_, index| {
-            Complex64::new(2.0, -3.0) * (index[0] as f64 + 1.0)
-        })
-        .unwrap();
+    let complex_rhs: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&y3, &rhs_x1],
+        [&y1, &rhs_x1],
+        |_, index| Complex64::new(2.0, -3.0) * (index[0] as f64 + 1.0),
+    )
+    .unwrap();
     first.f_queries.store(0, Ordering::Relaxed);
     first.reset_commit_spy();
-    let complex = complex_lhs.otimes(&complex_rhs).unwrap();
+    let complex = complex_lhs.otimes(engine, &complex_rhs).unwrap();
     assert!(std::ptr::eq(complex.provider(), first.as_ref()));
     for (actual, expected) in complex.dense_data().unwrap().iter().zip(EXPECTED_DATA) {
         assert!((*actual - Complex64::new(5.0, -1.0) * expected).norm() <= 1e-12);
@@ -975,6 +1035,7 @@ fn checked_only_otimes_matches_fixed_heterogeneous_nonunit_oracle() {
 
 #[test]
 fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: successful catdomain admission uses the left provider Arc once;
     // admitted identity stamps keep the equal-identity right provider cold,
@@ -991,7 +1052,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
     ) {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let left_provider = Arc::new(CheckedOnlyToy::new(0));
     let right_provider = Arc::new(CheckedOnlyToy::new(0));
     let left_common = GradedSpace::try_new(Arc::clone(&left_provider), [(Label::X, 1)]).unwrap();
@@ -999,6 +1060,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
     let left_changed = GradedSpace::try_new(Arc::clone(&left_provider), [(Label::X, 1)]).unwrap();
     let right_changed = GradedSpace::try_new(Arc::clone(&right_provider), [(Label::X, 2)]).unwrap();
     let lhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&left_common, &left_common],
         [&left_changed],
@@ -1008,6 +1070,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
     )
     .unwrap();
     let rhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&right_common, &right_common],
         [&right_changed],
@@ -1031,7 +1094,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
         provider.reset_commit_spy();
     }
     let _: TensorMap<_, f64> =
-        TensorMap::zeros(&runtime, [&left_common, &left_common], [&combined]).unwrap();
+        TensorMap::zeros(engine, &runtime, [&left_common, &left_common], [&combined]).unwrap();
     let mut admission_queries = [
         left_provider.identity_queries.load(Ordering::Relaxed),
         left_provider.style_queries.load(Ordering::Relaxed),
@@ -1056,7 +1119,7 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
     }
     left_provider.arm_commit_spy_after_queries(admission_query_count);
 
-    let output = lhs.cat(&rhs, Side::Domain).unwrap();
+    let output = lhs.cat(engine, &rhs, Side::Domain).unwrap();
 
     assert!(std::ptr::eq(output.provider(), left_provider.as_ref()));
     assert!(!std::ptr::eq(output.provider(), right_provider.as_ref()));
@@ -1088,12 +1151,13 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
 
 #[test]
 fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
     // What: admission stamps, runtime, cat arguments, then output admission
     // reject in order; every failure leaves both admitted input payloads alone.
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let other_runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(123));
     let equal = Arc::new(CheckedOnlyToy::new(123));
     let wrong = Arc::new(CheckedOnlyToy::new(1));
@@ -1101,27 +1165,39 @@ fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing(
     let equal_leg = GradedSpace::try_new(Arc::clone(&equal), [(Label::X, 1)]).unwrap();
     let wrong_leg = GradedSpace::try_new(Arc::clone(&wrong), [(Label::X, 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |_, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
             1.0 + indices.iter().sum::<usize>() as f64
         })
         .unwrap();
-    let valid_rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&equal_leg, &equal_leg], [&equal_leg], |_, _| 2.0)
-            .unwrap();
+    let valid_rhs: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&equal_leg, &equal_leg],
+        [&equal_leg],
+        |_, _| 2.0,
+    )
+    .unwrap();
     let wrong_identity: TensorMap<_, f64> = TensorMap::zeros(
+        engine,
         &other_runtime,
         [&wrong_leg, &wrong_leg],
         [&wrong_leg, &wrong_leg],
     )
     .unwrap();
     let wrong_runtime: TensorMap<_, f64> = TensorMap::zeros(
+        engine,
         &other_runtime,
         [&equal_leg, &equal_leg],
         [&equal_leg, &equal_leg],
     )
     .unwrap();
-    let bad_arguments: TensorMap<_, f64> =
-        TensorMap::zeros(&runtime, [&equal_leg, &equal_leg], [&equal_leg, &equal_leg]).unwrap();
+    let bad_arguments: TensorMap<_, f64> = TensorMap::zeros(
+        engine,
+        &runtime,
+        [&equal_leg, &equal_leg],
+        [&equal_leg, &equal_leg],
+    )
+    .unwrap();
     let lhs_before = lhs.dense_data().unwrap().to_vec();
     let rhs_before = valid_rhs.dense_data().unwrap().to_vec();
     // See `forget_cached_structures`: this tag is this test's alone.
@@ -1140,25 +1216,25 @@ fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing(
     provider.reset_commit_spy();
 
     assert!(matches!(
-        lhs.cat(&wrong_identity, Side::Domain),
+        lhs.cat(engine, &wrong_identity, Side::Domain),
         Err(GenericTensorError::Facade(
             symtn::typed::Error::RuleMismatch
         ))
     ));
     assert!(matches!(
-        lhs.cat(&wrong_runtime, Side::Domain),
+        lhs.cat(engine, &wrong_runtime, Side::Domain),
         Err(GenericTensorError::Facade(
             symtn::typed::Error::RuntimeMismatch
         ))
     ));
     assert!(
-        matches!(lhs.cat(&bad_arguments, Side::Domain), Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message))) if message.contains("exactly one domain leg"))
+        matches!(lhs.cat(engine, &bad_arguments, Side::Domain), Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message))) if message.contains("exactly one domain leg"))
     );
     assert_eq!(provider.identity_queries.load(Ordering::Relaxed), 0);
     assert_eq!(provider.algebra_queries.load(Ordering::Relaxed), 0);
 
     assert!(matches!(
-        lhs.cat(&valid_rhs, Side::Domain),
+        lhs.cat(engine, &valid_rhs, Side::Domain),
         Err(GenericTensorError::Structure(
             CheckedGenericStructureError::Provider(ToyError::Algebra)
         ))
@@ -1241,13 +1317,17 @@ fn assert_sun_cat_values<D>(
 }
 
 #[cfg(feature = "cgc-gen")]
-fn assert_sun_cat_case<D>(n: usize, label: Vec<i64>, value: impl Fn(usize) -> D + Copy)
-where
+fn assert_sun_cat_case<D>(
+    engine: &mut dyn Engine,
+    n: usize,
+    label: Vec<i64>,
+    value: impl Fn(usize) -> D + Copy,
+) where
     D: Copy + fmt::Debug + PartialEq + symtn::typed::TensorScalar,
 {
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let left_provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap());
     let right_provider =
@@ -1272,6 +1352,7 @@ where
     };
 
     let domain_lhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&left_common, &left_common],
         [&left_changed],
@@ -1279,34 +1360,37 @@ where
     )
     .unwrap();
     let domain_rhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&right_common, &right_common],
         [&right_changed],
         |trees, indices| fill(20_000, trees, indices),
     )
     .unwrap();
-    let domain = domain_lhs.cat(&domain_rhs, Side::Domain).unwrap();
+    let domain = domain_lhs.cat(engine, &domain_rhs, Side::Domain).unwrap();
     assert!(std::ptr::eq(domain.provider(), left_provider.as_ref()));
     assert!(!std::ptr::eq(domain.provider(), right_provider.as_ref()));
     assert_eq!(domain.domain()[0].degeneracy(&label).unwrap(), 3);
     assert_sun_cat_values(&domain, &domain_lhs, &domain_rhs, 2, 1, value);
+    let domain_rhs_adjoint = domain_rhs.adjoint(engine).unwrap();
     let lazy_domain = domain_lhs
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .cat(&domain_rhs.adjoint().unwrap(), Side::Codomain)
+        .cat(engine, &domain_rhs_adjoint, Side::Codomain)
         .unwrap();
     assert_eq!(
         lazy_domain.dense_data().unwrap(),
         domain
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
     );
 
     let codomain_lhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&left_changed],
         [&left_common, &left_common],
@@ -1314,27 +1398,31 @@ where
     )
     .unwrap();
     let codomain_rhs: TensorMap<_, D> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&right_changed],
         [&right_common, &right_common],
         |trees, indices| fill(20_000, trees, indices),
     )
     .unwrap();
-    let codomain = codomain_lhs.cat(&codomain_rhs, Side::Codomain).unwrap();
+    let codomain = codomain_lhs
+        .cat(engine, &codomain_rhs, Side::Codomain)
+        .unwrap();
     assert!(std::ptr::eq(codomain.provider(), left_provider.as_ref()));
     assert_eq!(codomain.codomain()[0].degeneracy(&label).unwrap(), 3);
     assert_sun_cat_values(&codomain, &codomain_lhs, &codomain_rhs, 0, 1, value);
+    let codomain_rhs_adjoint = codomain_rhs.adjoint(engine).unwrap();
     let lazy_codomain = codomain_lhs
-        .adjoint()
+        .adjoint(engine)
         .unwrap()
-        .cat(&codomain_rhs.adjoint().unwrap(), Side::Domain)
+        .cat(engine, &codomain_rhs_adjoint, Side::Domain)
         .unwrap();
     assert_eq!(
         lazy_codomain.dense_data().unwrap(),
         codomain
-            .adjoint()
+            .adjoint(engine)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -1344,12 +1432,13 @@ where
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: exact TensorKit direct-sum slab values, μ=2 full-key matching,
     // distinct equal-identity Arcs, left authority, and lazy-adjoint parity.
     for (n, label) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
-        assert_sun_cat_case(n, label.clone(), |value| value as f64);
-        assert_sun_cat_case(n, label, |value| {
+        assert_sun_cat_case(engine, n, label.clone(), |value| value as f64);
+        assert_sun_cat_case(engine, n, label, |value| {
             Complex64::new(value as f64, -(value as f64))
         });
     }
@@ -1358,17 +1447,18 @@ fn sun_checked_generic_cat_covers_both_directions_dtypes_and_mu_two_keys() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 1)]).unwrap();
         let tensor: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
                 trees.codomain_vertices()[0].get() as f64
             })
             .unwrap();
@@ -1387,10 +1477,11 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
         assert_eq!(tensor.dense_data().unwrap(), &[1.0, 2.0]);
 
         let identity: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
         for output in [
             tensor
                 .contract(
+                    engine,
                     &identity,
                     &ContractSpec {
                         lhs: &[2],
@@ -1400,7 +1491,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
                     },
                 )
                 .unwrap(),
-            tensor.compose(&identity).unwrap(),
+            tensor.compose(engine, &identity).unwrap(),
         ] {
             assert!(std::ptr::eq(output.provider(), provider.as_ref()));
             assert_eq!(output.dense_data().unwrap(), tensor.dense_data().unwrap());
@@ -1412,7 +1503,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
             }
         }
 
-        let product = tensor.otimes(&tensor).unwrap();
+        let product = tensor.otimes(engine, &tensor).unwrap();
         assert!(std::ptr::eq(product.provider(), provider.as_ref()));
         let (expected_len, expected_sum, expected_weighted, expected_prefix): (
             usize,
@@ -1498,20 +1589,24 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
         let source_snapshot = snapshot(&tensor);
         for restored in [
             tensor
-                .permute(&[1, 0], &[2])
+                .permute(engine, &[1, 0], &[2])
                 .unwrap()
-                .permute(&[1, 0], &[2])
+                .permute(engine, &[1, 0], &[2])
                 .unwrap(),
             tensor
-                .braid(&[0, 2], &[1], &[0, 1, 2])
+                .braid(engine, &[0, 2], &[1], &[0, 1, 2])
                 .unwrap()
-                .braid(&[0, 2], &[1], &[0, 1, 2])
+                .braid(engine, &[0, 2], &[1], &[0, 1, 2])
                 .unwrap(),
-            tensor.repartition(1).unwrap().repartition(2).unwrap(),
             tensor
-                .transpose(&[2], &[1, 0])
+                .repartition(engine, 1)
                 .unwrap()
-                .transpose(&[2, 1], &[0])
+                .repartition(engine, 2)
+                .unwrap(),
+            tensor
+                .transpose(engine, &[2], &[1, 0])
+                .unwrap()
+                .transpose(engine, &[2, 1], &[0])
                 .unwrap(),
         ] {
             assert!(std::ptr::eq(restored.provider(), provider.as_ref()));
@@ -1531,6 +1626,7 @@ fn sun_adjoint_multiplicity_transforms_round_trip_labels_vertices_and_payload() 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
     if crate::checked_generic_facade::run_isolated_or_return(
@@ -1540,24 +1636,24 @@ fn sun_checked_generic_transforms_reuse_the_runtime_completed_store() {
         return;
     }
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     for (n, adjoint) in [(3, vec![1, 1]), (4, vec![1, 0, 1])] {
         let provider = Arc::new(
             LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(n).unwrap()).unwrap(),
         );
         let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 1)]).unwrap();
         let source: TensorMap<_, f64> =
-            TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&leg], |trees, _| {
+            TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |trees, _| {
                 trees.codomain_vertices()[0].get() as f64
             })
             .unwrap();
 
         for operation in ["permute", "braid", "repartition"] {
             symtn::cache::clear();
-            let apply = |tensor: &TensorMap<LieGroupFusionRule, f64>| match operation {
-                "permute" => tensor.permute(&[1, 0], &[2]),
-                "braid" => tensor.braid(&[1, 0], &[2], &[0, 1, 2]),
-                "repartition" => tensor.repartition(1),
+            let mut apply = |tensor: &TensorMap<LieGroupFusionRule, f64>| match operation {
+                "permute" => tensor.permute(engine, &[1, 0], &[2]),
+                "braid" => tensor.braid(engine, &[1, 0], &[2], &[0, 1, 2]),
+                "repartition" => tensor.repartition(engine, 1),
                 _ => unreachable!(),
             };
             let first = apply(&source).unwrap();
@@ -1589,11 +1685,13 @@ fn checked_multiplicity_lazy_fixture(
     runtime: &Runtime,
     provider: &Arc<CheckedOnlyToy>,
 ) -> TensorMap<CheckedOnlyToy, Complex64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = GradedSpace::try_new(Arc::clone(provider), [(Label::X, 2)]).unwrap();
     let mixed =
         GradedSpace::try_new(Arc::clone(provider), [(Label::Vacuum, 1), (Label::X, 3)]).unwrap();
     let tensor =
-        TensorMap::from_subblock_fn(runtime, [&x, &x], [&x, &mixed], lazy_oracle_value).unwrap();
+        TensorMap::from_subblock_fn(engine, runtime, [&x, &x], [&x, &mixed], lazy_oracle_value)
+            .unwrap();
     let coupled: std::collections::BTreeSet<_> = (0..tensor.subblock_count())
         .map(|index| *tensor.subblock_fusion_trees(index).unwrap().coupled())
         .collect();
@@ -1614,18 +1712,22 @@ fn checked_multiplicity_lazy_fixture(
 /// transform gives the same blocks (or the same error) on both. `$ops` is a
 /// closure `(lazy, owned) -> [(name, Result, Result); N]`.
 macro_rules! assert_checked_lazy_adjoint_matches_literal {
-    ($parent:expr, $conj:expr, $close:expr, $ops:expr) => {{
+    ($engine:ident, $parent:expr, $conj:expr, $close:expr, $ops:expr) => {{
         let parent = $parent;
-        let lazy = parent.adjoint().unwrap();
-        let parent_snapshot = snapshot!(parent);
-        let lazy_snapshot = snapshot!(lazy);
+        let lazy = parent.adjoint($engine).unwrap();
+        let parent_snapshot = snapshot!($engine, parent);
+        let lazy_snapshot = snapshot!($engine, lazy);
         let literal = common::literal_adjoint_payload(&parent_snapshot, &lazy_snapshot, $conj);
         assert_eq!(
             literal.len(),
-            lazy.materialize().unwrap().dense_data().unwrap().len()
+            lazy.materialize($engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len()
         );
         for (actual, expected) in lazy
-            .materialize()
+            .materialize($engine)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -1636,25 +1738,34 @@ macro_rules! assert_checked_lazy_adjoint_matches_literal {
         }
         let codomain = lazy.codomain();
         let domain = lazy.domain();
-        let owned =
-            TensorMap::from_subblock_fn(parent.runtime(), &codomain, &domain, |trees, indices| {
+        let owned = TensorMap::from_subblock_fn(
+            $engine,
+            parent.runtime(),
+            &codomain,
+            &domain,
+            |trees, indices| {
                 let (_, geometry) = lazy_snapshot
                     .blocks
                     .iter()
                     .find(|(candidate, _)| candidate == trees)
                     .unwrap();
                 literal[common::linear(geometry, indices)]
-            })
-            .unwrap();
-        common::assert_same_tensor(&snapshot!(owned), &lazy_snapshot, $close);
+            },
+        )
+        .unwrap();
+        common::assert_same_tensor(&snapshot!($engine, owned), &lazy_snapshot, $close);
 
         let mut succeeded = 0usize;
-        for (name, actual, expected) in $ops(&lazy, &owned) {
+        for (name, actual, expected) in $ops($engine, &lazy, &owned) {
             match (actual, expected) {
                 (Ok(actual), Ok(expected)) => {
                     succeeded += 1;
                     assert!(std::ptr::eq(actual.provider(), parent.provider()));
-                    common::assert_same_tensor(&snapshot!(actual), &snapshot!(expected), $close);
+                    common::assert_same_tensor(
+                        &snapshot!($engine, actual),
+                        &snapshot!($engine, expected),
+                        $close,
+                    );
                 }
                 (Err(actual), Err(expected)) => {
                     assert_eq!(format!("{actual:?}"), format!("{expected:?}"), "{name}")
@@ -1668,8 +1779,9 @@ macro_rules! assert_checked_lazy_adjoint_matches_literal {
 
 #[test]
 fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_complex() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     // The toy's F-symbols are the identity on `e == f` and zero otherwise, so
     // most recouplings are unrepresentable and fail identically for the lazy
@@ -1682,30 +1794,35 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         Result<TensorMap<CheckedOnlyToy, D>, GenericTensorError<ToyError>>,
     );
     fn two_sided_ops<D: symtn::typed::TensorScalar>(
+        engine: &mut dyn Engine,
         lazy: &TensorMap<CheckedOnlyToy, D>,
         owned: &TensorMap<CheckedOnlyToy, D>,
     ) -> [ToyStep<D>; 5] {
         [
             (
                 "permute",
-                lazy.permute(&[1, 0], &[2, 3]),
-                owned.permute(&[1, 0], &[2, 3]),
+                lazy.permute(engine, &[1, 0], &[2, 3]),
+                owned.permute(engine, &[1, 0], &[2, 3]),
             ),
             (
                 "braid",
-                lazy.braid(&[1, 0], &[2, 3], &[1, 0, 2, 3]),
-                owned.braid(&[1, 0], &[2, 3], &[1, 0, 2, 3]),
+                lazy.braid(engine, &[1, 0], &[2, 3], &[1, 0, 2, 3]),
+                owned.braid(engine, &[1, 0], &[2, 3], &[1, 0, 2, 3]),
             ),
-            ("repartition", lazy.repartition(1), owned.repartition(1)),
+            (
+                "repartition",
+                lazy.repartition(engine, 1),
+                owned.repartition(engine, 1),
+            ),
             (
                 "full transpose",
-                lazy.transpose(&[3, 2], &[1, 0]),
-                owned.transpose(&[3, 2], &[1, 0]),
+                lazy.transpose(engine, &[3, 2], &[1, 0]),
+                owned.transpose(engine, &[3, 2], &[1, 0]),
             ),
             (
                 "transpose",
-                lazy.transpose(&[1, 3], &[0, 2]),
-                owned.transpose(&[1, 3], &[0, 2]),
+                lazy.transpose(engine, &[1, 3], &[0, 2]),
+                owned.transpose(engine, &[1, 3], &[0, 2]),
             ),
         ]
     }
@@ -1715,35 +1832,42 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
     // parent `X, X, X <- []`, which the toy represents, where the Owned twin's
     // domain braid needs the toy's empty recouplings.
     fn one_sided_ops<D: symtn::typed::TensorScalar>(
+        engine: &mut dyn Engine,
         lazy: &TensorMap<CheckedOnlyToy, D>,
         owned: &TensorMap<CheckedOnlyToy, D>,
     ) -> [ToyStep<D>; 5] {
-        let parent = lazy.adjoint().unwrap();
-        assert!(owned.permute(&[], &[1, 0, 2]).is_err());
-        assert!(owned.braid(&[], &[1, 0, 2], &[0, 1, 2]).is_err());
+        let parent = lazy.adjoint(engine).unwrap();
+        assert!(owned.permute(engine, &[], &[1, 0, 2]).is_err());
+        assert!(owned.braid(engine, &[], &[1, 0, 2], &[0, 1, 2]).is_err());
         [
             (
                 "permute",
-                lazy.permute(&[], &[1, 0, 2]),
-                parent.permute(&[1, 0, 2], &[]).and_then(|t| t.adjoint()),
+                lazy.permute(engine, &[], &[1, 0, 2]),
+                parent
+                    .permute(engine, &[1, 0, 2], &[])
+                    .and_then(|t| t.adjoint(engine)),
             ),
             (
                 "braid",
-                lazy.braid(&[], &[1, 0, 2], &[0, 1, 2]),
+                lazy.braid(engine, &[], &[1, 0, 2], &[0, 1, 2]),
                 parent
-                    .braid(&[1, 0, 2], &[], &[0, 1, 2])
-                    .and_then(|t| t.adjoint()),
+                    .braid(engine, &[1, 0, 2], &[], &[0, 1, 2])
+                    .and_then(|t| t.adjoint(engine)),
             ),
-            ("repartition", lazy.repartition(1), owned.repartition(1)),
+            (
+                "repartition",
+                lazy.repartition(engine, 1),
+                owned.repartition(engine, 1),
+            ),
             (
                 "full transpose",
-                lazy.transpose(&[2, 1, 0], &[]),
-                owned.transpose(&[2, 1, 0], &[]),
+                lazy.transpose(engine, &[2, 1, 0], &[]),
+                owned.transpose(engine, &[2, 1, 0], &[]),
             ),
             (
                 "transpose",
-                lazy.transpose(&[2], &[0, 1]),
-                owned.transpose(&[2], &[0, 1]),
+                lazy.transpose(engine, &[2], &[0, 1]),
+                owned.transpose(engine, &[2], &[0, 1]),
             ),
         ]
     }
@@ -1755,13 +1879,16 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
         .iter()
         .any(|value| value.im != 0.0));
     assert_checked_lazy_adjoint_matches_literal!(
+        engine,
         two_sided.clone(),
         |z: Complex64| z.conj(),
         lazy_close_c64,
         two_sided_ops
     );
+    let two_sided_real = two_sided.re(engine).unwrap();
     assert_checked_lazy_adjoint_matches_literal!(
-        two_sided.re(),
+        engine,
+        two_sided_real,
         |x: f64| x,
         lazy_close_f64,
         two_sided_ops
@@ -1769,7 +1896,7 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
 
     let x = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
     let one_sided =
-        TensorMap::from_subblock_fn(&runtime, [&x, &x, &x], [], lazy_oracle_value).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&x, &x, &x], [], lazy_oracle_value).unwrap();
     assert!((0..one_sided.subblock_count()).any(|index| {
         one_sided
             .subblock_fusion_trees(index)
@@ -1779,13 +1906,16 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
             == 2
     }));
     let complex_succeeded = assert_checked_lazy_adjoint_matches_literal!(
+        engine,
         one_sided.clone(),
         |z: Complex64| z.conj(),
         lazy_close_c64,
         one_sided_ops
     );
+    let one_sided_real = one_sided.re(engine).unwrap();
     let real_succeeded = assert_checked_lazy_adjoint_matches_literal!(
-        one_sided.re(),
+        engine,
+        one_sided_real,
         |x: f64| x,
         lazy_close_f64,
         one_sided_ops
@@ -1798,18 +1928,23 @@ fn checked_multiplicity_lazy_adjoint_matches_the_literal_kernel_for_real_and_com
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![1, 1];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let other =
         GradedSpace::try_new(Arc::clone(&provider), [(vec![0, 0], 1), (adjoint, 1)]).unwrap();
-    let complex =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &leg], [&other, &leg], |trees, indices| {
+    let complex = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &leg],
+        [&other, &leg],
+        |trees, indices| {
             let tree = (format!("{trees:?}").bytes().fold(0u32, |acc, byte| {
                 acc.wrapping_mul(31).wrapping_add(byte as u32)
             }) % 97) as f64;
@@ -1820,8 +1955,9 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
                 im += (index as f64 + 1.0) * (axis as f64 + 1.0) * (axis as f64 + 1.0) * 0.5;
             }
             Complex64::new(re, im)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert!((0..complex.subblock_count()).any(|index| {
         complex
             .subblock_fusion_trees(index)
@@ -1842,41 +1978,48 @@ fn sun_lazy_adjoint_matches_the_literal_kernel_under_all_transforms() {
         >,
     );
     fn ops<D: symtn::typed::TensorScalar>(
+        engine: &mut dyn Engine,
         lazy: &TensorMap<LieGroupFusionRule, D>,
         owned: &TensorMap<LieGroupFusionRule, D>,
     ) -> [SunStep<D>; 5] {
         [
             (
                 "permute",
-                lazy.permute(&[1, 3], &[0, 2]),
-                owned.permute(&[1, 3], &[0, 2]),
+                lazy.permute(engine, &[1, 3], &[0, 2]),
+                owned.permute(engine, &[1, 3], &[0, 2]),
             ),
             (
                 "braid",
-                lazy.braid(&[1, 3], &[0, 2], &[3, 1, 2, 0]),
-                owned.braid(&[1, 3], &[0, 2], &[3, 1, 2, 0]),
+                lazy.braid(engine, &[1, 3], &[0, 2], &[3, 1, 2, 0]),
+                owned.braid(engine, &[1, 3], &[0, 2], &[3, 1, 2, 0]),
             ),
-            ("repartition", lazy.repartition(1), owned.repartition(1)),
+            (
+                "repartition",
+                lazy.repartition(engine, 1),
+                owned.repartition(engine, 1),
+            ),
             (
                 "full transpose",
-                lazy.transpose(&[3, 2], &[1, 0]),
-                owned.transpose(&[3, 2], &[1, 0]),
+                lazy.transpose(engine, &[3, 2], &[1, 0]),
+                owned.transpose(engine, &[3, 2], &[1, 0]),
             ),
             (
                 "transpose",
-                lazy.transpose(&[1, 3], &[0, 2]),
-                owned.transpose(&[1, 3], &[0, 2]),
+                lazy.transpose(engine, &[1, 3], &[0, 2]),
+                owned.transpose(engine, &[1, 3], &[0, 2]),
             ),
         ]
     }
     let succeeded = assert_checked_lazy_adjoint_matches_literal!(
+        engine,
         complex.clone(),
         |z: Complex64| z.conj(),
         lazy_close_c64,
         ops
     );
     assert_eq!(succeeded, 5);
+    let real = complex.re(engine).unwrap();
     let succeeded =
-        assert_checked_lazy_adjoint_matches_literal!(complex.re(), |x: f64| x, lazy_close_f64, ops);
+        assert_checked_lazy_adjoint_matches_literal!(engine, real, |x: f64| x, lazy_close_f64, ops);
     assert_eq!(succeeded, 5);
 }

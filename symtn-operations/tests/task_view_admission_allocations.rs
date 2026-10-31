@@ -10,6 +10,7 @@ use crate::counting_alloc;
 
 #[test]
 fn warmed_public_host_admission_without_tasks_is_allocation_free() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // An empty completed transform takes the normal profiled Host admission
     // seam but has no scale, block, coefficient, or dense numerical work.
@@ -25,6 +26,7 @@ fn warmed_public_host_admission_without_tasks_is_allocation_free() {
     let mut replay = |profile: &mut TreeTransformReplayProfile| {
         backend
             .tree_transform_structure_overwrite_into_raw_profiled(
+                engine,
                 &mut workspace,
                 &transform,
                 &structure,

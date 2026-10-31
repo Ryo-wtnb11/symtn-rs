@@ -5,6 +5,7 @@
 //! a warm lazy-adjoint call allocates no more than the owned `contract` (#1419).
 
 use std::hint::black_box;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
@@ -26,44 +27,68 @@ fn allocations<T>(f: impl FnOnce() -> T) -> (u64, T) {
 const LAZY_ADJOINT_SLACK: u64 = 0;
 /// Upper bound on warm `contract_conj` allocation calls. Recompiling the
 /// oriented plan per call would cost 474 or more on every row.
-const LAZY_ADJOINT_CEILING: u64 = 64;
+const LAZY_ADJOINT_CEILING: u64 = 64 + BLAS_GROUPED_PLAN_CALLS;
+/// Why a BLAS build pins more: cpueinsum-blas 0.9 prepares each grouped
+/// call's vendor plans per call, twelve allocations per GEMM job (four `Vec`s
+/// in `layout::choose` for each of the m, n and k groups) plus the plan
+/// vector, where the native plan used with `cpu-faer` allocates no per-job
+/// heap. The largest row (SU(2)) runs one grouped call of 11 jobs: measured
+/// 159 calls under Accelerate against 32 with faer. Provider plan
+/// preparation, not a symtn temporary; still far below a recompile.
+const BLAS_GROUPED_PLAN_CALLS: u64 = if cfg!(feature = "cpu-faer") {
+    0
+} else {
+    12 * 11 + 1
+};
 
 /// `A: V⊗V ← V⊗V` with three sectors of degeneracy four (the E1 `r4_s3_d4`
 /// row). The Runtime transform store must see no miss on a warm call.
 macro_rules! assert_warm_lazy_adjoint {
-    ($provider:expr, $sectors:expr $(,)?) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $provider:expr, $sectors:expr $(,)?) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let leg = GradedSpace::try_new(
             std::sync::Arc::new($provider),
             $sectors.into_iter().map(|s| (s, 4)),
         )
         .unwrap();
         let a =
-            TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 1).unwrap();
+            TensorMap::<_, f64>::rand_with_seed($engine, &runtime, [&leg, &leg], [&leg, &leg], 1)
+                .unwrap();
         let a2 =
-            TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg, &leg], [&leg, &leg], 2).unwrap();
-        let matrix = TensorMap::<_, f64>::rand_with_seed(&runtime, [&leg], [&leg], 4).unwrap();
-        let lazy = a.adjoint().unwrap();
+            TensorMap::<_, f64>::rand_with_seed($engine, &runtime, [&leg, &leg], [&leg, &leg], 2)
+                .unwrap();
+        let matrix =
+            TensorMap::<_, f64>::rand_with_seed($engine, &runtime, [&leg], [&leg], 4).unwrap();
+        let lazy = a.adjoint($engine).unwrap();
         let one_leg = ContractSpec {
             lhs: &[0],
             rhs: &[1],
             codomain: &[0, 1, 2],
             domain: &[3],
         };
-        let contract_conj = || black_box(&lazy).contract(&matrix, &one_leg).unwrap();
-        let compose_conj = || black_box(&lazy).compose(&a2).unwrap();
-        let contract = || black_box(&a).contract(&matrix, &one_leg).unwrap();
+        let contract_conj = |$engine: &mut dyn Engine| {
+            black_box(&lazy)
+                .contract($engine, &matrix, &one_leg)
+                .unwrap()
+        };
+        let compose_conj =
+            |$engine: &mut dyn Engine| black_box(&lazy).compose($engine, &a2).unwrap();
+        let contract =
+            |$engine: &mut dyn Engine| black_box(&a).contract($engine, &matrix, &one_leg).unwrap();
 
-        let cold_contract = contract_conj();
-        let cold_compose = compose_conj();
-        contract();
+        let cold_contract = contract_conj($engine);
+        let cold_compose = compose_conj($engine);
+        contract($engine);
         let misses = completed_transformers().misses();
-        let (contract_conj_calls, warm_contract) = allocations(contract_conj);
-        let (compose_conj_calls, warm_compose) = allocations(compose_conj);
-        let (contract_calls, _) = allocations(contract);
+        let (contract_conj_calls, warm_contract) = allocations(|| contract_conj($engine));
+        let (compose_conj_calls, warm_compose) = allocations(|| compose_conj($engine));
+        let (contract_calls, _) = allocations(|| contract($engine));
         // What: the first warm call is already the steady state.
-        assert_eq!(allocations(contract_conj).0, contract_conj_calls);
-        assert_eq!(allocations(compose_conj).0, compose_conj_calls);
+        assert_eq!(
+            allocations(|| contract_conj($engine)).0,
+            contract_conj_calls
+        );
+        assert_eq!(allocations(|| compose_conj($engine)).0, compose_conj_calls);
 
         // What: warm calls reuse every Runtime-owned transform plan.
         assert_eq!(completed_transformers().misses(), misses);
@@ -94,18 +119,21 @@ fn centered(count: i32) -> impl Iterator<Item = i32> {
 
 #[test]
 fn warm_lazy_adjoint_u1_allocates_like_owned_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_warm_lazy_adjoint!(U1FusionRule, centered(3).map(U1Irrep::new));
+    assert_warm_lazy_adjoint!(engine, U1FusionRule, centered(3).map(U1Irrep::new));
 }
 
 #[test]
 fn warm_lazy_adjoint_su2_allocates_like_owned_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_warm_lazy_adjoint!(SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
+    assert_warm_lazy_adjoint!(engine, SU2FusionRule, (0..3).map(SU2Irrep::from_twice_spin));
 }
 
 #[test]
 fn warm_lazy_adjoint_fz2_u1_allocates_like_owned_contract() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let parity = |q: i32| {
         if q.rem_euclid(2) == 0 {
@@ -115,6 +143,7 @@ fn warm_lazy_adjoint_fz2_u1_allocates_like_owned_contract() {
         }
     };
     assert_warm_lazy_adjoint!(
+        engine,
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
             FermionParityFusionRule,
             U1FusionRule

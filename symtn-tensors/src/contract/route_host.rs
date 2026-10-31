@@ -21,11 +21,13 @@
 
 use std::ops::Neg;
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
 use symtn_core::{BlockStructure, Placement, TensorStorage};
-use symtn_dense::DenseExecutor;
+use symtn_dense::{DenseExecutor, DenseGemmBatchBinding};
 use symtn_operations::fusion_replay::FusionBlockContractPlan;
+use symtn_operations::fusion_replay::{MatrixOp, Rank2GemmBatchJob};
 use symtn_operations::stacked::{StackedDirectReplay, StackedStorageView, StackedStorageViewMut};
 use symtn_operations::{
     admit_tree_transform_members_overwrite_raw, tree_transform_members_overwrite_raw,
@@ -38,8 +40,9 @@ use crate::{
     TreeTransformBackend, TreeTransformStructure,
 };
 
+use super::backend::{with_flat_batch_views, TensorContractWorkspace};
 use super::dynamic::{DynamicFusionTransformedSourceEntry, DynamicTreeExecutionArtifact};
-use super::fusion_block::FusionBlockContractWorkspace;
+use super::fusion_block::{BackendRank2Gemm, FusionBlockContractWorkspace};
 use super::resolution::{ContractRoute, StorageContractResolution};
 
 /// One tree-transform stage of a route; each owns its member workspace.
@@ -89,6 +92,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn overwrite_members(
         &mut self,
+        engine: &mut dyn Engine,
         stage: Stage,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -107,8 +111,10 @@ where
     ) -> Result<StackedDirectReplay<C>, OperationError>;
 
     /// Replays a `B > 1` core over member-major stacks.
+    #[allow(clippy::too_many_arguments)]
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        engine: &mut dyn Engine,
         replay: &StackedDirectReplay<C>,
         gemm: &mut G,
         dst: &mut [D],
@@ -163,6 +169,7 @@ where
 
     fn overwrite_members(
         &mut self,
+        _engine: &mut dyn Engine,
         _: Stage,
         _: &TreeTransformStructure<C>,
         _: &Arc<BlockStructure>,
@@ -185,6 +192,7 @@ where
 
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        _: &mut dyn Engine,
         _: &StackedDirectReplay<C>,
         _: &mut G,
         _: &mut [D],
@@ -244,6 +252,7 @@ where
 
     fn overwrite_members(
         &mut self,
+        engine: &mut dyn Engine,
         stage: Stage,
         structure: &TreeTransformStructure<C>,
         dst_structure: &Arc<BlockStructure>,
@@ -253,8 +262,10 @@ where
         members: usize,
         destination_scales: &[(usize, C)],
     ) -> Result<(), OperationError> {
-        let threads = self.backend.recoupling_threads().get();
+        // The engine's own cost rule decides the fan-out of the stacked replay.
+        let threads = symtn_operations::host_pool::copy_width(engine, dst.len())?;
         tree_transform_members_overwrite_raw(
+            engine,
             &mut crate::StridedHostKernelAdapter::default(),
             self.backend.dense_mut(),
             &mut self.workspaces[stage as usize],
@@ -279,6 +290,7 @@ where
 
     fn stacked_core<G: Rank2Gemm<D>>(
         &mut self,
+        engine: &mut dyn Engine,
         replay: &StackedDirectReplay<C>,
         gemm: &mut G,
         dst: &mut [D],
@@ -294,6 +306,7 @@ where
         let mut dst = WriteSlice(dst);
         let mut dst = StackedStorageViewMut::new::<D>(&mut dst, dst_len, members, dst_len)?;
         replay.execute_signed_host(
+            engine,
             &mut crate::StridedHostKernelAdapter::default(),
             gemm,
             &mut dst,
@@ -459,6 +472,7 @@ fn exact_len(actual: usize, expected: usize) -> Result<(), OperationError> {
 /// `b` scaled by `θ_b` from `destination_scales`.
 #[allow(clippy::too_many_arguments)]
 fn overwrite_stage<S, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     slot: Stage,
     structure: &TreeTransformStructure<C>,
@@ -476,6 +490,7 @@ where
 {
     if members != 1 {
         return stage.overwrite_members(
+            engine,
             slot,
             structure,
             dst_structure,
@@ -488,6 +503,7 @@ where
     }
     let (backend, workspace) = stage.ordinary(slot);
     backend.tree_transform_structure_overwrite_into_raw(
+        engine,
         workspace,
         structure,
         dst_structure,
@@ -615,6 +631,7 @@ impl<'r, C: DenseBlockScalar> RouteView<'r, C> {
 /// for CopyC, where it rides the output transform.
 #[allow(clippy::too_many_arguments)]
 fn execute_route_view<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -782,6 +799,7 @@ where
 
     if let Some(source) = &route.lhs_source {
         overwrite_stage(
+            engine,
             stage,
             Stage::Lhs,
             source.transform,
@@ -795,6 +813,7 @@ where
     }
     if let Some(source) = &route.rhs_source {
         overwrite_stage(
+            engine,
             stage,
             Stage::Rhs,
             source.transform,
@@ -832,6 +851,7 @@ where
         let mut kernels = crate::StridedHostKernelAdapter::default();
         match core_init {
             ContractDestinationInit::Zeroed => plan.execute_raw_zeroed(
+                engine,
                 &mut kernels,
                 gemm,
                 fusion_block_workspace,
@@ -844,6 +864,7 @@ where
                 core_alpha,
             ),
             ContractDestinationInit::Axpby(beta) => plan.execute_raw(
+                engine,
                 &mut kernels,
                 gemm,
                 fusion_block_workspace,
@@ -862,6 +883,7 @@ where
             unreachable!("B > 1 installed its stacked replay");
         };
         stage.stacked_core(
+            engine,
             replay,
             gemm,
             core_out,
@@ -884,6 +906,7 @@ where
     }
     if members != 1 {
         return stage.overwrite_members(
+            engine,
             Stage::Output,
             transform,
             dst_structure,
@@ -898,6 +921,7 @@ where
     let source = core_dst.as_slice();
     match init {
         ContractDestinationInit::Zeroed => backend.tree_transform_structure_overwrite_into_raw(
+            engine,
             workspace,
             transform,
             dst_structure,
@@ -908,6 +932,7 @@ where
             &[],
         ),
         ContractDestinationInit::Axpby(beta) => backend.tree_transform_structure_into_raw(
+            engine,
             workspace,
             transform,
             dst_structure,
@@ -925,6 +950,7 @@ where
 /// the caller's payload in place.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_route_host<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -944,6 +970,7 @@ where
     C: DenseBlockScalar,
 {
     execute_route_view(
+        engine,
         stage,
         gemm,
         fusion_block_workspace,
@@ -963,6 +990,7 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_dynamic_tree_route_host<S, G, D, C>(
+    engine: &mut dyn Engine,
     stage: &mut S,
     gemm: &mut G,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
@@ -982,6 +1010,7 @@ where
     C: DenseBlockScalar,
 {
     execute_route_view(
+        engine,
         stage,
         gemm,
         fusion_block_workspace,
@@ -999,13 +1028,23 @@ where
 /// Caller-owned Host payload and replay state for the member replays of one
 /// contraction route at varying `B`: owned source copies, the workspace core
 /// destination (a DynamicTree core destination or the CopyC temporary), the
-/// core slot, and one transform workspace per stage.
+/// core slot, the `B = 1` core's numerical GEMM bindings, and one transform
+/// workspace per stage.
+///
+/// The bindings hold one prepared native grouped GEMM plan per grouped core
+/// submission of the installed `B = 1` replay (one per distinct coefficient
+/// group), built on its first submission and reused while the jobs match.
+/// They are released when the workspace replays another plan or another
+/// member count; `B > 1` and the transform stages prepare per call as
+/// before. [`Self::retained_bytes`] charges them.
 #[doc(hidden)]
 pub struct HostContractMembersWorkspace<D, C = f64> {
     lhs: HostScratchBuffer<D>,
     rhs: HostScratchBuffer<D>,
     core_dst: HostScratchBuffer<D>,
     core: CoreSlot<C>,
+    /// Bindings of the `B = 1` core's batch submissions, in submission order.
+    core_bindings: Vec<DenseGemmBatchBinding>,
     /// Per-stage workspaces, indexed by [`Stage`].
     transforms: [TreeTransformWorkspace<D>; 3],
 }
@@ -1017,26 +1056,60 @@ impl<D, C> Default for HostContractMembersWorkspace<D, C> {
             rhs: HostScratchBuffer::default(),
             core_dst: HostScratchBuffer::default(),
             core: CoreSlot::default(),
+            core_bindings: Vec::new(),
             transforms: Default::default(),
         }
     }
 }
 
 impl<D, C: Copy + PartialEq + One> HostContractMembersWorkspace<D, C> {
+    /// Owned scratch and replay state: payload scratch, the core slot's
+    /// member expansion, the core bindings' conservative charge (see
+    /// [`DenseGemmBatchBinding::retained_bytes`]) and the transform
+    /// workspaces. Saturates at `usize::MAX`.
     pub fn retained_bytes(&self) -> usize {
+        let bindings = self
+            .core_bindings
+            .iter()
+            .map(DenseGemmBatchBinding::retained_bytes)
+            .fold(
+                self.core_bindings
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<DenseGemmBatchBinding>()),
+                usize::saturating_add,
+            );
         (self.lhs.capacity() + self.rhs.capacity() + self.core_dst.capacity())
             .saturating_mul(std::mem::size_of::<D>())
-            + self.core.retained_bytes()
-            + self
-                .transforms
-                .iter()
-                .map(TreeTransformWorkspace::retained_bytes)
-                .sum::<usize>()
+            .saturating_add(self.core.retained_bytes())
+            .saturating_add(bindings)
+            .saturating_add(
+                self.transforms
+                    .iter()
+                    .map(TreeTransformWorkspace::retained_bytes)
+                    .fold(0, usize::saturating_add),
+            )
     }
 
     #[cfg(test)]
     pub(crate) fn core_replay_builds(&self) -> usize {
         self.core.builds
+    }
+
+    /// Bytes the core slot's member expansion holds (zero for the plan itself).
+    #[cfg(test)]
+    pub(crate) fn core_slot_bytes(&self) -> usize {
+        self.core.retained_bytes()
+    }
+
+    /// `(bindings, bytes they own)` of the `B = 1` core.
+    #[cfg(test)]
+    pub(crate) fn core_bindings(&self) -> (usize, usize) {
+        let bytes = self
+            .core_bindings
+            .iter()
+            .map(DenseGemmBatchBinding::retained_bytes)
+            .sum();
+        (self.core_bindings.len(), bytes)
     }
 
     #[cfg(test)]
@@ -1060,6 +1133,142 @@ impl<D, C: Copy + PartialEq + One> HostContractMembersWorkspace<D, C> {
     }
 }
 
+/// The core GEMMs of a member replay: the contract backend, plus at `B = 1`
+/// the workspace's bindings, one per batch submission in submission order.
+/// The cursor starts at zero on every call, so a failed call cannot shift the
+/// next call's submissions onto other bindings.
+///
+/// Why a private adapter and not a [`Rank2Gemm`] or `TensorContractBackend`
+/// method: only the built-in dense executor has a native grouped plan to
+/// bind, and only this caller-owned workspace has a lifetime to hold it in.
+struct MemberCoreGemm<'a, EC, D, C> {
+    backend: BackendRank2Gemm<'a, DenseTreeTransformOperations<EC>, TensorContractWorkspace<D>, C>,
+    bindings: Option<&'a mut Vec<DenseGemmBatchBinding>>,
+    next: usize,
+}
+
+/// The contract executor of a member core. The built-in executor binds its
+/// native grouped plans to the workspace; another executor (a test's
+/// counting wrapper) runs its ordinary batch and leaves the binding empty.
+pub(crate) trait MemberCoreExecutor: DenseExecutor {
+    #[allow(clippy::too_many_arguments)]
+    fn matmul_batch_axpby_into_member(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: symtn_dense::DenseWrite<'_>,
+        lhs: symtn_dense::DenseRead<'_>,
+        rhs: symtn_dense::DenseRead<'_>,
+        jobs: &[Rank2GemmBatchJob],
+        runs: &[usize],
+        alpha: symtn_dense::DenseScalar,
+        beta: symtn_dense::DenseScalar,
+        binding: &mut DenseGemmBatchBinding,
+    ) -> Result<(), symtn_dense::DenseError> {
+        let _ = binding;
+        self.matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
+    }
+}
+
+impl MemberCoreExecutor for symtn_dense::DefaultDenseExecutor {
+    fn matmul_batch_axpby_into_member(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: symtn_dense::DenseWrite<'_>,
+        lhs: symtn_dense::DenseRead<'_>,
+        rhs: symtn_dense::DenseRead<'_>,
+        jobs: &[Rank2GemmBatchJob],
+        runs: &[usize],
+        alpha: symtn_dense::DenseScalar,
+        beta: symtn_dense::DenseScalar,
+        binding: &mut DenseGemmBatchBinding,
+    ) -> Result<(), symtn_dense::DenseError> {
+        self.matmul_batch_axpby_into_bound(
+            engine, output, lhs, rhs, jobs, runs, alpha, beta, binding,
+        )
+    }
+}
+
+impl<EC, D, C> Rank2Gemm<D> for MemberCoreGemm<'_, EC, D, C>
+where
+    EC: MemberCoreExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
+    C: DenseBlockScalar,
+{
+    fn matmul_rank2(
+        &mut self,
+        engine: &mut dyn Engine,
+        dst: &mut [D],
+        lhs: &[D],
+        rhs: &[D],
+        rows: usize,
+        contracted: usize,
+        cols: usize,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError> {
+        self.backend
+            .matmul_rank2(engine, dst, lhs, rhs, rows, contracted, cols, alpha, beta)
+    }
+
+    fn matmul_rank2_batch(
+        &mut self,
+        engine: &mut dyn Engine,
+        dst: &mut [D],
+        lhs: &[D],
+        rhs: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        runs: &[usize],
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError> {
+        let Some(bindings) = self.bindings.as_deref_mut() else {
+            return self
+                .backend
+                .matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta);
+        };
+        if self.next == bindings.len() {
+            bindings.push(DenseGemmBatchBinding::default());
+        }
+        let binding = &mut bindings[self.next];
+        self.next += 1;
+        let dense = self.backend.backend.dense_mut();
+        with_flat_batch_views(dst, lhs, rhs, |output, lhs, rhs| {
+            dense.matmul_batch_axpby_into_member(
+                engine,
+                output,
+                lhs,
+                rhs,
+                jobs,
+                runs,
+                alpha.dense_scalar(),
+                beta.dense_scalar(),
+                binding,
+            )
+        })
+    }
+
+    fn matmul_rank2_batch_with_ops(
+        &mut self,
+        engine: &mut dyn Engine,
+        dst: &mut [D],
+        lhs: &[D],
+        rhs: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        runs: &[usize],
+        lhs_op: MatrixOp,
+        rhs_op: MatrixOp,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError> {
+        if lhs_op == MatrixOp::Identity && rhs_op == MatrixOp::Identity {
+            return self.matmul_rank2_batch(engine, dst, lhs, rhs, jobs, runs, alpha, beta);
+        }
+        self.backend.matmul_rank2_batch_with_ops(
+            engine, dst, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
+        )
+    }
+}
+
 /// The member route view: the resolved route, or a test's lone artifact.
 pub(super) enum MemberRoute<'r, C> {
     Resolution {
@@ -1078,9 +1287,10 @@ pub(super) enum MemberRoute<'r, C> {
 /// `Axpby(0)`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute_members_host<E, EC, D, C>(
+    engine: &mut dyn Engine,
     tree_backend: &mut DenseTreeTransformOperations<E>,
     contract_backend: &mut DenseTreeTransformOperations<EC>,
-    contract_workspace: &mut super::backend::TensorContractWorkspace<D>,
+    contract_workspace: &mut TensorContractWorkspace<D>,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     route: MemberRoute<'_, C>,
     dst_structure: &Arc<BlockStructure>,
@@ -1093,7 +1303,7 @@ pub(super) fn execute_members_host<E, EC, D, C>(
 ) -> Result<(), OperationError>
 where
     E: DenseExecutor,
-    EC: DenseExecutor,
+    EC: MemberCoreExecutor,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     C: DenseBlockScalar + Neg<Output = C>,
 {
@@ -1102,6 +1312,7 @@ where
         rhs: rhs_scratch,
         core_dst,
         core,
+        core_bindings,
         transforms,
     } = workspace;
     let route = match route {
@@ -1113,15 +1324,22 @@ where
         #[cfg(test)]
         MemberRoute::DynamicTree(artifact) => RouteView::dynamic_tree(artifact),
     };
+    // The bindings belong to the installed `B = 1` replay of this plan; any
+    // other call installs a different replay, so they are released first.
+    if members != 1 || !core.replay.replays(route.plan, 1) {
+        *core_bindings = Vec::new();
+    }
     execute_route_view(
+        engine,
         &mut MemberTreeStage {
             backend: tree_backend,
             workspaces: transforms,
         },
-        &mut super::fusion_block::BackendRank2Gemm::<_, _, C>::new(
-            contract_backend,
-            contract_workspace,
-        ),
+        &mut MemberCoreGemm {
+            backend: BackendRank2Gemm::<_, _, C>::new(contract_backend, contract_workspace),
+            bindings: (members == 1).then_some(core_bindings),
+            next: 0,
+        },
         fusion_block_workspace,
         HostRouteScratch {
             lhs: lhs_scratch,
@@ -1143,9 +1361,10 @@ where
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_dynamic_tree_execution_artifact_members_host<E, EC, D, C>(
+    engine: &mut dyn Engine,
     tree_backend: &mut DenseTreeTransformOperations<E>,
     contract_backend: &mut DenseTreeTransformOperations<EC>,
-    contract_workspace: &mut super::backend::TensorContractWorkspace<D>,
+    contract_workspace: &mut TensorContractWorkspace<D>,
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     artifact: &DynamicTreeExecutionArtifact<C>,
     dst_structure: &Arc<BlockStructure>,
@@ -1157,11 +1376,12 @@ pub(crate) fn execute_dynamic_tree_execution_artifact_members_host<E, EC, D, C>(
 ) -> Result<(), OperationError>
 where
     E: DenseExecutor,
-    EC: DenseExecutor,
+    EC: MemberCoreExecutor,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     C: DenseBlockScalar + Neg<Output = C>,
 {
     execute_members_host(
+        engine,
         tree_backend,
         contract_backend,
         contract_workspace,

@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::typed::PreparedExec;
+use symtn_dense::Engine;
 use symtn_tensors::{HostContractMembersWorkspace, OutputAxisOrder, StorageContractResolution};
 
 #[cfg(test)]
@@ -56,17 +57,41 @@ pub struct ContractPlan<R, D, S = Vec<D>> {
 /// destination; and the caller never reaches the buffer mutably until
 /// `take_output` moves it out for good. `execute_into` cannot rely on any of
 /// this for a caller's destination and rewrites every inactive block.
+///
+/// On Host with the faer provider, a one-member workspace also keeps the
+/// prepared native grouped-GEMM plan of each grouped core submission, built
+/// on its first call and reused while it matches, so a warm one-member call
+/// prepares no compatible grouped core plan. One-job and affine core batches
+/// keep Tenferro's binary-plan cache, whose misses are outside this
+/// guarantee. Changing the member count releases them (a
+/// later one-member call prepares them again), and dropping the workspace
+/// frees them; two workspaces of one plan each keep their own.
+/// [`Self::retained_bytes`] includes their charge. Member counts above one
+/// prepare their grouped plans per call.
 pub struct ContractWorkspace<R, D, S = Vec<D>> {
-    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
-    runtime: Runtime,
     binding: Arc<StorageContractResolution<f64>>,
     pub(super) output: OutputSlot<StackedTensorMap<R, D, S>>,
     pub(in crate::typed) members: HostContractMembersWorkspace<D>,
+    /// The Host replay's execution scratch (tree and contract lanes), kept
+    /// for this workspace's replays instead of rebuilt per call.
+    pub(in crate::typed) host_context: crate::runtime::ContextLease,
     #[cfg(feature = "cuda")]
     pub(in crate::typed) members_cuda: symtn_tensors::CudaContractMembersWorkspace<S>,
-    /// Plan entries this workspace holds in the device context's ledger.
+    /// The engine ([`symtn_dense::CudaDenseContext::identity`]) the device
+    /// state above belongs to; `None` while it holds none.
     #[cfg(feature = "cuda")]
-    pub(in crate::typed) reserved_plan_entries: usize,
+    pub(in crate::typed) cuda_engine: Option<u64>,
+}
+
+#[cfg(feature = "cuda")]
+impl<R, D, S> ContractWorkspace<R, D, S> {
+    /// Drops the outputs, the spare and the member scratch and templates, and
+    /// binds the emptied workspace to `engine`.
+    pub(in crate::typed) fn drop_device_state(&mut self, engine: Option<u64>) {
+        self.output = OutputSlot::default();
+        self.members_cuda = Default::default();
+        self.cuda_engine = engine;
+    }
 }
 
 impl<R, D, S> ContractPlan<R, D, S>
@@ -85,11 +110,12 @@ where
     /// CUDA admits exact-sign direct Core/SwappedCore, nonzero Single CopyC,
     /// and transformed-tree routes whose transforms are nonzero Single moves.
     pub fn new(
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         spec: &super::super::ContractSpec<'_>,
     ) -> Result<Self, Error> {
-        Self::prepare(lhs, rhs, Some(spec))
+        Self::prepare(engine, lhs, rhs, Some(spec))
     }
 
     /// The one constructor of both prepared operations: `Some(spec)` is the
@@ -98,6 +124,7 @@ where
     /// because a fermionic composition and the contraction over the same
     /// legs differ by the supertrace twist.
     fn prepare(
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         spec: Option<&super::super::ContractSpec<'_>>,
@@ -114,7 +141,6 @@ where
         if rhs.signature.placement != placement {
             return Err(Error::PlacementMismatch);
         }
-        let _pool = lhs.runtime.enter_host_pool();
         let operands = (
             FusionOperand::direct(lhs.space.space()),
             FusionOperand::direct(rhs.space.space()),
@@ -134,9 +160,10 @@ where
                     order,
                     spec.codomain.len(),
                 )?;
-                let mut lease = lhs.runtime.lease_context()?;
+                let mut lease = crate::runtime::ContextLease::new();
                 let lane = lease.context().multiplicity_free_lane::<D>()?;
                 let resolution = lane.plan_contract::<symtn_tensors::DirectCoreExecutor, _>(
+                    engine,
                     &space,
                     operands.0,
                     operands.1,
@@ -148,7 +175,7 @@ where
             }
             None => {
                 // The composition's core needs no context state, so planning
-                // it takes no context lease (#1531).
+                // it builds no execution context (#1531).
                 let (left, right) = (lhs.space.space(), rhs.space.space());
                 let lhs_axes: Vec<usize> = (left.nout()..left.nout() + left.nin()).collect();
                 let rhs_axes: Vec<usize> = (0..right.nout()).collect();
@@ -259,6 +286,19 @@ where
         Ok(())
     }
 
+    /// Refuses a call whose operand or destination belongs to another engine
+    /// than the lease's, before any output, template or scratch upload.
+    fn admit_members(lease: &S::MembersLease<'_>, buffers: &[&S]) -> Result<(), Error> {
+        if buffers
+            .iter()
+            .all(|buffer| S::owns_output(EXEC, lease, buffer))
+        {
+            Ok(())
+        } else {
+            Err(Error::PlacementMismatch)
+        }
+    }
+
     fn total_len(&self, len: usize, members: usize) -> Result<usize, Error> {
         let total = len.checked_mul(members).ok_or_else(|| {
             Error::InvalidArgument("stacked payload length overflows usize".into())
@@ -269,22 +309,20 @@ where
         Ok(total)
     }
 
-    /// Creates independent mutable state; member count can change later. On
-    /// CUDA it also reserves this workspace's device plan entries, which it
-    /// releases when dropped, even if this plan is dropped first.
+    /// Creates independent mutable state; member count can change later. It
+    /// allocates nothing: device buffers are created by the first execution
+    /// that needs them.
     pub fn workspace(&self) -> Result<ContractWorkspace<R, D, S>, Error> {
-        let mut workspace = ContractWorkspace {
-            runtime: self.runtime.clone(),
+        Ok(ContractWorkspace {
             binding: Arc::clone(&self.resolution),
             output: OutputSlot::default(),
             members: HostContractMembersWorkspace::default(),
+            host_context: crate::runtime::ContextLease::new(),
             #[cfg(feature = "cuda")]
             members_cuda: Default::default(),
             #[cfg(feature = "cuda")]
-            reserved_plan_entries: 0,
-        };
-        S::reserve_members(EXEC, self, &mut workspace)?;
-        Ok(workspace)
+            cuda_engine: None,
+        })
     }
 
     /// Overwrites the workspace-owned output and borrows it until the next
@@ -292,22 +330,32 @@ where
     /// output's inactive blocks are not rewritten: they are already zero
     /// (see [`ContractWorkspace`]).
     ///
-    /// On CUDA a new member count uploads one zeroed output buffer (#740). A
+    /// On CUDA a new member count, or an engine other than the one the
+    /// retained output belongs to, uploads one zeroed output buffer (#740);
+    /// an output of another engine is dropped, never written or kept. A
     /// reused buffer, including one kept after a failed call, transfers no
-    /// payload.
+    /// payload. Operands of another engine are refused
+    /// ([`Error::PlacementMismatch`]) before any upload.
     pub fn execute<'a>(
         &self,
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
         self.check_workspace(workspace)?;
+        // First, so no later error of this call keeps another engine's state.
+        let mut lease = match S::lease_members(EXEC, engine, workspace) {
+            Ok(lease) => lease,
+            Err(error) => return Err(workspace.output.hide(error)),
+        };
         let buffers = workspace.output.take();
         let prepared = self.check(lhs, rhs).and_then(|members| {
             let total = self.total_len(self.member_len, members)?;
-            Ok((members, total, S::lease_members(EXEC, &self.runtime)?))
+            Self::admit_members(&lease, &[&lhs.storage, &rhs.storage])?;
+            Ok((members, total))
         });
-        let (members, total, mut lease) = match prepared {
+        let (members, total) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => return Err(workspace.output.fail(buffers, error)),
         };
@@ -317,7 +365,7 @@ where
                 runtime: self.runtime.clone(),
                 space: self.space.clone(),
                 signature: self.output_signature.clone(),
-                storage: S::zeroed_members(EXEC, &lease, total, self.member_len, members)?,
+                storage: S::zeroed_members(EXEC, &mut lease, total, self.member_len, members)?,
                 members,
                 member_len: self.member_len,
                 _payload: PhantomData,
@@ -344,19 +392,25 @@ where
     /// follows the batched module's failure rule.
     ///
     /// On CUDA each inactive region is zeroed across all members; the first
-    /// such call at a new high-water member count reserves the context zero
-    /// template, and later calls transfer no payload.
+    /// such call at a new high-water member count grows the workspace's zero
+    /// template, and later calls transfer nothing.
     pub fn execute_into(
         &self,
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         self.check_workspace(workspace)?;
+        // First, so no later error of this call keeps another engine's state.
+        let mut lease = match S::lease_members(EXEC, engine, workspace) {
+            Ok(lease) => lease,
+            Err(error) => return Err(workspace.output.hide(error)),
+        };
         let result = self.check(lhs, rhs).and_then(|members| {
             self.check_destination(dst, members)?;
-            let mut lease = S::lease_members(EXEC, &self.runtime)?;
+            Self::admit_members(&lease, &[&lhs.storage, &rhs.storage, &dst.storage])?;
             S::contract_members(
                 EXEC,
                 self,
@@ -391,7 +445,7 @@ where
 ///
 /// The plan is independent of `B` and can be shared across threads. Each
 /// caller owns a separate [`ContractWorkspace`] for the mutable output,
-/// replay layout and CUDA resource reservations. Inputs and an optional
+/// replay layout and CUDA templates. Inputs and an optional
 /// destination are bound and validated on every call.
 ///
 /// # Supported scope
@@ -403,8 +457,9 @@ where
 /// the eager device composition reports.
 ///
 /// [`Self::workspace`] creates the B-dependent state. On CUDA each workspace
-/// owns and releases its exact ledger claim, even if this plan is dropped
-/// first. Runtime-level zero templates remain shared context effects.
+/// also keeps the zero and `1` templates of its fills, bound to the engine
+/// that created them: used with another engine, it drops its device state,
+/// retained outputs included, and rebuilds it there.
 ///
 /// ```
 /// use std::sync::Arc;
@@ -412,24 +467,25 @@ where
 /// use symtn::typed::{ComposePlan, Error, GradedSpace, Runtime, StackedTensorMap, TensorMap};
 ///
 /// # fn main() -> Result<(), Error> {
+/// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
 /// let rule = Arc::new(U1FusionRule);
 /// let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)])?;
 /// let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 3)])?;
-/// let lhs = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(
+/// let lhs = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&v, &v], [&w],
 /// )?])?;
-/// let rhs = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(
+/// let rhs = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&w], [&v],
 /// )?])?;
-/// let mut destination = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(
+/// let mut destination = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&v, &v], [&v],
 /// )?])?;
 ///
-/// let plan = ComposePlan::new(&lhs, &rhs)?;
+/// let plan = ComposePlan::new(engine, &lhs, &rhs)?;
 /// let mut workspace = plan.workspace()?;
-/// let _output = plan.execute(&lhs, &rhs, &mut workspace)?;
-/// plan.execute_into(&lhs, &rhs, &mut destination, &mut workspace)?;
+/// let _output = plan.execute(engine, &lhs, &rhs, &mut workspace)?;
+/// plan.execute_into(engine, &lhs, &rhs, &mut destination, &mut workspace)?;
 /// # Ok(())
 /// # }
 /// ```
@@ -459,10 +515,11 @@ where
     /// and `UnsupportedTensorContractScope` for a plan that is not fully
     /// direct.
     pub fn new(
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
     ) -> Result<Self, Error> {
-        ContractPlan::prepare(lhs, rhs, None).map(Self)
+        ContractPlan::prepare(engine, lhs, rhs, None).map(Self)
     }
 
     /// The signature of every output member.
@@ -471,7 +528,8 @@ where
     }
 
     /// Creates independent mutable execution state for this plan; on CUDA,
-    /// the B-dependent output, zero-fill and plan resources.
+    /// the B-dependent output and zero-fill buffers, created by the first
+    /// execution that needs them.
     pub fn workspace(&self) -> Result<ContractWorkspace<R, D, S>, Error> {
         self.0.workspace()
     }
@@ -489,11 +547,12 @@ where
     /// the batched module's failure rule.
     pub fn execute<'a>(
         &self,
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        self.0.execute(lhs, rhs, workspace)
+        self.0.execute(engine, lhs, rhs, workspace)
     }
 
     /// Composes every member pair into the caller's `dst`, overwriting it;
@@ -509,12 +568,13 @@ where
     /// any write; any error follows the batched module's failure rule.
     pub fn execute_into(
         &self,
+        engine: &mut dyn Engine,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
-        self.0.execute_into(lhs, rhs, dst, workspace)
+        self.0.execute_into(engine, lhs, rhs, dst, workspace)
     }
 }
 
@@ -528,7 +588,11 @@ impl<R, D, S> ContractWorkspace<R, D, S> {
 
 impl<R, D, S: PreparedExec<R, D>> ContractWorkspace<R, D, S> {
     /// Retained output payload and replay scratch (on CUDA, device payload
-    /// and Host layout scratch), excluding Runtime resources.
+    /// and Host layout scratch), plus on Host a conservative charge for the
+    /// one-member core's grouped-GEMM plans (16 KiB plus eight bytes per
+    /// `3 m + 3 n + 2 k + 4` for each job, and the job list). On CUDA the zero
+    /// and `1` templates of the fills are not counted: they are bounded by the
+    /// largest fill of one call, not by what the member count sizes.
     pub fn retained_bytes(&self) -> usize {
         self.members.retained_bytes()
             + S::retained_scratch_bytes(EXEC, self)
@@ -546,17 +610,6 @@ impl<R, D, S: PreparedExec<R, D>> ContractWorkspace<R, D, S> {
     }
 }
 
-impl<R, D, S> Drop for ContractWorkspace<R, D, S> {
-    fn drop(&mut self) {
-        #[cfg(feature = "cuda")]
-        if self.reserved_plan_entries > 0 {
-            if let Some(mut lease) = self.runtime.lease_cuda_for_maintenance() {
-                lease.release_plan_entries(self.reserved_plan_entries);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod failure_tests {
     use super::*;
@@ -565,12 +618,13 @@ mod failure_tests {
 
     #[test]
     fn a_failure_after_the_output_is_taken_keeps_it_unobservable() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
         // What: on the direct Core and the CopyC route, an error inside the
         // replay, after the output buffer is taken (forced by an operand
         // whose layout and payload are consistently one entry short, which
         // only a corrupted stack carries), leaves no observable output; the
         // buffer is kept and the next call recovers.
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -582,8 +636,8 @@ mod failure_tests {
         )
         .unwrap();
         let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-        let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+        let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+        let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
         let lhs = StackedTensorMap::pack(&[&a, &a]).unwrap();
         let rhs = StackedTensorMap::pack(&[&b, &b]).unwrap();
         let mut corrupt = StackedTensorMap::pack(&[&a, &a]).unwrap();
@@ -598,11 +652,11 @@ mod failure_tests {
                 codomain: &codomain,
                 domain: &[2],
             };
-            let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+            let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
             assert_eq!(plan.copy_c().is_some(), copy_c);
             let mut workspace = plan.workspace().unwrap();
             let expected = plan
-                .execute(&lhs, &rhs, &mut workspace)
+                .execute(engine, &lhs, &rhs, &mut workspace)
                 .unwrap()
                 .storage
                 .clone();
@@ -610,8 +664,9 @@ mod failure_tests {
 
             // Only the route executor compares the payload with the plan's
             // operand structure.
-            let Err(crate::error::Error::Operation(error)) =
-                plan.execute(&corrupt, &rhs, &mut workspace).map(|_| ())
+            let Err(crate::error::Error::Operation(error)) = plan
+                .execute(engine, &corrupt, &rhs, &mut workspace)
+                .map(|_| ())
             else {
                 panic!("the corrupted stack must fail as an operation error");
             };
@@ -629,7 +684,9 @@ mod failure_tests {
             assert!(workspace.take_output().is_none());
             assert_eq!(workspace.retained_bytes(), bytes);
             assert_eq!(
-                plan.execute(&lhs, &rhs, &mut workspace).unwrap().storage,
+                plan.execute(engine, &lhs, &rhs, &mut workspace)
+                    .unwrap()
+                    .storage,
                 expected
             );
             assert!(workspace.take_output().is_some());
@@ -640,13 +697,16 @@ mod failure_tests {
     #[test]
     #[ignore = "requires a real CUDA device"]
     fn cuda_copy_c_failure_keeps_the_temporary_and_the_output() {
+        let cpu = &mut crate::typed::CpuEngine::serial();
+        let cuda = &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0))
+            .unwrap();
         // What: on the CUDA CopyC route, an error after the core GEMMs have
         // written the temporary and before the output transform (injected:
         // the member replay checks every operand length before its first
         // submission, so a corrupted stack never reaches the device)
         // keeps the temporary and the output in the workspace, so the next
         // call uploads neither and recovers.
-        let runtime = Runtime::builder().cuda(0).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&rule),
@@ -658,15 +718,15 @@ mod failure_tests {
         )
         .unwrap();
         let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
-        let a = TensorMap::<_, f64>::rand_with_seed(&runtime, [&v, &v], [&w], 5).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(&runtime, [&w], [&v], 6).unwrap();
+        let a = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&v, &v], [&w], 5).unwrap();
+        let b = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&w], [&v], 6).unwrap();
         let lhs = StackedTensorMap::pack(&[&a, &a])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let rhs = StackedTensorMap::pack(&[&b, &b])
             .unwrap()
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap();
         let spec = super::super::super::ContractSpec {
             lhs: &[2],
@@ -674,13 +734,13 @@ mod failure_tests {
             codomain: &[1, 0],
             domain: &[2],
         };
-        let plan = ContractPlan::new(&lhs, &rhs, &spec).unwrap();
+        let plan = ContractPlan::new(cuda, &lhs, &rhs, &spec).unwrap();
         assert!(plan.copy_c().is_some());
         let mut workspace = plan.workspace().unwrap();
         let expected = plan
-            .execute(&lhs, &rhs, &mut workspace)
+            .execute(cuda, &lhs, &rhs, &mut workspace)
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .storage;
         let bytes = workspace.retained_bytes();
@@ -688,7 +748,7 @@ mod failure_tests {
         workspace.members_cuda.fail_next_before_output();
         let before = symtn_dense::cuda_transfer_stats();
         let error = plan
-            .execute(&lhs, &rhs, &mut workspace)
+            .execute(cuda, &lhs, &rhs, &mut workspace)
             .map(|_| ())
             .unwrap_err();
         let failed = symtn_dense::cuda_transfer_stats();
@@ -701,10 +761,10 @@ mod failure_tests {
         assert!(workspace.output.spare.is_some(), "the output is kept");
         assert!(workspace.take_output().is_none());
         assert_eq!(workspace.retained_bytes(), bytes, "the temporary is kept");
-        let output = plan.execute(&lhs, &rhs, &mut workspace).unwrap();
+        let output = plan.execute(cuda, &lhs, &rhs, &mut workspace).unwrap();
         let recovered = symtn_dense::cuda_transfer_stats();
         assert_eq!(recovered.h2d_calls, failed.h2d_calls, "nothing re-uploaded");
-        assert_eq!(output.to_host().unwrap().storage, expected);
+        assert_eq!(output.to_host(cuda).unwrap().storage, expected);
     }
 }
 
@@ -729,6 +789,7 @@ mod fermionic_unit_tests {
     impl Rank2Gemm<f64> for Count {
         fn matmul_rank2(
             &mut self,
+            _engine: &mut dyn Engine,
             _: &mut [f64],
             _: &[f64],
             _: &[f64],
@@ -743,6 +804,7 @@ mod fermionic_unit_tests {
 
         fn matmul_rank2_batch(
             &mut self,
+            _engine: &mut dyn Engine,
             _: &mut [f64],
             _: &[f64],
             _: &[f64],
@@ -766,7 +828,8 @@ mod fermionic_unit_tests {
 
     #[test]
     fn fermionic_unit_routes_submit_one_member_expanded_core_batch() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
@@ -798,11 +861,11 @@ mod fermionic_unit_tests {
             ],
         )
         .unwrap();
-        check_routes(&runtime, &u1);
-        check_routes(&runtime, &su2);
+        check_routes(engine, &runtime, &u1);
+        check_routes(engine, &runtime, &su2);
     }
 
-    fn check_routes<R>(runtime: &Runtime, v: &GradedSpace<R>)
+    fn check_routes<R>(engine: &mut dyn Engine, runtime: &Runtime, v: &GradedSpace<R>)
     where
         R: TypedSectorAdmission<
                 Sector = <R as SectorCodec>::Sector,
@@ -812,8 +875,8 @@ mod fermionic_unit_tests {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
-        let a = TensorMap::<_, f64>::rand_with_seed(runtime, [v, v], [v, v], 61).unwrap();
-        let b = TensorMap::<_, f64>::rand_with_seed(runtime, [v, v], [v, v], 62).unwrap();
+        let a = TensorMap::<_, f64>::rand_with_seed(engine, runtime, [v, v], [v, v], 61).unwrap();
+        let b = TensorMap::<_, f64>::rand_with_seed(engine, runtime, [v, v], [v, v], 62).unwrap();
         let cases = [
             ("C0", [2, 3], [0, 1], [0, 1, 2, 3], 2, false, false),
             ("C1", [3, 2], [1, 0], [0, 1, 2, 3], 2, false, false),
@@ -830,7 +893,7 @@ mod fermionic_unit_tests {
             };
             let left = StackedTensorMap::pack(&[&a]).unwrap();
             let right = StackedTensorMap::pack(&[&b]).unwrap();
-            let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+            let plan = ContractPlan::new(engine, &left, &right, &spec).unwrap();
             assert_eq!(plan.copy_c().is_some(), copy_c, "{name}");
             assert!(!plan.resolution.is_dynamic_tree(), "{name}");
             let mut jobs_per_member = 0;
@@ -848,6 +911,7 @@ mod fermionic_unit_tests {
                 let mut count = Count::default();
                 replay
                     .execute_host(
+                        engine,
                         &mut StridedHostKernelAdapter::default(),
                         &mut count,
                         &mut StackedStorageViewMut::new::<f64>(&mut dst, dst_len, members, dst_len)
@@ -873,7 +937,8 @@ mod fermionic_unit_tests {
 
     #[test]
     fn signed_direct_submits_one_batch_per_present_sign_class() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
         let u1 = GradedSpace::try_new(
             Arc::new(
                 ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
@@ -925,16 +990,17 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         for swapped in [false, true] {
-            check_signed_classes(&runtime, &u1, 1, 2, swapped);
-            check_signed_classes(&runtime, &u1_full, 1, 2, swapped);
-            check_signed_classes(&runtime, &su2, 2, 1, swapped);
-            check_signed_classes(&runtime, &odd_only, 0, 1, swapped);
+            check_signed_classes(engine, &runtime, &u1, 1, 2, swapped);
+            check_signed_classes(engine, &runtime, &u1_full, 1, 2, swapped);
+            check_signed_classes(engine, &runtime, &su2, 2, 1, swapped);
+            check_signed_classes(engine, &runtime, &odd_only, 0, 1, swapped);
         }
     }
 
     #[cfg(feature = "cuda")]
     #[test]
     fn signed_direct_can_leave_inactive_destination_blocks() {
+        let cpu = &mut crate::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let rule = Arc::new(
             ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
@@ -957,8 +1023,10 @@ mod fermionic_unit_tests {
         )
         .unwrap();
         let wd = w.try_dual().unwrap();
-        let lhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&v], [&wd], |_, _| 1.0).unwrap();
-        let rhs = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&wd], [&v], |_, _| 1.0).unwrap();
+        let lhs =
+            TensorMap::<_, f64>::from_subblock_fn(cpu, &runtime, [&v], [&wd], |_, _| 1.0).unwrap();
+        let rhs =
+            TensorMap::<_, f64>::from_subblock_fn(cpu, &runtime, [&wd], [&v], |_, _| 1.0).unwrap();
         let left = StackedTensorMap::pack(&[&lhs]).unwrap();
         let right = StackedTensorMap::pack(&[&rhs]).unwrap();
         let spec = super::super::super::ContractSpec {
@@ -967,7 +1035,7 @@ mod fermionic_unit_tests {
             codomain: &[0],
             domain: &[1],
         };
-        let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+        let plan = ContractPlan::new(cpu, &left, &right, &spec).unwrap();
         let core = plan.resolution.direct_core().unwrap().0;
         core.require_identity_signed_direct_replay().unwrap();
         assert!(core.require_identity_direct_replay().is_err());
@@ -975,15 +1043,15 @@ mod fermionic_unit_tests {
         assert!(core.distinct_direct_gemm_shapes() > 0);
         // Member Core and CopyC admit the signed core; only a DynamicTree
         // core must be unit.
-        assert!(plan.resolution.admit_cuda_members().unwrap() > 0);
+        plan.resolution.admit_cuda_members().unwrap();
         let reversed = super::super::super::ContractSpec {
             codomain: &[1],
             domain: &[0],
             ..spec
         };
-        let copy_c = ContractPlan::new(&left, &right, &reversed).unwrap();
+        let copy_c = ContractPlan::new(cpu, &left, &right, &reversed).unwrap();
         assert!(copy_c.copy_c().is_some());
-        assert!(copy_c.resolution.admit_cuda_members().unwrap() > 0);
+        copy_c.resolution.admit_cuda_members().unwrap();
     }
 
     #[cfg(feature = "cuda")]
@@ -994,7 +1062,7 @@ mod fermionic_unit_tests {
         lhs_axes: &[usize],
         rhs_axes: &[usize],
         output: &[usize],
-    ) -> (bool, Result<usize, OperationError>)
+    ) -> (bool, Result<(), OperationError>)
     where
         R: symtn_core::TypedSectorAdmission<
                 Sector = <R as symtn_core::SectorCodec>::Sector,
@@ -1004,8 +1072,10 @@ mod fermionic_unit_tests {
             + CheckedFusionAlgebra
             + SectorCodec,
     {
+        let cpu = &mut crate::typed::CpuEngine::serial();
         let [a, b] = [0, 1].map(|i| {
             TensorMap::<_, f64>::from_subblock_fn(
+                &mut *cpu,
                 runtime,
                 codomains[i].iter().copied(),
                 domains[i].iter().copied(),
@@ -1021,6 +1091,7 @@ mod fermionic_unit_tests {
             domain: &output[split..],
         };
         let plan = ContractPlan::new(
+            cpu,
             &StackedTensorMap::pack(&[&a]).unwrap(),
             &StackedTensorMap::pack(&[&b]).unwrap(),
             &spec,
@@ -1038,7 +1109,7 @@ mod fermionic_unit_tests {
     #[cfg(feature = "cuda")]
     #[test]
     fn cuda_dynamic_tree_admission_is_single_only() {
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let u1 = |charges: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
@@ -1072,7 +1143,7 @@ mod fermionic_unit_tests {
             let (dynamic, admitted) =
                 cuda_dynamic_admission(&runtime, codomains, domains, lhs_axes, rhs_axes, output);
             assert!(dynamic, "{name}");
-            assert!(admitted.unwrap() > 0, "{name}");
+            admitted.unwrap_or_else(|err| panic!("{name}: {err}"));
         }
         let f = GradedSpace::try_new(
             Arc::new(
@@ -1125,6 +1196,7 @@ mod fermionic_unit_tests {
     }
 
     fn check_signed_classes<R>(
+        engine: &mut dyn Engine,
         runtime: &Runtime,
         v: &GradedSpace<R>,
         positive: usize,
@@ -1140,8 +1212,10 @@ mod fermionic_unit_tests {
             + SectorCodec,
     {
         let dual = v.try_dual().unwrap();
-        let a = TensorMap::<_, f64>::from_subblock_fn(runtime, [v], [&dual], |_, _| 1.0).unwrap();
-        let b = TensorMap::<_, f64>::from_subblock_fn(runtime, [&dual], [v], |_, _| 1.0).unwrap();
+        let a = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [v], [&dual], |_, _| 1.0)
+            .unwrap();
+        let b = TensorMap::<_, f64>::from_subblock_fn(engine, runtime, [&dual], [v], |_, _| 1.0)
+            .unwrap();
         let (lhs, rhs) = if swapped_expected { (b, a) } else { (a, b) };
         let left = StackedTensorMap::pack(&[&lhs]).unwrap();
         let right = StackedTensorMap::pack(&[&rhs]).unwrap();
@@ -1154,7 +1228,7 @@ mod fermionic_unit_tests {
             codomain: &output[..1],
             domain: &output[1..],
         };
-        let plan = ContractPlan::new(&left, &right, &spec).unwrap();
+        let plan = ContractPlan::new(engine, &left, &right, &spec).unwrap();
         assert!(plan.copy_c().is_none());
         assert!(!plan.resolution.is_dynamic_tree());
         let (core, swapped) = plan.resolution.direct_core().unwrap();
@@ -1171,6 +1245,7 @@ mod fermionic_unit_tests {
             if negative > 0 && members == 1 {
                 assert!(replay
                     .execute_host(
+                        engine,
                         &mut StridedHostKernelAdapter::default(),
                         &mut count,
                         &mut StackedStorageViewMut::new::<f64>(&mut dst, dst_len, members, dst_len)
@@ -1185,6 +1260,7 @@ mod fermionic_unit_tests {
             }
             replay
                 .execute_signed_host(
+                    engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut count,
                     &mut StackedStorageViewMut::new::<f64>(&mut dst, dst_len, members, dst_len)
@@ -1209,6 +1285,7 @@ mod fermionic_unit_tests {
                 count.fail_negative = true;
                 let error = replay
                     .execute_signed_host(
+                        engine,
                         &mut StridedHostKernelAdapter::default(),
                         &mut count,
                         &mut StackedStorageViewMut::new::<f64>(&mut dst, dst_len, members, dst_len)

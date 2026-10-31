@@ -23,9 +23,11 @@ fn checked_generic_shared_provider_builds_identical_plans_concurrently() {
                 let operation = operation.clone();
                 let data = &data;
                 scope.spawn(move || {
+                    // One caller engine per thread, sharing the provider.
+                    let engine = &mut symtn_dense::CpuEngine::serial();
                     crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
                         .tree_transform_owned_checked_generic_in(
-                            &source, None, data, &operation, 1.0,
+                            engine, &source, None, data, &operation, 1.0,
                         )
                         .unwrap()
                 })
@@ -46,6 +48,7 @@ fn checked_generic_shared_provider_builds_identical_plans_concurrently() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Isolated: a sibling test may publish this shared canonical key between
     // the two calls, turning the cold build into a hit.
     if crate::test_support::run_isolated_or_return(
@@ -74,7 +77,7 @@ fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() 
 
     provider.calls.set([0; CheckedPlanCall::COUNT]);
     let first = context
-        .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
         .unwrap();
     let cold = owner_activity();
     assert_eq!((cold.hits, cold.publications), (0, 1), "{cold:?}");
@@ -83,7 +86,7 @@ fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() 
 
     provider.calls.set([0; CheckedPlanCall::COUNT]);
     let repeated = context
-        .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
         .unwrap();
     let warm = owner_activity();
 
@@ -99,6 +102,7 @@ fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() 
     *provider.identity.borrow_mut() = Some(RuleIdentity::of_type::<ToyGenericRule>());
     let identity_error = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &source,
             None,
             &data,
@@ -117,6 +121,7 @@ fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() 
     provider.fail.set(Some((CheckedPlanCall::F, 1)));
     let late_error = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &source,
             None,
             &data,
@@ -135,6 +140,7 @@ fn checked_generic_runtime_reuses_completed_structure_after_checked_admission() 
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_storage_matches_literal_dense_braid() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = DenseGenericRule;
     let provider = Arc::new(CheckedPlanSpy::new(&rule));
     let canonical = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -154,6 +160,7 @@ fn checked_generic_adjoint_storage_matches_literal_dense_braid() {
 
     let actual = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &logical,
             Some(&parent),
             &parent_data,
@@ -177,6 +184,7 @@ fn checked_generic_adjoint_storage_matches_literal_dense_braid() {
 
 #[test]
 fn checked_generic_adjoint_storage_keeps_distinct_logical_layout_cache_identity() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -239,6 +247,7 @@ fn checked_generic_adjoint_storage_keeps_distinct_logical_layout_cache_identity(
     let mut execute = |logical| {
         context
             .tree_transform_owned_checked_generic_in(
+                engine,
                 logical,
                 Some(&parent),
                 &parent_data,
@@ -264,6 +273,7 @@ fn checked_generic_adjoint_storage_keeps_distinct_logical_layout_cache_identity(
 
 #[test]
 fn checked_generic_adjoint_storage_reads_reordered_padded_parent() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SynchronizedCheckedGeneric::new());
     let canonical = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
         Arc::clone(&provider),
@@ -332,6 +342,7 @@ fn checked_generic_adjoint_storage_reads_reordered_padded_parent() {
         crate::TreeTransformExecutionContext::<Complex64, RuleIdentity, f64>::default();
     let actual = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &logical,
             Some(&parent),
             &padded_data,
@@ -349,6 +360,7 @@ fn checked_generic_adjoint_storage_reads_reordered_padded_parent() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_failures_do_not_consume_or_publish_cache_entries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -366,14 +378,28 @@ fn checked_generic_adjoint_failures_do_not_consume_or_publish_cache_entries() {
     let mut context = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default();
     owner_activity();
     context
-        .tree_transform_owned_checked_generic_in(&logical, Some(&parent), &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(
+            engine,
+            &logical,
+            Some(&parent),
+            &data,
+            &operation,
+            1.0,
+        )
         .unwrap();
     let first = owner_activity();
     assert_eq!(first.hits + first.publications, 1, "{first:?}");
 
     *provider.identity.borrow_mut() = Some(RuleIdentity::of_type::<ToyGenericRule>());
     let error = context
-        .tree_transform_owned_checked_generic_in(&logical, Some(&parent), &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(
+            engine,
+            &logical,
+            Some(&parent),
+            &data,
+            &operation,
+            1.0,
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -384,6 +410,7 @@ fn checked_generic_adjoint_failures_do_not_consume_or_publish_cache_entries() {
     *provider.identity.borrow_mut() = None;
     let error = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &logical,
             Some(&parent),
             &data[..data.len() - 1],
@@ -401,6 +428,7 @@ fn checked_generic_adjoint_failures_do_not_consume_or_publish_cache_entries() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_rejects_equal_length_wrong_parent_relation_without_cache_change() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -418,7 +446,14 @@ fn checked_generic_adjoint_rejects_equal_length_wrong_parent_relation_without_ca
     let mut context = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default();
     owner_activity();
     context
-        .tree_transform_owned_checked_generic_in(&logical, Some(&parent), &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(
+            engine,
+            &logical,
+            Some(&parent),
+            &data,
+            &operation,
+            1.0,
+        )
         .unwrap();
     let first = owner_activity();
     assert_eq!(first.hits + first.publications, 1, "{first:?}");
@@ -441,6 +476,7 @@ fn checked_generic_adjoint_rejects_equal_length_wrong_parent_relation_without_ca
 
     let error = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &wrong_logical,
             Some(&parent),
             &data,
@@ -460,6 +496,7 @@ fn checked_generic_adjoint_rejects_equal_length_wrong_parent_relation_without_ca
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_direct_transform_does_not_prepare_fusion_operand_projection() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = DenseGenericRule;
     let provider = Arc::new(CheckedPlanSpy::new(&rule));
     let source = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -472,6 +509,7 @@ fn checked_generic_direct_transform_does_not_prepare_fusion_operand_projection()
 
     crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &source,
             None,
             &data,
@@ -489,6 +527,7 @@ fn checked_generic_direct_transform_does_not_prepare_fusion_operand_projection()
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_storage_handles_empty_layouts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = DenseGenericRule;
     let provider = Arc::new(CheckedPlanSpy::new(&rule));
     let empty_leg = || SectorLeg::new(std::iter::empty::<(SectorId, usize)>(), false);
@@ -512,6 +551,7 @@ fn checked_generic_adjoint_storage_handles_empty_layouts() {
     ] {
         let output = context
             .tree_transform_owned_checked_generic_in(
+                engine,
                 &logical,
                 Some(&parent),
                 &[],
@@ -526,6 +566,7 @@ fn checked_generic_adjoint_storage_handles_empty_layouts() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_storage_rejects_distinct_provider_allocation() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = DenseGenericRule;
     let logical_provider = Arc::new(CheckedPlanSpy::new(&rule));
     let canonical = crate::BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
@@ -545,6 +586,7 @@ fn checked_generic_adjoint_storage_rejects_distinct_provider_allocation() {
 
     let error = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &logical,
             Some(&distinct_parent),
             &data,
@@ -567,6 +609,7 @@ fn checked_generic_adjoint_storage_rejects_distinct_provider_allocation() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_commit_failure_publishes_no_composed_coefficients() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     struct CommitFailureIdentity;
     let rule = DenseGenericRule;
     let provider = Arc::new(CheckedPlanSpy::new(&rule));
@@ -586,7 +629,7 @@ fn checked_generic_commit_failure_publishes_no_composed_coefficients() {
         .restyle_at
         .set(Some((CheckedPlanCall::R, FusionStyleKind::Unique)));
     let error = context
-        .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
         .unwrap_err();
     assert!(
         matches!(
@@ -604,7 +647,7 @@ fn checked_generic_commit_failure_publishes_no_composed_coefficients() {
     provider.fusion_style.set(None);
     provider.calls.set([0; CheckedPlanCall::COUNT]);
     context
-        .tree_transform_owned_checked_generic_in(&source, None, &data, &operation, 1.0)
+        .tree_transform_owned_checked_generic_in(engine, &source, None, &data, &operation, 1.0)
         .unwrap();
     let committed = crate::probe::take_coefficient_group_activity();
     assert_eq!(
@@ -617,6 +660,7 @@ fn checked_generic_commit_failure_publishes_no_composed_coefficients() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)]
 fn checked_generic_adjoint_late_provider_failure_does_not_publish_cache() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -637,6 +681,7 @@ fn checked_generic_adjoint_late_provider_failure_does_not_publish_cache() {
 
     let error = context
         .tree_transform_owned_checked_generic_in(
+            engine,
             &logical,
             Some(&parent),
             &data,
@@ -656,6 +701,7 @@ fn checked_generic_adjoint_late_provider_failure_does_not_publish_cache() {
 #[test]
 #[allow(clippy::arc_with_non_send_sync)] // The API requires Arc; this single-threaded spy uses Cells for deterministic failures.
 fn checked_generic_owned_failure_does_not_publish_destination_state() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     use symtn_core::{structure_cache_info, StructureCacheKind};
 
     const ISOLATED: &str = "SYMTN_CHECKED_GENERIC_OWNED_FAILURE_ISOLATED";
@@ -712,7 +758,14 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
         owner_activity();
 
         let error = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(&test_space, None, &src_data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(
+                engine,
+                &test_space,
+                None,
+                &src_data,
+                &operation,
+                1.0,
+            )
             .unwrap_err();
         if style_mismatch {
             // The checked transform's own admission reports the tensors
@@ -777,7 +830,9 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
         owner_activity();
 
         let error = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
-            .tree_transform_owned_checked_generic_in(&bound_src, None, &src_data, &operation, 1.0)
+            .tree_transform_owned_checked_generic_in(
+                engine, &bound_src, None, &src_data, &operation, 1.0,
+            )
             .unwrap_err();
         match failure {
             Err((call, _)) => assert!(matches!(
@@ -833,6 +888,7 @@ fn checked_generic_owned_failure_does_not_publish_destination_state() {
         .set(Some((CheckedPlanCall::FrobeniusSchur, 1)));
     let error = crate::TreeTransformExecutionContext::<f64, RuleIdentity, f64>::default()
         .tree_transform_owned_checked_generic_in(
+            engine,
             &dense_space,
             None,
             &dense_data,

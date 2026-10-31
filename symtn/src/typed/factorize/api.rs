@@ -54,11 +54,12 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?;
-    /// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1)?;
-    /// assert_eq!(a.solve(&[0], &[1], &b, &[0], &[1])?.dense_data()?, b.dense_data()?);
+    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
+    /// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
+    /// assert_eq!(a.solve(engine, &[0], &[1], &b, &[0], &[1])?.dense_data()?, b.dense_data()?);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -71,6 +72,7 @@ where
     /// the shape checks, which need the permuted operands.
     pub fn solve<'a>(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
         rhs: impl Into<TensorRef<'a, R, D>>,
@@ -88,8 +90,10 @@ where
         if !self.axes_are_identity(rows, cols) || !rhs.axes_are_identity(rhs_rows, rhs_cols) {
             rhs.refuse_borrowed_view("solve")?;
         }
-        self.with_leg_roles(rows, cols, |lhs| {
-            rhs.with_leg_roles(rhs_rows, rhs_cols, |right| lhs.factor_solve(right))
+        self.with_leg_roles(engine, rows, cols, |lhs, engine| {
+            rhs.with_leg_roles(engine, rhs_rows, rhs_cols, |right, engine| {
+                lhs.factor_solve(engine, right)
+            })
         })
     }
 }
@@ -160,8 +164,14 @@ where
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn pinv(&self, rows: &[usize], cols: &[usize], rcond: f64) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| t.factor_pinv(rcond))
+    pub fn pinv(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+        rcond: f64,
+    ) -> Result<Self, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_pinv(engine, rcond))
     }
 }
 
@@ -219,12 +229,13 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Qr, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 3)?;
-    /// let Qr { q, r } = a.qr_compact(&[0], &[1])?;
-    /// let rebuilt = q.compose(&r)?;
-    /// assert!(rebuilt.axpby(1.0, &a, -1.0)?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 3)?;
+    /// let Qr { q, r } = a.qr_compact(engine, &[0], &[1])?;
+    /// let rebuilt = q.compose(engine, &r)?;
+    /// assert!(rebuilt.axpby(engine, 1.0, &a, -1.0)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -248,8 +259,15 @@ where
     /// structural admission and before any output upload or solver call: it
     /// costs one device scan of the payload and one scalar download, which
     /// synchronizes the host with the device.
-    pub fn qr_compact(&self, rows: &[usize], cols: &[usize]) -> Result<Qr<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| S::qr_compact(EXEC, t))
+    pub fn qr_compact(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Qr<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::qr_compact(engine, EXEC, t)
+        })
     }
 
     /// Returns the compact singular-value decomposition
@@ -288,12 +306,13 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 4)?;
-    /// let Svd { u, s, vh } = a.svd_compact(&[0], &[1])?;
-    /// let rebuilt = u.compose(&s)?.compose(&vh)?;
-    /// assert!(rebuilt.axpby(1.0, &a, -1.0)?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 4)?;
+    /// let Svd { u, s, vh } = a.svd_compact(engine, &[0], &[1])?;
+    /// let rebuilt = u.compose(engine, &s)?.compose(engine, &vh)?;
+    /// assert!(rebuilt.axpby(engine, 1.0, &a, -1.0)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -346,8 +365,15 @@ where
     /// multiplies by anyway (1 op) or a scaling of the aligned factor before
     /// its copy (2 ops), plus one `conj` for a complex left side. They are
     /// counted in `CudaTransferStats::gauge_ops`.
-    pub fn svd_compact(&self, rows: &[usize], cols: &[usize]) -> Result<Svd<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| S::svd_compact(EXEC, t))
+    pub fn svd_compact(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Svd<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::svd_compact(engine, EXEC, t)
+        })
     }
 
     /// Returns the Hermitian eigendecomposition `self = v * d * v^H` as an
@@ -391,12 +417,14 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Eigh, GradedSpace, HermitianTol, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?.scale(2.0)?;
-    /// let Eigh { d, v: eigenvectors } = a.eigh_full(&[0], &[1], HermitianTol::DEFAULT)?;
-    /// let rebuilt = eigenvectors.compose(&d)?.compose(&eigenvectors.adjoint()?)?;
-    /// assert!(rebuilt.axpby(1.0, &a, -1.0)?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
+    /// let Eigh { d, v: eigenvectors } = a.eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)?;
+    /// let inverse = eigenvectors.adjoint(engine)?;
+    /// let rebuilt = eigenvectors.compose(engine, &d)?.compose(engine, &inverse)?;
+    /// assert!(rebuilt.axpby(engine, 1.0, &a, -1.0)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -452,11 +480,14 @@ where
     /// `Σ_c n_c` upload and move nothing less.
     pub fn eigh_full(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| S::eigh_full(EXEC, t, hermitian_tol))
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::eigh_full(engine, EXEC, t, hermitian_tol)
+        })
     }
 }
 
@@ -492,24 +523,30 @@ where
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, Svd, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
     ///     [(TableSector::new(1), 1), (TableSector::new(2), 2)],
     /// )?;
     /// let t: TensorMap<TableRule, Complex64> =
-    ///     TensorMap::rand_with_seed(&runtime, [&v, &v], [&v], 7)?;
-    /// let Svd { u, s, vh } = t.svd_full(&[0, 1], &[2])?;
-    /// let rebuilt = u.compose(&s)?.compose(&vh)?;
-    /// assert!(rebuilt.axpby(Complex64::ONE, &t, -Complex64::ONE)?.norm(2.0)? < 1e-12);
+    ///     TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 7)?;
+    /// let Svd { u, s, vh } = t.svd_full(engine, &[0, 1], &[2])?;
+    /// let rebuilt = u.compose(engine, &s)?.compose(engine, &vh)?;
+    /// assert!(rebuilt.axpby(engine, Complex64::ONE, &t, -Complex64::ONE)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn svd_full(&self, rows: &[usize], cols: &[usize]) -> Result<Svd<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_svd_full)
+    pub fn svd_full(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Svd<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, Self::factor_svd_full)
     }
 }
 
@@ -540,34 +577,40 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Lq, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 5)?;
-    /// let Lq { l, q } = a.lq_compact(&[0], &[1])?;
-    /// assert!(l.compose(&q)?.axpby(1.0, &a, -1.0)?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 5)?;
+    /// let Lq { l, q } = a.lq_compact(engine, &[0], &[1])?;
+    /// assert!(l.compose(engine, &q)?.axpby(engine, 1.0, &a, -1.0)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn lq_compact(&self, rows: &[usize], cols: &[usize]) -> Result<Lq<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_lq(
+    pub fn lq_compact(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Lq<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_lq(engine,
                 FactorOp::LqCompact,
-                |lease, source| {
-                    symtn_matrixalgebra::seam::lq_compact_from_source::<R::Mode, _, _, _, _>(
+                |engine, lease, source| {
+                    symtn_matrixalgebra::seam::lq_compact_from_source::<R::Mode, _, _, _, _>(engine,
                         lease, source,
                     )
                 },
-                |lease, parent, adjoint_space| {
+                |engine, lease, parent, adjoint_space| {
                     symtn_matrixalgebra::seam::lq_compact_adjoint_from_parent::<
                         R::Mode,
                         _,
                         _,
                         _,
                         _,
-                    > (lease, parent, adjoint_space)
+                    > (engine, lease, parent, adjoint_space)
                 },
             )
         })
@@ -615,16 +658,18 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
     /// let values = SectorSpectrum { sector: U1Irrep::new(0), values: vec![4.0, 9.0] };
-    /// let s: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &v, [values])?;
-    /// assert_eq!(s.map_diagonal(f64::sqrt)?.diagview()?[0].values, [2.0, 3.0]);
-    /// let dense: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?;
-    /// assert!(dense.map_diagonal(f64::sqrt).is_err());
+    /// let s: TensorMap<_, f64> = TensorMap::diagonal(engine, &runtime, &v, [values])?;
+    /// assert_eq!(s.map_diagonal(engine, f64::sqrt)?.diagview(engine)?[0].values, [2.0, 3.0]);
+    /// let dense: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
+    /// assert!(dense.map_diagonal(engine, f64::sqrt).is_err());
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn map_diagonal(&self, f: impl Fn(D) -> D) -> Result<Self, Error> {
+    pub fn map_diagonal(&self, engine: &mut dyn Engine, f: impl Fn(D) -> D) -> Result<Self, Error> {
+        admit_host_engine(engine)?;
         let Some(spectrum) = self.spectrum() else {
             return Err(Error::InvalidArgument(
                 "map_diagonal requires a compact diagonal tensor (a compact factor or a \
@@ -659,10 +704,17 @@ where
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn qr_full(&self, rows: &[usize], cols: &[usize]) -> Result<Qr<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_qr(FactorOp::QrFull, |lease, source| {
-                symtn_matrixalgebra::seam::qr_full_from_source::<R::Mode, _, _, _, _>(lease, source)
+    pub fn qr_full(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Qr<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_qr(engine, FactorOp::QrFull, |engine, lease, source| {
+                symtn_matrixalgebra::seam::qr_full_from_source::<R::Mode, _, _, _, _>(
+                    engine, lease, source,
+                )
             })
         })
     }
@@ -690,17 +742,24 @@ where
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn lq_full(&self, rows: &[usize], cols: &[usize]) -> Result<Lq<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
+    pub fn lq_full(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Lq<Self>, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
             t.factor_lq(
+                engine,
                 FactorOp::LqFull,
-                |lease, source| {
+                |engine, lease, source| {
                     symtn_matrixalgebra::seam::lq_full_from_source::<R::Mode, _, _, _, _>(
-                        lease, source,
+                        engine, lease, source,
                     )
                 },
-                |lease, parent, adjoint_space| {
+                |engine, lease, parent, adjoint_space| {
                     symtn_matrixalgebra::seam::lq_full_adjoint_from_parent::<R::Mode, _, _, _, _>(
+                        engine,
                         lease,
                         parent,
                         adjoint_space,
@@ -740,13 +799,14 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn svd_vals(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_values(FactorOp::SvdVals, |lease, source| {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::SvdVals, |engine, lease, source| {
                 symtn_matrixalgebra::seam::svd_vals_from_source::<R::Mode, _, _, _, _>(
-                    lease, source,
+                    engine, lease, source,
                 )
             })
         })
@@ -781,13 +841,15 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn eigh_vals(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_values(FactorOp::EighVals, |lease, source| {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::EighVals, |engine, lease, source| {
                 symtn_matrixalgebra::seam::eigh_vals_from_source::<R::Mode, _, _, _, _>(
+                    engine,
                     lease,
                     source,
                     hermitian_tol,
@@ -825,16 +887,17 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn eig_vals(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<
         Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, num_complex::Complex64>>,
         FacadeError<R>,
     > {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_values(FactorOp::EigVals, |lease, source| {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::EigVals, |engine, lease, source| {
                 symtn_matrixalgebra::seam::eig_vals_from_source::<R::Mode, _, _, _, _>(
-                    lease, source,
+                    engine, lease, source,
                 )
             })
         })
@@ -888,12 +951,15 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Eig, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?.scale(2.0)?;
-    /// let Eig { d, v: eigenvectors } = a.eig_full(&[0], &[1])?;
-    /// let rebuilt = eigenvectors.compose(&d)?.compose(&eigenvectors.inv(&[0], &[1])?)?;
-    /// assert!(rebuilt.axpby(1.0.into(), &a.convert::<num_complex::Complex64>(), (-1.0).into())?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
+    /// let Eig { d, v: eigenvectors } = a.eig_full(engine, &[0], &[1])?;
+    /// let inverse = eigenvectors.inv(engine, &[0], &[1])?;
+    /// let rebuilt = eigenvectors.compose(engine, &d)?.compose(engine, &inverse)?;
+    /// let a = a.convert::<num_complex::Complex64>(engine)?;
+    /// assert!(rebuilt.axpby(engine, 1.0.into(), &a, (-1.0).into())?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -902,10 +968,11 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn eig_full(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Eig<TensorMap<R, <D as FactorScalar>::Eig>>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_eig_full)
+        self.with_leg_roles(engine, rows, cols, Self::factor_eig_full)
     }
 }
 
@@ -944,11 +1011,12 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let zero: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&v], [&v])?;
-    /// let n = zero.left_null(&[0], &[1])?;
-    /// assert!(n.adjoint()?.compose(&zero)?.norm(2.0)? < 1e-12);
+    /// let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
+    /// let n = zero.left_null(engine, &[0], &[1])?;
+    /// assert!(n.adjoint(engine)?.compose(engine, &zero)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -976,38 +1044,44 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let rule = Arc::new(U1FusionRule);
     /// let tall = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 3)])?;
     /// let short = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2)])?;
     /// // Rank one: the shape gives one null direction, the rank two.
-    /// let a: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+    /// let a: TensorMap<_, f64> = TensorMap::from_subblock_fn(engine,
     ///     &runtime, [&tall], [&short], |_, i| ((i[0] + 1) * (i[1] + 1)) as f64,
     /// )?;
-    /// assert_eq!(a.left_null(&[0], &[1])?.domain()[0].degeneracy(&U1Irrep::new(0))?, 1);
+    /// assert_eq!(a.left_null(engine, &[0], &[1])?.domain()[0].degeneracy(&U1Irrep::new(0))?, 1);
     ///
-    /// let Svd { u, s, .. } = a.svd_full(&[0], &[1])?;
+    /// let Svd { u, s, .. } = a.svd_full(engine, &[0], &[1])?;
     /// let bond = &u.domain()[0];
-    /// let spectrum = bond.extend_spectrum(&s.diagview()?)?;
+    /// let spectrum = bond.extend_spectrum(&s.diagview(engine)?)?;
     /// let rtol = f64::EPSILON.powf(2.0 / 3.0);
     /// let null = bond.find_truncated(&spectrum, &Truncation::below(0.0, rtol)?)?;
-    /// let n = u.restrict_leg(&[(u.codomain_rank(), &null.selection)])?;
+    /// let n = u.restrict_leg(engine, &[(u.codomain_rank(), &null.selection)])?;
     /// assert_eq!(n.domain()[0].degeneracy(&U1Irrep::new(0))?, 2);
-    /// assert!(n.adjoint()?.compose(&a)?.norm(2.0)? < 1e-12);
+    /// assert!(n.adjoint(engine)?.compose(engine, &a)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn left_null(&self, rows: &[usize], cols: &[usize]) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
-            t.factor_null(
+    pub fn left_null(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Self, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_null(engine,
                 FactorOp::LeftNull,
-                |parent| {
-                    parent.factor_null(
+                |parent, engine| {
+                    parent.factor_null(engine,
                         FactorOp::RightNull,
-                        |_| {
+                        |_, _| {
                             // A lazy adjoint's parent is owned, so it is
                             // never redirected again.
                             Err(internal_layout_error(
@@ -1015,15 +1089,15 @@ where
                             )
                             .into())
                         },
-                        |lease, source| {
-                            symtn_matrixalgebra::seam::right_null_from_source::<R::Mode, _, _, _, _>(
+                        |engine, lease, source| {
+                            symtn_matrixalgebra::seam::right_null_from_source::<R::Mode, _, _, _, _>(engine,
                                 lease, source,
                             )
                         },
                     )
                 },
-                |lease, source| {
-                    symtn_matrixalgebra::seam::left_null_from_source::<R::Mode, _, _, _, _>(
+                |engine, lease, source| {
+                    symtn_matrixalgebra::seam::left_null_from_source::<R::Mode, _, _, _, _>(engine,
                         lease, source,
                     )
                 },
@@ -1053,37 +1127,46 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, Svd, TensorMap, Truncation};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let rule = Arc::new(U1FusionRule);
     /// let short = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)])?;
     /// let wide = GradedSpace::try_new(rule, [(U1Irrep::new(0), 3)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+    /// let a: TensorMap<_, f64> = TensorMap::from_subblock_fn(engine,
     ///     &runtime, [&short], [&wide], |_, i| ((i[0] + 1) * (i[1] + 1)) as f64,
     /// )?;
-    /// assert_eq!(a.right_null(&[0], &[1])?.codomain()[0].degeneracy(&U1Irrep::new(0))?, 1);
+    /// assert_eq!(a.right_null(engine, &[0], &[1])?.codomain()[0].degeneracy(&U1Irrep::new(0))?, 1);
     ///
-    /// let Svd { s, vh, .. } = a.svd_full(&[0], &[1])?;
+    /// let Svd { s, vh, .. } = a.svd_full(engine, &[0], &[1])?;
     /// let bond = &vh.codomain()[0];
-    /// let spectrum = bond.extend_spectrum(&s.diagview()?)?;
+    /// let spectrum = bond.extend_spectrum(&s.diagview(engine)?)?;
     /// let rtol = f64::EPSILON.powf(2.0 / 3.0);
     /// let null = bond.find_truncated(&spectrum, &Truncation::below(0.0, rtol)?)?;
-    /// let n = vh.restrict_leg(&[(0, &null.selection)])?;
+    /// let n = vh.restrict_leg(engine, &[(0, &null.selection)])?;
     /// assert_eq!(n.codomain()[0].degeneracy(&U1Irrep::new(0))?, 2);
-    /// assert!(a.compose(&n.adjoint()?)?.norm(2.0)? < 1e-12);
+    /// let n_adjoint = n.adjoint(engine)?;
+    /// assert!(a.compose(engine, &n_adjoint)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn right_null(&self, rows: &[usize], cols: &[usize]) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, |t| {
+    pub fn right_null(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Self, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
             t.factor_null(
+                engine,
                 FactorOp::RightNull,
-                |parent| {
+                |parent, engine| {
                     parent.factor_null(
+                        engine,
                         FactorOp::LeftNull,
-                        |_| {
+                        |_, _| {
                             // A lazy adjoint's parent is owned, so it is
                             // never redirected again.
                             Err(
@@ -1091,16 +1174,16 @@ where
                                     .into(),
                             )
                         },
-                        |lease, source| {
+                        |engine, lease, source| {
                             symtn_matrixalgebra::seam::left_null_from_source::<R::Mode, _, _, _, _>(
-                                lease, source,
+                                engine, lease, source,
                             )
                         },
                     )
                 },
-                |lease, source| {
+                |engine, lease, source| {
                     symtn_matrixalgebra::seam::right_null_from_source::<R::Mode, _, _, _, _>(
-                        lease, source,
+                        engine, lease, source,
                     )
                 },
             )
@@ -1137,11 +1220,12 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, LeftPolar, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?.scale(2.0)?;
-    /// let LeftPolar { w, p } = a.left_polar(&[0], &[1])?;
-    /// assert!(w.compose(&p)?.axpby(1.0, &a, -1.0)?.norm(2.0)? < 1e-12);
+    /// let a: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?.scale(engine, 2.0)?;
+    /// let LeftPolar { w, p } = a.left_polar(engine, &[0], &[1])?;
+    /// assert!(w.compose(engine, &p)?.axpby(engine, 1.0, &a, -1.0)?.norm(engine, 2.0)? < 1e-12);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
@@ -1150,10 +1234,11 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn left_polar(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<LeftPolar<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_left_polar)
+        self.with_leg_roles(engine, rows, cols, Self::factor_left_polar)
     }
 
     /// Returns the right polar decomposition `self = p * wh` as a
@@ -1172,10 +1257,11 @@ where
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
     pub fn right_polar(
         &self,
+        engine: &mut dyn Engine,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<RightPolar<Self>, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_right_polar)
+        self.with_leg_roles(engine, rows, cols, Self::factor_right_polar)
     }
 }
 
@@ -1231,8 +1317,13 @@ where
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn inv(&self, rows: &[usize], cols: &[usize]) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_inv)
+    pub fn inv(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Self, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, Self::factor_inv)
     }
 }
 
@@ -1296,18 +1387,24 @@ where
     /// use std::sync::Arc;
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)])?;
-    /// let zero: TensorMap<_, f64> = TensorMap::zeros(&runtime, [&v], [&v])?;
-    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?;
-    /// assert!(zero.exp(&[0], &[1])?.dense_data()?.iter().zip(id.dense_data()?).all(|(a, b)| (a - b).abs() < 1e-15));
+    /// let zero: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;
+    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
+    /// assert!(zero.exp(engine, &[0], &[1])?.dense_data()?.iter().zip(id.dense_data()?).all(|(a, b)| (a - b).abs() < 1e-15));
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     ///
     /// `rows` and `cols` are the leg roles: the operation acts on the matrix
     /// view `self.permute(rows, cols)`, and the current split costs nothing
     /// extra (see [`Self::svd_compact`]'s *Leg roles*).
-    pub fn exp(&self, rows: &[usize], cols: &[usize]) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(rows, cols, Self::factor_exp)
+    pub fn exp(
+        &self,
+        engine: &mut dyn Engine,
+        rows: &[usize],
+        cols: &[usize],
+    ) -> Result<Self, FacadeError<R>> {
+        self.with_leg_roles(engine, rows, cols, Self::factor_exp)
     }
 }

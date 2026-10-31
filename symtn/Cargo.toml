@@ -38,7 +38,7 @@ name = "cuda_transfer"
 required-features = ["cuda"]
 
 [dependencies]
-krylov = { version = "0.2", optional = true, default-features = false }
+krylov = { version = "0.3", optional = true, default-features = false }
 num-complex = "0.4"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 symtn-core = { version = "0.1.1", path = "../symtn-core" }
@@ -87,7 +87,3 @@ path = "tests/integration.rs"
 [[test]]
 name = "serial"
 path = "tests/serial.rs"
-
-[[test]]
-name = "runtime_owned_cpu_pool"
-path = "tests/runtime_owned_cpu_pool.rs"

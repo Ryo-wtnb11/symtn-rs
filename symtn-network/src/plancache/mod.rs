@@ -25,6 +25,7 @@ use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use symtn::typed::Engine;
 
 use lru::LruCache;
 use symtn::expert::TensorStorage;
@@ -464,6 +465,7 @@ impl CachedPlan {
     /// which decided the operand count and admission before the lookup.
     pub(crate) fn execute<R, D, S>(
         &self,
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, S>],
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
     where
@@ -472,7 +474,9 @@ impl CachedPlan {
         D: TensorScalar + Send + Sync + 'static,
         S: crate::network::NetworkOperandStorage<R, D>,
     {
-        self.execute_leased(tensors, PlannedNetwork::execute_admitted)
+        self.execute_leased(tensors, |planned, tensors, workspace| {
+            planned.execute_admitted(engine, tensors, workspace)
+        })
     }
 
     /// One lease lifecycle for every placement: take a workspace from this
@@ -1468,6 +1472,7 @@ mod tests {
     use std::time::Duration;
     use symtn::sector::{SU2FusionRule, U1FusionRule};
     use symtn::typed::Complex64;
+    use symtn::typed::Engine;
     use symtn::typed::{ContractSpec, GradedSpace, TensorMap};
 
     #[cfg(feature = "cotengra-python")]
@@ -1514,13 +1519,14 @@ mod tests {
         }
     }
 
-    type Call<'a> = &'a dyn Fn() -> Result<(), String>;
+    type Call<'a> = &'a dyn Fn(&mut dyn Engine) -> Result<(), String>;
 
     /// #1371: `reject` is rejected on the plan-cache miss, topology-hit and
     /// alias-hit paths of the `Network::contract` call that `accept` publishes,
     /// leaving [`CacheState`] and `extra` (device transfers) unchanged, with
     /// one error on every path, which is returned.
     fn assert_rejected_before_the_lookup<X: PartialEq + std::fmt::Debug>(
+        engine: &mut dyn Engine,
         runtime: &symtn::typed::Runtime,
         what: &str,
         accept: Call<'_>,
@@ -1535,31 +1541,35 @@ mod tests {
                     .clear();
             })
         };
-        let rejected = |path: &str| {
+        let rejected = |engine: &mut dyn Engine, path: &str| {
             let before = (cache_state(runtime), extra());
-            let error = reject().expect_err(what);
+            let error = reject(engine).expect_err(what);
             assert_eq!((cache_state(runtime), extra()), before, "{what}: {path}");
             error
         };
 
         super::clear_plan_cache(runtime);
-        let error = rejected("miss");
+        let error = rejected(engine, "miss");
         assert_eq!(super::plan_cache_stats(runtime).entries, 0, "{what}");
 
-        accept().unwrap();
+        accept(engine).unwrap();
         clear_aliases();
         assert_eq!(cache_state(runtime).aliases, Some(0), "{what}: setup");
-        assert_eq!(rejected("topology hit"), error, "{what}: topology hit");
+        assert_eq!(
+            rejected(engine, "topology hit"),
+            error,
+            "{what}: topology hit"
+        );
         // Non-vacuity: the same site accepted is a topology hit, which
         // installs the alias the next rejection meets.
         let hits = super::plan_cache_stats(runtime).hits;
-        accept().unwrap();
+        accept(engine).unwrap();
         assert_eq!(super::plan_cache_stats(runtime).hits, hits + 1, "{what}");
         assert_eq!(cache_state(runtime).aliases, Some(1), "{what}: alias");
 
-        assert_eq!(rejected("alias hit"), error, "{what}: alias hit");
+        assert_eq!(rejected(engine, "alias hit"), error, "{what}: alias hit");
         let hits = super::plan_cache_stats(runtime).hits;
-        accept().unwrap();
+        accept(engine).unwrap();
         assert_eq!(super::plan_cache_stats(runtime).hits, hits + 1, "{what}");
         error
     }
@@ -1569,7 +1579,7 @@ mod tests {
     /// `[i; k] = a[i, j;] * b[j, k;]`. Each is one topology for every
     /// provider and storage, so a probe operand meets the plan a U(1) operand
     /// of the same leg dimensions published.
-    fn pair<T>(a: &T, b: &T) -> Result<(), String>
+    fn pair<T>(engine: &mut dyn Engine, a: &T, b: &T) -> Result<(), String>
     where
         T: crate::NetworkOperand,
         T::Error: std::fmt::Display,
@@ -1582,12 +1592,12 @@ mod tests {
             Some(1),
         )
         .unwrap()
-        .contract(&[a, b])
+        .contract(engine, &[a, b])
         .map(drop)
         .map_err(|error| error.to_string())
     }
 
-    fn codomain_pair<T>(a: &T, b: &T) -> Result<(), String>
+    fn codomain_pair<T>(engine: &mut dyn Engine, a: &T, b: &T) -> Result<(), String>
     where
         T: crate::NetworkOperand,
         T::Error: std::fmt::Display,
@@ -1600,7 +1610,7 @@ mod tests {
             Some(1),
         )
         .unwrap()
-        .contract(&[a, b])
+        .contract(engine, &[a, b])
         .map(drop)
         .map_err(|error| error.to_string())
     }
@@ -1626,6 +1636,7 @@ mod tests {
         TensorMap<crate::braiding_probe::RealBraidingProbe<ANYONIC>, f64>;
 
     fn rejections(
+        engine: &mut dyn Engine,
         runtime: &symtn::typed::Runtime,
     ) -> Rejections<TensorMap<U1FusionRule, f64>, ProbeMap<true>> {
         use crate::braiding_probe::{ProbeSector, RealBraidingProbe};
@@ -1664,10 +1675,12 @@ mod tests {
         assert_eq!(x_flag.dim().unwrap(), x_dual.dim().unwrap());
         let p =
             GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)]).unwrap();
-        let u1 = |codomain: &[&GradedSpace<U1FusionRule>],
+        let u1 = |engine: &mut dyn Engine,
+                  codomain: &[&GradedSpace<U1FusionRule>],
                   domain: &[&GradedSpace<U1FusionRule>],
                   seed| {
             TensorMap::<U1FusionRule, f64>::rand_with_seed(
+                engine,
                 runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -1675,20 +1688,21 @@ mod tests {
             )
             .unwrap()
         };
-        let probe = |rank: usize, seed| {
-            TensorMap::rand_with_seed(runtime, vec![&p; rank], vec![&p; rank], seed).unwrap()
+        let probe = |engine: &mut dyn Engine, rank: usize, seed| {
+            TensorMap::rand_with_seed(engine, runtime, vec![&p; rank], vec![&p; rank], seed)
+                .unwrap()
         };
         Rejections {
-            a: u1(&[&v], &[&v], 1_371_000),
-            b: u1(&[&v], &[&v], 1_371_001),
-            b_sector: u1(&[&w], &[&v], 1_371_002),
-            b_dual: u1(&[&v_dual], &[&v], 1_371_003),
-            probe_a: probe(1, 1_371_007),
-            probe_b: probe(1, 1_371_008),
-            cc_a: u1(&[&x, &x], &[], 1_371_010),
-            cc_b: u1(&[&x_dual, &x], &[], 1_371_011),
-            cc_degeneracy: u1(&[&x_degeneracy, &x], &[], 1_371_012),
-            cc_flag: u1(&[&x_flag, &x], &[], 1_371_013),
+            a: u1(engine, &[&v], &[&v], 1_371_000),
+            b: u1(engine, &[&v], &[&v], 1_371_001),
+            b_sector: u1(engine, &[&w], &[&v], 1_371_002),
+            b_dual: u1(engine, &[&v_dual], &[&v], 1_371_003),
+            probe_a: probe(engine, 1, 1_371_007),
+            probe_b: probe(engine, 1, 1_371_008),
+            cc_a: u1(engine, &[&x, &x], &[], 1_371_010),
+            cc_b: u1(engine, &[&x_dual, &x], &[], 1_371_011),
+            cc_degeneracy: u1(engine, &[&x_degeneracy, &x], &[], 1_371_012),
+            cc_flag: u1(engine, &[&x_flag, &x], &[], 1_371_013),
         }
     }
 
@@ -1699,8 +1713,9 @@ mod tests {
     /// injected through the executor `execute_leased` already takes.
     #[test]
     fn a_failed_execution_quarantines_its_lease() {
+        let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = symtn::typed::Runtime::builder().build().unwrap();
-        let o = rejections(&runtime);
+        let o = rejections(engine, &runtime);
         let tensors = [&o.a, &o.b];
         let network = Network::new(
             vec![vec!["i", "j"], vec!["j", "k"]],
@@ -1711,7 +1726,7 @@ mod tests {
         )
         .unwrap();
         let cached = super::get_or_plan_network(&network, &tensors, &Default::default()).unwrap();
-        cached.execute(&tensors).unwrap();
+        cached.execute(engine, &tensors).unwrap();
         let warm = super::plan_cache_stats(&runtime);
         assert_eq!(warm.idle_workspaces, 1, "a success recycles its lease");
 
@@ -1724,7 +1739,7 @@ mod tests {
         let after = super::plan_cache_stats(&runtime);
         assert_eq!(after.idle_workspaces, 0, "the failed lease is quarantined");
 
-        cached.execute(&tensors).unwrap();
+        cached.execute(engine, &tensors).unwrap();
         let rebuilt = super::plan_cache_stats(&runtime);
         assert_eq!(
             rebuilt.workspaces_created,
@@ -1739,26 +1754,28 @@ mod tests {
     /// installed (keyed by the network, not the tensors) is never reached.
     #[test]
     fn a_mismatched_written_split_leaves_the_plan_cache_untouched_on_every_path() {
+        let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = symtn::typed::Runtime::builder().build().unwrap();
-        let o = rejections(&runtime);
+        let o = rejections(engine, &runtime);
         let none = || ();
         for (what, accept, reject, split, rank) in [
             (
                 "split 1 on codomain rank 2",
-                &(|| pair(&o.a, &o.b)) as Call<'_>,
-                &(|| pair(&o.cc_a, &o.cc_b)) as Call<'_>,
+                &(|engine: &mut dyn Engine| pair(engine, &o.a, &o.b)) as Call<'_>,
+                &(|engine: &mut dyn Engine| pair(engine, &o.cc_a, &o.cc_b)) as Call<'_>,
                 1,
                 2,
             ),
             (
                 "split 2 on codomain rank 1",
-                &|| codomain_pair(&o.cc_a, &o.cc_b),
-                &|| codomain_pair(&o.a, &o.b),
+                &|engine: &mut dyn Engine| codomain_pair(engine, &o.cc_a, &o.cc_b),
+                &|engine: &mut dyn Engine| codomain_pair(engine, &o.a, &o.b),
                 2,
                 1,
             ),
         ] {
-            let error = assert_rejected_before_the_lookup(&runtime, what, accept, reject, &none);
+            let error =
+                assert_rejected_before_the_lookup(engine, &runtime, what, accept, reject, &none);
             assert_eq!(
                 error,
                 format!(
@@ -1778,33 +1795,41 @@ mod tests {
     /// the typed `contract`'s for braiding.
     #[test]
     fn host_metadata_rejections_leave_the_plan_cache_untouched_on_every_path() {
+        let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = symtn::typed::Runtime::builder().build().unwrap();
-        let o = rejections(&runtime);
+        let o = rejections(engine, &runtime);
         let none = || ();
-        let accept_pair = || pair(&o.a, &o.b);
-        let accept_codomain = || codomain_pair(&o.cc_a, &o.cc_b);
+        let accept_pair = |engine: &mut dyn Engine| pair(engine, &o.a, &o.b);
+        let accept_codomain = |engine: &mut dyn Engine| codomain_pair(engine, &o.cc_a, &o.cc_b);
         for (what, accept, reject, label) in [
             (
                 "degeneracy",
                 &accept_codomain as Call<'_>,
-                &(|| codomain_pair(&o.cc_a, &o.cc_degeneracy)) as Call<'_>,
+                &(|engine: &mut dyn Engine| codomain_pair(engine, &o.cc_a, &o.cc_degeneracy))
+                    as Call<'_>,
                 "j",
             ),
             (
                 "undualised flag",
                 &accept_codomain,
-                &|| codomain_pair(&o.cc_a, &o.cc_flag),
+                &|engine: &mut dyn Engine| codomain_pair(engine, &o.cc_a, &o.cc_flag),
                 "j",
             ),
             (
                 "sector",
                 &accept_pair as Call<'_>,
-                &(|| pair(&o.a, &o.b_sector)) as Call<'_>,
+                &(|engine: &mut dyn Engine| pair(engine, &o.a, &o.b_sector)) as Call<'_>,
                 "j",
             ),
-            ("duality", &accept_pair, &|| pair(&o.a, &o.b_dual), "j"),
+            (
+                "duality",
+                &accept_pair,
+                &|engine: &mut dyn Engine| pair(engine, &o.a, &o.b_dual),
+                "j",
+            ),
         ] {
-            let error = assert_rejected_before_the_lookup(&runtime, what, accept, reject, &none);
+            let error =
+                assert_rejected_before_the_lookup(engine, &runtime, what, accept, reject, &none);
             assert!(
                 error.starts_with(&format!(
                     "invalid argument: space mismatch for contracted label `{label}` between operand 0 leg 1 and operand 1 leg 0"
@@ -1816,6 +1841,7 @@ mod tests {
         let contract_error = o
             .probe_a
             .contract(
+                engine,
                 &o.probe_b,
                 &ContractSpec {
                     lhs: &[1],
@@ -1827,10 +1853,11 @@ mod tests {
             .unwrap_err()
             .to_string();
         let error = assert_rejected_before_the_lookup(
+            engine,
             &runtime,
             "non-symmetric",
             &accept_pair,
-            &|| pair(&o.probe_a, &o.probe_b),
+            &|engine: &mut dyn Engine| pair(engine, &o.probe_a, &o.probe_b),
             &none,
         );
         assert_eq!(error, contract_error, "non-symmetric");
@@ -1844,61 +1871,63 @@ mod tests {
     #[test]
     #[ignore = "requires a real CUDA device"]
     fn device_metadata_rejections_leave_the_plan_cache_and_device_untouched_on_every_path() {
-        let runtime = symtn::typed::Runtime::builder()
-            .cuda(0)
-            .dense_threads(1)
-            .build()
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let cuda = &mut symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0))
             .unwrap();
-        let h = rejections(&runtime);
-        let lift = |tensor: &TensorMap<U1FusionRule, f64>| tensor.to_cuda().unwrap();
+        let runtime = symtn::typed::Runtime::builder().build().unwrap();
+        let h = rejections(engine, &runtime);
+        let (probe_a, probe_b) = (
+            h.probe_a.to_cuda(&mut *cuda).unwrap(),
+            h.probe_b.to_cuda(&mut *cuda).unwrap(),
+        );
+        let mut lift = |tensor: &TensorMap<U1FusionRule, f64>| tensor.to_cuda(&mut *cuda).unwrap();
         let (a, b, b_sector, b_dual) = (lift(&h.a), lift(&h.b), lift(&h.b_sector), lift(&h.b_dual));
-        let (probe_a, probe_b) = (h.probe_a.to_cuda().unwrap(), h.probe_b.to_cuda().unwrap());
-        let transfers = symtn::expert::cuda_transfer_stats;
-        let accept_pair = || pair(&a, &b);
         let (cc_a, cc_b, cc_degeneracy, cc_flag) = (
             lift(&h.cc_a),
             lift(&h.cc_b),
             lift(&h.cc_degeneracy),
             lift(&h.cc_flag),
         );
-        let accept_codomain = || codomain_pair(&cc_a, &cc_b);
-        // Warm the device context so lazily created state is not attributed
-        // to the rejected calls.
-        accept_pair().unwrap();
+        let transfers = symtn::expert::cuda_transfer_stats;
+        let accept_pair = |e: &mut dyn Engine| pair(e, &a, &b);
+        let accept_codomain = |e: &mut dyn Engine| codomain_pair(e, &cc_a, &cc_b);
+        // Warm the engine so lazily created state is not attributed to the
+        // rejected calls.
+        accept_pair(cuda).unwrap();
         for (what, accept, reject, host) in [
             (
                 "degeneracy",
                 &accept_codomain as Call<'_>,
-                &(|| codomain_pair(&cc_a, &cc_degeneracy)) as Call<'_>,
-                codomain_pair(&h.cc_a, &h.cc_degeneracy),
+                &(|e: &mut dyn Engine| codomain_pair(e, &cc_a, &cc_degeneracy)) as Call<'_>,
+                codomain_pair(engine, &h.cc_a, &h.cc_degeneracy),
             ),
             (
                 "undualised flag",
                 &accept_codomain,
-                &|| codomain_pair(&cc_a, &cc_flag),
-                codomain_pair(&h.cc_a, &h.cc_flag),
+                &|e: &mut dyn Engine| codomain_pair(e, &cc_a, &cc_flag),
+                codomain_pair(engine, &h.cc_a, &h.cc_flag),
             ),
             (
                 "sector",
                 &accept_pair,
-                &(|| pair(&a, &b_sector)) as Call<'_>,
-                pair(&h.a, &h.b_sector),
+                &(|e: &mut dyn Engine| pair(e, &a, &b_sector)) as Call<'_>,
+                pair(engine, &h.a, &h.b_sector),
             ),
             (
                 "duality",
                 &accept_pair,
-                &|| pair(&a, &b_dual),
-                pair(&h.a, &h.b_dual),
+                &|e: &mut dyn Engine| pair(e, &a, &b_dual),
+                pair(engine, &h.a, &h.b_dual),
             ),
             (
                 "non-symmetric",
                 &accept_pair,
-                &|| pair(&probe_a, &probe_b),
-                pair(&h.probe_a, &h.probe_b),
+                &|e: &mut dyn Engine| pair(e, &probe_a, &probe_b),
+                pair(engine, &h.probe_a, &h.probe_b),
             ),
         ] {
             let error =
-                assert_rejected_before_the_lookup(&runtime, what, accept, reject, &transfers);
+                assert_rejected_before_the_lookup(cuda, &runtime, what, accept, reject, &transfers);
             assert_eq!(Err(error), host, "{what}");
         }
     }

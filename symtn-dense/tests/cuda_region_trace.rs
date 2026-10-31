@@ -303,7 +303,9 @@ fn traces_match_the_unmerged_oracle<D: TraceScalar>(ctx: &mut CudaDenseContext) 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_trace_matches_the_unmerged_host_oracle_at_every_dtype() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     traces_match_the_unmerged_oracle::<f64>(&mut ctx);
     traces_match_the_unmerged_oracle::<Complex64>(&mut ctx);
     traces_match_the_unmerged_oracle::<f32>(&mut ctx);
@@ -315,7 +317,9 @@ fn device_trace_matches_the_unmerged_host_oracle_at_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_zero_scale_adds_nothing_even_over_a_nan_diagonal() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let geometry = Geometry::new(&[2], &[3], &[0, 1, 2], &[0]);
     let mut src: Vec<f64> = (0..geometry.src_len()).map(f64::sample).collect();
     let dst: Vec<f64> = (0..geometry.dst_len())
@@ -350,7 +354,9 @@ fn a_zero_scale_adds_nothing_even_over_a_nan_diagonal() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_scale_applies_per_element_before_the_sum() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let src_region = CudaRegion::new(vec![2], vec![3], 0).unwrap();
     let dst_region = CudaRegion::new(vec![], vec![], 0).unwrap();
     let src = CudaDenseStorage::upload(&ctx, &[1e308, 0.0, 0.0, 1e308]).unwrap();
@@ -392,7 +398,9 @@ fn the_scale_applies_per_element_before_the_sum() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_reserved_template_makes_every_trace_upload_free_and_rejections_do_nothing() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     let geometry = Geometry::new(&[2, 3], &[4, 2], &[2, 0, 3, 1, 5, 4], &[1, 0]);
     let src: Vec<f64> = (0..geometry.src_len()).map(f64::sample).collect();
     let src_dev = CudaDenseStorage::upload(&ctx, &src).unwrap();
@@ -518,4 +526,44 @@ fn a_reserved_template_makes_every_trace_upload_free_and_rejections_do_nothing()
     });
     result.unwrap();
     assert_eq!(counters, CudaTransferStats::default());
+}
+
+/// A rank-8 destination, the largest write view Tenferro 0.8 serves, is
+/// traced in place: the template is contracted over the traced mode and the
+/// destination keeps its own rank. The fixture is a ten-leg block of extent 2
+/// traced over its last pair, read as nine modes with the merged diagonal
+/// stride `2^8 + 2^9 = 768`; the oracle sums the two diagonal entries of each
+/// output element directly.
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_rank_eight_destination_is_traced_without_a_ninth_mode() {
+    let mut engine =
+        symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
+    let src_strides: Vec<usize> = (0..8).map(|axis| 1 << axis).chain([768]).collect();
+    let src_region = CudaRegion::new(vec![2; 9], src_strides, 0).unwrap();
+    let dst_region =
+        CudaRegion::new(vec![2; 8], (0..8).map(|axis| 1 << axis).collect(), 0).unwrap();
+    let src: Vec<f64> = (0..1024).map(f64::sample).collect();
+    let dst: Vec<f64> = (0..256).map(|i| f64::sample(i + 2000)).collect();
+    let expected: Vec<f64> = (0..256).map(|i| dst[i] + src[i] + src[i + 768]).collect();
+    let source = CudaDenseStorage::upload(&ctx, &src).unwrap();
+    let mut out = CudaDenseStorage::upload(&ctx, &dst).unwrap();
+    cuda_region_trace_accumulate::<f64>(
+        &mut ctx,
+        &source,
+        &src_region,
+        false,
+        1.0,
+        &mut out,
+        &dst_region,
+    )
+    .unwrap();
+    let got = out.download::<f64>(&ctx).unwrap();
+    for (index, (got, want)) in got.iter().zip(&expected).enumerate() {
+        assert!(
+            (got - want).abs() <= 4.0 * f64::EPSILON * (1.0 + want.abs()),
+            "element {index}: {got} != {want}"
+        );
+    }
 }

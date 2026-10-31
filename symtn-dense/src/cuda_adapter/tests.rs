@@ -18,6 +18,61 @@ fn default_tolerance<D: CudaScalar>() -> f64 {
     <D::Real as CudaRealScalar>::EPSILON.powf(0.75)
 }
 
+/// The placement of a buffer of test engine `n`: device ordinal `n`, and a
+/// domain of its own per `n`, as two engines have even on one ordinal.
+fn on(n: usize) -> CudaPlacement {
+    static DOMAINS: std::sync::OnceLock<Vec<AllocationDomainId>> = std::sync::OnceLock::new();
+    let domains = DOMAINS.get_or_init(|| (0..4).map(|_| AllocationDomainId::fresh()).collect());
+    CudaPlacement {
+        ordinal: n,
+        domain: domains[n],
+    }
+}
+
+/// A CUDA engine on device `n`.
+fn cuda_engine(n: u32) -> tenferro_gpu::cuda::CudaEngine {
+    tenferro_gpu::cuda::CudaEngine::open(tenferro_gpu::cuda::CudaDeviceId::from_ordinal(n)).unwrap()
+}
+
+#[test]
+fn a_cpu_engine_is_refused_before_any_device_work() {
+    // What: a device operation needs the caller's CUDA engine; any other
+    // engine is a typed refusal at context construction, so nothing is
+    // uploaded or submitted. No GPU is needed to prove it.
+    let mut cpu = tenferro_cpu::CpuEngine::serial();
+    let before = cuda_transfer_stats();
+    let err = CudaDenseContext::new(&mut cpu)
+        .err()
+        .expect("a CPU engine is refused");
+    assert!(
+        matches!(
+            err,
+            DenseError::Unsupported {
+                op: "cuda_context",
+                ..
+            }
+        ),
+        "{err}"
+    );
+    assert_eq!(cuda_transfer_stats(), before);
+}
+
+#[test]
+fn ensure_cuda_device_rejects_another_engine_on_the_same_ordinal() {
+    // What: compatibility is the engine's allocation domain, not the device
+    // ordinal: a buffer of a second engine on device 0 is refused.
+    let other = CudaPlacement {
+        ordinal: 0,
+        domain: AllocationDomainId::fresh(),
+    };
+    let err = ensure_cuda_device(on(0), "cuda_matmul", &[("lhs", on(0)), ("rhs", other)])
+        .expect_err("a same-ordinal buffer of another engine must be rejected");
+    assert!(
+        matches!(err, DenseError::Backend { op: "cuda_matmul", ref message, .. } if message.contains("rhs")),
+        "{err}"
+    );
+}
+
 #[test]
 fn rectangular_operand_views_use_parent_native_strides() {
     assert_eq!(cuda_operand_view(MatrixOp::Identity, 2, 3), ([1, 2], false));
@@ -64,14 +119,14 @@ fn a_zero_descriptor_scale_is_rejected_before_any_device_work() {
 #[test]
 fn ensure_cuda_device_accepts_matching_operands() {
     assert!(
-        ensure_cuda_device(0, "op", &[("a", 0), ("b", 0)]).is_ok(),
+        ensure_cuda_device(on(0), "op", &[("a", on(0)), ("b", on(0))]).is_ok(),
         "operands on the context device must be accepted"
     );
 }
 
 #[test]
 fn ensure_cuda_device_rejects_a_foreign_operand() {
-    let err = ensure_cuda_device(0, "cuda_matmul", &[("lhs", 0), ("rhs", 1)])
+    let err = ensure_cuda_device(on(0), "cuda_matmul", &[("lhs", on(0)), ("rhs", on(1))])
         .expect_err("an operand on another device must be rejected");
     match err {
         DenseError::Backend {
@@ -97,6 +152,11 @@ fn ensure_cuda_device_rejects_a_foreign_operand() {
 /// A spectrum produced on `device`, of `len` values (host data stands in for
 /// the device buffer: the guard reads only the recorded device).
 fn spectrum_on(device: usize, len: usize) -> CudaSpectrum {
+    spectrum_at(on(device), len)
+}
+
+/// [`spectrum_on`] at an explicit placement, e.g. a real context's.
+fn spectrum_at(device: CudaPlacement, len: usize) -> CudaSpectrum {
     CudaSpectrum {
         tensor: Tensor::from_vec_col_major(vec![len], vec![1.0_f64; len]).unwrap(),
         device,
@@ -120,9 +180,9 @@ fn assert_foreign_spectrum(err: DenseError, op: &str, operand: &str) {
 
 #[test]
 fn the_spectrum_device_guard_rejects_any_foreign_spectrum_even_an_empty_one() {
-    assert!(ensure_spectra_device(0, "op", &[]).is_ok());
-    assert!(ensure_spectra_device(0, "op", &[spectrum_on(0, 3), spectrum_on(0, 0)]).is_ok());
-    let err = ensure_spectra_device(0, "op", &[spectrum_on(0, 3), spectrum_on(1, 0)])
+    assert!(ensure_spectra_device(on(0), "op", &[]).is_ok());
+    assert!(ensure_spectra_device(on(0), "op", &[spectrum_on(0, 3), spectrum_on(0, 0)]).is_ok());
+    let err = ensure_spectra_device(on(0), "op", &[spectrum_on(0, 3), spectrum_on(1, 0)])
         .expect_err("an empty spectrum from device 1 must be rejected");
     assert_foreign_spectrum(err, "op", "spectra[1]");
 }
@@ -135,22 +195,24 @@ fn every_spectrum_consumer_rejects_a_foreign_spectrum_before_any_device_work() {
     // empty ones too, which otherwise skip all device work. One GPU suffices:
     // the guard reads the recorded device, so relabelling stands in for a
     // second producer (the two-device test below uses a real one).
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
+    let here = ctx.device;
     let src = CudaDenseStorage::upload::<f64>(&ctx, &[2.0, 0.5, 0.5, 1.0]).unwrap();
     let foreign = |ctx: &mut CudaDenseContext, n: usize| {
         let (mut values, _) = cuda_eigh_region::<f64>(ctx, &src, 0, n).unwrap();
-        values.device = 1;
+        values.device = on(1);
         values
     };
     let batched_foreign = |ctx: &mut CudaDenseContext| {
         let (mut values, _) = cuda_eigh_region_batched::<f64>(ctx, &src, 0, 2, 1, 4).unwrap();
-        values.device = 1;
+        values.device = on(1);
         values
     };
     let mut dst =
         CudaDenseStorage::upload::<Complex64>(&ctx, &[Complex64::new(7.0, 0.0); 4]).unwrap();
     for len in [2, 0] {
-        let local = || spectrum_on(0, 0);
+        let local = || spectrum_at(here, 0);
         let spectra = [
             local(),
             if len == 0 {
@@ -191,15 +253,15 @@ fn every_spectrum_consumer_rejects_a_foreign_spectrum_before_any_device_work() {
         // A local spectrum into a `dst` recorded on device 1: rejected before
         // the complex cast and before the empty-spectrum early return.
         let spectrum = if len == 0 {
-            spectrum_on(0, 0)
+            spectrum_at(here, 0)
         } else {
             cuda_eigh_region::<f64>(&mut ctx, &src, 0, 2).unwrap().0
         };
-        dst.device = 1;
+        dst.device = on(1);
         let before = cuda_transfer_stats();
         let err =
             cuda_copy_spectrum_into::<Complex64>(&mut ctx, spectrum, &mut dst, 0, 3).unwrap_err();
-        dst.device = 0;
+        dst.device = here;
         assert_foreign_spectrum(err, "cuda_copy_spectrum", "dst");
         assert_eq!(cuda_transfer_stats(), before, "foreign dst, len {len}");
     }
@@ -211,10 +273,41 @@ fn every_spectrum_consumer_rejects_a_foreign_spectrum_before_any_device_work() {
 }
 
 #[test]
+#[ignore = "requires a real CUDA device"]
+fn a_buffer_of_another_engine_on_the_same_device_is_refused() {
+    // What: two engines on one ordinal are separate allocation domains. A
+    // buffer of the first is refused by the second before any transfer or
+    // submission, and stays intact for its own engine.
+    let mut first_engine = cuda_engine(0);
+    let mut second_engine = cuda_engine(0);
+    let first = CudaDenseContext::new(&mut first_engine).unwrap();
+    let mut second = CudaDenseContext::new(&mut second_engine).unwrap();
+    assert_eq!(first.device(), second.device());
+    assert_ne!(first.identity(), second.identity());
+    let src = CudaDenseStorage::upload::<f64>(&first, &[1.0, 2.0, 3.0, 4.0]).unwrap();
+    let mut dst = CudaDenseStorage::upload::<f64>(&first, &[0.0; 4]).unwrap();
+    let before = cuda_transfer_stats();
+    assert!(src.download::<f64>(&second).is_err());
+    assert!(
+        cuda_matmul_region_into::<f64>(&mut second, &mut dst, 0, &src, 0, &src, 0, 2, 2, 2)
+            .is_err()
+    );
+    assert!(cuda_all_finite::<f64>(&mut second, &src).is_err());
+    assert_eq!(cuda_transfer_stats(), before, "nothing reaches the device");
+    assert_eq!(dst.download::<f64>(&first).unwrap(), vec![0.0; 4]);
+    assert_eq!(
+        src.download::<f64>(&first).unwrap(),
+        vec![1.0, 2.0, 3.0, 4.0]
+    );
+}
+
+#[test]
 #[ignore = "requires two idle CUDA devices"]
 fn a_spectrum_from_another_device_is_rejected_by_every_consumer() {
-    let mut producer = CudaDenseContext::new(1).unwrap();
-    let mut consumer = CudaDenseContext::new(0).unwrap();
+    let mut producer_engine = cuda_engine(1);
+    let mut producer = CudaDenseContext::new(&mut producer_engine).unwrap();
+    let mut consumer_engine = cuda_engine(0);
+    let mut consumer = CudaDenseContext::new(&mut consumer_engine).unwrap();
     let src = CudaDenseStorage::upload::<f64>(&producer, &[2.0, 0.5, 0.5, 1.0]).unwrap();
     let mut eigh = || {
         cuda_eigh_region::<f64>(&mut producer, &src, 0, 2)
@@ -231,7 +324,12 @@ fn a_spectrum_from_another_device_is_rejected_by_every_consumer() {
             singular.device,
             batched.device
         ),
-        (1, 1, 1, 1)
+        (
+            producer.device,
+            producer.device,
+            producer.device,
+            producer.device
+        )
     );
     let mut dst = CudaDenseStorage::upload::<f64>(&consumer, &[7.0; 4]).unwrap();
 
@@ -256,7 +354,7 @@ fn a_spectrum_from_another_device_is_rejected_by_every_consumer() {
         .0;
     let mut foreign_dst =
         CudaDenseStorage::upload::<Complex64>(&producer, &[Complex64::new(7.0, 0.0); 4]).unwrap();
-    for spectrum in [local, spectrum_on(0, 0)] {
+    for spectrum in [local, spectrum_at(consumer.device, 0)] {
         let before = cuda_transfer_stats();
         let err =
             cuda_copy_spectrum_into::<Complex64>(&mut consumer, spectrum, &mut foreign_dst, 0, 3)
@@ -318,7 +416,8 @@ fn a_bad_later_gather_row_rejects_the_call_before_any_write() {
     // What: with a valid first entry and an out-of-range later one, the
     // gather is rejected and the destination keeps every sentinel; the
     // valid list alone places the selected columns.
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let (n, members) = (3, 2);
     let mut data = vec![0.0; n * n * members];
     for member in 0..members {
@@ -381,7 +480,8 @@ fn a_bad_later_gather_row_rejects_the_call_before_any_write() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn an_empty_spectrum_copy_touches_nothing_even_for_a_complex_payload() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let empty = CudaDenseStorage::upload_owned::<f64>(&ctx, Vec::new()).unwrap();
     let spectrum = CudaSpectrum {
         tensor: empty.tensor,
@@ -398,7 +498,8 @@ fn an_empty_spectrum_copy_touches_nothing_even_for_a_complex_payload() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn cuda_hermitian_region_is_scaled_and_downloads_only_scalar_metadata() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let n = 4;
     let mut data = vec![0.0; n * n];
     for i in 0..n {
@@ -453,7 +554,8 @@ fn cuda_transfer_bytes_scale_with_the_payload_dtype() {
     // #1268: a complex payload must move the same *number* of buffers as
     // the real one and exactly `size_of::<Complex64>() / size_of::<f64>()`
     // times the bytes for the same element count.
-    let ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let elements = 16;
     let real: Vec<f64> = (0..elements).map(|index| index as f64).collect();
     let complex: Vec<Complex64> = (0..elements)
@@ -500,7 +602,8 @@ fn cuda_transfer_bytes_scale_with_the_payload_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn cuda_transfer_counters_attribute_one_upload_download_and_gemm() {
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let n = 2;
     let lhs_host = vec![1.0_f64, 2.0, 3.0, 4.0];
     let rhs_host = vec![5.0_f64, 6.0, 7.0, 8.0];
@@ -555,7 +658,8 @@ fn cuda_transfer_counters_attribute_one_upload_download_and_gemm() {
 fn warm_up_costs_one_gemm_one_solver_call_and_a_bounded_fixed_traffic() {
     // A context built directly here has never submitted work: only
     // `RuntimeBuilder::build` warms one, so this is a cold backend.
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
 
     reset_cuda_transfer_stats();
     ctx.warm_up().unwrap();
@@ -690,7 +794,8 @@ fn the_finite_scan_refuses_exactly_nan_and_infinite_components() {
     // component is NaN or infinite, wherever it lies, and true for the
     // extremes of the finite range (MAX, MAX+MAX*i, subnormals, -0), at the
     // cost of one real-lane scalar download.
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     assert_finite_scan_decides_every_component::<f32>(&mut ctx);
     assert_finite_scan_decides_every_component::<f64>(&mut ctx);
     assert_finite_scan_decides_every_component::<Complex32>(&mut ctx);
@@ -705,7 +810,8 @@ fn the_finite_scan_reads_only_the_active_payload() {
     // the active length is stale and ignored, one inside it is refused. An
     // empty payload is finite without a transfer, and a payload of another
     // dtype is a dtype error.
-    let mut ctx = CudaDenseContext::new(0).unwrap();
+    let mut ctx_engine = cuda_engine(0);
+    let mut ctx = CudaDenseContext::new(&mut ctx_engine).unwrap();
     let mut src = CudaDenseStorage::upload(&ctx, &[1.0, 2.0, f64::NAN, 4.0]).unwrap();
     src.set_active_len(2).unwrap();
     assert!(cuda_all_finite::<f64>(&mut ctx, &src).unwrap());

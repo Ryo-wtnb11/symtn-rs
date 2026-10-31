@@ -41,9 +41,11 @@ fn general<D>(lift: impl Fn(Complex64) -> D) -> Map<D>
 where
     D: symtn::typed::TensorScalar,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = leg();
     let mut k = 0;
     TensorMap::from_subblock_fn(
+        engine,
         &host_runtime(),
         [&space, &space],
         [&space, &space],
@@ -77,7 +79,8 @@ fn dense_block(t: &Map<Complex64>, sector: &SU2Irrep) -> (usize, Vec<Complex64>)
 }
 
 fn assert_eig_full(t: &Map<Complex64>, Eig { d, v }: Eig<Map<Complex64>>) {
-    let spectra = d.diagview().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let spectra = d.diagview(engine).unwrap();
     let sectors: Vec<SU2Irrep> = t.blocks().unwrap().map(|(sector, _)| sector).collect();
     assert_eq!(
         spectra.iter().map(|s| s.sector).collect::<Vec<_>>(),
@@ -135,14 +138,16 @@ fn assert_eig_full(t: &Map<Complex64>, Eig { d, v }: Eig<Map<Complex64>>) {
 
 #[test]
 fn complex_su2_eig_full_diagonalizes_every_multi_tree_coupled_block() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let t = general::<Complex64>(|x| x);
-    let eig = t.eig_full(&[0, 1], &[2, 3]).unwrap();
+    let eig = t.eig_full(engine, &[0, 1], &[2, 3]).unwrap();
     assert_eig_full(&t, eig);
 }
 
 #[test]
 fn real_su2_eig_full_diagonalizes_every_multi_tree_coupled_block() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let t = general::<f64>(|x| x.re);
-    let eig = t.eig_full(&[0, 1], &[2, 3]).unwrap();
-    assert_eig_full(&t.convert::<Complex64>(), eig);
+    let eig = t.eig_full(engine, &[0, 1], &[2, 3]).unwrap();
+    assert_eig_full(&t.convert::<Complex64>(engine).unwrap(), eig);
 }

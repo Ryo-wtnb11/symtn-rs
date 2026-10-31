@@ -14,7 +14,7 @@ contain operation examples and method-level bounds.
 | Structured FLOP and storage obligations | [Complexity policy](complexity_parity_policy.md) |
 | Oracles, exactness and tolerances | [Numerical testing](testing_numerics.md) |
 | Optional Python path planner | [cotengra bridge](cotengra_backend.md) |
-| Optional Host tensor solvers | [Krylov integration](krylov.md) |
+| Optional Host tensor solvers on the caller's engine | [Krylov integration](krylov.md) |
 
 For theory, see [TensorKit's manual](https://docs.juliahub.com/General/TensorKit/stable/)
 and the [papers and source references](../symtn/references.md).
@@ -26,9 +26,11 @@ Use source and focused tests as evidence. Keep revision-specific audits and
 measurements in review records or [benchmarks](../benchmarks/README.md), with
 revision, provider, build, thread count, workload and raw results.
 
-[CI](../.github/workflows/ci.yml) runs lint, feature/backend contracts, the Host
-pool audit, Linux coverage tests, doctests, examples and rustdoc on ready PRs
-and main pushes. The lint job also runs `cargo run -p symtn-production-contract`,
+[CI](../.github/workflows/ci.yml) runs lint, feature/backend contracts, Linux
+coverage tests, doctests, examples and rustdoc on ready PRs and main pushes.
+Engine ownership (the caller's engine runs every numerical step; a broken or
+wrong-backend engine is refused) is covered by the `engine_ownership` and
+`cuda_engine_ownership` integration tests. The lint job also runs `cargo run -p symtn-production-contract`,
 a [normal-dependency consumer](../tests/production-contract/src/main.rs) that
 checks category A/B forwarding and query costs with `testing` disabled.
 The full default-provider macOS suite runs on main nightly at
@@ -51,7 +53,6 @@ once, and every test takes [the shared serial guard](../tests/support/counting_a
 first. Cold-cache tests establish their preconditions through public clear/reset
 APIs. Runtime-local caches and thread-local CUDA transfer counters do not require
 serialization. Tests requiring set-once process state keep separate targets:
-`runtime_owned_cpu_pool`, `cuda_stream_config_{conflict,single}`, and
 `intermediate_allocations`. Run a member with a module filter, for example
 `cargo test -p symtn --no-default-features --features krylov,blas-openblas --test serial krylov_vector::`.
 

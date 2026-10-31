@@ -353,8 +353,9 @@ where
     R::Mode: symtn::typed::TypedTensorModeDispatch<R>,
     D: Val,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // A lazy adjoint has no borrowed subblocks; the oracle materializes it.
-    let dense = t.materialize().unwrap();
+    let dense = t.materialize(engine).unwrap();
     move |trees, index| {
         let views: HashMap<_, _> = dense.subblocks().unwrap().collect();
         views[trees].get(index).unwrap().c()
@@ -373,7 +374,9 @@ where
         + symtn::typed::TypedTensorConstructionDispatch<R, D>,
     D: Val,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let t = TensorMap::<R, D>::from_subblock_fn(
+        engine,
         rt,
         codomain.iter().copied(),
         domain.iter().copied(),
@@ -400,7 +403,8 @@ where
     R::Mode: symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedAdjointSpace<R>,
     D: Val,
 {
-    let lazy = t.adjoint().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let lazy = t.adjoint(engine).unwrap();
     adjoint_view_case(what, t, &lazy);
 }
 
@@ -444,7 +448,8 @@ where
         symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedTensorContractDispatch<R, D>,
     D: Val,
 {
-    let ab = a.compose(b).unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let ab = a.compose(engine, b).unwrap();
     let mut count = 0;
     let mut empty_factor = false;
     for (sector, block) in ab.blocks().unwrap() {
@@ -465,9 +470,9 @@ where
 }
 
 macro_rules! physical_case {
-    ($what:expr, $t:expr, $dim:expr) => {{
+    ($engine:ident, $what:expr, $t:expr, $dim:expr) => {{
         let t = $t;
-        let physical = t.to_physical_dense().unwrap();
+        let physical = t.to_physical_dense($engine).unwrap();
         let rows: usize = physical.shape[..t.codomain_rank()].iter().product();
         let cols: usize = physical.shape[t.codomain_rank()..].iter().product();
         let m = Mat {
@@ -537,7 +542,7 @@ fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
 /// Label, adjoint and composition oracles over `[v, w] ← [v]` and
 /// `[v] ← [v, w]` (`w` dual), for both payload dtypes.
 macro_rules! multiplicity_free {
-    ($rt:expr, $legs:expr, $name:expr, |$t:ident| $extra:expr) => {{
+    ($engine:ident, $rt:expr, $legs:expr, $name:expr, |$t:ident| $extra:expr) => {{
         let (v, w) = $legs;
         {
             let a = label_case::<_, f64>(concat!($name, " f64"), $rt, &[&v, &w], &[&v]);
@@ -560,8 +565,10 @@ macro_rules! multiplicity_free {
 
 #[test]
 fn u1_blocks_match_label_physical_adjoint_and_composition_oracles() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    multiplicity_free!(&rt, u1_legs(), "U(1)", |t| physical_case!(
+    multiplicity_free!(engine, &rt, u1_legs(), "U(1)", |t| physical_case!(
+        engine,
         "U(1)",
         t,
         |_: &U1Irrep| 1
@@ -570,8 +577,10 @@ fn u1_blocks_match_label_physical_adjoint_and_composition_oracles() {
 
 #[test]
 fn su2_blocks_match_label_physical_adjoint_and_composition_oracles() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
-    multiplicity_free!(&rt, su2_legs(), "SU(2)", |t| physical_case!(
+    multiplicity_free!(engine, &rt, su2_legs(), "SU(2)", |t| physical_case!(
+        engine,
         "SU(2)",
         t,
         |c: &SU2Irrep| c.twice_spin() + 1
@@ -581,13 +590,14 @@ fn su2_blocks_match_label_physical_adjoint_and_composition_oracles() {
 #[test]
 fn fz2u1_blocks_match_label_adjoint_and_composition_oracles() {
     let rt = Runtime::builder().build().unwrap();
-    multiplicity_free!(&rt, fz2u1_legs(), "fZ2xU(1)", |t| {
+    multiplicity_free!(engine, &rt, fz2u1_legs(), "fZ2xU(1)", |t| {
         let _ = t;
     });
 }
 
 #[test]
 fn compact_diagonal_block_is_its_stored_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, _) = u1_legs();
     let spectra = [
@@ -596,6 +606,7 @@ fn compact_diagonal_block_is_its_stored_spectrum() {
         (1, vec![3.0, -0.5, 4.0]),
     ];
     let d = TensorMap::<_, Complex64>::diagonal(
+        engine,
         &rt,
         &v,
         spectra.iter().map(|(q, values)| SectorSpectrum {
@@ -630,10 +641,12 @@ fn compact_diagonal_block_is_its_stored_spectrum() {
 
 #[test]
 fn absent_coupled_sector_is_tensorkits_empty_view() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
-    let t = TensorMap::<_, f64>::from_subblock_fn(&rt, [&v, &w], [&v], label_value).unwrap();
-    let lazy = t.clone().adjoint().unwrap();
+    let t =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v, &w], [&v], label_value).unwrap();
+    let lazy = t.clone().adjoint(engine).unwrap();
     // `-2` fuses in the codomain `v ⊗ w'` (3·2 = 6 states) but not in the
     // domain `v`; `7` fuses nowhere.
     for (sector, rows, cols) in [(-2, 6, 0), (7, 0, 0)] {
@@ -659,6 +672,7 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
         .all(|(sector, _)| sector != U1Irrep::new(-2)));
 
     let d = TensorMap::<_, f64>::diagonal(
+        engine,
         &rt,
         &v,
         [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| SectorSpectrum {
@@ -674,6 +688,7 @@ fn absent_coupled_sector_is_tensorkits_empty_view() {
 
 #[cfg(feature = "cgc-gen")]
 mod su3 {
+    use symtn::typed::Engine;
 
     use super::*;
     use symtn::sector::LieGroupFusionRule;
@@ -690,7 +705,7 @@ mod su3 {
         [octet, chiral, dual]
     }
 
-    fn run<D: Val>(what: &str) {
+    fn run<D: Val>(engine: &mut dyn Engine, what: &str) {
         let rt = Runtime::builder().build().unwrap();
         let [octet, chiral, dual] = legs();
         let a = label_case::<_, D>(what, &rt, &[&octet, &octet], &[&octet]);
@@ -707,7 +722,7 @@ mod su3 {
         compose_case(what, &a, &b);
         let wide = label_case::<_, D>(what, &rt, &[&octet], &[&octet, &octet]);
         assert!(compose_case(what, &a, &wide), "{what}: empty factor block");
-        adjoint_view_case(what, &b, &b.adjoint().unwrap());
+        adjoint_view_case(what, &b, &b.adjoint(engine).unwrap());
         // Only a label the provider cannot encode is an error.
         assert!(
             matches!(
@@ -723,6 +738,7 @@ mod su3 {
 
         let values = |n: usize| (0..n).map(|i| D::make(i as u64 + 11)).collect::<Vec<_>>();
         let d = TensorMap::<_, D>::diagonal(
+            engine,
             &rt,
             &octet,
             [
@@ -756,8 +772,9 @@ mod su3 {
 
     #[test]
     fn checked_generic_su3_blocks_match_label_adjoint_and_composition_oracles() {
-        run::<f64>("SU(3) f64");
-        run::<Complex64>("SU(3) c64");
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        run::<f64>(engine, "SU(3) f64");
+        run::<Complex64>(engine, "SU(3) c64");
     }
 }
 
@@ -770,14 +787,14 @@ mod cuda {
     /// names holds the Host block's entries. The device buffer is read back
     /// verbatim through `to_host`, which downloads the canonical payload (the
     /// parent's, for a lazy adjoint) without relayout.
-    fn device_case<R, D>(what: &str, host: &TensorMap<R, D>)
+    fn device_case<R, D>(cuda: &mut dyn symtn::typed::Engine, what: &str, host: &TensorMap<R, D>)
     where
         R: TypedSectorAdmission,
         R::Mode: symtn::typed::TypedTensorModeDispatch<R>,
         D: Val + symtn::typed::CudaPayload + symtn::typed::CudaScalar,
     {
-        let device: TensorMap<R, D, CudaStorage<D>> = host.to_cuda().unwrap();
-        let back = device.to_host().unwrap();
+        let device: TensorMap<R, D, CudaStorage<D>> = host.to_cuda(cuda).unwrap();
+        let back = device.to_host(cuda).unwrap();
         let host_blocks: Vec<_> = host.blocks().unwrap().collect();
         let device_blocks: Vec<_> = device.blocks().unwrap().collect();
         assert_eq!(host_blocks.len(), device_blocks.len(), "{what}");
@@ -827,8 +844,14 @@ mod cuda {
         }
     }
 
-    fn run<R, D>(what: &str, rt: &Runtime, v: &GradedSpace<R>, w: &GradedSpace<R>)
-    where
+    fn run<R, D>(
+        engine: &mut dyn symtn::typed::Engine,
+        cuda: &mut dyn symtn::typed::Engine,
+        what: &str,
+        rt: &Runtime,
+        v: &GradedSpace<R>,
+        w: &GradedSpace<R>,
+    ) where
         R: TypedSectorAdmission + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>,
         R::Mode: symtn::typed::TypedTensorModeDispatch<R>
             + symtn::typed::TypedTensorConstructionDispatch<R, D>
@@ -836,30 +859,33 @@ mod cuda {
         D: Val + symtn::typed::CudaPayload + symtn::typed::CudaScalar,
     {
         let t = label_case::<R, D>(what, rt, &[v, w], &[v]);
-        device_case(what, &t);
-        device_case(&format!("{what} adjoint"), &t.adjoint().unwrap());
+        device_case(cuda, what, &t);
+        let adjoint = t.adjoint(engine).unwrap();
+        device_case(cuda, &format!("{what} adjoint"), &adjoint);
     }
 
     #[test]
     #[ignore]
     fn device_block_views_address_the_host_block_entries() {
-        let rt = Runtime::builder().cuda(0).build().unwrap();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let cuda = &mut crate::common::cuda_engine();
+        let rt = Runtime::builder().build().unwrap();
         let (v, w) = u1_legs();
-        run::<_, f64>("U(1) f64", &rt, &v, &w);
-        run::<_, Complex64>("U(1) c64", &rt, &v, &w);
+        run::<_, f64>(engine, cuda, "U(1) f64", &rt, &v, &w);
+        run::<_, Complex64>(engine, cuda, "U(1) c64", &rt, &v, &w);
         let (v, w) = su2_legs();
-        run::<_, f64>("SU(2) f64", &rt, &v, &w);
-        run::<_, Complex64>("SU(2) c64", &rt, &v, &w);
+        run::<_, f64>(engine, cuda, "SU(2) f64", &rt, &v, &w);
+        run::<_, Complex64>(engine, cuda, "SU(2) c64", &rt, &v, &w);
         let (v, w) = fz2u1_legs();
-        run::<_, f64>("fZ2xU(1) f64", &rt, &v, &w);
-        run::<_, Complex64>("fZ2xU(1) c64", &rt, &v, &w);
+        run::<_, f64>(engine, cuda, "fZ2xU(1) f64", &rt, &v, &w);
+        run::<_, Complex64>(engine, cuda, "fZ2xU(1) c64", &rt, &v, &w);
     }
 
     #[cfg(feature = "cgc-gen")]
     #[test]
     #[ignore]
     fn checked_generic_su3_device_block_views_address_the_host_block_entries() {
-        let rt = Runtime::builder().cuda(0).build().unwrap();
+        let rt = Runtime::builder().build().unwrap();
         let [octet, _, _] = super::su3::legs();
         let t = label_case::<_, f64>("SU(3) f64", &rt, &[&octet, &octet], &[&octet]);
         device_case("SU(3) f64", &t);

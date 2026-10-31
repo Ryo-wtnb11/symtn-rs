@@ -11,6 +11,7 @@
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::Direction;
+use symtn::typed::Engine;
 
 use symtn::sector::{
     product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
@@ -70,14 +71,16 @@ fn rand_perm(state: &mut u64, n: usize) -> Vec<usize> {
 }
 
 macro_rules! for_each_space {
-    ($case:ident) => {
+    ($engine:ident, $case:ident) => {
         $case!(
+            $engine,
             "Z2",
             Arc::new(Z2FusionRule),
             [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
             false
         );
         $case!(
+            $engine,
             "U1",
             Arc::new(U1FusionRule),
             [
@@ -88,6 +91,7 @@ macro_rules! for_each_space {
             false
         );
         $case!(
+            $engine,
             "SU2",
             Arc::new(SU2FusionRule),
             [
@@ -98,12 +102,14 @@ macro_rules! for_each_space {
             false
         );
         $case!(
+            $engine,
             "fZ2",
             Arc::new(FermionParityFusionRule),
             [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
             true
         );
         $case!(
+            $engine,
             "fZ2xU1xSU2",
             Arc::new(
                 Fz2U1Su2Rule::try_new(
@@ -149,28 +155,32 @@ macro_rules! for_each_space {
 /// codomain/domain splits exercised by the typed repartition suite).
 #[test]
 fn permute_composition_law() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let mut state = 0x5EED_0001u64;
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             for (ncod, ndom, seed) in [(2usize, 2usize, 11u64), (1, 4, 12)] {
                 let rank = ncod + ndom;
                 let cod: Vec<_> = std::iter::repeat(&v).take(ncod).collect();
                 let dom: Vec<_> = std::iter::repeat(&v).take(ndom).collect();
-                let t: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, cod, dom, seed).unwrap();
+                let t: TensorMap<_, f64> =
+                    TensorMap::rand_with_seed($engine, &rt, cod, dom, seed).unwrap();
                 for _ in 0..3 {
                     let s1 = rand_perm(&mut state, rank);
                     let n1 = 1 + rand_below(&mut state, rank - 1);
                     let s2 = rand_perm(&mut state, rank);
                     let n2 = 1 + rand_below(&mut state, rank - 1);
                     let step2 = t
-                        .permute(&s1[..n1], &s1[n1..])
+                        .permute($engine, &s1[..n1], &s1[n1..])
                         .unwrap()
-                        .permute(&s2[..n2], &s2[n2..])
+                        .permute($engine, &s2[..n2], &s2[n2..])
                         .unwrap();
                     let composed: Vec<usize> = s2.iter().map(|&i| s1[i]).collect();
-                    let direct = t.permute(&composed[..n2], &composed[n2..]).unwrap();
+                    let direct = t
+                        .permute($engine, &composed[..n2], &composed[n2..])
+                        .unwrap();
                     numerics::assert_slices_close(
                         "composed permutation",
                         step2.dense_data().unwrap(),
@@ -179,8 +189,8 @@ fn permute_composition_law() {
                     );
                     numerics::assert_close(
                         "permutation norm",
-                        step2.norm(2.0).unwrap(),
-                        t.norm(2.0).unwrap(),
+                        step2.norm($engine, 2.0).unwrap(),
+                        t.norm($engine, 2.0).unwrap(),
                         TERMS,
                     );
                 }
@@ -188,7 +198,7 @@ fn permute_composition_law() {
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// braid ∘ braid⁻¹ == id: the inverse braid applies the inverse permutation
@@ -196,27 +206,28 @@ fn permute_composition_law() {
 /// undoing a crossing swaps which strand passes above).
 #[test]
 fn braid_inverse_roundtrip() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let mut state = 0x5EED_0002u64;
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             let t: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 21).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 21).unwrap();
             for _ in 0..3 {
                 let s = rand_perm(&mut state, 4);
                 let levels = rand_perm(&mut state, 4)
                     .into_iter()
                     .map(|l| l + 1)
                     .collect::<Vec<_>>();
-                let braided = t.braid(&s[..2], &s[2..], &levels).unwrap();
+                let braided = t.braid($engine, &s[..2], &s[2..], &levels).unwrap();
                 let mut s_inv = vec![0usize; 4];
                 for (i, &j) in s.iter().enumerate() {
                     s_inv[j] = i;
                 }
                 let levels_braided: Vec<usize> = s.iter().map(|&j| levels[j]).collect();
                 let back = braided
-                    .braid(&s_inv[..2], &s_inv[2..], &levels_braided)
+                    .braid($engine, &s_inv[..2], &s_inv[2..], &levels_braided)
                     .unwrap();
                 numerics::assert_slices_close(
                     "braid round trip",
@@ -226,36 +237,37 @@ fn braid_inverse_roundtrip() {
                 );
                 numerics::assert_close(
                     "braid norm",
-                    braided.norm(2.0).unwrap(),
-                    t.norm(2.0).unwrap(),
+                    braided.norm($engine, 2.0).unwrap(),
+                    t.norm($engine, 2.0).unwrap(),
                     TERMS,
                 );
             }
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// Bosonic rules: braid == permute for every level assignment.
 #[test]
 fn bosonic_braid_equals_permute() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let mut state = 0x5EED_0003u64;
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             if !$fermionic {
                 let v = GradedSpace::try_new($provider, $pairs).unwrap();
                 let t: TensorMap<_, f64> =
-                    TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 31).unwrap();
+                    TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 31).unwrap();
                 for _ in 0..3 {
                     let s = rand_perm(&mut state, 4);
                     let levels = rand_perm(&mut state, 4)
                         .into_iter()
                         .map(|l| l + 1)
                         .collect::<Vec<_>>();
-                    let braided = t.braid(&s[..2], &s[2..], &levels).unwrap();
-                    let permuted = t.permute(&s[..2], &s[2..]).unwrap();
+                    let braided = t.braid($engine, &s[..2], &s[2..], &levels).unwrap();
+                    let permuted = t.permute($engine, &s[..2], &s[2..]).unwrap();
                     numerics::assert_slices_close(
                         "braid equals permute",
                         braided.dense_data().unwrap(),
@@ -267,7 +279,7 @@ fn bosonic_braid_equals_permute() {
             let _ = $name;
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// Yang-Baxter on three adjacent codomain legs:
@@ -277,19 +289,28 @@ fn bosonic_braid_equals_permute() {
 /// still passed so the braid engine takes the genuine braiding path.
 #[test]
 fn yang_baxter_adjacent_swaps() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             let t: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v, &v], [&v], 41).unwrap();
-            let swap = |t: &TensorMap<_, f64>, i: usize| {
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v, &v], [&v], 41).unwrap();
+            let swap = |engine: &mut dyn Engine, t: &TensorMap<_, f64>, i: usize| {
                 let mut cod = vec![0usize, 1, 2];
                 cod.swap(i, i + 1);
-                t.braid(&cod, &[3], &[1, 2, 3, 4]).unwrap()
+                t.braid(engine, &cod, &[3], &[1, 2, 3, 4]).unwrap()
             };
-            let lhs = swap(&swap(&swap(&t, 0), 1), 0);
-            let rhs = swap(&swap(&swap(&t, 1), 0), 1);
+            let lhs = {
+                let first = swap($engine, &t, 0);
+                let second = swap($engine, &first, 1);
+                swap($engine, &second, 0)
+            };
+            let rhs = {
+                let first = swap($engine, &t, 1);
+                let second = swap($engine, &first, 0);
+                swap($engine, &second, 1)
+            };
             numerics::assert_slices_close(
                 "permute identity",
                 lhs.dense_data().unwrap(),
@@ -299,7 +320,7 @@ fn yang_baxter_adjacent_swaps() {
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 // ---------------------------------------------------------------------------
@@ -309,136 +330,156 @@ fn yang_baxter_adjacent_swaps() {
 /// adjoint is an involution and an antihomomorphism: `(a∘b)† == b†∘a†`.
 #[test]
 fn adjoint_involution_and_antihomomorphism() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             let a: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 51).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 51).unwrap();
             let b: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 52).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 52).unwrap();
             numerics::assert_slices_close(
                 "double adjoint",
-                a.adjoint()
+                a.adjoint($engine)
                     .unwrap()
-                    .adjoint()
+                    .adjoint($engine)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
                 a.dense_data().unwrap(),
                 TERMS,
             );
-            let lhs = a.compose(&b).unwrap().adjoint().unwrap();
-            let rhs = b.adjoint().unwrap().compose(&a.adjoint().unwrap()).unwrap();
+            let lhs = a.compose($engine, &b).unwrap().adjoint($engine).unwrap();
+            let a_adjoint = a.adjoint($engine).unwrap();
+            let rhs = b
+                .adjoint($engine)
+                .unwrap()
+                .compose($engine, &a_adjoint)
+                .unwrap();
             numerics::assert_slices_close(
                 "adjoint of a composition",
-                lhs.materialize().unwrap().dense_data().unwrap(),
+                lhs.materialize($engine).unwrap().dense_data().unwrap(),
                 rhs.dense_data().unwrap(),
                 TERMS,
             );
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// The ordinary matrix trace is cyclic for every supported rule.
 #[test]
 fn trace_cyclicity() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             for (ncod, seed) in [(1usize, 61u64), (2, 62)] {
                 let cod: Vec<_> = std::iter::repeat(&v).take(ncod).collect();
                 let a: TensorMap<_, f64> =
-                    TensorMap::rand_with_seed(&rt, cod.clone(), cod.clone(), seed).unwrap();
+                    TensorMap::rand_with_seed($engine, &rt, cod.clone(), cod.clone(), seed)
+                        .unwrap();
                 let b: TensorMap<_, f64> =
-                    TensorMap::rand_with_seed(&rt, cod.clone(), cod, seed + 100).unwrap();
+                    TensorMap::rand_with_seed($engine, &rt, cod.clone(), cod, seed + 100).unwrap();
                 numerics::assert_close(
                     "trace cyclicity",
-                    a.compose(&b).unwrap().tr().unwrap(),
-                    b.compose(&a).unwrap().tr().unwrap(),
+                    a.compose($engine, &b).unwrap().tr($engine).unwrap(),
+                    b.compose($engine, &a).unwrap().tr($engine).unwrap(),
                     TERMS,
                 );
             }
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// For bosonic rules, ordinary trace and full tensor trace coincide. Fermionic
 /// rules are intentionally covered by fixed trace-vs-supertrace oracles.
 #[test]
 fn bosonic_trace_matches_partial_trace_engine() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             if !$fermionic {
                 let v = GradedSpace::try_new($provider, $pairs).unwrap();
                 for (ncod, seed) in [(1usize, 71u64), (2, 72)] {
                     let cod: Vec<_> = std::iter::repeat(&v).take(ncod).collect();
                     let pairs: Vec<(usize, usize)> = (0..ncod).map(|i| (i, ncod + i)).collect();
                     let real: TensorMap<_, f64> =
-                        TensorMap::rand_with_seed(&rt, cod.clone(), cod.clone(), seed).unwrap();
+                        TensorMap::rand_with_seed($engine, &rt, cod.clone(), cod.clone(), seed)
+                            .unwrap();
                     numerics::assert_close(
                         "real trace_pairs",
-                        real.tr().unwrap(),
-                        real.trace_pairs(&pairs).unwrap().scalar().unwrap(),
+                        real.tr($engine).unwrap(),
+                        real.trace_pairs($engine, &pairs)
+                            .unwrap()
+                            .scalar($engine)
+                            .unwrap(),
                         TERMS,
                     );
                     let complex: TensorMap<_, Complex64> =
-                        TensorMap::rand_with_seed(&rt, cod.clone(), cod, seed).unwrap();
-                    let fast = complex.tr().unwrap();
-                    let engine = complex.trace_pairs(&pairs).unwrap().scalar().unwrap();
-                    numerics::assert_close("complex trace_pairs re", fast.re, engine.re, TERMS);
-                    numerics::assert_close("complex trace_pairs im", fast.im, engine.im, TERMS);
+                        TensorMap::rand_with_seed($engine, &rt, cod.clone(), cod, seed).unwrap();
+                    let fast = complex.tr($engine).unwrap();
+                    let $engine = complex
+                        .trace_pairs($engine, &pairs)
+                        .unwrap()
+                        .scalar($engine)
+                        .unwrap();
+                    numerics::assert_close("complex trace_pairs re", fast.re, $engine.re, TERMS);
+                    numerics::assert_close("complex trace_pairs im", fast.im, $engine.im, TERMS);
                 }
             }
             let _ = $name;
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// `tr(id(V)) = dim(V)` in both dtypes for Abelian, non-Abelian, fermionic,
 /// and product rules. This independently pins the positive dimension weight.
 #[test]
 fn ordinary_trace_of_identity_is_positive_dimension() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             let expected = v.dim().unwrap();
-            let real: TensorMap<_, f64> = TensorMap::isomorphism(&rt, [&v], [&v]).unwrap();
-            numerics::assert_close("real trace", real.tr().unwrap(), expected, TERMS);
-            let complex: TensorMap<_, Complex64> = TensorMap::isomorphism(&rt, [&v], [&v]).unwrap();
-            let actual = complex.tr().unwrap();
+            let real: TensorMap<_, f64> = TensorMap::isomorphism($engine, &rt, [&v], [&v]).unwrap();
+            numerics::assert_close("real trace", real.tr($engine).unwrap(), expected, TERMS);
+            let complex: TensorMap<_, Complex64> =
+                TensorMap::isomorphism($engine, &rt, [&v], [&v]).unwrap();
+            let actual = complex.tr($engine).unwrap();
             numerics::assert_close("complex trace re", actual.re, expected, TERMS);
             numerics::assert_close("complex trace im", actual.im, 0.0, TERMS);
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// twist² == id on every leg (all rules in scope have θ ∈ {±1}); bosonic
 /// rules have trivial twist; twist is natural with respect to permute.
 #[test]
 fn twist_squares_to_identity_and_naturality() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let mut state = 0x5EED_0004u64;
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             let t: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 71).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 71).unwrap();
             for leg in 0..4usize {
                 let twice = t
-                    .twist(&[leg], Direction::Forward)
+                    .twist($engine, &[leg], Direction::Forward)
                     .unwrap()
-                    .twist(&[leg], Direction::Forward)
+                    .twist($engine, &[leg], Direction::Forward)
                     .unwrap();
                 numerics::assert_slices_close(
                     "double twist",
@@ -446,7 +487,7 @@ fn twist_squares_to_identity_and_naturality() {
                     t.dense_data().unwrap(),
                     TERMS,
                 );
-                let once = t.twist(&[leg], Direction::Forward).unwrap();
+                let once = t.twist($engine, &[leg], Direction::Forward).unwrap();
                 if $fermionic {
                     // Every leg of these fermionic fixtures carries an odd sector,
                     // so the twist must negate those blocks. Guards the
@@ -472,14 +513,14 @@ fn twist_squares_to_identity_and_naturality() {
             let s = rand_perm(&mut state, 4);
             let pos = s.iter().position(|&j| j == 0).unwrap();
             let lhs = t
-                .twist(&[0], Direction::Forward)
+                .twist($engine, &[0], Direction::Forward)
                 .unwrap()
-                .permute(&s[..2], &s[2..])
+                .permute($engine, &s[..2], &s[2..])
                 .unwrap();
             let rhs = t
-                .permute(&s[..2], &s[2..])
+                .permute($engine, &s[..2], &s[2..])
                 .unwrap()
-                .twist(&[pos], Direction::Forward)
+                .twist($engine, &[pos], Direction::Forward)
                 .unwrap();
             numerics::assert_slices_close(
                 "identity",
@@ -489,34 +530,35 @@ fn twist_squares_to_identity_and_naturality() {
             );
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// isometry / isomorphism isometric identities: `w†∘w == id`.
 #[test]
 fn isometry_and_isomorphism_are_isometric() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
-            let id: TensorMap<_, f64> = TensorMap::isomorphism(&rt, [&v], [&v]).unwrap();
+            let id: TensorMap<_, f64> = TensorMap::isomorphism($engine, &rt, [&v], [&v]).unwrap();
             numerics::assert_slices_close(
                 "identity isometry",
-                id.adjoint()
+                id.adjoint($engine)
                     .unwrap()
-                    .compose(&id)
+                    .compose($engine, &id)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
                 id.dense_data().unwrap(),
                 TERMS,
             );
-            let w: TensorMap<_, f64> = TensorMap::isometry(&rt, [&v, &v], [&v]).unwrap();
+            let w: TensorMap<_, f64> = TensorMap::isometry($engine, &rt, [&v, &v], [&v]).unwrap();
             numerics::assert_slices_close(
                 "isometry",
-                w.adjoint()
+                w.adjoint($engine)
                     .unwrap()
-                    .compose(&w)
+                    .compose($engine, &w)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -526,28 +568,35 @@ fn isometry_and_isomorphism_are_isometric() {
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// Norm, trace and singular values agree on one quantity:
 /// `tr(e†∘e) = ‖e‖² = Σ_c dim(c) Σ σ_c²`, for a rank-2 ← 2 composition `e`.
 #[test]
 fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let provider = $provider;
             let v = GradedSpace::try_new(Arc::clone(&provider), $pairs).unwrap();
             let a: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 81).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 81).unwrap();
             let b: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 82).unwrap();
-            let e = a.compose(&b).unwrap();
-            let square = e.norm(2.0).unwrap().powi(2);
-            let trace = e.adjoint().unwrap().compose(&e).unwrap().tr().unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 82).unwrap();
+            let e = a.compose($engine, &b).unwrap();
+            let square = e.norm($engine, 2.0).unwrap().powi(2);
+            let trace = e
+                .adjoint($engine)
+                .unwrap()
+                .compose($engine, &e)
+                .unwrap()
+                .tr($engine)
+                .unwrap();
             numerics::assert_close($name, trace, square, TERMS);
             let weighted: f64 = e
-                .svd_vals(&codomain_axes(&e), &domain_axes(&e))
+                .svd_vals($engine, &codomain_axes(&e), &domain_axes(&e))
                 .unwrap()
                 .iter()
                 .map(|spectrum| {
@@ -562,7 +611,7 @@ fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
             let _ = $fermionic;
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 // ---------------------------------------------------------------------------
@@ -574,41 +623,51 @@ fn norm_trace_and_singular_values_measure_the_same_weighted_square() {
 /// that forces axis permutations.
 #[test]
 fn contraction_order_independence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     macro_rules! case {
-        ($name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
+        ($engine:ident, $name:expr, $provider:expr, $pairs:expr, $fermionic:expr) => {{
             let v = GradedSpace::try_new($provider, $pairs).unwrap();
             // Closed ring of four matrices: full tensor trace of x1 x2 x3 x4.
-            let x1: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v], [&v], 81).unwrap();
-            let x2: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v], [&v], 82).unwrap();
-            let x3: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v], [&v], 83).unwrap();
-            let x4: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v], [&v], 84).unwrap();
+            let x1: TensorMap<_, f64> =
+                TensorMap::rand_with_seed($engine, &rt, [&v], [&v], 81).unwrap();
+            let x2: TensorMap<_, f64> =
+                TensorMap::rand_with_seed($engine, &rt, [&v], [&v], 82).unwrap();
+            let x3: TensorMap<_, f64> =
+                TensorMap::rand_with_seed($engine, &rt, [&v], [&v], 83).unwrap();
+            let x4: TensorMap<_, f64> =
+                TensorMap::rand_with_seed($engine, &rt, [&v], [&v], 84).unwrap();
             let left = x1
-                .compose(&x2)
+                .compose($engine, &x2)
                 .unwrap()
-                .compose(&x3)
+                .compose($engine, &x3)
                 .unwrap()
-                .compose(&x4)
+                .compose($engine, &x4)
                 .unwrap()
-                .trace_pairs(&[(0, 1)])
+                .trace_pairs($engine, &[(0, 1)])
                 .unwrap()
-                .scalar()
+                .scalar($engine)
                 .unwrap();
-            let inner = x2.compose(&x3).unwrap();
+            let inner = x2.compose($engine, &x3).unwrap();
             let middle = x1
-                .compose(&inner)
+                .compose($engine, &inner)
                 .unwrap()
-                .compose(&x4)
+                .compose($engine, &x4)
                 .unwrap()
-                .trace_pairs(&[(0, 1)])
+                .trace_pairs($engine, &[(0, 1)])
                 .unwrap()
-                .scalar()
+                .scalar($engine)
                 .unwrap();
             numerics::assert_close("trace association", left, middle, TERMS);
 
             // Open chain: both association orders agree elementwise.
-            let assoc_l = x1.compose(&x2).unwrap().compose(&x3).unwrap();
-            let assoc_r = x1.compose(&x2.compose(&x3).unwrap()).unwrap();
+            let assoc_l = x1
+                .compose($engine, &x2)
+                .unwrap()
+                .compose($engine, &x3)
+                .unwrap();
+            let x2_compose = x2.compose($engine, &x3).unwrap();
+            let assoc_r = x1.compose($engine, &x2_compose).unwrap();
             numerics::assert_slices_close(
                 "composition associativity",
                 assoc_l.dense_data().unwrap(),
@@ -619,11 +678,12 @@ fn contraction_order_independence() {
             // Rank-4 pair with crossed contracted legs: forces tree transforms
             // and output permutes on both routes.
             let a: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 85).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 85).unwrap();
             let b: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 86).unwrap();
+                TensorMap::rand_with_seed($engine, &rt, [&v, &v], [&v, &v], 86).unwrap();
             let ab = a
                 .contract(
+                    $engine,
                     &b,
                     &ContractSpec {
                         lhs: &[1, 2],
@@ -634,10 +694,11 @@ fn contraction_order_independence() {
                 )
                 .unwrap()
                 // default open order [p, s, q, r] with codomain split after 2
-                .permute(&[0, 2], &[3, 1])
+                .permute($engine, &[0, 2], &[3, 1])
                 .unwrap();
             let ba = b
                 .contract(
+                    $engine,
                     &a,
                     &ContractSpec {
                         lhs: &[2, 1],
@@ -648,7 +709,7 @@ fn contraction_order_independence() {
                 )
                 .unwrap()
                 // default open order [q, r, p, s]
-                .permute(&[2, 0], &[1, 3])
+                .permute($engine, &[2, 0], &[1, 3])
                 .unwrap();
             numerics::assert_slices_close(
                 "crossed contraction",
@@ -659,7 +720,7 @@ fn contraction_order_independence() {
             let _ = ($name, $fermionic);
         }};
     }
-    for_each_space!(case);
+    for_each_space!(engine, case);
 }
 
 /// Regression test for issue #12: SU(2) with non-uniform sector
@@ -674,6 +735,7 @@ fn contraction_order_independence() {
 /// the two explicit crossed-contract routes.
 #[test]
 fn su2_nonuniform_degeneracy_crossed_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(SU2FusionRule);
     let v = GradedSpace::try_new(
@@ -685,10 +747,13 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
         ],
     )
     .unwrap();
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 85).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 86).unwrap();
+    let a: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 85).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 86).unwrap();
     let ab = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[1, 2],
@@ -698,10 +763,11 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
             },
         )
         .unwrap()
-        .permute(&[0, 2], &[3, 1])
+        .permute(engine, &[0, 2], &[3, 1])
         .unwrap();
     let ba = b
         .contract(
+            engine,
             &a,
             &ContractSpec {
                 lhs: &[2, 1],
@@ -711,7 +777,7 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
             },
         )
         .unwrap()
-        .permute(&[2, 0], &[1, 3])
+        .permute(engine, &[2, 0], &[1, 3])
         .unwrap();
     numerics::assert_slices_close(
         "contraction order",
@@ -728,15 +794,19 @@ fn su2_nonuniform_degeneracy_crossed_contract() {
 /// reference route (permute first, then plain compose) never triggered it.
 #[test]
 fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(FermionParityFusionRule);
     let v = GradedSpace::try_new(rule, [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)]).unwrap();
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 5).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 6).unwrap();
+    let a: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 5).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 6).unwrap();
     // Open legs cross the split: a's domain axis 3 stays open, b's axes
     // 1..3 stay open. Default output order matches the permuted compose.
     let direct = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[2],
@@ -746,10 +816,11 @@ fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
             },
         )
         .unwrap();
+    let b_permute = b.permute(engine, &[0], &[1, 2, 3]).unwrap();
     let reference = a
-        .permute(&[0, 1, 3], &[2])
+        .permute(engine, &[0, 1, 3], &[2])
         .unwrap()
-        .compose(&b.permute(&[0], &[1, 2, 3]).unwrap())
+        .compose(engine, &b_permute)
         .unwrap();
     numerics::assert_slices_close(
         "direct contraction",
@@ -764,6 +835,7 @@ fn fz2_decreasing_degeneracy_boundary_crossing_contract() {
 /// legs (the original suite only covered the degeneracy-1 triple space).
 #[test]
 fn triple_product_nonuniform_degeneracy_crossed_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
@@ -787,10 +859,13 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
         ],
     )
     .unwrap();
-    let a: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 87).unwrap();
-    let b: TensorMap<_, f64> = TensorMap::rand_with_seed(&rt, [&v, &v], [&v, &v], 88).unwrap();
+    let a: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 87).unwrap();
+    let b: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 88).unwrap();
     let ab = a
         .contract(
+            engine,
             &b,
             &ContractSpec {
                 lhs: &[1, 2],
@@ -800,10 +875,11 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
             },
         )
         .unwrap()
-        .permute(&[0, 2], &[3, 1])
+        .permute(engine, &[0, 2], &[3, 1])
         .unwrap();
     let ba = b
         .contract(
+            engine,
             &a,
             &ContractSpec {
                 lhs: &[2, 1],
@@ -813,7 +889,7 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
             },
         )
         .unwrap()
-        .permute(&[2, 0], &[1, 3])
+        .permute(engine, &[2, 0], &[1, 3])
         .unwrap();
     numerics::assert_slices_close(
         "contraction order",
@@ -831,10 +907,11 @@ fn triple_product_nonuniform_degeneracy_crossed_contract() {
 /// sector contents (beyond the fixed fixture spaces).
 #[test]
 fn svd_qr_reconstruction_random_spaces() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let mut state = 0x5EED_0005u64;
     macro_rules! case {
-        ($name:expr, $provider:expr, $vacuum:expr, [$($other:expr),* $(,)?]) => {{
+        ($engine:ident, $name:expr, $provider:expr, $vacuum:expr, [$($other:expr),* $(,)?]) => {{
         let provider = $provider;
         let build = |state: &mut u64| {
             let mut sectors = vec![($vacuum, 1 + rand_below(state, 2))];
@@ -849,43 +926,43 @@ fn svd_qr_reconstruction_random_spaces() {
             let va = build(&mut state);
             let vb = build(&mut state);
             let t: TensorMap<_, f64> =
-                TensorMap::rand_with_seed(&rt, [&va, &vb], [&vb, &va], 90 + draw).unwrap();
-            if t.norm(2.0).unwrap() == 0.0 {
+                TensorMap::rand_with_seed($engine, &rt, [&va, &vb], [&vb, &va], 90 + draw).unwrap();
+            if t.norm($engine, 2.0).unwrap() == 0.0 {
                 continue;
             }
 
-            let Svd { u, s, vh } = t.svd_compact(&[0, 1], &[2, 3]).unwrap();
-            let recon = u.compose(&s).unwrap().compose(&vh).unwrap();
-            let diff = recon.axpby(1.0, &t, -1.0).unwrap().norm(2.0).unwrap();
+            let Svd { u, s, vh } = t.svd_compact($engine, &[0, 1], &[2, 3]).unwrap();
+            let recon = u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap();
+            let diff = recon.axpby($engine, 1.0, &t, -1.0).unwrap().norm($engine, 2.0).unwrap();
             assert!(
-                diff <= 1e-10 * (1.0 + t.norm(2.0).unwrap()),
+                diff <= 1e-10 * (1.0 + t.norm($engine, 2.0).unwrap()),
                 "{} draw {draw}: svd reconstruction error {diff}",
                 $name,
             );
             let mid = u.domain();
 
-            let id: TensorMap<_, f64> = TensorMap::isomorphism(&rt, mid.iter(), mid.iter()).unwrap();
-            let utu = u.adjoint().unwrap().compose(&u).unwrap();
-            let iso_err = utu.axpby(1.0, &id, -1.0).unwrap().norm(2.0).unwrap();
+            let id: TensorMap<_, f64> = TensorMap::isomorphism($engine, &rt, mid.iter(), mid.iter()).unwrap();
+            let utu = u.adjoint($engine).unwrap().compose($engine, &u).unwrap();
+            let iso_err = utu.axpby($engine, 1.0, &id, -1.0).unwrap().norm($engine, 2.0).unwrap();
             assert!(
                 iso_err <= 1e-10,
                 "{} draw {draw}: U†U != id ({iso_err})",
                 $name,
             );
 
-            let Qr { q, r } = t.qr_compact(&[0, 1], &[2, 3]).unwrap();
-            let recon = q.compose(&r).unwrap();
-            let diff = recon.axpby(1.0, &t, -1.0).unwrap().norm(2.0).unwrap();
+            let Qr { q, r } = t.qr_compact($engine, &[0, 1], &[2, 3]).unwrap();
+            let recon = q.compose($engine, &r).unwrap();
+            let diff = recon.axpby($engine, 1.0, &t, -1.0).unwrap().norm($engine, 2.0).unwrap();
             assert!(
-                diff <= 1e-10 * (1.0 + t.norm(2.0).unwrap()),
+                diff <= 1e-10 * (1.0 + t.norm($engine, 2.0).unwrap()),
                 "{} draw {draw}: qr reconstruction error {diff}",
                 $name,
             );
             let mid = q.domain();
 
-            let id: TensorMap<_, f64> = TensorMap::isomorphism(&rt, mid.iter(), mid.iter()).unwrap();
-            let qtq = q.adjoint().unwrap().compose(&q).unwrap();
-            let iso_err = qtq.axpby(1.0, &id, -1.0).unwrap().norm(2.0).unwrap();
+            let id: TensorMap<_, f64> = TensorMap::isomorphism($engine, &rt, mid.iter(), mid.iter()).unwrap();
+            let qtq = q.adjoint($engine).unwrap().compose($engine, &q).unwrap();
+            let iso_err = qtq.axpby($engine, 1.0, &id, -1.0).unwrap().norm($engine, 2.0).unwrap();
             assert!(
                 iso_err <= 1e-10,
                 "{} draw {draw}: Q†Q != id ({iso_err})",
@@ -894,14 +971,22 @@ fn svd_qr_reconstruction_random_spaces() {
         }
         }};
     }
-    case!("Z2", Arc::new(Z2FusionRule), Z2Irrep::EVEN, [Z2Irrep::ODD]);
     case!(
+        engine,
+        "Z2",
+        Arc::new(Z2FusionRule),
+        Z2Irrep::EVEN,
+        [Z2Irrep::ODD]
+    );
+    case!(
+        engine,
         "fZ2",
         Arc::new(FermionParityFusionRule),
         Z2Irrep::EVEN,
         [Z2Irrep::ODD]
     );
     case!(
+        engine,
         "U1",
         Arc::new(U1FusionRule),
         U1Irrep::new(0),
@@ -913,6 +998,7 @@ fn svd_qr_reconstruction_random_spaces() {
         ]
     );
     case!(
+        engine,
         "SU2",
         Arc::new(SU2FusionRule),
         SU2Irrep::from_twice_spin(0),
@@ -932,6 +1018,7 @@ fn svd_qr_reconstruction_random_spaces() {
         )
     };
     case!(
+        engine,
         "fZ2xU1xSU2",
         triple,
         label(Z2Irrep::EVEN, 0, 0),
@@ -972,13 +1059,15 @@ fn oracle_fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
 /// scalar-weight values.
 #[test]
 fn weighted_rank_truncation_matches_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     macro_rules! case {
-        ($provider:expr, $pairs:expr, $label_of:expr, $expected:expr, $error:expr) => {{
+        ($engine:ident, $provider:expr, $pairs:expr, $label_of:expr, $expected:expr, $error:expr) => {{
             let runtime = Runtime::builder().build().unwrap();
             let space = GradedSpace::try_new($provider, $pairs).unwrap();
             let label_of = $label_of;
-            let build = |c0| {
+            let mut build = |c0| {
                 TensorMap::from_subblock_fn(
+                    $engine,
                     &runtime,
                     [&space, &space],
                     [&space, &space],
@@ -1002,20 +1091,21 @@ fn weighted_rank_truncation_matches_tensorkit() {
             };
             let a = build(3);
             let b = build(5);
+            let a_compose = a.compose($engine, &b).unwrap();
             let e = a
-                .permute(&[1, 0], &[3, 2])
+                .permute($engine, &[1, 0], &[3, 2])
                 .unwrap()
-                .compose(&a.compose(&b).unwrap())
+                .compose($engine, &a_compose)
                 .unwrap();
-            let Svd { s, .. } = e.svd_compact(&[0, 1], &[2, 3]).unwrap();
+            let Svd { s, .. } = e.svd_compact($engine, &[0, 1], &[2, 3]).unwrap();
             let found = s.domain()[0]
-                .find_truncated(&s.diagview().unwrap(), &Truncation::rank(5))
+                .find_truncated(&s.diagview($engine).unwrap(), &Truncation::rank(5))
                 .unwrap();
             // `diagview` lists sectors in stored order; compare by label.
             let mut kept: Vec<_> = s
-                .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                .restrict_leg($engine, &[(0, &found.selection), (1, &found.selection)])
                 .unwrap()
-                .diagview()
+                .diagview($engine)
                 .unwrap()
                 .iter()
                 .filter(|entry| !entry.values.is_empty())
@@ -1034,6 +1124,7 @@ fn weighted_rank_truncation_matches_tensorkit() {
     }
 
     case!(
+        engine,
         Arc::new(U1FusionRule),
         [
             (U1Irrep::new(-1), 2),
@@ -1045,6 +1136,7 @@ fn weighted_rank_truncation_matches_tensorkit() {
         155706.08009324488
     );
     case!(
+        engine,
         Arc::new(SU2FusionRule),
         [
             (SU2Irrep::from_twice_spin(0), 2),

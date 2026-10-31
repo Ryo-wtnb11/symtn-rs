@@ -9,6 +9,7 @@ struct HostEighTrunc<R: SectorCodec, D> {
 }
 
 fn host_eigh_trunc<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     source: &TensorMap<R, D>,
     truncation: &Truncation,
     to_f64: impl Fn(D) -> f64,
@@ -25,28 +26,33 @@ where
 {
     let Eigh { d, v } = source
         .eigh_full(
+            engine,
             &codomain_axes(source),
             &domain_axes(source),
             HermitianTol::DEFAULT,
         )
         .unwrap();
     let found = d.domain()[0]
-        .find_truncated(&d.diagview().unwrap(), truncation)
+        .find_truncated(&d.diagview(engine).unwrap(), truncation)
         .unwrap();
     let d = d
-        .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
         .unwrap();
     HostEighTrunc {
-        v: v.restrict_leg(&[(v.codomain_rank(), &found.selection)])
+        v: v.restrict_leg(engine, &[(v.codomain_rank(), &found.selection)])
             .unwrap(),
-        eigenvalues: labelled_f64(&d, to_f64),
+        eigenvalues: labelled_f64(engine, &d, to_f64),
         d,
         error: found.error,
     }
 }
 
-fn assert_reduction_parity<R>(lhs: &TensorMap<R, f64>, rhs: &TensorMap<R, f64>)
-where
+fn assert_reduction_parity<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    lhs: &TensorMap<R, f64>,
+    rhs: &TensorMap<R, f64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -55,22 +61,25 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let expected_inner = lhs.inner(rhs).unwrap();
-    let expected_norm = lhs.norm(2.0).unwrap();
-    let lhs_device = lhs.to_cuda().unwrap();
-    let rhs_device = rhs.to_cuda().unwrap();
-    let inner = lhs_device.inner(&rhs_device).unwrap();
-    let norm = lhs_device.norm(2.0).unwrap();
+    let expected_inner = lhs.inner(engine, rhs).unwrap();
+    let expected_norm = lhs.norm(engine, 2.0).unwrap();
+    let lhs_device = lhs.to_cuda(cuda).unwrap();
+    let rhs_device = rhs.to_cuda(cuda).unwrap();
+    let inner = lhs_device.inner(cuda, &rhs_device).unwrap();
+    let norm = lhs_device.norm(cuda, 2.0).unwrap();
     let tolerance = 1e-12 * (1.0 + expected_inner.abs().max(expected_norm));
 
     assert!((inner - expected_inner).abs() <= tolerance);
     assert!((norm - expected_norm).abs() <= tolerance);
-    let self_inner = lhs_device.inner(&lhs_device).unwrap();
+    let self_inner = lhs_device.inner(cuda, &lhs_device).unwrap();
     assert!((self_inner - norm.powi(2)).abs() <= 1e-12 * (1.0 + self_inner.abs()));
 }
 
-fn assert_typed_cuda_qr_matches_host<R>(source: &TensorMap<R, f64>)
-where
+fn assert_typed_cuda_qr_matches_host<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    source: &TensorMap<R, f64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -91,14 +100,18 @@ where
         q: expected_left,
         r: expected_right,
     } = source
-        .qr_compact(&codomain_axes(source), &domain_axes(source))
+        .qr_compact(engine, &codomain_axes(source), &domain_axes(source))
         .unwrap();
-    let source_device = source.to_cuda().unwrap();
+    let source_device = source.to_cuda(cuda).unwrap();
     let Qr {
         q: left_device,
         r: right_device,
     } = source_device
-        .qr_compact(&codomain_axes(&source_device), &domain_axes(&source_device))
+        .qr_compact(
+            cuda,
+            &codomain_axes(&source_device),
+            &domain_axes(&source_device),
+        )
         .unwrap();
 
     for factor in [&left_device, &right_device] {
@@ -106,8 +119,8 @@ where
         assert!(runtime.matches(factor.runtime()));
         assert_eq!(factor.placement(), symtn::expert::Placement::Cuda(0));
     }
-    let left = left_device.to_host().unwrap();
-    let right = right_device.to_host().unwrap();
+    let left = left_device.to_host(cuda).unwrap();
+    let right = right_device.to_host(cuda).unwrap();
     numerics::assert_slices_close(
         "left",
         left.dense_data().unwrap(),
@@ -128,7 +141,7 @@ where
         structural_snapshot(&right),
         structural_snapshot(&expected_right)
     );
-    let rebuilt = left.compose(&right).unwrap();
+    let rebuilt = left.compose(engine, &right).unwrap();
     numerics::assert_slices_close(
         "rebuilt",
         rebuilt.dense_data().unwrap(),
@@ -137,7 +150,7 @@ where
     );
     assert_eq!(
         source_device
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap()
@@ -168,7 +181,9 @@ where
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1_provider = Arc::new(U1FusionRule);
     let u1_leg = GradedSpace::try_new(
@@ -177,7 +192,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     )
     .unwrap();
     let u1_lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1_leg], [&u1_leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |trees, _| {
             if trees.coupled() == &U1Irrep::new(0) {
                 1.0
             } else {
@@ -186,7 +201,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         })
         .unwrap();
     let u1_rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&u1_leg], [&u1_leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&u1_leg], [&u1_leg], |trees, _| {
             if trees.coupled() == &U1Irrep::new(0) {
                 3.0
             } else {
@@ -194,30 +209,22 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
             }
         })
         .unwrap();
-    assert_eq!(u1_lhs.inner(&u1_rhs).unwrap(), 11.0);
-    assert_reduction_parity(&u1_lhs, &u1_rhs);
+    assert_eq!(u1_lhs.inner(engine, &u1_rhs).unwrap(), 11.0);
+    assert_reduction_parity(engine, cuda, &u1_lhs, &u1_rhs);
 
-    let u1_device = u1_lhs.to_cuda().unwrap();
-    let u1_norm = u1_device.norm(2.0).unwrap();
-    let lazy = u1_device.adjoint().unwrap();
-    assert!((lazy.norm(2.0).unwrap() - u1_norm).abs() < 1e-12);
+    let u1_device = u1_lhs.to_cuda(cuda).unwrap();
+    let u1_norm = u1_device.norm(cuda, 2.0).unwrap();
+    let lazy = u1_device.adjoint(cuda).unwrap();
+    assert!((lazy.norm(cuda, 2.0).unwrap() - u1_norm).abs() < 1e-12);
     assert!(matches!(
-        lazy.inner(&lazy),
+        lazy.inner(cuda, &lazy),
         Err(symtn::typed::Error::UnsupportedOnDevice(_))
     ));
-    let u1_rhs_device = u1_rhs.to_cuda().unwrap();
-    let repeated = u1_device.inner(&u1_rhs_device).unwrap();
+    let u1_rhs_device = u1_rhs.to_cuda(cuda).unwrap();
+    let repeated = u1_device.inner(cuda, &u1_rhs_device).unwrap();
     for _ in 0..3 {
-        assert_eq!(u1_device.inner(&u1_rhs_device).unwrap(), repeated);
+        assert_eq!(u1_device.inner(cuda, &u1_rhs_device).unwrap(), repeated);
     }
-    std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..4)
-            .map(|_| scope.spawn(|| u1_device.inner(&u1_rhs_device).unwrap()))
-            .collect();
-        for worker in workers {
-            assert_eq!(worker.join().unwrap(), repeated);
-        }
-    });
 
     let su2_provider = Arc::new(SU2FusionRule);
     let spin0 = SU2Irrep::from_twice_spin(0);
@@ -225,7 +232,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     let su2_leg =
         GradedSpace::try_new(Arc::clone(&su2_provider), [(spin0, 1), (spin_half, 1)]).unwrap();
     let su2_lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |trees, _| {
             if trees.coupled() == &spin0 {
                 1.0
             } else {
@@ -234,7 +241,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         })
         .unwrap();
     let su2_rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |trees, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |trees, _| {
             if trees.coupled() == &spin0 {
                 3.0
             } else {
@@ -243,10 +250,11 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         })
         .unwrap();
     // dim(j=0) * 1 * 3 + dim(j=1/2) * 2 * 4 = 1 * 3 + 2 * 8.
-    assert_eq!(su2_lhs.inner(&su2_rhs).unwrap(), 19.0);
-    assert_reduction_parity(&su2_lhs, &su2_rhs);
+    assert_eq!(su2_lhs.inner(engine, &su2_rhs).unwrap(), 19.0);
+    assert_reduction_parity(engine, cuda, &su2_lhs, &su2_rhs);
 
     let su2_rank5_lhs = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&su2_leg, &su2_leg, &su2_leg],
         [&su2_leg, &su2_leg],
@@ -254,13 +262,14 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     )
     .unwrap();
     let su2_rank5_rhs = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&su2_leg, &su2_leg, &su2_leg],
         [&su2_leg, &su2_leg],
         |_, indices| indices.iter().sum::<usize>() as f64 + 3.0,
     )
     .unwrap();
-    assert_reduction_parity(&su2_rank5_lhs, &su2_rank5_rhs);
+    assert_reduction_parity(engine, cuda, &su2_rank5_lhs, &su2_rank5_rhs);
 
     let fz2_provider = Arc::new(FermionParityFusionRule);
     let fz2_leg = GradedSpace::try_new(
@@ -268,15 +277,17 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
     )
     .unwrap();
-    let fz2_lhs = TensorMap::from_subblock_fn(&runtime, [&fz2_leg], [&fz2_leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 1.0
-    })
-    .unwrap();
-    let fz2_rhs = TensorMap::from_subblock_fn(&runtime, [&fz2_leg], [&fz2_leg], |_, indices| {
-        indices.iter().sum::<usize>() as f64 + 3.0
-    })
-    .unwrap();
-    assert_reduction_parity(&fz2_lhs, &fz2_rhs);
+    let fz2_lhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&fz2_leg], [&fz2_leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 1.0
+        })
+        .unwrap();
+    let fz2_rhs =
+        TensorMap::from_subblock_fn(engine, &runtime, [&fz2_leg], [&fz2_leg], |_, indices| {
+            indices.iter().sum::<usize>() as f64 + 3.0
+        })
+        .unwrap();
+    assert_reduction_parity(engine, cuda, &fz2_lhs, &fz2_rhs);
 
     let product_provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
@@ -290,65 +301,72 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         ],
     )
     .unwrap();
-    let product_lhs =
-        TensorMap::from_subblock_fn(&runtime, [&product_leg], [&product_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 2.0
-        })
-        .unwrap();
-    let product_rhs =
-        TensorMap::from_subblock_fn(&runtime, [&product_leg], [&product_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 5.0
-        })
-        .unwrap();
-    assert_reduction_parity(&product_lhs, &product_rhs);
+    let product_lhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&product_leg],
+        [&product_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 2.0,
+    )
+    .unwrap();
+    let product_rhs = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&product_leg],
+        [&product_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 5.0,
+    )
+    .unwrap();
+    assert_reduction_parity(engine, cuda, &product_lhs, &product_rhs);
 
     let callback_count = Arc::new(AtomicUsize::new(0));
     let probe_provider = Arc::new(ReentrantDimensionRule {
-        runtime: runtime.clone(),
         calls: Arc::clone(&callback_count),
     });
     let probe_leg = GradedSpace::try_new(Arc::clone(&probe_provider), [(ProbeSector, 1)]).unwrap();
     let probe_lhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&probe_leg], [&probe_leg], |_, _| 2.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&probe_leg], [&probe_leg], |_, _| 2.0)
+            .unwrap();
     let probe_rhs: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&probe_leg], [&probe_leg], |_, _| 3.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&probe_leg], [&probe_leg], |_, _| 3.0)
+            .unwrap();
     let calls_before_reduction = callback_count.load(Ordering::SeqCst);
+    let probe_rhs_device = probe_rhs.to_cuda(cuda).unwrap();
     assert_eq!(
         probe_lhs
-            .to_cuda()
+            .to_cuda(cuda)
             .unwrap()
-            .inner(&probe_rhs.to_cuda().unwrap())
+            .inner(cuda, &probe_rhs_device)
             .unwrap(),
         6.0
     );
     assert!(callback_count.load(Ordering::SeqCst) > calls_before_reduction);
 
-    // Same canary for a device structural transform (#1322). This provider's
-    // `dim_scalar` re-enters `lease_cuda`, so any provider callback made while
-    // the device lease is held deadlocks on a non-re-entrant mutex. The
-    // transform's compile needs F and R symbols but no dimension for this
-    // one-sector rule, so the counter is not asserted to move — what is
-    // guarded is that a future edit which does need a dimension cannot make
-    // that call under the lease.
-    let probe_device = probe_lhs.to_cuda().unwrap();
+    // The same custom provider through a device structural transform (#1322).
+    let probe_device = probe_lhs.to_cuda(cuda).unwrap();
     assert_eq!(
         probe_device
-            .permute(&[1], &[0])
+            .permute(cuda, &[1], &[0])
             .unwrap()
-            .to_host()
+            .to_host(cuda)
             .unwrap()
             .dense_data()
             .unwrap(),
-        probe_lhs.permute(&[1], &[0]).unwrap().dense_data().unwrap()
+        probe_lhs
+            .permute(engine, &[1], &[0])
+            .unwrap()
+            .dense_data()
+            .unwrap()
     );
 
-    let other_runtime = Runtime::builder().cuda(0).build().unwrap();
-    let foreign = TensorMap::from_subblock_fn(&other_runtime, [&u1_leg], [&u1_leg], |_, _| 1.0)
-        .unwrap()
-        .to_cuda()
-        .unwrap();
+    let other_runtime = Runtime::builder().build().unwrap();
+    let foreign =
+        TensorMap::from_subblock_fn(engine, &other_runtime, [&u1_leg], [&u1_leg], |_, _| 1.0)
+            .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
     assert_eq!(
-        u1_device.inner(&foreign).unwrap_err(),
+        u1_device.inner(cuda, &foreign).unwrap_err(),
         symtn::typed::Error::RuntimeMismatch
     );
 
@@ -357,17 +375,17 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
     )
     .unwrap();
-    let mismatched = TensorMap::from_subblock_fn(&runtime, [&wider], [&wider], |_, _| 1.0)
+    let mismatched = TensorMap::from_subblock_fn(engine, &runtime, [&wider], [&wider], |_, _| 1.0)
         .unwrap()
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap();
     assert!(matches!(
-        u1_device.inner(&mismatched),
+        u1_device.inner(cuda, &mismatched),
         Err(symtn::typed::Error::Operation(operation))
             if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
     ));
     assert_eq!(
-        u1_device.to_host().unwrap().dense_data().unwrap(),
+        u1_device.to_host(cuda).unwrap().dense_data().unwrap(),
         u1_lhs.dense_data().unwrap()
     );
 
@@ -375,17 +393,19 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
     let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
     let empty: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     assert!(empty.dense_data().unwrap().is_empty());
-    let empty_device = empty.to_cuda().unwrap();
-    assert_eq!(empty_device.norm(2.0).unwrap(), 0.0);
-    assert_eq!(empty_device.inner(&empty_device).unwrap(), 0.0);
+    let empty_device = empty.to_cuda(cuda).unwrap();
+    assert_eq!(empty_device.norm(cuda, 2.0).unwrap(), 0.0);
+    assert_eq!(empty_device.inner(cuda, &empty_device).unwrap(), 0.0);
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
 
     let u1 = Arc::new(U1FusionRule);
     let tall = GradedSpace::try_new(
@@ -398,7 +418,7 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
     )
     .unwrap();
-    let mixed = TensorMap::from_subblock_fn(&runtime, [&tall], [&wide], |_, indices| {
+    let mixed = TensorMap::from_subblock_fn(engine, &runtime, [&tall], [&wide], |_, indices| {
         if indices[0] == indices[1] {
             6.0 + indices[0] as f64
         } else {
@@ -406,21 +426,26 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         }
     })
     .unwrap();
-    assert_typed_cuda_qr_matches_host(&mixed);
+    assert_typed_cuda_qr_matches_host(engine, cuda, &mixed);
 
     let charge_zero_only = GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0), 2)]).unwrap();
-    let unmatched =
-        TensorMap::from_subblock_fn(&runtime, [&tall], [&charge_zero_only], |_, indices| {
+    let unmatched = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&tall],
+        [&charge_zero_only],
+        |_, indices| {
             if indices[0] == indices[1] {
                 4.0 + indices[0] as f64
             } else {
                 1.0
             }
-        })
-        .unwrap();
-    assert_typed_cuda_qr_matches_host(&unmatched);
+        },
+    )
+    .unwrap();
+    assert_typed_cuda_qr_matches_host(engine, cuda, &unmatched);
 
-    let square = TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, indices| {
+    let square = TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, indices| {
         if indices[0] == indices[1] {
             8.0 + indices[0] as f64
         } else {
@@ -428,7 +453,7 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         }
     })
     .unwrap();
-    assert_typed_cuda_qr_matches_host(&square);
+    assert_typed_cuda_qr_matches_host(engine, cuda, &square);
 
     let su2 = Arc::new(SU2FusionRule);
     let su2_leg = GradedSpace::try_new(
@@ -439,15 +464,16 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         ],
     )
     .unwrap();
-    let su2_tensor = TensorMap::from_subblock_fn(&runtime, [&su2_leg], [&su2_leg], |_, indices| {
-        if indices[0] == indices[1] {
-            7.0 + indices[0] as f64
-        } else {
-            1.0
-        }
-    })
-    .unwrap();
-    assert_typed_cuda_qr_matches_host(&su2_tensor);
+    let su2_tensor =
+        TensorMap::from_subblock_fn(engine, &runtime, [&su2_leg], [&su2_leg], |_, indices| {
+            if indices[0] == indices[1] {
+                7.0 + indices[0] as f64
+            } else {
+                1.0
+            }
+        })
+        .unwrap();
+    assert_typed_cuda_qr_matches_host(engine, cuda, &su2_tensor);
 
     let product = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
@@ -461,37 +487,50 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         ],
     )
     .unwrap();
-    let product_tensor =
-        TensorMap::from_subblock_fn(&runtime, [&product_leg], [&product_leg], |_, indices| {
+    let product_tensor = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&product_leg],
+        [&product_leg],
+        |_, indices| {
             if indices[0] == indices[1] {
                 5.0 + indices[0] as f64
             } else {
                 1.0
             }
-        })
-        .unwrap();
-    assert_typed_cuda_qr_matches_host(&product_tensor);
+        },
+    )
+    .unwrap();
+    assert_typed_cuda_qr_matches_host(engine, cuda, &product_tensor);
 
-    let multi_tree =
-        TensorMap::from_subblock_fn(&runtime, [&su2_leg, &su2_leg], [&su2_leg], |_, indices| {
-            indices.iter().sum::<usize>() as f64 + 1.0
-        })
-        .unwrap();
+    let multi_tree = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2_leg, &su2_leg],
+        [&su2_leg],
+        |_, indices| indices.iter().sum::<usize>() as f64 + 1.0,
+    )
+    .unwrap();
     let Qr {
         q: expected_multi_left,
         r: expected_multi_right,
     } = multi_tree
-        .qr_compact(&codomain_axes(&multi_tree), &domain_axes(&multi_tree))
+        .qr_compact(
+            engine,
+            &codomain_axes(&multi_tree),
+            &domain_axes(&multi_tree),
+        )
         .unwrap();
-    let multi_tree_device = multi_tree.to_cuda().unwrap();
+    let multi_tree_device = multi_tree.to_cuda(cuda).unwrap();
     let Qr { q: left, r: right } = multi_tree_device
         .qr_compact(
+            cuda,
             &codomain_axes(&multi_tree_device),
             &domain_axes(&multi_tree_device),
         )
         .unwrap();
-    let left = left.to_host().unwrap();
-    let right = right.to_host().unwrap();
+    let left = left.to_host(cuda).unwrap();
+    let right = right.to_host(cuda).unwrap();
     assert_eq!(
         structural_snapshot(&left),
         structural_snapshot(&expected_multi_left)
@@ -500,7 +539,7 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         structural_snapshot(&right),
         structural_snapshot(&expected_multi_right)
     );
-    let rebuilt = left.compose(&right).unwrap();
+    let rebuilt = left.compose(engine, &right).unwrap();
     numerics::assert_slices_close(
         "rebuilt",
         rebuilt.dense_data().unwrap(),
@@ -508,17 +547,21 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         FACTOR_TERMS,
     );
 
-    let zero = TensorMap::from_subblock_fn(&runtime, [&wide], [&wide], |_, _| 0.0).unwrap();
-    let zero_device = zero.to_cuda().unwrap();
+    let zero = TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, _| 0.0).unwrap();
+    let zero_device = zero.to_cuda(cuda).unwrap();
     let Qr {
         q: zero_left,
         r: zero_right,
     } = zero_device
-        .qr_compact(&codomain_axes(&zero_device), &domain_axes(&zero_device))
+        .qr_compact(
+            cuda,
+            &codomain_axes(&zero_device),
+            &domain_axes(&zero_device),
+        )
         .unwrap();
-    let zero_left = zero_left.to_host().unwrap();
-    let zero_right = zero_right.to_host().unwrap();
-    let zero_rebuilt = zero_left.compose(&zero_right).unwrap();
+    let zero_left = zero_left.to_host(cuda).unwrap();
+    let zero_right = zero_right.to_host(cuda).unwrap();
+    let zero_rebuilt = zero_left.compose(engine, &zero_right).unwrap();
     numerics::assert_slices_close(
         "zero_rebuilt",
         zero_rebuilt.dense_data().unwrap(),
@@ -529,6 +572,7 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
 
     let rank_deficient_leg = GradedSpace::try_new(Arc::clone(&u1), [(U1Irrep::new(0), 3)]).unwrap();
     let rank_deficient = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&rank_deficient_leg],
         [&rank_deficient_leg],
@@ -539,20 +583,21 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         q: rank_left,
         r: rank_right,
     } = rank_deficient
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
         .qr_compact(
+            cuda,
             &codomain_axes(&rank_deficient),
             &domain_axes(&rank_deficient),
         )
         .unwrap();
-    let rank_left = rank_left.to_host().unwrap();
-    let rank_right = rank_right.to_host().unwrap();
-    assert!(is_isometric!(rank_left, 1e-10));
+    let rank_left = rank_left.to_host(cuda).unwrap();
+    let rank_right = rank_right.to_host(cuda).unwrap();
+    assert!(is_isometric!(engine, rank_left, 1e-10));
     numerics::assert_slices_close(
         "rank_left .compose(rank_right)",
         rank_left
-            .compose(&rank_right)
+            .compose(engine, &rank_right)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -562,6 +607,7 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     assert_finite_r_diagonal_nonnegative(&rank_right);
 
     let tiny_negative = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&charge_zero_only],
         [&charge_zero_only],
@@ -578,16 +624,20 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
         q: tiny_left,
         r: tiny_right,
     } = tiny_negative
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
-        .qr_compact(&codomain_axes(&tiny_negative), &domain_axes(&tiny_negative))
+        .qr_compact(
+            cuda,
+            &codomain_axes(&tiny_negative),
+            &domain_axes(&tiny_negative),
+        )
         .unwrap();
-    let tiny_left = tiny_left.to_host().unwrap();
-    let tiny_right = tiny_right.to_host().unwrap();
+    let tiny_left = tiny_left.to_host(cuda).unwrap();
+    let tiny_right = tiny_right.to_host(cuda).unwrap();
     numerics::assert_slices_close(
         "tiny_left .compose(tiny_right)",
         tiny_left
-            .compose(&tiny_right)
+            .compose(engine, &tiny_right)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -600,69 +650,46 @@ fn typed_cuda_qr_compact_streams_multiplicity_free_f64_factors() {
     let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 2)]).unwrap();
     let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 3)]).unwrap();
     let empty: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
+        TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     assert!(empty.dense_data().unwrap().is_empty());
-    assert_typed_cuda_qr_matches_host(&empty);
+    assert_typed_cuda_qr_matches_host(engine, cuda, &empty);
 
-    let device = mixed.to_cuda().unwrap();
-    let lazy = device.adjoint().unwrap();
+    let device = mixed.to_cuda(cuda).unwrap();
+    let lazy = device.adjoint(cuda).unwrap();
     assert!(matches!(
-        lazy.qr_compact(&codomain_axes(&lazy), &domain_axes(&lazy)),
+        lazy.qr_compact(cuda, &codomain_axes(&lazy), &domain_axes(&lazy)),
         Err(symtn::typed::Error::UnsupportedOnDevice(_))
     ));
     let expected = device
-        .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+        .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
-    let expected_left = expected.q.to_host().unwrap();
-    let expected_right = expected.r.to_host().unwrap();
+    let expected_left = expected.q.to_host(cuda).unwrap();
+    let expected_right = expected.r.to_host(cuda).unwrap();
     for _ in 0..3 {
         let actual = device
-            .qr_compact(&codomain_axes(&device), &domain_axes(&device))
+            .qr_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
             .unwrap();
         numerics::assert_slices_close(
             "actual.q",
-            actual.q.to_host().unwrap().dense_data().unwrap(),
+            actual.q.to_host(cuda).unwrap().dense_data().unwrap(),
             expected_left.dense_data().unwrap(),
             FACTOR_TERMS,
         );
         numerics::assert_slices_close(
             "actual.r",
-            actual.r.to_host().unwrap().dense_data().unwrap(),
+            actual.r.to_host(cuda).unwrap().dense_data().unwrap(),
             expected_right.dense_data().unwrap(),
             FACTOR_TERMS,
         );
     }
-    std::thread::scope(|scope| {
-        let workers: Vec<_> = (0..4)
-            .map(|_| {
-                scope.spawn(|| {
-                    device
-                        .qr_compact(&codomain_axes(&device), &domain_axes(&device))
-                        .unwrap()
-                })
-            })
-            .collect();
-        for worker in workers {
-            let actual = worker.join().unwrap();
-            numerics::assert_slices_close(
-                "actual.q",
-                actual.q.to_host().unwrap().dense_data().unwrap(),
-                expected_left.dense_data().unwrap(),
-                FACTOR_TERMS,
-            );
-            numerics::assert_slices_close(
-                "actual.r",
-                actual.r.to_host().unwrap().dense_data().unwrap(),
-                expected_right.dense_data().unwrap(),
-                FACTOR_TERMS,
-            );
-        }
-    });
 }
 
 /// `a + a^H` as a Hermitian fixture with nonzero imaginary off-diagonals: a
 /// transpose-only admission rule would reject it.
-fn hermitian_c64<R>(source: &TensorMap<R, Complex64>) -> TensorMap<R, Complex64>
+fn hermitian_c64<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    source: &TensorMap<R, Complex64>,
+) -> TensorMap<R, Complex64>
 where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
@@ -672,10 +699,12 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let source_adjoint = source.adjoint(engine).unwrap();
     let hermitian = source
         .axpby(
+            engine,
             Complex64::new(1.0, 0.0),
-            &source.adjoint().unwrap(),
+            &source_adjoint,
             Complex64::new(1.0, 0.0),
         )
         .unwrap();
@@ -701,6 +730,8 @@ where
 }
 
 fn assert_c64_eigh_trunc_composition_matches_host<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     source: &TensorMap<R, Complex64>,
     truncation: &Truncation,
 ) where
@@ -713,29 +744,34 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
         + SectorCodec,
 {
     let source_data = source.dense_data().unwrap().to_vec();
-    let expected = host_eigh_trunc(source, truncation, |value: Complex64| value.re);
-    let device = source.to_cuda().unwrap();
+    let expected = host_eigh_trunc(engine, source, truncation, |value: Complex64| value.re);
+    let device = source.to_cuda(cuda).unwrap();
 
     let Eigh {
         d: d_device,
         v: v_device,
     } = device
         .eigh_full(
+            cuda,
             &codomain_axes(&device),
             &domain_axes(&device),
             HermitianTol::DEFAULT,
         )
         .unwrap();
     assert_device_factor_handles(source, [&d_device, &v_device]);
-    let d = d_device.to_host().unwrap();
-    let v = v_device.to_host().unwrap();
+    let d = d_device.to_host(cuda).unwrap();
+    let v = v_device.to_host(cuda).unwrap();
 
     let found = d.domain()[0]
-        .find_truncated(&d.diagview().unwrap(), truncation)
+        .find_truncated(&d.diagview(engine).unwrap(), truncation)
         .unwrap();
     let selection = &found.selection;
-    let d = d.restrict_leg(&[(0, selection), (1, selection)]).unwrap();
-    let v = v.restrict_leg(&[(v.codomain_rank(), selection)]).unwrap();
+    let d = d
+        .restrict_leg(engine, &[(0, selection), (1, selection)])
+        .unwrap();
+    let v = v
+        .restrict_leg(engine, &[(v.codomain_rank(), selection)])
+        .unwrap();
 
     assert_eq!(*selection.subspace(), expected.d.domain()[0]);
     assert_eq!(structural_snapshot(&d), structural_snapshot(&expected.d));
@@ -748,7 +784,7 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
             .all(|value| value.im.abs() <= 1e-10),
         "eigenvalues must be real"
     );
-    let mut kept = d.diagview().unwrap();
+    let mut kept = d.diagview(engine).unwrap();
     kept.sort_by(|left, right| left.sector.cmp(&right.sector));
     assert_eq!(kept.len(), expected.eigenvalues.len());
     for (actual, expected) in kept.iter().zip(&expected.eigenvalues) {
@@ -758,12 +794,13 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
     }
     assert!((found.error - expected.error).abs() <= 1e-9 * (1.0 + expected.error));
 
-    assert!(is_isometric!(v, 1e-10), "V^H V = I");
+    assert!(is_isometric!(engine, v, 1e-10), "V^H V = I");
     if matches!(truncation, Truncation::Full) {
+        let v_adjoint = v.adjoint(engine).unwrap();
         let rebuilt = v
-            .compose(&d)
+            .compose(engine, &d)
             .unwrap()
-            .compose(&v.adjoint().unwrap())
+            .compose(engine, &v_adjoint)
             .unwrap();
         numerics::assert_slices_close(
             "rebuilt",
@@ -772,42 +809,54 @@ fn assert_c64_eigh_trunc_composition_matches_host<R>(
             FACTOR_TERMS,
         );
     }
-    assert_eq!(device.to_host().unwrap().dense_data().unwrap(), source_data);
+    assert_eq!(
+        device.to_host(cuda).unwrap().dense_data().unwrap(),
+        source_data
+    );
 }
 
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
-    let runtime = Runtime::builder().cuda(0).dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let cuda = &mut crate::common::cuda_engine();
+    let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
     )
     .unwrap();
-    let hermitian = hermitian_c64(
-        &TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], distinct_c64_fill())
-            .unwrap(),
-    );
-    assert_c64_eigh_trunc_composition_matches_host(&hermitian, &Truncation::Full);
-    assert_c64_eigh_trunc_composition_matches_host(&hermitian, &Truncation::rank(2));
+    let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        distinct_c64_fill(),
+    )
+    .unwrap();
+    let hermitian = hermitian_c64(engine, &host_result);
+    assert_c64_eigh_trunc_composition_matches_host(engine, cuda, &hermitian, &Truncation::Full);
+    assert_c64_eigh_trunc_composition_matches_host(engine, cuda, &hermitian, &Truncation::rank(2));
 
     let Eigh { d, v } = hermitian
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
         .eigh_full(
+            cuda,
             &codomain_axes(&hermitian),
             &domain_axes(&hermitian),
             HermitianTol::DEFAULT,
         )
         .unwrap();
-    let d = d.to_host().unwrap();
-    let v = v.to_host().unwrap();
-    assert!(is_isometric!(v, 1e-10), "V^H V = I");
+    let d = d.to_host(cuda).unwrap();
+    let v = v.to_host(cuda).unwrap();
+    assert!(is_isometric!(engine, v, 1e-10), "V^H V = I");
+    let v_adjoint = v.adjoint(engine).unwrap();
     numerics::assert_slices_close(
         "v.compose(d)  .compose(v.adjoint())",
-        v.compose(&d)
+        v.compose(engine, &d)
             .unwrap()
-            .compose(&v.adjoint().unwrap())
+            .compose(engine, &v_adjoint)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -823,27 +872,33 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
         ],
     )
     .unwrap();
-    let su2_hermitian = hermitian_c64(
-        &TensorMap::<_, Complex64>::from_subblock_fn(
-            &runtime,
-            [&su2, &su2],
-            [&su2, &su2],
-            distinct_c64_fill(),
-        )
-        .unwrap(),
-    );
-    assert_c64_eigh_trunc_composition_matches_host(&su2_hermitian, &Truncation::Full);
+    let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&su2, &su2],
+        [&su2, &su2],
+        distinct_c64_fill(),
+    )
+    .unwrap();
+    let su2_hermitian = hermitian_c64(engine, &host_result);
+    assert_c64_eigh_trunc_composition_matches_host(engine, cuda, &su2_hermitian, &Truncation::Full);
 
     // `a^T = a` but `a^H != a`: a transpose-only admission rule would accept.
-    let complex_symmetric =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&u1], [&u1], |_, indices| {
+    let complex_symmetric = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&u1],
+        [&u1],
+        |_, indices| {
             let (row, col) = (indices[0].min(indices[1]), indices[0].max(indices[1]));
             Complex64::new(1.0 + row as f64, 1.0 + col as f64)
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert!(
         complex_symmetric
             .eigh_full(
+                engine,
                 &codomain_axes(&complex_symmetric),
                 &domain_axes(&complex_symmetric),
                 HermitianTol::DEFAULT
@@ -855,9 +910,10 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
         "the Host oracle rejects a complex-symmetric non-Hermitian input"
     );
     let device_error = complex_symmetric
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
         .eigh_full(
+            cuda,
             &codomain_axes(&complex_symmetric),
             &domain_axes(&complex_symmetric),
             HermitianTol::DEFAULT,
@@ -878,26 +934,30 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
     // A 2x2 hand case: `[[1, i], [-i, 1]]` is Hermitian, `[[1, i], [i, 1]]` is
     // complex-symmetric and must be rejected.
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let hand_hermitian =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| match (
-            indices[0], indices[1],
-        ) {
+    let hand_hermitian = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg],
+        [&leg],
+        |_, indices| match (indices[0], indices[1]) {
             (0, 1) => Complex64::new(0.0, 1.0),
             (1, 0) => Complex64::new(0.0, -1.0),
             _ => Complex64::new(1.0, 0.0),
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let Eigh { d, .. } = hand_hermitian
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
         .eigh_full(
+            cuda,
             &codomain_axes(&hand_hermitian),
             &domain_axes(&hand_hermitian),
             HermitianTol::DEFAULT,
         )
         .unwrap();
     let mut values: Vec<f64> = d
-        .to_host()
+        .to_host(cuda)
         .unwrap()
         .dense_data()
         .unwrap()
@@ -907,19 +967,25 @@ fn typed_cuda_c64_eigh_admits_hermitian_and_rejects_complex_symmetric_input() {
     values.sort_by(f64::total_cmp);
     numerics::assert_slices_close("values", &values, &[0.0, 0.0, 0.0, 2.0], FACTOR_TERMS);
 
-    let hand_symmetric =
-        TensorMap::<_, Complex64>::from_subblock_fn(&runtime, [&leg], [&leg], |_, indices| {
+    let hand_symmetric = TensorMap::<_, Complex64>::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg],
+        [&leg],
+        |_, indices| {
             if indices[0] == indices[1] {
                 Complex64::new(1.0, 0.0)
             } else {
                 Complex64::new(0.0, 1.0)
             }
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     assert!(hand_symmetric
-        .to_cuda()
+        .to_cuda(cuda)
         .unwrap()
         .eigh_full(
+            cuda,
             &codomain_axes(&hand_symmetric),
             &domain_axes(&hand_symmetric),
             HermitianTol::DEFAULT

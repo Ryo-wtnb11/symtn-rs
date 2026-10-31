@@ -6,6 +6,7 @@
 
 use crate::probe::{self, Event};
 use std::sync::Arc;
+use symtn_dense::Engine;
 
 use symtn_core::{
     FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols,
@@ -30,6 +31,7 @@ struct CountBatchCalls {
 impl Rank2Gemm<f64> for CountBatchCalls {
     fn matmul_rank2(
         &mut self,
+        _engine: &mut dyn Engine,
         _: &mut [f64],
         _: &[f64],
         _: &[f64],
@@ -44,6 +46,7 @@ impl Rank2Gemm<f64> for CountBatchCalls {
 
     fn matmul_rank2_batch(
         &mut self,
+        _engine: &mut dyn Engine,
         _: &mut [f64],
         _: &[f64],
         _: &[f64],
@@ -66,6 +69,7 @@ fn assert_one_batch_submission(
     rhs_len: usize,
     swapped: bool,
 ) -> usize {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut jobs_per_member = 0;
     for members in [1, 2, 17] {
         let (core, actual_swapped) = route.direct_core().unwrap();
@@ -88,6 +92,7 @@ fn assert_one_batch_submission(
         let mut gemm = CountBatchCalls::default();
         replay
             .execute_host(
+                engine,
                 &mut crate::StridedHostKernelAdapter::default(),
                 &mut gemm,
                 &mut dst,
@@ -203,6 +208,7 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64>
         + crate::TreeTransformRuleCacheKey<Key = RuleIdentity>,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = square(provider, leg, leg);
     let len = space.space().required_len().unwrap();
     let (lhs_data, rhs_data) = (data(len, 1), data(len, 2));
@@ -221,6 +227,7 @@ where
         if lhs_lazy || rhs_lazy {
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &space,
                     &mut dst,
                     operand(&space, lhs_lazy),
@@ -235,6 +242,7 @@ where
         } else {
             context
                 .tensorcontract_prelowered_into(
+                    engine,
                     &space,
                     &mut dst,
                     crate::FusionOperand::direct(space.space()),
@@ -309,6 +317,7 @@ fn zero_copy_candidates_resolve_to_core_on_su2() {
 
 #[test]
 fn asymmetric_owned_candidate_reaches_swapped_storage_core() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let (v, w, x) = (
         u1_leg(),
@@ -355,6 +364,7 @@ fn asymmetric_owned_candidate_reaches_swapped_storage_core() {
     .unwrap();
     let route = Context::default()
         .compile_storage_contract_resolution(
+            engine,
             &dst,
             FusionOperand::direct(lhs.space()),
             FusionOperand::direct(rhs.space()),
@@ -392,6 +402,7 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 /// Values against TensorKit's steps: `symtn/tests/typed_contract_host_oracle.rs`.
 #[test]
 fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -405,6 +416,7 @@ fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_co
     let mut context = Context::default();
     context
         .tensorcontract_prelowered_into(
+            engine,
             &dst,
             &mut out,
             crate::FusionOperand::direct(lhs.space()),

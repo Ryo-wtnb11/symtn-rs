@@ -47,20 +47,25 @@ pub fn cuda_all_finite<D: CudaScalar>(
     let axes: Vec<usize> = (0..payload.shape().len()).collect();
     let diff = ctx
         .backend
-        .sub(payload, payload)
+        .sub_read(
+            TensorRead::from_tensor(payload),
+            TensorRead::from_tensor(payload),
+        )
         .map_err(|err| cuda_error(OP, err))?;
     let diff = if D::IS_COMPLEX {
-        ctx.backend.abs(&diff).map_err(|err| cuda_error(OP, err))?
+        ctx.backend
+            .abs_read(TensorRead::from_tensor(&diff))
+            .map_err(|err| cuda_error(OP, err))?
     } else {
         diff
     };
     let sum = ctx
         .backend
-        .reduce_sum(&diff, &axes)
+        .reduce_sum_read(TensorRead::from_tensor(&diff), &axes)
         .map_err(|err| cuda_error(OP, err))?;
     let sum = if sum.shape().is_empty() {
         ctx.backend
-            .reshape(&sum, &[1])
+            .reshape_read(TensorRead::from_tensor(&sum), &[1])
             .map_err(|err| cuda_error(OP, err))?
     } else {
         sum

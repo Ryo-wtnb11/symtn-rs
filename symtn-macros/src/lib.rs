@@ -37,6 +37,8 @@ struct Operand {
 }
 
 struct Contraction {
+    /// The caller's engine expression, evaluated once.
+    engine: Expr,
     output: Option<Labels>,
     operands: Vec<Operand>,
 }
@@ -159,6 +161,18 @@ impl Parse for Operand {
 
 impl Parse for Contraction {
     fn parse(input: ParseStream) -> Result<Self> {
+        let missing_engine = "contract! takes the caller's engine first; \
+             hint: write `contract!(&mut engine, [i; k] := …)`";
+        if input.peek(token::Bracket) {
+            return Err(input.error(missing_engine));
+        }
+        let engine: Expr = input
+            .parse()
+            .map_err(|error| Error::new(error.span(), missing_engine))?;
+        if !input.peek(Token![,]) {
+            return Err(input.error(missing_engine));
+        }
+        input.parse::<Token![,]>()?;
         let output = if input.peek(token::Bracket) {
             let content;
             bracketed!(content in input);
@@ -191,7 +205,7 @@ impl Parse for Contraction {
             let name = &operands[0].tensor;
             return Err(input.error(format!(
                 "the output of contract! has no name; hint: write \
-                 `let {name} = contract!([i; k] := …)?`"
+                 `let {name} = contract!(&mut engine, [i; k] := …)?`"
             )));
         }
         while !input.is_empty() {
@@ -207,7 +221,11 @@ impl Parse for Contraction {
                 return Err(input.error("expected `*` between operands"));
             }
         }
-        Ok(Self { output, operands })
+        Ok(Self {
+            engine,
+            output,
+            operands,
+        })
     }
 }
 
@@ -325,6 +343,7 @@ fn expand(input: TokenStream) -> Result<TokenStream> {
         labels.split.unwrap_or(labels.labels.len())
     });
     let tensors = contraction.operands.iter().map(|operand| &operand.tensor);
+    let engine = &contraction.engine;
     let (output, output_split) = match &contraction.output {
         Some(labels) => (label_strings(labels), labels.split),
         None => (quote!(::std::vec::Vec::<&'static str>::new()), None),
@@ -337,10 +356,13 @@ fn expand(input: TokenStream) -> Result<TokenStream> {
     let scalar = contraction
         .output
         .is_none()
-        .then(|| quote!(.and_then(|scalar| scalar.scalar().map_err(::core::convert::Into::into))));
+        .then(|| quote!(.and_then(|scalar| scalar.scalar(__symtn_engine).map_err(::core::convert::Into::into))));
     Ok(quote! {
         {
             use ::symtn_network::NetworkOperand as _;
+            // Reborrowed, so a `&mut dyn Engine` binding stays usable after
+            // the call.
+            let __symtn_engine = &mut *(#engine);
             static __SYMTN_CONTRACT_NETWORK: ::std::sync::OnceLock<::symtn_network::Network> =
                 ::std::sync::OnceLock::new();
             __SYMTN_CONTRACT_NETWORK
@@ -358,7 +380,7 @@ fn expand(input: TokenStream) -> Result<TokenStream> {
                     // output rank are derived from the written lists.
                     .expect("contract! validated its label structure at compile time")
                 })
-                .contract(&[#((#tensors).__contract_operand()),*])
+                .contract(__symtn_engine, &[#((#tensors).__contract_operand()),*])
                 #scalar
         }
     })
@@ -387,7 +409,7 @@ mod tests {
     fn each_written_form_lowers_to_its_network_arguments() {
         let vec = "::std::vec::Vec::<&'staticstr>::";
         assert_eq!(
-            network_args(quote!([i; k] := a[i; j] * b[j; k])),
+            network_args(quote!(&mut engine, [i; k] := a[i; j] * b[j; k])),
             format!(
                 "[{vec}from([\"i\",\"j\"]),{vec}from([\"j\",\"k\"])],[false,false],\
                  [1usize,1usize],{vec}from([\"i\",\"k\"]),::core::option::Option::Some(1usize),"
@@ -395,14 +417,14 @@ mod tests {
         );
         // No `;`: every leg in the codomain; labels separated by spaces.
         assert_eq!(
-            network_args(quote!([a b c] := x[a i] * y[i; b, c])),
+            network_args(quote!(&mut engine, [a b c] := x[a i] * y[i; b, c])),
             format!(
                 "[{vec}from([\"a\",\"i\"]),{vec}from([\"i\",\"b\",\"c\"])],[false,false],\
                  [2usize,1usize],{vec}from([\"a\",\"b\",\"c\"]),::core::option::Option::None,"
             )
         );
         // No left-hand side: an empty output and the scalar accessor.
-        let scalar = quote!(conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]);
+        let scalar = quote!(&mut engine, conj(psi)[p; l, r] * h[p; q] * psi[q; l, r]);
         assert_eq!(
             network_args(scalar.clone()),
             format!(
@@ -411,23 +433,29 @@ mod tests {
                  {vec}new(),::core::option::Option::None,"
             )
         );
-        assert!(expand(scalar).unwrap().to_string().contains("scalar ()"));
-        let rank0 = expand(quote!([] := a[i; j] * b[j; i])).unwrap().to_string();
-        assert!(!rank0.contains("scalar ()"));
+        assert!(expand(scalar)
+            .unwrap()
+            .to_string()
+            .contains("scalar (__symtn_engine)"));
+        let rank0 = expand(quote!(&mut engine, [] := a[i; j] * b[j; i]))
+            .unwrap()
+            .to_string();
+        assert!(!rank0.contains("scalar (__symtn_engine)"));
     }
 
     #[test]
     fn operands_are_identifiers_field_chains_or_parenthesized_expressions() {
-        let expanded = expand(quote!([i; k] := (svd.u)[i; s] * conj(w.get(0)?)[k; s] * x.0.y[]))
-            .unwrap()
-            .to_string()
-            .replace(' ', "");
+        let expanded =
+            expand(quote!(&mut engine, [i; k] := (svd.u)[i; s] * conj(w.get(0)?)[k; s] * x.0.y[]))
+                .unwrap()
+                .to_string()
+                .replace(' ', "");
         assert!(expanded.contains(
-            ".contract(&[(svd.u).__contract_operand(),(w.get(0)?).__contract_operand(),\
-             (x.0.y).__contract_operand()])"
+            ".contract(__symtn_engine,&[(svd.u).__contract_operand(),\
+             (w.get(0)?).__contract_operand(),(x.0.y).__contract_operand()])"
         ));
-        assert!(network_args(quote!([r#in] := r#type[r#in])).contains("\"in\""));
-        let nested = expand(quote!([i, k] := tup.0.0[i; j] * pair.1.2.u[j; k]))
+        assert!(network_args(quote!(&mut engine, [r#in] := r#type[r#in])).contains("\"in\""));
+        let nested = expand(quote!(&mut engine, [i, k] := tup.0.0[i; j] * pair.1.2.u[j; k]))
             .unwrap()
             .to_string()
             .replace(' ', "");
@@ -437,37 +465,57 @@ mod tests {
     #[test]
     fn rejected_forms_name_their_hint() {
         let cases = [
-            (quote!([i] := a[i, j, j]), "trace_pairs"),
-            (quote!([] := a[i] * b[i] * c[i]), "hyperedge"),
-            (quote!([i] := a[i; j] * b[j] * c[i]), "hyperedge"),
-            (quote!([i] := a[i] + b[i]), "axpby"),
-            (quote!([i] := a[i] - b[i]), "axpby"),
-            (quote!([i] := 2.0 * a[i]), "scale"),
-            (quote!([i] := alpha * a[i]), "scale"),
-            (quote!([i] := -a[i]), "scale"),
-            (quote!([i] := (s)), "scale"),
-            (quote!([i] = a[i]), "destination"),
-            (quote!([i] += a[i]), "destination"),
-            (quote!([i] := a.f(0)[i]), "parentheses"),
-            (quote!([i, i] := a[i] * b[j, j]), "trace_pairs"),
+            (quote!(&mut engine, [i] := a[i, j, j]), "trace_pairs"),
+            (quote!(&mut engine, [] := a[i] * b[i] * c[i]), "hyperedge"),
             (
-                quote!([i, i] := a[j] * b[j]),
+                quote!(&mut engine, [i] := a[i; j] * b[j] * c[i]),
+                "hyperedge",
+            ),
+            (quote!(&mut engine, [i] := a[i] + b[i]), "axpby"),
+            (quote!(&mut engine, [i] := a[i] - b[i]), "axpby"),
+            (quote!(&mut engine, [i] := 2.0 * a[i]), "scale"),
+            (quote!(&mut engine, [i] := alpha * a[i]), "scale"),
+            (quote!(&mut engine, [i] := -a[i]), "scale"),
+            (quote!(&mut engine, [i] := (s)), "scale"),
+            (quote!(&mut engine, [i] = a[i]), "destination"),
+            (quote!(&mut engine, [i] += a[i]), "destination"),
+            (quote!(&mut engine, [i] := a.f(0)[i]), "parentheses"),
+            (quote!(&mut engine, [i, i] := a[i] * b[j, j]), "trace_pairs"),
+            (
+                quote!(&mut engine, [i, i] := a[j] * b[j]),
                 "repeated on the left-hand side",
             ),
-            (quote!([i, k] := a[i]), "appears on no operand"),
-            (quote!([] := a[i, j] * b[j]), "one operand only"),
-            (quote!(a[i, j] * b[j]), "contracts every label to a scalar"),
-            (quote!([i] := a[i; ; j]), "at most one `;`"),
-            (quote!([i] := a[1]), "a label is an identifier"),
-            (quote!([i] - a[i]), "expected `:=`"),
-            (quote!([i] := a[i] / b[i]), "expected `*`"),
-            (quote!([i] := * a[i]), "expected an operand"),
-            (quote!([i; j] := w[0][i; j]), "`(w[0])[i; j]`"),
+            (quote!(&mut engine, [i, k] := a[i]), "appears on no operand"),
             (
-                quote!(c[i; k] := a[i; j] * b[j; k]),
-                "`let c = contract!([i; k] := …)?`",
+                quote!(&mut engine, [] := a[i, j] * b[j]),
+                "one operand only",
             ),
-            (quote!(c[i; k] = a[i; j] * b[j; k]), "has no name"),
+            (
+                quote!(&mut engine, a[i, j] * b[j]),
+                "contracts every label to a scalar",
+            ),
+            (quote!(&mut engine, [i] := a[i; ; j]), "at most one `;`"),
+            (quote!(&mut engine, [i] := a[1]), "a label is an identifier"),
+            (quote!(&mut engine, [i] - a[i]), "expected `:=`"),
+            (quote!(&mut engine, [i] := a[i] / b[i]), "expected `*`"),
+            (quote!(&mut engine, [i] := * a[i]), "expected an operand"),
+            (quote!(&mut engine, [i; j] := w[0][i; j]), "`(w[0])[i; j]`"),
+            (
+                quote!(&mut engine, c[i; k] := a[i; j] * b[j; k]),
+                "`let c = contract!(&mut engine, [i; k] := …)?`",
+            ),
+            (
+                quote!(&mut engine, c[i; k] = a[i; j] * b[j; k]),
+                "has no name",
+            ),
+            (
+                quote!([i; k] := a[i; j] * b[j; k]),
+                "takes the caller's engine first",
+            ),
+            (
+                quote!(&mut engine [i] := a[i]),
+                "takes the caller's engine first",
+            ),
         ];
         for (input, hint) in cases {
             let message = error(input.clone());

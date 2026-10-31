@@ -261,6 +261,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
     space: BoundDynamicFusionMapSpace<LateGenericSpy>,
     data: Vec<D>,
 ) {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let regions = space
         .space()
         .structure()
@@ -273,7 +274,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
     let compact_qr_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut qr = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Qr);
-    let factors = qr_compact_dyn_checked_generic(&mut qr, &input).unwrap();
+    let factors = qr_compact_dyn_checked_generic(engine, &mut qr, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &factors.q, None, &factors.r);
     assert_compact_input_observations(
         &checked_inputs_rec,
@@ -287,7 +288,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
     let compact_svd_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut svd = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Svd);
-    let factors = svd_compact_dyn_checked_generic(&mut svd, &input).unwrap();
+    let factors = svd_compact_dyn_checked_generic(engine, &mut svd, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &factors.u, Some(&factors.s), &factors.vh);
     assert_compact_input_observations(
         &checked_inputs_rec,
@@ -301,7 +302,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
     let compact_lq_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
     let mut lq = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Lq);
-    let factors = lq_compact_dyn_checked_generic(&mut lq, &input).unwrap();
+    let factors = lq_compact_dyn_checked_generic(engine, &mut lq, &input).unwrap();
     assert_compact_factors_reconstruct_input(&input, &factors.l, None, &factors.q);
     assert_compact_input_observations(
         &checked_inputs_rec,
@@ -332,6 +333,7 @@ fn checked_generic_compact_factors_borrow_real_and_complex_canonical_inputs() {
 
 #[test]
 fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, _, data) = generic_values_endomorphism_input();
     let (_, space) = bind_checked_only(&source);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
@@ -355,7 +357,7 @@ fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
 
     let checked_inputs_rec = crate::probe::record();
     let mut qr = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Qr);
-    let qr_factors = qr_compact_dyn_checked_generic(&mut qr, &input).unwrap();
+    let qr_factors = qr_compact_dyn_checked_generic(engine, &mut qr, &input).unwrap();
     assert_compact_input_observations(
         &checked_inputs_rec,
         crate::probe::CheckedCompactOperation::Qr,
@@ -367,7 +369,7 @@ fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
 
     let checked_inputs_rec = crate::probe::record();
     let mut svd = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Svd);
-    let svd_factors = svd_compact_dyn_checked_generic(&mut svd, &input).unwrap();
+    let svd_factors = svd_compact_dyn_checked_generic(engine, &mut svd, &input).unwrap();
     assert_compact_input_observations(
         &checked_inputs_rec,
         crate::probe::CheckedCompactOperation::Svd,
@@ -384,7 +386,7 @@ fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
 
     let checked_inputs_rec = crate::probe::record();
     let mut lq = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Lq);
-    let lq_factors = lq_compact_dyn_checked_generic(&mut lq, &input).unwrap();
+    let lq_factors = lq_compact_dyn_checked_generic(engine, &mut lq, &input).unwrap();
     assert_compact_input_observations(
         &checked_inputs_rec,
         crate::probe::CheckedCompactOperation::Lq,
@@ -401,6 +403,7 @@ fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_compact_factors_keep_padded_reordered_input_pack() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let (expert_space, expert_data) =
         expert_generic_factorization_input(&canonical_space, &canonical_data, true);
@@ -421,12 +424,12 @@ fn checked_generic_compact_factors_keep_padded_reordered_input_pack() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_qr_copy_rec = crate::probe::record();
-    let actual_qr = qr_compact_dyn_checked_generic(&mut dense, &expert).unwrap();
+    let actual_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
     assert_compact_factors_reconstruct_input(&expert, &actual_qr.q, None, &actual_qr.r);
     assert!(compact_qr_copy_rec.compact_qr_copy().input_pack_calls > 0);
 
     let compact_svd_copy_rec = crate::probe::record();
-    let actual_svd = svd_compact_dyn_checked_generic(&mut dense, &expert).unwrap();
+    let actual_svd = svd_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
     assert_compact_factors_reconstruct_input(
         &expert,
         &actual_svd.u,
@@ -437,7 +440,7 @@ fn checked_generic_compact_factors_keep_padded_reordered_input_pack() {
 
     let compact_lq_copy_rec = crate::probe::record();
     let checked_inputs_rec = crate::probe::record();
-    let actual_lq = lq_compact_dyn_checked_generic(&mut dense, &expert).unwrap();
+    let actual_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
     assert_compact_factors_reconstruct_input(&expert, &actual_lq.l, None, &actual_lq.q);
     let lq_probe = compact_lq_copy_rec.compact_lq_copy();
     assert!(lq_probe.input_pack_calls > 0);
@@ -462,6 +465,7 @@ fn checked_generic_compact_factors_keep_padded_reordered_input_pack() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_generic_compact_interleaved_fallback_keeps_literal_matrix_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical, _, canonical_data) = generic_values_endomorphism_input();
     let (expert_space, expert_data) =
         interleaved_generic_endomorphism_input(&canonical, &canonical_data);
@@ -499,7 +503,7 @@ fn checked_generic_compact_interleaved_fallback_keeps_literal_matrix_order() {
 
     let compact_qr_copy_rec = crate::probe::record();
     let mut qr = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Qr);
-    let factors = qr_compact_dyn_checked_generic(&mut qr, &expert).unwrap();
+    let factors = qr_compact_dyn_checked_generic(engine, &mut qr, &expert).unwrap();
     assert_eq!(
         qr.observations
             .iter()
@@ -512,7 +516,7 @@ fn checked_generic_compact_interleaved_fallback_keeps_literal_matrix_order() {
 
     let compact_svd_copy_rec = crate::probe::record();
     let mut svd = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Svd);
-    let factors = svd_compact_dyn_checked_generic(&mut svd, &expert).unwrap();
+    let factors = svd_compact_dyn_checked_generic(engine, &mut svd, &expert).unwrap();
     assert_eq!(
         svd.observations
             .iter()
@@ -525,7 +529,7 @@ fn checked_generic_compact_interleaved_fallback_keeps_literal_matrix_order() {
 
     let compact_lq_copy_rec = crate::probe::record();
     let mut lq = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Lq);
-    let factors = lq_compact_dyn_checked_generic(&mut lq, &expert).unwrap();
+    let factors = lq_compact_dyn_checked_generic(engine, &mut lq, &expert).unwrap();
     assert_eq!(
         lq.observations
             .iter()
@@ -766,6 +770,7 @@ fn checked_generic_values_keep_padded_reordered_fallback() {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn checked_only_generic_values_preserve_empty_scalar_and_shape_boundaries() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let empty_leg = SectorLeg::new([(x, 0)], false);
     let empty_homspace = FusionTreeHomSpace::new(
@@ -791,7 +796,7 @@ fn checked_only_generic_values_preserve_empty_scalar_and_shape_boundaries() {
         .unwrap()
         .is_empty());
     let empty_eigh =
-        eigh_full_dyn_checked_generic(&mut reject, &empty, HermitianTol::DEFAULT).unwrap();
+        eigh_full_dyn_checked_generic(engine, &mut reject, &empty, HermitianTol::DEFAULT).unwrap();
     assert!(empty_eigh.v().data().is_empty());
     assert!(empty_eigh.eigenvalues().is_empty());
     assert!(eig_vals_dyn_checked_generic(&mut reject, &empty)
@@ -846,6 +851,7 @@ fn checked_only_generic_values_preserve_empty_scalar_and_shape_boundaries() {
 
 #[test]
 fn spectrum_only_entry_points_return_the_published_orders() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: svd_vals descending, eigh_vals ascending, eig_vals ascending
     // lexicographic (re, im) within every sector (#1985).
     let rule = Z2FusionRule;
@@ -854,6 +860,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
 
     let svd = svd_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )
@@ -865,6 +872,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
         }
     }
     let eigh = eigh_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &hermitian),
     )
@@ -876,6 +884,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
         }
     }
     let eig = eig_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )
@@ -890,6 +899,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
 
 #[test]
 fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: zero degeneracies remove the sector entirely, while a rank-zero
     // scalar remains one vacuum-sector 1x1 matrix for every values operation.
     let empty = rectangular_svd_tensor(0, 0);
@@ -898,18 +908,21 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     let mut reject = ScriptedExecutor::new(RejectExecutorCalls);
     let values_fallbacks_rec = crate::probe::record();
     assert!(svd_vals(
+        engine,
         &mut reject,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
     )
     .unwrap()
     .is_empty());
     assert!(eigh_vals(
+        engine,
         &mut reject,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
     )
     .unwrap()
     .is_empty());
     assert!(eig_vals(
+        engine,
         &mut reject,
         &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
     )
@@ -926,9 +939,24 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let scalar = TestTensor::<f64>::from_vec_with_fusion_space(vec![-3.0], space).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let svd = svd_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &scalar)).unwrap();
-    let eigh = eigh_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &scalar)).unwrap();
-    let eig = eig_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &scalar)).unwrap();
+    let svd = svd_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &scalar),
+    )
+    .unwrap();
+    let eigh = eigh_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &scalar),
+    )
+    .unwrap();
+    let eig = eig_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &scalar),
+    )
+    .unwrap();
     assert_eq!(svd[0].sector, rule.vacuum());
     assert_eq!(svd[0].values, vec![3.0]);
     assert_eq!(eigh[0].sector, rule.vacuum());
@@ -939,6 +967,7 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
 
 #[test]
 fn values_only_second_sector_failures_publish_no_partial_spectrum() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: after one successful sector, each dense values failure returns Err
     // without exposing the accumulated prefix or mutating borrowed input.
     let sectors = [SectorId::new(0), SectorId::new(1)];
@@ -958,9 +987,9 @@ fn values_only_second_sector_failures_publish_no_partial_spectrum() {
         let before = input.data().to_vec();
         let mut dense = fail_second_values(operation);
         let result = match operation {
-            ValuesOperation::Svd => svd_vals(&mut dense, &input.as_ref()).map(|_| ()),
-            ValuesOperation::Eigh => eigh_vals(&mut dense, &input.as_ref()).map(|_| ()),
-            ValuesOperation::Eig => eig_vals(&mut dense, &input.as_ref()).map(|_| ()),
+            ValuesOperation::Svd => svd_vals(engine, &mut dense, &input.as_ref()).map(|_| ()),
+            ValuesOperation::Eigh => eigh_vals(engine, &mut dense, &input.as_ref()).map(|_| ()),
+            ValuesOperation::Eig => eig_vals(engine, &mut dense, &input.as_ref()).map(|_| ()),
         };
 
         assert!(matches!(result, Err(OperationError::Dense(_))));
@@ -971,6 +1000,7 @@ fn values_only_second_sector_failures_publish_no_partial_spectrum() {
 
 #[test]
 fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: equal singular values keep the provider's order, the provider's
     // ascending EIGH spectrum (with a ±2 pair) is published unchanged, and a
     // conjugate EIG pair is published in (re, im) order, on both the borrowed
@@ -990,17 +1020,23 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let raw_svd = dense
-        .svd_vals(DenseRead::F64(
-            symtn_dense::DenseView::new(svd_input.data(), &shape, &strides, 0).unwrap(),
-        ))
+        .svd_vals(
+            engine,
+            DenseRead::F64(
+                symtn_dense::DenseView::new(svd_input.data(), &shape, &strides, 0).unwrap(),
+            ),
+        )
         .unwrap()
         .as_f64_slice()
         .unwrap()
         .to_vec();
     let raw_eigh = dense
-        .eigh_vals(DenseRead::F64(
-            symtn_dense::DenseView::new(eigh_input.data(), &shape, &strides, 0).unwrap(),
-        ))
+        .eigh_vals(
+            engine,
+            DenseRead::F64(
+                symtn_dense::DenseView::new(eigh_input.data(), &shape, &strides, 0).unwrap(),
+            ),
+        )
         .unwrap()
         .as_f64_slice()
         .unwrap()
@@ -1015,23 +1051,54 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
     }
     assert_eq!(raw_eigh.len(), 3);
     let mut raw_eig = dense
-        .eig_vals(DenseRead::F64(
-            symtn_dense::DenseView::new(eig_input.data(), &shape, &strides, 0).unwrap(),
-        ))
+        .eig_vals(
+            engine,
+            DenseRead::F64(
+                symtn_dense::DenseView::new(eig_input.data(), &shape, &strides, 0).unwrap(),
+            ),
+        )
         .unwrap()
         .as_c64_slice()
         .unwrap()
         .to_vec();
     raw_eig.sort_by(|a, b| (a.re, a.im).partial_cmp(&(b.re, b.im)).unwrap());
 
-    let direct_svd = svd_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &svd_input)).unwrap();
-    let padded_svd = svd_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &svd_padded)).unwrap();
-    let direct_eigh =
-        eigh_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &eigh_input)).unwrap();
-    let padded_eigh =
-        eigh_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &eigh_padded)).unwrap();
-    let direct_eig = eig_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &eig_input)).unwrap();
-    let padded_eig = eig_vals(&mut dense, &bound_tensor_ref!(Arc::new(rule), &eig_padded)).unwrap();
+    let direct_svd = svd_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &svd_input),
+    )
+    .unwrap();
+    let padded_svd = svd_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &svd_padded),
+    )
+    .unwrap();
+    let direct_eigh = eigh_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &eigh_input),
+    )
+    .unwrap();
+    let padded_eigh = eigh_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &eigh_padded),
+    )
+    .unwrap();
+    let direct_eig = eig_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &eig_input),
+    )
+    .unwrap();
+    let padded_eig = eig_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(rule), &eig_padded),
+    )
+    .unwrap();
 
     assert_eq!(direct_svd[0].values, raw_svd);
     assert_eq!(direct_eigh[0].values, raw_eigh);
@@ -1043,6 +1110,7 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
 
 #[test]
 fn values_only_entry_points_match_untruncated_decomposition_spectra() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // The `_vals` paths call LAPACK `job='N'` (no vectors) and must reproduce
     // the untruncated decomposition's spectrum. This is a numerical-agreement check,
     // not bit-for-bit: LAPACK backends may route the vectors-vs-no-vectors
@@ -1066,11 +1134,13 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     };
 
     let svd_vals_spectra = svd_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )
     .unwrap();
     let svd_compact_spectra = svd_compact(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )
@@ -1079,11 +1149,13 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     assert_real_close(&svd_vals_spectra, &svd_compact_spectra);
 
     let eigh_vals_spectra = eigh_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &hermitian),
     )
     .unwrap();
     let eigh_full_spectra = eigh_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &hermitian),
     )
@@ -1092,11 +1164,13 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     assert_real_close(&eigh_vals_spectra, &eigh_full_spectra);
 
     let eig_vals_spectra = eig_vals(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )
     .unwrap();
     let eig_full_spectra = eig_full(
+        engine,
         &mut dense_executor,
         &bound_tensor_ref!(Arc::new(rule), &general),
     )

@@ -1,7 +1,7 @@
 use super::*;
 
 /// The device trace kernel: the terms compiled on the Host, replayed on the
-/// device under one device lease, the placement checked under it first.
+/// caller's CUDA engine, the placement checked first.
 impl<R, D> TraceExec<R, D> for CudaStorage<D>
 where
     R: symtn_core::TypedSectorAdmission<
@@ -16,6 +16,7 @@ where
     /// The #740 output upload, then every term accumulates (`beta = 1`), so
     /// no `beta` pass is submitted.
     fn trace_owned(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         _dst_nout: usize,
@@ -28,11 +29,9 @@ where
             .dst_structure()
             .required_len()
             .map_err(Error::from)?;
-        let mut lease = source.runtime.lease_cuda()?;
-        let (cuda, transforms) = lease.split();
-        if src.placement() != Placement::Cuda(cuda.device()) {
-            return Err(Error::PlacementMismatch.into());
-        }
+        let mut lease = crate::runtime::cuda_call(engine)?;
+        let cuda = &mut *lease;
+        ensure_cuda_owns(cuda, "trace", &[&src.0])?;
         // ponytail: #740 — the device seam initializes an output by uploading
         // zeros; replace only with a measured native allocation. The zeros are
         // also what the accumulating replay starts from.
@@ -40,7 +39,6 @@ where
             .map_err(Error::from)?;
         symtn_tensors::tensortrace_fusion_structure_into_on_cuda(
             cuda,
-            transforms,
             structure,
             structure.dst_structure(),
             &mut output,
@@ -57,6 +55,7 @@ where
     /// The executor admits every region before its first submission, so a
     /// rejected replay leaves the caller's destination byte-identical.
     fn trace_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         structure: &symtn_tensors::TensorTraceFusionStructure<f64>,
         compact: Option<D>,
@@ -66,15 +65,11 @@ where
         beta: D,
     ) -> Result<(), TransformExecError> {
         let src = cuda_trace_source(source, compact)?;
-        let mut lease = source.runtime.lease_cuda()?;
-        let (cuda, transforms) = lease.split();
-        let device = Placement::Cuda(cuda.device());
-        if src.placement() != device || destination.placement() != device {
-            return Err(Error::PlacementMismatch.into());
-        }
+        let mut lease = crate::runtime::cuda_call(engine)?;
+        let cuda = &mut *lease;
+        ensure_cuda_owns(cuda, "trace_into", &[&src.0, &destination.0])?;
         symtn_tensors::tensortrace_fusion_structure_into_on_cuda(
             cuda,
-            transforms,
             structure,
             structure.dst_structure(),
             destination,
@@ -99,11 +94,11 @@ fn cuda_trace_source<R, D: CudaPayload>(
     }
 }
 
-/// The device lease a prepared stack replay holds from its output upload
-/// through its replay. Nominally public only to name
+/// The CUDA operation context a prepared stack replay holds from its output
+/// upload through its replay. Nominally public only to name
 /// [`PreparedExec::MembersLease`]; it is not reachable outside the crate.
 #[doc(hidden)]
-pub struct CudaMembersLease<'r>(crate::runtime::CudaLease<'r>);
+pub struct CudaMembersLease<'e>(crate::runtime::CudaCall<'e>);
 
 /// The device prepared-batch kernels: the members' plan entries, lease,
 /// upload and replay of the one prepared plan body.
@@ -112,29 +107,29 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaPayload,
 {
-    type MembersLease<'r> = CudaMembersLease<'r>;
+    type MembersLease<'e> = CudaMembersLease<'e>;
 
-    fn reserve_members(
+    fn lease_members<'e>(
         _: ExecToken,
-        plan: &ContractPlan<R, D, Self>,
+        engine: &'e mut dyn Engine,
         workspace: &mut ContractWorkspace<R, D, Self>,
-    ) -> Result<(), Error> {
-        let entries = plan.resolution.admit_cuda_members()?;
-        workspace.reserved_plan_entries = plan
-            .runtime
-            .lease_cuda()?
-            .reserve_plan_entries(entries)
-            .map_err(symtn_operations::OperationError::Dense)?;
-        Ok(())
-    }
-
-    fn lease_members(_: ExecToken, runtime: &Runtime) -> Result<CudaMembersLease<'_>, Error> {
-        Ok(CudaMembersLease(runtime.lease_cuda()?))
+    ) -> Result<CudaMembersLease<'e>, Error> {
+        let lease = match crate::runtime::cuda_call(engine) {
+            Ok(lease) => lease,
+            Err(error) => {
+                workspace.drop_device_state(None);
+                return Err(error);
+            }
+        };
+        if workspace.cuda_engine != Some(lease.identity()) {
+            workspace.drop_device_state(Some(lease.identity()));
+        }
+        Ok(CudaMembersLease(lease))
     }
 
     fn zeroed_members(
         _: ExecToken,
-        lease: &CudaMembersLease<'_>,
+        lease: &mut CudaMembersLease<'_>,
         total: usize,
         member_len: usize,
         members: usize,
@@ -171,6 +166,10 @@ where
         Ok(())
     }
 
+    fn owns_output(_: ExecToken, lease: &CudaMembersLease<'_>, buffer: &Self) -> bool {
+        ensure_cuda_owns(&lease.0, "prepared_contract", &[&buffer.0]).is_ok()
+    }
+
     fn retained_scratch_bytes(_: ExecToken, workspace: &ContractWorkspace<R, D, Self>) -> usize {
         workspace.members_cuda.retained_bytes()
     }
@@ -192,6 +191,7 @@ where
     type Caps = symtn_tensors::DirectCoreExecutor;
 
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D, Self>,
@@ -202,7 +202,6 @@ where
     {
         let (lhs, rhs) = (cuda_contract_operand(lhs)?, cuda_contract_operand(rhs)?);
         let ContractReplay {
-            runtime,
             lease,
             resolution,
             destination,
@@ -212,12 +211,9 @@ where
             ..
         } = replay;
         drop(lease);
-        let mut lease = runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, transforms, scratch) = lease.split_contract();
-        let device = Placement::Cuda(cuda.device());
-        if lhs.placement() != device || rhs.placement() != device {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "contract", &[&lhs.0, &rhs.0])?;
         // ponytail: #740 — the device seam initializes an output by uploading
         // zeros; replace only with a measured native allocation.
         let mut dst = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); destination_len])
@@ -241,6 +237,7 @@ where
     /// The route executor admits every region before its first submission,
     /// so a rejected replay leaves the caller's destination byte-identical.
     fn contract_into<C: symtn_tensors::DenseBlockScalar>(
+        engine: &mut dyn Engine,
         _: ExecToken,
         replay: ContractReplay<'_, D, C>,
         lhs: &TensorMap<R, D, Self>,
@@ -254,7 +251,6 @@ where
     {
         let (lhs, rhs) = (cuda_contract_operand(lhs)?, cuda_contract_operand(rhs)?);
         let ContractReplay {
-            runtime,
             lease,
             resolution,
             destination: destination_structure,
@@ -263,15 +259,9 @@ where
             ..
         } = replay;
         drop(lease);
-        let mut lease = runtime.lease_cuda()?;
+        let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, transforms, scratch) = lease.split_contract();
-        let device = Placement::Cuda(cuda.device());
-        if lhs.placement() != device
-            || rhs.placement() != device
-            || destination.placement() != device
-        {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "contract_into", &[&lhs.0, &rhs.0, &destination.0])?;
         symtn_tensors::execute_storage_contract_resolution_on_cuda(
             cuda,
             transforms,

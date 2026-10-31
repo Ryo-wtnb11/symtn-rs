@@ -28,6 +28,7 @@ fn fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
 
 #[test]
 fn complex_su2_structural_invariants_match_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(SU2FusionRule);
     let space = GradedSpace::try_new(
@@ -39,6 +40,7 @@ fn complex_su2_structural_invariants_match_tensorkit() {
     )
     .unwrap();
     let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&space, &space],
         [&space, &space],
@@ -57,8 +59,12 @@ fn complex_su2_structural_invariants_match_tensorkit() {
         },
     )
     .unwrap();
-    let permuted = source.permute(&[1, 0], &[3, 2]).unwrap();
-    let gram = source.adjoint().unwrap().compose(&source).unwrap();
+    let permuted = source.permute(engine, &[1, 0], &[3, 2]).unwrap();
+    let gram = source
+        .adjoint(engine)
+        .unwrap()
+        .compose(engine, &source)
+        .unwrap();
 
     for (tensor, expected_norm, expected_trace) in [
         (&source, 40.741_733_994_626_31, Complex64::new(-81.0, -9.0)),
@@ -73,14 +79,14 @@ fn complex_su2_structural_invariants_match_tensorkit() {
             Complex64::new(1_659.888_888_888_889, 0.0),
         ),
     ] {
-        close(tensor.norm(2.0).unwrap(), expected_norm);
-        let trace = tensor.tr().unwrap();
+        close(tensor.norm(engine, 2.0).unwrap(), expected_norm);
+        let trace = tensor.tr(engine).unwrap();
         close(trace.re, expected_trace.re);
         close(trace.im, expected_trace.im);
     }
 
     let mut singular_values: Vec<_> = permuted
-        .svd_vals(&[0, 1], &[2, 3])
+        .svd_vals(engine, &[0, 1], &[2, 3])
         .unwrap()
         .iter()
         .flat_map(|spectrum| spectrum.values.iter().copied())

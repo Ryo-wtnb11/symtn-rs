@@ -3,7 +3,7 @@
 //! single-flight, so no caller parks on another's build, even when work
 //! stealing re-enters a caller's Rayon region. Each case runs in its own
 //! process (the counters are process-global) under a watchdog, issues one
-//! cold transform from many tasks with `recoupling_threads > 1`, and requires
+//! cold transform from many tasks, each on its own engine, and requires
 //! every task to finish, one admission per key in each cache, and
 //! byte-identical results.
 //!
@@ -18,6 +18,7 @@ use symtn_core::{SU2FusionRule, SU2Irrep};
 use symtn_tensors::{TreeTransformOperation, TreeTransformStructure};
 
 use crate::runtime::Runtime;
+use crate::typed::{CpuEngine, Engine, Pool};
 use crate::typed::{GradedSpace, TensorMap};
 
 const TASKS: usize = 32;
@@ -38,6 +39,7 @@ fn watchdog(body: impl FnOnce() + Send + 'static) {
 /// An SU(2) `V^2 <- V^2` tensor (non-Unique fusion, so the build runs
 /// recoupling regions) and its permute.
 fn fixture(runtime: &Runtime) -> TensorMap<SU2FusionRule, f64> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = GradedSpace::try_new(
         Arc::new(SU2FusionRule),
         [
@@ -48,28 +50,29 @@ fn fixture(runtime: &Runtime) -> TensorMap<SU2FusionRule, f64> {
         ],
     )
     .unwrap();
-    TensorMap::rand_with_seed(runtime, [&space, &space], [&space, &space], 20_143).unwrap()
+    TensorMap::rand_with_seed(engine, runtime, [&space, &space], [&space, &space], 20_143).unwrap()
 }
 
 fn operation() -> TreeTransformOperation {
     TreeTransformOperation::permute([2, 0], [3, 1])
 }
 
-/// Stages the fixture's eager transform through one leased Runtime context
-/// and returns its completed transformer (planning only: the dense backend is
-/// not entered on a pool worker).
+/// Stages the fixture's eager transform in one execution context and returns
+/// its completed transformer (planning only: the dense backend is not entered
+/// on a pool worker).
 fn resolve(
-    runtime: &Runtime,
+    engine: &mut dyn Engine,
     source: &TensorMap<SU2FusionRule, f64>,
 ) -> TreeTransformStructure<f64> {
     let source = source.test_bound_space();
-    let mut lease = runtime.lease_context().unwrap();
+    let mut lease = crate::runtime::ContextLease::new();
     lease
         .context()
         .multiplicity_free_lane::<f64>()
         .unwrap()
         .tree_context_mut()
         .stage_tree_transform_multiplicity_free_in(
+            engine,
             source,
             None,
             source.space().required_len().unwrap(),
@@ -123,18 +126,30 @@ fn assert_converged(
 }
 
 fn runtime() -> Runtime {
-    Runtime::builder()
-        .dense_threads(4)
-        .recoupling_threads(4)
-        .build()
-        .unwrap()
+    Runtime::builder().build().unwrap()
+}
+
+/// Resolves the fixture's transformer from `TASKS` threads at once, each on
+/// its own two-thread engine over the shared tensor and caches.
+fn resolve_on_threads(source: &TensorMap<SU2FusionRule, f64>) -> Vec<TreeTransformStructure<f64>> {
+    std::thread::scope(|scope| {
+        let tasks: Vec<_> = (0..TASKS)
+            .map(|_| {
+                scope.spawn(|| {
+                    let pool = Pool::builder().threads(2).build().unwrap();
+                    resolve(&mut CpuEngine::new(pool), source)
+                })
+            })
+            .collect();
+        tasks.into_iter().map(|task| task.join().unwrap()).collect()
+    })
 }
 
 #[test]
-fn cache_concurrency_user_par_iter_on_the_runtime_pool() {
+fn cache_concurrency_threads_with_their_own_engines() {
     if crate::test_cache::run_isolated_or_return(
-        "SYMTN_CACHE_CONCURRENCY_RUNTIME_POOL",
-        "cache_concurrency_tests::cache_concurrency_user_par_iter_on_the_runtime_pool",
+        "SYMTN_CACHE_CONCURRENCY_OWN_ENGINES",
+        "cache_concurrency_tests::cache_concurrency_threads_with_their_own_engines",
     ) {
         return;
     }
@@ -143,13 +158,7 @@ fn cache_concurrency_user_par_iter_on_the_runtime_pool() {
         let source = fixture(&runtime);
         crate::cache::clear();
         let before = admissions();
-        let shared = runtime.execution_config().shared_ctx.clone();
-        let built = shared.install(|| {
-            (0..TASKS)
-                .into_par_iter()
-                .map(|_| resolve(&runtime, &source))
-                .collect::<Vec<_>>()
-        });
+        let built = resolve_on_threads(&source);
         assert_converged(&built, before, Some((1, source_groups(&source))));
     });
 }
@@ -174,7 +183,7 @@ fn cache_concurrency_user_par_iter_on_a_foreign_pool() {
         let built = pool.install(|| {
             (0..TASKS)
                 .into_par_iter()
-                .map(|_| resolve(&runtime, &source))
+                .map(|_| resolve(&mut CpuEngine::serial(), &source))
                 .collect::<Vec<_>>()
         });
         assert_converged(&built, before, Some((1, source_groups(&source))));
@@ -197,8 +206,8 @@ fn cache_concurrency_ambient_pool_without_a_runtime() {
         let src_len = source.space().required_len().unwrap();
         crate::cache::clear();
         let before = admissions();
-        // Standalone contexts on Rayon's global pool: no Runtime pool,
-        // recoupling regions on the ambient pool.
+        // Standalone contexts on Rayon's global pool, each task on its own
+        // serial engine.
         let built = (0..TASKS)
             .into_par_iter()
             .map(|_| {
@@ -207,10 +216,13 @@ fn cache_concurrency_ambient_pool_without_a_runtime() {
                     symtn_core::RuleIdentity,
                 >::default();
                 context
-                    .backend_mut()
-                    .set_recoupling_threads(std::num::NonZeroUsize::new(4).unwrap());
-                context
-                    .stage_tree_transform_multiplicity_free_in(&source, None, src_len, &operation())
+                    .stage_tree_transform_multiplicity_free_in(
+                        &mut CpuEngine::serial(),
+                        &source,
+                        None,
+                        src_len,
+                        &operation(),
+                    )
                     .unwrap()
                     .structure()
                     .clone()
@@ -243,13 +255,7 @@ fn cache_concurrency_with_a_racing_clear() {
                 }
             })
         };
-        let shared = runtime.execution_config().shared_ctx.clone();
-        let built = shared.install(|| {
-            (0..TASKS)
-                .into_par_iter()
-                .map(|_| resolve(&runtime, &source))
-                .collect::<Vec<_>>()
-        });
+        let built = resolve_on_threads(&source);
         stop.store(true, std::sync::atomic::Ordering::Relaxed);
         clearer.join().unwrap();
         // Clears zero the counters, so only convergence is checked here.
@@ -268,19 +274,17 @@ fn global_clear_takes_no_runtime_or_device_lock() {
     ) {
         return;
     }
-    // What: `symtn::cache::clear` is semantic only. With this Runtime's state
-    // lock and a leased execution context held, a clear still completes.
+    // What: `symtn::cache::clear` is semantic only. With this Runtime's own
+    // lock (its extension slot) held, a clear still completes.
     let runtime = runtime();
-    let state = runtime.lock();
-    let lease = runtime.lease_context().unwrap();
-    let (done, finished) = mpsc::channel();
-    std::thread::spawn(move || {
-        crate::cache::clear();
-        done.send(()).unwrap();
+    runtime.with_extension_slot(|_| {
+        let (done, finished) = mpsc::channel();
+        std::thread::spawn(move || {
+            crate::cache::clear();
+            done.send(()).unwrap();
+        });
+        finished
+            .recv_timeout(Duration::from_secs(60))
+            .expect("the global clear waited on a Runtime lock");
     });
-    finished
-        .recv_timeout(Duration::from_secs(60))
-        .expect("the global clear waited on a Runtime lock");
-    drop(lease);
-    drop(state);
 }

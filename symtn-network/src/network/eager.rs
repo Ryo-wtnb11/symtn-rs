@@ -1,4 +1,5 @@
 use super::*;
+use symtn::typed::Engine;
 
 mod network_operand_sealed {
     pub trait Sealed {}
@@ -12,7 +13,11 @@ pub trait NetworkOperand: network_operand_sealed::Sealed + Sized {
     type Error;
 
     #[doc(hidden)]
-    fn contract_network(network: &Network, tensors: &[&Self]) -> Result<Self, Self::Error>;
+    fn contract_network(
+        engine: &mut dyn Engine,
+        network: &Network,
+        tensors: &[&Self],
+    ) -> Result<Self, Self::Error>;
 
     /// [`contract!`](crate::contract)'s operand: method auto-deref takes
     /// both a tensor and a reference to one (`(w.get(0)?)[i; j]`) to
@@ -50,8 +55,12 @@ impl Network {
     ///
     /// The typed error of the operands' mode, as [`PlannedNetwork::execute`]
     /// returns it, or [`Error`] for device operands.
-    pub fn contract<T: NetworkOperand>(&self, tensors: &[&T]) -> Result<T, T::Error> {
-        T::contract_network(self, tensors)
+    pub fn contract<T: NetworkOperand>(
+        &self,
+        engine: &mut dyn Engine,
+        tensors: &[&T],
+    ) -> Result<T, T::Error> {
+        T::contract_network(engine, self, tensors)
     }
 
     fn validate_operand_count(&self, operands: usize) -> Result<(), Error> {
@@ -97,7 +106,7 @@ where
 
 /// The storage half of [`NetworkOperand`] and [`PlannedNetwork::execute`]:
 /// the operand admission decided before any plan lookup or step. Host
-/// checks braiding; the device adds Runtime device, placement and
+/// checks braiding; the device adds the CUDA engine, placement and
 /// dense-payload admission (`cuda_operand_admission`).
 #[doc(hidden)]
 pub trait NetworkOperandStorage<R, D>: NetworkPayloadStorage<D> + Send + Sync + Sized
@@ -107,6 +116,7 @@ where
     D: TensorScalar,
 {
     fn admit_operands(
+        engine: &mut dyn Engine,
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>>;
@@ -118,7 +128,11 @@ where
     R::Mode: NetworkModeDispatch<R, D>,
     D: TensorScalar + Send + Sync + 'static,
 {
-    fn admit_operands(tensors: &[&TensorMap<R, D>], contracts: bool) -> Result<(), FacadeError<R>> {
+    fn admit_operands(
+        _engine: &mut dyn Engine,
+        tensors: &[&TensorMap<R, D>],
+        contracts: bool,
+    ) -> Result<(), FacadeError<R>> {
         reject_non_symmetric_network(tensors, contracts)
     }
 }
@@ -135,8 +149,12 @@ where
         + SectorCodec,
     D: CudaPayload,
 {
-    fn admit_operands(tensors: &[&TensorMap<R, D, Self>], contracts: bool) -> Result<(), Error> {
-        cuda_operand_admission(tensors, contracts)
+    fn admit_operands(
+        engine: &mut dyn Engine,
+        tensors: &[&TensorMap<R, D, Self>],
+        contracts: bool,
+    ) -> Result<(), Error> {
+        cuda_operand_admission(engine, tensors, contracts)
     }
 }
 
@@ -162,11 +180,15 @@ where
 {
     type Error = FacadeError<R>;
 
-    fn contract_network(network: &Network, tensors: &[&Self]) -> Result<Self, Self::Error> {
+    fn contract_network(
+        engine: &mut dyn Engine,
+        network: &Network,
+        tensors: &[&Self],
+    ) -> Result<Self, Self::Error> {
         network.validate_operand_count(tensors.len())?;
-        S::admit_operands(tensors, tensors.len() > 1)?;
+        S::admit_operands(engine, tensors, tensors.len() > 1)?;
         network.contract_preflight(tensors)?;
         crate::plancache::get_or_plan_network(network, tensors, &runtime_optimizer(tensors))?
-            .execute(tensors)
+            .execute(engine, tensors)
     }
 }

@@ -18,13 +18,15 @@ use symtn::typed::{GradedSpace, LegSelection, TensorMap};
 
 #[test]
 fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
     let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&leg, &spectator, &spectator],
         [],
@@ -44,7 +46,7 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
     );
 
     let selection = LegSelection::try_new(&leg, [(adjoint.clone(), 1..3)]).unwrap();
-    let restricted = source.restrict_leg(&[(0, &selection)]).unwrap();
+    let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.codomain()[0], *selection.subspace());
     assert_eq!(restricted.subblock_count(), source.subblock_count());
 
@@ -55,13 +57,13 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
 
     // Embedding back writes the same rectangle into a zero payload and leaves
     // every vertex key in place.
-    let embedded = restricted.embed_leg(0, &selection).unwrap();
+    let embedded = restricted.embed_leg(engine, 0, &selection).unwrap();
     assert_eq!(embedded.codomain()[0], leg);
     let expected = literal_scatter(&restricted, &embedded, 0, &[1, 2]);
     assert_eq!(embedded.dense_data().unwrap(), expected);
     assert_eq!(
         embedded
-            .restrict_leg(&[(0, &selection)])
+            .restrict_leg(engine, &[(0, &selection)])
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -71,24 +73,30 @@ fn restrict_and_embed_preserve_su3_multiplicity_vertices() {
 
 #[test]
 fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&leg, &spectator, &leg], [], |trees, indices| {
+    let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&leg, &spectator, &leg],
+        [],
+        |trees, indices| {
             (1000 * trees.codomain_vertices()[0].get()
                 + 100 * indices[0]
                 + 10 * indices[1]
                 + indices[2]) as f64
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let middle = LegSelection::try_new(&leg, [(adjoint.clone(), 1..3)]).unwrap();
     let head = LegSelection::try_new(&leg, [(adjoint.clone(), 0..2)]).unwrap();
     let set = [(2, &head), (0, &middle)];
-    let restricted = source.restrict_leg(&set).unwrap();
+    let restricted = source.restrict_leg(engine, &set).unwrap();
     assert_eq!(restricted.codomain()[0], *middle.subspace());
     assert_eq!(restricted.codomain()[2], *head.subspace());
     assert_eq!(restricted.subblock_count(), source.subblock_count());
@@ -97,9 +105,9 @@ fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
         literal_slice(&source, &restricted, &[(0, &[1, 2]), (2, &[0, 1])])
     );
     let sequential = source
-        .restrict_leg(&[(2, &head)])
+        .restrict_leg(engine, &[(2, &head)])
         .unwrap()
-        .restrict_leg(&[(0, &middle)])
+        .restrict_leg(engine, &[(0, &middle)])
         .unwrap();
     assert_eq!(
         restricted
@@ -119,7 +127,8 @@ fn a_multi_axis_restriction_is_the_literal_slice_on_every_axis_at_once() {
 
 #[test]
 fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = GradedSpace::try_new(
@@ -128,27 +137,33 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
     )
     .unwrap();
     let mut state = 0x5eed_u64;
-    let raw: TensorMap<_, f64> = TensorMap::from_subblock_fn(&runtime, [&leg], [&leg], |_, _| {
-        state = state
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1);
-        (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
-    })
-    .unwrap();
-    let hermitian = raw.axpby(1.0, &raw.adjoint().unwrap(), 1.0).unwrap();
+    let raw: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        })
+        .unwrap();
+    let raw_adjoint = &raw.adjoint(engine).unwrap();
+    let hermitian = raw.axpby(engine, 1.0, raw_adjoint, 1.0).unwrap();
     let d = hermitian
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .d;
-    assert!(symtn::expert::diagonal_spectrum(&d).unwrap().is_some());
+    assert!(symtn::expert::diagonal_spectrum(engine, &d)
+        .unwrap()
+        .is_some());
     let bond = d.domain()[0].clone();
     let kept = [(vec![0i64, 0], 1..3), (vec![2i64, 2], 0..1)];
     let selection = LegSelection::try_new(&bond, kept.iter().cloned()).unwrap();
-    let restricted = d.restrict_leg(&[(1, &selection), (0, &selection)]).unwrap();
-    let got = symtn::expert::diagonal_spectrum(&restricted)
+    let restricted = d
+        .restrict_leg(engine, &[(1, &selection), (0, &selection)])
+        .unwrap();
+    let got = symtn::expert::diagonal_spectrum(engine, &restricted)
         .unwrap()
         .expect("one selection on both legs keeps a compact payload compact");
-    let source = d.diagview().unwrap();
+    let source = d.diagview(engine).unwrap();
     assert_eq!(got.len(), kept.len());
     for entry in got {
         let (_, range) = kept
@@ -162,10 +177,14 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
         assert_eq!(entry.values, from.values[range.clone()].to_vec());
     }
     assert_eq!(
-        restricted.materialize().unwrap().dense_data().unwrap(),
-        d.materialize()
+        restricted
+            .materialize(engine)
             .unwrap()
-            .restrict_leg(&[(0, &selection), (1, &selection)])
+            .dense_data()
+            .unwrap(),
+        d.materialize(engine)
+            .unwrap()
+            .restrict_leg(engine, &[(0, &selection), (1, &selection)])
             .unwrap()
             .dense_data()
             .unwrap()
@@ -177,33 +196,41 @@ fn a_compact_eigh_spectrum_restricted_on_both_legs_stays_compact() {
 /// scatter, and a compact `eigh` spectrum restricted to a two-run set.
 #[test]
 fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let adjoint = vec![2i64, 2];
     let wide = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 4)]).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 3)]).unwrap();
     let spectator = GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&wide, &spectator, &leg], [], |trees, indices| {
+    let source: TensorMap<_, f64> = TensorMap::from_subblock_fn(
+        engine,
+        &runtime,
+        [&wide, &spectator, &leg],
+        [],
+        |trees, indices| {
             (1000 * trees.codomain_vertices()[0].get()
                 + 100 * indices[0]
                 + 10 * indices[1]
                 + indices[2]) as f64
-        })
-        .unwrap();
+        },
+    )
+    .unwrap();
     let ends = LegSelection::try_new(&wide, [(adjoint.clone(), vec![0, 3])]).unwrap();
     let outer = LegSelection::try_new(&leg, [(adjoint.clone(), vec![0, 2])]).unwrap();
     assert_eq!(ends.positions(&adjoint).unwrap(), vec![0, 3]);
-    let restricted = source.restrict_leg(&[(2, &outer), (0, &ends)]).unwrap();
+    let restricted = source
+        .restrict_leg(engine, &[(2, &outer), (0, &ends)])
+        .unwrap();
     assert_eq!(restricted.subblock_count(), source.subblock_count());
     assert_eq!(
         restricted.dense_data().unwrap(),
         literal_slice(&source, &restricted, &[(0, &[0, 3]), (2, &[0, 2])])
     );
 
-    let single = source.restrict_leg(&[(0, &ends)]).unwrap();
-    let embedded = single.embed_leg(0, &ends).unwrap();
+    let single = source.restrict_leg(engine, &[(0, &ends)]).unwrap();
+    let embedded = single.embed_leg(engine, 0, &ends).unwrap();
     assert_eq!(embedded.codomain()[0], wide);
     assert_eq!(
         embedded.dense_data().unwrap(),
@@ -217,16 +244,17 @@ fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices
     )
     .unwrap();
     let raw: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&square], [&square], |_, _| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&square], [&square], |_, _| {
             state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1);
             (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
         })
         .unwrap();
-    let hermitian = raw.axpby(1.0, &raw.adjoint().unwrap(), 1.0).unwrap();
+    let raw_adjoint = &raw.adjoint(engine).unwrap();
+    let hermitian = raw.axpby(engine, 1.0, raw_adjoint, 1.0).unwrap();
     let d = hermitian
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .d;
     let bond = d.domain()[0].clone();
@@ -235,11 +263,13 @@ fn noncontiguous_positions_are_the_literal_gather_with_su3_multiplicity_vertices
         (adjoint.clone(), vec![0, 1, 3]),
     ];
     let selection = LegSelection::try_new(&bond, kept.iter().cloned()).unwrap();
-    let restricted = d.restrict_leg(&[(0, &selection), (1, &selection)]).unwrap();
-    let got = symtn::expert::diagonal_spectrum(&restricted)
+    let restricted = d
+        .restrict_leg(engine, &[(0, &selection), (1, &selection)])
+        .unwrap();
+    let got = symtn::expert::diagonal_spectrum(engine, &restricted)
         .unwrap()
         .expect("one selection on both legs keeps a compact payload compact");
-    let source = d.diagview().unwrap();
+    let source = d.diagview(engine).unwrap();
     for entry in got {
         let (_, positions) = kept
             .iter()

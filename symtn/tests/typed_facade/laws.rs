@@ -94,6 +94,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let shapes = typed_leg_shapes(typed.0);
     assert_ne!(shapes[0], shapes[1], "{what}: p and q must differ");
     assert!(shapes[1].0, "{what}: q must be dual");
@@ -111,6 +112,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
     let default_contract = typed
         .0
         .contract(
+            engine,
             typed.1,
             &ContractSpec {
                 lhs: &lhs_axes,
@@ -123,6 +125,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
     let ordered_contract = typed
         .0
         .contract(
+            engine,
             typed.1,
             &ContractSpec {
                 lhs: &lhs_axes,
@@ -132,7 +135,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
             },
         )
         .unwrap();
-    let permuted_default = default_contract.permute(&[1, 3], &[0, 2]).unwrap();
+    let permuted_default = default_contract.permute(engine, &[1, 3], &[0, 2]).unwrap();
     assert_same_legs(&ordered_contract.codomain(), &permuted_default.codomain());
     assert_same_legs(&ordered_contract.domain(), &permuted_default.domain());
     // Routes that may recouple and accumulate in different orders: agreement
@@ -171,12 +174,13 @@ fn assert_contract_compose_compact_laws_hold<R>(
         .collect();
     let twisted_right = typed
         .1
-        .twist(&dual_codomain_legs, Direction::Forward)
+        .twist(engine, &dual_codomain_legs, Direction::Forward)
         .unwrap();
-    let composed = typed.0.compose(typed.1).unwrap();
+    let composed = typed.0.compose(engine, typed.1).unwrap();
     let twisted_contract = typed
         .0
         .contract(
+            engine,
             &twisted_right,
             &ContractSpec {
                 lhs: &lhs_axes,
@@ -224,10 +228,11 @@ fn assert_contract_compose_compact_laws_hold<R>(
         vh: typed_vh,
     } = typed
         .0
-        .svd_compact(&[0, 1], &[2, 3])
+        .svd_compact(engine, &[0, 1], &[2, 3])
         .unwrap_or_else(|error| panic!("{what}: svd_compact failed: {error}"));
     let typed_absorbed = typed_u
         .contract(
+            engine,
             &typed_s,
             &ContractSpec {
                 lhs: &[2],
@@ -251,6 +256,7 @@ fn assert_contract_compose_compact_laws_hold<R>(
     );
     let reconstructed = typed_absorbed
         .contract(
+            engine,
             &typed_vh,
             &ContractSpec {
                 lhs: &[2],
@@ -310,6 +316,7 @@ fn contract_compose_and_compact_laws_hold_on_fz2_u1_su2() {
 
 #[test]
 fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // What: the exact relation on `fZ2 x U(1) x SU(2)`,
     // `compose(a, b) == contract(a, twist(b, b's dual codomain legs))`. The
@@ -334,6 +341,7 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
     let rule = leg_p.provider().clone();
     let mut next = 99.0;
     let twisted_b = TensorMap::from_subblock_fn(
+        engine,
         &runtime,
         [&leg_p, &leg_q],
         [&leg_p, &leg_q],
@@ -352,12 +360,13 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
     numerics::assert_slices_close(
         "fZ2 x U1 x SU2: compose is contract against the twisted right operand",
         fermionic_a
-            .compose(&fermionic_b)
+            .compose(engine, &fermionic_b)
             .unwrap()
             .dense_data()
             .unwrap(),
         fermionic_a
             .contract(
+                engine,
                 &twisted_b,
                 &ContractSpec {
                     lhs: &[2, 3],
@@ -375,6 +384,7 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
     assert_ne!(
         fermionic_a
             .contract(
+                engine,
                 &fermionic_b,
                 &ContractSpec {
                     lhs: &[2, 3],
@@ -387,7 +397,7 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
             .dense_data()
             .unwrap(),
         fermionic_a
-            .compose(&fermionic_b)
+            .compose(engine, &fermionic_b)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -400,6 +410,7 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
         "U1: a bosonic rule has no twist, so the two agree",
         bosonic_a
             .contract(
+                engine,
                 &bosonic_b,
                 &ContractSpec {
                     lhs: &[2, 3],
@@ -411,7 +422,11 @@ fn the_fermionic_product_compose_is_contract_against_a_twisted_right_operand() {
             .unwrap()
             .dense_data()
             .unwrap(),
-        bosonic_a.compose(&bosonic_b).unwrap().dense_data().unwrap(),
+        bosonic_a
+            .compose(engine, &bosonic_b)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         bilinear_terms(&bosonic_a, &bosonic_b),
     );
 }
@@ -437,9 +452,10 @@ fn assert_reductions_and_factorizations_hold<R>(
         + CheckedFusionAlgebra
         + SectorCodec,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // Neither coefficient is 1 and they differ in sign, so dropping or
     // swapping one moves the buffer.
-    let typed_sum = typed.0.axpby(2.0, typed.1, -3.0).unwrap();
+    let typed_sum = typed.0.axpby(engine, 2.0, typed.1, -3.0).unwrap();
     for ((&actual, &left), &right) in typed_sum
         .dense_data()
         .unwrap()
@@ -453,7 +469,7 @@ fn assert_reductions_and_factorizations_hold<R>(
     assert_ne!(
         typed
             .0
-            .axpby(-3.0, typed.1, 2.0)
+            .axpby(engine, -3.0, typed.1, 2.0)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -461,7 +477,7 @@ fn assert_reductions_and_factorizations_hold<R>(
         "{what}: add is not symmetric in its coefficients"
     );
 
-    let typed_scaled = typed.0.scale(-2.5).unwrap();
+    let typed_scaled = typed.0.scale(engine, -2.5).unwrap();
     for (&actual, &source) in typed_scaled
         .dense_data()
         .unwrap()
@@ -472,8 +488,8 @@ fn assert_reductions_and_factorizations_hold<R>(
     }
     assert_nonzero(what, typed_scaled.dense_data().unwrap());
 
-    let typed_inner = typed.0.inner(typed.1).unwrap();
-    let reverse_inner = typed.1.inner(typed.0).unwrap();
+    let typed_inner = typed.0.inner(engine, typed.1).unwrap();
+    let reverse_inner = typed.1.inner(engine, typed.0).unwrap();
     assert!(
         (typed_inner - reverse_inner).abs() < 1e-12 * typed_inner.abs().max(1.0),
         "{what}: inner is not conjugate symmetric"
@@ -481,8 +497,8 @@ fn assert_reductions_and_factorizations_hold<R>(
     assert_ne!(typed_inner, 0.0, "{what}: inner is vacuously zero");
     // `<t, t>` is the squared weighted norm, which is the identity that pins
     // this weighting to `norm`'s.
-    let norm = typed.0.norm(2.0).unwrap();
-    let self_inner = typed.0.inner(typed.0).unwrap();
+    let norm = typed.0.norm(engine, 2.0).unwrap();
+    let self_inner = typed.0.inner(engine, typed.0).unwrap();
     assert!(
         (self_inner - norm * norm).abs() < 1e-9 * norm * norm,
         "{what}: <t, t> != norm^2"
@@ -506,12 +522,16 @@ fn assert_reductions_and_factorizations_hold<R>(
     let Qr {
         q: typed_q,
         r: typed_r,
-    } = typed.0.qr_compact(&[0, 1], &[2, 3]).unwrap();
+    } = typed.0.qr_compact(engine, &[0, 1], &[2, 3]).unwrap();
     assert_data_close_f64(
-        typed_q.compose(&typed_r).unwrap().dense_data().unwrap(),
+        typed_q
+            .compose(engine, &typed_r)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         typed.0.dense_data().unwrap(),
     );
-    assert!(is_isometric!(typed_q, 1e-12), "{what}: qr q");
+    assert!(is_isometric!(engine, typed_q, 1e-12), "{what}: qr q");
     assert_same_legs(&typed_q.codomain(), &typed.0.codomain());
     assert_same_legs(&typed_r.domain(), &typed.0.domain());
     assert_same_legs(&typed_q.domain(), &typed_r.codomain());
@@ -521,13 +541,17 @@ fn assert_reductions_and_factorizations_hold<R>(
     let Lq {
         l: typed_c,
         q: typed_vh,
-    } = typed.0.lq_compact(&[0, 1], &[2, 3]).unwrap();
+    } = typed.0.lq_compact(engine, &[0, 1], &[2, 3]).unwrap();
     assert_data_close_f64(
-        typed_c.compose(&typed_vh).unwrap().dense_data().unwrap(),
+        typed_c
+            .compose(engine, &typed_vh)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         typed.0.dense_data().unwrap(),
     );
     assert!(
-        is_isometric!(typed_vh.adjoint().unwrap(), 1e-12),
+        is_isometric!(engine, typed_vh.adjoint(engine).unwrap(), 1e-12),
         "{what}: lq q"
     );
     assert_same_legs(&typed_c.codomain(), &typed.0.codomain());
@@ -536,7 +560,7 @@ fn assert_reductions_and_factorizations_hold<R>(
     assert_nonzero(what, typed_c.dense_data().unwrap());
     assert_nonzero(what, typed_vh.dense_data().unwrap());
 
-    let typed_spectrum = typed.0.svd_vals(&[0, 1], &[2, 3]).unwrap();
+    let typed_spectrum = typed.0.svd_vals(engine, &[0, 1], &[2, 3]).unwrap();
     assert!(
         typed_spectrum
             .windows(2)
@@ -630,6 +654,7 @@ fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
 /// earlier in this file.
 #[test]
 fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = runtime();
 
@@ -669,24 +694,31 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
     // A distinct value per element, so multiple blocks are exercised
     // nontrivially.
     let mut next = 0.0_f64;
-    let t: TensorMap<_, f64> = TensorMap::from_subblock_fn(&runtime, [&p, &q], [&p, &q], |_, _| {
-        next += 1.0;
-        next
-    })
-    .unwrap();
+    let t: TensorMap<_, f64> =
+        TensorMap::from_subblock_fn(engine, &runtime, [&p, &q], [&p, &q], |_, _| {
+            next += 1.0;
+            next
+        })
+        .unwrap();
 
     assert!(
         t.subblock_count() > 1,
         "a single block would make the identities below near-vacuous"
     );
-    let norm = t.norm(2.0).unwrap();
+    let norm = t.norm(engine, 2.0).unwrap();
     assert!(norm > 0.0, "zero tensor: the assertions below are vacuous");
 
     // <t, t> = |t|^2 and tr(t† ∘ t) = |t|^2: three independent code paths
     // (weighted inner, reduction norm, composition + trace) over the product
     // provider's own fusion and dual data.
-    assert!((t.inner(&t).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
-    let gram_trace = t.adjoint().unwrap().compose(&t).unwrap().tr().unwrap();
+    assert!((t.inner(engine, &t).unwrap() - norm * norm).abs() < 1e-9 * norm * norm);
+    let gram_trace = t
+        .adjoint(engine)
+        .unwrap()
+        .compose(engine, &t)
+        .unwrap()
+        .tr(engine)
+        .unwrap();
     assert!((gram_trace - norm * norm).abs() < 1e-9 * norm * norm);
 }
 

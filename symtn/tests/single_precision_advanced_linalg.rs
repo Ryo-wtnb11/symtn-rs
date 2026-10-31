@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{Eig, Svd};
+use symtn::typed::{Eig, Engine, Svd};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap, Truncation};
 
 use single_precision_oracle::{
@@ -73,10 +73,10 @@ fn su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<SU2FusionRule> {
 /// tensor, asserted full rank and below `1e4` so the fixture is a usable
 /// single-precision oracle.
 macro_rules! measured_kappa {
-    ($tensor:expr) => {{
+    ($engine:ident, $tensor:expr) => {{
         let mut largest = 0.0f64;
         let mut smallest = f64::INFINITY;
-        for entry in &$tensor.svd_vals(&[0], &[1]).unwrap() {
+        for entry in &$tensor.svd_vals($engine, &[0], &[1]).unwrap() {
             for &value in &entry.values {
                 largest = largest.max(value);
                 smallest = smallest.min(value);
@@ -93,14 +93,14 @@ macro_rules! measured_kappa {
 
 /// `‖actual - expected‖ <= tolerance(terms, ‖expected‖)`.
 macro_rules! assert_residual {
-    ($what:expr, $actual:expr, $expected:expr, $terms:expr, $d:ty) => {{
+    ($engine:ident, $what:expr, $actual:expr, $expected:expr, $terms:expr, $d:ty) => {{
         let expected = $expected;
         let residual = $actual
-            .axpby(one::<$d>(), expected, minus_one::<$d>())
+            .axpby($engine, one::<$d>(), expected, minus_one::<$d>())
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
-        let bound = tolerance($terms, expected.norm(2.0).unwrap());
+        let bound = tolerance($terms, expected.norm($engine, 2.0).unwrap());
         assert!(
             residual <= bound,
             "{}: residual {residual:e} exceeds tolerance {bound:e}",
@@ -138,14 +138,17 @@ macro_rules! assert_complex_spectra_agree {
 /// `Complex32`, not a widened `Complex64`.
 macro_rules! advanced_checks {
     (
+        $engine:ident,
         $name:expr, $narrow:ty, $wide:ty, $eig:ty, $to_eig:expr,
         $square:expr, $tall:expr, $min_blocks:expr, $multiplicity_free:expr
     ) => {{
+        let engine = &mut *$engine;
         let rt = runtime();
         let name: &str = $name;
         let square = $square;
         let tall = $tall;
         let (h, wide_h) = twin_with!(
+            engine,
             &rt,
             $narrow,
             $wide,
@@ -154,6 +157,7 @@ macro_rules! advanced_checks {
             |i: &[usize]| { hermitian_entry(i[0], i[1]) }
         );
         let (a, wide_a) = twin_with!(
+            engine,
             &rt,
             $narrow,
             $wide,
@@ -162,6 +166,7 @@ macro_rules! advanced_checks {
             |i: &[usize]| { nonnormal_entry(i[0], i[1]) }
         );
         let (b, wide_b) = twin_with!(
+            engine,
             &rt,
             $narrow,
             $wide,
@@ -169,61 +174,73 @@ macro_rules! advanced_checks {
             [&square],
             |i: &[usize]| { nonnormal_entry(i[1], i[0]) }
         );
-        let (t, wide_t) = twin_with!(&rt, $narrow, $wide, [&tall], [&square], |i: &[usize]| {
-            hermitian_entry(i[0], i[1])
-        });
+        let (t, wide_t) = twin_with!(
+            engine,
+            &rt,
+            $narrow,
+            $wide,
+            [&tall],
+            [&square],
+            |i: &[usize]| { hermitian_entry(i[0], i[1]) }
+        );
         let n = wide_h.dense_data().unwrap().len();
         assert!(
             h.subblock_count() >= $min_blocks,
             "{name}: the fixture must carry at least {} coupled blocks",
             $min_blocks
         );
-        let kappa_h = measured_kappa!(&wide_h);
-        let kappa_a = measured_kappa!(&wide_a);
-        let kappa_t = measured_kappa!(&wide_t);
+        let kappa_h = measured_kappa!(engine, &wide_h);
+        let kappa_a = measured_kappa!(engine, &wide_a);
+        let kappa_t = measured_kappa!(engine, &wide_t);
 
         // ---- inv / solve / right solve / pinv: forward errors. -------------
         assert_payloads_agree_scaled(
             &format!("{name}: inv (kappa {kappa_a:e})"),
-            a.inv(&[0], &[1]).unwrap().dense_data().unwrap(),
-            wide_a.inv(&[0], &[1]).unwrap().dense_data().unwrap(),
+            a.inv(engine, &[0], &[1]).unwrap().dense_data().unwrap(),
+            wide_a
+                .inv(engine, &[0], &[1])
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             n,
             kappa_a,
         );
         assert_payloads_agree_scaled(
             &format!("{name}: solve (kappa {kappa_a:e})"),
-            a.solve(&[0], &[1], &b, &[0], &[1])
+            a.solve(engine, &[0], &[1], &b, &[0], &[1])
                 .unwrap()
                 .dense_data()
                 .unwrap(),
             wide_a
-                .solve(&[0], &[1], &wide_b, &[0], &[1])
+                .solve(engine, &[0], &[1], &wide_b, &[0], &[1])
                 .unwrap()
                 .dense_data()
                 .unwrap(),
             n,
             kappa_a,
         );
+        let b_adjoint = b.adjoint(engine).unwrap();
+        let wide_b_adjoint = wide_b.adjoint(engine).unwrap();
         assert_payloads_agree_scaled(
             &format!("{name}: right solve (kappa {kappa_a:e})"),
-            a.adjoint()
+            a.adjoint(engine)
                 .unwrap()
-                .solve(&[0], &[1], &b.adjoint().unwrap(), &[0], &[1])
+                .solve(engine, &[0], &[1], &b_adjoint, &[0], &[1])
                 .unwrap()
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
             wide_a
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
-                .solve(&[0], &[1], &wide_b.adjoint().unwrap(), &[0], &[1])
+                .solve(engine, &[0], &[1], &wide_b_adjoint, &[0], &[1])
                 .unwrap()
-                .adjoint()
+                .adjoint(engine)
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -232,8 +249,15 @@ macro_rules! advanced_checks {
         );
         assert_payloads_agree_scaled(
             &format!("{name}: pinv (kappa {kappa_t:e})"),
-            t.pinv(&[0], &[1], 1e-4).unwrap().dense_data().unwrap(),
-            wide_t.pinv(&[0], &[1], 1e-4).unwrap().dense_data().unwrap(),
+            t.pinv(engine, &[0], &[1], 1e-4)
+                .unwrap()
+                .dense_data()
+                .unwrap(),
+            wide_t
+                .pinv(engine, &[0], &[1], 1e-4)
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             wide_t.dense_data().unwrap().len(),
             kappa_t,
         );
@@ -241,29 +265,38 @@ macro_rules! advanced_checks {
         // ---- exp: spectral (Hermitian) and Padé (non-Hermitian) routes. ----
         assert_payloads_agree_scaled(
             &format!("{name}: exp, Hermitian route"),
-            h.exp(&[0], &[1]).unwrap().dense_data().unwrap(),
-            wide_h.exp(&[0], &[1]).unwrap().dense_data().unwrap(),
+            h.exp(engine, &[0], &[1]).unwrap().dense_data().unwrap(),
+            wide_h
+                .exp(engine, &[0], &[1])
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             n,
             1.0,
         );
         assert_payloads_agree_scaled(
             &format!("{name}: exp, Padé route"),
-            a.exp(&[0], &[1]).unwrap().dense_data().unwrap(),
-            wide_a.exp(&[0], &[1]).unwrap().dense_data().unwrap(),
+            a.exp(engine, &[0], &[1]).unwrap().dense_data().unwrap(),
+            wide_a
+                .exp(engine, &[0], &[1])
+                .unwrap()
+                .dense_data()
+                .unwrap(),
             n,
             1.0,
         );
 
         // ---- Integer powers: repeated composition; a negative power inverts once.
         macro_rules! cube {
-            ($t:expr) => {
-                $t.compose(&$t.compose(&$t).unwrap()).unwrap()
-            };
+            ($t:expr) => {{
+                let square = $t.compose(engine, &$t).unwrap();
+                $t.compose(engine, &square).unwrap()
+            }};
         }
         macro_rules! inverse_square {
             ($t:expr) => {{
-                let inverse = $t.inv(&[0], &[1]).unwrap();
-                inverse.compose(&inverse).unwrap()
+                let inverse = $t.inv(engine, &[0], &[1]).unwrap();
+                inverse.compose(engine, &inverse).unwrap()
             }};
         }
         assert_payloads_agree_scaled(
@@ -284,16 +317,16 @@ macro_rules! advanced_checks {
         // ---- Elementwise sqrt of a compact spectrum. ------------------------
         // Compact SVD stores `s` diagonally for every Host provider. Checked
         // Generic reductions still need an explicit dense payload.
-        let Svd { s, .. } = h.svd_compact(&[0], &[1]).unwrap();
-        let Svd { s: wide_s, .. } = wide_h.svd_compact(&[0], &[1]).unwrap();
-        let root = s.map_diagonal(|value| value.sqrt()).unwrap();
+        let Svd { s, .. } = h.svd_compact(engine, &[0], &[1]).unwrap();
+        let Svd { s: wide_s, .. } = wide_h.svd_compact(engine, &[0], &[1]).unwrap();
+        let root = s.map_diagonal(engine, |value| value.sqrt()).unwrap();
         assert_payloads_agree_scaled(
             &format!("{name}: sqrt of a compact spectrum"),
-            root.materialize().unwrap().dense_data().unwrap(),
+            root.materialize(engine).unwrap().dense_data().unwrap(),
             wide_s
-                .map_diagonal(|value| value.sqrt())
+                .map_diagonal(engine, |value| value.sqrt())
                 .unwrap()
-                .materialize()
+                .materialize(engine)
                 .unwrap()
                 .dense_data()
                 .unwrap(),
@@ -301,28 +334,30 @@ macro_rules! advanced_checks {
             1.0,
         );
         assert_residual!(
+            engine,
             format!("{name}: sqrt ∘ sqrt"),
-            root.compose(&root).unwrap(),
-            &s.materialize().unwrap(),
+            root.compose(engine, &root).unwrap(),
+            &s.materialize(engine).unwrap(),
             n,
             $narrow
         );
         // ---- General eig: factors in `D::Eig`, spectra `Complex64`. --------
-        let Eig { d, v }: Eig<TensorMap<_, $eig>> = a.eig_full(&[0], &[1]).unwrap();
-        let Eig { v: wide_v, .. } = wide_a.eig_full(&[0], &[1]).unwrap();
-        let kappa_v = measured_kappa!(&wide_v);
+        let Eig { d, v }: Eig<TensorMap<_, $eig>> = a.eig_full(engine, &[0], &[1]).unwrap();
+        let Eig { v: wide_v, .. } = wide_a.eig_full(engine, &[0], &[1]).unwrap();
+        let kappa_v = measured_kappa!(engine, &wide_v);
         let to_eig = $to_eig;
-        let a_eig: TensorMap<_, $eig> = to_eig(&a);
-        let vd = v.compose(&d).unwrap();
+        let a_eig: TensorMap<_, $eig> = to_eig(&mut *engine, &a);
+        let vd = v.compose(engine, &d).unwrap();
         assert_residual!(
+            engine,
             format!("{name}: eig_full a∘v == v∘d"),
-            a_eig.compose(&v).unwrap(),
+            a_eig.compose(engine, &v).unwrap(),
             &vd,
             n,
             $eig
         );
-        let wide_values = wide_a.eig_vals(&[0], &[1]).unwrap();
-        let values: Vec<SectorSpectrum<_, Complex64>> = a.eig_vals(&[0], &[1]).unwrap();
+        let wide_values = wide_a.eig_vals(engine, &[0], &[1]).unwrap();
+        let values: Vec<SectorSpectrum<_, Complex64>> = a.eig_vals(engine, &[0], &[1]).unwrap();
         assert_complex_spectra_agree!(
             format!("{name}: eig_vals (kappa(V) {kappa_v:e})"),
             &values,
@@ -333,7 +368,7 @@ macro_rules! advanced_checks {
         assert_complex_spectra_agree!(
             format!("{name}: eig_full d (kappa(V) {kappa_v:e})"),
             &{
-                let mut spectra = d.diagview().unwrap();
+                let mut spectra = d.diagview(engine).unwrap();
                 spectra.sort_by(|left, right| left.sector.cmp(&right.sector));
                 spectra
             },
@@ -345,29 +380,38 @@ macro_rules! advanced_checks {
         // `find_truncated` → two-leg `restrict_leg` (#1534).
         let (kept, error) = {
             let found = d.domain()[0]
-                .find_truncated(&d.diagview().unwrap(), &Truncation::rank(2))
+                .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(2))
                 .unwrap();
             (
-                d.restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                d.restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
                     .unwrap(),
                 found.error,
             )
         };
         let (wide_kept, wide_error) = {
-            let Eig { d: wide_d, .. } = wide_a.eig_full(&[0], &[1]).unwrap();
+            let Eig { d: wide_d, .. } = wide_a.eig_full(engine, &[0], &[1]).unwrap();
             let found = wide_d.domain()[0]
-                .find_truncated(&wide_d.diagview().unwrap(), &Truncation::rank(2))
+                .find_truncated(&wide_d.diagview(engine).unwrap(), &Truncation::rank(2))
                 .unwrap();
             (
                 wide_d
-                    .restrict_leg(&[(0, &found.selection), (1, &found.selection)])
+                    .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
                     .unwrap(),
                 found.error,
             )
         };
         assert_eq!(
-            kept.materialize().unwrap().dense_data().unwrap().len(),
-            wide_kept.materialize().unwrap().dense_data().unwrap().len(),
+            kept.materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len(),
+            wide_kept
+                .materialize(engine)
+                .unwrap()
+                .dense_data()
+                .unwrap()
+                .len(),
             "{name}: truncated eig kept a different number of states than the widened oracle"
         );
         assert!(error > 0.0, "{name}: truncated eig discarded nothing");
@@ -381,14 +425,14 @@ macro_rules! advanced_checks {
 
         if $multiplicity_free {
             // Lazy-adjoint receivers are materialized for the call.
-            let lazy = a.adjoint().unwrap();
+            let lazy = a.adjoint(engine).unwrap();
             assert_payloads_agree_scaled(
                 &format!("{name}: inv of a lazy adjoint"),
-                lazy.inv(&[0], &[1]).unwrap().dense_data().unwrap(),
+                lazy.inv(engine, &[0], &[1]).unwrap().dense_data().unwrap(),
                 wide_a
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .inv(&[0], &[1])
+                    .inv(engine, &[0], &[1])
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -397,11 +441,11 @@ macro_rules! advanced_checks {
             );
             assert_payloads_agree_scaled(
                 &format!("{name}: exp of a lazy adjoint"),
-                lazy.exp(&[0], &[1]).unwrap().dense_data().unwrap(),
+                lazy.exp(engine, &[0], &[1]).unwrap().dense_data().unwrap(),
                 wide_a
-                    .adjoint()
+                    .adjoint(engine)
                     .unwrap()
-                    .exp(&[0], &[1])
+                    .exp(engine, &[0], &[1])
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -419,7 +463,9 @@ macro_rules! advanced_suite {
 
             #[test]
             fn u1_advanced_linalg_matches_the_widened_oracle() {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 advanced_checks!(
+                    engine,
                     concat!("U(1) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -434,7 +480,9 @@ macro_rules! advanced_suite {
 
             #[test]
             fn su2_advanced_linalg_matches_the_widened_oracle() {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 advanced_checks!(
+                    engine,
                     concat!("SU(2) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -449,7 +497,9 @@ macro_rules! advanced_suite {
 
             #[test]
             fn fermion_su2_advanced_linalg_matches_the_widened_oracle() {
+                let engine = &mut symtn::typed::CpuEngine::serial();
                 advanced_checks!(
+                    engine,
                     concat!("fZ2 x U(1) x SU(2) ", stringify!($narrow)),
                     $narrow,
                     $wide,
@@ -465,15 +515,19 @@ macro_rules! advanced_suite {
     };
 }
 
-advanced_suite!(f32_payload, f32, f64, Complex32, |t: &TensorMap<_, f32>| {
-    t.convert::<Complex32>()
-});
+advanced_suite!(
+    f32_payload,
+    f32,
+    f64,
+    Complex32,
+    |engine: &mut dyn Engine, t: &TensorMap<_, f32>| t.convert::<Complex32>(engine).unwrap()
+);
 advanced_suite!(
     complex32_payload,
     Complex32,
     Complex64,
     Complex32,
-    |t: &TensorMap<_, Complex32>| t.clone()
+    |_: &mut dyn Engine, t: &TensorMap<_, Complex32>| t.clone()
 );
 
 /// The reciprocal of a compact `Complex32` entry whose squared modulus
@@ -481,10 +535,12 @@ advanced_suite!(
 /// representable: `2^-80`, `2^-80 i` and `2^100` invert exactly.
 #[test]
 fn compact_complex32_reciprocal_does_not_underflow() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = runtime();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     let tiny = 2.0f32.powi(-80);
     let diagonal: TensorMap<_, Complex32> = TensorMap::diagonal(
+        engine,
         &rt,
         &leg,
         [SectorSpectrum {
@@ -502,10 +558,10 @@ fn compact_complex32_reciprocal_does_not_underflow() {
         Complex32::new(0.0, -(2.0f32.powi(80))),
         Complex32::new(2.0f32.powi(-100), 0.0),
     ];
-    let inverse = diagonal.inv(&[0], &[1]).unwrap();
-    assert_eq!(inverse.diagview().unwrap()[0].values, expected, "inv");
-    let pseudo = diagonal.pinv(&[0], &[1], 0.0).unwrap();
-    assert_eq!(pseudo.diagview().unwrap()[0].values, expected, "pinv");
+    let inverse = diagonal.inv(engine, &[0], &[1]).unwrap();
+    assert_eq!(inverse.diagview(engine).unwrap()[0].values, expected, "inv");
+    let pseudo = diagonal.pinv(engine, &[0], &[1], 0.0).unwrap();
+    assert_eq!(pseudo.diagview(engine).unwrap()[0].values, expected, "pinv");
 }
 
 /// Checked-Generic provider: SU(3), outer multiplicity, the checked dispatch.
@@ -531,7 +587,9 @@ mod checked_generic {
 
                 #[test]
                 fn su3_advanced_linalg_matches_the_widened_oracle() {
+                    let engine = &mut symtn::typed::CpuEngine::serial();
                     advanced_checks!(
+                        engine,
                         concat!("SU(3) ", stringify!($narrow)),
                         $narrow,
                         $wide,
@@ -547,14 +605,18 @@ mod checked_generic {
         };
     }
 
-    checked_generic_suite!(f32_payload, f32, f64, Complex32, |t: &TensorMap<_, f32>| {
-        t.convert::<Complex32>()
-    });
+    checked_generic_suite!(
+        f32_payload,
+        f32,
+        f64,
+        Complex32,
+        |engine: &mut dyn Engine, t: &TensorMap<_, f32>| t.convert::<Complex32>(engine).unwrap()
+    );
     checked_generic_suite!(
         complex32_payload,
         Complex32,
         Complex64,
         Complex32,
-        |t: &TensorMap<_, Complex32>| t.clone()
+        |_: &mut dyn Engine, t: &TensorMap<_, Complex32>| t.clone()
     );
 }

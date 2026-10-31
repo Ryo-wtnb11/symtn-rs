@@ -4,6 +4,7 @@ use crate::probe::{self, Event};
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
@@ -55,6 +56,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -84,6 +86,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FermionParityFusionRule;
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
@@ -135,6 +138,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -164,6 +168,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
@@ -215,6 +220,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -243,6 +249,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FermionParityFusionRule;
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
@@ -294,6 +301,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -323,6 +331,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
@@ -378,6 +387,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -406,6 +416,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
 // Expected data checked against TensorKit 0.17.1 `TO.tensorcontract!`.
 #[test]
 fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = FermionParityFusionRule;
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
@@ -461,6 +472,7 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
             .unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -489,6 +501,7 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
 
 #[test]
 fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let sector = SectorId::new(0);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
@@ -523,6 +536,7 @@ fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
         TestTensor::from_vec_with_fusion_space(vec![Complex64::new(0.0, 0.0)], dst_space).unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -544,6 +558,7 @@ fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
     dst.data_mut().copy_from_slice(&[Complex64::new(0.0, 0.0)]);
     let mut context = TensorContractFusionExecutionContext::<Complex64, _>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut dst,
@@ -571,6 +586,7 @@ fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
 // parent-storage matrix is consumed through the op-bearing Core batch.
 #[test]
 fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -626,6 +642,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     let mut oracle = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
     let mut ctx = crate::TensorContractFusionExecutionContext::<Complex64, _>::default();
     ctx.tensorcontract_prelowered_into(
+        engine,
         &dst_bound,
         &mut oracle,
         crate::FusionOperand::direct(adj_bound.space()),
@@ -656,6 +673,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
         for _ in 0..2 {
             let mut fold = vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
             ctx.tensorcontract_prelowered_into(
+                engine,
                 &dst_bound,
                 &mut fold,
                 lhs_operand,
@@ -682,6 +700,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
             let mut folded_again =
                 vec![Complex64::new(0.0, 0.0); dst_space.required_len().unwrap()];
             ctx.tensorcontract_prelowered_into(
+                engine,
                 &dst_bound,
                 &mut folded_again,
                 lhs_operand,
@@ -743,6 +762,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     let mut contract_backend = DenseTreeTransformOperations::default_executor();
     let mut contract_workspace = TensorContractWorkspace::default();
     crate::contract::tensorcontract_fusion_dynamic_plan_into_with(
+        engine,
         &mut tree_backend,
         &mut tree_workspace,
         &mut contract_backend,
@@ -766,6 +786,7 @@ fn tensorcontract_fusion_u1_lhs_adjoint_matches_eager_conjugate_transpose() {
     )
     .unwrap();
     crate::contract::execute_dynamic_tree_execution_artifact_for_test(
+        engine,
         provider.as_ref(),
         &reverse_plan,
         &mut artifact_dst,

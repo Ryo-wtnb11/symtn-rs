@@ -99,14 +99,14 @@ where
 /// use symtn::sector::{CheckedGenericAdmissionMode, CheckedGenericRigidSymbols, TypedSectorAdmission};
 /// use symtn::typed::TensorMap;
 ///
-/// fn checked_transpose<R>(tensor: &TensorMap<R, f64>)
+/// fn checked_transpose<R>(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<R, f64>)
 /// where
 ///     R: TypedSectorAdmission<
 ///             Error = <R as symtn::sector::CheckedGenericFusion>::Error,
 ///             Mode = CheckedGenericAdmissionMode,
 ///         > + CheckedGenericRigidSymbols<Scalar = f64>,
 /// {
-///     let _ = tensor.transpose(&[1], &[0]);
+///     let _ = tensor.transpose(engine, &[1], &[0]);
 /// }
 /// ```
 #[doc(hidden)]
@@ -121,6 +121,7 @@ where
     /// bijection, or (when that proof or `require_representable` fails) the
     /// dense replay of the densified spectrum with the same structure.
     fn transform_bond_spectrum(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
         operation: &TreeTransformOperation,
@@ -132,6 +133,7 @@ where
     /// [`TypedAdjointSpace`]; the default `None` is for a mode that cannot
     /// hold a lazy adjoint.
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        _engine: &mut dyn Engine,
         _tensor: &TensorMap<R, D, S>,
         _operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, D, S>>, Self::FacadeError> {
@@ -142,6 +144,7 @@ where
     /// densified) into a fresh destination payload of its storage. A lazy
     /// adjoint never reaches it: `try_lazy_adjoint_transform` takes it first.
     fn transform<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>;
@@ -156,6 +159,7 @@ where
     /// the borrowed request of an owned dense source through
     /// `exact_layout_probe` before `operation` builds the owned one.
     fn transform_into<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
@@ -190,6 +194,7 @@ where
     R: TypedSectorAdmission,
 {
     fn transform_bond_spectrum(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, Self>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<Self>],
         operation: &TreeTransformOperation,
@@ -197,16 +202,19 @@ where
     ) -> Result<BondTransform<R, Self>, Error>;
 
     fn try_lazy_adjoint<S: TransformExec<R, Self>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, Self, S>,
         operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, Self, S>>, Error>;
 
     fn transform<S: TransformExec<R, Self>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, Self, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
 
     fn transform_into<S: TransformExec<R, Self>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, Self, S>,
         destination: &mut TensorMap<R, Self, S>,
         alpha: Self,
@@ -220,13 +228,16 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
     TensorScalar
 {
     fn contract<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
         planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
 
+    #[allow(clippy::too_many_arguments)]
     fn contract_into<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
@@ -237,6 +248,7 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
     ) -> Result<(), Error>;
 
     fn compose<S: ContractExec<R, Self>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
@@ -354,6 +366,7 @@ where
     /// With `planar`, the planar contraction over those admitted orders
     /// ([`TensorMap::planar_contract`]) instead of the ordinary one.
     fn contract<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -366,7 +379,9 @@ where
     /// [`destination_precheck`]: one lease, [`Self::contract`]'s staging, the
     /// staged space against the destination's, [`destination_storage_mut`],
     /// planning, the storage's write, then the same commit.
+    #[allow(clippy::too_many_arguments)]
     fn contract_into<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -379,6 +394,7 @@ where
     /// Composes two operands, a lazy adjoint read through its parent's
     /// payload, into a fresh destination payload of their storage.
     fn compose<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>;
@@ -397,6 +413,7 @@ where
     /// for a single-scalar destination (a compact spectrum) — then the
     /// commit.
     fn trace<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -411,6 +428,7 @@ where
     /// [`TraceExec::trace_into`] kernel, then the same commit.
     #[allow(clippy::too_many_arguments)]
     fn trace_into<S: TraceExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         read: impl FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> Option<D>,
         axes: symtn_tensors::TensorTraceAxisSpec<'_>,
@@ -507,11 +525,13 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError>;
 
     fn remove_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError>;
@@ -527,17 +547,19 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        tensor.insert_unit_multiplicity_free(insertion)
+        tensor.insert_unit_multiplicity_free(engine, insertion)
     }
 
     fn remove_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        tensor.remove_unit_multiplicity_free(axis)
+        tensor.remove_unit_multiplicity_free(engine, axis)
     }
 }
 
@@ -550,16 +572,18 @@ where
     D: TensorScalar,
 {
     fn insert_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        generic_insert_unit(tensor, insertion)
+        generic_insert_unit(engine, tensor, insertion)
     }
 
     fn remove_unit(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        generic_remove_unit(tensor, axis)
+        generic_remove_unit(engine, tensor, axis)
     }
 }

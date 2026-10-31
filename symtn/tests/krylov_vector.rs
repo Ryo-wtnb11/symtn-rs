@@ -21,8 +21,8 @@ use num_complex::{Complex32, Complex64};
 use symtn::krylov::{self, Lanczos, Vector, Which, Workspace};
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    BlockFusionTrees, ContractSpec, Error, GradedSpace, OperationError, Runtime, SectorSpectrum,
-    TensorMap, TensorScalar,
+    BlockFusionTrees, ContractSpec, CpuEngine, Engine, Error, GradedSpace, OperationError, Pool,
+    Runtime, SectorSpectrum, TensorMap, TensorScalar,
 };
 use symtn_sectors::{TableRule, TableSector};
 
@@ -75,9 +75,9 @@ impl Sample for Complex64 {
 }
 
 macro_rules! filled {
-    ($rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
+    ($engine:ident, $rt:expr, $codomain:expr, $domain:expr, $d:ty, $salt:expr) => {{
         let mut k = 0usize;
-        TensorMap::<_, $d>::from_subblock_fn($rt, $codomain, $domain, |_, _| {
+        TensorMap::<_, $d>::from_subblock_fn($engine, $rt, $codomain, $domain, |_, _| {
             k += 1;
             <$d as Sample>::sample(k, $salt)
         })
@@ -135,48 +135,49 @@ fn wide<D: Numeric>(v: &[D]) -> Vec<Complex64> {
 /// The five vector operations on `x`, `y` (one space `[v, w] <- [v]`)
 /// against their physical dense expansions.
 macro_rules! vector_contract {
-    ($what:expr, $rt:expr, $legs:expr, $d:ty, $a:expr, $b:expr) => {{
+    ($engine:ident, $what:expr, $rt:expr, $legs:expr, $d:ty, $a:expr, $b:expr) => {{
+        let engine: &mut dyn Engine = &mut *$engine;
         let (v, w) = $legs;
         let what = $what;
-        let x = filled!($rt, [&v, &w], [&v], $d, 1);
-        let y = filled!($rt, [&v, &w], [&v], $d, 2);
-        let xd = wide(&x.to_physical_dense().unwrap().data);
-        let yd = wide(&y.to_physical_dense().unwrap().data);
+        let x = filled!(engine, $rt, [&v, &w], [&v], $d, 1);
+        let y = filled!(engine, $rt, [&v, &w], [&v], $d, 2);
+        let xd = wide(&x.to_physical_dense(engine).unwrap().data);
+        let yd = wide(&y.to_physical_dense(engine).unwrap().data);
         let n = xd.len();
         let inner: Complex64 = xd.iter().zip(&yd).map(|(p, q)| p.conj() * q).sum();
-        let got = Vector::inner(&x, &y).unwrap().wide();
+        let got = Vector::inner(&x, engine, &y).unwrap().wide();
         close::<$d>(&format!("{what} inner"), got, inner, n);
         let norm = xd.iter().map(|p| p.norm_sqr()).sum::<f64>().sqrt();
-        let got = Vector::norm(&x).unwrap().wide();
+        let got = Vector::norm(&x, engine).unwrap().wide();
         close::<$d>(&format!("{what} norm"), got, Complex64::new(norm, 0.0), n);
 
         // `similar` is a fresh exact zero that accepts writes: no payload
         // shared with `x` (a clone would be `DestinationShared`).
-        let mut z = x.similar().unwrap();
-        assert!(wide(&z.to_physical_dense().unwrap().data)
+        let mut z = x.similar(engine).unwrap();
+        assert!(wide(&z.to_physical_dense(engine).unwrap().data)
             .iter()
             .all(|v| *v == Complex64::new(0.0, 0.0)));
-        z.copy_from(&y).unwrap();
+        z.copy_from(engine, &y).unwrap();
         assert_eq!(
-            wide(&z.to_physical_dense().unwrap().data),
+            wide(&z.to_physical_dense(engine).unwrap().data),
             yd,
             "{what} copy_from"
         );
         assert_eq!(
-            wide(&x.to_physical_dense().unwrap().data),
+            wide(&x.to_physical_dense(engine).unwrap().data),
             xd,
             "{what} source kept"
         );
 
         // `b = 0` overwrites a NaN-filled destination without reading it.
-        let mut nan = TensorMap::<_, $d>::from_subblock_fn($rt, [&v, &w], [&v], |_, _| {
+        let mut nan = TensorMap::<_, $d>::from_subblock_fn(engine, $rt, [&v, &w], [&v], |_, _| {
             <$d as Sample>::real(f64::NAN)
         })
         .unwrap();
         let (a, b): ($d, $d) = ($a, $b);
-        Vector::axpby(&mut nan, a, &x, <$d as Sample>::real(0.0)).unwrap();
+        Vector::axpby(&mut nan, engine, a, &x, <$d as Sample>::real(0.0)).unwrap();
         let want: Vec<Complex64> = xd.iter().map(|p| a.wide() * p).collect();
-        let got = wide(&nan.to_physical_dense().unwrap().data);
+        let got = wide(&nan.to_physical_dense(engine).unwrap().data);
         assert!(
             got.iter().all(|v| v.re.is_finite() && v.im.is_finite()),
             "{what}: NaN leaked"
@@ -184,21 +185,21 @@ macro_rules! vector_contract {
         slices_close::<$d>(&format!("{what} axpby b=0"), &got, &want, 1);
 
         // General `a·x + b·self`.
-        let mut d = x.similar().unwrap();
-        d.copy_from(&y).unwrap();
-        Vector::axpby(&mut d, a, &x, b).unwrap();
+        let mut d = x.similar(engine).unwrap();
+        d.copy_from(engine, &y).unwrap();
+        Vector::axpby(&mut d, engine, a, &x, b).unwrap();
         let want: Vec<Complex64> = xd
             .iter()
             .zip(&yd)
             .map(|(p, q)| a.wide() * p + b.wide() * q)
             .collect();
-        let got = wide(&d.to_physical_dense().unwrap().data);
+        let got = wide(&d.to_physical_dense(engine).unwrap().data);
         slices_close::<$d>(&format!("{what} axpby"), &got, &want, 2);
 
         // A tensor on another space is refused before any write.
-        let other = filled!($rt, [&v], [&v], $d, 3);
-        let mut e = other.similar().unwrap();
-        let err = Vector::axpby(&mut e, a, &x, b).unwrap_err();
+        let other = filled!(engine, $rt, [&v], [&v], $d, 3);
+        let mut e = other.similar(engine).unwrap();
+        let err = Vector::axpby(&mut e, engine, a, &x, b).unwrap_err();
         assert!(is_space_mismatch(&err), "{what}: {err:?}");
     }};
 }
@@ -207,34 +208,37 @@ macro_rules! vector_contract {
 fn vector_operations_match_the_dense_expansion() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let (a, b) = (0.75, -2.5);
     let (ca, cb) = (Complex64::new(0.5, -2.0), Complex64::new(-1.5, 0.25));
-    vector_contract!("u1 f64", &rt, u1_legs(), f64, a, b);
-    vector_contract!("u1 c64", &rt, u1_legs(), Complex64, ca, cb);
-    vector_contract!("su2 f64", &rt, su2_legs(), f64, a, b);
-    vector_contract!("su2 c64", &rt, su2_legs(), Complex64, ca, cb);
+    vector_contract!(engine, "u1 f64", &rt, u1_legs(), f64, a, b);
+    vector_contract!(engine, "u1 c64", &rt, u1_legs(), Complex64, ca, cb);
+    vector_contract!(engine, "su2 f64", &rt, su2_legs(), f64, a, b);
+    vector_contract!(engine, "su2 c64", &rt, su2_legs(), Complex64, ca, cb);
     let (a32, b32) = (0.75f32, -2.5f32);
     let (ca32, cb32) = (Complex32::new(0.5, -2.0), Complex32::new(-1.5, 0.25));
-    vector_contract!("u1 f32", &rt, u1_legs(), f32, a32, b32);
-    vector_contract!("su2 f32", &rt, su2_legs(), f32, a32, b32);
-    vector_contract!("su2 c32", &rt, su2_legs(), Complex32, ca32, cb32);
+    vector_contract!(engine, "u1 f32", &rt, u1_legs(), f32, a32, b32);
+    vector_contract!(engine, "su2 f32", &rt, su2_legs(), f32, a32, b32);
+    vector_contract!(engine, "su2 c32", &rt, su2_legs(), Complex32, ca32, cb32);
 }
 
 #[test]
 fn lazy_and_compact_receivers_are_refused_by_similar() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let (v, _) = su2_legs();
-    let x = filled!(&rt, [&v], [&v], Complex64, 4);
-    let lazy = x.adjoint().unwrap();
+    let x = filled!(engine, &rt, [&v], [&v], Complex64, 4);
+    let lazy = x.adjoint(engine).unwrap();
     let names_materialize = |e: &Error| {
         *e == Error::Unsupported {
             operation: "Vector::similar",
             alternative: symtn::typed::Alternative::Materialize,
         }
     };
-    assert!(names_materialize(&lazy.similar().unwrap_err()));
+    assert!(names_materialize(&lazy.similar(engine).unwrap_err()));
     let compact = TensorMap::<_, Complex64>::diagonal(
+        engine,
         &rt,
         &v,
         [(0, 2), (1, 2), (2, 1)].map(|(s, n)| SectorSpectrum {
@@ -245,19 +249,23 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
         }),
     )
     .unwrap();
-    assert!(names_materialize(&compact.similar().unwrap_err()));
+    assert!(names_materialize(&compact.similar(engine).unwrap_err()));
     // Both still serve as sources, read in their logical form.
-    let mut z = lazy.materialize().unwrap().similar().unwrap();
-    z.copy_from(&lazy).unwrap();
+    let mut z = lazy.materialize(engine).unwrap().similar(engine).unwrap();
+    z.copy_from(engine, &lazy).unwrap();
     assert_eq!(
         z.dense_data().unwrap(),
-        lazy.materialize().unwrap().dense_data().unwrap()
+        lazy.materialize(engine).unwrap().dense_data().unwrap()
     );
-    let mut z = compact.materialize().unwrap().similar().unwrap();
-    z.copy_from(&compact).unwrap();
+    let mut z = compact
+        .materialize(engine)
+        .unwrap()
+        .similar(engine)
+        .unwrap();
+    z.copy_from(engine, &compact).unwrap();
     assert_eq!(
         z.dense_data().unwrap(),
-        compact.materialize().unwrap().dense_data().unwrap()
+        compact.materialize(engine).unwrap().dense_data().unwrap()
     );
 }
 
@@ -265,14 +273,17 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
 fn krylov_reports_operation_errors_as_vector_errors() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let (v, w) = u1_legs();
-    let b = filled!(&rt, [&v, &w], [&v], f64, 5);
-    let x0 = filled!(&rt, [&v], [&v], f64, 6);
-    let mut ws = Workspace::with_capacity(&b, 5).unwrap();
-    let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
-        x.axpby_into(y, 2.0, 0.0)
-    };
+    let b = filled!(engine, &rt, [&v, &w], [&v], f64, 5);
+    let x0 = filled!(engine, &rt, [&v], [&v], f64, 6);
+    let mut ws = Workspace::with_capacity(engine, &b, 5).unwrap();
+    let mut op =
+        |engine: &mut (dyn Engine + 'static),
+         x: &TensorMap<U1FusionRule, f64>,
+         y: &mut TensorMap<U1FusionRule, f64>| x.axpby_into(engine, y, 2.0, 0.0);
     let result = krylov::linsolve(
+        engine,
         &mut op,
         &b,
         &x0,
@@ -302,12 +313,14 @@ fn heisenberg_eigenvalues(twice: usize) -> Vec<f64> {
 
 /// `S·S` on `V ⊗ V <- V ⊗ V`, SU(2): `λ_c` on coupled spin `c`.
 fn su2_heisenberg<D: Sample>(
+    engine: &mut dyn Engine,
     rt: &Runtime,
     v: &GradedSpace<SU2FusionRule>,
     twice: usize,
 ) -> TensorMap<SU2FusionRule, D> {
     let lambda = heisenberg_eigenvalues(twice);
     TensorMap::from_subblock_fn(
+        engine,
         rt,
         [v, v],
         [v, v],
@@ -325,6 +338,7 @@ fn su2_heisenberg<D: Sample>(
 
 /// `S·S` on `V ⊗ V <- V ⊗ V`, U(1) with charge `2m`: `Sz⊗Sz + (S+⊗S- + S-⊗S+)/2`.
 fn u1_heisenberg<D: Sample>(
+    engine: &mut dyn Engine,
     rt: &Runtime,
     v: &GradedSpace<U1FusionRule>,
     twice: usize,
@@ -333,6 +347,7 @@ fn u1_heisenberg<D: Sample>(
     let raise = |m: f64| (s * (s + 1.0) - m * (m + 1.0)).sqrt();
     let lower = |m: f64| (s * (s + 1.0) - m * (m - 1.0)).sqrt();
     TensorMap::from_subblock_fn(
+        engine,
         rt,
         [v, v],
         [v, v],
@@ -369,24 +384,40 @@ const APPLY: ContractSpec<'static> = ContractSpec {
 /// Distinct eigenvalues of the operator found by Lanczos on `x0`, plus the
 /// eigen-residuals and the eigenvector norms in the dense expansion.
 macro_rules! eigsolve_case {
-    ($what:expr, $rt:expr, $h:expr, $x0:expr, $want:expr, $alg:expr, $tol:expr) => {{
+    ($engine:expr, $what:expr, $rt:expr, $h:expr, $x0:expr, $want:expr, $alg:expr, $tol:expr) => {{
+        let engine: &mut dyn Engine = $engine;
         let (h, x0, want): (_, _, Vec<f64>) = (&$h, &$x0, $want);
-        let mut op =
-            |x: &_, y: &mut _| h.contract_into(x, &APPLY, y, Sample::real(1.0), Sample::real(0.0));
+        let mut op = |engine: &mut (dyn Engine + 'static), x: &_, y: &mut _| {
+            h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
+        };
         let (alg, tol): (Lanczos, f64) = ($alg, $tol);
-        let mut ws = Workspace::with_capacity(x0, 10).unwrap();
-        let (vals, vecs, info) =
-            krylov::eigsolve(&mut op, x0, want.len(), Which::SmallestReal, &alg, &mut ws).unwrap();
+        let mut ws = Workspace::with_capacity(engine, x0, 10).unwrap();
+        let (vals, vecs, info) = krylov::eigsolve(
+            engine,
+            &mut op,
+            x0,
+            want.len(),
+            Which::SmallestReal,
+            &alg,
+            &mut ws,
+        )
+        .unwrap();
         assert_eq!(info.converged, want.len(), "{}: {info:?}", $what);
         for ((&got, &want), x) in vals.iter().zip(&want).zip(&vecs) {
             let got: f64 = got.into();
             assert!((got - want).abs() < tol, "{}: {got} vs {want}", $what);
-            let dense = wide(&x.to_physical_dense().unwrap().data);
+            let dense = wide(&x.to_physical_dense(engine).unwrap().data);
             let n = dense.iter().map(|p| p.norm_sqr()).sum::<f64>().sqrt();
             assert!((n - 1.0).abs() < tol, "{}: |x| = {n}", $what);
-            let hx = h.contract(x, &APPLY).unwrap();
-            let r = hx.axpby(Sample::real(1.0), x, Sample::real(-got)).unwrap();
-            assert!(r.norm(2.0).unwrap() < 10.0 * tol, "{}: residual", $what);
+            let hx = h.contract(engine, x, &APPLY).unwrap();
+            let r = hx
+                .axpby(engine, Sample::real(1.0), x, Sample::real(-got))
+                .unwrap();
+            assert!(
+                r.norm(engine, 2.0).unwrap() < 10.0 * tol,
+                "{}: residual",
+                $what
+            );
         }
     }};
 }
@@ -401,6 +432,7 @@ fn eigsolve_in_single_precision() {
     // SU(2) spin 1: [-2, -1, 1], to single precision (Lanczos tolerance
     // above the f32 rounding of the residual).
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let v =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(2), 2)]).unwrap();
     let w = GradedSpace::try_new(
@@ -410,18 +442,28 @@ fn eigsolve_in_single_precision() {
     .unwrap();
     let want = heisenberg_eigenvalues(2);
     let alg = || Lanczos::new(10, 100, 1e-5);
-    let h = su2_heisenberg::<f32>(&rt, &v, 2);
-    let x0 = filled!(&rt, [&v, &v], [&w], f32, 7);
-    eigsolve_case!("su2 2s=2 f32", &rt, h, x0, want.clone(), alg(), 1e-5);
-    let h = su2_heisenberg::<Complex32>(&rt, &v, 2);
-    let x0 = filled!(&rt, [&v, &v], [&w], Complex32, 7);
-    eigsolve_case!("su2 2s=2 c32", &rt, h, x0, want, alg(), 1e-5);
+    let h = su2_heisenberg::<f32>(engine, &rt, &v, 2);
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], f32, 7);
+    eigsolve_case!(
+        engine,
+        "su2 2s=2 f32",
+        &rt,
+        h,
+        x0,
+        want.clone(),
+        alg(),
+        1e-5
+    );
+    let h = su2_heisenberg::<Complex32>(engine, &rt, &v, 2);
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex32, 7);
+    eigsolve_case!(engine, "su2 2s=2 c32", &rt, h, x0, want, alg(), 1e-5);
 }
 
 #[test]
 fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     for twice in [1usize, 2] {
         let want = heisenberg_eigenvalues(twice);
         // SU(2): spin `s` with degeneracy 2, and W carrying every total spin.
@@ -435,9 +477,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             (0..=twice).map(|big| (SU2Irrep::from_twice_spin(2 * big), 1 + big % 2)),
         )
         .unwrap();
-        let h = su2_heisenberg::<f64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], f64, 7);
+        let h = su2_heisenberg::<f64>(engine, &rt, &v, twice);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 7);
         eigsolve_case!(
+            engine,
             format!("su2 2s={twice} f64"),
             &rt,
             h,
@@ -446,9 +489,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             f64_alg(),
             1e-10
         );
-        let h = su2_heisenberg::<Complex64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], Complex64, 7);
+        let h = su2_heisenberg::<Complex64>(engine, &rt, &v, twice);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex64, 7);
         eigsolve_case!(
+            engine,
             format!("su2 2s={twice} c64"),
             &rt,
             h,
@@ -469,9 +513,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 2)),
         )
         .unwrap();
-        let h = u1_heisenberg::<f64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], f64, 8);
+        let h = u1_heisenberg::<f64>(engine, &rt, &v, twice);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 8);
         eigsolve_case!(
+            engine,
             format!("u1 2s={twice} f64"),
             &rt,
             h,
@@ -480,9 +525,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
             f64_alg(),
             1e-10
         );
-        let h = u1_heisenberg::<Complex64>(&rt, &v, twice);
-        let x0 = filled!(&rt, [&v, &v], [&w], Complex64, 8);
+        let h = u1_heisenberg::<Complex64>(engine, &rt, &v, twice);
+        let x0 = filled!(engine, &rt, [&v, &v], [&w], Complex64, 8);
         eigsolve_case!(
+            engine,
             format!("u1 2s={twice} c64"),
             &rt,
             h,
@@ -498,14 +544,16 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
 /// interpolant `Σ_k e^{tλ_k} Π_{j≠k} (H_c - λ_j)/(λ_k - λ_j)` over the
 /// distinct eigenvalues `λ` of `H`, compared with `exponentiate`.
 macro_rules! exponentiate_case {
-    ($what:expr, $h:expr, $x:expr, $t:expr, $lambda:expr) => {{
+    ($engine:expr, $what:expr, $h:expr, $x:expr, $t:expr, $lambda:expr) => {{
+        let engine: &mut dyn Engine = $engine;
         let (h, x, lambda): (_, _, Vec<f64>) = (&$h, &$x, $lambda);
         let t = $t;
-        let mut op =
-            |x: &_, y: &mut _| h.contract_into(x, &APPLY, y, Sample::real(1.0), Sample::real(0.0));
+        let mut op = |engine: &mut (dyn Engine + 'static), x: &_, y: &mut _| {
+            h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
+        };
         let alg = Lanczos::new(10, 100, 1e-13);
-        let mut ws = Workspace::with_capacity(x, 10).unwrap();
-        let (y, info) = krylov::exponentiate(&mut op, t, x, &alg, &mut ws).unwrap();
+        let mut ws = Workspace::with_capacity(engine, x, 10).unwrap();
+        let (y, info) = krylov::exponentiate(engine, &mut op, t, x, &alg, &mut ws).unwrap();
         assert_eq!(info.converged, 1, "{}", $what);
         let tw = t.wide();
         for (sector, xb) in x.blocks().unwrap() {
@@ -560,6 +608,7 @@ fn symtn_get<R, D: Numeric + TensorScalar>(
 fn exponentiate_matches_the_block_exponential() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     for twice in [1usize, 2] {
         let lambda = heisenberg_eigenvalues(twice);
         let v = GradedSpace::try_new(
@@ -572,12 +621,20 @@ fn exponentiate_matches_the_block_exponential() {
             (0..=twice).map(|big| (SU2Irrep::from_twice_spin(2 * big), 2)),
         )
         .unwrap();
-        let h = su2_heisenberg::<f64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], f64, 9);
-        exponentiate_case!(format!("su2 2s={twice} f64"), h, x, -0.7, lambda.clone());
-        let h = su2_heisenberg::<Complex64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], Complex64, 9);
+        let h = su2_heisenberg::<f64>(engine, &rt, &v, twice);
+        let x = filled!(engine, &rt, [&v, &v], [&w], f64, 9);
         exponentiate_case!(
+            engine,
+            format!("su2 2s={twice} f64"),
+            h,
+            x,
+            -0.7,
+            lambda.clone()
+        );
+        let h = su2_heisenberg::<Complex64>(engine, &rt, &v, twice);
+        let x = filled!(engine, &rt, [&v, &v], [&w], Complex64, 9);
+        exponentiate_case!(
+            engine,
             format!("su2 2s={twice} c64"),
             h,
             x,
@@ -595,12 +652,20 @@ fn exponentiate_matches_the_block_exponential() {
             (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 1)),
         )
         .unwrap();
-        let h = u1_heisenberg::<f64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], f64, 10);
-        exponentiate_case!(format!("u1 2s={twice} f64"), h, x, -0.7, lambda.clone());
-        let h = u1_heisenberg::<Complex64>(&rt, &v, twice);
-        let x = filled!(&rt, [&v, &v], [&w], Complex64, 10);
+        let h = u1_heisenberg::<f64>(engine, &rt, &v, twice);
+        let x = filled!(engine, &rt, [&v, &v], [&w], f64, 10);
         exponentiate_case!(
+            engine,
+            format!("u1 2s={twice} f64"),
+            h,
+            x,
+            -0.7,
+            lambda.clone()
+        );
+        let h = u1_heisenberg::<Complex64>(engine, &rt, &v, twice);
+        let x = filled!(engine, &rt, [&v, &v], [&w], Complex64, 10);
+        exponentiate_case!(
+            engine,
             format!("u1 2s={twice} c64"),
             h,
             x,
@@ -614,12 +679,13 @@ fn exponentiate_matches_the_block_exponential() {
 fn fibonacci_vectors_carry_the_golden_ratio_weight() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let rule = Arc::new(TableRule::fibonacci());
     let (one, tau) = (TableSector::new(1), TableSector::new(2));
     let t = GradedSpace::try_new(Arc::clone(&rule), [(tau, 1)]).unwrap();
     let w = GradedSpace::try_new(Arc::clone(&rule), [(one, 2), (tau, 3)]).unwrap();
-    let x = filled!(&rt, [&t, &t], [&w], Complex64, 11);
-    let y = filled!(&rt, [&t, &t], [&w], Complex64, 12);
+    let x = filled!(engine, &rt, [&t, &t], [&w], Complex64, 11);
+    let y = filled!(engine, &rt, [&t, &t], [&w], Complex64, 12);
     let phi = (1.0 + 5f64.sqrt()) / 2.0;
     let weighted = |a: &TensorMap<TableRule, Complex64>, b: &TensorMap<TableRule, Complex64>| {
         let mut sum = Complex64::new(0.0, 0.0);
@@ -636,30 +702,37 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
     };
     numerics::assert_close(
         "fib inner",
-        Vector::inner(&x, &y).unwrap(),
+        Vector::inner(&x, engine, &y).unwrap(),
         weighted(&x, &y),
         32,
     );
     numerics::assert_close(
         "fib norm",
-        Vector::norm(&x).unwrap(),
+        Vector::norm(&x, engine).unwrap(),
         weighted(&x, &x).re.sqrt(),
         32,
     );
 
     // H = -P_𝟙 on τ ⊗ τ: eigenvalue -1 on channel 𝟙, 0 on channel τ.
-    let h = TensorMap::<_, Complex64>::from_subblock_fn(&rt, [&t, &t], [&t, &t], |trees, _| {
-        Complex64::new(if *trees.coupled() == one { -1.0 } else { 0.0 }, 0.0)
-    })
-    .unwrap();
-    let mut op = |x: &TensorMap<TableRule, Complex64>, y: &mut TensorMap<TableRule, Complex64>| {
-        h.compose(x)?
-            .axpby_into(y, Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0))
+    let h =
+        TensorMap::<_, Complex64>::from_subblock_fn(engine, &rt, [&t, &t], [&t, &t], |trees, _| {
+            Complex64::new(if *trees.coupled() == one { -1.0 } else { 0.0 }, 0.0)
+        })
+        .unwrap();
+    let mut op = |engine: &mut (dyn Engine + 'static),
+                  x: &TensorMap<TableRule, Complex64>,
+                  y: &mut TensorMap<TableRule, Complex64>| {
+        h.compose(engine, x)?.axpby_into(
+            engine,
+            y,
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, 0.0),
+        )
     };
-    let mut ws = Workspace::with_capacity(&x, 6).unwrap();
+    let mut ws = Workspace::with_capacity(engine, &x, 6).unwrap();
     let alg = Lanczos::new(6, 100, 1e-12);
     let (vals, _, info) =
-        krylov::eigsolve(&mut op, &x, 2, Which::SmallestReal, &alg, &mut ws).unwrap();
+        krylov::eigsolve(engine, &mut op, &x, 2, Which::SmallestReal, &alg, &mut ws).unwrap();
     assert_eq!(info.converged, 2);
     assert!(
         (vals[0] + 1.0).abs() < 1e-12 && vals[1].abs() < 1e-12,
@@ -672,7 +745,8 @@ fn warm_eigsolve_allocates_only_its_results() {
     let _serial = crate::counting_alloc::serial();
     // A random Hermitian H with many distinct eigenvalues, so Lanczos
     // restarts; the map writes in place (`contract_into`).
-    let rt = Runtime::builder().dense_threads(1).build().unwrap();
+    let rt = Runtime::builder().build().unwrap();
+    let engine: &mut dyn Engine = &mut CpuEngine::serial();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(-1, 4), (0, 3), (1, 4)].map(|(q, n)| (U1Irrep::new(q), n)),
@@ -683,39 +757,128 @@ fn warm_eigsolve_allocates_only_its_results() {
         [(-2, 12), (-1, 16), (0, 20), (1, 16), (2, 12)].map(|(q, n)| (U1Irrep::new(q), n)),
     )
     .unwrap();
-    let a = TensorMap::<_, f64>::rand_with_seed(&rt, [&v, &v], [&v, &v], 3).unwrap();
-    let h = a.axpby(1.0, &a.adjoint().unwrap(), 1.0).unwrap();
-    let x0 = filled!(&rt, [&v, &v], [&w], f64, 13);
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 3).unwrap();
+    let adjoint = a.adjoint(engine).unwrap();
+    let h = a.axpby(engine, 1.0, &adjoint, 1.0).unwrap();
+    let x0 = filled!(engine, &rt, [&v, &v], [&w], f64, 13);
     let payload = std::mem::size_of_val(x0.dense_data().unwrap());
     let howmany = 2;
     let alg = Lanczos::new(12, 20, 1e-12);
-    let mut ws = Workspace::with_capacity(&x0, 12).unwrap();
-    let mut op = |x: &TensorMap<U1FusionRule, f64>, y: &mut TensorMap<U1FusionRule, f64>| {
-        h.contract_into(x, &APPLY, y, 1.0, 0.0)
+    let mut ws = Workspace::with_capacity(engine, &x0, 12).unwrap();
+    let mut op = |engine: &mut (dyn Engine + 'static),
+                  x: &TensorMap<U1FusionRule, f64>,
+                  y: &mut TensorMap<U1FusionRule, f64>| {
+        h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
     };
     // Warm the contraction plan and the dense backend.
-    krylov::eigsolve(&mut op, &x0, howmany, Which::SmallestReal, &alg, &mut ws).unwrap();
+    krylov::eigsolve(
+        engine,
+        &mut op,
+        &x0,
+        howmany,
+        Which::SmallestReal,
+        &alg,
+        &mut ws,
+    )
+    .unwrap();
     let ((vals, vecs, info), allocs) = counting_alloc::measure(|| {
-        krylov::eigsolve(&mut op, &x0, howmany, Which::SmallestReal, &alg, &mut ws).unwrap()
+        krylov::eigsolve(
+            engine,
+            &mut op,
+            &x0,
+            howmany,
+            Which::SmallestReal,
+            &alg,
+            &mut ws,
+        )
+        .unwrap()
     });
     // The map's own allocations (contraction metadata), per application.
-    let mut y = x0.similar().unwrap();
-    let ((), map) = counting_alloc::measure(|| op(&x0, &mut y).unwrap());
+    let mut y = x0.similar(engine).unwrap();
+    let ((), map) = counting_alloc::measure(|| op(engine, &x0, &mut y).unwrap());
     // Many map applications, but payload allocations only for the returned
     // eigenvectors and residuals, plus O(k²) dense scratch and metadata: a
     // payload-sized allocation per step would exceed the bound several times.
+    // The map's bytes are the caller's; the bound is on the solver's own.
     assert!(info.numops > 4 * alg.get_krylovdim(), "{info:?}");
     let results = vecs.len() + info.residual.len();
-    let bound =
-        info.numops as u64 * map.bytes + (results + 1) as u64 * (payload as u64 + 4096) + 64 * 1024;
+    let solver = allocs.bytes.saturating_sub(info.numops as u64 * map.bytes);
+    let bound = (results + 1) as u64 * (payload as u64 + 4096) + 64 * 1024;
     assert!(
         info.numops as u64 * payload as u64 > 2 * bound,
         "fixture too small"
     );
     assert!(
-        allocs.bytes <= bound,
-        "{} bytes > {bound} (payload {payload}, {} ops, {vals:?})",
-        allocs.bytes,
+        solver <= bound,
+        "{solver} solver bytes > {bound} (payload {payload}, map {} per op, {} ops, {vals:?})",
+        map.bytes,
         info.numops
     );
+}
+
+/// The solver runs on the caller's engine: a width-4 engine finds the
+/// width-1 spectrum and eigenvectors, and a broken engine fails the solve
+/// with the typed Host-region error of every other Host value operation.
+#[test]
+fn eigsolve_runs_on_the_callers_engine() {
+    let _serial = crate::counting_alloc::serial();
+    let rt = Runtime::builder().build().unwrap();
+    let twice = 2;
+    let v = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 3)),
+    )
+    .unwrap();
+    let w = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 4)),
+    )
+    .unwrap();
+    let serial: &mut dyn Engine = &mut CpuEngine::serial();
+    let h = u1_heisenberg::<f64>(serial, &rt, &v, twice);
+    let x0 = filled!(serial, &rt, [&v, &v], [&w], f64, 14);
+    let want = heisenberg_eigenvalues(twice);
+    let solve = |engine: &mut (dyn Engine + 'static)| {
+        let mut op = |engine: &mut (dyn Engine + 'static),
+                      x: &TensorMap<U1FusionRule, f64>,
+                      y: &mut TensorMap<U1FusionRule, f64>| {
+            h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
+        };
+        let mut ws = Workspace::with_capacity(engine, &x0, 10).map_err(krylov::Error::Vector)?;
+        krylov::eigsolve(
+            engine,
+            &mut op,
+            &x0,
+            want.len(),
+            Which::SmallestReal,
+            &f64_alg(),
+            &mut ws,
+        )
+    };
+    let (vals1, vecs1, _) = solve(serial).unwrap();
+    let mut wide4 = CpuEngine::new(Pool::builder().threads(4).build().unwrap());
+    let (vals4, vecs4, info) = solve(&mut wide4).unwrap();
+    assert_eq!(info.converged, want.len(), "{info:?}");
+    for (k, (&a, &b)) in vals4.iter().zip(&vals1).enumerate() {
+        assert!(
+            (a - want[k]).abs() < 1e-10 && (a - b).abs() < 1e-10,
+            "{a} vs {b}"
+        );
+    }
+    // Distinct eigenvalues: the eigenvectors agree up to a sign.
+    for (x4, x1) in vecs4.iter().zip(&vecs1) {
+        let overlap = x1.inner(serial, x4).unwrap();
+        assert!((overlap.abs() - 1.0).abs() < 1e-10, "overlap {overlap}");
+    }
+
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        wide4.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+    }));
+    assert!(panicked.is_err() && wide4.is_broken());
+    match solve(&mut wide4) {
+        Err(krylov::Error::Vector(e)) => {
+            assert!(format!("{e:?}").contains("host_region"), "{e:?}")
+        }
+        other => panic!("{:?}", other.map(|_| ())),
+    }
 }

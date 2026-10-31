@@ -1091,6 +1091,7 @@ fn side_only_publication_bytes_case<D>(values: impl Fn(usize) -> D)
 where
     D: FactorScalar + PartialEq + fmt::Debug,
 {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let space = u1_mps_side_only_space();
     let data = (0..space.space().required_len().unwrap())
         .map(&values)
@@ -1137,7 +1138,7 @@ where
 
     // Left null: charge 1 null basis 6 x 2 owns the buffer, charge 2 adds
     // a 3 x 3 identity, charge 0 is absent (P = 12 + 9, fallback 21 + 12 + 3).
-    let null = left_null_dyn(&mut dense, &input).unwrap();
+    let null = left_null_dyn(engine, &mut dense, &input).unwrap();
     publication(9);
     assert_eq!(null.data().len(), 21);
     check(
@@ -1147,19 +1148,19 @@ where
     );
     // Right null: charges 0 and 1 have full column rank and are absent;
     // the charge-3 identity (2 x 2) is written into a fresh buffer.
-    let null = right_null_dyn(&mut dense, &input).unwrap();
+    let null = right_null_dyn(engine, &mut dense, &input).unwrap();
     publication(4);
     assert_eq!(null.data().len(), 4);
     check(&null, &BTreeMap::from([(q(3), 2)]), FactorSide::Right);
 
-    let Qr { q: left, r: right } = qr_full_dyn(&mut dense, &input).unwrap();
+    let Qr { q: left, r: right } = qr_full_dyn(engine, &mut dense, &input).unwrap();
     let _ = one_sided_rec.borrow().one_sided_publication();
     check(&left, &codomain, FactorSide::Left);
     check(&right, &codomain, FactorSide::Right);
-    let Lq { l: left, q: right } = lq_full_dyn(&mut dense, &input).unwrap();
+    let Lq { l: left, q: right } = lq_full_dyn(engine, &mut dense, &input).unwrap();
     check(&left, &domain, FactorSide::Left);
     check(&right, &domain, FactorSide::Right);
-    let svd = svd_full_dyn(&mut dense, &input).unwrap();
+    let svd = svd_full_dyn(engine, &mut dense, &input).unwrap();
     check(svd.u(), &codomain, FactorSide::Left);
     check(svd.vh(), &domain, FactorSide::Right);
     let probe = one_sided_rec.borrow().one_sided_publication();

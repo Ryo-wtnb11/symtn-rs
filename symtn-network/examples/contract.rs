@@ -5,6 +5,7 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use symtn_network::{contract, Network};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build()?;
     let space = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
@@ -18,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Fill each allowed charge block. Unequal indices stay zero, so both maps
     // are diagonal.
     let a: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&space], [&space], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |trees, indices| {
             if indices[0] == indices[1] {
                 f64::from(2 + trees.coupled().charge())
             } else {
@@ -26,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
     let b: TensorMap<U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(&runtime, [&space], [&space], |trees, indices| {
+        TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |trees, indices| {
             if indices[0] == indices[1] {
                 f64::from(2 - trees.coupled().charge())
             } else {
@@ -34,10 +35,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         })?;
 
-    let c = contract!([i; k] := a[i; j] * b[j; k])?;
+    let c = contract!(engine, [i; k] := a[i; j] * b[j; k])?;
     assert_eq!((c.codomain_rank(), c.domain_rank()), (1, 1));
     // A tensor's inner product with itself is its squared norm.
-    let inner = c.inner(&c)?;
+    let inner = c.inner(engine, &c)?;
     assert!((inner - 50.0).abs() < 1e-12);
     let network = Network::new(
         [["i", "j"], ["j", "k"]],
@@ -46,8 +47,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ["i", "k"],
         Some(1),
     )?;
-    let same = network.contract(&[&a, &b])?;
-    assert!(same.axpby(1.0, &c, -1.0)?.norm(2.0)? < 1e-12);
+    let same = network.contract(engine, &[&a, &b])?;
+    assert!(same.axpby(engine, 1.0, &c, -1.0)?.norm(engine, 2.0)? < 1e-12);
 
     println!(
         "result: codomain rank = {}, domain rank = {}, squared norm = {inner}",

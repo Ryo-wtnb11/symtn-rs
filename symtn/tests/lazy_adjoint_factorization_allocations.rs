@@ -21,19 +21,19 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 use crate::counting_alloc;
 
 /// Warm `f` once, then return its allocations.
-fn warm_allocs(f: impl Fn()) -> counting_alloc::Allocs {
+fn warm_allocs(mut f: impl FnMut()) -> counting_alloc::Allocs {
     f();
-    counting_alloc::measure(&f).1
+    counting_alloc::measure(f).1
 }
 
 /// Warm `f` once, then return its allocated bytes.
-fn warm_bytes(f: impl Fn()) -> i64 {
+fn warm_bytes(f: impl FnMut()) -> i64 {
     warm_allocs(f).bytes as i64
 }
 
 /// Allocation calls of `op` on `lazy` and of materialize-then-`op`.
 macro_rules! calls {
-    ($lazy:expr, |$t:ident| $op:expr) => {{
+    ($engine:ident, $lazy:expr, |$t:ident| $op:expr) => {{
         let lazy = &$lazy;
         let lazy_calls = warm_allocs(|| {
             let $t = lazy;
@@ -41,7 +41,7 @@ macro_rules! calls {
         })
         .calls;
         let eager_calls = warm_allocs(|| {
-            let materialized = lazy.materialize().unwrap();
+            let materialized = lazy.materialize($engine).unwrap();
             let $t = &materialized;
             black_box($op);
         })
@@ -52,14 +52,14 @@ macro_rules! calls {
 
 /// Bytes of `op` on `lazy` minus those of materialize-then-`op`.
 macro_rules! excess {
-    ($lazy:expr, |$t:ident| $op:expr) => {{
+    ($engine:ident, $lazy:expr, |$t:ident| $op:expr) => {{
         let lazy = &$lazy;
         let lazy_bytes = warm_bytes(|| {
             let $t = lazy;
             black_box($op);
         });
         let eager_bytes = warm_bytes(|| {
-            let materialized = lazy.materialize().unwrap();
+            let materialized = lazy.materialize($engine).unwrap();
             let $t = &materialized;
             black_box($op);
         });
@@ -70,37 +70,75 @@ macro_rules! excess {
 /// Every op on the lazy adjoint of a random `[v, v] <- [v, v]` complex
 /// tensor, for `v` at degeneracy scale 1 and 3.
 macro_rules! assert_excess_is_metadata {
-    ($mode:expr, $runtime:expr, $leg:expr) => {{
+    ($engine:ident, $mode:expr, $runtime:expr, $leg:expr) => {{
         let mut rows = Vec::new();
         let mut payload_bytes = Vec::new();
         for scale in [1usize, 3] {
             let leg = $leg(scale);
-            let parent =
-                TensorMap::<_, Complex64>::rand_with_seed(&$runtime, [&leg, &leg], [&leg, &leg], 7)
-                    .unwrap();
+            let parent = TensorMap::<_, Complex64>::rand_with_seed(
+                $engine,
+                &$runtime,
+                [&leg, &leg],
+                [&leg, &leg],
+                7,
+            )
+            .unwrap();
             payload_bytes.push(
                 (parent.dense_data().unwrap().len() * std::mem::size_of::<Complex64>()) as i64,
             );
-            let lazy = parent.adjoint().unwrap();
+            let lazy = parent.adjoint($engine).unwrap();
             let (r, c) = (&[0, 1][..], &[2, 3][..]);
             rows.push([
-                ("svd_vals", excess!(lazy, |t| t.svd_vals(r, c).unwrap())),
+                (
+                    "svd_vals",
+                    excess!($engine, lazy, |t| t.svd_vals($engine, r, c).unwrap()),
+                ),
                 (
                     "svd_compact",
-                    excess!(lazy, |t| t.svd_compact(r, c).unwrap()),
+                    excess!($engine, lazy, |t| t.svd_compact($engine, r, c).unwrap()),
                 ),
-                ("svd_full", excess!(lazy, |t| t.svd_full(r, c).unwrap())),
-                ("pinv", excess!(lazy, |t| t.pinv(r, c, 1.0e-12).unwrap())),
-                ("qr_compact", excess!(lazy, |t| t.qr_compact(r, c).unwrap())),
-                ("lq_compact", excess!(lazy, |t| t.lq_compact(r, c).unwrap())),
-                ("lq_full", excess!(lazy, |t| t.lq_full(r, c).unwrap())),
-                ("left_null", excess!(lazy, |t| t.left_null(r, c).unwrap())),
-                ("left_polar", excess!(lazy, |t| t.left_polar(r, c).unwrap())),
-                ("inv", excess!(lazy, |t| t.inv(r, c).unwrap())),
+                (
+                    "svd_full",
+                    excess!($engine, lazy, |t| t.svd_full($engine, r, c).unwrap()),
+                ),
+                (
+                    "pinv",
+                    excess!($engine, lazy, |t| t.pinv($engine, r, c, 1.0e-12).unwrap()),
+                ),
+                (
+                    "qr_compact",
+                    excess!($engine, lazy, |t| t.qr_compact($engine, r, c).unwrap()),
+                ),
+                (
+                    "lq_compact",
+                    excess!($engine, lazy, |t| t.lq_compact($engine, r, c).unwrap()),
+                ),
+                (
+                    "lq_full",
+                    excess!($engine, lazy, |t| t.lq_full($engine, r, c).unwrap()),
+                ),
+                (
+                    "left_null",
+                    excess!($engine, lazy, |t| t.left_null($engine, r, c).unwrap()),
+                ),
+                (
+                    "left_polar",
+                    excess!($engine, lazy, |t| t.left_polar($engine, r, c).unwrap()),
+                ),
+                (
+                    "inv",
+                    excess!($engine, lazy, |t| t.inv($engine, r, c).unwrap()),
+                ),
             ]);
             for (name, (lazy_calls, eager_calls)) in [
-                ("lq_compact", calls!(lazy, |t| t.lq_compact(r, c).unwrap())),
-                ("lq_full", calls!(lazy, |t| t.lq_full(r, c).unwrap())),
+                (
+                    "lq_compact",
+                    calls!($engine, lazy, |t| t.lq_compact($engine, r, c).unwrap()),
+                ),
+                (
+                    "lq_full",
+                    calls!($engine, lazy, |t| t.lq_full($engine, r, c).unwrap()),
+                ),
             ] {
                 eprintln!(
                     "{} {name}: lazy/materialize-then-factor calls {lazy_calls}/{eager_calls} \
@@ -148,11 +186,12 @@ macro_rules! assert_excess_is_metadata {
 
 #[test]
 fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(SU2FusionRule);
     let leg = |scale: usize| {
         GradedSpace::try_new(
@@ -162,19 +201,20 @@ fn multiplicity_free_lazy_adjoint_factorizations_add_no_payload_allocation() {
         )
         .unwrap()
     };
-    assert_excess_is_metadata!("MF SU(2)", runtime, leg);
+    assert_excess_is_metadata!(engine, "MF SU(2)", runtime, leg);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
     use symtn::sector::LieGroupFusionRule;
 
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let runtime = Runtime::builder().build().unwrap();
     let provider =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
     let leg = |scale: usize| {
@@ -188,5 +228,5 @@ fn checked_lazy_adjoint_factorizations_add_no_payload_allocation() {
         )
         .unwrap()
     };
-    assert_excess_is_metadata!("checked SU(3)", runtime, leg);
+    assert_excess_is_metadata!(engine, "checked SU(3)", runtime, leg);
 }

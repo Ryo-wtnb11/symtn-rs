@@ -26,6 +26,7 @@
 
 use std::hint::black_box;
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
@@ -34,9 +35,9 @@ use crate::counting_alloc;
 
 /// `(u, spec)` of a fixture over `(runtime, V, X, fill)`.
 macro_rules! fixture {
-    (permuted, $runtime:expr, $v:expr, $x:expr, $value:expr) => {
+    ($engine:ident, permuted, $runtime:expr, $v:expr, $x:expr, $value:expr) => {
         (
-            TensorMap::from_subblock_fn($runtime, [$v, $x, $v], [], $value).unwrap(),
+            TensorMap::from_subblock_fn($engine, $runtime, [$v, $x, $v], [], $value).unwrap(),
             ContractSpec {
                 lhs: &[1, 2],
                 rhs: &[0, 2],
@@ -45,9 +46,9 @@ macro_rules! fixture {
             },
         )
     };
-    (reversed, $runtime:expr, $v:expr, $x:expr, $value:expr) => {
+    ($engine:ident, reversed, $runtime:expr, $v:expr, $x:expr, $value:expr) => {
         (
-            TensorMap::from_subblock_fn($runtime, [$v, $v], [$x], $value).unwrap(),
+            TensorMap::from_subblock_fn($engine, $runtime, [$v, $v], [$x], $value).unwrap(),
             ContractSpec {
                 lhs: &[1, 2],
                 rhs: &[1, 0],
@@ -60,7 +61,7 @@ macro_rules! fixture {
 
 /// The reduced entries of `$got` and `$want` agree (both nonzero).
 macro_rules! assert_close {
-    ($got:expr, $want:expr) => {{
+    ($engine:ident, $got:expr, $want:expr) => {{
         let entries = |t: &TensorMap<_, f64>| {
             t.subblocks()
                 .unwrap()
@@ -91,19 +92,20 @@ macro_rules! assert_close {
     }};
 }
 
-/// Asserts, at two degeneracy scales, that one call on a trimmed runtime
+/// Asserts, at two degeneracy scales, that one warm call
 /// allocates nothing of exactly `|p|` bytes and at least one buffer of
 /// `|u|` bytes, and (oracle: materialize `a`, then contract) that its value
 /// is unchanged; `$spaces(scale)` gives `(V, X)`.
 macro_rules! assert_borrowed {
-    ($name:expr, $fixture:ident, $spaces:expr) => {{
+    ($engine:ident, $name:expr, $fixture:ident, $spaces:expr) => {{
         for scale in [1, 4] {
             let (v, x) = $spaces(scale);
-            let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+            let runtime = Runtime::builder().build().unwrap();
             let value = |_: &_, index: &[usize]| 0.25 + index.iter().sum::<usize>() as f64 * 0.125;
             let p: TensorMap<_, f64> =
-                TensorMap::from_subblock_fn(&runtime, [&v, &v], [&v], value).unwrap();
-            let (u, spec): (TensorMap<_, f64>, _) = fixture!($fixture, &runtime, &v, &x, value);
+                TensorMap::from_subblock_fn($engine, &runtime, [&v, &v], [&v], value).unwrap();
+            let (u, spec): (TensorMap<_, f64>, _) =
+                fixture!($engine, $fixture, &runtime, &v, &x, value);
             let bytes = |t: &TensorMap<_, f64>| {
                 t.subblocks()
                     .unwrap()
@@ -117,24 +119,27 @@ macro_rules! assert_borrowed {
             if stringify!($fixture) == "reversed" {
                 assert!(u_bytes < p_bytes);
             }
-            let a = p.adjoint().unwrap();
-            let call = || {
-                black_box(a.contract(&u, &spec).unwrap());
+            let a = p.adjoint($engine).unwrap();
+            let call = |$engine: &mut dyn Engine| {
+                black_box(a.contract($engine, &u, &spec).unwrap());
             };
-            let got = a.contract(&u, &spec).unwrap();
-            let want = a.materialize().unwrap().contract(&u, &spec).unwrap();
-            assert_close!(&got, &want);
-            call();
-            call();
-            runtime.trim_host_contract_scratch();
-            let ((), p_allocs) = counting_alloc::measure_matching(p_bytes..=p_bytes, call);
-            let retained = runtime.host_contract_scratch_bytes();
-            runtime.trim_host_contract_scratch();
-            let ((), u_allocs) = counting_alloc::measure_matching(u_bytes..=u_bytes, call);
+            let got = a.contract($engine, &u, &spec).unwrap();
+            let want = a
+                .materialize($engine)
+                .unwrap()
+                .contract($engine, &u, &spec)
+                .unwrap();
+            assert_close!($engine, &got, &want);
+            call($engine);
+            call($engine);
+            let ((), p_allocs) =
+                counting_alloc::measure_matching(p_bytes..=p_bytes, || call($engine));
+            let ((), u_allocs) =
+                counting_alloc::measure_matching(u_bytes..=u_bytes, || call($engine));
             let (p_copies, u_copies) = (p_allocs.matched_calls, u_allocs.matched_calls);
             eprintln!(
                 "{} {} x{scale}: |p| {p_bytes} B copied {p_copies}x, |u| {u_bytes} B copied \
-                 {u_copies}x; call {} allocs {} B peak {} B; retained scratch {retained} B",
+                 {u_copies}x; call {} allocs {} B peak {} B",
                 $name,
                 stringify!($fixture),
                 p_allocs.calls,
@@ -206,38 +211,44 @@ fn checked_su2_spaces(
 
 #[test]
 fn su2_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("SU(2)", permuted, su2_spaces);
+    assert_borrowed!(engine, "SU(2)", permuted, su2_spaces);
 }
 
 #[test]
 fn u1_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("U(1)", permuted, u1_spaces);
+    assert_borrowed!(engine, "U(1)", permuted, u1_spaces);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_identity_adjoint_is_borrowed_on_the_dynamic_tree_route() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("checked SU(2)", permuted, checked_su2_spaces);
+    assert_borrowed!(engine, "checked SU(2)", permuted, checked_su2_spaces);
 }
 
 #[test]
 fn su2_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("SU(2)", reversed, su2_spaces);
+    assert_borrowed!(engine, "SU(2)", reversed, su2_spaces);
 }
 
 #[test]
 fn u1_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("U(1)", reversed, u1_spaces);
+    assert_borrowed!(engine, "U(1)", reversed, u1_spaces);
 }
 
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn checked_su2_selection_prices_a_borrowable_identity_adjoint_as_free() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    assert_borrowed!("checked SU(2)", reversed, checked_su2_spaces);
+    assert_borrowed!(engine, "checked SU(2)", reversed, checked_su2_spaces);
 }

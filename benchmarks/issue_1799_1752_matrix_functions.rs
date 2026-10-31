@@ -112,7 +112,6 @@ macro_rules! cases {
 fn main() {
     let runtime = Runtime::builder()
         .linalg_backend(LinalgBackend::Faer)
-        .dense_threads(1)
         .build()
         .unwrap();
     println!("family,dtype,sectors,k,operation,median_ns,alloc_calls,alloc_bytes,peak_live_bytes");

@@ -4,10 +4,12 @@ use core::ops::Add;
 use core::ops::Mul;
 use std::sync::{Arc, Weak};
 
+#[cfg(not(test))]
+use crate::host_pool::join as pool_join;
+use crate::host_pool::Exec;
 #[cfg(test)]
 use allocation_oracle::join as pool_join;
-#[cfg(not(test))]
-use rayon::join as pool_join;
+use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
 #[cfg(any(test, feature = "testing"))]
@@ -18,8 +20,8 @@ use symtn_core::{BlockStructure, Placement};
 use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
-use crate::host_scratch::HostScratchBuffer;
-use crate::kernel_adapter::for_each_fused_span;
+use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
+use crate::kernel_adapter::write_fused_uninit;
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::scalar::scale_value;
 use crate::storage_scratch::TreeTransformScratchBuffers;
@@ -30,7 +32,7 @@ use crate::transform_structure::{
     TreeTransformScatterReplay,
 };
 use crate::{
-    BakedFusedLayout, ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
+    ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
     RecouplingCoefficientAction, ReportsPlacement, TransformScale, TreeTransformBlock,
     TreeTransformLayoutTable, TreeTransformReplayProfile, TreeTransformStructure,
 };
@@ -126,7 +128,6 @@ mod allocation_oracle {
     }
 
     pub(super) fn with_session<R>(action: impl FnOnce() -> R) -> (R, usize) {
-        assert!(rayon::current_thread_index().is_none());
         assert!(!is_measured());
         assert!(!SESSION_ACTIVE.with(Cell::get));
         let restore = RestoreSession(SESSION_ACTIVE.with(|active| active.replace(true)));
@@ -158,28 +159,33 @@ mod allocation_oracle {
         JOINS.load(Ordering::Relaxed)
     }
 
-    pub(super) fn join<A, B, RA, RB>(left: A, right: B) -> (RA, RB)
+    pub(super) fn join<A, B, RA, RB>(
+        exec: crate::host_pool::Exec<'_>,
+        left: A,
+        right: B,
+    ) -> (RA, RB)
     where
-        A: FnOnce() -> RA + Send,
-        B: FnOnce() -> RB + Send,
-        RA: Send,
-        RB: Send,
+        A: FnOnce(crate::host_pool::Exec<'_>) -> RA + Send + Sync,
+        B: FnOnce(crate::host_pool::Exec<'_>) -> RB + Send + Sync,
+        RA: Send + Sync,
+        RB: Send + Sync,
     {
         let measured = is_measured();
         if measured {
             JOINS.fetch_add(1, Ordering::Relaxed);
         }
         let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
-        let result = rayon::join(
-            || {
+        let result = crate::host_pool::join(
+            exec,
+            |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = left();
+                let result = left(exec);
                 drop(restore);
                 result
             },
-            || {
+            |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = right();
+                let result = right(exec);
                 drop(restore);
                 result
             },
@@ -310,7 +316,10 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
-    fused_indices: Vec<usize>,
+    // The calling lane's fused index, one entry per fused axis; inline up to
+    // eight, the rank metadata width, so a fresh per-call workspace allocates
+    // none. Forked lanes below that rank keep their own (`LaneIndex`).
+    fused_indices: smallvec::SmallVec<[usize; 8]>,
     member_shape: Vec<usize>,
     member_dst_strides: Vec<isize>,
     member_src_strides: Vec<isize>,
@@ -330,7 +339,7 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
-            fused_indices: Vec::new(),
+            fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
             member_src_strides: Vec::new(),
@@ -356,7 +365,7 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.chunk_runs.capacity()
                 + self.chunk_scatter_groups.capacity()
-                + self.fused_indices.capacity()
+                + self.fused_indices_heap_capacity()
                 + self.member_shape.capacity(),
             std::mem::size_of::<usize>(),
         ) + bytes(
@@ -407,12 +416,26 @@ impl<T> HostTreeTransformWorkspace<T> {
     where
         T: Clone,
     {
-        self.packed
-            .source_mut()
-            .resize_filled(source_len, zero.clone());
-        self.packed
-            .destination_mut()
-            .resize_filled(destination_len, zero);
+        prepare_packed_buffer(self.packed.source_mut(), source_len, zero.clone());
+        prepare_packed_buffer(self.packed.destination_mut(), destination_len, zero);
+    }
+
+    /// Sizes the packed destination alone, for a replay whose source pack
+    /// overwrites its scratch without a fill.
+    fn prepare_packed_destination(&mut self, len: usize, zero: T)
+    where
+        T: Clone,
+    {
+        prepare_packed_buffer(self.packed.destination_mut(), len, zero);
+    }
+
+    /// Heap elements `fused_indices` owns (none while inline).
+    fn fused_indices_heap_capacity(&self) -> usize {
+        if self.fused_indices.spilled() {
+            self.fused_indices.capacity()
+        } else {
+            0
+        }
     }
 
     fn prepare_fused_indices(
@@ -420,11 +443,88 @@ impl<T> HostTreeTransformWorkspace<T> {
         threads: usize,
         max_fused_rank: usize,
     ) -> Result<(), OperationError> {
-        let len = checked_fused_index_len(threads, max_fused_rank)?;
+        let len =
+            checked_fused_index_len(fused_index_lanes(threads, max_fused_rank), max_fused_rank)?;
         if len > self.fused_indices.len() {
             self.fused_indices.resize(len, 0);
         }
         Ok(())
+    }
+}
+
+/// Sizes one pack buffer to `len` zero-initialised elements.
+///
+/// Why not `resize_filled` when the buffer must grow past its capacity: that
+/// reallocates, copies contents every reader overwrites, and then fills the
+/// new tail element by element. A per-call workspace grows from empty on
+/// every call, so that fill was one extra pass over the whole chunk scratch
+/// before the pack overwrote it. A fresh `filled` allocation lets std zero
+/// real scalars through the allocator (`alloc_zeroed`): fresh pages need no
+/// pass, and a reused block gets one bulk zeroing instead of the element loop.
+/// Complex scalars still take the element loop (std has no zeroed path for
+/// them).
+fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize, zero: T) {
+    if len > buffer.capacity() {
+        *buffer = HostScratchBuffer::filled(len, zero);
+    } else {
+        buffer.resize_filled(len, zero);
+    }
+}
+
+/// Fused-index entries a lane keeps inline: the rank metadata width.
+const INLINE_FUSED_RANK: usize = 8;
+
+/// Lanes whose fused indices the shared workspace buffer holds: every lane
+/// above the inline rank, only the calling lane otherwise.
+///
+/// Why not always one shared `threads * rank` buffer: an eager call's
+/// workspace is per call, and that buffer outgrows its inline capacity as
+/// soon as the engine is wider than one, so every parallel call allocated on
+/// the caller thread what the serial call does not. Up to the inline rank a
+/// forked lane keeps its index on its own stack instead ([`LaneIndex`]);
+/// above it the index spills anyway, and one shared buffer keeps a warm
+/// replay allocation-free.
+fn fused_index_lanes(threads: usize, max_fused_rank: usize) -> usize {
+    if max_fused_rank <= INLINE_FUSED_RANK {
+        1
+    } else {
+        threads
+    }
+}
+
+/// The fused-index scratch of the second lane of a fork: a slice of the
+/// shared buffer when it holds every lane, or the lane's own inline index.
+enum LaneIndex<'a> {
+    Shared(&'a mut [usize]),
+    Own(smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>),
+}
+
+impl LaneIndex<'_> {
+    fn get(&mut self) -> &mut [usize] {
+        match self {
+            Self::Shared(indices) => indices,
+            Self::Own(indices) => indices,
+        }
+    }
+}
+
+/// Splits one fork's fused-index scratch: the first `left_threads` lanes keep
+/// the front of `fused_indices`; the rest take the back when the buffer holds
+/// every lane, and their own inline index otherwise.
+fn split_lane_indices(
+    fused_indices: &mut [usize],
+    left_threads: usize,
+    threads: usize,
+    max_fused_rank: usize,
+) -> (&mut [usize], LaneIndex<'_>) {
+    if fused_indices.len() >= threads * max_fused_rank {
+        let (left, right) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+        (left, LaneIndex::Shared(right))
+    } else {
+        (
+            fused_indices,
+            LaneIndex::Own(smallvec::SmallVec::from_elem(0, max_fused_rank)),
+        )
     }
 }
 
@@ -449,18 +549,31 @@ impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {
 #[cfg(test)]
 mod allocation_oracle_tests {
     use super::{allocation_oracle, replay_join};
+    use crate::host_pool::TestPool;
     use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    /// A two-worker engine, so joins really fork. Built and warmed before
+    /// any measured scope: building an engine and its first fork allocate.
+    fn two_slots() -> TestPool {
+        let mut engine = crate::host_pool::test_pool(2);
+        engine.with_exec(|exec| allocation_oracle::join(exec, |_| (), |_| ()));
+        engine
+    }
 
     #[test]
     fn allocation_oracle_inherits_and_restores_join_scopes() {
+        let mut engine = two_slots();
         assert!(!allocation_oracle::is_measured());
         let (_, allocations) = allocation_oracle::with_session(|| {
             allocation_oracle::with_measurement(|| {
                 assert!(allocation_oracle::is_measured());
-                allocation_oracle::join(
-                    || assert!(allocation_oracle::is_measured()),
-                    || assert!(allocation_oracle::is_measured()),
-                );
+                engine.with_exec(|exec| {
+                    allocation_oracle::join(
+                        exec,
+                        |_| assert!(allocation_oracle::is_measured()),
+                        |_| assert!(allocation_oracle::is_measured()),
+                    )
+                });
                 assert!(allocation_oracle::is_measured());
             })
         });
@@ -470,27 +583,36 @@ mod allocation_oracle_tests {
 
     #[test]
     fn allocation_oracle_leaves_inactive_joins_unmeasured() {
-        allocation_oracle::join(
-            || assert!(!allocation_oracle::is_measured()),
-            || assert!(!allocation_oracle::is_measured()),
-        );
+        let mut engine = two_slots();
+        engine.with_exec(|exec| {
+            allocation_oracle::join(
+                exec,
+                |_| assert!(!allocation_oracle::is_measured()),
+                |_| assert!(!allocation_oracle::is_measured()),
+            )
+        });
         assert!(!allocation_oracle::is_measured());
     }
 
     #[test]
     fn allocation_oracle_restores_nested_worker_scopes() {
+        let mut engine = two_slots();
         let (_, allocations) = allocation_oracle::with_session(|| {
             allocation_oracle::with_measurement(|| {
-                allocation_oracle::join(
-                    || {
-                        allocation_oracle::join(
-                            || assert!(allocation_oracle::is_measured()),
-                            || assert!(allocation_oracle::is_measured()),
-                        );
-                        assert!(allocation_oracle::is_measured());
-                    },
-                    || assert!(allocation_oracle::is_measured()),
-                );
+                engine.with_exec(|exec| {
+                    allocation_oracle::join(
+                        exec,
+                        |exec| {
+                            allocation_oracle::join(
+                                exec,
+                                |_| assert!(allocation_oracle::is_measured()),
+                                |_| assert!(allocation_oracle::is_measured()),
+                            );
+                            assert!(allocation_oracle::is_measured());
+                        },
+                        |_| assert!(allocation_oracle::is_measured()),
+                    )
+                });
                 assert!(allocation_oracle::is_measured());
             })
         });
@@ -527,28 +649,18 @@ mod allocation_oracle_tests {
     }
 
     #[test]
-    fn allocation_oracle_rejects_worker_sessions() {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(1)
-            .build()
-            .unwrap();
-        let worker_session = pool
-            .install(|| catch_unwind(AssertUnwindSafe(|| allocation_oracle::with_session(|| ()))));
-        assert!(worker_session.is_err());
-
-        let (_, allocations) = allocation_oracle::with_session(|| ());
-        assert_eq!(allocations, 0);
-    }
-
-    #[test]
     fn allocation_oracle_restores_after_a_panicking_replay_join() {
+        let mut engine = two_slots();
         let panic = catch_unwind(AssertUnwindSafe(|| {
             allocation_oracle::with_session(|| {
                 allocation_oracle::with_measurement(|| {
-                    replay_join(
-                        || panic!("expected replay join panic"),
-                        || assert!(allocation_oracle::is_measured()),
-                    );
+                    engine.with_exec(|exec| {
+                        replay_join(
+                            exec,
+                            |_| panic!("expected replay join panic"),
+                            |_| assert!(allocation_oracle::is_measured()),
+                        )
+                    });
                 })
             });
         }));

@@ -16,16 +16,17 @@ where
     /// # Errors
     ///
     /// [`Error::InvalidArgument`] on a tensor with legs.
-    pub fn scalar(&self) -> Result<D, Error> {
+    pub fn scalar(&self, engine: &mut dyn Engine) -> Result<D, Error> {
         if self.rank() != 0 {
             return Err(Error::InvalidArgument(format!(
                 "scalar() requires a rank-0 tensor, got rank {}",
                 self.rank()
             )));
         }
+        admit_host_engine(engine)?;
         // A rank-0 payload holds at most one element; summing gives the empty
         // payload its zero for free.
-        let materialized = self.materialized_tensor_uncached()?;
+        let materialized = self.materialized_tensor_uncached(engine)?;
         Ok(materialized
             .owned_body()
             .expect("uncached materialization is owned")
@@ -210,27 +211,30 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(&runtime, [&v], [&v])?;
-    /// let twice = id.axpby(1.0, &id, 1.0)?;
-    /// assert!((twice.norm(2.0)? - 2.0_f64.sqrt() * 2.0).abs() < 1e-12);
-    /// assert_eq!(twice.norm(f64::INFINITY)?, 2.0);
-    /// assert_eq!(id.inner(&id)?, 2.0);
-    /// assert_eq!(id.tr()?, 2.0);
+    /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
+    /// let twice = id.axpby(engine, 1.0, &id, 1.0)?;
+    /// assert!((twice.norm(engine, 2.0)? - 2.0_f64.sqrt() * 2.0).abs() < 1e-12);
+    /// assert_eq!(twice.norm(engine, f64::INFINITY)?, 2.0);
+    /// assert_eq!(id.inner(engine, &id)?, 2.0);
+    /// assert_eq!(id.tr(engine)?, 2.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn norm(&self, p: f64) -> Result<f64, FacadeError<R>> {
+    pub fn norm(&self, engine: &mut dyn Engine, p: f64) -> Result<f64, FacadeError<R>> {
         // Checked before any dispatch so an invalid `p` is rejected the same
         // way on every representation and storage.
         validate_norm_p(p)?;
         if let Some(spectrum) = S::as_host(EXEC, self).and_then(TensorMap::spectrum) {
+            admit_host_engine(engine)?;
             return compact_norm(spectrum, self.logical_space().provider(), p);
         }
         // Every entrywise norm is adjoint invariant: reduce the parent's
         // payload without materializing the logical adjoint.
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
             return S::dense_norm(
+                engine,
                 EXEC,
                 &Self {
                     runtime: self.runtime.clone(),
@@ -239,7 +243,7 @@ where
                 p,
             );
         }
-        S::dense_norm(EXEC, self, p)
+        S::dense_norm(engine, EXEC, self, p)
     }
 
     /// Returns the quantum-dimension-weighted Frobenius inner product
@@ -268,16 +272,23 @@ where
     /// device first (#1383). A lazy adjoint CUDA operand returns
     /// [`Error::UnsupportedOnDevice`].
     #[doc(alias = "dot")]
-    pub fn inner<'a>(&self, other: impl Into<TensorRef<'a, R, D, S>>) -> Result<D, FacadeError<R>> {
+    pub fn inner<'a>(
+        &self,
+        engine: &mut dyn Engine,
+        other: impl Into<TensorRef<'a, R, D, S>>,
+    ) -> Result<D, FacadeError<R>> {
         let other = other.into().operand()?;
         let other = &*other;
         super::linear_ops::require_same_runtime_and_space(self, other)?;
         if let (Some(lhs), Some(rhs)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
+            if lhs.spectrum().is_some() || rhs.spectrum().is_some() {
+                admit_host_engine(engine)?;
+            }
             if let Some(value) = lhs.compact_inner_arms(rhs)? {
                 return Ok(value);
             }
         }
-        S::dense_inner(EXEC, self, other)
+        S::dense_inner(engine, EXEC, self, other)
     }
 }
 
@@ -334,11 +345,17 @@ where
     R::Mode: TypedSpaceModeDispatch<R>,
 {
     /// `norm(t, p)` of an owned dense tensor, `p` already validated.
-    fn dense_norm(_: ExecToken, t: &TensorMap<R, D, Self>, p: f64) -> Result<f64, FacadeError<R>>;
+    fn dense_norm(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D, Self>,
+        p: f64,
+    ) -> Result<f64, FacadeError<R>>;
 
     /// `inner(x, y)` of two dense operands, owned or lazy adjoint, on one
     /// runtime and one space.
     fn dense_inner(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         y: &TensorMap<R, D, Self>,
@@ -351,7 +368,13 @@ where
     R::Mode: TypedSpaceModeDispatch<R>,
     D: TensorScalar,
 {
-    fn dense_norm(_: ExecToken, t: &TensorMap<R, D>, p: f64) -> Result<f64, FacadeError<R>> {
+    fn dense_norm(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D>,
+        p: f64,
+    ) -> Result<f64, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let provider = t.logical_space().provider();
         let payload = t
             .owned_body()
@@ -400,11 +423,12 @@ where
     }
 
     fn dense_inner(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D>,
         y: &TensorMap<R, D>,
     ) -> Result<D, FacadeError<R>> {
-        let _host_pool = x.runtime.enter_host_pool();
+        admit_host_engine(engine)?;
         let provider = x.logical_space().provider();
         if matches!(&x.repr, TypedTensorRepr::Adjoint(_))
             || matches!(&y.repr, TypedTensorRepr::Adjoint(_))
@@ -588,18 +612,20 @@ where
     /// use symtn::sector::{TableRule, TableSector};
     /// use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let tau = GradedSpace::try_new(
     ///     Arc::new(TableRule::fibonacci()),
     ///     [(TableSector::new(2), 1)],
     /// )?;
     /// let id: TensorMap<TableRule, Complex64> =
-    ///     TensorMap::isomorphism(&runtime, [&tau], [&tau])?;
+    ///     TensorMap::isomorphism(engine, &runtime, [&tau], [&tau])?;
     /// let golden_ratio = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    /// assert!((id.tr()? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);
+    /// assert!((id.tr(engine)? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn tr(&self) -> Result<D, FacadeError<R>> {
+    pub fn tr(&self, engine: &mut dyn Engine) -> Result<D, FacadeError<R>> {
+        admit_host_engine(engine)?;
         let hom = self.logical_space().space().homspace();
         // The weighted trace below indexes codomain axis `i` together with
         // domain axis `nout + i` and would be meaningless without this check.
@@ -626,7 +652,7 @@ where
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
             return Ok(FactorScalar::adjoint(
-                Self::adjoint_parent(view, &self.runtime).tr()?,
+                Self::adjoint_parent(view, &self.runtime).tr(engine)?,
             ));
         }
         Ok(D::from_complex64(weighted_trace(

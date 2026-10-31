@@ -3,7 +3,7 @@
 //!
 //! What this file owns that the `f64`/`Complex64` suites do not: the paths
 //! that were typed by `f64` rather than by the payload's real lane — the
-//! spectrum and reduction downloads, the rank-0 divisor of the Hermitian
+//! spectrum and reduction downloads, the normalizers of the Hermitian
 //! test, and its tolerance — plus complex device QR, the last
 //! dtype gate (tenferro-rs#1833, lifted by #1271).
 //!
@@ -136,8 +136,9 @@ impl ProbeScalar for Complex64 {
     }
 }
 
-fn context() -> CudaDenseContext {
-    CudaDenseContext::new(0).expect("CUDA device 0 must be available for the device suite")
+fn engine() -> symtn_dense::CudaEngine {
+    symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0))
+        .expect("CUDA device 0 must be available for the device suite")
 }
 
 fn upload<D: ProbeScalar>(ctx: &CudaDenseContext, data: &[D]) -> CudaDenseStorage {
@@ -333,7 +334,8 @@ fn gemm_sweep<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_gemm_matches_a_double_precision_oracle_for_every_dtype_and_op_pair() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     gemm_sweep::<f32>(&mut ctx);
     gemm_sweep::<f64>(&mut ctx);
     gemm_sweep::<Complex32>(&mut ctx);
@@ -547,7 +549,8 @@ fn assert_orthonormal_rows<D: ProbeScalar>(
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_svd_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for &(rows, cols) in &[(5usize, 3usize), (3, 5), (4, 4)] {
         svd_case::<f32>(&mut ctx, rows, cols);
         svd_case::<f64>(&mut ctx, rows, cols);
@@ -559,7 +562,8 @@ fn region_svd_obeys_its_laws_for_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_qr_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for &(rows, cols) in &[(5usize, 3usize), (3, 5), (4, 4)] {
         qr_case::<f32>(&mut ctx, rows, cols);
         qr_case::<f64>(&mut ctx, rows, cols);
@@ -571,7 +575,8 @@ fn region_qr_obeys_its_laws_for_every_dtype() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn region_eigh_obeys_its_laws_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     for n in [4usize, 6] {
         eigh_case::<f32>(&mut ctx, n);
         eigh_case::<f64>(&mut ctx, n);
@@ -581,8 +586,8 @@ fn region_eigh_obeys_its_laws_for_every_dtype() {
 }
 
 // ---------------------------------------------------------------------------
-// The real lane itself: spectra widened to f64, and the rank-0 divisor typed
-// by the lane rather than by f64 or by the payload.
+// The real lane itself: spectra widened to f64, and the Hermitian normalizers
+// typed by the payload rather than by f64.
 // ---------------------------------------------------------------------------
 
 /// A device spectrum of a single-precision payload comes back as `F32` and is
@@ -632,18 +637,19 @@ fn spectrum_widening_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn device_spectra_are_widened_to_f64_for_every_dtype() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     spectrum_widening_case::<f32>(&mut ctx);
     spectrum_widening_case::<f64>(&mut ctx);
     spectrum_widening_case::<Complex32>(&mut ctx);
     spectrum_widening_case::<Complex64>(&mut ctx);
 }
 
-/// The Hermitian test divides the block by a rank-0 **real** scalar of the
-/// payload's lane. An `f64` divisor against an `F32`/`C32` block and a
-/// payload-typed complex divisor are both rejected by Tenferro, so a block
-/// this test admits is evidence that the divisor is typed by the lane: the
-/// whole chain would error out otherwise, not merely answer differently.
+/// The Hermitian test multiplies the block by power-of-two normalizers in the
+/// payload's own dtype, and reduces in the payload's real lane. Tenferro
+/// rejects an operand of another dtype, so a block this test admits is
+/// evidence that every operand is typed by the payload: the whole chain would
+/// error out otherwise, not merely answer differently.
 /// An `n x n` block that is Hermitian by construction — element `(row, col)`
 /// and `(col, row)` are built from the same pair of magnitudes with the
 /// imaginary part negated — scaled by an exact power of two so no rounding is
@@ -777,7 +783,8 @@ fn hermitian_tolerance_case<D: ProbeScalar>(ctx: &mut CudaDenseContext) {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn the_hermitian_rule_scales_with_the_payload_real_lane() {
-    let mut ctx = context();
+    let mut engine = engine();
+    let mut ctx = CudaDenseContext::new(&mut engine).unwrap();
     hermitian_admits_an_exactly_hermitian_block::<f32>(&mut ctx);
     hermitian_admits_an_exactly_hermitian_block::<f64>(&mut ctx);
     hermitian_admits_an_exactly_hermitian_block::<Complex32>(&mut ctx);
@@ -823,7 +830,8 @@ fn the_hermitian_rule_scales_with_the_payload_real_lane() {
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn every_admitted_dtype_reports_its_own_tag_and_rejects_the_others() {
-    let ctx = context();
+    let mut engine = engine();
+    let ctx = CudaDenseContext::new(&mut engine).unwrap();
     let single = upload::<f32>(&ctx, &[1.0f32, 2.0, 3.0, 4.0]);
     let single_complex = upload::<Complex32>(&ctx, &[Complex32::new(1.0, -1.0); 4]);
 

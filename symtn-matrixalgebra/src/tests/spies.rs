@@ -428,12 +428,13 @@ impl Observer for EighCallSpy {
 /// The compiled default provider, so every feature set exercises the direct
 /// full-SVD path it actually ships; `None` only where no provider has one.
 fn native_full_svd_executor() -> Option<symtn_dense::DefaultDenseExecutor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let mut executor = symtn_dense::DefaultDenseExecutor::new();
     if executor.supports_svd_full() {
         return Some(executor);
     }
     assert!(matches!(
-        executor.svd_full_owned(DenseOwned::F64(vec![1.0]), 1, 1),
+        executor.svd_full_owned(engine, DenseOwned::F64(vec![1.0]), 1, 1),
         Err(DenseError::Unsupported {
             op: "svd_full_owned",
             ..
@@ -856,6 +857,7 @@ where
 
 #[test]
 fn scripted_default_eig_vals_reaches_the_forwarded_eig() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the trait's default `eig_vals` calls `eig`; with `EigVals` at
     // `Default` and `Eig` at `Forward`, the scripted executor routes it back
     // through its own `eig`, so the values come from the wrapped backend and
@@ -863,7 +865,7 @@ fn scripted_default_eig_vals_reaches_the_forwarded_eig() {
     let mut dense = ScriptedExecutor::<CountingDense>::default();
     let data = [2.0_f64, 0.0, 0.0, -1.0];
     let input = DenseRead::F64(symtn_dense::DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap());
-    let values = dense.eig_vals(input).unwrap();
+    let values = dense.eig_vals(engine, input).unwrap();
     assert_eq!(values.shape(), [2]);
     assert_eq!(dense.counts().eig_vals, 1);
     assert_eq!(dense.counts().eig, 1);

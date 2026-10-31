@@ -2,13 +2,13 @@ use super::*;
 
 #[test]
 fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eigh_full_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -22,9 +22,11 @@ fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
     )
     .unwrap();
     let densified = probe::record();
-    let Eigh { d, v } = input.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let Eigh { d, v } = input
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(
-        d.diagview().unwrap()[0].values,
+        d.diagview(engine).unwrap()[0].values,
         vec![
             Complex64::new(-2.0, 0.0),
             Complex64::new(1.0, 0.0),
@@ -35,18 +37,22 @@ fn compact_diagonal_eigh_full_skips_dense_input_and_solver() {
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
     let densified = probe::record();
-    let _ = input.eigh_full(&[1], &[0], HermitianTol::DEFAULT).unwrap();
+    let _ = input
+        .eigh_full(engine, &[1], &[0], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
 }
 
 #[test]
 fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     macro_rules! check {
-        ($dtype:ty, $values:expr, $sorted:expr, $zero:expr, $one:expr) => {{
+        ($engine:ident, $dtype:ty, $values:expr, $sorted:expr, $zero:expr, $one:expr) => {{
             let input: TensorMap<_, $dtype> = TensorMap::diagonal(
+                $engine,
                 &runtime,
                 &leg,
                 [SectorSpectrum {
@@ -55,17 +61,19 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
                 }],
             )
             .unwrap();
-            let saved = input.diagview().unwrap();
+            let saved = input.diagview($engine).unwrap();
             let dense = input
-                .materialize()
+                .materialize($engine)
                 .unwrap()
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap();
             let densified = probe::record();
-            let Eigh { d, v } = input.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+            let Eigh { d, v } = input
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
+                .unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), saved);
-            assert_eq!(d.diagview().unwrap()[0].values, $sorted);
+            assert_eq!(input.diagview($engine).unwrap(), saved);
+            assert_eq!(d.diagview($engine).unwrap()[0].values, $sorted);
             assert_eq!(d.codomain(), v.domain());
             assert_eq!(d.domain(), v.domain());
             assert_eq!(v.codomain(), input.codomain());
@@ -75,22 +83,23 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
             let o: $dtype = $one;
             assert_eq!(v.dense_data().unwrap(), [z, o, z, z, z, o, o, z, z]);
             assert_eq!(
-                input.compose(&v).unwrap().dense_data().unwrap(),
-                v.compose(&d).unwrap().dense_data().unwrap()
+                input.compose($engine, &v).unwrap().dense_data().unwrap(),
+                v.compose($engine, &d).unwrap().dense_data().unwrap()
             );
+            let v_adjoint = &v.adjoint($engine).unwrap();
             assert_eq!(
-                v.compose(&d)
+                v.compose($engine, &d)
                     .unwrap()
-                    .compose(&v.adjoint().unwrap())
+                    .compose($engine, v_adjoint)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
-                input.materialize().unwrap().dense_data().unwrap()
+                input.materialize($engine).unwrap().dense_data().unwrap()
             );
             assert_eq!(
-                v.adjoint()
+                v.adjoint($engine)
                     .unwrap()
-                    .compose(&v)
+                    .compose($engine, &v)
                     .unwrap()
                     .dense_data()
                     .unwrap(),
@@ -99,6 +108,7 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
         }};
     }
     check!(
+        engine,
         f32,
         vec![2.0_f32, -2.0, 1.0],
         vec![-2.0_f32, 1.0, 2.0],
@@ -106,6 +116,7 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
         1.0_f32
     );
     check!(
+        engine,
         f64,
         vec![2.0_f64, -2.0, 1.0],
         vec![-2.0_f64, 1.0, 2.0],
@@ -113,6 +124,7 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
         1.0_f64
     );
     check!(
+        engine,
         num_complex::Complex32,
         vec![
             num_complex::Complex32::new(2.0, 0.0),
@@ -128,6 +140,7 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
         num_complex::Complex32::new(1.0, 0.0)
     );
     check!(
+        engine,
         Complex64,
         vec![
             Complex64::new(2.0, 0.0),
@@ -146,9 +159,11 @@ fn compact_diagonal_eigh_full_hand_permutation_all_scalars() {
 
 #[test]
 fn compact_diagonal_eigh_full_signed_zeros_remain_a_valid_eigenbasis() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -158,31 +173,31 @@ fn compact_diagonal_eigh_full_signed_zeros_remain_a_valid_eigenbasis() {
     )
     .unwrap();
     let dense = input
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap();
     let densified = probe::record();
-    let Eigh { d, v } = input.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let Eigh { d, v } = input
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(
-        d.diagview().unwrap()[0].values,
-        dense.d.diagview().unwrap()[0].values
+        d.diagview(engine).unwrap()[0].values,
+        dense.d.diagview(engine).unwrap()[0].values
     );
-    let av = input.compose(&v).unwrap();
-    let vd = v.compose(&d).unwrap();
+    let av = input.compose(engine, &v).unwrap();
+    let vd = v.compose(engine, &d).unwrap();
     assert_eq!(av.dense_data().unwrap(), vd.dense_data().unwrap());
+    let v_adjoint = &v.adjoint(engine).unwrap();
     assert_eq!(
-        vd.compose(&v.adjoint().unwrap())
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        input.materialize().unwrap().dense_data().unwrap()
+        vd.compose(engine, v_adjoint).unwrap().dense_data().unwrap(),
+        input.materialize(engine).unwrap().dense_data().unwrap()
     );
     assert_eq!(
-        v.adjoint()
+        v.adjoint(engine)
             .unwrap()
-            .compose(&v)
+            .compose(engine, &v)
             .unwrap()
             .dense_data()
             .unwrap(),
@@ -192,28 +207,32 @@ fn compact_diagonal_eigh_full_signed_zeros_remain_a_valid_eigenbasis() {
 
 #[test]
 fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! check {
-        ($leg:expr, $spectra:expr, $expected:expr) => {{
-            let input: TensorMap<_, f64> = TensorMap::diagonal(&runtime, &$leg, $spectra).unwrap();
-            let saved = input.diagview().unwrap();
+        ($engine:ident, $leg:expr, $spectra:expr, $expected:expr) => {{
+            let input: TensorMap<_, f64> =
+                TensorMap::diagonal($engine, &runtime, &$leg, $spectra).unwrap();
+            let saved = input.diagview($engine).unwrap();
             let dense = input
-                .materialize()
+                .materialize($engine)
                 .unwrap()
-                .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
                 .unwrap();
             let densified = probe::record();
-            let Eigh { d, v } = input.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+            let Eigh { d, v } = input
+                .eigh_full($engine, &[0], &[1], HermitianTol::DEFAULT)
+                .unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), saved);
-            assert_eq!(d.diagview().unwrap(), $expected);
+            assert_eq!(input.diagview($engine).unwrap(), saved);
+            assert_eq!(d.diagview($engine).unwrap(), $expected);
             assert_eq!(v.codomain(), input.codomain());
             assert_eq!(v.domain(), dense.v.domain());
             assert!(!v.domain()[0].is_dual());
             assert_eq!(d.codomain(), v.domain());
             assert_eq!(d.domain(), v.domain());
-            let av = input.compose(&v).unwrap();
-            let vd = v.compose(&d).unwrap();
+            let av = input.compose($engine, &v).unwrap();
+            let vd = v.compose($engine, &d).unwrap();
             for (&a, &b) in av
                 .dense_data()
                 .unwrap()
@@ -222,18 +241,20 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
             {
                 assert!((a - b).abs() <= 1e-12);
             }
-            let recon = vd.compose(&v.adjoint().unwrap()).unwrap();
+            let v_adjoint = &v.adjoint($engine).unwrap();
+            let recon = vd.compose($engine, v_adjoint).unwrap();
             for (&a, &b) in recon
                 .dense_data()
                 .unwrap()
                 .iter()
-                .zip(input.materialize().unwrap().dense_data().unwrap())
+                .zip(input.materialize($engine).unwrap().dense_data().unwrap())
             {
                 assert!((a - b).abs() <= 1e-12);
             }
-            let unit = v.adjoint().unwrap().compose(&v).unwrap();
+            let unit = v.adjoint($engine).unwrap().compose($engine, &v).unwrap();
             let bond = v.domain();
             let expected_unit = TensorMap::<_, f64>::from_subblock_fn(
+                $engine,
                 &runtime,
                 [&bond[0]],
                 [&bond[0]],
@@ -257,6 +278,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     .unwrap();
     let dual = u1.try_dual().unwrap();
     check!(
+        engine,
         dual,
         [
             SectorSpectrum {
@@ -283,6 +305,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     let spin_half = SU2Irrep::from_twice_spin(1);
     let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
     check!(
+        engine,
         su2,
         [
             SectorSpectrum {
@@ -315,6 +338,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     )
     .unwrap();
     check!(
+        engine,
         fermion,
         [
             SectorSpectrum {
@@ -343,6 +367,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     )
     .unwrap();
     check!(
+        engine,
         zero,
         [SectorSpectrum {
             sector: U1Irrep::new(1),
@@ -355,6 +380,7 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
     );
     let empty = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
     check!(
+        engine,
         empty,
         Vec::<SectorSpectrum<_, f64>>::new(),
         Vec::<SectorSpectrum<_, f64>>::new()
@@ -363,13 +389,13 @@ fn compact_diagonal_eigh_full_preserves_sector_spaces_and_zero_regions() {
 
 #[test]
 fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite_input() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eigh_full_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eigh_full_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -382,8 +408,13 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     // the eigenvalue is its real part; the diagonal applies the same check
     // directly, with no materialization and no dense EIGH.
     let densified = probe::record();
-    let Eigh { d, .. } = near.eigh_full(&[0], &[1], HermitianTol::DEFAULT).unwrap();
-    assert_eq!(d.diagview().unwrap()[0].values, [Complex64::new(1.0, 0.0)]);
+    let Eigh { d, .. } = near
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
+    assert_eq!(
+        d.diagview(engine).unwrap()[0].values,
+        [Complex64::new(1.0, 0.0)]
+    );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
 
@@ -391,6 +422,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     // any dense work.
     for value in [f64::NAN, f64::INFINITY] {
         let input: TensorMap<_, f64> = TensorMap::diagonal(
+            engine,
             &runtime,
             &leg,
             [SectorSpectrum {
@@ -401,13 +433,14 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
         .unwrap();
         let densified = probe::record();
         let actual = input
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .map(drop)
             .unwrap_err();
         assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
         assert!(is_finite_input_refusal(&actual, "eigh"), "{actual:?}");
     }
     let extreme: TensorMap<_, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -420,10 +453,10 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     let densified = probe::record();
     assert_eq!(
         extreme
-            .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+            .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
             .unwrap()
             .d
-            .diagview()
+            .diagview(engine)
             .unwrap()[0]
             .values,
         [f32::MAX]
@@ -431,6 +464,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), calls_before);
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -441,7 +475,7 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
     .unwrap();
     let densified = probe::record();
     assert!(matches!(
-        input.eigh_full(&[0, 1], &[], HermitianTol::DEFAULT),
+        input.eigh_full(engine, &[0, 1], &[], HermitianTol::DEFAULT),
         Err(Error::Operation(error))
             if matches!(error.as_ref(), symtn_tensors::OperationError::SpaceMismatch {
                 message: "eigh requires an endomorphism (codomain == domain)"
@@ -452,7 +486,8 @@ fn compact_diagonal_eigh_full_is_direct_for_near_hermitian_and_refuses_nonfinite
 
 #[test]
 fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
@@ -461,6 +496,7 @@ fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
     .try_dual()
     .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -475,24 +511,32 @@ fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
         ],
     )
     .unwrap();
-    let swapped = input.permute(&[1], &[0]).unwrap();
-    assert_ne!(swapped.diagview().unwrap(), input.diagview().unwrap());
+    let swapped = input.permute(engine, &[1], &[0]).unwrap();
+    assert_ne!(
+        swapped.diagview(engine).unwrap(),
+        input.diagview(engine).unwrap()
+    );
     let reference = swapped
-        .materialize()
+        .materialize(engine)
         .unwrap()
-        .eigh_full(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap();
     let densified = probe::record();
-    let Eigh { d, v } = input.eigh_full(&[1], &[0], HermitianTol::DEFAULT).unwrap();
+    let Eigh { d, v } = input
+        .eigh_full(engine, &[1], &[0], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    assert_eq!(d.diagview().unwrap(), reference.d.diagview().unwrap());
+    assert_eq!(
+        d.diagview(engine).unwrap(),
+        reference.d.diagview(engine).unwrap()
+    );
     assert_eq!(d.codomain(), reference.d.codomain());
     assert_eq!(d.domain(), reference.d.domain());
     assert_eq!(v.codomain(), reference.v.codomain());
     assert_eq!(v.domain(), reference.v.domain());
     assert!(!v.domain()[0].is_dual());
-    let av = swapped.compose(&v).unwrap();
-    let vd = v.compose(&d).unwrap();
+    let av = swapped.compose(engine, &v).unwrap();
+    let vd = v.compose(engine, &d).unwrap();
     for (&a, &b) in av
         .dense_data()
         .unwrap()
@@ -501,12 +545,13 @@ fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
     {
         assert!((a - b).abs() <= 1e-12);
     }
-    let recon = vd.compose(&v.adjoint().unwrap()).unwrap();
+    let v_adjoint = &v.adjoint(engine).unwrap();
+    let recon = vd.compose(engine, v_adjoint).unwrap();
     for (&a, &b) in recon
         .dense_data()
         .unwrap()
         .iter()
-        .zip(swapped.materialize().unwrap().dense_data().unwrap())
+        .zip(swapped.materialize(engine).unwrap().dense_data().unwrap())
     {
         assert!((a - b).abs() <= 1e-12);
     }
@@ -514,13 +559,13 @@ fn compact_diagonal_eigh_full_changed_roles_match_explicit_dense_permute() {
 
 #[test]
 fn compact_diagonal_eig_full_skips_dense_input_and_solver() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eig_full_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -534,9 +579,9 @@ fn compact_diagonal_eig_full_skips_dense_input_and_solver() {
     )
     .unwrap();
     let densified = probe::record();
-    let Eig { d, v } = input.eig_full(&[0], &[1]).unwrap();
+    let Eig { d, v } = input.eig_full(engine, &[0], &[1]).unwrap();
     assert_eq!(
-        d.diagview().unwrap()[0].values,
+        d.diagview(engine).unwrap()[0].values,
         vec![
             Complex64::new(-4.0, 0.0),
             Complex64::new(0.0, 0.0),
@@ -547,18 +592,20 @@ fn compact_diagonal_eig_full_skips_dense_input_and_solver() {
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.of(EIG_FULL), 0);
     let densified = probe::record();
-    let _ = input.eig_full(&[1], &[0]).unwrap();
+    let _ = input.eig_full(engine, &[1], &[0]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.of(EIG_FULL), 0);
 }
 
 #[test]
 fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     macro_rules! check {
-        ($dtype:ty, $eig:ty, $values:expr, $expected:expr, $zero:expr, $one:expr, $tol:expr, $promote:expr) => {{
+        ($engine:ident, $dtype:ty, $eig:ty, $values:expr, $expected:expr, $zero:expr, $one:expr, $tol:expr, $promote:expr) => {{
             let input: TensorMap<_, $dtype> = TensorMap::diagonal(
+                $engine,
                 &runtime,
                 &leg,
                 [SectorSpectrum {
@@ -567,12 +614,12 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
                 }],
             )
             .unwrap();
-            let original = input.diagview().unwrap();
+            let original = input.diagview($engine).unwrap();
             let densified = probe::record();
-            let Eig { d, v } = input.eig_full(&[0], &[1]).unwrap();
+            let Eig { d, v } = input.eig_full($engine, &[0], &[1]).unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), original);
-            assert_eq!(d.diagview().unwrap()[0].values, $expected);
+            assert_eq!(input.diagview($engine).unwrap(), original);
+            assert_eq!(d.diagview($engine).unwrap()[0].values, $expected);
             assert_eq!(d.codomain(), v.domain());
             assert_eq!(d.domain(), v.domain());
             assert_eq!(v.codomain(), input.codomain());
@@ -581,19 +628,19 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
             let o: $eig = $one;
             assert_eq!(v.dense_data().unwrap(), [z, o, z, z, z, o, o, z, z]);
             let promoted = ($promote)(&input);
-            let av = promoted.compose(&v).unwrap();
-            let vd = v.compose(&d).unwrap();
-            assert_typed_map_close(&av, &vd, $tol);
-            assert_typed_map_close(
-                &vd.compose(&v.adjoint().unwrap()).unwrap(),
-                &promoted.materialize().unwrap(),
-                $tol,
-            );
-            let unit = v.adjoint().unwrap().compose(&v).unwrap();
+            let av = promoted.compose($engine, &v).unwrap();
+            let vd = v.compose($engine, &d).unwrap();
+            assert_typed_map_close($engine, &av, &vd, $tol);
+            let v_adjoint = &v.adjoint($engine).unwrap();
+            let vd_compose = &vd.compose($engine, v_adjoint).unwrap();
+            let promoted_materialize = &promoted.materialize($engine).unwrap();
+            assert_typed_map_close($engine, vd_compose, promoted_materialize, $tol);
+            let unit = v.adjoint($engine).unwrap().compose($engine, &v).unwrap();
             assert_eq!(unit.dense_data().unwrap(), [o, z, z, z, o, z, z, z, o]);
         }};
     }
     check!(
+        engine,
         f32,
         num_complex::Complex32,
         vec![1.0_f32, -4.0, 0.25],
@@ -605,9 +652,12 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
         num_complex::Complex32::new(0.0, 0.0),
         num_complex::Complex32::new(1.0, 0.0),
         1e-5,
-        |input: &TensorMap<U1FusionRule, f32>| input.convert::<num_complex::Complex32>()
+        |input: &TensorMap<U1FusionRule, f32>| input
+            .convert::<num_complex::Complex32>(engine)
+            .unwrap()
     );
     check!(
+        engine,
         f64,
         Complex64,
         vec![1.0_f64, -4.0, 0.25],
@@ -619,9 +669,10 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
         Complex64::new(0.0, 0.0),
         Complex64::new(1.0, 0.0),
         1e-12,
-        |input: &TensorMap<U1FusionRule, f64>| input.convert::<Complex64>()
+        |input: &TensorMap<U1FusionRule, f64>| input.convert::<Complex64>(engine).unwrap()
     );
     check!(
+        engine,
         num_complex::Complex32,
         num_complex::Complex32,
         vec![
@@ -640,6 +691,7 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
         |input: &TensorMap<U1FusionRule, num_complex::Complex32>| input.clone()
     );
     check!(
+        engine,
         Complex64,
         Complex64,
         vec![
@@ -661,41 +713,46 @@ fn compact_diagonal_eig_full_hand_permutation_all_scalars() {
 
 #[test]
 fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! check {
-        ($leg:expr, $spectra:expr, $expected:expr) => {{
+        ($engine:ident, $leg:expr, $spectra:expr, $expected:expr) => {{
             let input: TensorMap<_, Complex64> =
-                TensorMap::diagonal(&runtime, &$leg, $spectra).unwrap();
-            let original = input.diagview().unwrap();
-            let dense = input.materialize().unwrap().eig_full(&[0], &[1]).unwrap();
+                TensorMap::diagonal($engine, &runtime, &$leg, $spectra).unwrap();
+            let original = input.diagview($engine).unwrap();
+            let dense = input
+                .materialize($engine)
+                .unwrap()
+                .eig_full($engine, &[0], &[1])
+                .unwrap();
             let densified = probe::record();
-            let Eig { d, v } = input.eig_full(&[0], &[1]).unwrap();
+            let Eig { d, v } = input.eig_full($engine, &[0], &[1]).unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), original);
-            assert_eq!(d.diagview().unwrap(), $expected);
+            assert_eq!(input.diagview($engine).unwrap(), original);
+            assert_eq!(d.diagview($engine).unwrap(), $expected);
             assert_eq!(d.codomain(), v.domain());
             assert_eq!(d.domain(), v.domain());
             assert_eq!(v.codomain(), input.codomain());
             assert_eq!(v.domain(), dense.v.domain());
             assert!(!v.domain()[0].is_dual());
-            let av = input.compose(&v).unwrap();
-            let vd = v.compose(&d).unwrap();
-            assert_typed_map_close(&av, &vd, 1e-12);
-            assert_typed_map_close(
-                &vd.compose(&v.adjoint().unwrap()).unwrap(),
-                &input.materialize().unwrap(),
-                1e-12,
-            );
-            let unit = v.adjoint().unwrap().compose(&v).unwrap();
+            let av = input.compose($engine, &v).unwrap();
+            let vd = v.compose($engine, &d).unwrap();
+            assert_typed_map_close($engine, &av, &vd, 1e-12);
+            let v_adjoint = &v.adjoint($engine).unwrap();
+            let vd_compose = &vd.compose($engine, v_adjoint).unwrap();
+            let input_materialize = &input.materialize($engine).unwrap();
+            assert_typed_map_close($engine, vd_compose, input_materialize, 1e-12);
+            let unit = v.adjoint($engine).unwrap().compose($engine, &v).unwrap();
             let bond = v.domain();
             let expected_unit = TensorMap::<_, Complex64>::from_subblock_fn(
+                $engine,
                 &runtime,
                 [&bond[0]],
                 [&bond[0]],
                 |_, indices| Complex64::new(f64::from(indices[0] == indices[1]), 0.0),
             )
             .unwrap();
-            assert_typed_map_close(&unit, &expected_unit, 1e-12);
+            assert_typed_map_close($engine, &unit, &expected_unit, 1e-12);
         }};
     }
     let u1 = GradedSpace::try_new(
@@ -706,6 +763,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     .try_dual()
     .unwrap();
     check!(
+        engine,
         u1,
         [
             SectorSpectrum {
@@ -740,6 +798,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     let spin_half = SU2Irrep::from_twice_spin(1);
     let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
     check!(
+        engine,
         su2,
         [
             SectorSpectrum {
@@ -772,6 +831,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     )
     .unwrap();
     check!(
+        engine,
         fermion,
         [
             SectorSpectrum {
@@ -800,6 +860,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     )
     .unwrap();
     check!(
+        engine,
         zero,
         [SectorSpectrum {
             sector: U1Irrep::new(1),
@@ -812,6 +873,7 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
     );
     let empty = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
     check!(
+        engine,
         empty,
         Vec::<SectorSpectrum<_, Complex64>>::new(),
         Vec::<SectorSpectrum<_, Complex64>>::new()
@@ -820,7 +882,8 @@ fn compact_diagonal_eig_full_preserves_sector_spaces_and_zero_regions() {
 
 #[test]
 fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
@@ -829,6 +892,7 @@ fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
     .try_dual()
     .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -843,32 +907,44 @@ fn compact_diagonal_eig_full_changed_roles_match_explicit_dense_permute() {
         ],
     )
     .unwrap();
-    let swapped = input.permute(&[1], &[0]).unwrap();
-    assert_ne!(swapped.diagview().unwrap(), input.diagview().unwrap());
-    let reference = swapped.materialize().unwrap().eig_full(&[0], &[1]).unwrap();
+    let swapped = input.permute(engine, &[1], &[0]).unwrap();
+    assert_ne!(
+        swapped.diagview(engine).unwrap(),
+        input.diagview(engine).unwrap()
+    );
+    let reference = swapped
+        .materialize(engine)
+        .unwrap()
+        .eig_full(engine, &[0], &[1])
+        .unwrap();
     let densified = probe::record();
-    let Eig { d, v } = input.eig_full(&[1], &[0]).unwrap();
+    let Eig { d, v } = input.eig_full(engine, &[1], &[0]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    assert_eq!(d.diagview().unwrap(), reference.d.diagview().unwrap());
+    assert_eq!(
+        d.diagview(engine).unwrap(),
+        reference.d.diagview(engine).unwrap()
+    );
     assert_eq!(d.codomain(), reference.d.codomain());
     assert_eq!(d.domain(), reference.d.domain());
     assert_eq!(v.codomain(), reference.v.codomain());
     assert_eq!(v.domain(), reference.v.domain());
     assert!(!v.domain()[0].is_dual());
-    let vd = v.compose(&d).unwrap();
-    assert_typed_map_close(&swapped.compose(&v).unwrap(), &vd, 1e-12);
-    assert_typed_map_close(
-        &vd.compose(&v.adjoint().unwrap()).unwrap(),
-        &swapped.materialize().unwrap(),
-        1e-12,
-    );
+    let vd = v.compose(engine, &d).unwrap();
+    let swapped_compose = &swapped.compose(engine, &v).unwrap();
+    assert_typed_map_close(engine, swapped_compose, &vd, 1e-12);
+    let v_adjoint = &v.adjoint(engine).unwrap();
+    let vd_compose = &vd.compose(engine, v_adjoint).unwrap();
+    let swapped_materialize = &swapped.materialize(engine).unwrap();
+    assert_typed_map_close(engine, vd_compose, swapped_materialize, 1e-12);
 }
 
 #[test]
 fn compact_diagonal_eig_full_ties_and_signed_zeros_are_valid() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -883,9 +959,9 @@ fn compact_diagonal_eig_full_ties_and_signed_zeros_are_valid() {
     )
     .unwrap();
     let densified = probe::record();
-    let Eig { d, v } = input.eig_full(&[0], &[1]).unwrap();
+    let Eig { d, v } = input.eig_full(engine, &[0], &[1]).unwrap();
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-    let values = &d.diagview().unwrap()[0].values;
+    let values = &d.diagview(engine).unwrap()[0].values;
     assert_eq!(values.len(), 4);
     // Lexicographic (re, im) under IEEE total order, as MAK's `isless`:
     // the `-0.0` real part precedes every `+0.0` one.
@@ -904,14 +980,14 @@ fn compact_diagonal_eig_full_ties_and_signed_zeros_are_valid() {
     );
     assert!(values.contains(&Complex64::new(0.0, 2.0)));
     assert!(values.contains(&Complex64::new(0.0, -2.0)));
-    let vd = v.compose(&d).unwrap();
-    assert_typed_map_close(&input.compose(&v).unwrap(), &vd, 1e-12);
-    assert_typed_map_close(
-        &vd.compose(&v.adjoint().unwrap()).unwrap(),
-        &input.materialize().unwrap(),
-        1e-12,
-    );
-    let unit = v.adjoint().unwrap().compose(&v).unwrap();
+    let vd = v.compose(engine, &d).unwrap();
+    let input_compose = &input.compose(engine, &v).unwrap();
+    assert_typed_map_close(engine, input_compose, &vd, 1e-12);
+    let v_adjoint = &v.adjoint(engine).unwrap();
+    let vd_compose = &vd.compose(engine, v_adjoint).unwrap();
+    let input_materialize = &input.materialize(engine).unwrap();
+    assert_typed_map_close(engine, vd_compose, input_materialize, 1e-12);
+    let unit = v.adjoint(engine).unwrap().compose(engine, &v).unwrap();
     assert_eq!(
         unit.dense_data()
             .unwrap()
@@ -932,11 +1008,10 @@ fn compact_diagonal_eig_full_ties_and_signed_zeros_are_valid() {
 
 #[test]
 fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eig_full_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eig_full_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
     for value in [
         Complex64::new(f64::NAN, 0.0),
@@ -944,6 +1019,7 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
         Complex64::new(f64::MAX, f64::MAX),
     ] {
         let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+            engine,
             &runtime,
             &leg,
             [SectorSpectrum {
@@ -957,7 +1033,7 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
         // no materialization or dense EIG either way.
         let before = calls.of(EIG_FULL);
         let densified = probe::record();
-        let error = input.eig_full(&[0], &[1]).map(drop).unwrap_err();
+        let error = input.eig_full(engine, &[0], &[1]).map(drop).unwrap_err();
         assert!(
             is_eig_value_error(&error, value.re.is_finite() && value.im.is_finite()),
             "{error:?}"
@@ -966,6 +1042,7 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
         assert_eq!(calls.of(EIG_FULL), before);
     }
     let input: TensorMap<_, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -977,14 +1054,20 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
     let before = calls.of(EIG_FULL);
     let densified = probe::record();
     assert_eq!(
-        input.eig_full(&[0], &[1]).unwrap().d.diagview().unwrap()[0].values,
+        input
+            .eig_full(engine, &[0], &[1])
+            .unwrap()
+            .d
+            .diagview(engine)
+            .unwrap()[0]
+            .values,
         [num_complex::Complex32::new(f32::MAX, 0.0)]
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.of(EIG_FULL), before);
     let densified = probe::record();
     assert!(matches!(
-        input.eig_full(&[0, 1], &[]),
+        input.eig_full(engine, &[0, 1], &[]),
         Err(Error::Operation(error))
             if matches!(error.as_ref(), symtn_tensors::OperationError::SpaceMismatch {
                 message: "eig requires an endomorphism (codomain == domain)"
@@ -995,17 +1078,17 @@ fn compact_diagonal_eig_full_refuses_nonfinite_and_overflowing_values() {
 
 #[test]
 fn compact_diagonal_eig_vals_skips_dense_input_and_solver() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eig_vals_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
     )
     .unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -1024,9 +1107,9 @@ fn compact_diagonal_eig_vals_skips_dense_input_and_solver() {
         ],
     )
     .unwrap();
-    let saved = input.diagview().unwrap();
+    let saved = input.diagview(engine).unwrap();
     let densified = probe::record();
-    let result = input.eig_vals(&[0], &[1]).unwrap();
+    let result = input.eig_vals(engine, &[0], &[1]).unwrap();
     assert_eq!(
         result[0].values,
         vec![
@@ -1041,22 +1124,27 @@ fn compact_diagonal_eig_vals_skips_dense_input_and_solver() {
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
-    assert_eq!(input.diagview().unwrap(), saved);
+    assert_eq!(input.diagview(engine).unwrap(), saved);
 }
 
 #[test]
 fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! check {
-        ($leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
+        ($engine:ident, $leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
             let input: TensorMap<_, $dtype> =
-                TensorMap::diagonal(&runtime, &$leg, $spectra).unwrap();
-            let saved = input.diagview().unwrap();
-            let dense_values = input.materialize().unwrap().eig_vals(&[0], &[1]).unwrap();
+                TensorMap::diagonal($engine, &runtime, &$leg, $spectra).unwrap();
+            let saved = input.diagview($engine).unwrap();
+            let dense_values = input
+                .materialize($engine)
+                .unwrap()
+                .eig_vals($engine, &[0], &[1])
+                .unwrap();
             let densified = probe::record();
-            let actual = input.eig_vals(&[0], &[1]).unwrap();
+            let actual = input.eig_vals($engine, &[0], &[1]).unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), saved);
+            assert_eq!(input.diagview($engine).unwrap(), saved);
             let expected: Vec<Vec<Complex64>> = $expected;
             assert_eq!(actual.len(), expected.len());
             for ((actual, dense), expected) in actual.iter().zip(&dense_values).zip(expected) {
@@ -1091,6 +1179,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     .unwrap();
     let real32 = [1.0000001_f32, -3.25, 0.3];
     check!(
+        engine,
         u1,
         [
             SectorSpectrum {
@@ -1115,6 +1204,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
         num_complex::Complex32::new(0.0, -0.3),
     ];
     check!(
+        engine,
         u1,
         [
             SectorSpectrum {
@@ -1140,6 +1230,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     );
     let dual = u1.try_dual().unwrap();
     check!(
+        engine,
         dual,
         [
             SectorSpectrum {
@@ -1166,6 +1257,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     let spin_half = SU2Irrep::from_twice_spin(1);
     let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
     check!(
+        engine,
         su2,
         [
             SectorSpectrum {
@@ -1194,6 +1286,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     )
     .unwrap();
     check!(
+        engine,
         fermion,
         [
             SectorSpectrum {
@@ -1218,6 +1311,7 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
     )
     .unwrap();
     check!(
+        engine,
         zero,
         [SectorSpectrum {
             sector: U1Irrep::new(1),
@@ -1228,20 +1322,24 @@ fn compact_diagonal_eig_vals_match_hand_spectra_across_scalars_and_sectors() {
         1e-12
     );
     let empty = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
-    let input: TensorMap<_, f64> =
-        TensorMap::diagonal(&runtime, &empty, Vec::<SectorSpectrum<_, f64>>::new()).unwrap();
+    let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
+        &runtime,
+        &empty,
+        Vec::<SectorSpectrum<_, f64>>::new(),
+    )
+    .unwrap();
     let densified = probe::record();
-    assert!(input.eig_vals(&[0], &[1]).unwrap().is_empty());
+    assert!(input.eig_vals(engine, &[0], &[1]).unwrap().is_empty());
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
 }
 
 #[test]
 fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eig_vals_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eig_vals_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
     for value in [
         Complex64::new(f64::NAN, 0.0),
@@ -1249,6 +1347,7 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
         Complex64::new(f64::MAX, f64::MAX),
     ] {
         let input: TensorMap<_, Complex64> = TensorMap::diagonal(
+            engine,
             &runtime,
             &leg,
             [SectorSpectrum {
@@ -1260,7 +1359,7 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
         // As `eig_full`: the shared finite-input stage, or the dense route's
         // eigenvalue check for the overflowing `MAX + MAX i`.
         let densified = probe::record();
-        let error = input.eig_vals(&[0], &[1]).unwrap_err();
+        let error = input.eig_vals(engine, &[0], &[1]).unwrap_err();
         assert!(
             is_eig_value_error(&error, value.re.is_finite() && value.im.is_finite()),
             "{error:?}"
@@ -1269,6 +1368,7 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
     }
     assert_eq!(calls.total(), 0);
     let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1278,7 +1378,7 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
     )
     .unwrap();
     let densified = probe::record();
-    let error = input.eig_vals(&[0, 1], &[]).unwrap_err();
+    let error = input.eig_vals(engine, &[0, 1], &[]).unwrap_err();
     assert!(matches!(
         error,
         Error::Operation(error)
@@ -1294,17 +1394,17 @@ fn compact_diagonal_eig_vals_refuses_nonfinite_and_overflowing_values() {
 
 #[test]
 fn compact_diagonal_eigh_vals_skips_dense_input_and_solver() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eigh_vals_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
     )
     .unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [
@@ -1320,7 +1420,9 @@ fn compact_diagonal_eigh_vals_skips_dense_input_and_solver() {
     )
     .unwrap();
     let densified = probe::record();
-    let result = source.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+    let result = source
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+        .unwrap();
     assert_eq!(result[0].values, vec![-4.0, 0.0, 1.0]);
     assert_eq!(result[1].values, vec![-2.0, 2.0]);
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -1329,18 +1431,23 @@ fn compact_diagonal_eigh_vals_skips_dense_input_and_solver() {
 
 #[test]
 fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     macro_rules! check {
-        ($leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
+        ($engine:ident, $leg:expr, $spectra:expr, $dtype:ty, $expected:expr, $tol:expr) => {{
             let input: TensorMap<_, $dtype> =
-                TensorMap::diagonal(&runtime, &$leg, $spectra).unwrap();
-            let saved = input.diagview().unwrap();
-            let dense = input.materialize().unwrap();
-            let dense_values = dense.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+                TensorMap::diagonal($engine, &runtime, &$leg, $spectra).unwrap();
+            let saved = input.diagview($engine).unwrap();
+            let dense = input.materialize($engine).unwrap();
+            let dense_values = dense
+                .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
+                .unwrap();
             let densified = probe::record();
-            let actual = input.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap();
+            let actual = input
+                .eigh_vals($engine, &[0], &[1], HermitianTol::DEFAULT)
+                .unwrap();
             assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
-            assert_eq!(input.diagview().unwrap(), saved);
+            assert_eq!(input.diagview($engine).unwrap(), saved);
             let expected: Vec<Vec<f64>> = $expected;
             assert_eq!(actual.len(), expected.len());
             for ((actual, dense), expected) in actual.iter().zip(&dense_values).zip(expected) {
@@ -1361,6 +1468,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     )
     .unwrap();
     check!(
+        engine,
         u1,
         [
             SectorSpectrum {
@@ -1377,6 +1485,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
         1e-5
     );
     check!(
+        engine,
         u1,
         [
             SectorSpectrum {
@@ -1401,6 +1510,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     );
     let dual = u1.try_dual().unwrap();
     check!(
+        engine,
         dual,
         [
             SectorSpectrum {
@@ -1420,6 +1530,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     let spin_half = SU2Irrep::from_twice_spin(1);
     let su2 = GradedSpace::try_new(Arc::new(SU2FusionRule), [(spin0, 2), (spin_half, 1)]).unwrap();
     check!(
+        engine,
         su2,
         [
             SectorSpectrum {
@@ -1445,6 +1556,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     )
     .unwrap();
     check!(
+        engine,
         fermion,
         [
             SectorSpectrum {
@@ -1466,6 +1578,7 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
     )
     .unwrap();
     check!(
+        engine,
         zero_sector,
         [SectorSpectrum {
             sector: U1Irrep::new(1),
@@ -1476,11 +1589,16 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
         1e-12
     );
     let empty = GradedSpace::try_new(Arc::new(U1FusionRule), []).unwrap();
-    let input: TensorMap<_, f64> =
-        TensorMap::diagonal(&runtime, &empty, Vec::<SectorSpectrum<_, f64>>::new()).unwrap();
+    let input: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
+        &runtime,
+        &empty,
+        Vec::<SectorSpectrum<_, f64>>::new(),
+    )
+    .unwrap();
     let densified = probe::record();
     assert!(input
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap()
         .is_empty());
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -1488,13 +1606,13 @@ fn compact_diagonal_eigh_vals_match_hand_spectra_across_scalars_and_sectors() {
 
 #[test]
 fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let calls = Arc::new(SpyCounts::default());
-    let runtime = Runtime::builder()
-        .with_dense_executor(Box::new(eigh_vals_spy(&calls)))
-        .build()
-        .unwrap();
+    let _dense = probe::inject_dense(Box::new(eigh_vals_spy(&calls)));
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
     let near: TensorMap<_, Complex64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1507,13 +1625,16 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
     // is the real part, read directly.
     let densified = probe::record();
     assert_eq!(
-        near.eigh_vals(&[0], &[1], HermitianTol::DEFAULT).unwrap()[0].values,
+        near.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
+            .unwrap()[0]
+            .values,
         [1.0]
     );
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
     assert_eq!(calls.total(), 0);
 
     let nonfinite: TensorMap<_, f64> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1525,7 +1646,7 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
     // NaN is refused by the shared finite-input stage.
     let densified = probe::record();
     let error = nonfinite
-        .eigh_vals(&[0], &[1], HermitianTol::DEFAULT)
+        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
         .unwrap_err();
     assert!(is_finite_input_refusal(&error, "eigh"), "{error:?}");
     assert_eq!(densified.get(Event::DiagonalMaterialization), 0);
@@ -1534,11 +1655,13 @@ fn compact_diagonal_eigh_vals_applies_the_dense_hermiticity_check_directly() {
 
 #[test]
 fn compact_diagonal_eigh_vals_widens_stored_single_precision_values() {
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
     let values = [1.0000001_f32, -1.0000002_f32, 0.3_f32];
     let expected = vec![values[1] as f64, values[2] as f64, values[0] as f64];
     let real: TensorMap<_, f32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1548,6 +1671,7 @@ fn compact_diagonal_eigh_vals_widens_stored_single_precision_values() {
     )
     .unwrap();
     let complex: TensorMap<_, num_complex::Complex32> = TensorMap::diagonal(
+        engine,
         &runtime,
         &leg,
         [SectorSpectrum {
@@ -1560,8 +1684,8 @@ fn compact_diagonal_eigh_vals_widens_stored_single_precision_values() {
     .unwrap();
     let densified = probe::record();
     for actual in [
-        real.eigh_vals(&[0], &[1], HermitianTol::DEFAULT),
-        complex.eigh_vals(&[0], &[1], HermitianTol::DEFAULT),
+        real.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT),
+        complex.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT),
     ] {
         assert_eq!(actual.unwrap()[0].values, expected);
     }

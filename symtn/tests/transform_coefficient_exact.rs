@@ -15,6 +15,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::{Complex32, Complex64};
 use symtn::sector::{
@@ -63,18 +64,18 @@ fn component<S: Hash>(trees: &BlockFusionTrees<S>, indices: &[usize], salt: u8) 
 /// Transforms the complex tensor and its two real components the same way,
 /// and asserts the complex result is the componentwise real result.
 macro_rules! assert_componentwise {
-    ([$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?], |$t:ident| $body:expr) => {
-        assert_componentwise!(
+    ($engine:ident, [$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?], |$t:ident| $body:expr) => {
+        assert_componentwise!($engine,
             Complex64, f64, [$($codomain),*], [$($domain),*], |$t| $body
         )
     };
-    ($complex:ty, $real:ty, [$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?],
+    ($engine:ident, $complex:ty, $real:ty, [$($codomain:expr),* $(,)?], [$($domain:expr),* $(,)?],
      |$t:ident| $body:expr) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+        let runtime = Runtime::builder().build().unwrap();
         let codomain = vec![$($codomain),*];
         let domain = vec![$($domain),*];
-        let build = |f: &dyn Fn(&BlockFusionTrees<_>, &[usize]) -> $real| {
-            TensorMap::<_, $real>::from_subblock_fn(
+        let build = |$engine: &mut dyn Engine, f: &dyn Fn(&BlockFusionTrees<_>, &[usize]) -> $real| {
+            TensorMap::<_, $real>::from_subblock_fn($engine,
                 &runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -82,7 +83,7 @@ macro_rules! assert_componentwise {
             )
             .unwrap()
         };
-        let complex = TensorMap::<_, $complex>::from_subblock_fn(
+        let complex = TensorMap::<_, $complex>::from_subblock_fn($engine,
             &runtime,
             codomain.iter().copied(),
             domain.iter().copied(),
@@ -94,8 +95,8 @@ macro_rules! assert_componentwise {
             },
         )
         .unwrap();
-        let real = build(&|trees, indices| component(trees, indices, 0) as $real);
-        let imaginary = build(&|trees, indices| component(trees, indices, 1) as $real);
+        let real = build($engine, &|trees, indices| component(trees, indices, 0) as $real);
+        let imaginary = build($engine, &|trees, indices| component(trees, indices, 1) as $real);
         assert_non_trivial(
             complex.subblock_count(),
             complex
@@ -194,29 +195,47 @@ fn bits(data: &[Complex64]) -> Vec<(u64, u64)> {
 
 #[test]
 fn u1_transforms_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
     let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
 
-    assert_componentwise!([&leg, &other], [&dual], |t| t.permute(&[1, 0], &[2]));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.repartition(1));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.transpose(&[2], &[1, 0]));
-    assert_componentwise!([&leg], [&other, &dual], |t| t.permute(&[2, 0], &[1]));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
+        engine,
+        &[1, 0],
+        &[2]
+    ));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t
+        .repartition(engine, 1));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.transpose(
+        engine,
+        &[2],
+        &[1, 0]
+    ));
+    assert_componentwise!(engine, [&leg], [&other, &dual], |t| t.permute(
+        engine,
+        &[2, 0],
+        &[1]
+    ));
     // c32: the coefficient converts with `as f32` before acting, still
     // componentwise.
-    assert_componentwise!(Complex32, f32, [&leg, &other], [&dual], |t| t
-        .permute(&[1, 0], &[2]));
-    assert_componentwise!(Complex32, f32, [&leg, &other], [&dual], |t| t
-        .repartition(1));
+    assert_componentwise!(engine, Complex32, f32, [&leg, &other], [&dual], |t| t
+        .permute(engine, &[1, 0], &[2]));
+    assert_componentwise!(engine, Complex32, f32, [&leg, &other], [&dual], |t| t
+        .repartition(engine, 1));
 
     // A round trip composes to the identity coefficient, so it must return the
     // input bits unchanged.
-    let (source, _) = assert_componentwise!([&leg, &other], [&dual], |t| t.permute(&[1, 0], &[2]));
+    let (source, _) = assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
+        engine,
+        &[1, 0],
+        &[2]
+    ));
     let back = source
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap()
-        .permute(&[1, 0], &[2])
+        .permute(engine, &[1, 0], &[2])
         .unwrap();
     assert_eq!(
         bits(back.dense_data().unwrap()),
@@ -226,19 +245,30 @@ fn u1_transforms_scale_componentwise() {
 
 #[test]
 fn su2_transforms_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
     let other = su2(&provider, &[(0, 1), (1, 2)]);
 
-    assert_componentwise!([&leg, &other], [&dual], |t| t.permute(&[1, 0], &[2]));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.repartition(1));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.transpose(&[2], &[1, 0]));
-    assert_componentwise!([&leg], [&other], |t| t.repartition(0));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
+        engine,
+        &[1, 0],
+        &[2]
+    ));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t
+        .repartition(engine, 1));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.transpose(
+        engine,
+        &[2],
+        &[1, 0]
+    ));
+    assert_componentwise!(engine, [&leg], [&other], |t| t.repartition(engine, 0));
 }
 
 #[test]
 fn u1_times_su2_transforms_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, SU2FusionRule).unwrap(),
     );
@@ -257,15 +287,25 @@ fn u1_times_su2_transforms_scale_componentwise() {
     )
     .unwrap();
 
-    assert_componentwise!([&leg, &other], [&dual], |t| t.permute(&[1, 0], &[2]));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.repartition(1));
-    assert_componentwise!([&leg, &dual], [&other], |t| t.transpose(&[2], &[1, 0]));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
+        engine,
+        &[1, 0],
+        &[2]
+    ));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t
+        .repartition(engine, 1));
+    assert_componentwise!(engine, [&leg, &dual], [&other], |t| t.transpose(
+        engine,
+        &[2],
+        &[1, 0]
+    ));
 }
 
 /// fZ2 x U(1): the permutation of two odd legs contributes a fermionic `-1`,
 /// which must stay a real sign rather than a complex multiply.
 #[test]
 fn fermionic_transforms_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -296,15 +336,26 @@ fn fermionic_transforms_scale_componentwise() {
     )
     .unwrap();
 
-    let (source, permuted) =
-        assert_componentwise!([&leg, &other], [&dual], |t| t.permute(&[1, 0], &[2]));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.repartition(1));
-    assert_componentwise!([&leg, &other], [&dual], |t| t.transpose(&[2], &[1, 0]));
-    assert_componentwise!([&leg, &dual], [&other, &leg], |t| t
-        .permute(&[1, 2], &[3, 0]));
+    let (source, permuted) = assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
+        engine,
+        &[1, 0],
+        &[2]
+    ));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t
+        .repartition(engine, 1));
+    assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.transpose(
+        engine,
+        &[2],
+        &[1, 0]
+    ));
+    assert_componentwise!(engine, [&leg, &dual], [&other, &leg], |t| t.permute(
+        engine,
+        &[1, 2],
+        &[3, 0]
+    ));
 
     // The swap sign is real and involutive: permuting back is the exact input.
-    let back = permuted.permute(&[1, 0], &[2]).unwrap();
+    let back = permuted.permute(engine, &[1, 0], &[2]).unwrap();
     assert_eq!(
         bits(back.dense_data().unwrap()),
         bits(source.dense_data().unwrap())
@@ -318,25 +369,40 @@ fn fermionic_transforms_scale_componentwise() {
 /// both reach a non-unit real coefficient.
 #[test]
 fn traces_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
     let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
-    assert_componentwise!([&leg, &other], [&leg, &other], |t| t.trace_pairs(&[(0, 2)]));
-    assert_componentwise!([&dual, &other], [&dual, &other], |t| t
-        .trace_pairs(&[(1, 3)]));
-    assert_componentwise!(Complex32, f32, [&leg, &other], [&leg, &other], |t| t
-        .trace_pairs(&[(1, 3)]));
+    assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
+        .trace_pairs(engine, &[(0, 2)]));
+    assert_componentwise!(engine, [&dual, &other], [&dual, &other], |t| t
+        .trace_pairs(engine, &[(1, 3)]));
+    assert_componentwise!(
+        engine,
+        Complex32,
+        f32,
+        [&leg, &other],
+        [&leg, &other],
+        |t| t.trace_pairs(engine, &[(1, 3)])
+    );
 
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
     let other = su2(&provider, &[(0, 1), (1, 2)]);
-    assert_componentwise!([&leg, &other], [&leg, &other], |t| t.trace_pairs(&[(1, 3)]));
-    assert_componentwise!([&other, &dual], [&other, &dual], |t| t
-        .trace_pairs(&[(0, 2)]));
-    assert_componentwise!(Complex32, f32, [&leg, &other], [&leg, &other], |t| t
-        .trace_pairs(&[(1, 3)]));
+    assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
+        .trace_pairs(engine, &[(1, 3)]));
+    assert_componentwise!(engine, [&other, &dual], [&other, &dual], |t| t
+        .trace_pairs(engine, &[(0, 2)]));
+    assert_componentwise!(
+        engine,
+        Complex32,
+        f32,
+        [&leg, &other],
+        [&leg, &other],
+        |t| t.trace_pairs(engine, &[(1, 3)])
+    );
 
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
@@ -358,8 +424,10 @@ fn traces_scale_componentwise() {
     )
     .unwrap();
     let dual = leg.try_dual().unwrap();
-    assert_componentwise!([&leg, &dual], [&leg, &dual], |t| t.trace_pairs(&[(1, 3)]));
-    assert_componentwise!([&leg, &dual], [&leg, &dual], |t| t.trace_pairs(&[(0, 2)]));
+    assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t
+        .trace_pairs(engine, &[(1, 3)]));
+    assert_componentwise!(engine, [&leg, &dual], [&leg, &dual], |t| t
+        .trace_pairs(engine, &[(0, 2)]));
 }
 
 /// Known residual of #1398: a transform that needs a recoupling *matrix* still
@@ -371,9 +439,13 @@ fn traces_scale_componentwise() {
 #[test]
 #[ignore = "multi-block recoupling GEMM still promotes the coefficient (#1398 residual)"]
 fn su2_recoupling_matrix_transforms_scale_componentwise() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let other = su2(&provider, &[(0, 1), (1, 2)]);
-    assert_componentwise!([&leg, &other, &other], [&leg], |t| t
-        .permute(&[2, 1, 0], &[3]));
+    assert_componentwise!(engine, [&leg, &other, &other], [&leg], |t| t.permute(
+        engine,
+        &[2, 1, 0],
+        &[3]
+    ));
 }

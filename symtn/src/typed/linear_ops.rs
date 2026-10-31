@@ -13,8 +13,12 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     /// A compact spectrum maps spectrum-to-spectrum and stays compact. A cold
     /// lazy adjoint uses an operation-local payload for the `O(stored_len)`
     /// output; the logical space is shared.
-    pub fn re(&self) -> TensorMap<R, f64> {
-        self.map_parts(|value| value.re)
+    ///
+    /// # Errors
+    ///
+    /// The materialization of a lazy adjoint input can fail on the engine.
+    pub fn re(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
+        self.map_parts(engine, |value| value.re)
     }
 
     /// The element-wise imaginary part, as an f64 tensor map on the same
@@ -23,15 +27,22 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     /// A compact spectrum maps spectrum-to-spectrum and stays compact. A cold
     /// lazy adjoint uses an operation-local payload for the `O(stored_len)`
     /// output; the logical space is shared.
-    pub fn im(&self) -> TensorMap<R, f64> {
-        self.map_parts(|value| value.im)
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::re`].
+    pub fn im(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
+        self.map_parts(engine, |value| value.im)
     }
 
     /// The shared owned-input route of [`Self::re`] / [`Self::im`].
-    fn map_parts(&self, part: impl Fn(num_complex::Complex64) -> f64) -> TensorMap<R, f64> {
-        let materialized = self
-            .materialized_tensor_uncached()
-            .expect("a pre-admitted typed adjoint must materialize");
+    fn map_parts(
+        &self,
+        engine: &mut dyn Engine,
+        part: impl Fn(num_complex::Complex64) -> f64,
+    ) -> Result<TensorMap<R, f64>, Error> {
+        admit_host_engine(engine)?;
+        let materialized = self.materialized_tensor_uncached(engine)?;
         let source = materialized
             .owned_body()
             .expect("uncached materialization is owned");
@@ -44,10 +55,10 @@ impl<R> TensorMap<R, num_complex::Complex64> {
                 TypedTensorBody::diagonal(source.space.clone(), map_spectrum_dtype(spectrum, part))
             }
         };
-        TensorMap {
+        Ok(TensorMap {
             runtime: self.runtime.clone(),
             repr: owned_repr(body),
-        }
+        })
     }
 }
 
@@ -99,20 +110,30 @@ where
     /// ```
     pub fn axpby<'a>(
         &self,
+        engine: &mut dyn Engine,
         alpha: D,
         y: impl Into<TensorRef<'a, R, D, S>>,
         beta: D,
     ) -> Result<Self, FacadeError<R>> {
         let y = y.into().operand()?;
-        Ok(self.axpby_checked(alpha, &y, beta)?)
+        Ok(self.axpby_checked(engine, alpha, &y, beta)?)
     }
 
     /// The one body of [`Self::axpby`].
-    fn axpby_checked(&self, alpha: D, other: &Self, beta: D) -> Result<Self, Error> {
+    fn axpby_checked(
+        &self,
+        engine: &mut dyn Engine,
+        alpha: D,
+        other: &Self,
+        beta: D,
+    ) -> Result<Self, Error> {
         // Runtime first, exactly as `contract` does: crossing runtimes is a
         // trust-boundary violation rather than an algebra error.
         require_same_runtime_and_space(self, other)?;
         if let (Some(x), Some(y)) = (S::as_host(EXEC, self), S::as_host(EXEC, other)) {
+            if x.spectrum().is_some() || y.spectrum().is_some() {
+                admit_host_engine(engine)?;
+            }
             if let Some(sum) = x.compact_axpby(alpha, y, beta)? {
                 return S::from_host(EXEC, sum);
             }
@@ -122,13 +143,14 @@ where
         {
             // `alpha A^H + beta B^H == (conj(alpha) A + conj(beta) B)^H`.
             let sum = self.parent_of(x).axpby_checked(
+                engine,
                 FactorScalar::adjoint(alpha),
                 &other.parent_of(y),
                 FactorScalar::adjoint(beta),
             )?;
             return sum.lazy_adjoint_on(&x.logical_space);
         }
-        S::combine(EXEC, self, alpha, Some((other, beta)))
+        S::combine(engine, EXEC, self, alpha, Some((other, beta)))
     }
 
     /// Returns `factor * self`.
@@ -138,8 +160,9 @@ where
     /// materialization is cached. A zero factor gives exact zeros whatever
     /// `self` holds (TensorKit's `scale(x, 0)`); signed-zero bits are
     /// storage-local.
-    pub fn scale(&self, factor: D) -> Result<Self, FacadeError<R>> {
+    pub fn scale(&self, engine: &mut dyn Engine, factor: D) -> Result<Self, FacadeError<R>> {
         if let Some(spectrum) = self.spectrum() {
+            admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
                 spectrum
                     .iter()
@@ -155,10 +178,12 @@ where
             ));
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self.parent_of(view).scale(FactorScalar::adjoint(factor))?;
+            let parent = self
+                .parent_of(view)
+                .scale(engine, FactorScalar::adjoint(factor))?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
-        Ok(S::combine(EXEC, self, factor, None)?)
+        Ok(S::combine(engine, EXEC, self, factor, None)?)
     }
 
     /// `destination = alpha * self + beta * destination`: BLAS `axpby`,
@@ -175,11 +200,14 @@ where
     /// # CUDA storage
     ///
     /// One `dot_general` over the whole payload with `alpha` as its
-    /// descriptor scale and `beta` in its epilogue; nothing is uploaded or
-    /// allocated on a warm context. A lazy-adjoint `self` is read from its
-    /// parent with one conjugating strided `dot_general` per block, likewise
-    /// upload-free (#1874). A payload on another device returns
-    /// [`Error::PlacementMismatch`].
+    /// descriptor scale and `beta` in its epilogue. A lazy-adjoint `self` is
+    /// read from its parent with one conjugating strided `dot_general` per
+    /// block (#1874). No payload is uploaded or downloaded, but an eager call
+    /// keeps no device state between calls: the scalar templates its regions
+    /// read (the one-element `1` coefficient, and the zero template of a
+    /// zero-scale fill) are uploaded, each one H2D and one device allocation,
+    /// by every call. A payload of another device or engine returns
+    /// [`Error::PlacementMismatch`] before any upload.
     ///
     /// # Errors
     ///
@@ -204,26 +232,28 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let x: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1)?;
-    /// let mut y = x.zeros_like()?;
-    /// x.axpby_into(&mut y, 2.0, 0.0)?;
-    /// assert_eq!(y.dense_data()?, x.scale(2.0)?.dense_data()?);
+    /// let x: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
+    /// let mut y = x.zeros_like(engine)?;
+    /// x.axpby_into(engine, &mut y, 2.0, 0.0)?;
+    /// assert_eq!(y.dense_data()?, x.scale(engine, 2.0)?.dense_data()?);
     ///
     /// // A clone shares the payload, so it is not a valid destination.
     /// let shared = y.clone();
-    /// assert_eq!(x.axpby_into(&mut y, 1.0, 1.0), Err(Error::DestinationShared));
+    /// assert_eq!(x.axpby_into(engine, &mut y, 1.0, 1.0), Err(Error::DestinationShared));
     /// drop(shared);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn axpby_into(
         &self,
+        engine: &mut dyn Engine,
         destination: &mut Self,
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        Ok(axpby_into_checked(self, destination, alpha, beta)?)
+        Ok(axpby_into_checked(engine, self, destination, alpha, beta)?)
     }
 }
 
@@ -270,7 +300,6 @@ where
         if lhs.is_none() && rhs.is_none() {
             return Ok(None);
         }
-        let _host_pool = self.runtime.enter_host_pool();
         let sum = match (lhs, rhs) {
             (None, None) => return Ok(None),
             // A lazy adjoint against a spectrum: the oriented sum of the
@@ -373,13 +402,18 @@ fn lazy_plus_spectrum<R, D: TensorScalar>(
 #[doc(hidden)]
 pub trait ElementwiseExec<R, D>: TypedStorage<R, D> {
     /// A fresh exact-zero dense payload on an owned dense `t`'s space.
-    fn zeros(_: ExecToken, t: &TensorMap<R, D, Self>) -> Result<TensorMap<R, D, Self>, Error>;
+    fn zeros(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D, Self>,
+    ) -> Result<TensorMap<R, D, Self>, Error>;
 
     /// `alpha * x + beta * y`, or `alpha * x` without `y`, as a fresh owned
     /// dense result on `x`'s logical space. The operands are dense, share
     /// one runtime and space, and at most one is a lazy adjoint; `x` alone
     /// is owned.
     fn combine(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         alpha: D,
@@ -389,6 +423,7 @@ pub trait ElementwiseExec<R, D>: TypedStorage<R, D> {
     /// `destination = alpha * x + beta * destination` into an admitted
     /// destination: same runtime and space, owned dense, unaliased, unique.
     fn axpby_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D, Self>,
         destination: &mut TensorMap<R, D, Self>,
@@ -398,7 +433,12 @@ pub trait ElementwiseExec<R, D>: TypedStorage<R, D> {
 }
 
 impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
-    fn zeros(_: ExecToken, t: &TensorMap<R, D>) -> Result<TensorMap<R, D>, Error> {
+    fn zeros(
+        engine: &mut dyn Engine,
+        _: ExecToken,
+        t: &TensorMap<R, D>,
+    ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         Ok(t.with_data(vec![
             D::from_real(0.0);
             t.owned_body()
@@ -410,11 +450,13 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
     }
 
     fn combine(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D>,
         alpha: D,
         y: Option<(&TensorMap<R, D>, D)>,
     ) -> Result<TensorMap<R, D>, Error> {
+        admit_host_engine(engine)?;
         let Some((y, beta)) = y else {
             let data = x
                 .owned_body()
@@ -427,7 +469,6 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
             };
             return Ok(x.with_data(scaled));
         };
-        let _host_pool = x.runtime.enter_host_pool();
         if matches!(&x.repr, TypedTensorRepr::Adjoint(_))
             || matches!(&y.repr, TypedTensorRepr::Adjoint(_))
         {
@@ -461,13 +502,14 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
     }
 
     fn axpby_into(
+        engine: &mut dyn Engine,
         _: ExecToken,
         x: &TensorMap<R, D>,
         destination: &mut TensorMap<R, D>,
         alpha: D,
         beta: D,
     ) -> Result<(), Error> {
-        let _host_pool = x.runtime.enter_host_pool();
+        admit_host_engine(engine)?;
         let TypedTensorRepr::Owned(destination_body) = &mut destination.repr else {
             return Err(internal_layout_error("ordinary destination checked above"));
         };
@@ -503,14 +545,21 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
             },
             TypedTensorRepr::Adjoint(_) => {
                 let (operand, source) = x.fusion_operand_and_data();
-                symtn_tensors::oriented_fusion_axpby_into(
-                    x.logical_space().space().structure(),
-                    destination_data,
-                    operand,
-                    &source,
-                    alpha,
-                    beta,
-                )?;
+                symtn_operations::host_pool::region(
+                    engine,
+                    symtn_operations::host_pool::HostPoolSite::Strided,
+                    |exec| {
+                        symtn_tensors::oriented_fusion_axpby_into(
+                            exec,
+                            x.logical_space().space().structure(),
+                            destination_data,
+                            operand,
+                            &source,
+                            alpha,
+                            beta,
+                        )
+                    },
+                )??;
             }
         }
         Ok(())
@@ -544,19 +593,25 @@ where
     /// use symtn::sector::{U1FusionRule, U1Irrep};
     /// use symtn::typed::{Error, GradedSpace, Runtime, TensorMap};
     ///
+    /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
-    /// let mut t: TensorMap<_, f64> = TensorMap::rand_with_seed(&runtime, [&v], [&v], 1)?;
-    /// let expected = t.scale(2.0)?;
-    /// t.scale_assign(2.0)?;
+    /// let mut t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
+    /// let expected = t.scale(engine, 2.0)?;
+    /// t.scale_assign(engine, 2.0)?;
     /// assert_eq!(t.dense_data()?, expected.dense_data()?);
     ///
     /// let shared = t.clone();
-    /// assert_eq!(t.scale_assign(2.0), Err(Error::DestinationShared));
+    /// assert_eq!(t.scale_assign(engine, 2.0), Err(Error::DestinationShared));
     /// drop(shared);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn scale_assign(&mut self, factor: D) -> Result<(), FacadeError<R>> {
+    pub fn scale_assign(
+        &mut self,
+        engine: &mut dyn Engine,
+        factor: D,
+    ) -> Result<(), FacadeError<R>> {
+        admit_host_engine(engine)?;
         let (body, factor) = match &mut self.repr {
             TypedTensorRepr::Owned(body) => (Arc::get_mut(body), factor),
             TypedTensorRepr::Adjoint(view) => (
@@ -727,6 +782,7 @@ pub(super) fn require_same_runtime_and_space<R, D, S>(
 /// `trace_pairs_into`: the TensorKit order (runtime, space, then the
 /// destination checks) before the one storage kernel.
 pub(super) fn axpby_into_checked<R, D, S>(
+    engine: &mut dyn Engine,
     x: &TensorMap<R, D, S>,
     destination: &mut TensorMap<R, D, S>,
     alpha: D,
@@ -742,5 +798,5 @@ where
         x.logical_space().space(),
         S::NOUN,
     )?;
-    S::axpby_into(EXEC, x, destination, alpha, beta)
+    S::axpby_into(engine, EXEC, x, destination, alpha, beta)
 }

@@ -22,32 +22,32 @@ const TOL: f64 = 1e-12;
 
 /// `n^H a = 0` and `n^H n = 1` (left), or `a n^H = 0` and `n n^H = 1` (right).
 macro_rules! assert_null_space {
-    ($runtime:expr, $a:expr, $n:expr, $left:expr, $one:expr) => {{
+    ($engine:ident, $runtime:expr, $a:expr, $n:expr, $left:expr, $one:expr) => {{
         let (a, n) = (&$a, &$n);
-        let n_adjoint = n.adjoint().unwrap().materialize().unwrap();
+        let n_adjoint = n.adjoint($engine).unwrap().materialize($engine).unwrap();
         let (residual, gram, bond) = if $left {
             (
-                n_adjoint.compose(a).unwrap(),
-                n_adjoint.compose(n).unwrap(),
+                n_adjoint.compose($engine, a).unwrap(),
+                n_adjoint.compose($engine, n).unwrap(),
                 n.domain(),
             )
         } else {
             (
-                a.compose(&n_adjoint).unwrap(),
-                n.compose(&n_adjoint).unwrap(),
+                a.compose($engine, &n_adjoint).unwrap(),
+                n.compose($engine, &n_adjoint).unwrap(),
                 n.codomain(),
             )
         };
-        let residual = residual.norm(2.0).unwrap();
+        let residual = residual.norm($engine, 2.0).unwrap();
         assert!(
-            residual <= TOL * (1.0 + a.norm(2.0).unwrap()),
+            residual <= TOL * (1.0 + a.norm($engine, 2.0).unwrap()),
             "the null space does not annihilate the input: {residual}"
         );
-        let identity = TensorMap::isomorphism(&$runtime, &bond, &bond).unwrap();
+        let identity = TensorMap::isomorphism($engine, &$runtime, &bond, &bond).unwrap();
         let defect = gram
-            .axpby($one, &identity, -$one)
+            .axpby($engine, $one, &identity, -$one)
             .unwrap()
-            .norm(2.0)
+            .norm($engine, 2.0)
             .unwrap();
         assert!(defect <= TOL, "the null basis is not orthonormal: {defect}");
     }};
@@ -56,19 +56,19 @@ macro_rules! assert_null_space {
 /// Left null of the tall `[legs..] <- [w]` and right null of the wide
 /// `[w] <- [legs..]`, with the null bond's degeneracy per coupled sector.
 macro_rules! check_both_sides {
-    ($runtime:expr, $scalar:ty, [$($leg:expr),+], $w:expr, $one:expr, $expected:expr) => {{
+    ($engine:ident, $runtime:expr, $scalar:ty, [$($leg:expr),+], $w:expr, $one:expr, $expected:expr) => {{
         let w = &$w;
         let legs = [$(&$leg),+];
         let many: Vec<usize> = (0..legs.len()).collect();
         let shifted: Vec<usize> = (1..=legs.len()).collect();
         let tall: TensorMap<_, $scalar> =
-            TensorMap::rand_with_seed(&$runtime, legs, [w], 2309).unwrap();
-        let left = tall.left_null(&many, &[legs.len()]).unwrap();
-        assert_null_space!($runtime, tall, left, true, $one);
+            TensorMap::rand_with_seed($engine, &$runtime, legs, [w], 2309).unwrap();
+        let left = tall.left_null($engine, &many, &[legs.len()]).unwrap();
+        assert_null_space!($engine, $runtime, tall, left, true, $one);
         let wide: TensorMap<_, $scalar> =
-            TensorMap::rand_with_seed(&$runtime, [w], legs, 2310).unwrap();
-        let right = wide.right_null(&[0], &shifted).unwrap();
-        assert_null_space!($runtime, wide, right, false, $one);
+            TensorMap::rand_with_seed($engine, &$runtime, [w], legs, 2310).unwrap();
+        let right = wide.right_null($engine, &[0], &shifted).unwrap();
+        assert_null_space!($engine, $runtime, wide, right, false, $one);
         for (sector, nullity) in $expected {
             assert_eq!(
                 left.domain()[0].degeneracy(&sector).unwrap(),
@@ -86,6 +86,7 @@ macro_rules! check_both_sides {
 
 #[test]
 fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     // `v = 0^2 + (1/2)^2 + 1`. Its pair `v (x) v*` has the degeneracies
     //   0:   (0,0) 4 + (1/2,1/2) 4 + (1,1) 1                 = 9
     //   1/2: (0,1/2) 4 + (1/2,0) 4 + (1/2,1) 2 + (1,1/2) 2   = 12
@@ -122,8 +123,9 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
         (spin(5), 6),
         (spin(6), 1),
     ];
-    check_both_sides!(runtime, f64, [v, v_dual, v], w, 1.0, expected);
+    check_both_sides!(engine, runtime, f64, [v, v_dual, v], w, 1.0, expected);
     check_both_sides!(
+        engine,
         runtime,
         Complex64,
         [v, v_dual, v],
@@ -136,6 +138,7 @@ fn su2_null_spaces_annihilate_and_are_orthonormal_on_inner_lines_and_dual_legs()
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
     // Dynkin labels: 1 = [0,0], 8 = [1,1], 10 = [3,0], 10bar = [0,3],
@@ -152,7 +155,7 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         GradedSpace::try_new(Arc::clone(&provider), [(vec![1i64, 1], 2), (vec![0, 0], 1)]).unwrap();
     let a_dual = a.try_dual().unwrap();
     let b = GradedSpace::try_new(provider, [(vec![0i64, 0], 2), (vec![1, 1], 3)]).unwrap();
-    let probe = TensorMap::<_, f64>::zeros(&runtime, [&a, &a_dual], [&b]).unwrap();
+    let probe = TensorMap::<_, f64>::zeros(engine, &runtime, [&a, &a_dual], [&b]).unwrap();
     assert!(
         (0..probe.subblock_count()).any(|index| probe
             .subblock_fusion_trees(index)
@@ -169,8 +172,9 @@ fn su3_null_spaces_annihilate_and_are_orthonormal_with_outer_multiplicity() {
         (vec![0, 3], 4),
         (vec![2, 2], 4),
     ];
-    check_both_sides!(runtime, f64, [a, a_dual], b, 1.0, expected.clone());
+    check_both_sides!(engine, runtime, f64, [a, a_dual], b, 1.0, expected.clone());
     check_both_sides!(
+        engine,
         runtime,
         Complex64,
         [a, a_dual],

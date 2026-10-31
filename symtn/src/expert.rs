@@ -15,27 +15,20 @@ pub use symtn_core::{
     BlockLayout, BlockRef, BlockView, HostReadableStorage, Placement, SectorLeg,
     SectorLegConstructionError, TensorStorage,
 };
-/// Process-wide CPU session counters.
-pub use symtn_dense::{cpu_session_stats, reset_cpu_session_stats, CpuSessionStats};
-/// Per-thread CUDA boundary counters and the plan-cache snapshot returned by
-/// `Runtime::cuda_plan_cache_stats`.
+/// Per-thread CUDA boundary counters.
 #[cfg(feature = "cuda")]
-pub use symtn_dense::{
-    cuda_transfer_stats, reset_cuda_transfer_stats, CudaPlanCacheStats, CudaTransferStats,
-};
-/// The dense executor seam of `RuntimeBuilder::with_dense_executor` and the
-/// types its methods exchange; `CpuBackendKind` selects the provider of
-/// `DefaultDenseExecutor::with_kind`.
-pub use symtn_dense::{
-    CpuBackendKind, DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError,
-    DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
-    DenseRead, DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, MatrixOp,
-    SharedCpuContext,
-};
-/// The device context a CUDA runtime dereferences to, and the device buffer
-/// inside a `CudaStorage`.
+pub use symtn_dense::{cuda_transfer_stats, reset_cuda_transfer_stats, CudaTransferStats};
+/// The device context one CUDA operation borrows the caller's engine
+/// through, and the device buffer inside a `CudaStorage`.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{CudaDenseContext, CudaDenseStorage};
+/// The dense executor seam and the types its methods exchange; every
+/// numerical method takes the caller's engine.
+pub use symtn_dense::{
+    DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError, DenseExecutor,
+    DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned, DenseRead,
+    DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, MatrixOp,
+};
 /// The tree-transform descriptor carried by `OperationError` variants.
 pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};
 
@@ -45,6 +38,7 @@ use crate::sector::{
 use crate::typed::{
     Error, FacadeError, SectorSpectrum, TensorMap, TensorScalar, TypedTensorRootDispatch,
 };
+use symtn_dense::Engine;
 
 /// Returns the compact diagonal spectrum without materializing dense data.
 ///
@@ -56,6 +50,7 @@ use crate::typed::{
     reason = "the compact readback exposes provider-labelled sector spectra"
 )]
 pub fn diagonal_spectrum<R, D>(
+    engine: &mut dyn Engine,
     tensor: &TensorMap<R, D>,
 ) -> Result<Option<Vec<SectorSpectrum<R::Sector, D>>>, FacadeError<R>>
 where
@@ -63,6 +58,7 @@ where
     R::Mode: TypedTensorRootDispatch<R>,
     D: TensorScalar,
 {
+    crate::typed::admit_host_engine(engine)?;
     tensor.diagonal_spectrum()
 }
 
@@ -75,10 +71,14 @@ where
 /// Negative and non-finite tolerances are rejected before every shortcut.
 /// Scale `tol` to the payload dtype, as
 /// [`FactorizationScalar`](crate::typed::FactorizationScalar) describes.
-pub fn is_diagonal<R, D>(tensor: &TensorMap<R, D>, tol: f64) -> Result<bool, Error>
+pub fn is_diagonal<R, D>(
+    engine: &mut dyn Engine,
+    tensor: &TensorMap<R, D>,
+    tol: f64,
+) -> Result<bool, Error>
 where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: TensorScalar,
 {
-    tensor.is_diagonal(tol)
+    tensor.is_diagonal(engine, tol)
 }

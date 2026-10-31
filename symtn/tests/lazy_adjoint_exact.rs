@@ -15,6 +15,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use symtn::typed::Engine;
 
 use num_complex::Complex64;
 
@@ -216,12 +217,12 @@ fn assert_update_close<D: Exact>(what: &str, got: &[D], want: &[D]) {
 }
 
 macro_rules! assert_exact_adjoint {
-    ($dtype:ty, [$($codomain:expr),+], [$($domain:expr),+]) => {{
-        let runtime = Runtime::builder().dense_threads(1).build().unwrap();
+    ($engine:ident, $dtype:ty, [$($codomain:expr),+], [$($domain:expr),+]) => {{
+        let runtime = Runtime::builder().build().unwrap();
         let codomain = vec![$($codomain),+];
         let domain = vec![$($domain),+];
-        let parent = |salt| {
-            TensorMap::<_, $dtype>::from_subblock_fn(
+        let parent = |$engine: &mut dyn Engine, salt| {
+            TensorMap::<_, $dtype>::from_subblock_fn($engine,
                 &runtime,
                 codomain.iter().copied(),
                 domain.iter().copied(),
@@ -229,8 +230,8 @@ macro_rules! assert_exact_adjoint {
             )
             .unwrap()
         };
-        let on_adjoint_space = |fill: &dyn Fn(&_, &[usize]) -> $dtype| {
-            TensorMap::<_, $dtype>::from_subblock_fn(
+        let on_adjoint_space = |$engine: &mut dyn Engine, fill: &dyn Fn(&_, &[usize]) -> $dtype| {
+            TensorMap::<_, $dtype>::from_subblock_fn($engine,
                 &runtime,
                 domain.iter().copied(),
                 codomain.iter().copied(),
@@ -238,20 +239,20 @@ macro_rules! assert_exact_adjoint {
             )
             .unwrap()
         };
-        let (first, second) = (parent(0), parent(1));
-        let owned = on_adjoint_space(&|trees, indices| entry::<$dtype, _>(trees, indices, 2));
-        let expected = on_adjoint_space(&|trees, indices| {
+        let (first, second) = (parent($engine, 0), parent($engine, 1));
+        let owned = on_adjoint_space($engine, &|trees, indices| entry::<$dtype, _>(trees, indices, 2));
+        let expected = on_adjoint_space($engine, &|trees, indices| {
             adjoint_entry::<$dtype, _>(trees, indices, 0)
         });
 
-        let lazy = first.adjoint().unwrap();
+        let lazy = first.adjoint($engine).unwrap();
         assert_eq!(lazy.codomain(), expected.codomain());
         assert_eq!(lazy.domain(), expected.domain());
         assert!(expected.subblock_count() > 1);
-        assert_eq!(bits(lazy.materialize().unwrap().dense_data().unwrap()), bits(expected.dense_data().unwrap()));
+        assert_eq!(bits(lazy.materialize($engine).unwrap().dense_data().unwrap()), bits(expected.dense_data().unwrap()));
 
-        let lazy = first.adjoint().unwrap();
-        let other_lazy = second.adjoint().unwrap();
+        let lazy = first.adjoint($engine).unwrap();
+        let other_lazy = second.adjoint($engine).unwrap();
         let (zero, one, alpha, beta) = (
             <$dtype as Exact>::ZERO,
             <$dtype as Exact>::ONE,
@@ -283,7 +284,7 @@ macro_rules! assert_exact_adjoint {
                     }
                 };
                 let both_lazy = rhs_salt == 1;
-                let expected = on_adjoint_space(&|trees, indices| {
+                let expected = on_adjoint_space($engine, &|trees, indices| {
                     let (x, y) = (value(lhs_salt, trees, indices), value(rhs_salt, trees, indices));
                     if both_lazy {
                         parent_updated(a, b, x, y)
@@ -293,7 +294,7 @@ macro_rules! assert_exact_adjoint {
                 });
                 // Two lazy operands give a lazy adjoint (A10); its
                 // materialization is the logical sum.
-                let sum = lhs.axpby(a, rhs, b).unwrap().materialize().unwrap();
+                let sum = lhs.axpby($engine, a, rhs, b).unwrap().materialize($engine).unwrap();
                 // Two lazy operands are the lazy adjoint of their parents'
                 // owned update (A10), which multiplies by an exact one: an
                 // arithmetic update, not a copy.
@@ -315,7 +316,7 @@ macro_rules! assert_exact_adjoint {
             }
         }
         // The operands stayed lazy views of untouched parents.
-        assert_eq!(bits(first.dense_data().unwrap()), bits(parent(0).dense_data().unwrap()));
+        assert_eq!(bits(first.dense_data().unwrap()), bits(parent($engine, 0).dense_data().unwrap()));
     }};
 }
 
@@ -341,28 +342,31 @@ fn su2(provider: &Arc<SU2FusionRule>, pairs: &[(usize, usize)]) -> GradedSpace<S
 
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
     let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
     let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
-    assert_exact_adjoint!(f64, [&leg, &other], [&leg]);
-    assert_exact_adjoint!(Complex64, [&leg, &dual], [&other]);
-    assert_exact_adjoint!(Complex64, [&other], [&dual, &leg, &other]);
-    assert_exact_adjoint!(f64, [&dual, &other], [&leg, &other]);
+    assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
+    assert_exact_adjoint!(engine, Complex64, [&leg, &dual], [&other]);
+    assert_exact_adjoint!(engine, Complex64, [&other], [&dual, &leg, &other]);
+    assert_exact_adjoint!(engine, f64, [&dual, &other], [&leg, &other]);
 }
 
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_su2_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
     let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let other = su2(&provider, &[(0, 1), (1, 2)]);
-    assert_exact_adjoint!(f64, [&leg, &other], [&leg]);
-    assert_exact_adjoint!(Complex64, [&leg, &other, &other], [&leg]);
-    assert_exact_adjoint!(Complex64, [&other, &leg], [&leg, &other]);
+    assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
+    assert_exact_adjoint!(engine, Complex64, [&leg, &other, &other], [&leg]);
+    assert_exact_adjoint!(engine, Complex64, [&other, &leg], [&leg, &other]);
 }
 
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
             .unwrap(),
@@ -392,9 +396,9 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
         ],
     )
     .unwrap();
-    assert_exact_adjoint!(f64, [&leg, &dual], [&leg]);
-    assert_exact_adjoint!(Complex64, [&leg, &other], [&dual]);
-    assert_exact_adjoint!(Complex64, [&dual], [&leg, &other]);
+    assert_exact_adjoint!(engine, f64, [&leg, &dual], [&leg]);
+    assert_exact_adjoint!(engine, Complex64, [&leg, &other], [&dual]);
+    assert_exact_adjoint!(engine, Complex64, [&dual], [&leg, &other]);
 }
 
 /// Checked-Generic `add` (`host_add_impl`) and materialization on SU(3):
@@ -403,6 +407,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
 #[cfg(feature = "cgc-gen")]
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
     use symtn::sector::LieGroupFusionRule;
 
     let provider =
@@ -412,9 +417,10 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
     let leg =
         GradedSpace::try_new(Arc::clone(&provider), [(adjoint.clone(), 2), (trivial, 1)]).unwrap();
     let other = GradedSpace::try_new(Arc::clone(&provider), [(adjoint, 3)]).unwrap();
-    let runtime = Runtime::builder().dense_threads(1).build().unwrap();
-    let probe = TensorMap::<_, f64>::from_subblock_fn(&runtime, [&leg, &other], [&leg], |_, _| 0.0)
-        .unwrap();
+    let runtime = Runtime::builder().build().unwrap();
+    let probe =
+        TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&leg, &other], [&leg], |_, _| 0.0)
+            .unwrap();
     assert!(
         (0..probe.subblock_count()).any(|index| probe
             .subblock_fusion_trees(index)
@@ -424,6 +430,6 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_su3_multiplicity_legs() {
             .any(|vertex| vertex.get() == 2)),
         "fixture must carry a Generic vertex key mu = 2"
     );
-    assert_exact_adjoint!(f64, [&leg, &other], [&leg]);
-    assert_exact_adjoint!(Complex64, [&leg, &other], [&other, &leg]);
+    assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
+    assert_exact_adjoint!(engine, Complex64, [&leg, &other], [&other, &leg]);
 }

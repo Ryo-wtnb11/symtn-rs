@@ -148,6 +148,7 @@ fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
 
 #[test]
 fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
     let leg = |is_dual| SectorLeg::new([(SectorId::new(0), 1)], is_dual);
     let src_space = DynamicFusionMapSpace::from_final_homspace(
@@ -171,6 +172,7 @@ fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
     let mut dst = TestTensor::<f64>::from_vec_with_fusion_space(vec![7.0], dst_space).unwrap();
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -186,6 +188,7 @@ fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
 
 #[test]
 fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let src_key = all_codomain_fusion_tree_test_key_for_rule(
         &rule,
@@ -252,6 +255,7 @@ fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
     assert!((specs[1].coefficient() - 0.866_025_403_784_438_6).abs() < 1.0e-12);
 
     fusion_contract_into(
+        engine,
         &rule,
         &mut dst,
         &lhs,
@@ -268,6 +272,7 @@ fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
 
 #[test]
 fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -367,6 +372,7 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
     )
     .unwrap();
     fusion_contract_into(
+        engine,
         &rule,
         &mut expected_core_dst,
         &expected_lhs_core,
@@ -400,7 +406,17 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
 
     let mut automatic_dst =
         TestTensor::<f64>::from_vec_with_fusion_space(vec![1.0, 2.0], dst_space.clone()).unwrap();
-    fusion_contract_into(&rule, &mut automatic_dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(
+        engine,
+        &rule,
+        &mut automatic_dst,
+        &lhs,
+        &rhs,
+        axes,
+        alpha,
+        beta,
+    )
+    .unwrap();
     for (&actual, &expected) in automatic_dst.data().iter().zip(expected_dst.data()) {
         assert!(
             (actual - expected).abs() < 1.0e-12,
@@ -417,6 +433,7 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
     let mut automatic_context =
         TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut automatic_context,
         &rule,
         &mut automatic_context_dst,
@@ -444,6 +461,7 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
     )
     .unwrap();
     context_contract_into(
+        engine,
         &mut automatic_context,
         &rule,
         &mut beta_only_dst,
@@ -459,6 +477,7 @@ fn tensorcontract_fusion_explicit_output_transform_materializes_core_dst() {
 
 #[test]
 fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;
     let lhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2)], [(1, 2), (1, 2), (1, 2)]);
     let rhs_hom = FusionTreeHomSpace::from_sector_ids([(1, 2), (1, 2), (1, 2)], [(1, 2)]);
@@ -560,7 +579,7 @@ fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
         }
     }
 
-    fusion_contract_into(&rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
+    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, alpha, beta).unwrap();
 
     for (&actual, expected) in dst.data().iter().zip(expected) {
         assert!(
@@ -626,6 +645,7 @@ fn contracted_fusion_tree_basis_requires_exact_stored_tree() {
 
 #[test]
 fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: exact cache counters describe one uninterrupted cache generation.
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
@@ -755,8 +775,19 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
 
     let alpha = -1.5;
     let beta = 0.25;
-    fusion_contract_into(&rule, &mut direct_dst, &lhs, &rhs, axes, alpha, beta).unwrap();
     fusion_contract_into(
+        engine,
+        &rule,
+        &mut direct_dst,
+        &lhs,
+        &rhs,
+        axes,
+        alpha,
+        beta,
+    )
+    .unwrap();
+    fusion_contract_into(
+        engine,
         &rule,
         &mut expected_dst,
         &lhs_core,
@@ -789,6 +820,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         TestTensor::<f64>::from_vec_with_fusion_space(initial_dst_for_context, dst_space).unwrap();
     let mut context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut context,
         &rule,
         &mut context_dst,
@@ -842,6 +874,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     let mut automatic_context =
         TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut automatic_context,
         &rule,
         &mut automatic_context_dst,
@@ -869,6 +902,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     let mut no_cache_context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     for _ in 0..2 {
         context_contract_into(
+            engine,
             &mut no_cache_context,
             &rule,
             &mut no_cache_dst,
@@ -906,6 +940,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     let mut warm_policy_context =
         TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut warm_policy_context,
         &rule,
         &mut warm_policy_dst,
@@ -925,6 +960,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
     .unwrap();
     let mut lru_context = TensorContractFusionExecutionContext::<f64, RuleIdentity>::default();
     context_contract_into(
+        engine,
         &mut lru_context,
         &rule,
         &mut lru_dst,
@@ -947,6 +983,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         .data_mut()
         .copy_from_slice(&initial_dst_for_context_replay);
     context_contract_into(
+        engine,
         &mut automatic_context,
         &rule,
         &mut automatic_context_dst,
@@ -972,6 +1009,7 @@ fn tensorcontract_fusion_non_core_form_su2_absorbs_explicit_transform_sequence()
         .data_mut()
         .copy_from_slice(&initial_dst_for_context_replay);
     context_contract_into(
+        engine,
         &mut automatic_context,
         &rule,
         &mut automatic_context_dst,

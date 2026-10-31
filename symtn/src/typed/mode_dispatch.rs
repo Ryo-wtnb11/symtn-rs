@@ -367,29 +367,33 @@ where
     D: TensorScalar + MultiplicityFreeTransformExecution<R>,
 {
     fn transform_bond_spectrum(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
         operation: &TreeTransformOperation,
         require_representable: bool,
     ) -> Result<BondTransform<R, D>, Error> {
-        D::transform_bond_spectrum(tensor, spectrum, operation, require_representable)
+        D::transform_bond_spectrum(engine, tensor, spectrum, operation, require_representable)
     }
 
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, D, S>>, Error> {
-        D::try_lazy_adjoint(tensor, operation)
+        D::try_lazy_adjoint(engine, tensor, operation)
     }
 
     fn transform<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        D::transform(tensor, operation)
+        D::transform(engine, tensor, operation)
     }
 
     fn transform_into<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
@@ -398,6 +402,7 @@ where
         exact_layout_probe: impl FnOnce(&mut dyn FnMut(symtn_tensors::TreeTransformOperationView<'_>)),
     ) -> Result<(), Error> {
         D::transform_into(
+            engine,
             source,
             destination,
             alpha,
@@ -417,18 +422,20 @@ where
     D: TensorScalar,
 {
     fn transform_bond_spectrum(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
         operation: &TreeTransformOperation,
         require_representable: bool,
     ) -> Result<BondTransform<R, D>, Self::FacadeError> {
         let source = tensor.logical_space();
-        let mut lease = tensor.runtime.lease_context()?;
+        let mut lease = crate::runtime::ContextLease::new();
         let (destination, outcome) = lease
             .context()
             .generic_lane::<D>()?
             .tree_context_mut()
             .tree_transform_structure_checked_generic_in(
+                engine,
                 source,
                 operation,
                 |structure, preview| {
@@ -446,13 +453,15 @@ where
     }
 
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, D, S>>, Self::FacadeError> {
-        lazy_adjoint_of_transformed_parent(tensor, operation)
+        lazy_adjoint_of_transformed_parent(engine, tensor, operation)
     }
 
     fn transform<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError> {
@@ -462,15 +471,22 @@ where
             .owned_body()
             .ok_or_else(|| internal_layout_error("checked Generic transform input is owned"))?;
         let src_len = transform_source_len(body)?;
-        let mut lease = tensor.runtime.lease_context()?;
+        let mut lease = crate::runtime::ContextLease::new();
         let staged = lease
             .context()
             .generic_lane::<D>()?
             .tree_context_mut()
-            .stage_tree_transform_checked_generic_in(&body.space, None, src_len, &operation)?;
+            .stage_tree_transform_checked_generic_in(
+                engine,
+                &body.space,
+                None,
+                src_len,
+                &operation,
+            )?;
         let data = S::replay_owned(
+            engine,
             EXEC,
-            TreeReplay::staged::<CheckedGenericTreeLane, _, _>(&tensor.runtime, lease, &staged),
+            TreeReplay::staged::<CheckedGenericTreeLane, _, _>(lease, &staged),
             tensor,
             D::from_real(1.0),
         )
@@ -481,6 +497,7 @@ where
     /// No exact-layout probe: its key family is multiplicity-free direct
     /// only, so a checked entry can never hit it.
     fn transform_into<S: TransformExec<R, D>>(
+        engine: &mut dyn Engine,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
@@ -488,7 +505,7 @@ where
         operation: impl FnOnce() -> Result<TreeTransformOperation, Error>,
         _exact_layout_probe: impl FnOnce(&mut dyn FnMut(symtn_tensors::TreeTransformOperationView<'_>)),
     ) -> Result<(), Self::FacadeError> {
-        let mut lease = source.runtime.lease_context()?;
+        let mut lease = crate::runtime::ContextLease::new();
         let operation = operation()?;
         let adjoint_of = match &source.repr {
             TypedTensorRepr::Owned(_) => None,
@@ -500,6 +517,7 @@ where
             .generic_lane::<D>()?
             .tree_context_mut()
             .stage_tree_transform_into_checked_generic_in::<R, Self::FacadeError>(
+                engine,
                 source.logical_space(),
                 adjoint_of,
                 transform_source_len(source.storage_body())?,
@@ -509,8 +527,9 @@ where
         let destination_data = destination_storage_mut(destination)?;
         with_transform_into_source(source, &operation, alpha, beta, |input| {
             S::replay_into(
+                engine,
                 EXEC,
-                TreeReplay::staged::<CheckedGenericTreeLane, _, _>(&source.runtime, lease, &staged),
+                TreeReplay::staged::<CheckedGenericTreeLane, _, _>(lease, &staged),
                 input,
                 destination_data,
                 alpha,
@@ -738,15 +757,17 @@ where
     D: TensorScalar + MultiplicityFreeContractExecution<R> + MultiplicityFreeTransformExecution<R>,
 {
     fn contract<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
         planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        D::contract(lhs, rhs, spec, planar)
+        D::contract(engine, lhs, rhs, spec, planar)
     }
 
     fn contract_into<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -755,14 +776,15 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), Error> {
-        D::contract_into(lhs, rhs, spec, planar, destination, alpha, beta)
+        D::contract_into(engine, lhs, rhs, spec, planar, destination, alpha, beta)
     }
 
     fn compose<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        D::compose(lhs, rhs)
+        D::compose(engine, lhs, rhs)
     }
 }
 
@@ -775,6 +797,7 @@ where
     D: TensorScalar,
 {
     fn contract<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -783,10 +806,11 @@ where
         let output_axes = spec.output_axes();
         let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
         let request = contract_request(lhs_operand, rhs_operand, spec, &output_axes, planar);
-        checked_generic_contract_owned(lhs, rhs, request)
+        checked_generic_contract_owned(engine, lhs, rhs, request)
     }
 
     fn contract_into<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -796,7 +820,7 @@ where
         beta: D,
     ) -> Result<(), Self::FacadeError> {
         let output_axes = spec.output_axes();
-        let mut lease = lhs.runtime.lease_context()?;
+        let mut lease = crate::runtime::ContextLease::new();
         lease.context().generic_lane::<D>()?;
         let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
         let mut staged = symtn_tensors::StagedContract::checked_generic(
@@ -816,12 +840,14 @@ where
         let destination = destination_storage_mut(destination)?;
         let resolution = match staged.try_core::<S::Caps>()? {
             symtn_tensors::CoreRoute::Hit(core) => core,
-            symtn_tensors::CoreRoute::Miss(miss) => staged.plan_beyond_core::<S::Caps>(miss)?,
+            symtn_tensors::CoreRoute::Miss(miss) => {
+                staged.plan_beyond_core::<S::Caps>(engine, miss)?
+            }
         };
         S::contract_into(
+            engine,
             EXEC,
             ContractReplay::new::<CheckedGenericTreeLane>(
-                &lhs.runtime,
                 Some(lease),
                 &resolution,
                 (staged.destination(), staged.destination_len()),
@@ -839,10 +865,11 @@ where
     }
 
     fn compose<S: ContractExec<R, D>>(
+        engine: &mut dyn Engine,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError> {
-        checked_generic_contract_owned(lhs, rhs, symtn_tensors::ContractRequest::Compose)
+        checked_generic_contract_owned(engine, lhs, rhs, symtn_tensors::ContractRequest::Compose)
     }
 }
 
@@ -850,6 +877,7 @@ where
 /// one lease, the staging, the planner under the call's transaction, the
 /// storage's kernel, then the commit and publication (#2063).
 fn checked_generic_contract_owned<'a, R, D, S>(
+    engine: &mut dyn Engine,
     lhs: &'a TensorMap<R, D, S>,
     rhs: &'a TensorMap<R, D, S>,
     request: symtn_tensors::ContractRequest<'a>,
@@ -863,7 +891,7 @@ where
     S: ContractExec<R, D>,
 {
     // The kernel resolves the generic lane under this lease, once.
-    let lease = lhs.runtime.lease_context()?;
+    let lease = crate::runtime::ContextLease::new();
     let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
     let mut staged = symtn_tensors::StagedContract::checked_generic(
         (
@@ -880,12 +908,12 @@ where
     )?;
     let resolution = match staged.try_core::<S::Caps>()? {
         symtn_tensors::CoreRoute::Hit(core) => core,
-        symtn_tensors::CoreRoute::Miss(miss) => staged.plan_beyond_core::<S::Caps>(miss)?,
+        symtn_tensors::CoreRoute::Miss(miss) => staged.plan_beyond_core::<S::Caps>(engine, miss)?,
     };
     let data = S::contract_owned(
+        engine,
         EXEC,
         ContractReplay::new::<CheckedGenericTreeLane>(
-            &lhs.runtime,
             Some(lease),
             &resolution,
             (staged.destination(), staged.destination_len()),

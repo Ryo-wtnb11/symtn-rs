@@ -54,6 +54,7 @@ struct HostSvdTrunc<R: SectorCodec, D> {
 }
 
 fn labelled_f64<R, D>(
+    engine: &mut dyn symtn::typed::Engine,
     factor: &TensorMap<R, D>,
     to_f64: impl Fn(D) -> f64,
 ) -> Vec<symtn::typed::SectorSpectrum<<R as SectorCodec>::Sector, f64>>
@@ -68,7 +69,7 @@ where
     D: TensorScalar,
 {
     let mut spectra: Vec<_> = factor
-        .diagview()
+        .diagview(engine)
         .unwrap()
         .into_iter()
         .map(|entry| symtn::typed::SectorSpectrum {
@@ -106,19 +107,9 @@ struct StructuralSnapshot<S> {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct ProbeSector;
 
-/// Tiny device operation for the canary below: `to_cuda` takes the Runtime's
-/// device lease, on a provider that never calls back into the Runtime.
-fn device_lease_probe(runtime: &Runtime) {
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
-    let probe: TensorMap<_, f64> = TensorMap::zeros(runtime, [&leg], [&leg]).unwrap();
-    probe.to_cuda().unwrap();
-}
-
-/// One-sector provider whose dimension callback re-enters the Runtime's device
-/// lease. A reduction deadlocks here if it calls provider code under that
-/// lease. (`cuda_device_ordinal` takes no lock, #1281.)
+/// One-sector provider counting its dimension callbacks, so a device
+/// reduction is seen to weight by the provider's own dimensions.
 struct ReentrantDimensionRule {
-    runtime: Runtime,
     calls: Arc<AtomicUsize>,
 }
 
@@ -197,11 +188,6 @@ impl MultiplicityFreeFusionSymbols for ReentrantDimensionRule {
 
 impl MultiplicityFreeRigidSymbols for ReentrantDimensionRule {
     fn dim_scalar(&self, _: SectorId) -> f64 {
-        assert_eq!(
-            symtn::typed::__network::cuda_device_ordinal(&self.runtime),
-            Some(0)
-        );
-        device_lease_probe(&self.runtime);
         self.calls.fetch_add(1, Ordering::SeqCst);
         1.0
     }
@@ -302,8 +288,11 @@ where
     }
 }
 
-fn assert_typed_cuda_svd_matches_host<R>(source: &TensorMap<R, f64>)
-where
+fn assert_typed_cuda_svd_matches_host<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    source: &TensorMap<R, f64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -313,19 +302,20 @@ where
         + SectorCodec,
 {
     let source_data = source.dense_data().unwrap().to_vec();
-    let source_device = source.to_cuda().unwrap();
+    let source_device = source.to_cuda(cuda).unwrap();
     let expected = source
-        .svd_compact(&codomain_axes(source), &domain_axes(source))
+        .svd_compact(engine, &codomain_axes(source), &domain_axes(source))
         .unwrap();
-    assert_cuda_svd_result(
-        source,
-        &expected,
-        source_device
-            .svd_compact(&codomain_axes(&source_device), &domain_axes(&source_device))
-            .unwrap(),
-    );
+    let device_result = source_device
+        .svd_compact(
+            cuda,
+            &codomain_axes(&source_device),
+            &domain_axes(&source_device),
+        )
+        .unwrap();
+    assert_cuda_svd_result(engine, cuda, source, &expected, device_result);
     assert_eq!(
-        source_device.to_host().unwrap().dense_data().unwrap(),
+        source_device.to_host(cuda).unwrap().dense_data().unwrap(),
         source_data
     );
 }
@@ -335,6 +325,8 @@ type HostSvdFactors<R, D> = Svd<TensorMap<R, D>>;
 type DeviceSvdFactors<R, D> = Svd<TensorMap<R, D, CudaStorage<D>>>;
 
 fn assert_cuda_svd_result<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
     source: &TensorMap<R, f64>,
     expected: &HostSvdFactors<R, f64>,
     factors: DeviceSvdFactors<R, f64>,
@@ -355,14 +347,19 @@ fn assert_cuda_svd_result<R>(
         assert_eq!(factor.placement(), symtn::expert::Placement::Cuda(0));
     }
     let actual = (
-        factors.u.to_host().unwrap(),
-        factors.s.to_host().unwrap(),
-        factors.vh.to_host().unwrap(),
+        factors.u.to_host(cuda).unwrap(),
+        factors.s.to_host(cuda).unwrap(),
+        factors.vh.to_host(cuda).unwrap(),
     );
     numerics::assert_slices_close(
         "actual.1",
-        actual.1.materialize().unwrap().dense_data().unwrap(),
-        expected.s.materialize().unwrap().dense_data().unwrap(),
+        actual.1.materialize(engine).unwrap().dense_data().unwrap(),
+        expected
+            .s
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         FACTOR_TERMS,
     );
     assert_eq!(
@@ -377,18 +374,22 @@ fn assert_cuda_svd_result<R>(
         structural_snapshot(&actual.2),
         structural_snapshot(&expected.vh)
     );
-    assert!(is_isometric!(actual.0, 1e-10));
-    assert!(is_isometric!(actual.2.adjoint().unwrap(), 1e-10));
+    assert!(is_isometric!(engine, actual.0, 1e-10));
+    assert!(is_isometric!(
+        engine,
+        actual.2.adjoint(engine).unwrap(),
+        1e-10
+    ));
     let rebuilt = actual
         .0
-        .compose(&actual.1)
+        .compose(engine, &actual.1)
         .unwrap()
-        .compose(&actual.2)
+        .compose(engine, &actual.2)
         .unwrap();
     numerics::assert_slices_close(
         "rebuilt",
-        rebuilt.materialize().unwrap().dense_data().unwrap(),
-        source.materialize().unwrap().dense_data().unwrap(),
+        rebuilt.materialize(engine).unwrap().dense_data().unwrap(),
+        source.materialize(engine).unwrap().dense_data().unwrap(),
         FACTOR_TERMS,
     );
 }
@@ -451,8 +452,11 @@ fn assert_device_factor_handles<R, const N: usize>(
     }
 }
 
-fn assert_c64_svd_matches_host<R>(source: &TensorMap<R, Complex64>)
-where
+fn assert_c64_svd_matches_host<R>(
+    engine: &mut dyn symtn::typed::Engine,
+    cuda: &mut dyn symtn::typed::Engine,
+    source: &TensorMap<R, Complex64>,
+) where
     R: symtn::sector::TypedSectorAdmission<
             Sector = <R as symtn::sector::SectorCodec>::Sector,
             Error = symtn::typed::FusionAlgebraError,
@@ -461,23 +465,28 @@ where
         + CheckedFusionAlgebra
         + SectorCodec,
 {
-    let source_data = source.materialize().unwrap().dense_data().unwrap().to_vec();
+    let source_data = source
+        .materialize(engine)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     let expected = source
-        .svd_compact(&codomain_axes(source), &domain_axes(source))
+        .svd_compact(engine, &codomain_axes(source), &domain_axes(source))
         .unwrap();
-    let device = source.to_cuda().unwrap();
+    let device = source.to_cuda(cuda).unwrap();
     let Svd {
         u: u_device,
         s: s_device,
         vh: vh_device,
     } = device
-        .svd_compact(&codomain_axes(&device), &domain_axes(&device))
+        .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
         .unwrap();
     assert_device_factor_handles(source, [&u_device, &s_device, &vh_device]);
 
-    let u = u_device.to_host().unwrap();
-    let s = s_device.to_host().unwrap();
-    let vh = vh_device.to_host().unwrap();
+    let u = u_device.to_host(cuda).unwrap();
+    let s = s_device.to_host(cuda).unwrap();
+    let vh = vh_device.to_host(cuda).unwrap();
     for (actual, expected) in [(&u, &expected.u), (&s, &expected.s), (&vh, &expected.vh)] {
         assert_eq!(structural_snapshot(actual), structural_snapshot(expected));
     }
@@ -485,26 +494,37 @@ where
     // are compared: the spectrum, both orthonormality relations, and `u s vh`.
     numerics::assert_slices_close(
         "s",
-        s.materialize().unwrap().dense_data().unwrap(),
-        expected.s.materialize().unwrap().dense_data().unwrap(),
+        s.materialize(engine).unwrap().dense_data().unwrap(),
+        expected
+            .s
+            .materialize(engine)
+            .unwrap()
+            .dense_data()
+            .unwrap(),
         FACTOR_TERMS,
     );
-    assert!(is_isometric!(u, 1e-10), "U^H U = I");
-    assert!(is_isometric!(vh.adjoint().unwrap(), 1e-10), "V^H V = I");
+    assert!(is_isometric!(engine, u, 1e-10), "U^H U = I");
+    assert!(
+        is_isometric!(engine, vh.adjoint(engine).unwrap(), 1e-10),
+        "V^H V = I"
+    );
     numerics::assert_slices_close(
         "u.compose(s)  .compose(vh)",
-        u.compose(&s)
+        u.compose(engine, &s)
             .unwrap()
-            .compose(&vh)
+            .compose(engine, &vh)
             .unwrap()
-            .materialize()
+            .materialize(engine)
             .unwrap()
             .dense_data()
             .unwrap(),
         &source_data,
         FACTOR_TERMS,
     );
-    assert_eq!(device.to_host().unwrap().dense_data().unwrap(), source_data);
+    assert_eq!(
+        device.to_host(cuda).unwrap().dense_data().unwrap(),
+        source_data
+    );
 }
 
 mod arithmetic;
