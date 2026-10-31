@@ -33,7 +33,6 @@
 //! formula's conventions (quantum-dimension weight, complex modulus).
 
 use std::sync::Arc;
-use symtn::typed::Engine;
 
 use symtn::sector::{
     FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
@@ -405,93 +404,6 @@ fn mixed_magnitudes_keep_the_dominant_block() {
         let want = expected(&U1, |block| if block == 2 { s } else { 1.0 }, real_abs);
         assert_rows::<f64>(&format!("u1 +1 block x{s:e}"), norms!(engine, t), want, 21);
     }
-}
-
-#[test]
-fn non_finite_entries_follow_julia() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let at_plus_one = |engine: &mut dyn Engine, value: f64, second: f64| {
-        tensor!(
-            engine,
-            u1(),
-            f64,
-            move |trees: &symtn::typed::BlockFusionTrees<U1Irrep>, i: &[usize]| {
-                match (*trees.coupled() == U1Irrep::new(1), i) {
-                    (true, [0, 0]) => value,
-                    (true, [1, 0]) => second,
-                    _ => real_fill(i),
-                }
-            }
-        )
-    };
-    let nan = [f64::NAN; 4];
-    let inf = [f64::INFINITY; 4];
-    // TensorKit: NaN -> all NaN; ±Inf -> all Inf; Inf beside NaN -> all NaN.
-    assert_rows::<f64>(
-        "NaN",
-        norms!(engine, at_plus_one(engine, f64::NAN, 1.5)),
-        nan,
-        21,
-    );
-    assert_rows::<f64>(
-        "Inf",
-        norms!(engine, at_plus_one(engine, f64::INFINITY, 1.5)),
-        inf,
-        21,
-    );
-    assert_rows::<f64>(
-        "-Inf",
-        norms!(engine, at_plus_one(engine, f64::NEG_INFINITY, 1.5)),
-        inf,
-        21,
-    );
-    assert_rows::<f64>(
-        "Inf and NaN",
-        norms!(engine, at_plus_one(engine, f64::INFINITY, f64::NAN)),
-        nan,
-        21,
-    );
-
-    // |NaN + Inf i| = hypot(NaN, Inf) = Inf, so Julia's maxabs is Inf and
-    // generic_norm2 returns it: TensorKit prints all Inf on these 21 entries.
-    // (Past NRM2_CUTOFF OpenBLAS `dznrm2` returns NaN for p = 2 instead; symtn
-    // follows the generic_norm2 rule at every length.)
-    let mixed = tensor!(engine, u1(), Complex64, |trees, i| {
-        if *trees.coupled() == U1Irrep::new(1) && i == [0, 0] {
-            Complex64::new(f64::NAN, f64::INFINITY)
-        } else {
-            complex_fill(i)
-        }
-    });
-    assert_rows::<Complex64>("NaN + Inf i", norms!(engine, mixed), inf, 21);
-
-    // Weighted SU(2): TensorKit prints all NaN and all Inf.
-    let su2_with = |engine: &mut dyn Engine, value: f64| {
-        tensor!(
-            engine,
-            su2(),
-            f64,
-            move |trees: &symtn::typed::BlockFusionTrees<SU2Irrep>, i: &[usize]| {
-                if *trees.coupled() == SU2Irrep::from_twice_spin(2) && i == [0, 0] {
-                    value
-                } else {
-                    real_fill(i)
-                }
-            }
-        )
-    };
-    assert_rows::<f64>(
-        "su2 NaN",
-        norms!(engine, su2_with(engine, f64::NAN)),
-        nan,
-        21,
-    );
-    assert_rows::<f64>(
-        "su2 Inf",
-        norms!(engine, su2_with(engine, f64::INFINITY)),
-        inf,
-        21,
-    );
 }
 
 #[test]

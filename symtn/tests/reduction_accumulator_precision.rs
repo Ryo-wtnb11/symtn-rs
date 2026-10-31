@@ -259,7 +259,7 @@ macro_rules! dense_reductions {
 /// Compact diagonal storage has its own reductions. Its full-trace row reads
 /// the rank-0 result through the multiplicity-free `scalar`, so this is
 /// separate from [`dense_reductions`]; checked Generic compact reductions are
-/// covered by `compact_reductions_both_modes.rs`.
+/// covered by `storage_parity_matrix.rs`.
 macro_rules! compact_reductions {
     ($engine:ident, $out:expr, $prefix:literal, $runtime:expr, $leg:expr, $dtype:ty, $wide:expr, $dim:expr) => {{
         let mut diagonal = stepper();
