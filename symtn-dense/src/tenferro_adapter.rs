@@ -288,10 +288,12 @@ impl DefaultDenseExecutor {
     /// jobs goes grouped, paying the grouped preparation per unbound call
     /// (O(J log J) staging, and under Auto the scheduler's lane search:
     /// O(J sum(W) + L0 J + P J log L0) with one provider grant query per job
-    /// and distinct share width W, `sum(W) <= 2 S H(L0) + L0`, for L0 lanes
-    /// over S slots, a lower bound per lane count, and a placement for the
-    /// P <= L0 counts the bound does not rule out) instead of the cached O(1)
-    /// strided analysis plus the residual's own preparation.
+    /// and distinct share width W during the sweep, plus up to two widths'
+    /// queries repeated to rebuild the winner, `sum(W) <= 2 S H(L0) + L0`,
+    /// for L0 lanes over S slots, a lower bound per lane count, and a
+    /// placement for the P <= L0 counts the bound does not rule out) instead
+    /// of the cached O(1) strided analysis plus the residual's own
+    /// preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
         &mut self,

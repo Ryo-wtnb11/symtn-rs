@@ -155,9 +155,13 @@ fn on_lanes<B: BlockOp>(
     // tlinalg 0.8.0's width rule, whose serial SVD estimate is about ten times
     // low (and QR's about two), so the model credits a wide lane with a
     // speedup the provider does not deliver and narrows batches of large
-    // blocks onto too few lanes. The estimate is corrected upstream
-    // (tensor4all/tlinalg-rs#89); on the tlinalg release that contains it,
-    // pass the grant for every kind again and re-measure.
+    // blocks onto too few lanes. The upstream change in progress
+    // (tensor4all/tlinalg-rs#89) caps the width inside the provider's own
+    // per-operation decision (`payback_share` in `batch::decide`), not a
+    // generic estimate, so adopting it is not enough: re-enabling needs the
+    // provider's operation-specific grant composed through a public
+    // interface, checked against the adopted release, and the lg lane matrix
+    // rerun.
     let grant = (B::KIND == OpKind::Gemm).then_some(|j: usize, serial: Duration, budget: usize| {
         op.grant(j, &jobs[j], shared, budget, serial)
     });

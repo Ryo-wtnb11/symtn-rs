@@ -117,9 +117,10 @@ otherwise its time over the provider's granted width plus the engine's
 dispatch cost at that width. The granted width is an estimate composed from
 the provider's public decisions (for a packed GEMM plan an optimistic upper
 bound on its grid), and the model has no sublinear speedup, so the choice is
-a scheduling estimate, not a promise of a faster run. The search adds one
-provider width query per block and distinct share width to each grouped
-submission; a lane count whose proved lower bound on its score is not below
+a scheduling estimate, not a promise of a faster run. During its sweep the
+search adds one provider width query per block and distinct share width to
+each grouped submission, and rebuilding the winning placement may repeat the
+queries of up to two widths; a lane count whose proved lower bound on its score is not below
 the best score so far is not placed. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
@@ -134,9 +135,14 @@ it. Their lanes keep the baseline placement over `L0` lanes, without the
 model search: the provider's current width estimate for one SVD is about ten
 times below its run time (QR about two), so the model would credit one wide
 lane with a speedup the factorization does not deliver and put batches of
-large blocks on too few lanes. The search is re-enabled for them, and
-re-measured, on the tlinalg release that corrects that estimate
-(tensor4all/tlinalg-rs#89). Every block runs up to the first one refused before the engine is entered
+large blocks on too few lanes. The upstream change in progress
+(tensor4all/tlinalg-rs#89) caps the width inside the provider's own
+per-operation decision rather than correcting a generic estimate, so a
+release containing it does not by itself make the model usable here.
+Re-enabling the search for factorizations requires composing the provider's
+operation-specific grant through a public interface it offers, checking that
+composition against the adopted provider release, and rerunning the full
+lane benchmark matrix. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view); the error reported is the
 lowest-indexed block's, the one the per-matrix SVD or QR would report, and
 nothing is returned on error. Each block allocates its own provider workspace
