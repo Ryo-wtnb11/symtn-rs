@@ -1169,6 +1169,10 @@ fn golden_diagonal_c64(
     TensorMap::diagonal(engine, runtime, &su2_leg(provider, false), spectrum).unwrap()
 }
 
+/// Wire-format stability contract: bytes written by version 1 of the persisted
+/// format must keep decoding to the same tensor and re-encode byte for byte.
+/// The `*_v1.bin` fixtures are that format, not a snapshot of a computation;
+/// changing them requires a new format version.
 #[test]
 fn version_one_golden_files_decode_and_reencode_byte_for_byte() {
     let engine = &mut symtn_dense::CpuEngine::serial();

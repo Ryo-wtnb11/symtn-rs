@@ -4,10 +4,13 @@ use symtn_network::{
     GreedyDenseOptimizer, LabelOrderDenseOptimizer, NetworkIR, SliceLabels, TemporaryLabel,
 };
 
-// The public plan and slice text formats, small enough to check by hand: the
-// chain a-b-c-d contracts (0, 1) -> 3 with labels a c, then 3 with 2 -> 4 with
-// labels a d, each step line reading `lhs rhs result cost "labels"`; slicing the
-// internal label c of extent 8 yields 8 slices, each `slice <kind> "label"`.
+// Format contract: `ContractionPlan::to_text` and `SlicePlan::to_text` write
+// the versioned (`-v2`) text that applications persist in plan-cache files and
+// restore with `from_text`, so a change to these strings is a format change
+// that needs a new header version, not a refactor. The chain a-b-c-d contracts
+// (0, 1) -> 3 with labels a c, then 3 with 2 -> 4 with labels a d, each step
+// line reading `lhs rhs result cost "labels"`; slicing the internal label c of
+// extent 8 yields 8 slices, each `slice <kind> "label"`.
 const DENSE_PATH: &str =
     "symtn-contract-plan-v2\ntensor_count 3\noutput \"a\" \"d\"\nstep 0 1 3 32 \"a\" \"c\"\nstep 2 3 4 50 \"a\" \"d\"\n";
 const DENSE_GREEDY: &str =
@@ -38,8 +41,10 @@ fn dense(ir: &NetworkIR, sizes: [[usize; 2]; 3]) -> DenseCostModel {
     .unwrap()
 }
 
+/// Every plan producer (active-pair path, label order, greedy, tree round
+/// trip) and both slice modes write the versioned plan-cache text format.
 #[test]
-fn plan_entries_match_recorded_text() {
+fn plan_producers_write_the_versioned_text_format() {
     let ir = chain_ir();
     let cost = dense(&ir, [[2, 3], [3, 4], [4, 5]]);
     let path = [ActivePair::new(0, 1), ActivePair::new(0, 1)];
