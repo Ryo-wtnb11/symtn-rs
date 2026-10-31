@@ -1289,9 +1289,9 @@ dependencies = [
 
 [[package]]
 name = "krylov"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb0adaad81fb8f6c2d5b9a7adf7468c716dd17575ab4e7a76d75e89be6d7ed72"
+checksum = "40cd155b23417d685a9f3f962388d357ffe1e4e0922af7456d259ed6e865502d"
 dependencies = [
  "lapack",
  "num-complex",
