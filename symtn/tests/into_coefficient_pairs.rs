@@ -1,4 +1,6 @@
-//! `dst <- alpha * op(inputs) + beta * dst` for every linear `*_into`.
+//! The dtype × `(α, β)` axis of the `*_into` law (the storage × category
+//! axis is `into_admission_matrix.rs`): every `*_into` over f64/c64/f32/c32
+//! and six `(α, β)` pairs, `dst <- alpha * op(inputs) + beta * dst`.
 //!
 //! The oracle never touches a destination path: it is the eager operation on
 //! the same inputs combined with the destination's prior value through the
@@ -6,8 +8,7 @@
 //! `permute!`, `tensortrace!`, `add!` with `α, β`). Covered: beta in
 //! {0, 1, general} and general alpha, a NaN destination under beta = 0,
 //! coupled sectors a contraction cannot reach (on the core route, left
-//! bitwise untouched under beta = 1 — the old full zero-fill would clear
-//! them), U(1), SU(2) and
+//! bitwise untouched under beta = 1), U(1), SU(2) and
 //! fZ2×U(1) with dual legs, f64/c64/f32/c32, lazy-adjoint inputs, the
 //! shared-destination error, and (with `--features cuda -- --ignored`) the
 //! device against the Host.
@@ -281,6 +282,30 @@ macro_rules! suite {
                 alpha,
                 beta,
                 |d: &mut TensorMap<_, D>| lazy.contract_into($engine, &rhs, &spec, d, alpha, beta),
+                32
+            );
+
+            // Planar contraction in the composition order.
+            let planar = ContractSpec {
+                lhs: &[2, 3],
+                rhs: &[0, 1],
+                codomain: &[0, 1],
+                domain: &[2],
+            };
+            let before = t2
+                .planar_contract($engine, &rhs, &planar)
+                .unwrap()
+                .scale($engine, D::real(0.5))
+                .unwrap();
+            check_into!(
+                $engine,
+                &what("planar_contract_into"),
+                t.planar_contract($engine, &rhs, &planar).unwrap(),
+                before,
+                alpha,
+                beta,
+                |d: &mut TensorMap<_, D>| t
+                    .planar_contract_into($engine, &rhs, &planar, d, alpha, beta),
                 32
             );
         }

@@ -1,4 +1,8 @@
-//! `*_into` admits what eager admits, in every admission mode.
+//! The `*_into` law, `dst == α·eager + β·dst₀`, for every facade `*_into`
+//! (`permute`, `braid`, `transpose`, `repartition`, `axpby`, `contract`,
+//! `planar_contract`, `trace_pairs`): `*_into` admits what eager admits, in
+//! every admission mode and storage form: the storage × category axis. The
+//! dtype × `(α, β)` axis of the same law is `into_coefficient_pairs.rs`.
 //!
 //! TensorKit `cfaa073e`: `permute!`/`braid!`/`transpose!`/`repartition!`
 //! (`src/tensors/indexmanipulations.jl:217, 303, 374, 435`) check the
@@ -26,15 +30,16 @@
 //!    materialized by the call.
 //!
 //! Rows: owned dense and lazy-adjoint rank-(2, 2) sources
-//! × {permute, braid, transpose, repartition}; compact rank-(1, 1) diagonal
-//! sources × {identity permute, swap permute, swap transpose,
-//! braid, repartition to (0, 2) and (2, 0)}. Columns: multiplicity-free real
+//! × {permute, braid, transpose, repartition, axpby}; compact rank-(1, 1)
+//! diagonal sources × {identity permute, swap permute, swap transpose,
+//! braid, repartition to (0, 2) and (2, 0), axpby}. Columns: multiplicity-free real
 //! symbols (U(1), SU(2), fermion parity, each with dual legs),
 //! multiplicity-free complex symbols (Fibonacci), checked Generic (SU(2),
 //! SU(3) with outer multiplicity) × {f64, Complex64 scaled by `1 + 2i`}.
 //! Contraction rows: `[v, w'] ← [v, w']` against `[v, w'] ← [v]`
 //! over the domain as owned, lazy-adjoint and adjoint-view (`other`) operands
-//! in the core and two reordered output orders; and every compact arm
+//! in the core and two reordered output orders, with `planar_contract_into`
+//! on the owned, lazy and view operands in the (planar) core order; and every compact arm
 //! pattern (`t · D`, `D · t` with a direct and a lazy `t`, `D · D`) in its own
 //! order and reordered, plus a two-axis contraction the arm declines. The
 //! oracle contracts the materialized operands; reordered `D · D` is the row
@@ -230,15 +235,19 @@ macro_rules! cell {
 /// contracts the materialized operands, and both operands stay cold.
 macro_rules! contract_cell {
     ($engine:ident, $rows:expr, $runtime:expr, $lhs:expr, $rhs:expr, $rhs_arg:expr, $spec:expr, $key:expr,
-     $d:ty, $name:expr) => {{
+     $d:ty, $name:expr) => {
+        contract_cell!(contract, contract_into; $engine, $rows, $runtime, $lhs, $rhs, $rhs_arg, $spec, $key, $d, $name)
+    };
+    ($eager:ident, $into:ident; $engine:ident, $rows:expr, $runtime:expr, $lhs:expr, $rhs:expr, $rhs_arg:expr,
+     $spec:expr, $key:expr, $d:ty, $name:expr) => {{
         let spec = $spec;
         let cold = ($lhs.dense_data().is_err(), $rhs.dense_data().is_err());
-        let eager = $lhs.contract($engine, $rhs_arg, &spec).unwrap();
+        let eager = $lhs.$eager($engine, $rhs_arg, &spec).unwrap();
         let dense_rhs = $rhs.materialize($engine).unwrap();
         let oracle = $lhs
             .materialize($engine)
             .unwrap()
-            .contract($engine, &dense_rhs, &spec)
+            .$eager($engine, &dense_rhs, &spec)
             .unwrap();
         beta_cells!(
             $engine,
@@ -250,7 +259,7 @@ macro_rules! contract_cell {
             $key,
             $d,
             $name,
-            |d, a, b| $lhs.contract_into($engine, $rhs_arg, &spec, d, a, b),
+            |d, a, b| $lhs.$into($engine, $rhs_arg, &spec, d, a, b),
             || assert_eq!(
                 ($lhs.dense_data().is_err(), $rhs.dense_data().is_err()),
                 cold,
@@ -413,6 +422,17 @@ macro_rules! bond_cells {
             |t| t.repartition($engine, 2),
             |d, a, b| $source.repartition_into($engine, d, a, b)
         );
+        cell!(
+            $engine,
+            rows,
+            $runtime,
+            $source,
+            $key,
+            $d,
+            "bond axpby",
+            |t| t.materialize($engine),
+            |d, a, b| $source.axpby_into($engine, d, a, b)
+        );
         rows
     }};
 }
@@ -482,6 +502,17 @@ macro_rules! transform_cells {
             "repartition",
             |t| t.repartition($engine, 1),
             |d, a, b| $source.repartition_into($engine, d, a, b)
+        );
+        cell!(
+            $engine,
+            rows,
+            $runtime,
+            $source,
+            $key,
+            $d,
+            "axpby",
+            |t| t.materialize($engine),
+            |d, a, b| $source.axpby_into($engine, d, a, b)
         );
         rows
     }};
@@ -722,7 +753,18 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         |t| t.repartition(engine, 1),
         |d, a, b| source.repartition_into(engine, d, a, b)
     );
-    assert_eq!(rows.len(), 3 * BETAS.len());
+    cell!(
+        engine,
+        rows,
+        &runtime,
+        source,
+        key,
+        Complex64,
+        "axpby",
+        |t| t.materialize(engine),
+        |d, a, b| source.axpby_into(engine, d, a, b)
+    );
+    assert_eq!(rows.len(), 4 * BETAS.len());
 
     // A compact Fibonacci bond: everything but the anyonic permute.
     let bond = bond!(
@@ -768,7 +810,18 @@ fn multiplicity_free_complex_symbol_transform_into_is_alpha_eager_plus_beta_dest
         |t| t.repartition(engine, 2),
         |d, a, b| bond.repartition_into(engine, d, a, b)
     );
-    assert_eq!(rows.len(), 3 * BETAS.len());
+    cell!(
+        engine,
+        rows,
+        &runtime,
+        bond,
+        key,
+        Complex64,
+        "bond axpby",
+        |t| t.materialize(engine),
+        |d, a, b| bond.axpby_into(engine, d, a, b)
+    );
+    assert_eq!(rows.len(), 4 * BETAS.len());
 
     // Anyonic: `permute` is refused alike, and the destination is untouched.
     let eager = source.permute(engine, &[2, 0], &[1, 3]).unwrap_err();
@@ -1372,6 +1425,19 @@ macro_rules! contract_cells {
                 $d,
                 format!("contract O·V {order}")
             );
+            // The composition order is planar: `planar_contract_into` on the
+            // same operands (the fermionic rule takes its twist-free route).
+            if order == "core" {
+                contract_cell!(planar_contract, planar_contract_into;
+                    $engine, rows, $runtime, $lhs, $rhs, &$rhs, spec, $key, $d,
+                    "planar O·O".to_string());
+                contract_cell!(planar_contract, planar_contract_into;
+                    $engine, rows, $runtime, $lazy_lhs, $rhs, &$rhs, spec, $key, $d,
+                    "planar L·O".to_string());
+                contract_cell!(planar_contract, planar_contract_into;
+                    $engine, rows, $runtime, $lhs, lazy_rhs, $rhs_parent.adjoint_view(), spec,
+                    $key, $d, "planar O·V".to_string());
+            }
         }
         rows
     }};
@@ -2654,4 +2720,56 @@ fn anyonic_complex_symbol_contract_into_is_refused_like_eager() {
         .unwrap_err();
     assert_eq!(format!("{into}"), format!("{eager}"));
     assert_eq!(dense(&destination), before);
+}
+
+/// A destination on an equal but distinct provider instance keeps that
+/// instance: `_into` writes values only, never the destination's space.
+#[test]
+fn into_keeps_a_destination_on_its_own_equal_provider_instance() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let _serial = crate::counting_alloc::serial();
+    let runtime = host_runtime();
+    let key = debug_key::<U1Irrep>;
+    let (v, w) = u1_legs();
+    let source = source!(engine, &runtime, v, w, key);
+    let (v, w) = u1_legs();
+    let twin = source!(engine, &runtime, v, w, key);
+    assert!(!std::ptr::eq(source.provider(), twin.provider()));
+    let spec = ContractSpec {
+        lhs: &[2, 3],
+        rhs: &[0, 1],
+        codomain: &[0, 1],
+        domain: &[2, 3],
+    };
+    let check = |what: &str, destination: &TensorMap<U1FusionRule, f64>, eager: Vec<Complex64>| {
+        let got = dense(destination);
+        assert_eq!(got.len(), eager.len(), "{what}");
+        for (i, (&got, &e)) in got.iter().zip(&eager).enumerate() {
+            assert!(close(got, e * 1.5), "{what} [{i}]: {got} vs {}", e * 1.5);
+        }
+    };
+
+    let mut destination = twin.permute(engine, &[2, 0], &[1, 3]).unwrap();
+    let provider = destination.provider() as *const _;
+    source
+        .permute_into(engine, &[2, 0], &[1, 3], &mut destination, 1.5, 0.0)
+        .unwrap();
+    assert!(std::ptr::eq(destination.provider(), provider));
+    check(
+        "permute",
+        &destination,
+        dense(&source.permute(engine, &[2, 0], &[1, 3]).unwrap()),
+    );
+
+    let mut destination = twin.contract(engine, &twin, &spec).unwrap();
+    let provider = destination.provider() as *const _;
+    source
+        .contract_into(engine, &source, &spec, &mut destination, 1.5, 0.0)
+        .unwrap();
+    assert!(std::ptr::eq(destination.provider(), provider));
+    check(
+        "contract",
+        &destination,
+        dense(&source.contract(engine, &source, &spec).unwrap()),
+    );
 }
