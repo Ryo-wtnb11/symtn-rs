@@ -23,6 +23,7 @@ tenferro = [
 cpu-faer = [
     "tenferro",
     "dep:tlinalg",
+    "dep:strided-view",
     "tenferro-cpu/native",
     "tenferro-linalg/native",
 ]
@@ -82,6 +83,9 @@ cpueinsum-blas = { version = "0.9.0", optional = true }
 tcontract = { version = "=0.9.0", optional = true }
 tcontract-exec = { version = "=0.9.0", optional = true }
 tlinalg = { version = "=0.8.0", optional = true }
+# The operand descriptor tlinalg's entries take (`RawStridedRef`); the version
+# tlinalg resolves, so it is tlinalg's own type. Native provider only.
+strided-view = { version = "=0.7.0", optional = true }
 tenferro-cpu = { version = "0.8.0", default-features = false, optional = true }
 tenferro-linalg = { version = "0.8.0", default-features = false, optional = true }
 # The `Engine` trait every numerical entry takes: needed by backend-free and

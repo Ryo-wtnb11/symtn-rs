@@ -34,6 +34,10 @@ mod block_kernel {
     // factorization kernels run here too.
     #[cfg(not(feature = "cpu-blas-core"))]
     pub(crate) mod gemm;
+    // The native provider's block factorizations; BLAS keeps its serial
+    // per-block vendor calls.
+    #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+    pub(crate) mod factor;
     #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod schedule;
 }

@@ -85,7 +85,17 @@ batch decision. The lanes share all of those threads: a batch of a few large
 blocks gives each lane several threads, and a batch of many small blocks runs
 one thread per lane. Blocks are placed largest first on the least-loaded lane; prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
-core batches the same way.
+core batches the same way. The native provider's compact SVD over a
+tensor's sector blocks runs on the same lanes: each block's cost is the
+provider's SVD work (`m n min(m, n)`, four times that for complex scalars)
+under the engine's work model, and each block's factorization gets its faer
+width from the engine's cost rule within its lane's share, so a small block
+takes no width the engine would not grant it. Every block runs up to the
+first one refused before the engine is entered (an unsupported dtype or a
+malformed view); the error reported is the lowest-indexed block's, the one the per-matrix SVD would
+report, and nothing is returned on error. Each block allocates its own
+provider workspace. QR and the other factorizations, and every BLAS
+factorization, still run block after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`

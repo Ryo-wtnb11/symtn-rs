@@ -5,6 +5,8 @@ use num_complex::{Complex32, Complex64};
 
 #[cfg(all(feature = "tenferro", not(feature = "cpu-blas-core")))]
 mod block_gemm;
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+mod block_svd;
 mod dot;
 mod executor;
 #[cfg(all(
