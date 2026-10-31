@@ -48,9 +48,7 @@ use symtn::sector::{
 use symtn::sector::{TableRule, TableSector};
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
-use symtn::typed::{
-    Eig, Eigh, GradedSpace, LeftPolar, Lq, Qr, RightPolar, Svd, TensorMap, Truncation,
-};
+use symtn::typed::{GradedSpace, LeftPolar, Lq, Qr, Svd, TensorMap};
 
 use crate::report;
 

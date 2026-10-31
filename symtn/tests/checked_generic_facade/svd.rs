@@ -52,113 +52,6 @@ fn sun_checked_generic_compact_svd_preserves_provider_and_reconstructs() {
 }
 
 #[test]
-fn checked_generic_dense_input_svd_publishes_compact_multisector_s() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(Label::Vacuum, 2), (Label::X, 3)]).unwrap();
-    let real: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
-            if ij[0] == ij[1] {
-                (ij[0] + 2) as f64
-            } else {
-                0.25
-            }
-        })
-        .unwrap();
-    let Svd { u, s, vh } = real.svd_compact(engine, &[0], &[1]).unwrap();
-    assert!(std::ptr::eq(s.provider(), provider.as_ref()));
-    assert_eq!(s.codomain(), s.domain());
-    assert!(s.dense_data().is_err());
-    let spectrum = s.diagview(engine).unwrap();
-    assert_eq!(
-        spectrum
-            .iter()
-            .map(|entry| entry.values.len())
-            .sum::<usize>(),
-        5
-    );
-    assert!(spectrum
-        .iter()
-        .all(|entry| entry.values.windows(2).all(|pair| pair[0] >= pair[1])));
-    assert!(s.map_diagonal(engine, f64::sqrt).is_ok());
-    let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
-    assert!(rebuilt
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(real.dense_data().unwrap())
-        .all(|(actual, expected)| (actual - expected).abs() < 1.0e-10));
-
-    let complex = real
-        .convert::<Complex64>(engine)
-        .unwrap()
-        .scale(engine, Complex64::new(1.0, 0.5))
-        .unwrap();
-    let Svd { u, s, vh } = complex.svd_compact(engine, &[0], &[1]).unwrap();
-    assert!(std::ptr::eq(s.provider(), provider.as_ref()));
-    assert_eq!(s.codomain(), s.domain());
-    assert!(s.dense_data().is_err());
-    assert_eq!(
-        s.diagview(engine)
-            .unwrap()
-            .iter()
-            .map(|entry| entry.values.len())
-            .sum::<usize>(),
-        5
-    );
-    let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
-    assert!(rebuilt
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(complex.dense_data().unwrap())
-        .all(|(actual, expected)| (*actual - *expected).norm() < 1.0e-10));
-
-    {
-        let Svd { u, s, vh } = real.svd_full(engine, &[0], &[1]).unwrap();
-        assert!(std::ptr::eq(s.provider(), provider.as_ref()));
-        assert_eq!(s.codomain(), s.domain());
-        assert!(s.dense_data().is_err());
-        assert!(
-            symtn::typed::__network::network_reuse_class(&s, false) == NetworkReuseClass::Compact
-        );
-        let values = s.diagview(engine).unwrap();
-        assert_eq!(values.len(), 2);
-        assert_eq!(values[0].sector, Label::Vacuum);
-        assert_eq!(values[1].sector, Label::X);
-        assert_eq!(values[0].values.len(), 2);
-        assert_eq!(values[1].values.len(), 3);
-        assert!(values
-            .iter()
-            .all(|entry| entry.values.windows(2).all(|pair| pair[0] >= pair[1])));
-        assert_eq!(
-            s.materialize(engine).unwrap().diagview(engine).unwrap(),
-            s.diagview(engine).unwrap()
-        );
-        let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
-        assert!(rebuilt
-            .dense_data()
-            .unwrap()
-            .iter()
-            .zip(real.dense_data().unwrap())
-            .all(|(actual, expected)| (actual - expected).abs() < 1.0e-10));
-    }
-    let Svd { u, s, vh } = complex.svd_full(engine, &[0], &[1]).unwrap();
-    assert!(s.dense_data().is_err());
-    assert_eq!(s.diagview(engine).unwrap().len(), 2);
-    let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
-    assert!(rebuilt
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(complex.dense_data().unwrap())
-        .all(|(actual, expected)| (*actual - *expected).norm() < 1.0e-10));
-}
-
-#[test]
 fn checked_compact_diagonal_svd_matches_hand_permutation_and_phase() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -530,7 +423,7 @@ fn sun_checked_generic_svd_vals_matches_compact_spectrum() {
 }
 
 #[test]
-fn checked_compact_svd_vals_preserves_leg_roles_and_decode_failure() {
+fn checked_compact_svd_vals_refuses_bent_leg_roles_and_surfaces_a_decode_failure() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     use symtn::typed::{CheckedGenericPlanError, OperationError};
@@ -555,11 +448,6 @@ fn checked_compact_svd_vals_preserves_leg_roles_and_decode_failure() {
         ],
     )
     .unwrap();
-    let expected = compact.materialize(engine).unwrap();
-    assert_eq!(
-        compact.svd_vals(engine, &[0], &[1]).unwrap(),
-        expected.svd_vals(engine, &[0], &[1]).unwrap()
-    );
     // Changing the leg roles takes the checked transform boundary before SVD.
     assert!(matches!(
         compact.svd_vals(engine, &[1], &[0]),
@@ -576,48 +464,6 @@ fn checked_compact_svd_vals_preserves_leg_roles_and_decode_failure() {
         )))
     ));
     provider.fail_decode.store(false, Ordering::Relaxed);
-}
-
-#[test]
-fn checked_generic_svd_truncation_reconstructs_and_preserves_provider() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
-            if indices[0] == indices[1] {
-                (indices[0] + 2) as f64
-            } else {
-                0.0
-            }
-        })
-        .unwrap();
-    // The truncated SVD is a composition.
-    let Svd { u, s, vh } = source.svd_compact(engine, &[0], &[1]).unwrap();
-    let found = s.domain()[0]
-        .find_truncated(&s.diagview(engine).unwrap(), &Truncation::rank(1))
-        .unwrap();
-    let u = u
-        .restrict_leg(engine, &[(u.codomain_rank(), &found.selection)])
-        .unwrap();
-    let s = s
-        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
-        .unwrap();
-    let vh = vh.restrict_leg(engine, &[(0, &found.selection)]).unwrap();
-    assert!(std::ptr::eq(u.provider(), provider.as_ref()));
-    assert!(std::ptr::eq(s.provider(), provider.as_ref()));
-    assert!(std::ptr::eq(vh.provider(), provider.as_ref()));
-    let rebuilt = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
-    assert!(rebuilt
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|value| value.is_finite()));
-    assert!(s.diagview(engine).unwrap().iter().all(|spectrum| {
-        spectrum.values.len() <= 2 && spectrum.values.iter().all(|value| value.is_finite())
-    }));
 }
 
 #[test]

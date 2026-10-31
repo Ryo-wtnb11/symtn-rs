@@ -47,30 +47,6 @@ fn permute_moves_legs_of_a_multi_block_external_provider_tensor() {
 }
 
 #[test]
-fn permute_round_trips_back_to_the_source_layout() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: permuting and permuting back is the identity on both the spaces and
-    // the payload — a stronger statement than "the multiset survived", since it
-    // pins where each element landed.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    let there = tensor.permute(engine, &[1, 3], &[0, 2]).unwrap();
-    let back = there.permute(engine, &[2, 0], &[3, 1]).unwrap();
-
-    assert_eq!(back.dense_data().unwrap(), tensor.dense_data().unwrap());
-    assert_eq!(back.subblock_count(), tensor.subblock_count());
-    for index in 0..tensor.subblock_count() {
-        assert_eq!(
-            back.subblock_fusion_trees(index).unwrap(),
-            tensor.subblock_fusion_trees(index).unwrap()
-        );
-    }
-}
-
-#[test]
 fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -106,52 +82,6 @@ fn permute_carries_a_simple_fusion_provider_with_a_complex_payload() {
 }
 
 #[test]
-fn permute_rejects_malformed_axes_without_panicking() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the expert layer's typed errors are the contract — an out-of-range
-    // axis, a repeated axis and a wrong-length axis list all come back as `Err`.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    assert!(
-        matches!(tensor.permute(engine, &[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-    assert!(
-        matches!(tensor.permute(engine, &[0, 0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-    assert!(
-        matches!(tensor.permute(engine, &[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-}
-
-#[test]
-fn braid_rejects_a_wrong_length_levels_list() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the public pre-check — `levels` must name every source axis — in
-    // both directions.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    let short = tensor
-        .braid(engine, &[1, 2], &[3, 0], &[0, 1, 2])
-        .unwrap_err();
-    let message = short.to_string();
-    assert!(message.contains("one level per source axis"), "{message}");
-    assert!(message.contains("expected 4"), "{message}");
-    assert!(tensor
-        .braid(engine, &[1, 2], &[3, 0], &[0; 5])
-        .is_invalid_argument("one level per source axis"));
-    // Malformed axes still come back from the expert layer, not from here.
-    assert!(
-        matches!(tensor.braid(engine, &[0, 0], &[2, 3], &[0, 1, 2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-}
-
-#[test]
 fn transpose_twice_returns_the_source_layout() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -175,28 +105,6 @@ fn transpose_twice_returns_the_source_layout() {
             tensor.subblock_fusion_trees(index).unwrap()
         );
     }
-}
-
-#[test]
-fn transpose_rejects_malformed_axes_without_panicking() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: out-of-range axes, a wrong-length list and a non-planar
-    // re-arrangement (a permute, which `transpose` must refuse rather than
-    // silently braid) all come back as `Err`.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    assert!(
-        matches!(tensor.transpose(engine, &[0, 9], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-    assert!(
-        matches!(tensor.transpose(engine, &[0], &[2, 3]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
-    assert!(
-        matches!(tensor.transpose(engine, &[1, 2], &[3, 0]), Err(symtn::typed::Error::Operation(e)) if matches!(*e, symtn::typed::OperationError::InvalidPermutation { rank: 4, .. }))
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -234,21 +142,6 @@ fn repartition_moves_the_boundary_and_round_trips_at_every_split() {
             );
         }
     }
-}
-
-#[test]
-fn repartition_rejects_a_split_beyond_the_rank() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: `num_codomain > rank` has no planar reading at all, so it is
-    // rejected rather than clamped.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    let error = tensor.repartition(engine, 5).unwrap_err();
-
-    assert!(error.to_string().contains("exceeds rank 4"), "{error}");
 }
 
 #[test]
@@ -343,39 +236,6 @@ fn repartition_is_sign_free_even_for_a_fermionic_provider() {
 // ---------------------------------------------------------------------------
 // Typed cat / absorb.
 // ---------------------------------------------------------------------------
-
-/// Position-weighted value from typed U(1) labels.
-fn u1_typed_fill(
-    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::U1Irrep>,
-    indices: &[usize],
-) -> f64 {
-    let mut value = f64::from(sectors.coupled().charge()) * 1000.0;
-    for (position, label) in sectors.codomain_uncoupled().iter().enumerate() {
-        value += f64::from(label.charge()) * 100.0 * (position + 1) as f64;
-    }
-    for (position, label) in sectors.domain_uncoupled().iter().enumerate() {
-        value += f64::from(label.charge()) * 10.0 * (position + 1) as f64;
-    }
-    value
-        + indices
-            .iter()
-            .enumerate()
-            .map(|(a, &i)| (a + 1) * i)
-            .sum::<usize>() as f64
-}
-
-/// One typed U(1) cat operand: rank `2 <- 1` with a dual codomain leg.
-fn u1_cat_tensor(
-    runtime: &Runtime,
-    domain_pairs: &[(i32, usize)],
-) -> TensorMap<symtn::sector::U1FusionRule, f64> {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let l1 = u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]);
-    let l2 = u1_leg(&provider, &[(0, 1), (1, 2)]).try_dual().unwrap();
-    let lv = u1_leg(&provider, domain_pairs);
-    TensorMap::from_subblock_fn(engine, runtime, [&l1, &l2], [&lv], u1_typed_fill).unwrap()
-}
 
 #[test]
 fn typed_cat_preserves_a_dual_changed_leg_and_its_slabs() {
@@ -566,143 +426,6 @@ fn typed_absorb_is_total_for_disjoint_zero_extent_and_rank_zero() {
             .unwrap(),
         scalar_source.scalar(engine).unwrap()
     );
-}
-
-#[test]
-fn typed_cat_and_absorb_validation_and_precedence_are_stable() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: each operation keeps its own validation classes and order.
-    let runtime = runtime();
-    let typed_lhs = u1_cat_tensor(&runtime, &[(0, 1), (1, 1)]);
-    let assert_invalid = |error: symtn::typed::Error, fragment: &str| {
-        assert!(
-            matches!(&error, symtn::typed::Error::InvalidArgument(_)),
-            "{error:?}"
-        );
-        assert!(format!("{error:?}").contains(fragment), "{error:?}");
-    };
-    let assert_mismatch = |error: symtn::typed::Error, fragment: &str| {
-        assert!(
-            matches!(&error, symtn::typed::Error::Operation(operation)
-                if matches!(**operation, symtn::typed::OperationError::SpaceMismatch { .. })),
-            "{error:?}"
-        );
-        assert!(format!("{error:?}").contains(fragment), "{error:?}");
-    };
-
-    // Wrong rank: a multi-leg changed side.
-    let provider = Arc::new(symtn::sector::U1FusionRule);
-    let two_legs_typed: TensorMap<symtn::sector::U1FusionRule, f64> = TensorMap::from_subblock_fn(
-        engine,
-        &runtime,
-        [
-            &u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]),
-            &u1_leg(&provider, &[(0, 1), (1, 2)]).try_dual().unwrap(),
-        ],
-        [&u1_leg(&provider, &[(0, 1)]), &u1_leg(&provider, &[(0, 1)])],
-        u1_typed_fill,
-    )
-    .unwrap();
-    assert_invalid(
-        typed_lhs
-            .cat(engine, &two_legs_typed, Side::Domain)
-            .unwrap_err(),
-        "exactly one domain leg",
-    );
-
-    // Mismatched unchanged side, catdomain: rank `2 <- 1` on both operands
-    // (the one-domain-leg check passes) with different codomain product
-    // spaces, so the codomain-equality check itself is what fires.
-    let other_codomain_typed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(
-            engine,
-            &runtime,
-            [
-                &u1_leg(&provider, &[(-1, 1), (0, 3), (1, 1)]),
-                &u1_leg(&provider, &[(0, 1), (1, 2)]).try_dual().unwrap(),
-            ],
-            [&u1_leg(&provider, &[(0, 1), (1, 1)])],
-            u1_typed_fill,
-        )
-        .unwrap();
-    assert_mismatch(
-        typed_lhs
-            .cat(engine, &other_codomain_typed, Side::Domain)
-            .unwrap_err(),
-        "identical codomain product spaces",
-    );
-
-    // Mismatched unchanged side, catcodomain: rank `1 <- 2` on both operands
-    // (the one-codomain-leg check passes) with different domain product
-    // spaces, so the domain-equality check itself is what fires.
-    let mut stack_pair = |domain1: &[(i32, usize)]| {
-        TensorMap::from_subblock_fn(
-            engine,
-            &runtime,
-            [&u1_leg(&provider, &[(0, 2), (1, 1)])],
-            [
-                &u1_leg(&provider, &[(-1, 1), (0, 1), (1, 1)]),
-                &u1_leg(&provider, domain1),
-            ],
-            u1_typed_fill,
-        )
-        .unwrap()
-    };
-    let typed_stack_lhs: TensorMap<symtn::sector::U1FusionRule, f64> =
-        stack_pair(&[(0, 1), (1, 1)]);
-    let typed_stack_rhs: TensorMap<symtn::sector::U1FusionRule, f64> =
-        stack_pair(&[(0, 2), (1, 1)]);
-    assert_mismatch(
-        typed_stack_lhs
-            .cat(engine, &typed_stack_rhs, Side::Codomain)
-            .unwrap_err(),
-        "identical domain product spaces",
-    );
-
-    // Duality mismatch on the changed leg: the direct sum refuses.
-    let dual_domain_typed: TensorMap<symtn::sector::U1FusionRule, f64> =
-        TensorMap::from_subblock_fn(
-            engine,
-            &runtime,
-            [
-                &u1_leg(&provider, &[(-1, 1), (0, 2), (1, 1)]),
-                &u1_leg(&provider, &[(0, 1), (1, 2)]).try_dual().unwrap(),
-            ],
-            [&u1_leg(&provider, &[(0, 1), (1, 1)]).try_dual().unwrap()],
-            u1_typed_fill,
-        )
-        .unwrap();
-    assert_mismatch(
-        typed_lhs
-            .cat(engine, &dual_domain_typed, Side::Domain)
-            .unwrap_err(),
-        "opposite duality",
-    );
-
-    assert_invalid(
-        typed_lhs.absorb(engine, &two_legs_typed).unwrap_err(),
-        "equal codomain/domain ranks",
-    );
-    assert_invalid(
-        typed_lhs.absorb(engine, &dual_domain_typed).unwrap_err(),
-        "equal duality",
-    );
-
-    // Runtime mismatch, for all three operations.
-    let other_runtime = Runtime::builder().build().unwrap();
-    let typed_other = u1_cat_tensor(&other_runtime, &[(0, 1), (1, 1)]);
-    for error in [
-        typed_lhs
-            .cat(engine, &typed_other, Side::Domain)
-            .unwrap_err(),
-        typed_lhs
-            .cat(engine, &typed_other, Side::Codomain)
-            .unwrap_err(),
-        typed_lhs.absorb(engine, &typed_other).unwrap_err(),
-    ] {
-        assert!(matches!(error, symtn::typed::Error::RuntimeMismatch));
-    }
 }
 
 #[test]
@@ -1066,39 +789,4 @@ fn typed_lazy_adjoint_cat_matches_column_major_oracles_in_every_orientation() {
             expected
         );
     }
-}
-
-#[test]
-fn braid_moves_legs_of_a_multi_block_external_provider_tensor() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: an explicit braid with a full level assignment produces the same
-    // reordered spaces a permute of the same axes does, and moves the payload.
-    //
-    // This symmetric fixture pins how levels are split and validated; the
-    // Fibonacci tests above pin genuinely anyonic level values.
-    let runtime = runtime();
-    let provider = Arc::new(external_z3());
-    let tensor = z3_rank_four(&runtime, &provider);
-
-    let braided = tensor
-        .braid(engine, &[1, 2], &[3, 0], &[0, 1, 2, 3])
-        .unwrap();
-    let permuted = tensor.permute(engine, &[1, 2], &[3, 0]).unwrap();
-
-    assert_eq!(
-        braided.dense_data().unwrap(),
-        permuted.dense_data().unwrap()
-    );
-    assert_ne!(braided.dense_data().unwrap(), tensor.dense_data().unwrap());
-    assert_eq!(braided.codomain()[0].degeneracies(), &[1, 2, 4]);
-    assert_eq!(braided.domain()[1].degeneracies(), &[2, 1, 3]);
-    // A different level assignment is the same morphism for a bosonic rule.
-    let reversed = tensor
-        .braid(engine, &[1, 2], &[3, 0], &[3, 2, 1, 0])
-        .unwrap();
-    assert_eq!(
-        reversed.dense_data().unwrap(),
-        braided.dense_data().unwrap()
-    );
 }

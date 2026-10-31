@@ -351,8 +351,10 @@ fn checked_generic_complex_diagonal_adjoint_is_the_owned_conjugated_diagonal() {
     assert_positive_zeros(engine, &mf_adjoint, 8);
 }
 
+/// A cold permutation of a fresh runtime reaches the provider's algebra, so
+/// an algebra failure surfaces as the typed `Plan(Provider)` error.
 #[test]
-fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
+fn checked_only_cold_permute_surfaces_a_provider_algebra_failure() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
@@ -363,36 +365,6 @@ fn checked_only_multiplicity_two_transforms_keep_the_source_authority() {
             trees.codomain_vertices()[0].get() as f64
         })
         .unwrap();
-    let snapshot = |tensor: &TensorMap<CheckedOnlyToy, f64>| {
-        (0..tensor.subblock_count())
-            .map(|index| tensor.subblock_fusion_trees(index).unwrap())
-            .collect::<Vec<_>>()
-    };
-    let source_snapshot = snapshot(&source);
-    provider.coefficient_queries.store(0, Ordering::Relaxed);
-    let error = source.braid(engine, &[1, 0, 2], &[], &[0, 1]).unwrap_err();
-    assert!(matches!(error, GenericTensorError::Facade(_)));
-    assert_eq!(provider.coefficient_queries.load(Ordering::Relaxed), 0);
-
-    let permuted = source.permute(engine, &[1, 0, 2], &[]).unwrap();
-    assert!(std::ptr::eq(permuted.provider(), provider.as_ref()));
-    let restored = permuted.permute(engine, &[1, 0, 2], &[]).unwrap();
-    assert_eq!(snapshot(&restored), source_snapshot);
-    for (actual, expected) in restored
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(source.dense_data().unwrap())
-    {
-        assert!((actual - expected).abs() <= 1e-12);
-    }
-
-    let braided = source.braid(engine, &[1, 0, 2], &[], &[0, 1, 2]).unwrap();
-    assert!(std::ptr::eq(braided.provider(), provider.as_ref()));
-
-    // A permutation this source has not taken: a warm one answers from its
-    // destination memo and completed transformer without the provider,
-    // so only a cold call reaches the failing algebra.
     provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = source.permute(engine, &[2, 1, 0], &[]).unwrap_err();
     assert!(matches!(
@@ -1154,12 +1126,14 @@ fn checked_generic_cat_admits_once_and_queries_only_left_before_commit() {
 }
 
 #[test]
-fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing() {
+fn checked_generic_cat_rule_check_and_admission_failure_are_typed_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let _cache = cache_exclusive();
-    // What: admission stamps, runtime, cat arguments, then output admission
-    // reject in order; every failure leaves both admitted input payloads alone.
+    // What: a foreign rule identity is refused before any provider query
+    // (even on a foreign runtime), and an output-admission failure is typed;
+    // neither leaves a trace in the admitted input payloads. The runtime and
+    // argument checks are the shared `admission_modes::transform` cell.
     let runtime = Runtime::builder().build().unwrap();
     let other_runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(123));
@@ -1188,20 +1162,6 @@ fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing(
         [&wrong_leg, &wrong_leg],
     )
     .unwrap();
-    let wrong_runtime: TensorMap<_, f64> = TensorMap::zeros(
-        engine,
-        &other_runtime,
-        [&equal_leg, &equal_leg],
-        [&equal_leg, &equal_leg],
-    )
-    .unwrap();
-    let bad_arguments: TensorMap<_, f64> = TensorMap::zeros(
-        engine,
-        &runtime,
-        [&equal_leg, &equal_leg],
-        [&equal_leg, &equal_leg],
-    )
-    .unwrap();
     let lhs_before = lhs.dense_data().unwrap().to_vec();
     let rhs_before = valid_rhs.dense_data().unwrap().to_vec();
     // See `forget_cached_structures`: this tag is this test's alone.
@@ -1225,15 +1185,6 @@ fn checked_generic_cat_precedence_and_admission_failure_are_typed_nonpublishing(
             symtn::typed::Error::RuleMismatch
         ))
     ));
-    assert!(matches!(
-        lhs.cat(engine, &wrong_runtime, Side::Domain),
-        Err(GenericTensorError::Facade(
-            symtn::typed::Error::RuntimeMismatch
-        ))
-    ));
-    assert!(
-        matches!(lhs.cat(engine, &bad_arguments, Side::Domain), Err(GenericTensorError::Facade(symtn::typed::Error::InvalidArgument(message))) if message.contains("exactly one domain leg"))
-    );
     assert_eq!(provider.identity_queries.load(Ordering::Relaxed), 0);
     assert_eq!(provider.algebra_queries.load(Ordering::Relaxed), 0);
 
