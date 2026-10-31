@@ -40,9 +40,11 @@ use std::sync::Arc;
 use symtn::typed::Direction;
 
 use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
-use symtn::sector::{U1FusionRule, U1Irrep};
+use symtn::sector::U1FusionRule;
 use symtn::typed::Error;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
+
+use crate::legs::u1_leg_2_1_2;
 
 /// Orders the local process-global cache probes; Runtime-local probes run concurrently.
 static CACHE_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
@@ -51,23 +53,11 @@ fn cache_exclusive() -> std::sync::RwLockWriteGuard<'static, ()> {
     CACHE_TEST_LOCK.write().unwrap_or_else(|e| e.into_inner())
 }
 
-fn leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
 fn fixture(
     engine: &mut dyn symtn::typed::Engine,
     runtime: &Runtime,
 ) -> TensorMap<U1FusionRule, f64> {
-    let v = leg();
+    let v = u1_leg_2_1_2();
     TensorMap::from_subblock_fn(engine, runtime, [&v, &v], [&v, &v], |_, indices| {
         indices.iter().map(|&i| i as f64 + 1.0).sum::<f64>()
     })
@@ -133,7 +123,7 @@ fn device_transform_short_circuits_do_no_device_work() {
 
     // A rank-0 tensor has no legs to build from, so it comes from a full Host
     // trace (this file does not test device `trace`) and is then uploaded.
-    let v = leg();
+    let v = u1_leg_2_1_2();
     let endomorphism: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v], [&v], |_, indices| {
             indices[0] as f64 + 1.0
@@ -552,7 +542,7 @@ fn device_into_rejections_happen_before_any_device_work() {
         source.transpose_into(cuda, &[1, 2], &[3, 0], &mut destination, 1.0, 0.0)
     );
 
-    let v = leg();
+    let v = u1_leg_2_1_2();
     let mut host_rank_three =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v], |_, _| f64::NAN).unwrap();
     let mut rank_three = host_rank_three.to_cuda(cuda).unwrap();

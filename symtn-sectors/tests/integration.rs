@@ -4,6 +4,8 @@ use num_complex::{Complex32, Complex64};
 
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
+#[path = "../../tests/support/sector_ids.rs"]
+mod sector_ids;
 
 mod abelian_cu1_values;
 mod builtin_rules;

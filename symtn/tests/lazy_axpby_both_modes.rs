@@ -33,6 +33,8 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
+use crate::legs::su2_spin;
+
 /// `(2j, k)` per sector: nontrivial, distinct degeneracies.
 const SECTORS: [(usize, usize); 3] = [(0, 2), (1, 3), (2, 2)];
 
@@ -198,10 +200,6 @@ fn sun2(twice: usize) -> Vec<i64> {
 #[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]
 fn sun_spin(sector: &Vec<i64>) -> usize {
     sector[0] as usize
-}
-
-fn su2_spin(sector: &SU2Irrep) -> usize {
-    sector.twice_spin()
 }
 
 fn assert_modes_agree(mf: Rows, checked: Rows) {

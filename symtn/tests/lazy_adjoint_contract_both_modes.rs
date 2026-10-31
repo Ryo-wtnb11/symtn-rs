@@ -40,6 +40,8 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
+use crate::legs::su2_spin;
+
 /// `(2j, k)` per sector: nontrivial, distinct degeneracies.
 const SECTORS: [(usize, usize); 3] = [(0, 2), (1, 3), (2, 2)];
 
@@ -286,10 +288,6 @@ macro_rules! contract_rows {
         row!("t∘a", |a| t.compose($engine, a));
         rows
     }};
-}
-
-fn su2_spin(sector: &SU2Irrep) -> usize {
-    sector.twice_spin()
 }
 
 #[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]

@@ -249,9 +249,7 @@ mod racah {
         sector[0] as usize
     }
 
-    fn su2_spin(sector: &SU2Irrep) -> usize {
-        sector.twice_spin()
-    }
+    use crate::legs::su2_spin;
 
     fn sun_value(trees: &BlockFusionTrees<Vec<i64>>, index: &[usize], seed: u64) -> f64 {
         hashed_value(&format!("{:?}{index:?}", twice(trees, sun_spin)), seed)

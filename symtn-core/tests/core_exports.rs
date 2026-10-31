@@ -20,51 +20,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-/// Drops comments (line, doc and `/* */`) and blanks string literals so that
-/// neither can hide or fake an item.
-fn strip(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(ch) = rest.chars().next() {
-        if rest.starts_with("//") {
-            rest = &rest[rest.find('\n').unwrap_or(rest.len())..];
-        } else if rest.starts_with("/*") {
-            rest = &rest[rest.find("*/").map_or(rest.len(), |end| end + 2)..];
-            out.push(' ');
-        } else if ch == '"' {
-            let mut escaped = false;
-            let end = rest[1..]
-                .find(|c: char| {
-                    let close = c == '"' && !escaped;
-                    escaped = c == '\\' && !escaped;
-                    close
-                })
-                .map_or(rest.len(), |end| end + 2);
-            rest = &rest[end..];
-            out.push_str("\"\"");
-        } else {
-            out.push(ch);
-            rest = &rest[ch.len_utf8()..];
-        }
-    }
-    out
-}
-
-/// The `testing` gate after [`strip`] blanks its string literal. No other
-/// feature uses the `any(test, feature = ..)` shape
-/// (`only_testing_uses_the_test_or_feature_gate`).
-const TESTING_GATE: &str = "#[cfg(any(test, feature = \"\"))]";
-
-/// Whether the item starting at `at` carries [`TESTING_GATE`] among the
-/// attribute lines directly above it.
-fn testing_gated(code: &str, at: usize) -> bool {
-    code[..at]
-        .lines()
-        .rev()
-        .map(str::trim)
-        .take_while(|line| line.starts_with("#["))
-        .any(|line| line == TESTING_GATE)
-}
+use crate::export_scan::{not_unrestricted_pub, strip, testing_gated, use_leaves};
 
 /// Names a module file exports at its top level, each with whether it is
 /// gated behind the `testing` feature. `pub use child::*` of a
@@ -87,12 +43,11 @@ fn exported_names(dir: &Path, file: &str) -> Result<BTreeMap<String, bool>, Stri
         if at != 0 && !code[..at].ends_with('\n') {
             continue; // not a top-level item
         }
-        let gated = testing_gated(&code, at);
-        let after = &code[at + 3..];
-        if after.starts_with('(') || after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        if not_unrestricted_pub(&code, at) {
             continue; // `pub(crate)` etc.
         }
-        let item = after.trim_start();
+        let gated = testing_gated(&code, at);
+        let item = code[at + 3..].trim_start();
         let mut words = item.split(|c: char| !(c.is_alphanumeric() || c == '_'));
         let keyword = words.next().unwrap_or("");
         if keyword != "use" {
@@ -117,22 +72,8 @@ fn exported_names(dir: &Path, file: &str) -> Result<BTreeMap<String, bool>, Stri
             }
             continue;
         }
-        let leaves = match tree.find('{') {
-            Some(open) => {
-                let inner = tree[open + 1..]
-                    .trim_end()
-                    .strip_suffix('}')
-                    .ok_or("bad use tree")?;
-                if inner.contains('{') {
-                    return Err(format!("nested use tree: {tree}"));
-                }
-                inner.split(',').collect::<Vec<_>>()
-            }
-            None => vec![tree],
-        };
-        for leaf in leaves.iter().map(|l| l.trim()).filter(|l| !l.is_empty()) {
-            let name = leaf.rsplit(" as ").next().unwrap();
-            names.insert(name.rsplit("::").next().unwrap().trim().to_owned(), gated);
+        for name in use_leaves(tree)? {
+            names.insert(name, gated);
         }
     }
     Ok(names)

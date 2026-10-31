@@ -22,13 +22,15 @@ use num_complex::Complex64;
 use symtn::expert::HostReadableStorage;
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2Irrep, U1FusionRule, U1Irrep,
+    Z2Irrep,
 };
 use symtn::typed::{BlockFusionTrees, CoupledBlock, CoupledBlockPayload};
 use symtn::typed::{
     GradedSpace, MultiplicityIndex, Runtime, SectorSpectrum, TensorMap, TensorScalar,
 };
+
+use crate::legs::{su2_legs, u1_legs};
 
 trait Val: TensorScalar + Copy + PartialEq + Debug {
     fn make(hash: u64) -> Self;
@@ -497,26 +499,6 @@ macro_rules! physical_case {
             );
         }
     }};
-}
-
-fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let v = GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q), n)),
-    )
-    .unwrap();
-    let w = v.try_dual().unwrap();
-    (v, w)
-}
-
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let v = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (SU2Irrep::from_twice_spin(s), n)),
-    )
-    .unwrap();
-    let w = v.try_dual().unwrap();
-    (v, w)
 }
 
 type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;

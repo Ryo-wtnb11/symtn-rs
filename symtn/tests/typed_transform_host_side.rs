@@ -25,6 +25,8 @@ use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::numerics;
 
+use crate::legs::{su2_leg_2_2_1, u1_leg_2_1_2};
+
 /// Floating terms per physical entry: the fusion-tree expansion of a rank-4
 /// SU(2) tensor with spins up to 1 sums over at most four intermediate spins.
 const TERMS: usize = 4;
@@ -50,37 +52,13 @@ fn real_fill<S: std::fmt::Debug>(_trees: &symtn::typed::BlockFusionTrees<S>, idx
     value
 }
 
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 #[test]
 fn the_dense_permute_oracle_agrees_with_the_host_for_u1_and_su2() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
 
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let u1_tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
     let source = u1_tensor.to_physical_dense(engine).unwrap();
@@ -93,7 +71,7 @@ fn the_dense_permute_oracle_agrees_with_the_host_for_u1_and_su2() {
 
     // SU(2) is the case that matters: the reduced-block replay must recouple
     // to produce what is, physically, a bare axis permutation.
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
             .unwrap();
@@ -134,7 +112,7 @@ fn the_semantic_clear_empties_the_host_transform_caches() {
     // `cuda` feature is compiled in.
     let runtime = Runtime::builder().build().unwrap();
 
-    let v = u1_leg();
+    let v = u1_leg_2_1_2();
     let tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], real_fill).unwrap();
     let _ = tensor.permute(engine, &[1, 0], &[3, 2]).unwrap();
@@ -171,7 +149,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let v = u1_leg();
+    let v = u1_leg_2_1_2();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], real_fill).unwrap();
     // Fresh, uniquely owned destinations: a `clone()` shares the payload `Arc`
@@ -299,7 +277,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     // and an identity axis list is still written rather than short
     // circuited.
     let runtime = Runtime::builder().build().unwrap();
-    let v = u1_leg();
+    let v = u1_leg_2_1_2();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&v, &v], [&v, &v], real_fill).unwrap();
 

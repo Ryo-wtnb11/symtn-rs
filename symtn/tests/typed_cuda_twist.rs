@@ -35,6 +35,8 @@ use symtn::sector::{
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
 
+use crate::legs::u1_leg_2_1_2;
+
 trait Payload: TensorScalar + Copy + PartialEq + std::fmt::Debug {
     fn negated(self) -> Self;
 }
@@ -141,18 +143,6 @@ fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     } else {
         space
     }
-}
-
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
 }
 
 #[test]
@@ -367,7 +357,7 @@ fn device_twist_round_trips_bitwise_and_short_circuits() {
     );
 
     // A bosonic provider twists by 1 on every block: a clone, never a scale.
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let bosonic: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
     let bosonic_device = bosonic.to_cuda(cuda).unwrap();

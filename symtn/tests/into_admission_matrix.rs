@@ -153,10 +153,6 @@ fn twice<S>(trees: &BlockFusionTrees<S>, spin: impl Fn(&S) -> usize) -> String {
     )
 }
 
-fn su2_spin(sector: &SU2Irrep) -> usize {
-    sector.twice_spin()
-}
-
 #[cfg(feature = "cgc-gen")]
 #[expect(clippy::ptr_arg, reason = "the SU(N) sector label is a `Vec<i64>`")]
 fn sun_spin(sector: &Vec<i64>) -> usize {
@@ -1970,6 +1966,8 @@ use symtn::sector::{
     RuleIdentity, SectorCodec, SectorId, SectorOrderKey, SectorVec,
 };
 use symtn::typed::FusionAlgebraError;
+
+use crate::legs::su2_spin;
 
 /// `U1FusionRule` with every symbol embedded in `Complex64`: the same
 /// category, so its contractions equal the real-symbol lane's.

@@ -16,102 +16,16 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Drops comments (line, doc and `/* */`) and blanks string literals so that
-/// neither can hide or fake an item.
-fn strip(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(ch) = rest.chars().next() {
-        if rest.starts_with("//") {
-            rest = &rest[rest.find('\n').unwrap_or(rest.len())..];
-        } else if rest.starts_with("/*") {
-            rest = &rest[rest.find("*/").map_or(rest.len(), |end| end + 2)..];
-            out.push(' ');
-        } else if ch == '"' {
-            let mut escaped = false;
-            let end = rest[1..]
-                .find(|c: char| {
-                    let close = c == '"' && !escaped;
-                    escaped = c == '\\' && !escaped;
-                    close
-                })
-                .map_or(rest.len(), |end| end + 2);
-            rest = &rest[end..];
-            out.push_str("\"\"");
-        } else {
-            out.push(ch);
-            rest = &rest[ch.len_utf8()..];
-        }
-    }
-    out
-}
+use crate::export_scan::{reexports, strip};
 
-/// Public names of `lib.rs`: `mod <name>` for each `pub mod <name>;`, the
-/// leaf of each `pub use` (`<path>::*` for a glob), or an error for any other
-/// inline public item (`pub fn`, `pub mod m { .. }`, ...) or
-/// `#[macro_export]`, which this firewall would otherwise not see.
+/// `pub use` leaves and `mod <name>` for every `pub mod <name>;`.
 fn exported_names(source: &str) -> Result<BTreeSet<String>, String> {
-    let code = strip(source);
-    if code.contains("macro_export") {
-        return Err("lib.rs exports a macro_rules! macro".into());
-    }
-    let mut names = BTreeSet::new();
-    for (at, _) in code.match_indices("pub") {
-        let before = code[..at].chars().next_back();
-        if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-            continue;
-        }
-        let after = &code[at + 3..];
-        if after.starts_with('(') || after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
-            continue; // `pub(crate)` etc., or an identifier such as `public`
-        }
-        let item = after.trim_start();
-        if let Some(module) = item
-            .strip_prefix("mod")
-            .filter(|t| t.starts_with(char::is_whitespace))
-        {
-            let end = module.find([';', '{']).ok_or("unterminated pub mod")?;
-            if module[end..].starts_with('{') {
-                return Err("lib.rs gained an inline `pub mod` body".into());
-            }
-            names.insert(format!("mod {}", module[..end].trim()));
-            continue;
-        }
-        let Some(tree) = item
-            .strip_prefix("use")
-            .filter(|t| t.starts_with(char::is_whitespace))
-        else {
-            let keyword = item.split_whitespace().next().unwrap_or("");
-            return Err(format!("lib.rs gained an inline `pub {keyword}` item"));
-        };
-        let tree = tree[..tree.find(';').ok_or("unterminated pub use")?].trim();
-        let leaves = match tree.find('{') {
-            Some(open) => {
-                let inner = tree[open + 1..]
-                    .trim_end()
-                    .strip_suffix('}')
-                    .ok_or("bad use tree")?;
-                if inner.contains('{') {
-                    return Err(format!("nested use tree: {tree}"));
-                }
-                inner.split(',').collect::<Vec<_>>()
-            }
-            None => vec![tree],
-        };
-        for leaf in leaves
-            .iter()
-            .map(|leaf| leaf.trim())
-            .filter(|l| !l.is_empty())
-        {
-            if leaf.ends_with('*') {
-                names.insert(leaf.split_whitespace().collect());
-                continue;
-            }
-            let name = leaf.rsplit(" as ").next().unwrap();
-            names.insert(name.rsplit("::").next().unwrap().trim().to_owned());
-        }
-    }
-    Ok(names)
+    let exports = reexports(source)?;
+    Ok(exports
+        .names
+        .into_keys()
+        .chain(exports.modules.iter().map(|module| format!("mod {module}")))
+        .collect())
 }
 
 /// Whether stripped `code` defines `name` as an unrestricted `pub fn`.

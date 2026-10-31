@@ -954,19 +954,8 @@ factorization_suite!(complex32_payload, Complex32, Complex64);
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
-    use std::sync::Arc;
-    use symtn::sector::LieGroupFusionRule;
-    use symtn::typed::GradedSpace;
 
-    fn su3_leg(degeneracy: usize) -> GradedSpace<LieGroupFusionRule> {
-        GradedSpace::try_new(
-            Arc::new(
-                LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap(),
-            ),
-            [(vec![2i64, 2], degeneracy)],
-        )
-        .unwrap()
-    }
+    use crate::su3::su3_leg;
 
     macro_rules! checked_generic_suite {
         ($suite:ident, $narrow:ty, $wide:ty) => {

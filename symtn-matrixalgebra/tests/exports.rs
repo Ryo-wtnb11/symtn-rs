@@ -14,99 +14,12 @@
 
 use std::collections::BTreeSet;
 
-/// Drops comments (line, doc and `/* */`) and blanks string literals so that
-/// neither can hide or fake an item.
-fn strip(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(ch) = rest.chars().next() {
-        if rest.starts_with("//") {
-            rest = &rest[rest.find('\n').unwrap_or(rest.len())..];
-        } else if rest.starts_with("/*") {
-            rest = &rest[rest.find("*/").map_or(rest.len(), |end| end + 2)..];
-            out.push(' ');
-        } else if ch == '"' {
-            let mut escaped = false;
-            let end = rest[1..]
-                .find(|c: char| {
-                    let close = c == '"' && !escaped;
-                    escaped = c == '\\' && !escaped;
-                    close
-                })
-                .map_or(rest.len(), |end| end + 2);
-            rest = &rest[end..];
-            out.push_str("\"\"");
-        } else {
-            out.push(ch);
-            rest = &rest[ch.len_utf8()..];
-        }
-    }
-    out
-}
+use crate::export_scan::{reexports, strip};
 
-/// Names exported by `code`: `pub use` leaves and `pub mod <name>;` module
-/// names. Any other inline public item (`pub fn`, `pub struct`, an inline
-/// `pub mod` body, ...) or `#[macro_export]` is an error, because this
-/// firewall would otherwise not see what it exports.
+/// `pub use` leaves and every `pub mod <name>;`.
 fn exported_names(code: &str) -> Result<BTreeSet<String>, String> {
-    if code.contains("macro_export") {
-        return Err("lib.rs exports a macro_rules! macro".into());
-    }
-    let mut names = BTreeSet::new();
-    for (at, _) in code.match_indices("pub") {
-        let before = code[..at].chars().next_back();
-        if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-            continue;
-        }
-        let after = &code[at + 3..];
-        if after.starts_with('(') || after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
-            continue; // `pub(crate)` etc., or an identifier such as `public`
-        }
-        let item = after.trim_start();
-        if let Some(module) = item
-            .strip_prefix("mod")
-            .filter(|t| t.starts_with(char::is_whitespace))
-        {
-            let end = module.find([';', '{']);
-            match end.map(|end| (module[..end].trim(), &module[end..end + 1])) {
-                Some((name, ";")) => {
-                    names.insert(name.to_owned());
-                    continue;
-                }
-                _ => return Err("lib.rs gained an inline `pub mod` body".into()),
-            }
-        }
-        let Some(tree) = item
-            .strip_prefix("use")
-            .filter(|t| t.starts_with(char::is_whitespace))
-        else {
-            let keyword = item.split_whitespace().next().unwrap_or("");
-            return Err(format!("lib.rs gained an inline `pub {keyword}` item"));
-        };
-        let tree = tree[..tree.find(';').ok_or("unterminated pub use")?].trim();
-        let leaves = match tree.find('{') {
-            Some(open) => {
-                let inner = tree[open + 1..]
-                    .trim_end()
-                    .strip_suffix('}')
-                    .ok_or("bad use tree")?;
-                if inner.contains('{') {
-                    return Err(format!("nested use tree: {tree}"));
-                }
-                inner.split(',').collect::<Vec<_>>()
-            }
-            None => vec![tree],
-        };
-        for leaf in leaves
-            .iter()
-            .map(|leaf| leaf.trim())
-            .filter(|l| !l.is_empty())
-        {
-            let name = leaf.rsplit(" as ").next().unwrap();
-            names.insert(name.rsplit("::").next().unwrap().trim().to_owned());
-        }
-    }
-    Ok(names)
+    let exports = reexports(code)?;
+    Ok(exports.names.into_keys().chain(exports.modules).collect())
 }
 
 /// Root and `seam` exports of `source`: the one inline module allowed is

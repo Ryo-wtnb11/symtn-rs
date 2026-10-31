@@ -6,10 +6,7 @@ use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::Engine;
 
-use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
-};
+use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
     TypedSectorAdmission,
@@ -26,29 +23,7 @@ use crate::braiding_probe;
 
 use crate::numerics;
 
-fn u1_space() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
-fn su2_space() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
+use crate::legs::{su2_leg_2_2_1, u1_leg_2_3_2};
 
 fn assert_close(lhs: &[f64], rhs: &[f64], tol: f64) {
     assert_eq!(lhs.len(), rhs.len(), "data lengths differ");
@@ -125,11 +100,11 @@ fn assert_pair_case<R, D>(
 fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = u1_space();
+    let u1 = u1_leg_2_3_2();
     assert_pair_case::<_, f64>(engine, &runtime, &u1, 750_100);
     assert_pair_case::<_, Complex64>(engine, &runtime, &u1, 750_102);
 
-    let su2 = su2_space();
+    let su2 = su2_leg_2_2_1();
     assert_pair_case::<_, f64>(engine, &runtime, &su2, 750_110);
     assert_pair_case::<_, Complex64>(engine, &runtime, &su2, 750_112);
 
@@ -171,11 +146,11 @@ fn typed_host_network_provider_dtype_matrix_matches_direct_contract() {
 fn typed_workspace_pool_registry_evicts_cold_types_and_recreates_them() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = u1_space();
+    let u1 = u1_leg_2_3_2();
     assert_pair_case::<_, f64>(engine, &runtime, &u1, 750_200);
     assert_pair_case::<_, Complex64>(engine, &runtime, &u1, 750_202);
 
-    let su2 = su2_space();
+    let su2 = su2_leg_2_2_1();
     assert_pair_case::<_, f64>(engine, &runtime, &su2, 750_210);
 
     // The third typed pool evicts the first from the bounded registry. A later
@@ -238,8 +213,8 @@ where
 fn pairwise_network_matches_direct_high_rank_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_high_rank_pairwise(engine, &runtime, &u1_space());
-    assert_high_rank_pairwise(engine, &runtime, &su2_space());
+    assert_high_rank_pairwise(engine, &runtime, &u1_leg_2_3_2());
+    assert_high_rank_pairwise(engine, &runtime, &su2_leg_2_2_1());
 }
 
 fn assert_permuted_output<R>(engine: &mut dyn Engine, runtime: &Runtime, space: &GradedSpace<R>)
@@ -289,8 +264,8 @@ where
 fn permuted_output_labels_match_ordered_contract() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_permuted_output(engine, &runtime, &u1_space());
-    assert_permuted_output(engine, &runtime, &su2_space());
+    assert_permuted_output(engine, &runtime, &u1_leg_2_3_2());
+    assert_permuted_output(engine, &runtime, &su2_leg_2_2_1());
 }
 
 fn assert_single_permute<R>(engine: &mut dyn Engine, runtime: &Runtime, space: &GradedSpace<R>)
@@ -321,8 +296,8 @@ where
 fn single_tensor_network_is_a_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_single_permute(engine, &runtime, &u1_space());
-    assert_single_permute(engine, &runtime, &su2_space());
+    assert_single_permute(engine, &runtime, &u1_leg_2_3_2());
+    assert_single_permute(engine, &runtime, &su2_leg_2_2_1());
 }
 
 fn assert_conj_norm<R>(engine: &mut dyn Engine, runtime: &Runtime, space: &GradedSpace<R>)
@@ -359,8 +334,8 @@ where
 fn scalar_output_with_conj_matches_norm_squared() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_conj_norm(engine, &runtime, &u1_space());
-    assert_conj_norm(engine, &runtime, &su2_space());
+    assert_conj_norm(engine, &runtime, &u1_leg_2_3_2());
+    assert_conj_norm(engine, &runtime, &su2_leg_2_2_1());
 }
 
 fn assert_three_tensor_chain<R>(engine: &mut dyn Engine, runtime: &Runtime, space: &GradedSpace<R>)
@@ -425,15 +400,15 @@ where
 fn three_tensor_chain_with_conj_matches_manual_contraction() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    assert_three_tensor_chain(engine, &runtime, &u1_space());
-    assert_three_tensor_chain(engine, &runtime, &su2_space());
+    assert_three_tensor_chain(engine, &runtime, &u1_leg_2_3_2());
+    assert_three_tensor_chain(engine, &runtime, &su2_leg_2_2_1());
 }
 
 #[test]
 fn wrong_input_codomain_split_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let space = u1_space();
+    let space = u1_leg_2_3_2();
     let lhs =
         TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 161)
             .unwrap();
@@ -455,7 +430,7 @@ fn operands_of_different_runtimes_are_a_runtime_mismatch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let other = Runtime::builder().build().unwrap();
-    let space = u1_space();
+    let space = u1_leg_2_3_2();
     let lhs =
         TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 165)
             .unwrap();

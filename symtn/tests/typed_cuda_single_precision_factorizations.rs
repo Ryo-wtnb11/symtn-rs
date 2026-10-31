@@ -44,7 +44,7 @@ use symtn::typed::HermitianTol;
 use num_complex::{Complex32, Complex64};
 
 use symtn::expert::cuda_transfer_stats;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::CudaScalar;
 use symtn::typed::{
     CudaFactorizationPayload, CudaStorage, Eigh, Error, GradedSpace, Qr, Runtime, Svd, TensorMap,
@@ -62,6 +62,8 @@ use single_precision_oracle::{fermion_su2_leg_with, K};
 use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes, host_runtime};
+
+use crate::legs::su2_leg_2_2;
 
 // ---------------------------------------------------------------------------
 // Payload markers
@@ -246,18 +248,6 @@ fn u1_leg(degeneracies: [usize; 3]) -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-/// SU(2): non-Abelian, `dim(c) != 1`, several coupled sectors.
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
 // ---------------------------------------------------------------------------
 // Compact SVD
 // ---------------------------------------------------------------------------
@@ -415,7 +405,7 @@ fn device_svd_compact_matches_the_host_at_every_payload() {
     let runtime = host_runtime();
     let square = u1_leg([2, 3, 2]);
     let tall = u1_leg([3, 4, 3]);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2();
     let fermion = fermion_su2_leg_with([2, 2, 1]);
 
     for (codomain, domain) in [(&square, &square), (&tall, &square)] {
@@ -528,7 +518,7 @@ fn device_qr_compact_matches_the_host_at_every_payload() {
     let runtime = host_runtime();
     let square = u1_leg([2, 3, 2]);
     let tall = u1_leg([3, 4, 3]);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2();
     let fermion = fermion_su2_leg_with([2, 2, 1]);
 
     // Square, tall and wide blocks.
@@ -878,7 +868,7 @@ fn device_eigh_full_matches_the_host_at_every_payload() {
     let cuda = &mut crate::common::cuda_engine();
     let runtime = host_runtime();
     let u1 = u1_leg([2, 3, 2]);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2();
     let fermion = fermion_su2_leg_with([2, 2, 1]);
 
     // Both the positive-definite and the indefinite fixture: the second is
@@ -1243,7 +1233,7 @@ fn the_device_truncation_composition_matches_the_host_composition_at_every_paylo
     let cuda = &mut crate::common::cuda_engine();
     let runtime = host_runtime();
     let leg = u1_leg([2, 3, 2]);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2();
 
     // Every budget lands in a gap of the fixture's spectrum, so no `rank`
     // boundary falls on a tie and the kept space is exactly the host's.
@@ -1685,6 +1675,6 @@ fn device_factor_plan_publishes_the_host_spaces_at_every_payload() {
     all_payloads(engine, cuda, &runtime, [&a, &b], &c);
 
     // SU(2): several trees per coupled sector with `dim(c) != 1`.
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2();
     all_payloads(engine, cuda, &runtime, [&su2, &su2], &su2);
 }
