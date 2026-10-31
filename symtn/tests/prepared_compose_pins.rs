@@ -14,8 +14,9 @@
 //! them: a warm `execute` and `execute_into` allocate nothing at B = 1 (the
 //! workspace keeps its core's grouped-GEMM plans,
 //! `prepared_member1_core_reuse`) and at most the block GEMM kernel's
-//! per-call staging (seven allocations, independent of the job count) at
-//! B > 1, until `B > 1` retention lands; `execute_into` retains nothing new; retained bytes grow with
+//! per-call staging at B > 1 (seven allocations measured on these
+//! fixtures' serial engine; the count grows with distinct geometries and
+//! lanes), until `B > 1` retention lands; `execute_into` retains nothing new; retained bytes grow with
 //! `B > 1` and return to the B = 1 footprint; and at B = 1 the workspace
 //! retains its output plus the charged grouped-GEMM bindings of its core (no
 //! stacked replay; the base kept a one-member replay there, 208 bytes and 8
@@ -151,8 +152,9 @@ fn record<R, D>(
         let retained = workspace.retained_bytes();
         // A warm B = 1 call reuses the workspace's grouped core plans; at
         // B > 1 the core runs on the block GEMM kernel, whose per-call
-        // staging is seven allocations whatever the job count (job order,
-        // geometry index, job slots, plans, costs, lane table, lane jobs).
+        // staging (job records, one index entry and plan per distinct
+        // geometry, lane tables) measured seven allocations on these
+        // fixtures' serial engine; it is a fixture bound, not a kernel one.
         let warm_budget = if count == 1 { 0 } else { 7 };
         // The first `execute_into` may grow the workspace's fill scratch
         // once; the second is warm.

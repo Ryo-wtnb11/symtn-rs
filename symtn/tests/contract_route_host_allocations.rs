@@ -95,10 +95,12 @@ fn row(codomain: &[usize]) -> Row {
 /// scratch per call (the Runtime keeps no execution pool; TensorKit's
 /// TensorOperations also allocates temporaries per call), and an unbound
 /// grouped core submission runs on the block GEMM kernel, which stages it
-/// per call in seven allocations whatever the job count (job order, geometry
-/// index, job slots, one plan per distinct geometry, costs, lane table, lane
-/// jobs; the `cpueinsum` 0.9 `GroupedPlan` it replaced took two, but one
-/// plan per job, so B = 17 warm bytes drop from 248880 to 16700). `B = 1`
+/// per call: job records (order, slots, costs), one geometry-index entry and
+/// plan per distinct geometry, and the scheduler's lane tables. On this
+/// fixture (serial engine, two small f64 geometries) that measured seven
+/// calls; more distinct geometries or lanes add more. The `cpueinsum` 0.9
+/// `GroupedPlan` it replaced took two, but one plan per job, so B = 17 warm
+/// bytes drop from 248880 to 16700. `B = 1`
 /// workspaces keep their grouped plans, so `member1_warm` is zero; `B > 1`
 /// retention is deferred.
 const BASE: [(&str, Row); 2] = [

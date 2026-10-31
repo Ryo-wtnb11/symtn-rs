@@ -327,10 +327,14 @@ impl DefaultDenseExecutor {
         let identity = ops == [MatrixOp::Identity; 2];
         // An op-bearing run additionally needs nonzero extents and a layout
         // the views admit: its transposed rank-3 view is otherwise refused,
-        // while the grouped kernel represents every such batch.
+        // while the grouped kernel represents every such batch. The extents
+        // are compared one by one, not multiplied: they are unvalidated here,
+        // and the checked layout and range helpers own size overflow.
         let strided = (jobs.len() == 1 || single_self_disjoint_run)
             && (identity
-                || jobs[0].rows * jobs[0].contracted * jobs[0].cols != 0
+                || jobs[0].rows != 0
+                    && jobs[0].contracted != 0
+                    && jobs[0].cols != 0
                     && self
                         .strided_batch_run_layout(jobs, ops[0], ops[1])
                         .is_ok_and(|layout| {

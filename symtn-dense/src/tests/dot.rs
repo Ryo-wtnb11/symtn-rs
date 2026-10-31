@@ -75,6 +75,48 @@ fn op_bearing_batch_reuses_executor_across_shapes_offsets_and_alpha_beta() {
         }
     }
 }
+/// Review finding (K1): a singleton op-bearing job whose extents overflow
+/// when multiplied (`rows = usize::MAX`, `contracted = 2`, `cols` 0 or 1)
+/// must return a typed error from the checked size helpers, not panic in the
+/// route's admission test, and must leave the destination untouched.
+#[test]
+fn op_bearing_singleton_with_overflowing_extents_is_a_typed_error() {
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0];
+    for cols in [0, 1] {
+        let jobs = [DenseGemmBatchJob {
+            dst_offset: 0,
+            lhs_offset: 0,
+            rhs_offset: 0,
+            rows: usize::MAX,
+            contracted: 2,
+            cols,
+        }];
+        let mut output = [7.0];
+        let error = DefaultDenseExecutor::new()
+            .matmul_batch_axpby_with_ops_into(
+                engine,
+                DenseWrite::F64(DenseViewMut::new(&mut output, &[1], &[1], 0).unwrap()),
+                DenseRead::F64(DenseView::new(&data, &[1], &[1], 0).unwrap()),
+                DenseRead::F64(DenseView::new(&data, &[1], &[1], 0).unwrap()),
+                &jobs,
+                &[1],
+                MatrixOp::Transpose,
+                MatrixOp::Identity,
+                DenseScalar::F64(1.0),
+                DenseScalar::F64(0.0),
+            )
+            .unwrap_err();
+        let expected = if BLAS {
+            DenseError::StrideOverflow { value: 2 }
+        } else {
+            DenseError::ElementCountOverflow
+        };
+        assert_eq!(error, expected, "cols={cols}");
+        assert_eq!(output, [7.0], "cols={cols}");
+    }
+    assert!(!engine.is_broken());
+}
 #[test]
 fn op_bearing_batch_rejects_offset_overflow_before_view_construction() {
     let engine = &mut CpuEngine::serial();

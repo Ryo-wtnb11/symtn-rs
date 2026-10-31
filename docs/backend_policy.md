@@ -80,6 +80,10 @@ time (Tenferro's own per-flop model), and its lane count from the engine's
 batch decision. The lanes share all of those threads: a batch of a few large
 blocks gives each lane several threads, and a batch of many small blocks runs
 one thread per lane. Blocks are placed largest first on the least-loaded lane.
+The grouped core batches of a one-member `ContractPlan`/`ComposePlan`
+workspace are the exception: they reuse the workspace's retained grouped
+plan (above), which under `Auto` runs one GEMM per lane with a single thread
+each.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`

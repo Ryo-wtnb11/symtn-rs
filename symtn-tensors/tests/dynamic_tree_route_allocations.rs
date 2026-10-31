@@ -245,13 +245,15 @@ fn dynamic_tree_route_allocations_are_bounded_by_base() {
 }
 
 /// `d416b1a2`, debug test build, one thread, except the `eager_warm` and
-/// `member17` rows, re-recorded with the block GEMM kernel: an unbound
-/// grouped submission (eager, and every `B > 1` core submission) stages
-/// seven allocations per call whatever its job count (job order, geometry
-/// index, job slots, one plan per distinct geometry, costs, lane table, lane
-/// jobs), where the `cpueinsum` 0.9 `GroupedPlan` took two but held one
-/// plan per job (SU2 transformed `member17_warm`: 8 calls / 13563960 B
-/// before, 31 / 229912 after). `B = 1` workspaces keep their plans; `B > 1`
+/// `member17` rows, re-recorded with the block GEMM kernel, which stages an
+/// unbound grouped submission (eager, and every `B > 1` core submission) on
+/// every call: its job records (order, slots, costs), one geometry-index
+/// entry and plan per distinct geometry, and the scheduler's lane tables.
+/// The counts are measured on these fixtures (serial engine, small f64 Faer
+/// plans) and grow with the number of distinct geometries and lanes; the
+/// `cpueinsum` 0.9 `GroupedPlan` took two calls but held one plan per job
+/// (SU2 transformed `member17_warm`: 8 calls / 13563960 B before, 31 /
+/// 229912 after). `B = 1` workspaces keep their plans; `B > 1`
 /// retention is deferred.
 const BASE: [(&str, Row); 4] = [
     (

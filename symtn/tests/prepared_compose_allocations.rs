@@ -4,8 +4,9 @@
 //! workspace keeps those plans and a warm call allocates nothing
 //! (`prepared_member1_core_reuse`); at the B = 5 of this test the core runs
 //! on the block GEMM kernel, which stages its geometry plans and lanes on
-//! every call (seven allocations, independent of the job count) until
-//! `B > 1` retention lands. The allocation target
+//! every call (seven allocations measured on this fixture: serial engine,
+//! small f64 blocks; the count grows with distinct geometries and
+//! lanes) until `B > 1` retention lands. The allocation target
 //! installs one shared counting allocator.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
@@ -44,10 +45,11 @@ fn warm_host_calls_allocate_at_most_the_grouped_core_plan() {
     // What: at a fixed B, a second `execute` and a second `execute_into`
     // (whose plan has inactive destination blocks to zero-fill) reuse the
     // workspace's output, job list and fill strides. The zero fill adds
-    // nothing (`execute_into` == `execute`), and both stay within the seven
-    // per-call staging allocations of the block GEMM kernel (job order,
-    // geometry index, job slots, plans, costs, lane table, lane jobs),
-    // independent of the job count. The cold call's count is
+    // nothing (`execute_into` == `execute`), and both stay within the block
+    // GEMM kernel's per-call staging measured on this fixture (seven
+    // allocations on a serial engine with small f64 blocks: job
+    // order, geometry index, job slots, plans, costs, lane table, lane jobs;
+    // more distinct geometries or lanes add more). The cold call's count is
     // the control that shows the counter sees this thread's allocations.
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();

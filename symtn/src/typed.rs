@@ -283,11 +283,14 @@ pub use symtn_core::{
 /// How grouped dense GEMMs (the recoupling and contraction batches) use a
 /// pooled `CpuEngine`'s threads is the engine's batch policy, an engine-owned
 /// setting symtn never overrides. On the native provider the default
-/// (`CpuBatchStrategy::Auto`) takes the batch's thread count from the
-/// engine's cost rule over its estimated serial time and its lane count from
-/// the engine's batch decision; the lanes share those threads, so a batch of
-/// a few large blocks gives each lane several threads. A caller can still
-/// give each GEMM the whole pool:
+/// (`CpuBatchStrategy::Auto`) runs a batch on symtn's block GEMM kernel,
+/// which takes the batch's thread count from the engine's cost rule over its
+/// estimated serial time and its lane count from the engine's batch decision;
+/// the lanes share those threads, so a batch of a few large blocks gives each
+/// lane several threads. The exception is the grouped core batch of a
+/// one-member `ContractPlan`/`ComposePlan` workspace, which reuses its
+/// retained grouped plan and under `Auto` still runs one GEMM per lane with a
+/// single thread each. A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
