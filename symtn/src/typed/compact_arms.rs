@@ -213,6 +213,9 @@ where
         ) else {
             return Ok(false);
         };
+        // Every arm below multiplies spectra or writes `destination` itself,
+        // before any checked storage kernel.
+        super::admit_host_engine(engine)?;
         let (tensor, operation) = match pattern {
             DiagonalContractPattern::Product => {
                 let Some(product) = self.compose_compact(other)? else {

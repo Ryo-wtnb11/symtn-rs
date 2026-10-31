@@ -2265,8 +2265,25 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
         }
     }
 
-    // A failing call on another engine (inputs of another rank, rejected by
-    // the topology check) keeps no device intermediate of the old engine.
+    // A failing call on another engine keeps no device intermediate of the
+    // old engine: first with too few inputs (rejected by the operand count),
+    // then, after A refills the workspace, with inputs of another rank
+    // (rejected by the topology check).
+    assert!(workspace
+        .intermediates
+        .iter()
+        .any(|buffers| buffers.output.is_some()));
+    assert!(planned
+        .execute(second, &[&on_b[0], &on_b[1]], &mut workspace)
+        .is_err());
+    assert!(workspace
+        .intermediates
+        .iter()
+        .all(|buffers| buffers.output.is_none()));
+    assert!(workspace.slots.iter().all(Option::is_none));
+    planned
+        .execute(first, &[&on_a[0], &on_a[1], &on_a[2]], &mut workspace)
+        .unwrap();
     assert!(workspace
         .intermediates
         .iter()

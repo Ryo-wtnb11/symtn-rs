@@ -488,6 +488,7 @@ impl PlannedNetwork {
         D: TensorScalar,
         S: NetworkOperandStorage<R, D>,
     {
+        workspace.drop_foreign_device_state(engine);
         if tensors.len() != self.schedule.input_ranks.len() {
             return Err(invalid(format!(
                 "plan has {} operands but {} tensors were given",
@@ -496,7 +497,6 @@ impl PlannedNetwork {
             ))
             .into());
         }
-        workspace.drop_foreign_device_state(engine);
         S::admit_operands(engine, tensors, !self.schedule.steps.is_empty())?;
         self.execute_admitted(engine, tensors, workspace)
     }

@@ -233,8 +233,9 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
 /// What: every compact (diagonal) numerical arm admits the caller's engine
 /// before its spectrum arithmetic, so a broken engine is refused whatever
 /// the representation: clone shortcuts, a swap read straight off the
-/// spectrum, the compact adjoint, compose and contract, and a compact-source
-/// `permute_into`, whose destination keeps its bits. (Basis: the review probe
+/// spectrum, the compact adjoint, compose and contract, a compact-source
+/// `permute_into` and compact `contract_into`, whose destinations keep their
+/// bits. (Basis: the review probe
 /// `/private/tmp/symtn-l1-rereview-probe`.)
 #[test]
 fn compact_arms_refuse_a_broken_engine_before_any_write() {
@@ -278,6 +279,21 @@ fn compact_arms_refuse_a_broken_engine_before_any_write() {
         .permute_into(engine, &[0], &[1], &mut destination, 1.0, 0.0)
         .is_err());
     assert_eq!(destination.dense_data().unwrap(), before.as_slice());
+    // Compact `contract_into` (diagonal·diagonal, diagonal·dense,
+    // dense·diagonal), with and without a zero alpha: the nonzero diagonal
+    // of the destination shows any write, the `β = 0` overwrite included.
+    let mut target = s.materialize(good).unwrap();
+    let target_before = target.dense_data().unwrap().to_vec();
+    for (lhs, rhs, what) in [(&s, &s, "D·D"), (&s, &a, "D·t"), (&a, &s, "t·D")] {
+        for alpha in [1.0, 0.0] {
+            assert!(
+                lhs.contract_into(engine, rhs, &spec, &mut target, alpha, 0.0)
+                    .is_err(),
+                "compact contract_into {what}, alpha {alpha}"
+            );
+            assert_eq!(target.dense_data().unwrap(), target_before.as_slice());
+        }
+    }
     // A dense lazy adjoint moves no payload and needs nothing of the engine.
     assert!(a.adjoint(engine).is_ok());
 }
