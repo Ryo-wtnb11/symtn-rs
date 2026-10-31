@@ -8,7 +8,7 @@ use std::time::Duration;
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::schedule::{self, AllocationScratch};
+use super::schedule::{self, AllocationScratch, GrantKey};
 use crate::tenferro_adapter::tenferro_error;
 use crate::DenseError;
 
@@ -85,6 +85,13 @@ pub(crate) trait BlockOp: Sync {
         serial: Duration,
     ) -> usize {
         exec.width_for_within(budget, serial.as_nanos() as f64, 1)
+    }
+
+    /// What block `index`'s [`grant`](Self::grant) depends on besides its
+    /// serial time and the context (see [`GrantKey`]). The default grant
+    /// reads nothing else.
+    fn grant_key(&self, _: usize, _: &Self::Job) -> GrantKey {
+        [0; 2]
     }
 
     /// Runs block `index` on its lane's execution context.
@@ -168,6 +175,7 @@ fn on_lanes<B: BlockOp>(
     let allocation = schedule::allocate_in(
         shared,
         &scratch.times,
+        |j| op.grant_key(j, &jobs[j]),
         mean_work,
         &mut scratch.allocation,
         grant,

@@ -591,6 +591,7 @@ fn factorization_batches_keep_the_baseline_placement() {
             Ok(schedule::allocate_in(
                 exec,
                 &times,
+                |_| [0; 2],
                 10075.0,
                 &mut schedule::AllocationScratch::default(),
                 Some(grant),

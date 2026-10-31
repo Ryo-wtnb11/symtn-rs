@@ -117,13 +117,17 @@ otherwise its time over the provider's granted width plus the engine's
 dispatch cost at that width. The granted width is an estimate composed from
 the provider's public decisions (for a packed GEMM plan an optimistic upper
 bound on its grid), and the model has no sublinear speedup, so the choice is
-a scheduling estimate, not a promise of a faster run. The search queries each
-block's provider width once at the full thread count; only the blocks the
-provider widens there are queried again, once per distinct share width during
-the sweep (rebuilding the winning placement may repeat up to two widths),
-since a block the provider keeps serial at the full count stays serial at
-every narrower share; a lane count whose proved lower bound on its score is
-not below the best score so far is not placed. Prepared
+a scheduling estimate, not a promise of a faster run. The search queries the
+provider width of each group of blocks with the same estimated time and the
+same grant inputs (for GEMM, the plan's algorithm and the work) once, at the
+full thread count; only the groups the provider widens there are queried
+again, once per distinct share width during the sweep (rebuilding the winning
+placement may repeat up to two widths), since a block the provider keeps
+serial at the full count stays serial at every narrower share; a lane count
+whose proved lower bound on its score is not below the best score so far is
+not placed. An executor that schedules repeatedly keeps its last searched
+allocation, and a batch whose times, grant inputs, engine policy, mean work,
+budget and dispatch costs are all unchanged replays it without a query. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane

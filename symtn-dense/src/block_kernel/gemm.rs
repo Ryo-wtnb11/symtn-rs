@@ -24,6 +24,7 @@ use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
+use super::schedule::GrantKey;
 use crate::fresh::{split_fresh_segments, FreshParts};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
@@ -240,6 +241,17 @@ pub(crate) fn grant<T: Scalar>(
     batch_decision_within(exec.batch_policy(), exec, narrowed, &query).item_threads
 }
 
+/// The inputs of [`grant`] besides the serial time and the context: the
+/// plan's algorithm and the job's work (the time is derived from the work).
+fn grant_key<T: Scalar>(plan: &Plan<T>, work: f64) -> GrantKey {
+    let algorithm = match plan.report().algorithm {
+        Algorithm::Faer => 1,
+        Algorithm::Packed => 2,
+        _ => 3,
+    };
+    [algorithm, work.to_bits()]
+}
+
 fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
     plans[index]
         .downcast_ref::<Plan<T>>()
@@ -278,6 +290,13 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     ) -> usize {
         let work = work::<T>(&self.jobs[index]);
         grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+    }
+
+    fn grant_key(&self, index: usize, (plan, _): &Self::Job) -> GrantKey {
+        grant_key(
+            plan_of::<T>(self.plans, *plan),
+            work::<T>(&self.jobs[index]),
+        )
     }
 
     fn run(
@@ -340,6 +359,13 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     ) -> usize {
         let work = work::<T>(&self.jobs[index]);
         grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+    }
+
+    fn grant_key(&self, index: usize, (plan, _, _): &Self::Job) -> GrantKey {
+        grant_key(
+            plan_of::<T>(self.plans, *plan),
+            work::<T>(&self.jobs[index]),
+        )
     }
 
     fn run(

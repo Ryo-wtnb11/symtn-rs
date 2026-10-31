@@ -20,15 +20,18 @@
 //! scheduling estimate, not a promise of a faster run. Without a grant model
 //! (the factorizations, see `driver::on_lanes`) the baseline is returned.
 //!
-//! The search costs `O(J log J + J S + J' sum(W) + L0 J' + P J log L0)`,
-//! counting the provider queries' width scans: every job's grant is queried
-//! once at the full S, and only the `J'` jobs it widens there are queried
-//! again, once per distinct equal-share width during the sweep (W, with
-//! `sum(W) <= 2 S H(L0) + L0`; rebuilding the winner may repeat up to two
-//! widths); a proved lower bound costs `O(J')` per lane count, the other
-//! jobs entering it as one precomputed sum and maximum; and only the
-//! `P <= L0` counts whose bound is below the best score so far are placed,
-//! with one heap per width class.
+//! The search costs `O(J log J + G S + G' sum(W) + L0 J' + P J log L0)`,
+//! counting the provider queries' width scans. Jobs with equal serial times
+//! and grant keys share their grants, so only one of each of the G distinct
+//! (time, key) groups is queried: once at the full S, and, for the G' groups
+//! widened there, once per distinct equal-share width during the sweep (W,
+//! with `sum(W) <= 2 S H(L0) + L0`; rebuilding the winner may repeat up to
+//! two widths). A proved lower bound costs `O(J')` per lane count for the J'
+//! widened jobs, the others entering it as one precomputed sum and maximum,
+//! and only the `P <= L0` counts whose bound is below the best score so far
+//! are placed, with one heap per width class. A repeated call whose inputs
+//! are all unchanged replays the scratch's last searched allocation in
+//! `O(J + S)` without a query.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -36,7 +39,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use tcontract_exec::{BatchDecision, BatchQuery, BatchStrategy, Exec, WorkModel};
+use tcontract_exec::{BatchDecision, BatchPolicy, BatchQuery, BatchStrategy, Exec, WorkModel};
 
 /// One lane: its reserved slot budget and its jobs in ascending canonical
 /// order.
@@ -95,6 +98,8 @@ pub(crate) struct AllocationScratch {
     load: Vec<Reverse<(Duration, usize, usize)>>,
     narrow: Vec<Reverse<(Duration, usize, usize)>>,
     columns: Columns,
+    keys: Vec<GrantKey>,
+    memo: Memo,
 }
 
 impl AllocationScratch {
@@ -125,6 +130,118 @@ impl AllocationScratch {
                     .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
             )
             .saturating_add(self.columns.retained_bytes())
+            .saturating_add(self.keys.capacity().saturating_mul(size_of::<GrantKey>()))
+            .saturating_add(self.memo.retained_bytes())
+    }
+}
+
+/// What a job's grant depends on besides its serial time and the execution
+/// context: jobs with equal keys and equal serial times get equal grants at
+/// every width. Every op whose jobs share one scratch must give different
+/// grant inputs different keys.
+pub(crate) type GrantKey = [u64; 2];
+
+/// The last searched allocation and everything it was computed from: one
+/// entry, replaced by every searched allocation, so its bytes are bounded by
+/// the largest batch the owner has scheduled.
+///
+/// Why the key is complete: a searched allocation is a function of the
+/// context's budget P, its batch policy (strategy and work model), the mean
+/// work (the batch decision), the token's dispatch cost at every width
+/// `2..=P` (the slot count, the batch decision, every grant and every item
+/// time read only those), whether the token carries a team (the Faer grant's
+/// item parallelism), the jobs' serial times in canonical order (the slot
+/// count, the order, the placements and the scores) and their grant keys
+/// (every other grant input). The grant function itself is fixed by the
+/// owner's op, whose keys distinguish its grant inputs.
+#[derive(Debug, Default)]
+struct Memo {
+    budget: usize,
+    policy: BatchPolicy,
+    mean_work: u64,
+    team: bool,
+    costs: Vec<Duration>,
+    times: Vec<Duration>,
+    keys: Vec<GrantKey>,
+    slots: usize,
+    /// The batch decision; none until the first store.
+    decision: Option<BatchDecision>,
+    /// Each lane's budget and the end of its jobs in `jobs`.
+    lanes: Vec<(usize, usize)>,
+    jobs: Vec<usize>,
+}
+
+impl Memo {
+    /// The stored batch decision when every key field equals this call's.
+    fn hit(
+        &self,
+        exec: &Exec<'_>,
+        times: &[Duration],
+        keys: &[GrantKey],
+        mean_work: f64,
+    ) -> Option<BatchDecision> {
+        let same = self.budget == exec.budget()
+            && self.policy == *exec.batch_policy()
+            && self.mean_work == mean_work.to_bits()
+            && self.team == exec.token_ref().carries_team()
+            && self.times == times
+            && self.keys == keys
+            && self.costs.len() + 1 == self.budget
+            && self.costs.iter().enumerate().all(|(i, &cost)| {
+                NonZeroUsize::new(i + 2)
+                    .is_some_and(|width| exec.token_ref().dispatch_cost(width) == cost)
+            });
+        self.decision.filter(|_| same)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn store(
+        &mut self,
+        exec: &Exec<'_>,
+        times: &[Duration],
+        keys: &[GrantKey],
+        mean_work: f64,
+        slots: usize,
+        decision: BatchDecision,
+        lanes: &[Lane],
+    ) {
+        self.budget = exec.budget();
+        self.policy = *exec.batch_policy();
+        self.mean_work = mean_work.to_bits();
+        self.team = exec.token_ref().carries_team();
+        self.costs.clear();
+        self.costs.extend(
+            (2..=self.budget)
+                .filter_map(NonZeroUsize::new)
+                .map(|width| exec.token_ref().dispatch_cost(width)),
+        );
+        self.times.clear();
+        self.times.extend_from_slice(times);
+        self.keys.clear();
+        self.keys.extend_from_slice(keys);
+        self.slots = slots;
+        self.decision = Some(decision);
+        self.lanes.clear();
+        self.jobs.clear();
+        for lane in lanes {
+            self.jobs.extend_from_slice(&lane.jobs);
+            self.lanes.push((lane.budget, self.jobs.len()));
+        }
+    }
+
+    fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        [
+            self.costs.capacity().saturating_mul(size_of::<Duration>()),
+            self.times.capacity().saturating_mul(size_of::<Duration>()),
+            self.keys.capacity().saturating_mul(size_of::<GrantKey>()),
+            self.lanes
+                .capacity()
+                .saturating_mul(size_of::<(usize, usize)>()),
+            self.jobs.capacity().saturating_mul(size_of::<usize>()),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
     }
 }
 
@@ -154,6 +271,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
     allocate_in(
         exec,
         times,
+        |_| [0; 2],
         mean_work,
         &mut AllocationScratch::default(),
         Some(|_, _, _| 1),
@@ -178,20 +296,66 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
 /// twice), with its tables drawn from `scratch`.
 ///
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
-/// `w` reserved slots; Auto scores its candidates with it (see the module
-/// documentation). Without a grant, and under a forced strategy, the
-/// baseline placement is returned and no candidate is scored.
+/// `w` reserved slots, and `key(j)` its other inputs (see [`GrantKey`]);
+/// Auto scores its candidates with it (see the module documentation), and
+/// replays the scratch's last searched allocation when every input it was
+/// computed from is unchanged (see [`Memo`]). Without a grant, and under a
+/// forced strategy, the baseline placement is returned and no candidate is
+/// scored; `key` is then not called.
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
+    key: impl Fn(usize) -> GrantKey,
+    mean_work: f64,
+    scratch: &mut AllocationScratch,
+    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+) -> Allocation {
+    // The keys are staged only where a search can run (two or more jobs and
+    // slots), so a serial context retains nothing for them.
+    let mut keys = std::mem::take(&mut scratch.keys);
+    keys.clear();
+    if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
+        keys.extend((0..times.len()).map(key));
+    }
+    let allocation = allocate_with(exec, times, &keys, mean_work, scratch, grant);
+    scratch.keys = keys;
+    allocation
+}
+
+fn allocate_with(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    keys: &[GrantKey],
     mean_work: f64,
     scratch: &mut AllocationScratch,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
-    let decision = exec.batch_decision(&BatchQuery::new(jobs, mean_work));
     let pool = std::mem::take(&mut scratch.lanes);
+    let searches = grant.is_some()
+        && exec.batch_policy().strategy == BatchStrategy::Auto
+        && keys.len() == jobs;
+    let hit = searches
+        .then(|| scratch.memo.hit(exec, times, keys, mean_work))
+        .flatten();
+    if let Some(decision) = hit {
+        let memo = &scratch.memo;
+        let mut lanes = lanes_from(pool, &mut scratch.spare, memo.lanes.len());
+        let mut start = 0;
+        for (lane, &(budget, end)) in lanes.iter_mut().zip(&memo.lanes) {
+            lane.budget = budget;
+            lane.jobs.extend_from_slice(&memo.jobs[start..end]);
+            start = end;
+        }
+        return Allocation {
+            budget,
+            slots: memo.slots,
+            decision,
+            lanes,
+        };
+    }
+    let decision = exec.batch_decision(&BatchQuery::new(jobs, mean_work));
     if jobs == 0 {
         return Allocation {
             budget,
@@ -250,7 +414,7 @@ pub(crate) fn allocate_in(
         let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
         let mut columns = std::mem::take(&mut scratch.columns);
         let mut narrow = std::mem::take(&mut scratch.narrow);
-        columns.begin(times, |j| grant(j, times[j], slots) > 1);
+        columns.begin(times, keys, |j| grant(j, times[j], slots) > 1);
         columns.prepare((slots, lanes), &fill);
         let baseline = assigned
             .iter()
@@ -293,6 +457,9 @@ pub(crate) fn allocate_in(
         }
         scratch.columns = columns;
         scratch.narrow = narrow;
+        scratch
+            .memo
+            .store(exec, times, keys, mean_work, slots, decision, &assigned);
     }
     scratch.order = order;
     scratch.load = load;
@@ -320,15 +487,25 @@ struct Columns {
     items: [Vec<Duration>; 2],
     /// The jobs the provider widens at the full slot count, ascending.
     widened: Vec<usize>,
+    /// Each job's representative: the lowest job with its serial time and
+    /// grant key, whose grants it shares at every width.
+    rep: Vec<usize>,
+    /// Jobs ordered by serial time, grant key and index, to find `rep`.
+    by_key: Vec<usize>,
+    /// Whether each job is widened at the full slot count.
+    widens: Vec<bool>,
     /// The sum and the largest of the other jobs' serial times, in ns.
     serial_total: u128,
     serial_largest: u128,
 }
 
 impl Columns {
-    /// Starts an allocation of jobs with serial times `times`: both columns
-    /// hold every job's serial time, and `widens(j)` (the provider's grant at
-    /// the full slot count S is above one) splits the jobs.
+    /// Starts an allocation of jobs with serial times `times` and grant keys
+    /// `keys`: both columns hold every job's serial time, each job's
+    /// representative is the lowest job with its serial time and key (whose
+    /// grants it shares at every width, so only representatives are
+    /// queried), and `widens(j)` (the provider's grant at the full slot
+    /// count S is above one), asked of representatives only, splits the jobs.
     ///
     /// Why a job serial at S is serial at every share `w <= S`: each step of
     /// a grant is a released width rule that starts at width one and moves
@@ -348,16 +525,39 @@ impl Columns {
     /// no lanes), both width rules within that smaller ceiling. Hence a
     /// grant of one at S is one at every share, and such a job's item time is
     /// its serial time at every candidate width.
-    fn begin(&mut self, times: &[Duration], widens: impl Fn(usize) -> bool) {
+    fn begin(&mut self, times: &[Duration], keys: &[GrantKey], widens: impl Fn(usize) -> bool) {
         self.width = [0; 2];
         for column in &mut self.items {
             column.clear();
             column.extend_from_slice(times);
         }
+        self.by_key.clear();
+        self.by_key.extend(0..times.len());
+        self.by_key
+            .sort_unstable_by_key(|&j| (times[j], keys[j], j));
+        self.rep.clear();
+        self.rep.resize(times.len(), 0);
+        let mut first = None;
+        for &j in &self.by_key {
+            let start = match first {
+                Some(f) if times[f] == times[j] && keys[f] == keys[j] => f,
+                _ => j,
+            };
+            first = Some(start);
+            self.rep[j] = start;
+        }
         self.widened.clear();
+        self.widens.clear();
         (self.serial_total, self.serial_largest) = (0, 0);
         for (j, t) in times.iter().enumerate() {
-            if widens(j) {
+            let rep = self.rep[j];
+            let wide = if rep == j {
+                widens(j)
+            } else {
+                self.widens[rep]
+            };
+            self.widens.push(wide);
+            if wide {
                 self.widened.push(j);
             } else {
                 self.serial_total = self.serial_total.saturating_add(t.as_nanos());
@@ -384,7 +584,12 @@ impl Columns {
             let slot = usize::from(widths.contains(&self.width[0]));
             self.width[slot] = width;
             for &j in &self.widened {
-                self.items[slot][j] = fill(j, width);
+                let rep = self.rep[j];
+                self.items[slot][j] = if rep == j {
+                    fill(j, width)
+                } else {
+                    self.items[slot][rep]
+                };
             }
         }
     }
@@ -430,10 +635,12 @@ impl Columns {
             .fold(0, usize::saturating_add)
             .saturating_mul(std::mem::size_of::<Duration>())
             .saturating_add(
-                self.widened
-                    .capacity()
+                (self.widened.capacity())
+                    .saturating_add(self.rep.capacity())
+                    .saturating_add(self.by_key.capacity())
                     .saturating_mul(std::mem::size_of::<usize>()),
             )
+            .saturating_add(self.widens.capacity())
     }
 }
 
@@ -863,6 +1070,7 @@ mod tests {
                 Ok(allocate_in(
                     exec,
                     times,
+                    |_| [0; 2],
                     mean_work,
                     &mut AllocationScratch::default(),
                     Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1)),
@@ -1055,12 +1263,18 @@ mod tests {
 
     /// Purpose: a warm allocation reuses its scratch even when the search
     /// narrows main's four lanes to one (a 40000 ns block and three 100 ns
-    /// ones on four slots, flat 100 ns dispatch): the set-aside lanes are
-    /// kept, so a repeated identical allocation allocates and frees nothing.
+    /// ones on four slots, flat 100 ns dispatch). Two batches alternate, so
+    /// each call misses the replay and searches: the set-aside lanes and
+    /// the replay's tables are kept, and a warm call allocates and frees
+    /// nothing.
     #[test]
     fn warm_fewer_lane_allocation_allocates_nothing() {
         use crate::tests::counting_alloc;
-        let t = nanos(&[40000, 100, 100, 100]);
+        let batches = [
+            nanos(&[40000, 100, 100, 100]),
+            nanos(&[40000, 100, 100, 101]),
+        ];
+        let keys = [[0; 2]; 4];
         let model = WorkModel::default()
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
@@ -1069,23 +1283,146 @@ mod tests {
             .with_contraction_exec(|exec, _, _| {
                 let exec: &Exec<'_> = exec;
                 let mut scratch = AllocationScratch::default();
-                let mut call = || {
-                    let grant =
-                        |_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1);
-                    let a = allocate_in(exec, &t, 10075.0, &mut scratch, Some(grant));
+                let queries = std::cell::Cell::new(0);
+                let mut call = |t: &[Duration]| {
+                    let grant = |_, t: Duration, w| {
+                        queries.set(queries.get() + 1);
+                        exec.width_for_within(w, t.as_nanos() as f64, 1)
+                    };
+                    let a = allocate_in(exec, t, |j| keys[j], 10075.0, &mut scratch, Some(grant));
                     let chosen = (a.decision.lanes, a.lanes.len());
                     scratch.keep(a);
                     chosen
                 };
-                assert_eq!(call(), (4, 1));
-                for _ in 0..2 {
-                    let (chosen, allocs) = counting_alloc::measure(&mut call);
+                for t in &batches {
+                    assert_eq!(call(t), (4, 1));
+                }
+                for t in batches.iter().chain(&batches) {
+                    queries.set(0);
+                    let (chosen, allocs) = counting_alloc::measure(|| call(t));
                     assert_eq!(chosen, (4, 1));
+                    assert!(queries.get() > 0, "the call searched");
                     assert_eq!((allocs.calls, allocs.frees), (0, 0));
                 }
                 Ok(())
             })
             .unwrap();
+    }
+
+    /// Purpose: jobs with equal serial times and grant keys share every
+    /// grant, so only one of them is queried, without changing the choice.
+    /// Nine jobs in three groups of three (flat 100 ns dispatch, six slots)
+    /// cost a third of the queries of the same jobs with distinct keys and
+    /// get the same lanes; 200 serial blocks are queried once per distinct
+    /// serial time.
+    #[test]
+    fn equal_grant_inputs_are_queried_once() {
+        let queries = std::cell::Cell::new(0);
+        let run = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey]| {
+            queries.set(0);
+            let a = engine
+                .with_contraction_exec(|exec, _, _| {
+                    let exec: &Exec<'_> = exec;
+                    let grant = |_, t: Duration, w| {
+                        queries.set(queries.get() + 1);
+                        exec.width_for_within(w, t.as_nanos() as f64, 1)
+                    };
+                    Ok(allocate_in(
+                        exec,
+                        t,
+                        |j| keys[j],
+                        1e9,
+                        &mut AllocationScratch::default(),
+                        Some(grant),
+                    ))
+                })
+                .unwrap();
+            (lanes(&a), queries.get())
+        };
+        let mut engine = flat(6, BatchPolicy::default(), 100);
+        let t = nanos(&[9000, 9000, 9000, 4000, 4000, 4000, 100, 100, 100]);
+        let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0]).collect();
+        let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0]).collect();
+        let (shared, few) = run(&mut engine, &t, &grouped);
+        let (separate, all) = run(&mut engine, &t, &distinct);
+        assert_eq!(shared, separate);
+        assert!(few > 0);
+        assert_eq!(all, 3 * few);
+
+        let tiny: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
+        let times: std::collections::BTreeSet<u64> = tiny.iter().copied().collect();
+        let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 2]; 200]);
+        assert_eq!(count, times.len());
+    }
+
+    /// Purpose: a repeated allocation with every input unchanged replays the
+    /// last searched one without a grant query, and changing any one input
+    /// it depends on (a serial time, a grant key, the mean work, the work
+    /// model, the dispatch costs, the budget, the token's team) searches
+    /// again.
+    #[test]
+    fn unchanged_inputs_replay_and_any_change_searches() {
+        let t = nanos(&[40000, 100, 100, 100]);
+        let keys = [[0; 2]; 4];
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let policy = BatchPolicy::default().with_model(model);
+        let mut scratch = AllocationScratch::default();
+        let queries = std::cell::Cell::new(0);
+        // Runs one allocation on `exec` and returns its lanes and whether
+        // it queried a grant.
+        let mut run = |exec: &Exec<'_>, t: &[Duration], keys: &[GrantKey], mean: f64| {
+            queries.set(0);
+            let grant = |_, t: Duration, w| {
+                queries.set(queries.get() + 1);
+                exec.width_for_within(w, t.as_nanos() as f64, 1)
+            };
+            let a = allocate_in(exec, t, |j| keys[j], mean, &mut scratch, Some(grant));
+            let result = (lanes(&a), queries.get() > 0);
+            scratch.keep(a);
+            result
+        };
+        let mut on = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey], mean: f64| {
+            engine
+                .with_contraction_exec(|exec, _, _| Ok(run(exec, t, keys, mean)))
+                .unwrap()
+        };
+        let mut base = flat(4, policy, 100);
+        let (first, searched) = on(&mut base, &t, &keys, 10075.0);
+        assert!(searched);
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+        let mut other_time = t.clone();
+        other_time[3] = Duration::from_nanos(101);
+        assert!(on(&mut base, &other_time, &keys, 10075.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        let mut other_key = keys;
+        other_key[2] = [1, 0];
+        assert!(on(&mut base, &t, &other_key, 10075.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        assert!(on(&mut base, &t, &keys, 10076.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
+        assert!(on(&mut flat(4, other_model, 100), &t, &keys, 10075.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        assert!(on(&mut flat(4, policy, 101), &t, &keys, 10075.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        assert!(on(&mut flat(5, policy, 100), &t, &keys, 10075.0).1);
+        on(&mut base, &t, &keys, 10075.0);
+        // The same pool and dispatch costs, through a plain token without
+        // the engine's team.
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::new([Duration::from_nanos(100); 3]);
+        let pool = Pool::builder()
+            .threads(4)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let borrowed = tcontract_exec::Pool::borrow(&pool);
+        let plain = Exec::new(&borrowed, 4).unwrap().with_batch_policy(policy);
+        assert!(!plain.token_ref().carries_team());
+        assert!(run(&plain, &t, &keys, 10075.0).1);
     }
 
     /// Purpose: a caller's `min_items` above the job count forbids fan-out,

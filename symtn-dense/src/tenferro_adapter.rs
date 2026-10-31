@@ -287,11 +287,13 @@ impl DefaultDenseExecutor {
     /// semantics. The disadvantage accepted here: a long run plus residual
     /// jobs goes grouped, paying the grouped preparation per unbound call
     /// (O(J log J) staging, and under Auto the scheduler's lane search:
-    /// one provider grant query per job at the full slot count S, further
-    /// queries per distinct share width only for the J' jobs widened there,
-    /// a lower bound per lane count, and a placement for each lane count the
-    /// bound does not rule out; see `block_kernel::schedule`) instead of the
-    /// cached O(1) strided analysis plus the residual's own preparation.
+    /// one provider grant query per distinct (time, plan algorithm, work)
+    /// group at the full slot count S, further queries per distinct share
+    /// width only for the groups widened there, a lower bound per lane count,
+    /// and a placement for each lane count the bound does not rule out, or a
+    /// replay of the executor's last searched allocation when every input is
+    /// unchanged; see `block_kernel::schedule`) instead of the cached O(1)
+    /// strided analysis plus the residual's own preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
         &mut self,
