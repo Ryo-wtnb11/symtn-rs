@@ -1,16 +1,24 @@
-//! Allocation calls and bytes of the Host DynamicTree route, eager and member
-//! (B = 1, 17), cold and warm, on one thread (#1859).
+//! Allocation contracts of the Host DynamicTree route, eager and member
+//! (B = 1, 17), on one thread (#1859):
 //!
-//! Call-count upper bounds are those recorded on `d416b1a2`, a revision with
-//! separate eager and member replays (the `B = 17` rows re-recorded, see
-//! `BASE`); bytes are reported, not asserted.
+//! - a warm member replay allocates nothing, at B = 1 and B = 17;
+//! - a warm eager call and a warm member replay build no GEMM plan (the
+//!   geometry-plan cache's misses do not move);
+//! - a warm eager call and a member workspace's cold call make as many
+//!   allocation calls on a larger structure of the same fixture (more
+//!   sectors, so more blocks and block geometries) as on the small one:
+//!   their cost is per call, not per block;
+//! - dropping a member workspace frees no more than its `retained_bytes`.
+//!
+//! Exact counts and bytes are printed, not pinned: they move with platform
+//! and dependency internals.
 
 use std::sync::Arc;
 use symtn_dense::Engine;
 
 use symtn_core::{
     FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols, SU2FusionRule, SU2Irrep,
-    SectorLeg, U1FusionRule, U1Irrep,
+    SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, HostContractMembersWorkspace,
@@ -44,22 +52,28 @@ fn space<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
     .unwrap()
 }
 
-fn u1_leg() -> SectorLeg {
+/// U(1) charges `-reach..=reach`, degeneracy two for charge zero, else one.
+fn u1_leg(reach: i32) -> SectorLeg {
     SectorLeg::new(
-        [-1, 0, 1].map(|charge| {
+        (-reach..=reach).map(|charge| {
             (
                 U1Irrep::new(charge).sector_id(),
-                2 - charge.unsigned_abs() as usize,
+                if charge == 0 { 2 } else { 1 },
             )
         }),
         false,
     )
 }
 
-fn su2_leg() -> SectorLeg {
+/// SU(2) spins `0..=reach/2`, degeneracy two for spin zero, else one.
+fn su2_leg(reach: i32) -> SectorLeg {
     SectorLeg::new(
-        [(0, 2), (1, 1), (2, 1)]
-            .map(|(twice, deg)| (SU2Irrep::from_twice_spin(twice).sector_id(), deg)),
+        (0..=reach).map(|twice| {
+            (
+                SU2Irrep::from_twice_spin(twice as _).sector_id(),
+                if twice == 0 { 2 } else { 1 },
+            )
+        }),
         false,
     )
 }
@@ -67,7 +81,7 @@ fn su2_leg() -> SectorLeg {
 /// Source transforms on both sides and an output transform.
 fn transformed<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
     provider: R,
-    leg: fn() -> SectorLeg,
+    leg: impl Fn() -> SectorLeg,
 ) -> Case<R> {
     let provider = Arc::new(provider);
     Case {
@@ -82,7 +96,7 @@ fn transformed<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 /// A transformed lhs written by the core straight into the destination.
 fn identity_output<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
     provider: R,
-    leg: fn() -> SectorLeg,
+    leg: impl Fn() -> SectorLeg,
 ) -> Case<R> {
     let provider = Arc::new(provider);
     Case {
@@ -96,13 +110,21 @@ fn identity_output<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Row {
-    eager_cold: (u64, u64),
-    eager_warm: (u64, u64),
-    member1_cold: (u64, u64),
-    member1_warm: (u64, u64),
-    member17_cold: (u64, u64),
-    member17_warm: (u64, u64),
-    member1_retained: usize,
+    /// Blocks of the destination, the size the scaling check compares.
+    blocks: usize,
+    eager_warm: u64,
+    member1_cold: u64,
+    member1_warm: u64,
+    member17_cold: u64,
+    member17_warm: u64,
+    /// GEMM plans built by the warm eager and warm member calls.
+    warm_plan_builds: u64,
+    retained: usize,
+    freed: u64,
+}
+
+fn plan_builds() -> u64 {
+    symtn_core::structure_cache_info(StructureCacheKind::GemmPlans).misses()
 }
 
 fn row<R>(engine: &mut dyn Engine, case: &Case<R>) -> Row
@@ -124,7 +146,6 @@ where
         (0..len).map(|i| (i as f64 * 0.37 + salt).sin()).collect()
     };
     let (lhs, rhs) = (data(17 * lhs_len, 0.1), data(17 * rhs_len, 0.2));
-    let calls = |allocs: counting_alloc::Allocs| (allocs.calls, allocs.bytes);
 
     let mut context = Context::default();
     let mut out = vec![0.0; dst_len];
@@ -146,9 +167,12 @@ where
                 .unwrap()
         })
         .1
+        .calls
     };
-    let eager_cold = calls(eager(&mut context, &mut out));
-    let eager_warm = calls(eager(&mut context, &mut out));
+    eager(&mut context, &mut out);
+    let builds = plan_builds();
+    let eager_warm = eager(&mut context, &mut out);
+    let mut warm_plan_builds = plan_builds() - builds;
 
     let mut context = Context::default();
     let resolution = context
@@ -163,148 +187,104 @@ where
         )
         .unwrap();
     assert!(resolution.is_dynamic_tree());
-    let mut workspace = HostContractMembersWorkspace::<f64>::default();
     let mut out = vec![0.0; 17 * dst_len];
     let mut member = |members: usize, workspace: &mut HostContractMembersWorkspace<f64>| {
         let out = &mut out[..members * dst_len];
-        calls(
-            counting_alloc::measure(|| {
-                context
-                    .execute_storage_contract_members_host(
-                        engine,
-                        &resolution,
-                        (dst.space().structure(), out),
-                        (case.lhs.space().structure(), &lhs[..members * lhs_len]),
-                        (case.rhs.space().structure(), &rhs[..members * rhs_len]),
-                        workspace,
-                        members,
-                        symtn_tensors::ContractDestinationInit::Axpby(0.0),
-                    )
-                    .unwrap()
-            })
-            .1,
-        )
+        counting_alloc::measure(|| {
+            context
+                .execute_storage_contract_members_host(
+                    engine,
+                    &resolution,
+                    (dst.space().structure(), out),
+                    (case.lhs.space().structure(), &lhs[..members * lhs_len]),
+                    (case.rhs.space().structure(), &rhs[..members * rhs_len]),
+                    workspace,
+                    members,
+                    symtn_tensors::ContractDestinationInit::Axpby(0.0),
+                )
+                .unwrap()
+        })
+        .1
+        .calls
     };
-    let member1_cold = member(1, &mut workspace);
-    let member1_warm = member(1, &mut workspace);
-    let member1_retained = workspace.retained_bytes();
-    let mut workspace = HostContractMembersWorkspace::<f64>::default();
-    let member17_cold = member(17, &mut workspace);
-    let member17_warm = member(17, &mut workspace);
+    // A throwaway workspace per member count admits that count's plans and
+    // sizes the context's GEMM staging, so a cold call below measures only
+    // what a new workspace allocates for itself.
+    let cold_warm =
+        |members: usize,
+         member: &mut dyn FnMut(usize, &mut HostContractMembersWorkspace<f64>) -> u64| {
+            member(members, &mut HostContractMembersWorkspace::default());
+            let mut workspace = HostContractMembersWorkspace::<f64>::default();
+            let cold = member(members, &mut workspace);
+            let builds = plan_builds();
+            let warm = member(members, &mut workspace);
+            (cold, warm, plan_builds() - builds, workspace)
+        };
+    let (member1_cold, member1_warm, builds1, workspace) = cold_warm(1, &mut member);
+    let retained = workspace.retained_bytes();
+    let ((), dropped) = counting_alloc::measure(|| drop(workspace));
+    let (member17_cold, member17_warm, builds17, _) = cold_warm(17, &mut member);
+    warm_plan_builds += builds1 + builds17;
     Row {
-        eager_cold,
+        blocks: dst.space().structure().block_count(),
         eager_warm,
         member1_cold,
         member1_warm,
         member17_cold,
         member17_warm,
-        member1_retained,
+        warm_plan_builds,
+        retained,
+        freed: dropped.freed_bytes,
     }
 }
 
 #[test]
-fn dynamic_tree_route_allocations_are_bounded_by_base() {
+fn dynamic_tree_route_allocations_follow_their_contracts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    let rows = [
-        (
-            "U1 transformed",
-            row(engine, &transformed(U1FusionRule, u1_leg)),
-        ),
-        (
-            "U1 identity output",
-            row(engine, &identity_output(U1FusionRule, u1_leg)),
-        ),
-        (
-            "SU2 transformed",
-            row(engine, &transformed(SU2FusionRule, su2_leg)),
-        ),
-        (
-            "SU2 identity output",
-            row(engine, &identity_output(SU2FusionRule, su2_leg)),
-        ),
+    type Fixture = fn(&mut dyn Engine, i32) -> Row;
+    let fixtures: [(&str, Fixture); 4] = [
+        ("U1 transformed", |engine, reach| {
+            row(engine, &transformed(U1FusionRule, || u1_leg(reach)))
+        }),
+        ("U1 identity output", |engine, reach| {
+            row(engine, &identity_output(U1FusionRule, || u1_leg(reach)))
+        }),
+        ("SU2 transformed", |engine, reach| {
+            row(engine, &transformed(SU2FusionRule, || su2_leg(reach)))
+        }),
+        ("SU2 identity output", |engine, reach| {
+            row(engine, &identity_output(SU2FusionRule, || su2_leg(reach)))
+        }),
     ];
-    for ((name, row), (base_name, base)) in rows.iter().zip(BASE) {
-        eprintln!("{name}: {row:?}");
-        assert_eq!(*name, base_name);
-        // What: the executor merge adds no allocation call to a warm eager
-        // replay, and a member replay makes no more calls than its base (no
-        // replay build at B = 1). Bytes and the cold eager row (planning)
-        // are reported only: byte counts move with platform and dependency
-        // internals.
-        for (head, base) in [
-            (row.eager_warm, base.eager_warm),
-            (row.member1_cold, base.member1_cold),
-            (row.member1_warm, base.member1_warm),
-            (row.member17_cold, base.member17_cold),
-            (row.member17_warm, base.member17_warm),
+    for (name, row) in fixtures {
+        let (small, large) = (row(engine, 1), row(engine, 2));
+        eprintln!("{name}: small {small:?}\n{name}: large {large:?}");
+        assert!(large.blocks > small.blocks, "{name}: premise");
+        for row in [small, large] {
+            // What: warm member replays allocate nothing; no warm call
+            // builds a GEMM plan; a dropped workspace frees what it charges.
+            assert_eq!(
+                (row.member1_warm, row.member17_warm),
+                (0, 0),
+                "{name}: {row:?}"
+            );
+            assert_eq!(row.warm_plan_builds, 0, "{name}: {row:?}");
+            assert!(row.freed as usize <= row.retained, "{name}: {row:?}");
+        }
+        // What: the warm eager call and a workspace's cold calls cost per
+        // call, not per block: the larger structure adds fewer calls than
+        // it adds blocks (amortized growth of reused buffers may add a few).
+        let added = large.blocks - small.blocks;
+        for (what, small, large) in [
+            ("eager warm", small.eager_warm, large.eager_warm),
+            ("member1 cold", small.member1_cold, large.member1_cold),
+            ("member17 cold", small.member17_cold, large.member17_cold),
         ] {
-            assert!(head.0 <= base.0, "{name}: {row:?}");
+            assert!(
+                large.saturating_sub(small) < added as u64,
+                "{name}: {what} grows with the block count: {small} -> {large} calls for {added} added blocks"
+            );
         }
     }
 }
-
-/// `d416b1a2`, debug test build, one thread, except the `eager_cold`,
-/// `eager_warm` and member rows, re-recorded with the block GEMM kernel, its
-/// process-global geometry-plan cache and its executor-kept staging. Every
-/// grouped submission takes its plans from the cache, so a warm call builds
-/// none, and its staging (job records, geometry index, plan-handle slots,
-/// costs, lane tables) from the executor that runs it, so a warm call on a
-/// kept executor (this test's eager context, and every member workspace)
-/// stages without allocating: `member1_warm` and `member17_warm` are zero
-/// (before: 0/0/2/0 and 7/7/31/7) and `eager_warm` drops by the kernel's
-/// seven calls. Cold calls pay the cache admission of new geometries (the
-/// shared `Arc` and the cache's placeholder) and size the staging, so
-/// `member1_cold` moves 10/6/30/6 -> 11/8/22/8 and SU2 transformed
-/// `member17_cold` 104 -> 116 calls. The plan bytes moved from
-/// `member1_retained` to the shared cache.
-const BASE: [(&str, Row); 4] = [
-    (
-        "U1 transformed",
-        Row {
-            eager_cold: (547, 201537),
-            eager_warm: (16, 2032),
-            member1_cold: (11, 5484),
-            member1_warm: (0, 0),
-            member17_cold: (31, 89248),
-            member17_warm: (0, 0),
-            member1_retained: 4592,
-        },
-    ),
-    (
-        "U1 identity output",
-        Row {
-            eager_cold: (114, 36016),
-            eager_warm: (13, 1312),
-            member1_cold: (8, 940),
-            member1_warm: (0, 0),
-            member17_cold: (13, 8704),
-            member17_warm: (0, 0),
-            member1_retained: 160,
-        },
-    ),
-    (
-        "SU2 transformed",
-        Row {
-            eager_cold: (22532, 6846533),
-            eager_warm: (17, 2096),
-            member1_cold: (22, 18732),
-            member1_warm: (0, 0),
-            member17_cold: (116, 634996),
-            member17_warm: (0, 0),
-            member1_retained: 16992,
-        },
-    ),
-    (
-        "SU2 identity output",
-        Row {
-            eager_cold: (476, 66500),
-            eager_warm: (13, 1312),
-            member1_cold: (8, 972),
-            member1_warm: (0, 0),
-            member17_cold: (13, 9248),
-            member17_warm: (0, 0),
-            member1_retained: 192,
-        },
-    ),
-];

@@ -1,8 +1,19 @@
-//! #1859 Host H2: allocation calls of the Host Core and CopyC routes, eager
-//! (`contract_into`) and `ContractPlan` members (B = 1, 17), cold and warm,
-//! on one thread.
+//! #1859 Host H2: allocation contracts of the Host Core and CopyC routes,
+//! eager (`contract_into`) and `ContractPlan` members (B = 1, 17), on one
+//! thread:
 //!
-//! Call-count upper bounds (see `BASE`); bytes are reported, not asserted.
+//! - a warm member call allocates nothing, at B = 1 and B = 17;
+//! - a warm eager call and a warm member call build no GEMM plan (the
+//!   geometry-plan cache's misses do not move);
+//! - a warm eager call and a new workspace's cold call cost per call, not per
+//!   block: a larger structure of the same family (more sectors, so more
+//!   blocks) adds fewer allocation calls than it adds blocks;
+//! - dropping a warmed workspace frees no more than its `retained_bytes`.
+//!
+//! Exact counts are printed, not pinned: they move with platform and
+//! dependency internals. The blocks stay small enough that the dense
+//! provider's GEMM needs no packing buffer of its own (faer allocates one
+//! per large GEMM, which no workspace of symtn can own).
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
@@ -11,39 +22,73 @@ use crate::backend;
 
 use std::sync::Arc;
 
+use symtn::cache::StructureCacheKind;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{ContractPlan, ContractSpec, GradedSpace, Runtime, StackedTensorMap, TensorMap};
 
 use crate::counting_alloc;
 
-fn measure(f: impl FnOnce()) -> (u64, u64) {
-    let ((), allocs) = counting_alloc::measure(f);
-    (allocs.calls, allocs.bytes)
+fn calls(f: impl FnOnce()) -> u64 {
+    counting_alloc::measure(f).1.calls
+}
+
+fn plan_builds() -> u64 {
+    symtn::cache::stats()
+        .into_iter()
+        .find(|info| info.kind() == StructureCacheKind::GemmPlans)
+        .unwrap()
+        .misses()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Row {
-    eager_warm: (u64, u64),
-    member1_cold: (u64, u64),
-    member1_warm: (u64, u64),
-    member17_cold: (u64, u64),
-    member17_warm: (u64, u64),
+    /// Coupled-sector blocks of the output (one core GEMM each), the size
+    /// the scaling check compares.
+    blocks: usize,
+    eager_warm: u64,
+    member1_cold: u64,
+    member1_warm: u64,
+    member17_cold: u64,
+    member17_warm: u64,
+    /// GEMM plans built by the warm eager and warm member calls.
+    warm_plan_builds: u64,
+    /// `retained_bytes` and the bytes its drop frees, at B = 1 and 17.
+    retained: [usize; 2],
+    freed: [u64; 2],
 }
 
-fn row(codomain: &[usize]) -> Row {
+/// `v` has U(1) charges `-reach..=reach` (degeneracies 4, 3, 4 on the
+/// charges up to one, 1 beyond) and the contracted `w` charges
+/// `1 - reach..=reach` (degeneracy 4 on charge 0, 2 on 1, 1 beyond), so the
+/// core's GEMM count grows with `reach`.
+fn row(codomain: &[usize], reach: i32) -> Row {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
-        [
-            (U1Irrep::new(-1), 4),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 4),
-        ],
+        (-reach..=reach).map(|charge| {
+            let degeneracy = match charge.abs() {
+                0 => 3,
+                1 => 4,
+                _ => 1,
+            };
+            (U1Irrep::new(charge), degeneracy)
+        }),
     )
     .unwrap();
-    let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)]).unwrap();
+    let w = GradedSpace::try_new(
+        rule,
+        (1 - reach..=reach).map(|charge| {
+            let degeneracy = match charge {
+                0 => 4,
+                1 => 2,
+                _ => 1,
+            };
+            (U1Irrep::new(charge), degeneracy)
+        }),
+    )
+    .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     let spec = ContractSpec {
@@ -55,100 +100,90 @@ fn row(codomain: &[usize]) -> Row {
     let mut out = a.contract(engine, &b, &spec).unwrap();
     a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
         .unwrap();
-    let eager_warm = measure(|| {
+    let mut builds = plan_builds();
+    let eager_warm = calls(|| {
         a.contract_into(engine, &b, &spec, &mut out, 1.0, 0.0)
             .unwrap()
     });
+    let mut warm_plan_builds = plan_builds() - builds;
 
     let mut member = |members: usize| {
         let lhs = StackedTensorMap::pack(&vec![&a; members]).unwrap();
         let rhs = StackedTensorMap::pack(&vec![&b; members]).unwrap();
         let plan = ContractPlan::new(engine, &lhs, &rhs, &spec).unwrap();
+        // A first workspace admits the plans, so the cold call below
+        // measures only what a new workspace allocates for itself.
         let mut workspace = plan.workspace().unwrap();
         plan.execute(engine, &lhs, &rhs, &mut workspace).unwrap();
         let mut dst = workspace.take_output().unwrap();
         let mut workspace = plan.workspace().unwrap();
-        let cold = measure(|| {
+        let cold = calls(|| {
             plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
-        let warm = measure(|| {
+        builds = plan_builds();
+        let warm = calls(|| {
             plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut workspace)
                 .unwrap()
         });
-        (cold, warm)
+        warm_plan_builds += plan_builds() - builds;
+        // Dropped while the plan, which shares its replay with the
+        // workspace, is alive: the plan's own data is not the workspace's.
+        let retained = workspace.retained_bytes();
+        let ((), dropped) = counting_alloc::measure(|| drop(workspace));
+        (cold, warm, retained, dropped.freed_bytes)
     };
-    let (member1_cold, member1_warm) = member(1);
-    let (member17_cold, member17_warm) = member(17);
+    let (member1_cold, member1_warm, retained, freed) = member(1);
+    let (member17_cold, member17_warm, retained17, freed17) = member(17);
     Row {
+        blocks: out.blocks().unwrap().len(),
         eager_warm,
         member1_cold,
         member1_warm,
         member17_cold,
         member17_warm,
+        warm_plan_builds,
+        retained: [retained, retained17],
+        freed: [freed, freed17],
     }
 }
 
-/// Recorded on the caller-owned engine model, debug test build, one thread.
-/// Against the `e6e9cac8` base (core `eager_warm` 11, `member17_warm` 1 for
-/// both routes): an eager call now allocates its executor and transform
-/// scratch per call (the Runtime keeps no execution pool; TensorKit's
-/// TensorOperations also allocates temporaries per call), and its grouped
-/// core submission runs on the block GEMM kernel, which stages it per call:
-/// job records (order, slots, costs), the geometry index, the plan handles
-/// and the scheduler's lane tables (seven calls on this fixture's serial
-/// engine and two small f64 geometries; more distinct geometries or lanes
-/// add more). The plans themselves come from the process-global
-/// geometry-plan cache, so a warm call builds none (core `eager_warm` bytes
-/// 16140 -> 2012 against the kernel's first, per-call-plan version). A
-/// prepared workspace's executor keeps that staging, so warm member calls
-/// allocate nothing at any member count (`member17_warm` 7 -> 0). Its cold
-/// calls size the staging: `member1_cold` 6 -> 8 (core) and 7 -> 9 (copyC),
-/// and `member17_cold` 15 -> 19 and 19 -> 23, where the staging grows to
-/// B = 17's job count.
-const BASE: [(&str, Row); 2] = [
-    (
-        "core",
-        Row {
-            eager_warm: (18, 2012),
-            member1_cold: (8, 812),
-            member1_warm: (0, 0),
-            member17_cold: (19, 4996),
-            member17_warm: (0, 0),
-        },
-    ),
-    (
-        "copyC",
-        Row {
-            eager_warm: (22, 4932),
-            member1_cold: (9, 3332),
-            member1_warm: (0, 0),
-            member17_cold: (23, 47932),
-            member17_warm: (0, 0),
-        },
-    ),
-];
-
 #[test]
-fn core_and_copy_c_route_allocation_calls_are_bounded_by_base() {
+fn core_and_copy_c_route_allocations_follow_their_contracts() {
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
         return;
     }
-    let rows = [("core", row(&[0, 1])), ("copyC", row(&[1, 0]))];
-    for ((name, row), (base_name, base)) in rows.iter().zip(BASE) {
-        eprintln!("{name}: {row:?}");
-        assert_eq!(*name, base_name);
-        // What: no route allocates more calls than its base; bytes are
-        // reported only (they move with platform and dependency internals).
-        for (head, base) in [
-            (row.eager_warm, base.eager_warm),
-            (row.member1_cold, base.member1_cold),
-            (row.member1_warm, base.member1_warm),
-            (row.member17_cold, base.member17_cold),
-            (row.member17_warm, base.member17_warm),
+    for (name, codomain) in [("core", [0, 1]), ("copyC", [1, 0])] {
+        let (small, large) = (row(&codomain, 1), row(&codomain, 6));
+        eprintln!("{name}: small {small:?}\n{name}: large {large:?}");
+        assert!(large.blocks > small.blocks, "{name}: premise");
+        for row in [small, large] {
+            // What: warm member calls allocate nothing; no warm call builds
+            // a GEMM plan; a dropped workspace frees what it charges.
+            assert_eq!(
+                (row.member1_warm, row.member17_warm),
+                (0, 0),
+                "{name}: {row:?}"
+            );
+            assert_eq!(row.warm_plan_builds, 0, "{name}: {row:?}");
+            for (freed, retained) in row.freed.into_iter().zip(row.retained) {
+                assert!(freed as usize <= retained, "{name}: {row:?}");
+            }
+        }
+        // What: the warm eager call and a workspace's cold calls cost per
+        // call, not per block (amortized growth of reused buffers may add a
+        // few calls).
+        let added = large.blocks - small.blocks;
+        for (what, small, large) in [
+            ("eager warm", small.eager_warm, large.eager_warm),
+            ("member1 cold", small.member1_cold, large.member1_cold),
+            ("member17 cold", small.member17_cold, large.member17_cold),
         ] {
-            assert!(head.0 <= base.0, "{name}: {row:?}");
+            assert!(
+                large.saturating_sub(small) < added as u64,
+                "{name}: {what} grows with the block count: {small} -> {large} calls for {added} added blocks"
+            );
         }
     }
 }
