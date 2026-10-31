@@ -109,13 +109,15 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         body(self.as_dyn_dense_executor(), engine)
     }
 
-    /// Applies `op` to each input in order and returns exactly one entry per
-    /// input, holding that input's outputs exactly as the per-matrix entry
-    /// returns them; stops at the first error.
+    /// Applies `op` to each input and returns exactly one entry per input,
+    /// holding that input's outputs exactly as the per-matrix entry returns
+    /// them; on failure, returns the lowest-indexed failing input's error
+    /// and no outputs.
     ///
-    /// The default issues one per-matrix call per input. An executor whose
-    /// per-call entry carries a fixed admission cost overrides this to pay it
-    /// once per batch, not once per matrix.
+    /// The default issues one per-matrix call per input, in order, and stops
+    /// at the first error. An executor whose per-call entry carries a fixed
+    /// admission cost overrides this to pay it once per batch, not once per
+    /// matrix; one may run the inputs concurrently on the engine's lanes.
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,

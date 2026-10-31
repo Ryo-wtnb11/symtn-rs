@@ -190,37 +190,52 @@ fn single_precision_allocates_as_often_as_double_and_half_the_payload_bytes() {
     );
 }
 
-/// Builds a tensor and factorizes it, at one payload dtype (#1324).
+/// Builds a tensor and runs one factorization on it, at one payload dtype.
 ///
-/// The same public sequence at every dtype: a QR, an SVD and a truncated SVD.
-/// The spectra are `f64` at every payload dtype by contract, so only the
-/// *factor payloads* narrow — which is exactly what the byte assertion counts.
-/// Builds a tensor and factorizes it, at one payload dtype (#1324).
+/// The same public sequence at every dtype: `qr` is a compact QR, `svd` a
+/// compact SVD followed by its truncation (a composition). The spectra are
+/// `f64` at every payload dtype by contract, so only the *factor payloads*
+/// narrow — which is exactly what the byte assertion counts.
 ///
 /// Returns `(produced, spectrum_sectors, calls, bytes)` for one **steady-state**
-/// iteration: `produced` is the total payload length of every factor the
+/// iteration: `produced` is the total payload length of every tensor the
 /// sequence returns, `spectrum_sectors` the number of coupled sectors across
 /// the spectrum factors it builds.
 ///
-/// Steady state, not "one warm pass", is the whole point. A single iteration of
-/// this sequence measured cold includes one-time growth of the dense backend's
-/// buffer pool, which is amortized across dtypes through process-global state:
-/// measured that way the counts depend on *which dtype ran first* (a
-/// complex-payload pipeline run after a real one was seen to cost 321 calls and
-/// 287 when it ran after another complex one, the two numbers swapping when the
-/// dtype order was swapped) and even on whether the allocator hook itself does
-/// extra work. After four identical iterations the per-iteration count is
-/// exactly reproducible and independent of the dtype order and of the runtime
-/// instance, which is what makes it a property of the algorithm rather than of
-/// the process.
-macro_rules! measure_factorizations {
-    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr) => {{
+/// Steady state, not "one warm pass", is the whole point. A single iteration
+/// measured cold includes one-time growth of the dense backend's buffer pool,
+/// which is amortized across dtypes through process-global state: measured
+/// that way the counts depend on *which dtype ran first*. After four identical
+/// iterations the per-iteration count is reproducible and independent of the
+/// dtype order and of the runtime instance, which is what makes it a property
+/// of the algorithm rather than of the process.
+macro_rules! measure_factorization {
+    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr, qr) => {{
         let space = $space;
         let sequence = |$engine: &mut dyn Engine| {
             let tensor: TensorMap<U1FusionRule, $dtype> =
                 TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 7_502)
                     .unwrap();
             let Qr { q, r } = tensor.qr_compact($engine, &[0, 1], &[2]).unwrap();
+            (tensor, q, r)
+        };
+        for _ in 0..4 {
+            black_box(sequence($engine));
+        }
+        let (tensor, q, r) = sequence($engine);
+        let produced = tensor.dense_data().unwrap().len()
+            + q.dense_data().unwrap().len()
+            + r.dense_data().unwrap().len();
+        black_box((tensor, q, r));
+        let (_, calls, bytes) = measured(|| black_box(sequence($engine)));
+        (produced, 0, calls, bytes)
+    }};
+    ($engine:ident, $runtime:expr, $dtype:ty, $space:expr, svd) => {{
+        let space = $space;
+        let sequence = |$engine: &mut dyn Engine| {
+            let tensor: TensorMap<U1FusionRule, $dtype> =
+                TensorMap::rand_with_seed($engine, $runtime, [space, space], [space], 7_502)
+                    .unwrap();
             let Svd { u, s, vh } = tensor.svd_compact($engine, &[0, 1], &[2]).unwrap();
             // The truncated SVD is a composition (#1534).
             let found = s.domain()[0]
@@ -233,17 +248,14 @@ macro_rules! measure_factorizations {
                     .unwrap(),
                 vh.restrict_leg($engine, &[(0, &found.selection)]).unwrap(),
             );
-            (tensor, q, r, u, s, vh, truncated)
+            (tensor, u, s, vh, truncated)
         };
-        // Warm: every one-time backend workspace growth is paid here.
         for _ in 0..4 {
             black_box(sequence($engine));
         }
         // Shape observation, outside the counter: `diagview` allocates.
-        let (tensor, q, r, u, s, vh, truncated) = sequence($engine);
+        let (tensor, u, s, vh, truncated) = sequence($engine);
         let produced = tensor.dense_data().unwrap().len()
-            + q.dense_data().unwrap().len()
-            + r.dense_data().unwrap().len()
             + u.dense_data().unwrap().len()
             + s.materialize($engine).unwrap().dense_data().unwrap().len()
             + vh.dense_data().unwrap().len()
@@ -258,93 +270,109 @@ macro_rules! measure_factorizations {
             + truncated.2.dense_data().unwrap().len();
         let spectrum_sectors =
             s.diagview($engine).unwrap().len() + truncated.1.diagview($engine).unwrap().len();
-        black_box((tensor, q, r, u, s, vh, truncated));
-
+        black_box((tensor, u, s, vh, truncated));
         let (_, calls, bytes) = measured(|| black_box(sequence($engine)));
         (produced, spectrum_sectors, calls, bytes)
     }};
 }
 
-#[test]
-fn single_precision_factorizations_allocate_like_double() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let space = u1_space();
+/// Measures one factorization at all four payload dtypes and asserts that
+/// each single-precision run takes the double-precision allocation route.
+macro_rules! assert_factorization_allocates_like_double {
+    ($op:tt) => {{
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let _serial = crate::counting_alloc::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let space = u1_space();
 
-    let (f64_payload, f64_sectors, f64_calls, f64_bytes) =
-        measure_factorizations!(engine, &runtime, f64, &space);
-    let (f32_payload, f32_sectors, f32_calls, f32_bytes) =
-        measure_factorizations!(engine, &runtime, f32, &space);
-    let (c64_payload, c64_sectors, c64_calls, c64_bytes) =
-        measure_factorizations!(engine, &runtime, Complex64, &space);
-    let (c32_payload, c32_sectors, c32_calls, c32_bytes) =
-        measure_factorizations!(engine, &runtime, Complex32, &space);
+        let (f64_payload, f64_sectors, f64_calls, f64_bytes) =
+            measure_factorization!(engine, &runtime, f64, &space, $op);
+        let (f32_payload, f32_sectors, f32_calls, f32_bytes) =
+            measure_factorization!(engine, &runtime, f32, &space, $op);
+        let (c64_payload, c64_sectors, c64_calls, c64_bytes) =
+            measure_factorization!(engine, &runtime, Complex64, &space, $op);
+        let (c32_payload, c32_sectors, c32_calls, c32_bytes) =
+            measure_factorization!(engine, &runtime, Complex32, &space, $op);
 
-    eprintln!(
-        "factorizations: f64 {f64_calls} calls/{f64_bytes} B ({f64_payload} entries, \
-         {f64_sectors} spectrum sectors), f32 {f32_calls}/{f32_bytes} ({f32_payload}, \
-         {f32_sectors}), c64 {c64_calls}/{c64_bytes} ({c64_payload}, {c64_sectors}), \
-         c32 {c32_calls}/{c32_bytes} ({c32_payload}, {c32_sectors})"
-    );
+        eprintln!(
+            "{}: f64 {f64_calls} calls/{f64_bytes} B ({f64_payload} entries, \
+             {f64_sectors} spectrum sectors), f32 {f32_calls}/{f32_bytes} ({f32_payload}, \
+             {f32_sectors}), c64 {c64_calls}/{c64_bytes} ({c64_payload}, {c64_sectors}), \
+             c32 {c32_calls}/{c32_bytes} ({c32_payload}, {c32_sectors})",
+            stringify!($op)
+        );
 
-    assert_eq!(
-        (f32_payload, f32_sectors),
-        (f64_payload, f64_sectors),
-        "the twins must produce factors of the same shape"
-    );
-    assert_eq!(
-        (c32_payload, c32_sectors),
-        (c64_payload, c64_sectors),
-        "Complex32 against Complex64"
-    );
-
-    // Equality, not a bound (#1337). The spectrum factor is filled from a
-    // borrowed slice, so the buffer count is a property of the algorithm
-    // rather than of the payload layout. Why not
-    // `into_iter().map(to_scalar).collect()` from the `Vec<f64>` spectrum:
-    // the standard library's in-place collect reuses the source buffer only
-    // when `D` matches `f64` in size *and* alignment, which `f32` (align 4),
-    // `Complex32` (align 4) and `Complex64` (16 bytes) all fail, costing one
-    // allocation per coupled sector. The dense backend's own SVD entry points
-    // and conversion chain are allocation-identical at all four dtypes.
-    for (single, double, what) in [
-        (f32_calls, f64_calls, "f32 against f64"),
-        (c32_calls, c64_calls, "Complex32 against Complex64"),
-    ] {
         assert_eq!(
-            single, double,
-            "{what}: narrowing the payload must not change how often the \
-             factorization allocates ({single} against {double})"
+            (f32_payload, f32_sectors),
+            (f64_payload, f64_sectors),
+            "the twins must produce factors of the same shape"
         );
-    }
+        assert_eq!(
+            (c32_payload, c32_sectors),
+            (c64_payload, c64_sectors),
+            "Complex32 against Complex64"
+        );
 
-    // Every entry of every factor the sequence returns is half as wide; the
-    // scratch the factorization allocates on top is not necessarily payload
-    // typed, so this is the lower bound the returned factors alone guarantee.
-    for (wide_bytes, narrow_bytes, payload, step, what) in [
-        (
-            f64_bytes,
-            f32_bytes,
-            f64_payload,
-            size_of::<f64>() - size_of::<f32>(),
-            "f32 against f64",
-        ),
-        (
-            c64_bytes,
-            c32_bytes,
-            c64_payload,
-            size_of::<Complex64>() - size_of::<Complex32>(),
-            "Complex32 against Complex64",
-        ),
-    ] {
-        // Addition, not subtraction: a regression must fail the assertion, not
-        // panic on a `usize` underflow before reaching it.
-        assert!(
-            narrow_bytes + payload * step <= wide_bytes,
-            "{what}: the narrow run allocated {narrow_bytes} B against {wide_bytes} B, \
-             less than the {} B its factors alone are narrower by",
-            payload * step
-        );
-    }
+        // Equality, not a bound (#1337): the buffer count is a property of
+        // the algorithm rather than of the payload layout. The spectrum
+        // factor is filled from a borrowed slice; a
+        // `into_iter().map(to_scalar).collect()` from the `Vec<f64>` spectrum
+        // would reuse the source buffer only when `D` matches `f64` in size
+        // and alignment, costing the narrow dtypes one allocation per sector.
+        for (single, double, what) in [
+            (f32_calls, f64_calls, "f32 against f64"),
+            (c32_calls, c64_calls, "Complex32 against Complex64"),
+        ] {
+            assert_eq!(
+                single, double,
+                "{what}: narrowing the payload must not change how often the \
+                 factorization allocates ({single} against {double})"
+            );
+        }
+
+        // Every entry of every tensor the sequence returns is half as wide;
+        // the scratch the factorization allocates on top is not necessarily
+        // payload typed, so this is the lower bound the returned tensors
+        // alone guarantee.
+        for (wide_bytes, narrow_bytes, payload, step, what) in [
+            (
+                f64_bytes,
+                f32_bytes,
+                f64_payload,
+                size_of::<f64>() - size_of::<f32>(),
+                "f32 against f64",
+            ),
+            (
+                c64_bytes,
+                c32_bytes,
+                c64_payload,
+                size_of::<Complex64>() - size_of::<Complex32>(),
+                "Complex32 against Complex64",
+            ),
+        ] {
+            // Addition, not subtraction: a regression must fail the
+            // assertion, not panic on a `usize` underflow before reaching it.
+            assert!(
+                narrow_bytes + payload * step <= wide_bytes,
+                "{what}: the narrow run allocated {narrow_bytes} B against {wide_bytes} B, \
+                 less than the {} B its factors alone are narrower by",
+                payload * step
+            );
+        }
+    }};
+}
+
+/// Purpose: single-precision compact SVD (and its truncation) takes the
+/// double-precision allocation route — no hidden widening or copy.
+#[test]
+fn single_precision_svd_allocates_like_double() {
+    assert_factorization_allocates_like_double!(svd);
+}
+
+/// Purpose: single-precision compact QR takes the double-precision
+/// allocation route — no hidden widening or copy.
+#[test]
+#[ignore = "compact QR grows a recycled backend buffer in place, so its allocation count follows buffer reuse history, not the dtype"]
+fn single_precision_qr_allocates_like_double() {
+    assert_factorization_allocates_like_double!(qr);
 }

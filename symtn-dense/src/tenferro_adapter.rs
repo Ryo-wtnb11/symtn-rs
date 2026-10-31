@@ -1079,10 +1079,12 @@ impl DenseExecutor for DefaultDenseExecutor {
         }
     }
 
-    // One engine lock for the whole batch: the per-matrix calls the per-call
-    // entries make, in the same order, plus only the pure view lowering;
-    // output wrapping stays outside it. Outputs land in one flat vector so the
-    // batch adds no per-matrix container beyond the returned one.
+    // The native provider's SVD runs the blocks on the shared scheduler's
+    // lanes (`block_kernel::factor`). Every other batch takes one engine lock
+    // for the whole batch: the per-matrix calls the per-call entries make, in
+    // the same order, plus only the pure view lowering; output wrapping stays
+    // outside it. Outputs land in one flat vector so the batch adds no
+    // per-matrix container beyond the returned one.
     #[cfg(not(feature = "provider-inject"))]
     fn factorize_batch(
         &mut self,
@@ -1093,6 +1095,10 @@ impl DenseExecutor for DefaultDenseExecutor {
         use crate::DenseFactorization;
         if inputs.is_empty() {
             return Ok(Vec::new());
+        }
+        #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+        if matches!(op, DenseFactorization::Svd) {
+            return crate::block_kernel::factor::svd_batch(engine, inputs);
         }
         let (arity, error_op) = match op {
             DenseFactorization::Svd => (3, "svd_read"),
@@ -1623,7 +1629,7 @@ fn tenferro_scalar(value: DenseScalar) -> tenferro_tensor::ContractionScalar {
     }
 }
 
-fn tenferro_view(input: DenseRead<'_>) -> Result<TensorView<'_>, DenseError> {
+pub(crate) fn tenferro_view(input: DenseRead<'_>) -> Result<TensorView<'_>, DenseError> {
     match input {
         DenseRead::F32(view) => typed_tenferro_view(view).map(TensorView::F32),
         DenseRead::F64(view) => typed_tenferro_view(view).map(TensorView::F64),
@@ -1718,7 +1724,7 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
     }
 }
 
-const NOT_A_CPU_ENGINE: &str =
+pub(crate) const NOT_A_CPU_ENGINE: &str =
     "DefaultDenseExecutor runs Host views and needs the caller's CPU engine";
 
 /// Runs `f` on the CPU engine behind the caller's erased engine; any other
