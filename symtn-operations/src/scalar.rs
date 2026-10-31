@@ -308,6 +308,16 @@ pub trait DenseBlockScalar:
     fn dense_write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_>;
     /// Dtype-erased carrier for accumulate-form GEMM parameters.
     fn dense_scalar(self) -> DenseScalar;
+    /// Dtype-erased carrier of a fresh-destination GEMM call: `segments`
+    /// and `written` as [`Rank2Gemm::matmul_rank2_batch_fresh`] takes them,
+    /// with this crate's zero fill as the carrier's `zeroed`.
+    ///
+    /// [`Rank2Gemm::matmul_rank2_batch_fresh`]: crate::Rank2Gemm::matmul_rank2_batch_fresh
+    #[doc(hidden)]
+    fn dense_fresh_segments<'s, 'a>(
+        segments: &'s mut [(usize, &'a mut [core::mem::MaybeUninit<Self>])],
+        written: &'s mut dyn FnMut(usize, &'a mut [Self]),
+    ) -> symtn_dense::DenseFreshSegments<'s, 'a>;
 }
 
 #[doc(hidden)]
@@ -328,6 +338,17 @@ macro_rules! impl_dense_block_scalar {
 
             fn dense_scalar(self) -> DenseScalar {
                 DenseScalar::$read_variant(self)
+            }
+
+            fn dense_fresh_segments<'s, 'a>(
+                segments: &'s mut [(usize, &'a mut [core::mem::MaybeUninit<Self>])],
+                written: &'s mut dyn FnMut(usize, &'a mut [Self]),
+            ) -> symtn_dense::DenseFreshSegments<'s, 'a> {
+                symtn_dense::DenseFreshSegments::$read_variant {
+                    segments,
+                    zeroed: crate::owned_overwrite_buffer::write_zeros::<$ty>,
+                    written,
+                }
             }
         }
     };

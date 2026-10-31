@@ -56,7 +56,11 @@ fn group_plan(
     .unwrap()
 }
 
-fn scalar_group(block_index: usize, direct: bool, coefficient: f64) -> FusionBlockMatrixGroup {
+pub(super) fn scalar_group(
+    block_index: usize,
+    direct: bool,
+    coefficient: f64,
+) -> FusionBlockMatrixGroup {
     FusionBlockMatrixGroup {
         coupled: SectorId::new(block_index),
         rows: 1,
@@ -78,7 +82,7 @@ fn scalar_group(block_index: usize, direct: bool, coefficient: f64) -> FusionBlo
 }
 
 #[derive(Default)]
-struct NaiveGemm;
+pub(super) struct NaiveGemm;
 
 impl<T> Rank2Gemm<T> for NaiveGemm
 where
@@ -1545,7 +1549,9 @@ impl Rank2Gemm<f64> for FailingAtJob {
 /// Four scalar blocks: blocks 0 and 1 are active (block 0 irregular when
 /// `irregular_first`, both direct otherwise) and blocks 2 and 3 are the
 /// inactive complement.
-fn four_block_plan(irregular_first: bool) -> (Arc<BlockStructure>, FusionBlockContractPlan) {
+pub(super) fn four_block_plan(
+    irregular_first: bool,
+) -> (Arc<BlockStructure>, FusionBlockContractPlan) {
     let structure = Arc::new(
         BlockStructure::packed_column_major(1, [vec![1], vec![1], vec![1], vec![1]]).unwrap(),
     );
@@ -1583,8 +1589,8 @@ fn four_block_plan(irregular_first: bool) -> (Arc<BlockStructure>, FusionBlockCo
     (structure, plan)
 }
 
-const FOUR_BLOCK_LHS: [f64; 4] = [3.0, 5.0, 0.0, 0.0];
-const FOUR_BLOCK_RHS: [f64; 4] = [7.0, 11.0, 0.0, 0.0];
+pub(super) const FOUR_BLOCK_LHS: [f64; 4] = [3.0, 5.0, 0.0, 0.0];
+pub(super) const FOUR_BLOCK_RHS: [f64; 4] = [7.0, 11.0, 0.0, 0.0];
 
 fn touched_inactive(offsets: &[isize]) -> Vec<isize> {
     offsets.iter().copied().filter(|&o| o >= 2).collect()

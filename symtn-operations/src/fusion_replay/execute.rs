@@ -112,13 +112,7 @@ where
             rhs_data.len(),
         )?;
 
-        if self.max_irregular_scratch_len != 0 {
-            fusion_workspace
-                .scratch
-                .resize_filled(self.max_irregular_scratch_len, D::zero());
-        } else {
-            fusion_workspace.scratch.resize_filled(0, D::zero());
-        }
+        self.prepare_irregular_scratch(fusion_workspace);
 
         crate::host_pool::with_exec(engine, |exec| {
             self.init_inactive_blocks(
@@ -171,34 +165,8 @@ where
         G: Rank2Gemm<D>,
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
-        if self.direct_batch.len() != self.direct_batch_alpha.len() {
-            return Err(OperationError::UnsupportedTensorContractScope {
-                message: "direct plan has misaligned GEMM coefficients",
-            });
-        }
-        let (mut start, mut run) = (0, 0);
-        while start < self.direct_batch.len() {
-            let coefficient = self.direct_batch_alpha[start];
-            let mut end = start;
-            let first_run = run;
-            while end < self.direct_batch.len() && self.direct_batch_alpha[end] == coefficient {
-                let len = self.direct_batch_runs.get(run).copied().ok_or(
-                    OperationError::UnsupportedTensorContractScope {
-                        message: "direct plan runs do not cover its jobs",
-                    },
-                )?;
-                end += len;
-                run += 1;
-            }
-            if end > self.direct_batch.len()
-                || self.direct_batch_alpha[start..end]
-                    .iter()
-                    .any(|&alpha| alpha != coefficient)
-            {
-                return Err(OperationError::UnsupportedTensorContractScope {
-                    message: "direct plan runs cross a coefficient change",
-                });
-            }
+        for call in &self.direct_calls {
+            let coefficient = self.direct_batch_alpha[call.jobs.start];
             let job_alpha = if coefficient == C::one() {
                 alpha
             } else {
@@ -210,18 +178,17 @@ where
                 dst,
                 lhs,
                 rhs,
-                &self.direct_batch[start..end],
-                &self.direct_batch_runs[first_run..run],
+                &self.direct_batch[call.jobs.clone()],
+                &self.direct_batch_runs[call.runs.clone()],
                 job_alpha,
                 beta,
             )?;
-            start = end;
         }
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn execute_irregular_group<A, G, D>(
+    pub(super) fn execute_irregular_group<A, G, D>(
         &self,
         engine: &mut dyn Engine,
         kernels: &mut A,
@@ -239,45 +206,17 @@ where
         G: Rank2Gemm<D>,
         D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     {
-        let group = &self.groups[execution.group_index];
         let scratch = &mut fusion_workspace.scratch.as_mut_slice()[..execution.scratch.total_len];
         // `execute_batch` never reads the packed operands at a zero `alpha`.
-        let forms_product = !alpha.is_zero();
-        if forms_product && execution.class.packs_lhs() {
-            let lhs = &mut scratch[..execution.scratch.lhs_len];
-            if group.lhs.needs_clear {
-                lhs.fill(D::zero());
-            }
-            crate::host_pool::with_exec(engine, |exec| {
-                pack_group(exec, kernels, &group.lhs, lhs_data, lhs)
-            })?;
-        }
-        if forms_product && execution.class.packs_rhs() {
-            let start_index = execution.scratch.rhs_offset;
-            let end = start_index + execution.scratch.rhs_len;
-            let rhs = &mut scratch[start_index..end];
-            if group.rhs.needs_clear {
-                rhs.fill(D::zero());
-            }
-            crate::host_pool::with_exec(engine, |exec| {
-                pack_group(exec, kernels, &group.rhs, rhs_data, rhs)
-            })?;
+        if !alpha.is_zero() {
+            self.pack_operands(engine, kernels, scratch, execution, lhs_data, rhs_data)?;
         }
 
         if execution.class.scatters_dst() {
+            let group = &self.groups[execution.group_index];
             let (inputs, destination) = scratch.split_at_mut(execution.scratch.dst_offset);
             let destination = &mut destination[..execution.scratch.dst_len];
-            let lhs = if execution.class.packs_lhs() {
-                &inputs[..execution.scratch.lhs_len]
-            } else {
-                lhs_data
-            };
-            let rhs = if execution.class.packs_rhs() {
-                let start = execution.scratch.rhs_offset;
-                &inputs[start..start + execution.scratch.rhs_len]
-            } else {
-                rhs_data
-            };
+            let (lhs, rhs) = execution.operands(inputs, lhs_data, rhs_data);
             self.execute_batch(
                 engine,
                 gemm,
@@ -293,17 +232,7 @@ where
                 scatter_group(exec, kernels, &group.dst, dst_data, destination, beta)
             })?;
         } else {
-            let lhs = if execution.class.packs_lhs() {
-                &scratch[..execution.scratch.lhs_len]
-            } else {
-                lhs_data
-            };
-            let rhs = if execution.class.packs_rhs() {
-                let start = execution.scratch.rhs_offset;
-                &scratch[start..start + execution.scratch.rhs_len]
-            } else {
-                rhs_data
-            };
+            let (lhs, rhs) = execution.operands(scratch, lhs_data, rhs_data);
             self.execute_batch(
                 engine,
                 gemm,
@@ -315,6 +244,53 @@ where
                 alpha,
                 beta,
             )?;
+        }
+        Ok(())
+    }
+
+    /// Sizes the workspace scratch for the largest irregular group.
+    pub(super) fn prepare_irregular_scratch<D: Clone + Zero>(
+        &self,
+        fusion_workspace: &mut FusionBlockContractWorkspace<D>,
+    ) {
+        fusion_workspace
+            .scratch
+            .resize_filled(self.max_irregular_scratch_len, D::zero());
+    }
+
+    /// Packs the operands `execution` reads from group-local scratch.
+    pub(super) fn pack_operands<A, D>(
+        &self,
+        engine: &mut dyn Engine,
+        kernels: &mut A,
+        scratch: &mut [D],
+        execution: &FusionIrregularGroupExecution,
+        lhs_data: &[D],
+        rhs_data: &[D],
+    ) -> Result<(), OperationError>
+    where
+        A: HostKernelAdapter<D>,
+        D: DenseBlockScalar + RecouplingCoefficientAction<C>,
+    {
+        let group = &self.groups[execution.group_index];
+        if execution.class.packs_lhs() {
+            let lhs = &mut scratch[..execution.scratch.lhs_len];
+            if group.lhs.needs_clear {
+                lhs.fill(D::zero());
+            }
+            crate::host_pool::with_exec(engine, |exec| {
+                pack_group(exec, kernels, &group.lhs, lhs_data, lhs)
+            })?;
+        }
+        if execution.class.packs_rhs() {
+            let start = execution.scratch.rhs_offset;
+            let rhs = &mut scratch[start..start + execution.scratch.rhs_len];
+            if group.rhs.needs_clear {
+                rhs.fill(D::zero());
+            }
+            crate::host_pool::with_exec(engine, |exec| {
+                pack_group(exec, kernels, &group.rhs, rhs_data, rhs)
+            })?;
         }
         Ok(())
     }
@@ -629,7 +605,7 @@ where
         validate_structure_identity("rhs", &self.rhs_structure, rhs_structure)
     }
 
-    fn validate_replay_inputs(
+    pub(super) fn validate_replay_inputs(
         &self,
         dst_structure: &Arc<BlockStructure>,
         dst_len: usize,

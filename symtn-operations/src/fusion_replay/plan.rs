@@ -93,6 +93,28 @@ impl<C> FusionBlockContractPlan<C>
 where
     C: Copy + PartialEq + One,
 {
+    /// Derives the GEMM calls of a validated plan and its owned-output
+    /// layout; adds no validity condition the layout validators have not
+    /// already checked.
+    fn with_derived_calls(mut self) -> Result<Self, OperationError> {
+        self.direct_calls = super::owned::direct_calls(
+            self.direct_batch.len(),
+            &self.direct_batch_alpha,
+            &self.direct_batch_runs,
+        )?;
+        let len = self
+            .dst_structure
+            .required_len()
+            .map_err(OperationError::from_core_preserving_context)?;
+        self.fresh = super::owned::FreshLayout::build(
+            len,
+            &self.direct_batch,
+            &self.direct_calls,
+            &self.irregular,
+        )?;
+        Ok(self)
+    }
+
     /// True when every group reads and writes coupled-sector matrices directly
     /// in storage.
     pub fn is_fully_direct(&self) -> bool {
@@ -153,7 +175,7 @@ where
             compile_group_execution(&groups)?;
         let direct_batch_alpha = vec![C::one(); direct_batch.len()];
         let direct_batch_runs = strided_batch_runs(&direct_batch);
-        Ok(Self {
+        Self {
             dst_structure,
             lhs_structure,
             rhs_structure,
@@ -162,11 +184,14 @@ where
             direct_batch,
             direct_batch_alpha,
             direct_batch_runs,
+            direct_calls: Vec::new(),
+            fresh: Default::default(),
             irregular,
             max_irregular_scratch_len,
             lhs_op,
             rhs_op,
-        })
+        }
+        .with_derived_calls()
     }
 
     /// Compiles canonical coupled-sector structures without synthesizing
@@ -337,7 +362,7 @@ where
             } else {
                 group_scaled_direct_batch(&direct_batch)
             };
-        Ok(Some(Self {
+        Self {
             dst_structure: Arc::clone(dst_structure),
             lhs_structure: Arc::clone(lhs_storage_structure),
             rhs_structure: Arc::clone(rhs_storage_structure),
@@ -346,11 +371,15 @@ where
             direct_batch,
             direct_batch_alpha,
             direct_batch_runs,
+            direct_calls: Vec::new(),
+            fresh: Default::default(),
             irregular: Vec::new(),
             max_irregular_scratch_len: 0,
             lhs_op,
             rhs_op,
-        }))
+        }
+        .with_derived_calls()
+        .map(Some)
     }
 }
 
