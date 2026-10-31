@@ -390,14 +390,9 @@ where
     R: TypedSectorAdmission + symtn::sector::FusionRule,
     D: CudaPayload,
 {
-    let device = __network::cuda_engine_device(engine)?;
+    __network::cuda_engine_device(engine, tensors)?;
     if tensors.is_empty() {
         return Err(invalid("network execution requires at least one operand"));
-    }
-    for &tensor in tensors {
-        if tensor.placement() != Placement::Cuda(device) {
-            return Err(Error::PlacementMismatch);
-        }
     }
     device_operand_admission(
         contracts,

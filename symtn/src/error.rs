@@ -35,9 +35,10 @@ pub enum Error {
     RuleMismatch,
     /// The operands belong to different [`crate::typed::Runtime`]s.
     RuntimeMismatch,
-    /// The operands live on different placements (host vs device, or
-    /// different devices); transfer explicitly with `to_cuda` / `to_host`
-    /// first.
+    /// The operands live on different placements (host vs device, different
+    /// devices, or different CUDA engines, which are separate allocation
+    /// domains even on one device); transfer explicitly with `to_cuda` /
+    /// `to_host` first.
     PlacementMismatch,
     /// The operation has no device implementation yet; the message says
     /// which. Device tensors never fall back to host execution silently —

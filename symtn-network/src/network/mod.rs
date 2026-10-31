@@ -10,8 +10,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(feature = "cuda")]
-use symtn::expert::Placement;
 use symtn::expert::{SectorLeg, TensorStorage};
 use symtn::sector::{
     CheckedFusionAlgebra, CheckedGenericAdmissionMode, CheckedGenericFusion,

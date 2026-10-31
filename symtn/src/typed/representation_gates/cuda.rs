@@ -118,27 +118,11 @@ where
 
 #[cfg(feature = "cuda")]
 #[test]
-fn typed_cuda_owned_metadata_validation_orders_ordinal_before_length() {
+fn typed_cuda_owned_length_validation_names_the_payload_length() {
     type DeviceTensor = TensorMap<U1FusionRule, f64, CudaStorage>;
-    assert!(DeviceTensor::validate_cuda_owned_metadata(
-        Placement::Cuda(0),
-        Placement::Cuda(0),
-        7,
-        7
-    )
-    .is_ok());
-    assert_eq!(
-        DeviceTensor::validate_cuda_owned_metadata(Placement::Cuda(1), Placement::Cuda(0), 7, 6)
-            .unwrap_err(),
-        Error::PlacementMismatch
-    );
+    assert!(DeviceTensor::validate_cuda_owned_len(7, 7).is_ok());
     assert!(matches!(
-        DeviceTensor::validate_cuda_owned_metadata(
-            Placement::Cuda(0),
-            Placement::Cuda(0),
-            7,
-            6
-        ),
+        DeviceTensor::validate_cuda_owned_len(7, 6),
         Err(Error::InvalidArgument(message)) if message.contains("payload length")
     ));
 }
@@ -518,26 +502,6 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
             )
             .unwrap()),
         untouched
-    );
-}
-
-#[cfg(feature = "cuda")]
-#[test]
-fn typed_cuda_reduction_placement_validation_is_exact() {
-    assert!(validate_cuda_reduction_placement(
-        Placement::Cuda(0),
-        Placement::Cuda(0),
-        Placement::Cuda(0)
-    )
-    .is_ok());
-    assert_eq!(
-        validate_cuda_reduction_placement(
-            Placement::Cuda(1),
-            Placement::Cuda(0),
-            Placement::Cuda(0)
-        )
-        .unwrap_err(),
-        Error::PlacementMismatch
     );
 }
 

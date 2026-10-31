@@ -638,8 +638,12 @@ fn device_twist_short_circuits_do_no_device_work() {
             .twist(cuda, &[0, 1, 2, 3], Direction::Forward)
             .unwrap()
     });
-    assert_eq!(counters.h2d_calls, 1, "{counters:?}");
-    assert_eq!(counters.device_allocs, 1, "{counters:?}");
+    // The zeroed output (#740) and, since an eager call keeps no device
+    // state between calls, this call's one-element `1` template.
+    let output_len = fermionic_host.dense_data().unwrap().len() as u64;
+    assert_eq!(counters.h2d_calls, 2, "{counters:?}");
+    assert_eq!(counters.h2d_bytes, (output_len + 1) * 8, "{counters:?}");
+    assert_eq!(counters.device_allocs, 2, "{counters:?}");
     assert_eq!(
         counters.gemm_calls,
         fermionic_host.subblock_count() as u64,

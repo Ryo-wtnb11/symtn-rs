@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(feature = "cuda")]
+use crate::typed::ensure_cuda_owns;
 use symtn_dense::Engine;
 
 /// The factors of one [`EighFullPlan::execute`], borrowed from its workspace.
@@ -417,7 +419,10 @@ where
     /// another plan is rejected before it is touched. Once the workspace is
     /// bound to this plan, any execution error leaves no observable output.
     ///
-    /// On CUDA, non-Hermitian members are found by the batched admission
+    /// On CUDA, factors the workspace retained for another engine are dropped
+    /// before any solver work and rebuilt on this one; a source of another
+    /// engine is refused before any device work. Non-Hermitian members are
+    /// found by the batched admission
     /// before any solver launch, and [`BatchError::Solver`] is returned when
     /// the solver reports a numerical failure on a block. Argument, bounds
     /// and backend failures are [`BatchError::Operation`].
@@ -838,6 +843,14 @@ where
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
         let routes = &device.routes;
+        // Factors retained for another engine are dropped before any solver
+        // work, so they are neither written nor kept as a spare.
+        if buffers.as_ref().is_some_and(|(d, v)| {
+            ensure_cuda_owns(cuda, "eigh_full", &[&d.storage.0, &v.storage.0]).is_err()
+        }) {
+            *buffers = None;
+        }
+        ensure_cuda_owns(cuda, "eigh_full", &[&source.storage.0])?;
 
         let accepted = symtn_dense::cuda_hermitian_regions_batched::<D>(
             cuda,

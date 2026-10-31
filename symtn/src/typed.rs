@@ -282,6 +282,11 @@ pub use symtn_core::{
 pub use symtn_dense::{CpuEngine, Engine, Pool};
 /// The caller-owned CUDA engine every device operation borrows, and the
 /// device id it opens on.
+///
+/// Opening an engine compiles tenferro-gpu's device kernels with NVRTC, seconds
+/// per kernel module, so hold one long-lived engine per device (and thread)
+/// rather than one per task. `TENFERRO_CUDA_ARTIFACT_CACHE=<dir>` persists the
+/// compiled kernels in `<dir>` for later engines and processes.
 #[cfg(feature = "cuda")]
 pub use symtn_dense::{CudaDeviceId, CudaEngine};
 /// The device-scalar supertrait of [`CudaPayload`] and its real counterpart.
@@ -372,13 +377,13 @@ mod cuda_factor;
 pub(crate) use cuda_factor::{
     assemble_aligned_left_factor, assemble_left_factor, assemble_right_factor,
     copy_left_factor_treewise, copy_whole_factor, cuda_download_spectra, cuda_hermitian_regions,
-    cuda_qr_region, cuda_svd_region, dense_err, fill_diagonal_values, require_finite_cuda_input,
-    typed_cuda_eigh_region, upload_selector,
+    cuda_qr_region, cuda_svd_region, dense_err, ensure_cuda_owns, fill_diagonal_values,
+    require_finite_cuda_input, typed_cuda_eigh_region, upload_selector,
 };
 #[cfg(feature = "cuda")]
 use cuda_factor::{
-    download_cuda_reduction_partials, executed_routes, validate_cuda_reduction_placement,
-    validate_cuda_svd_middle_regions, TypedCudaQrScratch, TypedCudaSvdScratch,
+    download_cuda_reduction_partials, executed_routes, validate_cuda_svd_middle_regions,
+    TypedCudaQrScratch, TypedCudaSvdScratch,
 };
 #[cfg(feature = "cuda")]
 use symtn_matrixalgebra::seam::{compact_factor_routes, CompactFactorPlan, CompactFactorRoute};

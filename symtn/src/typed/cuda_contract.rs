@@ -31,9 +31,7 @@ where
             .map_err(Error::from)?;
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        if src.placement() != Placement::Cuda(cuda.device()) {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "trace", &[&src.0])?;
         // ponytail: #740 — the device seam initializes an output by uploading
         // zeros; replace only with a measured native allocation. The zeros are
         // also what the accumulating replay starts from.
@@ -69,10 +67,7 @@ where
         let src = cuda_trace_source(source, compact)?;
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        let device = Placement::Cuda(cuda.device());
-        if src.placement() != device || destination.placement() != device {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "trace_into", &[&src.0, &destination.0])?;
         symtn_tensors::tensortrace_fusion_structure_into_on_cuda(
             cuda,
             structure,
@@ -157,6 +152,10 @@ where
         Ok(())
     }
 
+    fn owns_output(_: ExecToken, lease: &CudaMembersLease<'_>, buffer: &Self) -> bool {
+        ensure_cuda_owns(&lease.0, "prepared_contract", &[&buffer.0]).is_ok()
+    }
+
     fn retained_scratch_bytes(_: ExecToken, workspace: &ContractWorkspace<R, D, Self>) -> usize {
         workspace.members_cuda.retained_bytes()
     }
@@ -200,10 +199,7 @@ where
         drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, transforms, scratch) = lease.split_contract();
-        let device = Placement::Cuda(cuda.device());
-        if lhs.placement() != device || rhs.placement() != device {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "contract", &[&lhs.0, &rhs.0])?;
         // ponytail: #740 — the device seam initializes an output by uploading
         // zeros; replace only with a measured native allocation.
         let mut dst = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); destination_len])
@@ -251,13 +247,7 @@ where
         drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, transforms, scratch) = lease.split_contract();
-        let device = Placement::Cuda(cuda.device());
-        if lhs.placement() != device
-            || rhs.placement() != device
-            || destination.placement() != device
-        {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "contract_into", &[&lhs.0, &rhs.0, &destination.0])?;
         symtn_tensors::execute_storage_contract_resolution_on_cuda(
             cuda,
             transforms,

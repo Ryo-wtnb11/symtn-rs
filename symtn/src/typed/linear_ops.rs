@@ -203,8 +203,8 @@ where
     /// descriptor scale and `beta` in its epilogue; nothing is uploaded or
     /// allocated on a warm context. A lazy-adjoint `self` is read from its
     /// parent with one conjugating strided `dot_general` per block, likewise
-    /// upload-free (#1874). A payload on another device returns
-    /// [`Error::PlacementMismatch`].
+    /// upload-free (#1874). A payload of another device or engine returns
+    /// [`Error::PlacementMismatch`] before any upload.
     ///
     /// # Errors
     ///

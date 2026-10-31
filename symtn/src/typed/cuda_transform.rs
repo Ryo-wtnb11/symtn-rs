@@ -74,9 +74,7 @@ where
         drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
-        if source.placement() != Placement::Cuda(cuda.device()) {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "transform", &[&source.0])?;
         // ponytail: #740 — the device seam still initializes an output by
         // uploading zeros; replace only with a measured native allocation.
         //
@@ -135,10 +133,7 @@ where
         drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
-        let expected = Placement::Cuda(cuda.device());
-        if source.placement() != expected || destination.placement() != expected {
-            return Err(Error::PlacementMismatch.into());
-        }
+        ensure_cuda_owns(cuda, "transform_into", &[&source.0, &destination.0])?;
         executor
             .replay(
                 cuda,
@@ -185,12 +180,8 @@ where
 
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        TensorMap::<R, D, Self>::validate_cuda_owned_metadata(
-            Placement::Cuda(cuda.device()),
-            src.placement(),
-            required_len,
-            src.len(),
-        )?;
+        ensure_cuda_owns(cuda, operation, &[&src.0])?;
+        TensorMap::<R, D, Self>::validate_cuda_owned_len(required_len, src.len())?;
         // ponytail: #740 — the device seam still initializes an output by
         // uploading zeros; replace only with a measured native allocation.
         let mut dst = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); required_len])?;

@@ -100,13 +100,22 @@ before any transfer or submission; moving data between engines is an explicit
 `to_host` / `to_cuda`. A non-CUDA engine given to a device operation, or a
 CUDA engine given to a Host-only entry, is a typed refusal.
 
+Opening a `CudaEngine` is expensive: tenferro-gpu compiles its device kernels
+with NVRTC per engine, seconds per kernel module (about 8 s for a whole module
+on an A100). Hold one long-lived engine per device and thread rather than
+opening one per task. Setting `TENFERRO_CUDA_ARTIFACT_CACHE=<dir>` persists
+the compiled kernels in `<dir>`, so later engines and processes read them back
+in milliseconds; unset, the compiled kernels live only in memory.
+
 Device execution scratch — a tree transform's uploaded coefficient vectors and
 pack/scatter workspaces, a contraction's operand scratch, the region
 primitive's scalar templates — lives for one eager operation, `*_into`
 included. A prepared plan's workspace keeps its own device buffers and the
 scalar templates of its fills, lending the templates to each call, so a warm
-replay uploads nothing; a call on another engine discards that state rather
-than submits it. A network's steps are eager operations and keep no device
+replay uploads nothing. A call on another engine drops that state — scratch,
+templates and the workspace's retained outputs alike — before any work,
+rather than submits or keeps it, so a workspace can follow a caller who
+switches engines. A network's steps are eager operations and keep no device
 scratch between calls.
 
 ## Device validation

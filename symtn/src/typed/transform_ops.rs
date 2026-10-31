@@ -105,8 +105,9 @@ where
     /// storage with a clone. Checked Generic reports these in
     /// [`GenericTensorError::Facade`] and staging failures in
     /// [`GenericTensorError::Plan`], as for [`Self::permute`]. On CUDA the
-    /// storage noun names the placement, and a payload on another device is
-    /// [`Error::PlacementMismatch`], checked first under the device lease.
+    /// storage noun names the placement, and a payload of another device or
+    /// engine is [`Error::PlacementMismatch`], checked first under the device
+    /// lease.
     ///
     /// # CUDA storage
     ///
@@ -397,8 +398,8 @@ where
     /// Checked Generic providers report an axis misuse in
     /// [`GenericTensorError::Facade`] with the same [`Error`], and other
     /// failures in [`GenericTensorError::Plan`] with the concrete provider error
-    /// preserved as its source. On CUDA a payload on another device is
-    /// [`Error::PlacementMismatch`], before any device write.
+    /// preserved as its source. On CUDA a payload of another device or engine
+    /// is [`Error::PlacementMismatch`], before any device write.
     ///
     /// # CUDA storage
     ///

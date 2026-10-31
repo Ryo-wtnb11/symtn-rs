@@ -136,6 +136,24 @@ impl<'e> CudaDenseContext<'e> {
         self.identity
     }
 
+    /// Refuses `op` unless every buffer in `operands` belongs to this
+    /// context's engine (its allocation domain, not only its device ordinal).
+    ///
+    /// The one admission an operation runs on all of its device inputs and
+    /// destinations before it uploads, allocates or writes anything: the
+    /// kernel-level checks reject a foreign buffer only at its first
+    /// submission, which may come after an output was already uploaded.
+    #[doc(hidden)]
+    pub fn ensure_owns(
+        &self,
+        op: &'static str,
+        operands: &[&CudaDenseStorage],
+    ) -> Result<(), DenseError> {
+        operands.iter().try_for_each(|operand| {
+            ensure_cuda_device(self.device, op, &[("operand", operand.device)])
+        })
+    }
+
     /// Exchanges this context's scalar operand templates with `held`: lent
     /// before a prepared replay, so the replay finds the templates an earlier
     /// call left there, and swapped back after it, so `held` keeps what the
@@ -368,13 +386,14 @@ impl<'e> CudaDenseContext<'e> {
     /// `TENFERRO_CUTENSOR_PATH`, `TENFERRO_CUSOLVER_PATH` and
     /// `TENFERRO_CUBLAS_PATH`.
     ///
-    /// What is *not* warmed: CubeCL compiles each kernel family with NVRTC on
-    /// its first use (per process, per device), so the first elementwise,
-    /// reduction or copy of each family still pays a JIT compile here. That is
-    /// a CubeCL concern, not a symtn one; its PTX disk cache is configured
-    /// through CubeCL's own `cubecl.toml` (`[compilation] cache`) and is off by
-    /// default. The cuTENSOR plan cache is also per contraction shape, so a
-    /// user contraction still builds its own plan. The region primitive's
+    /// What is *not* warmed: tenferro-gpu compiles its kernels with NVRTC per
+    /// engine, seconds per kernel module, so the first elementwise, reduction
+    /// or copy of a module may still pay that compile. That is a tenferro-gpu
+    /// concern, not a symtn one: `TENFERRO_CUDA_ARTIFACT_CACHE=<dir>` persists
+    /// the compiled kernels for later engines and processes, and one
+    /// long-lived engine per device pays it once. The cuTENSOR plan cache is
+    /// also per contraction shape, so a user contraction still builds its own
+    /// plan. The region primitive's
     /// scalar operands are not warmed either: they belong to one context and
     /// are created on first use of their dtype.
     ///
@@ -397,7 +416,7 @@ impl<'e> CudaDenseContext<'e> {
     /// no notable per-dtype NVRTC stall
     /// (`benchmarks/history/cuda-single-precision-probe-2026-09-20.md`,
     /// finding 6). What a single-precision caller still pays on its own first
-    /// use is the CubeCL kernel JIT for its dtype and the context's `f32`/
+    /// use is the NVRTC compile of its dtype's kernels and the context's `f32`/
     /// `Complex32` scalar operands, both of which are lazy per dtype.
     ///
     /// Every device buffer created here is dropped before returning.

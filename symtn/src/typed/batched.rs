@@ -629,6 +629,13 @@ impl<T> OutputSlot<T> {
         }
     }
 
+    /// Drops the output and the spare unless `keep` holds for them: buffers
+    /// of another engine are never reused or kept.
+    fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) {
+        self.output = self.output.take().filter(&mut keep);
+        self.spare = self.spare.take().filter(keep);
+    }
+
     /// The output and the spare, for retained-byte accounting.
     fn buffers(&self) -> impl Iterator<Item = &T> {
         self.output.iter().chain(&self.spare)

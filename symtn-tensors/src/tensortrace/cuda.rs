@@ -68,6 +68,8 @@ where
     C: Copy,
     D: CudaScalar + RecouplingCoefficientAction<C>,
 {
+    ctx.ensure_owns("cuda_trace", &[&src.0, &dst.0])
+        .map_err(OperationError::Dense)?;
     structure.validate_replay_structures(dst_structure, src_structure)?;
     validate_trace_data_extents(dst_structure, dst.0.len(), src_structure, src.0.len())?;
     let descriptor = structure.descriptor();

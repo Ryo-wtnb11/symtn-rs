@@ -1491,14 +1491,15 @@ fn device_transforms_match_the_host_at_every_payload() {
 }
 
 /// The `*_into` cost of #1339 does not depend on the payload dtype: a replay
-/// over a caller-owned destination moves no payload across the host boundary
-/// at single precision either. An eager `permute_into` has no workspace, so
-/// its call's own scalar operands (the payload's `1` and, on the zero-scale
-/// route, its zero template sized to the largest written layout) are created
-/// per call: at most two uploads, bounded by the destination, every call.
+/// over a caller-owned destination downloads nothing at single precision
+/// either. An eager `permute_into` has no workspace, so its device state —
+/// the transform coefficients and the call's scalar operands (the payload's
+/// `1` and, on the zero-scale route, its zero template) — is uploaded by
+/// every call: a repeated call costs exactly what the previous one did, each
+/// upload a fresh allocation.
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn a_warm_single_precision_into_transfers_nothing() {
+fn a_single_precision_into_costs_the_same_every_call() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
@@ -1537,43 +1538,37 @@ fn a_warm_single_precision_into_transfers_nothing() {
             )
             .unwrap();
 
-        let destination_len = host
-            .permute(engine, &[1, 2], &[0])
-            .unwrap()
-            .dense_data()
-            .unwrap()
-            .len();
-        let bound = ((destination_len + 1) * std::mem::size_of::<D>()) as u64;
         for (alpha, what) in [
-            (D::entry(-2.5, 0.5), "warm overwrite"),
+            (D::entry(-2.5, 0.5), "overwrite"),
             (D::entry(0.0, 0.0), "zero-scale overwrite"),
-            (D::entry(-0.0, -0.0), "warm zero-scale overwrite"),
+            (D::entry(-0.0, -0.0), "negative zero-scale overwrite"),
         ] {
-            let before = cuda_transfer_stats();
-            device
-                .permute_into(
-                    cuda,
-                    &[1, 2],
-                    &[0],
-                    &mut destination,
-                    alpha,
-                    D::entry(0.0, 0.0),
-                )
-                .unwrap();
-            let after = cuda_transfer_stats();
-            let uploads = after.h2d_calls - before.h2d_calls;
-            assert!(
-                uploads <= 2 && after.h2d_bytes - before.h2d_bytes <= bound,
-                "{what} [{}]: only the call's scalar operands are uploaded",
-                D::NAME
-            );
-            assert_eq!(
-                (
+            let mut call = || {
+                let before = cuda_transfer_stats();
+                device
+                    .permute_into(
+                        cuda,
+                        &[1, 2],
+                        &[0],
+                        &mut destination,
+                        alpha,
+                        D::entry(0.0, 0.0),
+                    )
+                    .unwrap();
+                let after = cuda_transfer_stats();
+                [
+                    after.h2d_calls - before.h2d_calls,
+                    after.h2d_bytes - before.h2d_bytes,
                     after.d2h_calls - before.d2h_calls,
                     after.device_allocs - before.device_allocs,
-                ),
-                (0, uploads),
-                "{what} [{}]: nothing downloaded, nothing allocated but the operands",
+                ]
+            };
+            let first = call();
+            assert_eq!(call(), first, "{what} [{}]: a repeated call", D::NAME);
+            assert_eq!(
+                [first[2], first[3]],
+                [0, first[0]],
+                "{what} [{}]: nothing downloaded, nothing allocated but the uploads",
                 D::NAME
             );
         }

@@ -23,11 +23,25 @@ pub fn with_extension_slot<T>(runtime: &Runtime, f: impl FnOnce(&mut ExtensionSl
     runtime.with_extension_slot(f)
 }
 
-/// The device ordinal of the caller's CUDA engine; a non-CUDA engine is a
-/// typed refusal. Opens no device work.
+/// The device ordinal of the caller's CUDA engine, once every payload of
+/// `tensors` is admitted as that engine's: a non-CUDA engine, or a tensor of
+/// another engine (also on the same ordinal), is a typed refusal. Opens no
+/// device work.
 #[cfg(feature = "cuda")]
-pub fn cuda_engine_device(engine: &mut dyn Engine) -> Result<usize, Error> {
-    Ok(crate::runtime::cuda_call(engine)?.device())
+pub fn cuda_engine_device<R, D: CudaPayload>(
+    engine: &mut dyn Engine,
+    tensors: &[&TensorMap<R, D, CudaStorage<D>>],
+) -> Result<usize, Error> {
+    let lease = crate::runtime::cuda_call(engine)?;
+    let payloads: Vec<&CudaDenseStorage> = tensors
+        .iter()
+        .filter_map(|tensor| match tensor.storage_body().data.as_ref() {
+            TypedData::Dense(storage) => Some(&storage.0),
+            TypedData::Diagonal(_) => None,
+        })
+        .collect();
+    ensure_cuda_owns(&lease, "network", &payloads)?;
+    Ok(lease.device())
 }
 
 /// Parks an ordinary dense destination without its runtime and provider.

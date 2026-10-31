@@ -93,13 +93,16 @@ fn filled_destination<R: DeviceRule, D: DevicePayload>(
 }
 
 /// Eager device `contract` and an alpha/beta grid of `contract_into`, each
-/// bit-equal to the Host call, within the documented costs: a warm
-/// `contract` uploads only its zeroed output (#740), one allocation of
-/// `required_len * size_of::<D>()` bytes, and downloads nothing; a warm
-/// `contract_into` transfers and allocates nothing, and its submissions do
-/// not depend on alpha or on beta, except that at `beta = 1` a core route
-/// skips the region moves that write `beta * destination` into the coupled
-/// sectors no GEMM reaches ([`UNREACHED_CORE_SECTORS`]).
+/// bit-equal to the Host call, within the documented costs. An eager call
+/// builds its device state per call (transform coefficients and scalar
+/// templates are uploaded by every call; only a prepared workspace keeps
+/// them), so a repeated call costs exactly what the first one did, every
+/// upload is a fresh allocation and nothing is downloaded. A `contract`
+/// uploads at least its zeroed output (#740); on a core route that is all it
+/// uploads, and a warm core `contract_into` transfers nothing. Submissions do not
+/// depend on alpha or on beta, except that at `beta = 1` a core route skips
+/// the region moves that write `beta * destination` into the coupled sectors
+/// no GEMM reaches ([`UNREACHED_CORE_SECTORS`]).
 fn eager<R: DeviceRule, D: DevicePayload>(
     engine: &mut dyn symtn::typed::Engine,
     cuda: &mut dyn symtn::typed::Engine,
@@ -115,7 +118,7 @@ fn eager<R: DeviceRule, D: DevicePayload>(
         case.lhs.to_cuda(cuda).unwrap(),
         case.rhs.to_cuda(cuda).unwrap(),
     );
-    let device = lhs.contract(cuda, &rhs, &spec).unwrap();
+    let (device, cold) = delta(|| lhs.contract(cuda, &rhs, &spec).unwrap());
     assert_bit_equal(
         &format!("{name} contract"),
         device.to_host(cuda).unwrap().dense_data().unwrap(),
@@ -123,10 +126,22 @@ fn eager<R: DeviceRule, D: DevicePayload>(
     );
     let (_, warm) = delta(|| lhs.contract(cuda, &rhs, &spec).unwrap());
     assert_eq!(
-        warm[..4],
-        [1, output_bytes, 0, 1],
-        "{name} contract warm: (h2d_calls, h2d_bytes, d2h_calls, device_allocs)"
+        warm, cold,
+        "{name} contract: a repeated eager call costs the first"
     );
+    if family == "core" {
+        assert_eq!(
+            warm[..4],
+            [1, output_bytes, 0, 1],
+            "{name} contract warm: (h2d_calls, h2d_bytes, d2h_calls, device_allocs)"
+        );
+    } else {
+        assert!(
+            warm[1] >= output_bytes,
+            "{name} contract uploads its output"
+        );
+        assert_eq!([warm[2], warm[0]], [0, warm[3]], "{name} contract warm");
+    }
     let mut submissions = Vec::new();
     let filled = filled_destination(engine, runtime, case);
     let poisoned = poisoned_destination(engine, case);
@@ -163,10 +178,14 @@ fn eager<R: DeviceRule, D: DevicePayload>(
                 destination.to_host(cuda).unwrap().dense_data().unwrap(),
                 expected.dense_data().unwrap(),
             );
-            // The grid's first call is the first `contract_into` of this
-            // structure; every later one is warm.
-            if !submissions.is_empty() {
-                assert_eq!(counters[..4], [0; 4], "{what}: a warm call transfers");
+            // Eager per-call device state: only a warm core call (after the
+            // grid's first `contract_into` of this structure) uploads nothing.
+            if family == "core" {
+                if !submissions.is_empty() {
+                    assert_eq!(counters[..4], [0; 4], "{what}: a warm call transfers");
+                }
+            } else {
+                assert_eq!([counters[2], counters[0]], [0, counters[3]], "{what}");
             }
             submissions.push(((alpha_label, beta_label), counters[4..].to_vec()));
         }

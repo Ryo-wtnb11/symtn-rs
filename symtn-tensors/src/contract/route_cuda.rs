@@ -174,6 +174,9 @@ where
     D: CudaScalar + num_traits::Zero,
     C: DenseBlockScalar,
 {
+    // Before the stage admission, which may rebind and upload member scratch.
+    ctx.ensure_owns("cuda_contract", &[&lhs.0, &rhs.0, &dst.0])
+        .map_err(OperationError::Dense)?;
     let (core_alpha, core_init) = match route.output {
         None => (alpha, init),
         Some(_) if St::STALE_CORE_DESTINATION => (D::ONE, ContractDestinationInit::Axpby(D::ZERO)),

@@ -293,8 +293,9 @@ where
     /// `θ_b` into the descriptor alpha of the source-transform move writing
     /// core-right block `b`, as the Host folds it into the same move.
     ///
-    /// [`Error::PlacementMismatch`] for an operand on another device is
-    /// reported last, under the device lease, before any device work.
+    /// [`Error::PlacementMismatch`] for an operand of another device or
+    /// engine is reported last, under the device lease, before any device
+    /// work.
     ///
     /// # Errors
     ///
@@ -1108,6 +1109,11 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error>;
 
+    /// Whether `buffer` belongs to the lease's engine (always on Host). A
+    /// retained output is reused, and an operand or destination admitted,
+    /// only then: a workspace used with another engine drops its outputs.
+    fn owns_output(_: ExecToken, lease: &Self::MembersLease<'_>, buffer: &Self) -> bool;
+
     /// The workspace's retained device scratch (none on Host).
     fn retained_scratch_bytes(_: ExecToken, workspace: &ContractWorkspace<R, D, Self>) -> usize;
 
@@ -1159,6 +1165,10 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
                 init,
             )?;
         Ok(())
+    }
+
+    fn owns_output(_: ExecToken, _: &&mut dyn Engine, _: &Self) -> bool {
+        true
     }
 
     fn retained_scratch_bytes(_: ExecToken, _workspace: &ContractWorkspace<R, D>) -> usize {

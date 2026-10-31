@@ -48,12 +48,8 @@ where
     ) -> Result<CudaStorage<D>, Error> {
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        Self::validate_cuda_owned_metadata(
-            Placement::Cuda(cuda.device()),
-            source.placement(),
-            required_len,
-            source.len(),
-        )?;
+        ensure_cuda_owns(cuda, "zeros_like", &[&source.0])?;
+        Self::validate_cuda_owned_len(required_len, source.len())?;
         let output = CudaStorage::upload_owned(cuda, vec![D::from_real(0.0); required_len])?;
         #[cfg(test)]
         probe::hit(probe::Event::CudaZeroUpload);
@@ -160,6 +156,7 @@ where
         rhs: &CudaStorage<D>,
     ) -> Result<num_complex::Complex64, Error> {
         let mut lease = crate::runtime::cuda_call(engine)?;
+        ensure_cuda_owns(&lease, "inner", &[&lhs.0, &rhs.0])?;
         let wide_lhs = lhs.widened::<E>(&mut lease)?;
         let wide_rhs = if std::ptr::eq(lhs, rhs) {
             None
@@ -185,11 +182,7 @@ where
         let regions = sector_regions(space.structure(), space.nout())?;
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        validate_cuda_reduction_placement(
-            Placement::Cuda(cuda.device()),
-            lhs.placement(),
-            rhs.placement(),
-        )?;
+        ensure_cuda_owns(cuda, "inner", &[&lhs.0, &rhs.0])?;
         // ponytail: #740 keeps the proven host-zero upload until a native
         // allocation has correct cross-stream publication and measured value.
         let mut partials =
@@ -319,14 +312,10 @@ where
         let dense_err = |err| Error::from(symtn_tensors::OperationError::Dense(err));
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        let expected = Placement::Cuda(cuda.device());
+        let sources: Vec<_> = reads.iter().map(|(read, _)| &read.source.0).collect();
+        ensure_cuda_owns(cuda, operation, &sources)?;
         for (read, _) in &reads {
-            TensorMap::<R, D, Self>::validate_cuda_owned_metadata(
-                expected,
-                read.source.placement(),
-                required_len,
-                read.source.len(),
-            )?;
+            TensorMap::<R, D, Self>::validate_cuda_owned_len(required_len, read.source.len())?;
         }
         // ponytail: #740 keeps this proven Host upload (the output is born
         // zero) until native device allocation publishes cross-stream writes
@@ -373,7 +362,6 @@ where
     ) -> Result<(), Error> {
         let read = x.cuda_oriented_read("axpby_into")?;
         let source = read.source;
-        let device = Placement::Cuda(crate::runtime::cuda_call(engine)?.device());
         let TypedTensorRepr::Owned(destination_body) = &mut destination.repr else {
             return Err(internal_layout_error(
                 "ordinary CUDA destination checked above",
@@ -387,16 +375,14 @@ where
                 "dense CUDA destination checked above",
             ));
         };
-        if source.placement() != device || destination_data.placement() != device {
-            return Err(Error::PlacementMismatch);
-        }
+        let mut lease = crate::runtime::cuda_call(engine)?;
+        let cuda = &mut *lease;
+        ensure_cuda_owns(cuda, "axpby_into", &[&source.0, &destination_data.0])?;
         let len = TensorStorage::len(source);
         if len == 0 {
             return Ok(());
         }
         let dense_err = |err| Error::from(symtn_tensors::OperationError::Dense(err));
-        let mut lease = crate::runtime::cuda_call(engine)?;
-        let cuda = &mut *lease;
         if alpha.is_zero() {
             let region = symtn_dense::CudaRegion::packed(&[len], 0).map_err(dense_err)?;
             return symtn_dense::cuda_region_scale::<D>(

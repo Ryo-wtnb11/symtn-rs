@@ -164,15 +164,12 @@ where
         }
     }
 
-    pub(super) fn validate_cuda_owned_metadata(
-        expected: Placement,
-        actual: Placement,
+    /// The payload-length half of a CUDA operand's admission; its engine
+    /// ownership is [`ensure_cuda_owns`], checked first.
+    pub(super) fn validate_cuda_owned_len(
         required_len: usize,
         actual_len: usize,
     ) -> Result<(), Error> {
-        if actual != expected {
-            return Err(Error::PlacementMismatch);
-        }
         if actual_len != required_len {
             return Err(internal_layout_error(
                 "CUDA payload length does not match its admitted tensor space",
@@ -213,9 +210,7 @@ where
 
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
-        if source.placement() != Placement::Cuda(cuda.device()) {
-            return Err(Error::PlacementMismatch);
-        }
+        ensure_cuda_owns(cuda, "materialize", &[&source.0])?;
         let output = match adjoint {
             None => source.gather_members(cuda, required_len, 1, &[0])?,
             Some(CudaAdjointLowering {

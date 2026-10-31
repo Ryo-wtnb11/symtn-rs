@@ -271,6 +271,19 @@ where
         Ok(())
     }
 
+    /// Refuses a call whose operand or destination belongs to another engine
+    /// than the lease's, before any output, template or scratch upload.
+    fn admit_members(lease: &S::MembersLease<'_>, buffers: &[&S]) -> Result<(), Error> {
+        if buffers
+            .iter()
+            .all(|buffer| S::owns_output(EXEC, lease, buffer))
+        {
+            Ok(())
+        } else {
+            Err(Error::PlacementMismatch)
+        }
+    }
+
     fn total_len(&self, len: usize, members: usize) -> Result<usize, Error> {
         let total = len.checked_mul(members).ok_or_else(|| {
             Error::InvalidArgument("stacked payload length overflows usize".into())
@@ -300,9 +313,12 @@ where
     /// output's inactive blocks are not rewritten: they are already zero
     /// (see [`ContractWorkspace`]).
     ///
-    /// On CUDA a new member count uploads one zeroed output buffer (#740). A
+    /// On CUDA a new member count, or an engine other than the one the
+    /// retained output belongs to, uploads one zeroed output buffer (#740);
+    /// an output of another engine is dropped, never written or kept. A
     /// reused buffer, including one kept after a failed call, transfers no
-    /// payload.
+    /// payload. Operands of another engine are refused
+    /// ([`Error::PlacementMismatch`]) before any upload.
     pub fn execute<'a>(
         &self,
         engine: &mut dyn Engine,
@@ -320,6 +336,11 @@ where
             Ok(prepared) => prepared,
             Err(error) => return Err(workspace.output.fail(buffers, error)),
         };
+        // Buffers of another engine are dropped, never reused or kept.
+        let buffers = buffers.filter(|output| S::owns_output(EXEC, &lease, &output.storage));
+        if let Err(error) = Self::admit_members(&lease, &[&lhs.storage, &rhs.storage]) {
+            return Err(workspace.output.fail(buffers, error));
+        }
         let mut output = match buffers.filter(|output| output.members == members) {
             Some(output) => output,
             None => StackedTensorMap {
@@ -367,6 +388,10 @@ where
         let result = self.check(lhs, rhs).and_then(|members| {
             self.check_destination(dst, members)?;
             let mut lease = S::lease_members(EXEC, engine)?;
+            workspace
+                .output
+                .retain(|output| S::owns_output(EXEC, &lease, &output.storage));
+            Self::admit_members(&lease, &[&lhs.storage, &rhs.storage, &dst.storage])?;
             S::contract_members(
                 EXEC,
                 self,
@@ -414,8 +439,8 @@ where
 ///
 /// [`Self::workspace`] creates the B-dependent state. On CUDA each workspace
 /// also keeps the zero and `1` templates of its fills, bound to the engine
-/// that created them: used with another engine, it drops its device state
-/// and rebuilds it there.
+/// that created them: used with another engine, it drops its device state,
+/// retained outputs included, and rebuilds it there.
 ///
 /// ```
 /// use std::sync::Arc;

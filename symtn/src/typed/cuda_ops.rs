@@ -199,13 +199,9 @@ where
         {
             // Preflight only: opens no device work; a non-CUDA engine is
             // refused here, before any output exists.
-            let device = crate::runtime::cuda_call(engine)?.device();
-            Self::validate_cuda_owned_metadata(
-                Placement::Cuda(device),
-                source.placement(),
-                required_len,
-                source.len(),
-            )?;
+            let lease = crate::runtime::cuda_call(engine)?;
+            ensure_cuda_owns(&lease, operation, &[&source.0])?;
+            Self::validate_cuda_owned_len(required_len, source.len())?;
         }
         Ok((source, self.compact_factor_plan()?))
     }

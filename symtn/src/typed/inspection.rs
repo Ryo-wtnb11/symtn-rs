@@ -80,8 +80,8 @@ where
     /// # Errors
     ///
     /// [`Error::Operation`] only if an engine-internal layout invariant is
-    /// broken. On CUDA also [`Error::PlacementMismatch`] for a payload on
-    /// another device, and CUDA backend errors.
+    /// broken. On CUDA also [`Error::PlacementMismatch`] for a payload of
+    /// another device or engine, and CUDA backend errors.
     pub fn materialize(&self, engine: &mut dyn Engine) -> Result<Self, Error> {
         fn dense<D, S>(data: &TypedData<D, S>) -> Result<&S, Error> {
             match data {
