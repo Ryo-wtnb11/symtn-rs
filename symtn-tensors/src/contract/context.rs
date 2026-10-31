@@ -39,6 +39,7 @@ use super::resolution::{
     try_compile_oriented_storage_contract_candidate_plan, ContractKind, ContractRoute, CopyCRoute,
     CoreMiss, CoreRoute, ExecCaps, StorageContractResolution,
 };
+use super::route_host::RouteDestination;
 use super::scratch::DynamicFusionScratchWorkspace;
 use crate::host_scratch::HostScratchBuffer;
 
@@ -642,7 +643,7 @@ where
     /// The one owned Host contraction and composition of both modes, the
     /// steps every storage runs ([`StagedContract`]): stage the destination
     /// (multiplicity-free derives it; checked Generic admits the operands and
-    /// stages it), plan, replay into a fresh zeroed payload, then commit and
+    /// stages it), plan, replay into a fresh owned payload, then commit and
     /// publish (#2063).
     #[allow(clippy::type_complexity)]
     pub(super) fn tensorcontract_in<'a, St, R>(
@@ -672,15 +673,12 @@ where
         )?;
         let resolution =
             self.plan_staged::<super::resolution::HostEagerExecutor, R, St>(engine, &mut staged)?;
-        let mut data = crate::zeroed_payload(staged_len(&staged));
-        self.execute_contract_resolution_host(
+        let data = self.execute_contract_resolution_host_owned(
             engine,
             &resolution,
-            (staged_destination(&staged).structure(), &mut data),
+            staged_destination(&staged).structure(),
             (lhs.storage_space().structure(), lhs_data),
             (rhs.storage_space().structure(), rhs_data),
-            D::one(),
-            ContractDestinationInit::Zeroed,
         )?;
         let destination = staged_commit(staged, &resolution)?;
         Ok((destination, data))
@@ -795,7 +793,61 @@ where
     {
         #[cfg(test)]
         self.record_contract_route(resolution);
-        self.execute_route_host(engine, resolution, dst, lhs, rhs, alpha, init)
+        self.execute_route_host(
+            engine,
+            resolution,
+            (dst.0, RouteDestination::Into(dst.1, init)),
+            lhs,
+            rhs,
+            alpha,
+        )
+    }
+
+    /// Replays a planned route on the Host into a fresh owned payload of
+    /// `dst_structure`: `contract(lhs, rhs)` (`alpha = 1`, no prior
+    /// destination), the one owned contraction entry of every Host storage.
+    /// A route whose core writes the destination replays it into
+    /// uninitialized memory ([`FusionBlockContractPlan::execute_owned`]):
+    /// the output is not zero-filled by the allocator, and inactive blocks
+    /// and padding are written `+0.0`. Backend-side output fills (a one-job
+    /// batch, the faer strategy's per-job prefill) and the zero fill of
+    /// scatter blocks remain. A route with an output transform (CopyC, a
+    /// DynamicTree output) still overwrites an allocator-zeroed payload.
+    ///
+    /// This concrete cross-crate entrypoint is internal and unstable despite
+    /// being public for `symtn`; downstream callers must not rely on it.
+    ///
+    /// [`FusionBlockContractPlan::execute_owned`]: symtn_operations::FusionBlockContractPlan::execute_owned
+    #[doc(hidden)]
+    pub fn execute_contract_resolution_host_owned(
+        &mut self,
+        engine: &mut dyn Engine,
+        resolution: &StorageContractResolution<C>,
+        dst_structure: &Arc<BlockStructure>,
+        lhs: (&Arc<BlockStructure>, &[D]),
+        rhs: (&Arc<BlockStructure>, &[D]),
+    ) -> Result<Vec<D>, OperationError>
+    where
+        D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ZeroBytes,
+    {
+        #[cfg(test)]
+        self.record_contract_route(resolution);
+        let mut output = Vec::new();
+        self.execute_route_host(
+            engine,
+            resolution,
+            (
+                dst_structure,
+                RouteDestination::Owned {
+                    output: &mut output,
+                    zeroed: crate::zeroed_payload::<D>,
+                },
+            ),
+            lhs,
+            rhs,
+            D::one(),
+        )?;
+        Ok(output)
     }
 
     /// [`StagedContract::plan_beyond_core`] of a multiplicity-free
@@ -1029,11 +1081,10 @@ where
         self.execute_route_host(
             engine,
             resolution,
-            (dst_structure, dst_data),
+            (dst_structure, RouteDestination::Into(dst_data, init)),
             lhs,
             rhs,
             alpha,
-            init,
         )
     }
 
@@ -1045,11 +1096,10 @@ where
         &mut self,
         engine: &mut dyn Engine,
         resolution: &StorageContractResolution<C>,
-        dst: (&Arc<BlockStructure>, &mut [D]),
+        dst: (&Arc<BlockStructure>, RouteDestination<'_, D>),
         lhs: (&Arc<BlockStructure>, &[D]),
         rhs: (&Arc<BlockStructure>, &[D]),
         alpha: D,
-        init: ContractDestinationInit<D>,
     ) -> Result<(), OperationError>
     where
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
@@ -1083,7 +1133,6 @@ where
             rhs,
             1,
             alpha,
-            init,
         )
     }
 }

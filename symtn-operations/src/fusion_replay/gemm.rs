@@ -91,6 +91,127 @@ pub trait Rank2Gemm<D> {
             message: "rank-2 GEMM backend does not implement transpose/adjoint batches",
         })
     }
+
+    /// Batched overwrite GEMM into uninitialized memory: each job's
+    /// column-major `rows x cols` output at `dst_offset` becomes
+    /// `alpha * op(lhs_part) op(rhs_part)` with `op = ops[0], ops[1]`, and no
+    /// prior destination value is read.
+    ///
+    /// `segments` are `(start, memory)` pairs in ascending, non-overlapping
+    /// order, `memory` being destination range `start..start + len`; every
+    /// job with a nonempty output lies inside one segment, disjoint from the
+    /// other jobs. On `Ok`, every job has been reported once through
+    /// `written` with its own initialized piece (an empty job with an empty
+    /// slice). A reported slice keeps its borrow for the whole `'a`, which is
+    /// what lets the caller treat it as proof that the piece is initialized.
+    ///
+    /// The default zero-fills each job's piece, runs it as a one-job
+    /// [`Self::matmul_rank2_batch_with_ops`] with `beta = 0`, and reports
+    /// every job once all succeed.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    fn matmul_rank2_batch_fresh<'a>(
+        &mut self,
+        engine: &mut dyn Engine,
+        segments: &mut [(usize, &'a mut [MaybeUninit<D>])],
+        lhs: &[D],
+        rhs: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        ops: [MatrixOp; 2],
+        alpha: D,
+        written: &mut dyn FnMut(usize, &'a mut [D]),
+    ) -> Result<(), OperationError>
+    where
+        D: Copy + Zero,
+    {
+        let pieces = job_pieces(segments, jobs)?;
+        let mut outputs = Vec::with_capacity(jobs.len());
+        for (job, piece) in jobs.iter().zip(pieces) {
+            let output = crate::owned_overwrite_buffer::write_zeros(piece);
+            if !output.is_empty() {
+                self.matmul_rank2_batch_with_ops(
+                    engine,
+                    &mut *output,
+                    lhs,
+                    rhs,
+                    &[Rank2GemmBatchJob {
+                        dst_offset: 0,
+                        ..*job
+                    }],
+                    &[1],
+                    ops[0],
+                    ops[1],
+                    alpha,
+                    D::zero(),
+                )?;
+            }
+            outputs.push(output);
+        }
+        for (index, output) in outputs.into_iter().enumerate() {
+            written(index, output);
+        }
+        Ok(())
+    }
+}
+
+/// Each job's own piece of `segments` (an empty slice for an empty job),
+/// by job index. Refuses a job outside every segment or overlapping
+/// another before taking any memory.
+pub(super) fn job_pieces<'a, E>(
+    segments: &mut [(usize, &'a mut [E])],
+    jobs: &[Rank2GemmBatchJob],
+) -> Result<Vec<&'a mut [E]>, OperationError> {
+    let mut order = Vec::with_capacity(jobs.len());
+    for (index, job) in jobs.iter().enumerate() {
+        let len = direct_matrix_len(job.rows, job.cols)?;
+        if len != 0 {
+            let end = job
+                .dst_offset
+                .checked_add(len)
+                .ok_or(OperationError::ElementCountOverflow)?;
+            order.push((job.dst_offset, end, index));
+        }
+    }
+    order.sort_unstable();
+    let outside = OperationError::InvalidArgument {
+        message: "fresh GEMM job lies outside its destination segments",
+    };
+    // Check every job before taking memory.
+    let (mut segment, mut covered) = (0, 0);
+    for &(start, end, _) in &order {
+        while segments
+            .get(segment)
+            .is_some_and(|(first, memory)| first + memory.len() <= start)
+        {
+            segment += 1;
+        }
+        match segments.get(segment) {
+            Some((first, memory)) if start >= covered && start >= *first => {
+                if end > first + memory.len() {
+                    return Err(outside);
+                }
+            }
+            _ => return Err(outside),
+        }
+        covered = end;
+    }
+    let mut pieces: Vec<&'a mut [E]> = jobs.iter().map(|_| Default::default()).collect();
+    let (mut segment, mut cursor) = (0, 0);
+    let mut remaining: &'a mut [E] = &mut [];
+    for (start, end, index) in order {
+        while cursor + remaining.len() < end {
+            let (first, memory) = &mut segments[segment];
+            remaining = core::mem::take(memory);
+            cursor = *first;
+            segment += 1;
+        }
+        let (_, rest) = core::mem::take(&mut remaining).split_at_mut(start - cursor);
+        let (piece, tail) = rest.split_at_mut(end - start);
+        pieces[index] = piece;
+        remaining = tail;
+        cursor = end;
+    }
+    Ok(pieces)
 }
 
 /// One GEMM job addressed inside its selected source and destination buffers.

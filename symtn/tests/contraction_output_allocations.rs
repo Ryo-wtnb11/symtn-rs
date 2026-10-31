@@ -1,7 +1,9 @@
-//! Allocation contract of the owned eager contraction output: the
-//! payload is one allocator-zeroed allocation of `P * size_of::<D>()` bytes
-//! for both dtypes, and nothing else on the warmed path allocates zeroed
-//! memory or re-touches the inactive blocks.
+//! Allocation contract of the owned eager contraction output on routes whose
+//! core GEMMs write the destination (the fixtures here take the canonical
+//! core): the payload is one allocation of `P * size_of::<D>()` bytes for
+//! every dtype, and none of that size is allocator-zeroed. This removes the
+//! allocator-level whole-output zero fill only; kernel-side output fills are
+//! not visible here, and output-transform routes (CopyC) are not covered.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -14,8 +16,9 @@ use symtn::typed::{GradedSpace, TensorMap, TensorScalar};
 
 use crate::counting_alloc;
 
-/// Allocations of `f` on this thread; `matched_zeroed_calls` counts the
-/// allocator-zeroed ones of exactly `payload_bytes`.
+/// Allocations of `f` on this thread; `matched_calls` and
+/// `matched_zeroed_calls` count those (and the allocator-zeroed ones) of
+/// exactly `payload_bytes`.
 fn measure(payload_bytes: usize, f: impl FnOnce()) -> counting_alloc::Allocs {
     counting_alloc::measure_matching(payload_bytes..=payload_bytes, f).1
 }
@@ -91,25 +94,30 @@ fn u1_contract_measurement<D: TensorScalar + std::fmt::Debug>(seed: u64) {
     let output = output.unwrap();
     assert_eq!(output.dense_data().unwrap(), warm.dense_data().unwrap());
 
+    assert_one_unzeroed_payload(payload_bytes, measurement);
+}
+
+#[track_caller]
+fn assert_one_unzeroed_payload(payload_bytes: usize, measurement: counting_alloc::Allocs) {
     assert_eq!(
-        measurement.matched_zeroed_calls,
-        1,
-        "the owned output must be exactly one allocator-zeroed payload of {payload_bytes} bytes; got {:?}",
-        measurement
+        (measurement.matched_calls, measurement.matched_zeroed_calls),
+        (1, 0),
+        "the owned output must be one payload of {payload_bytes} bytes, not \
+         allocator-zeroed; got {measurement:?}"
     );
 }
 
-/// Purpose: a warm owned f64 U(1) contraction allocates its output as one
-/// allocator-zeroed payload.
+/// Purpose: a warm owned f64 U(1) contraction with inactive blocks
+/// allocates its output as one payload that is not allocator-zeroed.
 #[test]
-fn owned_f64_contraction_output_is_one_allocator_zeroed_payload() {
+fn owned_f64_contraction_output_is_one_unzeroed_payload() {
     let _serial = crate::counting_alloc::serial();
     u1_contract_measurement::<f64>(1_212_001);
 }
 
 /// Purpose: the Complex64 twin of the contract above.
 #[test]
-fn owned_c64_contraction_output_is_one_allocator_zeroed_payload() {
+fn owned_c64_contraction_output_is_one_unzeroed_payload() {
     let _serial = crate::counting_alloc::serial();
     u1_contract_measurement::<Complex64>(1_212_002);
 }
@@ -134,27 +142,22 @@ fn su2_compose_measurement<D: TensorScalar>(seed: u64) -> u64 {
     let measurement = measure(payload_bytes, || {
         black_box(lhs.compose(engine, &rhs).unwrap());
     });
-    assert_eq!(
-        measurement.matched_zeroed_calls, 1,
-        "the owned output must be exactly one allocator-zeroed payload of \
-         {payload_bytes} bytes; got {:?}",
-        measurement
-    );
+    assert_one_unzeroed_payload(payload_bytes, measurement);
     measurement.calls
 }
 
 /// Purpose: a warm owned SU(2) compose with an inactive coupled sector
-/// allocates its output as one allocator-zeroed payload.
+/// allocates its output as one payload that is not allocator-zeroed.
 #[test]
-fn owned_su2_contraction_with_inactive_sectors_is_one_allocator_zeroed_payload() {
+fn owned_su2_contraction_with_inactive_sectors_is_one_unzeroed_payload() {
     let _serial = crate::counting_alloc::serial();
     su2_compose_measurement::<f64>(1_212_003);
 }
 
 /// A single-precision payload must run the same algorithm on the
 /// recoupling path, not a different one. Same fixture, same call count; only
-/// the zeroed payload is half the size, which
-/// `zeroed_allocations_of(size_of_val(data))` checks per dtype.
+/// the payload is half the size, which the per-dtype payload check sizes
+/// from the output itself.
 #[test]
 fn owned_su2_single_precision_contraction_allocates_like_double() {
     let _serial = crate::counting_alloc::serial();

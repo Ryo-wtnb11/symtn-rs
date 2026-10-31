@@ -953,6 +953,36 @@ type RouteReplay<D, C> = fn(
     symtn_tensors::ContractDestinationInit<D>,
 ) -> Result<(), TransformExecError>;
 
+type OwnedRouteReplay<D, C> = fn(
+    &mut dyn Engine,
+    &mut crate::runtime::TensorExecutionContext,
+    &symtn_tensors::StorageContractResolution<C>,
+    &Arc<BlockStructure>,
+    (&Arc<BlockStructure>, &[D]),
+    (&Arc<BlockStructure>, &[D]),
+) -> Result<Vec<D>, TransformExecError>;
+
+fn host_route_replay_owned<L, D, C>(
+    engine: &mut dyn Engine,
+    context: &mut crate::runtime::TensorExecutionContext,
+    resolution: &symtn_tensors::StorageContractResolution<C>,
+    dst: &Arc<BlockStructure>,
+    lhs: (&Arc<BlockStructure>, &[D]),
+    rhs: (&Arc<BlockStructure>, &[D]),
+) -> Result<Vec<D>, TransformExecError>
+where
+    L: HostTreeLane<D, C>,
+    D: symtn_tensors::DenseRecouplingScalar
+        + RecouplingCoefficientAction<C>
+        + symtn_tensors::ConjugateValue
+        + symtn_tensors::ZeroBytes,
+    C: symtn_tensors::DenseBlockScalar,
+{
+    L::contract_lane(context)?
+        .execute_contract_resolution_host_owned(engine, resolution, dst, lhs, rhs)
+        .map_err(TransformExecError::Replay)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn host_route_replay<L, D, C>(
     engine: &mut dyn Engine,
@@ -991,8 +1021,11 @@ where
 pub struct ContractReplay<'a, D, C> {
     pub(super) lease: Option<crate::runtime::ContextLease>,
     execute: RouteReplay<D, C>,
+    execute_owned: OwnedRouteReplay<D, C>,
     pub(super) resolution: &'a symtn_tensors::StorageContractResolution<C>,
     pub(super) destination: &'a Arc<BlockStructure>,
+    // Read by the device kernel, which allocates its own output.
+    #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
     pub(super) destination_len: usize,
     pub(super) lhs: &'a Arc<BlockStructure>,
     pub(super) rhs: &'a Arc<BlockStructure>,
@@ -1002,7 +1035,8 @@ impl<'a, D, C> ContractReplay<'a, D, C>
 where
     D: symtn_tensors::DenseRecouplingScalar
         + RecouplingCoefficientAction<C>
-        + symtn_tensors::ConjugateValue,
+        + symtn_tensors::ConjugateValue
+        + symtn_tensors::ZeroBytes,
     C: symtn_tensors::DenseBlockScalar,
 {
     /// The replay of `resolution` on lane `L` into `destination`
@@ -1019,6 +1053,7 @@ where
         Self {
             lease,
             execute: host_route_replay::<L, D, C>,
+            execute_owned: host_route_replay_owned::<L, D, C>,
             resolution,
             destination: destination.structure(),
             destination_len,
@@ -1038,7 +1073,7 @@ pub trait ContractExec<R, D>: TypedStorage<R, D> {
     /// fully-direct cores.
     type Caps: symtn_tensors::ExecCaps;
 
-    /// `contract(lhs, rhs)` into a fresh zeroed payload of `replay`'s
+    /// `contract(lhs, rhs)` into a fresh owned payload of `replay`'s
     /// destination, reading each operand's stored payload (a lazy adjoint's
     /// parent; Host densifies a compact operand).
     fn contract_owned<C: symtn_tensors::DenseBlockScalar>(
@@ -1205,17 +1240,27 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     where
         D: RecouplingCoefficientAction<C>,
     {
-        let mut data = symtn_tensors::zeroed_payload(replay.destination_len);
-        host_contract(
+        let ContractReplay {
+            lease,
+            execute_owned,
+            resolution,
+            destination,
+            lhs: lhs_structure,
+            rhs: rhs_structure,
+            ..
+        } = replay;
+        let mut lease = lease.unwrap_or_else(crate::runtime::ContextLease::new);
+        host_contract_probe(resolution);
+        let (_, lhs_data) = lhs.fusion_operand_and_data();
+        let (_, rhs_data) = rhs.fusion_operand_and_data();
+        execute_owned(
             engine,
-            replay,
-            lhs,
-            rhs,
-            &mut data,
-            D::from_real(1.0),
-            symtn_tensors::ContractDestinationInit::Zeroed,
-        )?;
-        Ok(data)
+            lease.context(),
+            resolution,
+            destination,
+            (lhs_structure, &lhs_data),
+            (rhs_structure, &rhs_data),
+        )
     }
 
     fn contract_into<C: symtn_tensors::DenseBlockScalar>(
@@ -1243,6 +1288,16 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     }
 }
 
+#[cfg_attr(not(test), allow(unused_variables))]
+fn host_contract_probe<C: symtn_tensors::DenseBlockScalar>(
+    resolution: &symtn_tensors::StorageContractResolution<C>,
+) {
+    #[cfg(test)]
+    if resolution.copy_c().is_some() {
+        super::probe::hit(super::probe::Event::CopyCReplay);
+    }
+}
+
 fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
     engine: &mut dyn Engine,
     replay: ContractReplay<'_, D, C>,
@@ -1262,10 +1317,7 @@ fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
         ..
     } = replay;
     let mut lease = lease.unwrap_or_else(crate::runtime::ContextLease::new);
-    #[cfg(test)]
-    if resolution.copy_c().is_some() {
-        super::probe::hit(super::probe::Event::CopyCReplay);
-    }
+    host_contract_probe(resolution);
     let (_, lhs_data) = lhs.fusion_operand_and_data();
     let (_, rhs_data) = rhs.fusion_operand_and_data();
     execute(
