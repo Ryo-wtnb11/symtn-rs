@@ -16,16 +16,20 @@ path = "src/lib.rs"
 default = ["cpu-faer"]
 tenferro = [
     "dep:cpueinsum",
+    "dep:tcontract",
+    "dep:tcontract-exec",
     "dep:tenferro-cpu",
     "dep:tenferro-linalg",
 ]
 cpu-faer = [
     "tenferro",
+    "dep:tlinalg",
     "tenferro-cpu/native",
     "tenferro-linalg/native",
 ]
 cpu-blas-core = [
     "tenferro",
+    "dep:tlinalg",
     "dep:cpueinsum-blas",
     "tenferro-cpu/blas",
     "tenferro-linalg/blas",
@@ -68,6 +72,13 @@ cpueinsum = { version = "0.9.0", optional = true }
 # The BLAS provider's grouped GEMM plan, the BLAS counterpart of
 # `cpueinsum::GroupedPlan` (same executor vocabulary and version line).
 cpueinsum-blas = { version = "0.9.0", optional = true }
+# The native block kernel's GEMM plans and factorizations (#2337, #2430).
+# Pinned to the versions tenferro-cpu 0.8.0 / tenferro-linalg 0.8.0 resolve,
+# so `Exec`, `Plan` and the batch vocabulary are the engine's own types;
+# tlinalg follows tenferro-linalg, which links it only with a CPU provider.
+tcontract = { version = "=0.9.0", optional = true }
+tcontract-exec = { version = "=0.9.0", optional = true }
+tlinalg = { version = "=0.8.0", optional = true }
 tenferro-cpu = { version = "0.8.0", default-features = false, optional = true }
 tenferro-linalg = { version = "0.8.0", default-features = false, optional = true }
 # The `Engine` trait every numerical entry takes: needed by backend-free and

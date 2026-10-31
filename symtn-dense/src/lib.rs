@@ -28,6 +28,15 @@ mod cuda_hermitian;
 #[cfg(any(feature = "cuda", test))]
 #[cfg_attr(not(feature = "cuda"), allow(dead_code))]
 mod cuda_region;
+#[cfg(feature = "tenferro")]
+mod block_kernel {
+    // The BLAS provider keeps its own grouped scheduler until the
+    // factorization kernels run here too.
+    #[cfg(not(feature = "cpu-blas-core"))]
+    pub(crate) mod gemm;
+    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
+    pub(crate) mod schedule;
+}
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]

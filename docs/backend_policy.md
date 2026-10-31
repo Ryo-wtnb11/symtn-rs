@@ -22,22 +22,23 @@ With feature `cuda`, a device operation runs on the caller's `CudaEngine`
 (`CudaEngine::open(CudaDeviceId::from_ordinal(n))`), passed like any other
 engine; a `Runtime` is not tied to a device.
 
-On the native provider a non-affine Host GEMM batch runs as one
-`cpueinsum::GroupedPlan`. Eager calls prepare that plan per batch: two
-top-level allocations in cpueinsum 0.9, plus any child heap allocations (a
-Packed `Complex64` child's boxes and scatters). A one-member Host
-`ContractPlan`/`ComposePlan` workspace keeps the plan of each grouped core
-submission instead, so a warm one-member call prepares no compatible grouped
-core plan: it is prepared on the workspace's first call, reused while the
-ordered jobs and dtype match (payloads, buffers and view offsets are checked
-on every call, not keyed), and released when the workspace runs
-another member count or plan. Its charge (16 KiB plus a few words per job
-extent for each job, plus the job list) is part of
-`ContractWorkspace::retained_bytes`. This holds for the faer provider and the
-four payload scalars only; BLAS and CUDA builds, member counts above one,
-transform stages and single-job or affine batches prepare as before; the
-latter use Tenferro's binary-plan cache, whose misses this guarantee does
-not cover.
+On the native provider a Host GEMM batch that is neither one job nor one
+affine run, with or without transposed or adjoint operands, runs on symtn's
+block GEMM kernel: one `tcontract::Plan` per distinct block geometry (scalar
+type, extents, effective strides, conjugation), prepared on every call and
+shared by that call's blocks of the geometry, so preparation is O(J) small
+records plus one plan (and any child heap a Packed `Complex64` plan owns) per
+geometry. A one-member Host `ContractPlan`/`ComposePlan` workspace instead
+keeps one `cpueinsum::GroupedPlan` for each grouped core submission, so a
+warm one-member call prepares no compatible grouped core plan: it is prepared
+on the workspace's first call, reused while the ordered jobs and dtype match
+(payloads, buffers and view offsets are checked on every call, not keyed),
+and released when the workspace runs another member count or plan. Its
+charge (16 KiB plus a few words per job extent for each job, plus the job
+list) is part of `ContractWorkspace::retained_bytes`. This holds for the faer
+provider and the four payload scalars only; BLAS and CUDA builds prepare as
+before, and single-job or affine batches use Tenferro's binary-plan cache,
+whose misses this guarantee does not cover.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
@@ -73,13 +74,20 @@ the `Runtime`.
 Host parallelism is the engine's own decision. Dense kernels split work by
 Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
-provider's grouped GEMM route (recoupling, block-wise contraction) runs its
-GEMMs one per lane with a single thread each, so a batch of a few large blocks
-uses only a few of the pool's threads. Callers whose workloads are dominated
-by large blocks can give each GEMM the whole pool with
+provider's block GEMM kernel (recoupling, block-wise contraction) takes its
+thread count from the engine's cost rule over the batch's estimated serial
+time (Tenferro's own per-flop model), and its lane count from the engine's
+batch decision. The lanes share all of those threads: a batch of a few large
+blocks gives each lane several threads, and a batch of many small blocks runs
+one thread per lane. Blocks are placed largest first on the least-loaded lane.
+The grouped core batches of a one-member `ContractPlan`/`ComposePlan`
+workspace are the exception: they reuse the workspace's retained grouped
+plan (above), which under `Auto` runs one GEMM per lane with a single thread
+each.
+Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`
-are in `tenferro_cpu`). A BLAS provider under `Auto` instead runs the batch's
+are in `tenferro_cpu`), or force lanes with `Outer` or `Split`. A BLAS provider under `Auto` instead runs the batch's
 vendor GEMMs one after another on the calling thread; any threads the vendor
 library starts are outside the engine's lanes. Forcing `Inner` (or another
 lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
