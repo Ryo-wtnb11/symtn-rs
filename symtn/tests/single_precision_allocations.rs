@@ -372,7 +372,6 @@ fn single_precision_svd_allocates_like_double() {
 /// Purpose: single-precision compact QR takes the double-precision
 /// allocation route — no hidden widening or copy.
 #[test]
-#[ignore = "compact QR grows a recycled backend buffer in place, so its allocation count follows buffer reuse history, not the dtype"]
 fn single_precision_qr_allocates_like_double() {
     assert_factorization_allocates_like_double!(qr);
 }
