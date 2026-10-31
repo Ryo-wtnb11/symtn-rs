@@ -1,13 +1,13 @@
-//! Export firewall for `symtn-operations` (#1804).
+//! Export firewall for `symtn-operations`.
 //!
 //! Two pins, both over every feature combination at once:
 //! - the exact public modules and `pub use` leaves of `lib.rs`, so adding or
 //!   removing a crate-root export fails here and is reviewed as an API change;
 //! - the raw kernels, fusion-tree helpers, unrouted replay entries and compile
-//!   constructors narrowed in #1804, which live inside public or glob-exported
+//!   constructors that were narrowed, which live inside public or glob-exported
 //!   modules and so are invisible to the `lib.rs` pin. No workspace crate
 //!   calls them, and keeping them public froze signatures that the
-//!   one-pipeline refactors (#1851) must change.
+//!   one-pipeline refactors must change.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence.

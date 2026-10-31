@@ -1,4 +1,4 @@
-//! Allocation contracts of the network metadata preflight (#1371).
+//! Allocation contracts of the network metadata preflight.
 //!
 //! The counter is per thread, so the tests do not disturb each other; each
 //! call under test runs on the test's own thread.
@@ -63,7 +63,7 @@ fn pair_network() -> Network {
     .unwrap()
 }
 
-/// #1371 / #2022: a warm `Network::contract` hit adds no allocation to the
+/// A warm `Network::contract` hit adds no allocation to the
 /// replay it runs. Its alias lookup hashes the topology hash `Network::new`
 /// computed and compares the cached topology in place, and its metadata
 /// preflight reads the pairing `Network::new` resolved: it would allocate if
@@ -127,7 +127,7 @@ fn a_warm_network_contract_allocates_no_more_than_its_replay() {
     );
 }
 
-/// #1371, #1372: `PlannedNetwork::execute` and the sliced path
+/// `PlannedNetwork::execute` and the sliced path
 /// reject a non-symmetric braiding before their first step or accumulator:
 /// with the typed `contract`'s error, allocating no more than the typed
 /// `contract` does to reject the same operands (the error itself).

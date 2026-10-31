@@ -1,5 +1,5 @@
 //! A lazy adjoint's factorization allocates no more payload than
-//! materializing the adjoint and factoring that (#1755). The parent-reading
+//! materializing the adjoint and factoring that. The parent-reading
 //! stages (`svd_vals`, SVD, `pinv`, LQ) save the `O(stored_len)` input copy; a
 //! redirect trades it for one copy of each adjointed output, plus the
 //! adjoint factor spaces, which are metadata. So the excess over
@@ -147,7 +147,7 @@ macro_rules! assert_excess_is_metadata {
                 );
             }
         }
-        // The LQ seam (#2070) reads the parent in place: materialize-then-LQ
+        // The LQ seam reads the parent in place: materialize-then-LQ
         // pays at least the adjoint copy of the payload on top of it.
         for (scale_rows, &payload) in rows.iter().zip(&payload_bytes) {
             for (name, (lazy, eager)) in scale_rows {

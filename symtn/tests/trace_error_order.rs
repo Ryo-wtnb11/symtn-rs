@@ -1,5 +1,5 @@
 //! One error per trace misuse, detected in TensorKit `trace_permute!`'s
-//! order (#1872): braiding, then the axes, then the destination space (for a
+//! order: braiding, then the axes, then the destination space (for a
 //! trace into a destination), then the pair duality. The same input gives the
 //! same error eagerly and into a destination, on Host and CUDA, in the
 //! multiplicity-free and checked Generic modes, for `f64` and `Complex64`,

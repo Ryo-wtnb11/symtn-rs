@@ -1,4 +1,4 @@
-//! Owned transforms on a multi-threaded engine (#1217): the uninitialised
+//! Owned transforms on a multi-threaded engine: the uninitialised
 //! owned writer runs under the parallel schedule, so the result is
 //! bit-identical to the serial owned result and the caller thread makes the
 //! same allocations as the serial path, with no allocator-zeroed payload (no
@@ -23,9 +23,8 @@ use crate::counting_alloc;
 /// `u1_su2_space` fixture (same sectors and degeneracies) with
 /// `u1_su2_owned_transforms_are_bit_identical_across_thread_counts`, so a
 /// rebuild landing in that window changes this thread's allocation count (8
-/// against 6, reported during #1570 verification even with the lock held).
-/// Same technique as symtn-tensors #649/#650 and symtn-core/symtn-tensors'
-/// #1598/#1606 fix.
+/// against 6, even with the lock held). Same technique as the isolated
+/// cache-count tests in symtn-core and symtn-tensors.
 ///
 /// Call at the top of the `#[test]` fn with a name-unique env var and the
 /// test's libtest path; when it returns `true`, the child already ran the
@@ -230,7 +229,7 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
     // same caller-thread allocations as the serial owned path and none of them
     // is allocator-zeroed: the multi-threaded backend writes the owned output
     // directly, with no `vec![0.0; P]` fallback and destination-reading
-    // replay (#1217).
+    // replay.
     let runtime = Runtime::builder().build().unwrap();
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
@@ -255,7 +254,7 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
     assert!(warm_serial.dense_data().unwrap() == warm_parallel.dense_data().unwrap());
     // The caller thread may box a lazily created OS lock (macOS std allocates
     // each Mutex/Condvar on first use, once per process) inside the window the
-    // first time it waits for the engine's workers (#1964); the cleanest of a
+    // first time it waits for the engine's workers; the cleanest of a
     // few windows is the steady-state count, and a per-call allocation would
     // appear in all of them.
     let (result_parallel, parallel_allocations, parallel_bytes, parallel_zeroed) = (0..THREADS + 3)

@@ -1,5 +1,5 @@
-//! A two-sector checked Generic toy rule several symtn test targets share
-//! (#1828): sectors `Vacuum` and `X`, `X (x) X -> Vacuum + X` with outer
+//! A two-sector checked Generic toy rule several symtn test targets share:
+//! sectors `Vacuum` and `X`, `X (x) X -> Vacuum + X` with outer
 //! multiplicity two on `X (x) X -> X`, an allocation-free `dim`, and a typed
 //! error for any other sector id.
 //!

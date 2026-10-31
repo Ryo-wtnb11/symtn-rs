@@ -952,7 +952,7 @@ mod copy_c_scratch_tests {
         domain: &[1],
     };
 
-    /// #1631: on the copyC route the output transform writes every element,
+    /// On the copyC route the output transform writes every element,
     /// so an unreached one becomes `alpha * (+0) + beta * dst` — a `-0.0`
     /// becomes `+0.0` under `beta = 1` and an infinite `alpha` gives NaN, as
     /// TensorKit's `tensoradd!` — while `alpha = 0` still never reads the
@@ -1020,7 +1020,7 @@ mod copy_c_scratch_tests {
             .all(|&value| value == 1.0));
     }
 
-    /// #1870: a
+    /// A
     /// reordered `t · D` writes the scaled `t` through one transform `_into`
     /// (TensorKit's `copyC` of a `mul!` with a `Diagonal`), so the compact
     /// operand is never densified and no copyC contraction runs.

@@ -10,7 +10,7 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
     // Isolated like prepared_complete_structure_hits_without_rebuilding_layout:
     // this asserts process-global complete-structure cache counters, which
     // CACHE_TEST_LOCK does not protect from the crate's many ordinary,
-    // unlocked complete-structure builds landing between two reads (#1903).
+    // unlocked complete-structure builds landing between two reads.
     if test_support::run_isolated_or_return(
         "SYMTN_CORE_COMPLETE_HOMSPACE_REUSE_ISOLATED",
         "tests::fusion_space::layout_caches::complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions",
@@ -98,13 +98,12 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
 
 #[test]
 fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
-    // Isolated like symtn-tensors #649/#650's checked_bind_failure
-    // test: this asserts absolute process-global admissions()/
+    // Isolated like symtn-tensors' checked_bind_failure test: this asserts absolute process-global admissions()/
     // misses()/hits() counts, which CACHE_TEST_LOCK does not protect
     // from the crate's many ordinary, unlocked complete-structure
-    // builds landing in the same narrow window. Found flaking
-    // (left: 3/2, right: 1 at line 2898-ish) during #1598/#1606
-    // verification; same class as that pair's four named instances.
+    // builds landing in the same narrow window. Without isolation it
+    // flakes (a count of 3 or 2 where 1 is expected); same class as the other
+    // isolated cache-count tests.
     if test_support::run_isolated_or_return(
             "SYMTN_CORE_COMPLETE_HOMSPACE_CONCURRENT_HITS_ISOLATED",
             "tests::fusion_space::layout_caches::complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc",
@@ -164,13 +163,11 @@ fn complete_homspace_layout_cache_concurrent_hits_share_one_canonical_arc() {
 
 #[test]
 fn complete_homspace_layout_cache_keys_semantics_and_preserves_direct_layout() {
-    // Isolated like symtn-tensors #649/#650's checked_bind_failure
-    // test: this asserts an absolute process-global entries() count,
-    // which CACHE_TEST_LOCK does not protect from the crate's many
-    // ordinary, unlocked complete-structure builds landing in the
-    // same narrow window. Found flaking (left: 5, right: 4 at line
-    // 2960-ish) during #1598/#1606 verification; same class as that
-    // pair's four named instances.
+    // Isolated like symtn-tensors' checked_bind_failure test: this asserts
+    // an absolute process-global entries() count, which CACHE_TEST_LOCK does
+    // not protect from the crate's many ordinary, unlocked complete-structure
+    // builds landing in the same narrow window. Without isolation it flakes
+    // (a count of 5 where 4 is expected).
     if test_support::run_isolated_or_return(
             "SYMTN_CORE_COMPLETE_HOMSPACE_KEYS_SEMANTICS_ISOLATED",
             "tests::fusion_space::layout_caches::complete_homspace_layout_cache_keys_semantics_and_preserves_direct_layout",
@@ -460,7 +457,7 @@ fn complete_cache_separates_multiplicity_free_and_generic_modes() {
     assert_eq!(rejected_generic.as_ref(), generic.as_ref());
     assert_ne!(rejected_mf.content_id(), multiplicity_free.content_id());
     assert_ne!(rejected_generic.content_id(), generic.content_id());
-    // What: residency alone makes content canonical (#2014): admitted
+    // What: residency alone makes content canonical: admitted
     // winners are, zero-budget rejections are not.
     assert!(multiplicity_free.is_canonical() && generic.is_canonical());
     assert!(!rejected_mf.is_canonical() && !rejected_generic.is_canonical());
@@ -630,7 +627,7 @@ fn overlapping_resets_wait_so_the_epoch_stays_odd_until_the_first_finishes() {
 
 #[test]
 fn a_degeneracy_only_change_reuses_the_sector_structure() {
-    // What (#2014, variable shape): two HomSpaces with the same sectors and
+    // What (variable shape): two HomSpaces with the same sectors and
     // different degeneracies enumerate their fusion trees once and share one
     // sector structure; only the degeneracy structure differs. TensorKit
     // keys `sectorstructure` on the sectors alone (`structure.jl:41`).
@@ -685,7 +682,7 @@ fn a_degeneracy_only_change_reuses_the_sector_structure() {
     ));
     assert_ne!(small.required_len(), large.required_len());
 
-    // So does the checked Generic builder (#2030), once a walk succeeded.
+    // So does the checked Generic builder, once a walk succeeded.
     let checked = InfallibleGeneric::new(&SU2FusionRule);
     let checked_small = su2_hom(2)
         .coupled_subblock_structure_from_leg_degeneracies_generic_checked(&checked)
@@ -757,7 +754,7 @@ impl MultiplicityFreeFusionRule for RepeatedChannelRule {}
 
 #[test]
 fn repeated_fusion_channels_are_a_typed_error_not_a_duplicate_block() {
-    // What (#2014): duplicate tree keys from a provider with repeated
+    // What: duplicate tree keys from a provider with repeated
     // channels are `DuplicateBlockKey`, not a structure with two equal keys.
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let hom = FusionTreeHomSpace::new(
@@ -900,7 +897,7 @@ fn generic_complete_owner_keeps_canonical_identity_regions_and_budget() {
     set_structure_cache_byte_budget(StructureCacheKind::DegeneracyStructure, budget);
 }
 
-/// What (#2154): a committed checked permutation memoizes its destination
+/// What: a committed checked permutation memoizes its destination
 /// in the source's complete entry, charged once to that entry; the next
 /// staging of the same axes takes the memo without deriving, while an
 /// unpublished, reset-straddling or non-resident staging derives.
@@ -1252,7 +1249,7 @@ fn permuted_memo_keys_fill_the_slots_then_overflow_to_the_map() {
 
 #[test]
 fn a_sector_layout_entry_charges_its_tree_arena_once() {
-    // What (single-arena ownership, #2192): the layout keys and the sector
+    // What (single-arena ownership): the layout keys and the sector
     // structure built from them share one canonical arena, and the
     // layout-cache entry charges it once, through the structure, not again
     // for the keys.

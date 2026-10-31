@@ -1,4 +1,4 @@
-//! Allocation contract of the Host `EighFullPlan` (#1744): a warm call
+//! Allocation contract of the Host `EighFullPlan`: a warm call
 //! allocates per member exactly what the dense solver allocates for that
 //! member's coupled sectors, and nothing else. The allocation target
 //! shares one counting allocator; every dense kernel runs on the

@@ -446,7 +446,7 @@ fn typed_insert_unit_round_trips_at_every_position_and_shares_the_payload() {
     // What (gate 4): `insert_unit` at every legal
     // position `0..=rank` followed by `remove_unit` at the inserted axis
     // restores the spaces *and* the payload allocation — `data()` returns the
-    // same buffer address, the O(1) reuse the #613 contract promises for a
+    // same buffer address, the O(1) reuse the contract promises for a
     // dense payload. (The `Arc`-level gate lives with the body layout tests
     // in `typed.rs`, which can see the private fields.)
     let runtime = runtime();

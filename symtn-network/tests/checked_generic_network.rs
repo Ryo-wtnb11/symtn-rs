@@ -1230,7 +1230,7 @@ fn checked_generic_cache_modes_dtype_pools_and_lazy_operands_match_direct_author
         },
     );
     let replay = planned.execute(engine, &[&lazy, &b64], &mut Default::default());
-    // A checked lazy adjoint is a storage-conjugate operand (#1865): the
+    // A checked lazy adjoint is a storage-conjugate operand: the
     // replay and a conjugated network leg agree with the direct contraction
     // and with the materialized adjoint, and the lazy input stays lazy.
     let direct = direct.unwrap();

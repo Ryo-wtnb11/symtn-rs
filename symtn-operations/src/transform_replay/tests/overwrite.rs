@@ -134,7 +134,7 @@ fn nan_beta_reaches_active_and_inactive_destinations() {
 
 /// What: `beta = 0` scales an inactive destination by VectorInterface's
 /// `scale(x, 0) = zero(x) * 0`, so a NaN there becomes zero rather than
-/// `0 * NaN` (#1438), as TensorKit's `scale!(tdst, β)` does.
+/// `0 * NaN`, as TensorKit's `scale!(tdst, β)` does.
 #[test]
 fn generic_beta_zero_wipes_nan_in_inactive_destinations() {
     let (mut dst, src, structure) = fixture();

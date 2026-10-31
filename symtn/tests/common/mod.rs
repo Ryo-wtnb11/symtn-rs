@@ -139,7 +139,7 @@ pub fn is_adjoint_pair<S: PartialEq>(
         && lazy.domain_vertices() == parent.codomain_vertices()
 }
 
-/// The pre-#1201 adjoint kernel as a literal formula:
+/// The element-wise adjoint kernel as a literal formula:
 /// `L[b, x] = conj(P[s(b), pi(x)])` where `s` swaps the codomain/domain trees
 /// and `pi` swaps the dense axis halves (`x[..nin]` addresses the parent's
 /// domain axes, `x[nin..]` its codomain axes).
@@ -268,8 +268,7 @@ pub fn permute_dense<D: Copy>(shape: &[usize], data: &[D], perm: &[usize]) -> (V
 /// suites need.
 ///
 /// It lives here rather than in one test binary because several suites are
-/// generic over exactly this set — the device single-precision suites (#1336,
-/// #1341), the device general contraction (#1345) and its ungated Host oracle
+/// generic over exactly this set — the device single-precision suites, the device general contraction and its ungated Host oracle
 /// pin — and a second copy is a second place for `EPS` or a conversion to
 /// drift. It needs no device, so a Host pin can share it; [`DevicePayload`]
 /// adds the device bound.

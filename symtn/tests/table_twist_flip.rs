@@ -1,4 +1,4 @@
-//! `twist` and `flip` of complex-symbol rules (#2281) on Fibonacci and
+//! `twist` and `flip` of complex-symbol rules on Fibonacci and
 //! Ising through `TableRule`: twist against the closed-form θ entrywise,
 //! flip against a few values checked against TensorKit 0.17.1, TensorKit's
 //! inverse identities, and the lazy adjoint; and the unchanged `NoBraiding`
@@ -137,7 +137,7 @@ fn assert_same(what: &str, got: &Table, want: &Table) {
 /// `inner(probe, flip(t, legs))` checked against TensorKit 0.17.1 (`flip`
 /// on the same `entry` operand and probe, AnyonWiki labels; one-based legs
 /// `1`, inv `1,4` for Fibonacci and `4`, inv `2,3` for Ising). Each value is
-/// invariant under AnyonWiki's Ising vertex sign u^{σσ}_ψ = −1 (#2277): flip
+/// invariant under AnyonWiki's Ising vertex sign u^{σσ}_ψ = −1: flip
 /// scales a tree pair by twists and Frobenius-Schur phases of its uncoupled
 /// sectors, and `inner` pairs entries of equal trees.
 const FLIP_ROWS: [(&str, bool, &[usize], Complex64); 4] = [

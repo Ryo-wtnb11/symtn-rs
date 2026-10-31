@@ -1,5 +1,5 @@
 //! Gauge-invariant correspondence with the pinned QSpace v4 SU(2) spin-half
-//! operator (issue #9). QSpace public master `e87ccd1` produces one rank-3
+//! operator. QSpace public master `e87ccd1` produces one rank-3
 //! reduced record with labels `(1, 1, 2)`, orientation `('', '*', '*')`, and
 //! coefficient `-sqrt(3)/2`. Contracting the operator with its conjugate over
 //! the output and vector-operator legs gives `3/4` times the spin-half

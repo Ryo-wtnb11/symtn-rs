@@ -1,6 +1,6 @@
 //! Partial-trace fixtures and their independent oracles, shared by the Host
 //! pin (`typed_trace_host_oracle.rs`, ungated) and the device gate
-//! (`typed_cuda_trace.rs`, #1349).
+//! (`typed_cuda_trace.rs`).
 //!
 //! Two oracles, neither of which passes through the trace engine whose device
 //! replay is under test:

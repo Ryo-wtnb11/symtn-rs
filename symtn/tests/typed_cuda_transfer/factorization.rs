@@ -342,7 +342,7 @@ fn typed_cuda_reductions_cover_weights_providers_lazy_and_preflight() {
     );
     assert!(callback_count.load(Ordering::SeqCst) > calls_before_reduction);
 
-    // The same custom provider through a device structural transform (#1322).
+    // The same custom provider through a device structural transform.
     let probe_device = probe_lhs.to_cuda(cuda).unwrap();
     assert_eq!(
         probe_device

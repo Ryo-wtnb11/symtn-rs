@@ -1,4 +1,4 @@
-//! Cross-storage matrix for the typed methods unified over storage (#1756).
+//! Cross-storage matrix for the typed methods unified over storage.
 //!
 //! Host rows always run; CUDA rows compare the device result with the Host
 //! result on the same fixture and need a real device. Every unified family
@@ -560,7 +560,7 @@ fn cuda_rows_match_host() {
         let host_result = lazy_a.zeros_like(engine).unwrap();
         same(engine, cuda, "lazy zeros_like", device_result, host_result);
         // One lazy and one owned operand, both orders, and a lazy
-        // `axpby_into` source (#1874): the Host rule on the device.
+        // `axpby_into` source: the Host rule on the device.
         let owned_b_host = lazy_b.materialize(engine).unwrap();
         let owned_b = owned_b_host.to_cuda(cuda).unwrap();
         let device_result = lazy_dev.axpby(cuda, alpha, &owned_b, beta).unwrap();
@@ -584,7 +584,7 @@ fn cuda_rows_match_host() {
             destination.clone(),
             expected,
         );
-        // The destination checks still run first (#1756).
+        // The destination checks still run first.
         let shared = destination.clone();
         assert_eq!(
             lazy_dev
@@ -1525,7 +1525,7 @@ fn transform_cuda_rows_match_host() {
 /// several fusion trees per coupled sector): the lazy operand's blocks are
 /// strided, permuted views of its parent. The device equals the Host rule at
 /// every coefficient pattern, including a zero `beta` over a NaN destination
-/// (the NaN must not survive) and a zero `alpha` (#1874).
+/// (the NaN must not survive) and a zero `alpha`.
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
@@ -2298,7 +2298,7 @@ fn trace_host_rows_match_the_hand_oracle() {
 /// partial and full `trace_pairs`, `trace_pairs_into`, within the
 /// executor's dtype tolerance (cuTENSOR's sum order), and the admission
 /// order with the storage noun naming the placement: kind and alias before
-/// the destination space (#1870 C).
+/// the destination space.
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]

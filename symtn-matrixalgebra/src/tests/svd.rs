@@ -1,4 +1,4 @@
-//! SVD factorization tests (#1596 split of tests.rs).
+//! SVD factorization tests.
 
 use super::*;
 

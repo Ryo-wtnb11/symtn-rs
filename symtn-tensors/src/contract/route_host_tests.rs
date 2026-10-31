@@ -1,5 +1,5 @@
 //! The DynamicTree route has one Host executor for eager and
-//! member (any B) replays (#1859).
+//! member (any B) replays.
 //!
 //! Eager accumulation (`alpha`, `beta`, `Zeroed`, signed zeros, NaN) is
 //! checked by hand formula in `route_host_core_tests.rs`; member replays
@@ -288,7 +288,7 @@ fn a_warm_one_member_replay_converts_no_coefficient_pack() {
 
 #[test]
 fn a_warm_eager_contraction_converts_no_coefficient_pack() {
-    // Why (#2101): the eager lhs, rhs and output transforms each replay into
+    // Why: the eager lhs, rhs and output transforms each replay into
     // their own workspace, so a warm call finds all three Multi coefficient
     // packs installed instead of evicting each other's. Isolated: an eager
     // call resolves its transformers through the process-global cache, which
@@ -451,7 +451,7 @@ fn member_replays_outside_the_overwrite_contract_are_unsupported_before_writes()
         (2.0, ContractDestinationInit::Axpby(0.0), true, GUARD),
         (1.0, ContractDestinationInit::Axpby(1.0), true, GUARD),
         // The eager stage replays exactly one member; `Zeroed` (a born-zero
-        // destination, #2123) passes the overwrite guard and reaches it.
+        // destination) passes the overwrite guard and reaches it.
         (
             1.0,
             ContractDestinationInit::Axpby(0.0),

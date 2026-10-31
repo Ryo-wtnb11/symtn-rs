@@ -1,5 +1,5 @@
 //! The complete-structure cache holds the working set of an E1-style op
-//! ledger and of a sweep-like loop, so warm iterations never evict (#1365).
+//! ledger and of a sweep-like loop, so warm iterations never evict.
 //! Every test in this target takes the shared serial guard.
 
 use symtn::cache::{StructureCacheInfo, StructureCacheKind};

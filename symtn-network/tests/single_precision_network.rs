@@ -1,4 +1,4 @@
-//! `Network::contract` network execution on single-precision payloads (#1315).
+//! `Network::contract` network execution on single-precision payloads.
 //!
 //! Admitting `f32`/`Complex32` to `TensorScalar` opens every `D: TensorScalar`
 //! bound in `symtn-network` at once, so the cached network path needs its own oracle.

@@ -1,4 +1,4 @@
-//! Export firewall for symtn-matrixalgebra (#1803).
+//! Export firewall for symtn-matrixalgebra.
 //!
 //! The documented crate root carries the spectrum, scalar, factor and result
 //! types; every entry point the `symtn` facade dispatches to sits in the

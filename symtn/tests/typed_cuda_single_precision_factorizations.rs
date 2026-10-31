@@ -1,5 +1,5 @@
 //! Device twins of the `f64`/`Complex64` device *factorization* suites, run at
-//! every admitted device payload (#1341).
+//! every admitted device payload.
 //!
 //! Each gate is one generic body instantiated for the dtypes the marker under
 //! test admits, so the double-precision instantiation is the control: a helper
@@ -14,7 +14,7 @@
 //! `qr_compact` *is* gauge-fixed on device (positive diagonal), so its factors
 //! are compared pointwise. The host single-precision factorization semantics
 //! themselves are gated independently by
-//! `symtn/tests/single_precision_factorizations.rs` (#1324).
+//! `symtn/tests/single_precision_factorizations.rs`.
 //!
 //! **Tolerance.** `K * sqrt(n) * eps(real(D)) * scale * kappa`, with `K` the
 //! constant of the shared single-precision oracle module, `n` the number of
@@ -437,7 +437,7 @@ fn device_svd_compact_matches_the_host_at_every_payload() {
 }
 
 // ---------------------------------------------------------------------------
-// Compact QR (every payload, #1271)
+// Compact QR (every payload)
 // ---------------------------------------------------------------------------
 
 fn assert_device_qr_matches_host<R, D>(
@@ -896,7 +896,7 @@ fn device_eigh_full_matches_the_host_at_every_payload() {
     }
 }
 
-/// The device Hermitian admission rule at the payload's own epsilon (#1326).
+/// The device Hermitian admission rule at the payload's own epsilon.
 ///
 /// The perturbed fixture's relative anti-Hermitian residual sits between the
 /// default thresholds `eps(f64)^(3/4)` and `eps(f32)^(3/4)`: an `f32` block is
@@ -1065,10 +1065,10 @@ fn device_factorization_rejections_do_not_depend_on_the_payload() {
 }
 
 // ---------------------------------------------------------------------------
-// #1320: factor blocks at unaligned offsets
+// Factor blocks at unaligned offsets
 // ---------------------------------------------------------------------------
 
-/// #1320 at 4- and 8-byte elements.
+/// Region copies at 4- and 8-byte elements.
 ///
 /// The aligned whole-factor route copies each block straight into its sector
 /// region, so the copy must report each offset destination view's true
@@ -1102,7 +1102,7 @@ fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
 }
 
 // ---------------------------------------------------------------------------
-// #1297: the truncation composition at single precision
+// The truncation composition at single precision
 // ---------------------------------------------------------------------------
 
 /// Device `svd_compact` -> `to_host` -> `diagview` -> `find_truncated` ->
@@ -1111,7 +1111,7 @@ fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
 ///
 /// The kept bond space is asserted exactly: the fixture's singular values are
 /// well separated, so the rank budget is not at a tie and the documented
-/// near-tie behaviour of #1324 does not apply. The discarded-weight
+/// near-tie behaviour does not apply. The discarded-weight
 /// postcondition is compared within the spectrum's own tolerance.
 fn assert_truncation_composition<R, D>(
     engine: &mut dyn symtn::typed::Engine,
@@ -1250,7 +1250,7 @@ fn the_device_truncation_composition_matches_the_host_composition_at_every_paylo
     // Sector diagonals are `(8, 4)`, `(8, 4, 2)`, `(8, 4)` for U(1) and
     // `(8, 4)` twice for SU(2), whose quantum dimensions are `1` and `2`:
     // `3` keeps every `8` and `6` keeps every `8` and `4`. The near-tie
-    // behaviour #1324 documents is therefore out of scope here by
+    // near-tie behaviour is therefore out of scope here by
     // construction, not by tolerance.
     for truncation in [Truncation::Full, Truncation::rank(3), Truncation::rank(6)] {
         assert_truncation_composition::<_, f64>(engine, cuda, &runtime, &leg, &truncation);
@@ -1452,7 +1452,7 @@ fn complex_device_qr_costs_the_real_calls_and_twice_the_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// One compact factor plan for Host and CUDA (#1774)
+// One compact factor plan for Host and CUDA
 // ---------------------------------------------------------------------------
 
 /// QR, SVD and EIGH of one multi-leg source against the Host at `D`.

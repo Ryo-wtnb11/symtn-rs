@@ -709,8 +709,8 @@ fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<Z2
     let provider = Arc::new(Z2FusionRule);
     let raw = tensor.fusion_space().clone();
     let hom = raw.homspace().clone();
-    // Why not caller-supplied per-tree shapes: the #586 sweep narrowed the
-    // shape-admission bridge to symtn-tensors; the kept public installer
+    // Why not caller-supplied per-tree shapes: the shape-admission bridge is
+    // narrowed to symtn-tensors; the kept public installer
     // derives the identical blocks from the final homspace's leg
     // degeneracies for these dense-leg fixtures.
     BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free_checked(provider, hom)

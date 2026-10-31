@@ -1,6 +1,6 @@
 //! The Host compile entry of the storage (device) contraction route, and —
 //! with the `cuda` feature, on a real device — its executor replaying the
-//! Host `DynamicTree` artifact (#1345).
+//! Host `DynamicTree` artifact.
 //!
 //! The device tests force every orientation and axis-order candidate through
 //! the test-only plan builder, which the typed API cannot reach, and compare
@@ -402,7 +402,7 @@ fn dynamic_artifact_replays_host_members() {
             builds_before + usize::from(pass != 2)
         );
         let submissions = dense.dense().submissions.len() + backend.dense_mut().submissions.len();
-        eprintln!("#1647 SU(2) B={members}: Host dense submissions={submissions}, transform jobs={}, core jobs={}", dense.dense().submissions.iter().sum::<usize>(), backend.dense_mut().submissions.iter().sum::<usize>());
+        eprintln!("SU(2) B={members}: Host dense submissions={submissions}, transform jobs={}, core jobs={}", dense.dense().submissions.iter().sum::<usize>(), backend.dense_mut().submissions.iter().sum::<usize>());
         if members == 2 {
             b2_submissions = submissions;
         }
@@ -1664,7 +1664,7 @@ fn the_fermionic_twist_rides_on_the_operand_already_copied_or_the_smaller() {
             check_twist_role(role, &case, &format!("fZ2xSU2 {role:?}")),
         ));
     }
-    // What: twisting the operand already copied (#1351) removes the E_B-sized
+    // What: twisting the operand already copied removes the E_B-sized
     // materialization exactly where only A is copied (A copied: E_A + E_B -> E_A; canonical with A smaller:
     // E_B -> E_A); B copied and both copied are unchanged.
     for (role, (after, before)) in totals {
@@ -2637,7 +2637,7 @@ fn square_case<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
     }
 }
 
-/// #1858: Host eager and the device planner take the same route on every
+/// Host eager and the device planner take the same route on every
 /// fixture, owned and lazy, Core, CopyC and DynamicTree, bosonic and
 /// fermionic. A fermionic twist uniform within each RHS coupled-sector matrix
 /// rides the core as per-job GEMM alpha rather than a DynamicTree copy and
@@ -2908,7 +2908,7 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
     }
 }
 
-/// #1858: the planner walks the requested order's zero-copy candidates once.
+/// The planner walks the requested order's zero-copy candidates once.
 /// Before, `copyC`'s predicate walked it again after the core rung missed.
 #[test]
 fn the_planner_walks_the_requested_order_once() {
@@ -2940,7 +2940,7 @@ fn the_planner_walks_the_requested_order_once() {
     assert_eq!(walks(&u1_case()), (RouteKind::DynamicTree, 3));
 }
 
-/// #1488: `dim(C)` below both operands takes `copyC`. On the S1 sort
+/// `dim(C)` below both operands takes `copyC`. On the S1 sort
 /// `A[3,2]·B[1,0] → [2,3,0,1]` and the S2 swap `A[0,1]·B[2,3] → [3,2,1,0]`
 /// of `symtn/tests/contract_candidate_core.rs`
 /// (`small_output_copy_c_shapes_match_tensorkit_with_one_output_transform`), with `v = u1{-1:8, 0:8,

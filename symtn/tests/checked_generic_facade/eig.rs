@@ -459,7 +459,7 @@ fn assert_checked_generic_eigh_factors<D>(
         }
     }
 
-    // The truncated eigendecomposition is a composition (#1534).
+    // The truncated eigendecomposition is a composition.
     let found = d.domain()[0]
         .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(5))
         .unwrap();
@@ -905,7 +905,7 @@ fn checked_generic_eig_truncation_reports_discarded_spectrum_norm_only() {
             [-3.0, 2.0, 1.0][index[0]] * f64::from(index[0] == index[1])
         })
         .unwrap();
-    // The truncated eigendecomposition is a composition (#1534).
+    // The truncated eigendecomposition is a composition.
     let Eig { d, v } = source.eig_full(engine, &[0], &[1]).unwrap();
     let found = d.domain()[0]
         .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(5))
@@ -927,7 +927,7 @@ fn checked_generic_eig_truncation_reports_discarded_spectrum_norm_only() {
     assert!((found.error - (1.0 + 2.0_f64.sqrt()).sqrt()).abs() < 1.0e-12);
 }
 
-/// Independent oracle for the published eigenvector gauge (#2073), per
+/// Independent oracle for the published eigenvector gauge, per
 /// column `k` of one coupled block: `A v = lambda v` to backward error, unit
 /// 2-norm (LAPACK `geev`, which MatrixAlgebraKit `eig_full!` publishes), and
 /// the first largest-magnitude component real and non-negative (MAK
@@ -1251,7 +1251,7 @@ fn checked_nondual_compact_diagonal_eigh_full_makes_no_provider_query() {
 }
 
 /// The checked Generic eigh admission is the same shared check at the same
-/// tolerance (#1987): `[[1, δ], [0, 2]]` passes exactly when `δ ≤ tol·√10`,
+/// tolerance: `[[1, δ], [0, 2]]` passes exactly when `δ ≤ tol·√10`,
 /// and `diag(1 + iδ, 2)` exactly when `δ ≤ tol·√5`.
 #[test]
 fn checked_generic_eigh_admits_at_the_given_hermitian_tolerance() {
@@ -1318,7 +1318,7 @@ fn checked_generic_eigh_admits_at_the_given_hermitian_tolerance() {
 fn checked_generic_eig_order_matches_the_lexicographic_oracle_and_the_mf_route() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // What: #1985 on checked Generic. Dense and compact EIG/EIGH, full and
+    // What: on checked Generic, dense and compact EIG/EIGH, full and
     // values-only, publish the order sorted here independently (EIG
     // lexicographic `(re, im)`, EIGH ascending), and dense EIG agrees with
     // the multiplicity-free route on the same block.

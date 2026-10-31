@@ -558,7 +558,7 @@ fn transpose_tree_pair_block_matches_full_key_su2_cycles_and_repartition() {
     assert!(checked_blocks > 0, "expected at least one block");
 }
 
-// Regression (#1921): a transpose whose last compact step is a bend leaves the
+// Regression: a transpose whose last compact step is a bend leaves the
 // output basis in first-appearance order, not HomSpace order. For rank-5
 // SU(2) and Fibonacci `[4,3,2 | 1,0]` from (2,3) that order differs from the
 // HomSpace keys in some uncoupled blocks; values must still match per key.
@@ -1075,7 +1075,7 @@ fn a_structure_owns_its_tree_arena_and_reuses_only_a_complete_canonical_one() {
     let layout_arena = Arc::clone(&keys[0].codomain_tree().arena);
 
     // What: the layout keys already use their whole canonical arena, so a
-    // structure over all of them takes it without a copy (single-arena ownership, #2192).
+    // structure over all of them takes it without a copy (single-arena ownership).
     let full = SectorStructure::from_keys(4, keys.iter().cloned()).unwrap();
     assert!(Arc::ptr_eq(&tree_arena_of(&full, 0), &layout_arena));
 
@@ -1183,7 +1183,7 @@ fn trees_of_one_external_tuple_store_their_externals_once() {
     let keys = su2_half_keys();
     // What: every tree of either side has the same uncoupled sectors,
     // duality flags and vertex labels, so the arena stores them once and
-    // otherwise only each tree's coupled sector and inner lines (#2192),
+    // otherwise only each tree's coupled sector and inner lines,
     // whatever order the keys arrive in.
     for order in [
         keys.iter().cloned().collect::<Vec<_>>(),

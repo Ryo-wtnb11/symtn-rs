@@ -945,7 +945,7 @@ mod tests {
         }
     }
 
-    /// The structural gate of #1401: one layout pass per block per operand
+    /// The structural gate: one layout pass per block per operand
     /// set, and one span walk for a two-source update.
     #[test]
     fn one_layout_pass_and_one_walk_per_two_source_block() {

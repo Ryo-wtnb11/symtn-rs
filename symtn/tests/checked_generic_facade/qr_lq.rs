@@ -145,7 +145,7 @@ fn checked_generic_compact_qr_failure_is_typed_and_nonpublishing() {
     let before = source.dense_data().unwrap().to_vec();
     // The construction published the layouts this operation walks; a
     // provider whose answers change is not one identity, so the cached
-    // layouts go first (#2030). The tag is this test's alone.
+    // layouts go first. The tag is this test's alone.
     forget_cached_structures();
     provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = source.qr_compact(engine, &[0, 1], &[2]).unwrap_err();
@@ -171,7 +171,7 @@ fn checked_generic_compact_lq_failure_is_typed_and_nonpublishing() {
     let before = source.dense_data().unwrap().to_vec();
     // The construction published the layouts this operation walks; a
     // provider whose answers change is not one identity, so the cached
-    // layouts go first (#2030). The tag is this test's alone.
+    // layouts go first. The tag is this test's alone.
     forget_cached_structures();
     provider.fail_algebra.store(true, Ordering::Relaxed);
     let error = source.lq_compact(engine, &[0, 1], &[2]).unwrap_err();

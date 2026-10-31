@@ -1809,7 +1809,7 @@ fn every_tree_transform_entry_reports_the_operation_fusion_style_error() {
 
     // What: each tensors-layer tree-transform entry rejects a style it
     // cannot lower with the operation-carrying tensors variant, never the
-    // core variant wrapped in `OperationError::Core` (#1950).
+    // core variant wrapped in `OperationError::Core`.
     assert_eq!(
         crate::build_tree_pair_transform_group_plan(&generic, operation.clone(), &structure)
             .unwrap_err(),

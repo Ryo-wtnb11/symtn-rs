@@ -1,4 +1,4 @@
-//! #2081: `add_spectrum_into` pairs blocks with spectrum entries in O(G).
+//! `add_spectrum_into` pairs blocks with spectrum entries in O(G).
 //!
 //! The operation counter is the number of blocks that missed the cursor and
 //! scanned the spectrum; it is zero when both sides run in sector order, so

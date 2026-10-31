@@ -38,7 +38,7 @@ use symtn::typed::{
 use symtn::typed::{Complex32, Complex64, GenericTensorError, Runtime, SectorSpectrum};
 
 /// Orders process-global cache clears against provider-query and cache-count
-/// windows (#2084): a test that clears holds the write side for its whole
+/// windows: a test that clears holds the write side for its whole
 /// body, a test that counts holds the read side, so a sibling's clear cannot
 /// land between a warm-up and a measured call. Cooperative: every new
 /// count-dependent test must take `cache_shared` and every new clearing test
@@ -131,7 +131,7 @@ include!("../common/checked_only_toy.rs");
 include!("../common/spy_executor.rs");
 
 // ---------------------------------------------------------------------------
-// #1201: lazy-adjoint reads through FusionOperand + the shared strided owner,
+// Lazy-adjoint reads through FusionOperand + the shared strided owner,
 // and checked `tr` collapsed onto `weighted_trace`.
 // ---------------------------------------------------------------------------
 

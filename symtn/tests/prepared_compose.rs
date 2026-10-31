@@ -1,4 +1,4 @@
-//! Host gates of `ComposePlan` and its `ContractWorkspace` (#1639).
+//! Host gates of `ComposePlan` and its `ContractWorkspace`.
 //!
 //! Per member both public call shapes must equal eager `compose` of the same
 //! placement and the tree-keyed `mul!` oracle of `prepared/mod.rs`,
@@ -6,7 +6,7 @@
 //! destination blocks. `execute_into` must give the same result over a
 //! destination prefilled with NaN or garbage.
 //!
-//! #1775: the composition is its own kind, not a contraction inferred from
+//! The composition is its own kind, not a contraction inferred from
 //! its axes. A fermionic composition over a dual leg differs from the
 //! contraction over the same legs by the supertrace sign, and composition
 //! admits every braiding style while `ContractPlan` rejects non-symmetric
@@ -536,7 +536,7 @@ fn non_symmetric_composition<const ANYONIC: bool>() {
     }
 }
 
-/// F2 (#1775): composition admits every braiding style (TensorKit `mul!`
+/// F2: composition admits every braiding style (TensorKit `mul!`
 /// checks only the spaces), and no shared planning or admission step rejects
 /// it, while `ContractPlan::new` rejects the same geometry. Fibonacci, the
 /// built-in anyonic rule, has complex symbols (`Scalar = Complex64`), which

@@ -328,7 +328,7 @@ fn concurrent_cached_calls_share_one_plan_and_bound_idle_pool() {
     assert!(stats.workspaces_created >= stats.idle_workspaces as u64);
 }
 
-/// #1371: an operand from another Runtime is a metadata rejection, decided
+/// An operand from another Runtime is a metadata rejection, decided
 /// before the plan lookup, so it leases (and quarantines) no workspace and the
 /// next valid call reuses the idle one. Quarantine of a lease whose execution
 /// fails is the lease-level `panic_quarantines_typed_workspace_lease` unit

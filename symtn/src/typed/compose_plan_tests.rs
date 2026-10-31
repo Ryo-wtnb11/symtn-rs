@@ -1,7 +1,6 @@
-//! `ComposePlan` tests that need private plan and stack fields (#1775): the
+//! `ComposePlan` tests that need private plan and stack fields: the
 //! composition's route, the errors of corrupted stacks, and the CUDA zero
-//! regions of the inactive destination blocks against a hand derivation
-//! (#1980).
+//! regions of the inactive destination blocks against a hand derivation.
 
 use std::sync::Arc;
 
@@ -150,7 +149,7 @@ fn corrupted_stack_errors_are_typed() {
     assert!(short_dst.storage.iter().all(|&value| value == 1.0));
     let payload =
         Error::InvalidArgument("stacked payload length differs from its structure".into());
-    // `ComposePlan` runs `ContractPlan`'s per-call checks (#1775, stricter
+    // `ComposePlan` runs `ContractPlan`'s per-call checks (stricter
     // than TensorKit): a payload whose length differs from its structure is
     // an `InvalidArgument` before any work. The consistent corruption reaches
     // the route executor, which reports the operand's length (two members of
@@ -321,7 +320,7 @@ fn regions_match_hand_derivation<R>(
     }
 }
 
-/// #1980, #1775: the regions come from the one member stage, which also
+/// The regions come from the one member stage, which also
 /// validates each within the stack.
 #[cfg(feature = "cuda")]
 #[test]

@@ -1,5 +1,5 @@
-//! The eigh Hermiticity admission at its default and an explicit tolerance
-//! (#1987), through every multiplicity-free Host entry: dense and compact
+//! The eigh Hermiticity admission at its default and an explicit tolerance,
+//! through every multiplicity-free Host entry: dense and compact
 //! diagonal `eigh_vals`/`eigh_full`, and the prepared [`EighFullPlan`]. The
 //! checked Generic counterpart is in `checked_generic_facade/eig.rs`.
 

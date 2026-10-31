@@ -1,4 +1,4 @@
-//! Quantum-dimension-weighted reductions of complex-symbol rules (#2281):
+//! Quantum-dimension-weighted reductions of complex-symbol rules:
 //! `tr`, `norm`, `inner`, `scalar` and `GradedSpace::dim` on Fibonacci and
 //! Ising through `TableRule`, against TensorKit's definitions written per
 //! subblock; and the structural operations the same bounds admit (unit legs,

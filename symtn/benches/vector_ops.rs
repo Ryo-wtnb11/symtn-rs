@@ -1,4 +1,4 @@
-//! Serial Host vector operations (#2323 phase A). Run with an optional substring:
+//! Serial Host vector operations. Run with an optional substring:
 //! `cargo bench -p symtn --bench vector_ops --offline -- U1`.
 //! Finite, bounded random inputs; setup and correctness checks are untimed.
 //! Allocations include result destruction and count only the calling thread.

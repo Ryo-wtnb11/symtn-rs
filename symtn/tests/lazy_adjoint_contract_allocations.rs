@@ -1,8 +1,8 @@
-//! Warm eager `contract`/`compose` with a lazy-adjoint receiver (#1414).
+//! Warm eager `contract`/`compose` with a lazy-adjoint receiver.
 //!
 //! The adjoint-oriented tree-pair plan lives in the Runtime-owned transform
 //! store, and the operand projection reuses the parent's memoized adjoint, so
-//! a warm lazy-adjoint call allocates no more than the owned `contract` (#1419).
+//! a warm lazy-adjoint call allocates no more than the owned `contract`.
 
 use std::hint::black_box;
 use symtn::typed::Engine;
@@ -22,7 +22,7 @@ fn allocations<T>(f: impl FnOnce() -> T) -> (u64, T) {
 
 /// Warm `contract_conj` may exceed the owned `contract` by at most this many
 /// allocation calls: 0 on these rows, so no per-call adjoint HomSpace, storage
-/// map, axis-check Vecs or, for SU2, contracted HomSpace compare (#1419). Why not exact pins: allocator and std
+/// map, axis-check Vecs or, for SU2, contracted HomSpace compare. Why not exact pins: allocator and std
 /// differences move the absolute counts between platforms by the same offset.
 const LAZY_ADJOINT_SLACK: u64 = 0;
 /// Upper bound on warm `contract_conj` allocation calls. Recompiling the

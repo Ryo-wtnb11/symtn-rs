@@ -392,7 +392,7 @@ fn degeneracy_only_change_recomposes_no_group_and_matches_the_uncached_producer(
     }
 }
 
-/// #1753: degeneracy-only bindings of one cached group set share one
+/// Degeneracy-only bindings of one cached group set share one
 /// coefficient payload allocation (so a device uploads it once), with the
 /// values of an uncached build; another operation's group set does not.
 #[test]
@@ -467,7 +467,7 @@ fn a_staged_entry_owns_one_arena_for_its_key_and_value() {
 
     // What: the key's group and source pairs and the value's destination and
     // source pairs all point into one arena (charged once), never into the
-    // source structure's, and are equal by content (single-arena ownership, #2192).
+    // source structure's, and are equal by content (single-arena ownership).
     let arena = key.group_key.codomain_tree();
     assert!(arena.shares_arena(key.group_key.domain_tree()));
     let spec = &entry.specs()[0];
@@ -513,7 +513,7 @@ fn a_staged_trace_entry_owns_one_arena_for_its_key_and_destinations() {
 
     // What: the key and every destination of a trace entry point into one
     // arena (charged once), never into the source structure's (single-arena
-    // ownership, #2192), and keep their content.
+    // ownership), and keep their content.
     let arena = key.group_key.codomain_tree();
     assert!(arena.shares_arena(key.group_key.domain_tree()));
     for pair in key.src_keys.iter().chain(entry.destinations()) {

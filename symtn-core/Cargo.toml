@@ -35,7 +35,7 @@ quick_cache = { version = "0.7", default-features = false, features = ["sharded-
 # Enables `testing` for this crate's own integration tests
 # (tests/identity_transform_allocations.rs).
 symtn-core = { path = ".", features = ["testing"] }
-# Zero-cost-claim canary (#153): a tiny hash/eq microbench for the
+# Zero-cost-claim canary: a tiny hash/eq microbench for the
 # mult-free `FusionTreeKey` path (see benches/fusion_tree_key.rs; the
 # companion `size_of` assert lives in src/tests.rs, next to the type it
 # pins). Only pulled in for `cargo bench`, never a normal build.

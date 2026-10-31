@@ -1,4 +1,4 @@
-//! The destination of a failing `*_into` is left untouched (#1551).
+//! The destination of a failing `*_into` is left untouched.
 //!
 //! Every malformed-input class of every linear destination operation —
 //! runtime, rule, space, leg index, capability, destination representation,
@@ -260,7 +260,7 @@ macro_rules! u1_suite {
         );
         rejects!(
             |dst: &_| ($snap)(&mut *$ops, dst),
-            // Both lanes admit a lazy source (#1870, Host and device) and
+            // Both lanes admit a lazy source (Host and device) and
             // report the space.
             format!("{op} lazy source, wrong space"),
             wrong($ops, &permuted),
@@ -825,7 +825,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
     );
 
     // A compact source traced over its only pair is read from the compiled
-    // terms, as eager reads it (#1870 C): admitted, and its destination
+    // terms, as eager reads it: admitted, and its destination
     // checks run. Its spectrum holds a NaN, so the value is eager's NaN.
     let s = compact();
     let mut scalar = t.trace_pairs(engine, &[(0, 1)]).unwrap();
@@ -855,7 +855,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
         }
     );
     // A lazy-adjoint source is read through its parent's storage, so a
-    // destination that is that parent aliases it (#1870). The adjoint of
+    // destination that is that parent aliases it. The adjoint of
     // `[v] ← [v]` has the destination's own space: only the alias rejects.
     rejects!(
         host_snap,
@@ -867,7 +867,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
             source.permute_into(engine, &[0], &[1], d, 1.0, 0.5)
         }
     );
-    // A compact source is admitted (#1870), so its destination checks run:
+    // A compact source is admitted, so its destination checks run:
     // here the space, on every leg dualized.
     let (_, w) = legs();
     let dual = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&w], [&w], 1).unwrap();
@@ -880,7 +880,7 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
     );
 }
 
-/// Checked Generic tree-transform `_into` (#1870): every destination class
+/// Checked Generic tree-transform `_into`: every destination class
 /// in the multiplicity-free order — runtime, rule, then (for the destination
 /// kind, alias and space) the same `Error` in [`GenericTensorError::Facade`],
 /// space before sharing.
@@ -1477,7 +1477,7 @@ fn every_device_into_leaves_a_rejected_destination_bit_identical() {
         |e: &mut dyn symtn::typed::Engine, x: &TensorMap<ZNFusionRule, f64>| x.to_cuda(e).unwrap();
     rule_suite!(engine, cuda, &rt, lift, device_snap);
 
-    // A lazy-adjoint `axpby_into` source is admitted on the device (#1874);
+    // A lazy-adjoint `axpby_into` source is admitted on the device;
     // the destination checks still reject a shared destination untouched.
     let (v, w) = legs();
     let t = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [&v, &w], 1).unwrap();

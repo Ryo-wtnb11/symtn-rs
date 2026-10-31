@@ -1,4 +1,4 @@
-//! `*_into` admits what eager admits, in every admission mode (#1870).
+//! `*_into` admits what eager admits, in every admission mode.
 //!
 //! TensorKit `cfaa073e`: `permute!`/`braid!`/`transpose!`/`repartition!`
 //! (`src/tensors/indexmanipulations.jl:217, 303, 374, 435`) check the
@@ -59,8 +59,8 @@
 //!
 //! Compile-time capability absences, recorded and not counted as passing
 //! cells: checked Generic and complex-symbol rules × CUDA (the device
-//! transforms are bounded `MultiplicityFreeRigidSymbols<Scalar = f64>`,
-//! #1756), and a complex-symbol rule × trace (neither eager nor `_into` has
+//! transforms are bounded `MultiplicityFreeRigidSymbols<Scalar = f64>`),
+//! and a complex-symbol rule × trace (neither eager nor `_into` has
 //! one). The lazy adjoint of a complex-symbol rule is covered against its
 //! materialized adjoint in `complex_symbol_lazy_adjoint.rs`. Fibonacci `permute` is anyonic and asserted as the
 //! same rejection as eager.
@@ -2117,8 +2117,8 @@ impl SectorCodec for ComplexU1 {
 /// Unique braid (`unique_braid.rs:unique_direct_braid`, TensorKit's
 /// `SymmetricBraiding` branch, `braiding_manipulations.jl:221-229`), which
 /// takes `R(b, a)` for `a` crossing `b`. That equals the Artin path's `R(a, b)`
-/// only for a real `R`; for this one it is the conjugate (reported with
-/// #1870, outside the contraction lane).
+/// only for a real `R`; for this one it is the conjugate (outside the
+/// contraction lane).
 #[derive(Clone, Copy)]
 struct AlternatingZ3Squared;
 

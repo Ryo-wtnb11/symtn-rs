@@ -1,5 +1,5 @@
 //! `LieGroupFusionRule::rule_identity` returns the identity stored at construction:
-//! no allocation per call (#1750).
+//! no allocation per call.
 
 #![cfg(feature = "cgc-gen")]
 

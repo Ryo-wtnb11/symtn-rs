@@ -452,7 +452,7 @@ fn validated_layout_does_not_retain_provider_allocation() {
 fn validated_layout_does_not_retain_the_adjoint_memo() {
     // What: a layout taken after a lazy-adjoint contraction filled the
     // parent's adjoint memo neither keeps that memo nor charges differently
-    // from a never-adjointed layout (#1419 detach_runtime trace).
+    // from a never-adjointed layout (`detach_runtime`).
     let provider = Arc::new(Z2FusionRule);
     let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         z2_matrix_space(),

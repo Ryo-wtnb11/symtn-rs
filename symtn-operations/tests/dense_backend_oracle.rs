@@ -1,4 +1,4 @@
-//! `DenseTreeTransformOperations` runs the one batched-GEMM replay (#1767).
+//! `DenseTreeTransformOperations` runs the one batched-GEMM replay.
 //! Its values are checked against the explicit-index oracle in `common`
 //! (`Fixture::expected_scaled`), which walks each fixture's block metadata and
 //! never reads the compiled structure; the per-block strided driver serves only

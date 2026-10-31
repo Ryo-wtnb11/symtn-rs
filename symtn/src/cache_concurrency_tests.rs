@@ -1,5 +1,5 @@
 //! Release-mode concurrency gates of the process-global completed-transformer
-//! and composed-coefficient caches (#2014): no
+//! and composed-coefficient caches: no
 //! single-flight, so no caller parks on another's build, even when work
 //! stealing re-enters a caller's Rayon region. Each case runs in its own
 //! process (the counters are process-global) under a watchdog, issues one
@@ -267,7 +267,7 @@ fn cache_concurrency_with_a_racing_clear() {
 #[test]
 fn global_clear_takes_no_runtime_or_device_lock() {
     // Isolated: this clear is process-global and would land inside siblings'
-    // warm-up-to-measurement windows (#2084).
+    // warm-up-to-measurement windows.
     if crate::test_cache::run_isolated_or_return(
         "SYMTN_GLOBAL_CLEAR_TAKES_NO_RUNTIME_LOCK_ISOLATED",
         "cache_concurrency_tests::global_clear_takes_no_runtime_or_device_lock",

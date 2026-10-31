@@ -1,14 +1,14 @@
 //! Host/device traffic of the device diagonal factorizations, whatever the
 //! number of coupled sectors.
 //!
-//! - Compact SVD writes each sector's singular values into `s` on the device
-//!   (#1536): it downloads nothing, and uploads only the three zero-initialized
-//!   factors (the only device allocation path, #740), so `s` costs no
+//! - Compact SVD writes each sector's singular values into `s` on the device:
+//! it downloads nothing, and uploads only the three zero-initialized
+//!   factors (the only device allocation path), so `s` costs no
 //!   upload beyond its zero initialization.
 //! - Full EIGH must read its eigenvalues on the host (non-finite check, ascending
-//!   order, factor-space plan), all sectors' with one download (#1484), and
+//!   order, factor-space plan), all sectors' with one download, and
 //!   uploads `d` once, already filled, together with `v`'s zeros; with
-//!   cuSOLVER's ascending order no selector is uploaded (#1985).
+//!   cuSOLVER's ascending order no selector is uploaded.
 //!
 //! [`cuda_transfer_stats`] snapshots count only the calling thread.
 //!
@@ -70,7 +70,7 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
             s.to_host(cuda).unwrap(),
             vh.to_host(cuda).unwrap(),
         );
-        // Only the finite-input scan's one real scalar (#2038) comes back.
+        // Only the finite-input scan's one real scalar comes back.
         assert_eq!(
             (svd.d2h_calls, svd.d2h_bytes),
             (1, bytes(1)),
@@ -127,7 +127,7 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         assert!(eigh.d2h_bytes >= bytes(eigenvalues), "{charges}: {eigh:?}");
         // `d` arrives filled in its one dense upload, beside `v`'s zeros; the
         // remainder is per-sector scalars. cuSOLVER's order is already the
-        // published ascending one (#1985), so no `n_c x n_c` selector is
+        // published ascending one, so no `n_c x n_c` selector is
         // uploaded.
         let d_len = d.materialize(engine).unwrap().dense_data().unwrap().len();
         let v_len = v.materialize(engine).unwrap().dense_data().unwrap().len();

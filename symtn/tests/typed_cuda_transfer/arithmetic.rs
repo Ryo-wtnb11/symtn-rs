@@ -220,7 +220,7 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
                 .unwrap(),
         );
         // TensorKit's `scale(x, 0)` drops a zero-scaled operand, NaN and Inf
-        // included (#1442).
+        // included.
         assert!(actual_scale_zero
             .materialize(engine)
             .unwrap()
@@ -304,7 +304,7 @@ fn typed_cuda_arithmetic_matches_host_lazy_ownership_and_concurrency() {
         .unwrap()
         .iter()
         .all(|value| value.to_bits() == 0));
-    // One lazy and one owned operand (#1874): the Host rule, an owned
+    // One lazy and one owned operand: the Host rule, an owned
     // result on the receiver's provider.
     let mixed = lhs_lazy.axpby(cuda, alpha, &rhs_device, beta).unwrap();
     assert!(std::ptr::eq(mixed.provider(), lhs_provider));

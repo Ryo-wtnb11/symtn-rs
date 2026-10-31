@@ -1,4 +1,4 @@
-//! Fixtures several symtn test targets share verbatim (#1827).
+//! Fixtures several symtn test targets share verbatim.
 //!
 //! Test targets include this file with
 //! `#[path = ".../tests/support/fixtures.rs"] mod fixtures;`. Leg fixtures

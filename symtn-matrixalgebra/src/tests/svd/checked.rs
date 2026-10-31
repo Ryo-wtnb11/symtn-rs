@@ -965,7 +965,7 @@ fn compact_diagonal_on_an_expert_bond_layout_is_normalized_not_refused() {
         };
         assert_eq!(space.space().structure(), expert.space().structure());
     }
-    // #1994: the elementwise matrix functions admit the expert layout through
+    // The elementwise matrix functions admit the expert layout through
     // the same structural admission (no dense fallback), and a spectrum
     // factor's bond `fuse(V)` is the canonical layout, not the expert one.
     admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&expert, &spectrum).unwrap();
@@ -1014,7 +1014,7 @@ fn padded_layout(space: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
 fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
-    // What (#1994): the admission of inv/pinv/exp/solve is a
+    // What: the admission of inv/pinv/exp/solve is a
     // structural check on the bond's blocks. Warm, it allocates nothing and
     // queries no provider, on the canonical and on an expert layout, in both
     // fusion modes; misuse is still refused.
@@ -1112,7 +1112,7 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
 #[test]
 fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admission() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What (#1994): compact QR/LQ/polar keep the input space and emit
+    // What: compact QR/LQ/polar keep the input space and emit
     // their spectra in region order. On an aligned expert layout whose
     // blocks are not in sector order that order is not sector order, so the
     // elementwise admission must accept an unsorted spectrum exactly as the

@@ -1,6 +1,6 @@
-//! Warm-replay microbench for issue #232: a U(1) many-charge (21-sector),
+//! Warm-replay microbench: a U(1) many-charge (21-sector),
 //! degeneracy-2 rank-4 permute is the regime where per-call `fuse_pair_layout`
-//! recomputation dominated (Phase-0: ~29% self-time). Baking the fused layout
+//! recomputation dominated. Baking the fused layout
 //! per (block, role) at compile time removes that recompute from replay.
 //!
 //! Each iteration replays 21 Single-block permuted copies through the strided

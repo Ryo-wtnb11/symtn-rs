@@ -1,4 +1,4 @@
-//! The per-group composed-coefficient cache (cache 4 of #2014; #1570).
+//! The per-group composed-coefficient cache (coefficient cache).
 //!
 //! A sector change misses the completed-transformer cache. The rebuild must
 //! then recompose only the source fusion-tree groups

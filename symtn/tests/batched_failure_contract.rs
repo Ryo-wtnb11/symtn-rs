@@ -1,4 +1,4 @@
-//! The one failure rule of every batched plan (#1757): a failed `execute` or
+//! The one failure rule of every batched plan: a failed `execute` or
 //! `execute_into` (validation error, signature mismatch, injected backend
 //! error) leaves `take_output() == None`, and the next valid call on the same
 //! workspace succeeds and equals eager per member. Backend errors are injected

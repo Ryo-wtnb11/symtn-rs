@@ -657,7 +657,7 @@ mod tests {
         );
     }
 
-    /// What: the owned trace follows TensorKit's scaling (#1438): a zero `α`
+    /// What: the owned trace follows TensorKit's scaling: a zero `α`
     /// yields exact zeros for `±inf`/NaN sources (`scale(x, 0) = zero(x) * 0`;
     /// Julia's `trace_permute!(tdst, tsrc, p, q, 0, 0)` returns zeros), a zero
     /// coefficient term is skipped, and `α′ = α * coeff` scales every traced

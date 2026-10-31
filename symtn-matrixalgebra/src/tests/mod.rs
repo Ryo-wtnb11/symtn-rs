@@ -1,5 +1,5 @@
 //! Shared fixtures, spy executors and imports for symtn-matrixalgebra's
-//! test suite, split by responsibility into sibling files (#1596).
+//! test suite, split by responsibility into sibling files.
 
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, BraidingStyleKind, CheckedGenericAdmissionMode,
@@ -45,7 +45,7 @@ use fixtures::*;
 use generic_fixtures::*;
 use spies::*;
 
-// The checked values entries under their pre-#1862 names: the one entry per
+// The checked values entries under their earlier names: the one entry per
 // family in checked mode, on a source or on dense storage.
 fn svd_vals_checked_generic<L, E, R, D>(
     lease: L,

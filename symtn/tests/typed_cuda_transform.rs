@@ -1,5 +1,5 @@
 //! Real-device gates for typed structural transforms on CUDA tensors
-//! (issue #1322): `permute`, `braid`, `transpose`
+//!: `permute`, `braid`, `transpose`
 //! and `repartition` on `TensorMap<R, D, CudaStorage<D>>`.
 //!
 //! Evidence chain, as the design review fixed it:
@@ -408,7 +408,7 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
     );
 }
 
-/// #2192: Unique fusion is `NoCache`, so a degeneracy-only change misses
+/// Unique fusion is `NoCache`, so a degeneracy-only change misses
 /// the completed transformer and every block's phase is recomputed. The
 /// device permute right after that change, and the warm one after it, must
 /// match the Host. The timings are an observation, not a gate.
@@ -593,7 +593,7 @@ fn device_transform_laws_hold_on_device_tensors() {
 fn device_repartition_reaches_every_split_and_round_trips() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
-    // The #1310 residual: codomain/domain repartition, i.e. bends, on device.
+    // The remaining case: codomain/domain repartition, i.e. bends, on device.
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let host: TensorMap<_, f64> =
@@ -1147,7 +1147,7 @@ fn device_transforms_of_an_empty_tensor_produce_an_empty_tensor() {
 }
 
 // ---------------------------------------------------------------------------
-// `*_into` (issue #1329)
+// `*_into`
 // ---------------------------------------------------------------------------
 
 /// A destination whose every element is NaN, on the model's space. Overwrite
@@ -1593,7 +1593,7 @@ fn device_into_matches_the_hosts_nan_pattern_for_every_alpha() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
     // At `alpha == 0` device and Host follow VectorInterface's
-    // `scale(x, 0) = zero(x) * 0` (#1438): zeros whatever the source holds,
+    // `scale(x, 0) = zero(x) * 0`: zeros whatever the source holds,
     // as TensorKit's `permute!(tdst, tsrc, p, 0, 0)`. Every other scale
     // multiplies, so a NaN or infinite source poisons the destination
     // exactly where the Host's does.
@@ -1765,7 +1765,7 @@ fn device_into_of_an_empty_tensor_succeeds() {
 fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
-    // #1870: a lazy-adjoint source of the device `*_into` is read
+    // A lazy-adjoint source of the device `*_into` is read
     // through its parent's device payload (storage-mapped structure, storage
     // conjugation per task), as on Host. Each call is compared against the
     // Host `*_into` of the same lazy source and against the reference steps

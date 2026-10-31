@@ -1,5 +1,5 @@
 //! Real-device gates for `twist` in both directions on CUDA tensors
-//! (issue #1330).
+//!.
 //!
 //! A twist is not a tree transform: the Host builds a per-block ribbon-twist
 //! factor at call time and scales a copy, so the evidence chain is not the

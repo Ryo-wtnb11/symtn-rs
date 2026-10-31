@@ -1,4 +1,4 @@
-//! The rank-revealing null space as a composition (#1984).
+//! The rank-revealing null space as a composition.
 //!
 //! TensorKit's `left_null(t; alg = :svd, trunc)` / `right_null` is, in symtn,
 //! `svd_full` → `diagview` of `s` → `extend_spectrum` on the factor's bond →

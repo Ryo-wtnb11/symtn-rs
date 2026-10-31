@@ -391,7 +391,7 @@ fn trace_pairs_of_nothing_is_the_source() {
 fn trace_pairs_rejects_malformed_pairs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
-    // Out-of-range and repeated axes are an invalid axis subset (#1873).
+    // Out-of-range and repeated axes are an invalid axis subset.
     let runtime = runtime();
     let typed = z2_endomorphism(&runtime);
 

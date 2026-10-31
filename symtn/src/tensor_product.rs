@@ -1698,7 +1698,7 @@ mod tests {
     #[test]
     fn typed_ordered_contract_is_one_fused_seam_call_and_no_permute_transform() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        // What (#580 group 6, gate 1): a typed `contract` with a
+        // What: a typed `contract` with a
         // non-identity output order runs the fused contraction seam exactly
         // once and never a separate permute transform.
         let (_runtime, tensor) = typed_z2_facade_tensor(engine);
@@ -1740,7 +1740,7 @@ mod tests {
     #[test]
     fn typed_split_moving_contract_is_one_fused_seam_call_and_no_permute_transform() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        // What (#1549 gate b): a `ContractSpec` that moves open legs across
+        // What: a `ContractSpec` that moves open legs across
         // the codomain/domain split runs the fused contraction seam once and
         // no separate permute transform, where the composition it is defined
         // by (default-split contract, then permute) runs one of each.

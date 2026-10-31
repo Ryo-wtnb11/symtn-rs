@@ -1,5 +1,4 @@
-//! TensorKit `norm(t, p)` correspondence for `TensorMap::norm` (issue #597,
-//! item 2).
+//! TensorKit `norm(t, p)` correspondence for `TensorMap::norm`.
 //!
 //! TensorKit 0.17 `src/tensors/linalg.jl:257-275`:
 //!
@@ -230,7 +229,7 @@ fn compact_norm_p_equals_the_dense_answer() {
     }
 }
 
-// --- `norm(t, Inf)` on non-finite payloads (issue #1286) ------------------
+// --- `norm(t, Inf)` on non-finite payloads ------------------
 //
 // TensorKit reduces with `mapreduce(max, …)` (`src/tensors/linalg.jl:_norm`,
 // revision cfaa073) and Julia's `max` returns NaN when either argument is NaN.

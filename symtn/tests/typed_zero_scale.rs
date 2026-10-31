@@ -1,4 +1,4 @@
-//! TensorKit's zero-scale rule on the typed `add`/`scale` family (#1442).
+//! TensorKit's zero-scale rule on the typed `add`/`scale` family.
 //!
 //! Oracle: Julia 1.11, TensorKit main f87ca7fe (version 0.17.1),
 //! VectorInterface 0.6.0. For `x, y ∈ V ⊗ V ← V`

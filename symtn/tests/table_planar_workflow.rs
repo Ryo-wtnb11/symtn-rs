@@ -1,4 +1,4 @@
-//! The public planar workflow (#633) through `TableRule`: Fibonacci against
+//! The public planar workflow through `TableRule`: Fibonacci against
 //! a TensorKit golden-chain oracle, and Ising against TensorKit's
 //! `IsingAnyon` on gauge-invariant quantities plus the exact vertex gauge
 //! between AnyonWiki's and TensorKit's Ising data.

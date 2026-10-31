@@ -799,7 +799,7 @@ fn a_non_canonical_composition_misses_the_direct_core_with_the_unchanged_message
     assert!(!swapped && !core.is_fully_direct());
 }
 
-/// #2147: a lazy adjoint `P'` whose own tree transform is the identity, on
+/// A lazy adjoint `P'` whose own tree transform is the identity, on
 /// the DynamicTree route (the rhs `U` is permuted), is borrowed into the core
 /// GEMM with an adjoint op when its parent tiles canonical coupled-sector
 /// matrices, and copied when the parent stores them reordered. The copied
@@ -920,7 +920,7 @@ fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
     }
 }
 
-/// #2159: the DynamicTree scorer charges a borrowable identity adjoint
+/// The DynamicTree scorer charges a borrowable identity adjoint
 /// nothing, as TensorKit `cfaa073e` `contract_memcost` does through
 /// `has_shared_permute(::AdjointTensorMap)`. `A = P'` (8 elements) contracts
 /// its domain `(2, 3)` with `U`'s codomain in reverse order `(1, 0)`, `U`
@@ -1342,7 +1342,7 @@ fn run_core_plan(
     output
 }
 
-/// What (#2129): the checked Generic core plan of canonical staged
+/// What: the checked Generic core plan of canonical staged
 /// structures compiles from coupled regions (no per-subblock layout) and is
 /// bitwise identical to the per-subblock builder; a non-canonical operand
 /// tiling falls back to that builder. Outer multiplicity (`1 ⊗ 1 → 1` twice),

@@ -475,7 +475,7 @@ fn external_sector_lookup_rejects_a_short_sector_tuple() {
 
 #[test]
 fn sector_leg_dual_shares_the_sector_data_the_dual_fixes() {
-    // What: #1403. A leg whose sector -> degeneracy map the rule's dual
+    // What: a leg whose sector -> degeneracy map the rule's dual
     // fixes shares its storage with its dual, as TensorKit's `dual(V)`
     // shares `V.dims`; the dual is otherwise content-identical to the
     // eagerly built leg, including equality and hashing.
@@ -539,7 +539,7 @@ fn assert_shared_dual<R: FusionRule>(rule: &R, leg: &SectorLeg, expected: &Secto
 
 #[test]
 fn sector_leg_dual_is_shared_for_non_self_dual_self_dual_and_product_rules() {
-    // What: #1403. The dual shares storage for every map, and its content
+    // What: the dual shares storage for every map, and its content
     // is the hand-computed dual map with the flag flipped.
     for is_dual in [false, true] {
         let u1_leg = SectorLeg::new([(u1(-2), 1), (u1(0), 3), (u1(1), 5)], is_dual);

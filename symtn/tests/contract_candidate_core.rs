@@ -1,4 +1,4 @@
-//! Zero-copy TensorKit contraction candidates (#1468).
+//! Zero-copy TensorKit contraction candidates.
 //!
 //! TensorKit `contract!` (tensoroperations.jl L318-357) scores the lhs- and
 //! rhs-sorted pairings in both operand orders, and
@@ -656,7 +656,7 @@ fn zero_copy_candidates_with_an_output_permute_match_tensorkit_and_the_dense_exp
     at::<Complex32>();
 }
 
-/// #1626: the pooled copyC temporary changes no arithmetic. Every probe
+/// The pooled copyC temporary changes no arithmetic. Every probe
 /// equals its literal zero-copy contraction then permute, bit for bit.
 fn output_permute_bits<R, D>(
     engine: &mut dyn Engine,
@@ -692,7 +692,7 @@ fn output_permute_bits<R, D>(
     }
 }
 
-/// #1631: `contract_into` takes the same copyC route as `contract`, so it
+/// `contract_into` takes the same copyC route as `contract`, so it
 /// equals the two copyC steps with the caller's α/β on the permute
 /// (`tensoradd!(C, Cnew, pAB, false, α, β)`), bit for bit, for β = 0 (over a
 /// NaN destination), β = 1 and a general β, with owned and lazy operands.
@@ -879,7 +879,7 @@ fn zero_copy_fermionic_candidates_with_an_output_permute_match_tensorkit() {
     fermionic_output_permute_values::<Complex32>();
 }
 
-/// Review inputs of #1475 where `dim(C)` dwarfs the operands, so
+/// Inputs where `dim(C)` dwarfs the operands, so
 /// TensorKit's `_contract_memcost` (tensoroperations.jl L378) prefers
 /// copying both operands (m3/m4, `dim(A) + dim(B)`) over `copyC`: with
 /// `v = u1{-1:16, 0:16, 1:16}` and `c = u1{0:1}`,
@@ -889,7 +889,7 @@ fn zero_copy_fermionic_candidates_with_an_output_permute_match_tensorkit() {
 /// - `R2` `P'[3,2]·B[1,0] → [2,3,0,1]` with `P: c⊗c ← v⊗v`,
 ///   `B: c⊗c ← v⊗v`;
 /// - `R3` the owned sort `A[3,2]·B[1,0] → [2,3,0,1]`;
-/// - `R4` the #1466 core form `A[2,3]·B[0,1] → [2,3,0,1]`.
+/// - `R4` the core form `A[2,3]·B[0,1] → [2,3,0,1]`.
 fn large_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule, f64>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let v = u1(&[(-1, 16), (0, 16), (1, 16)]);
@@ -936,7 +936,7 @@ fn large_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule
 /// - `X1` `A[3,2]·B[1,0] → [2,3,0,1]`, `A: v⊗v ← w⊗w`, `B: w⊗w ← v⊗v`;
 /// - `X2` `A[3,2]·Q'[1,0]`, `Q: v⊗v ← w⊗w`;
 /// - `X3` `P'[3,2]·B[1,0]`, `P: w⊗w ← v⊗v`;
-/// - `X4` the #1466 core form `A[2]·B[0] → [2,3,0,1]` with
+/// - `X4` the core form `A[2]·B[0] → [2,3,0,1]` with
 ///   `A: v⊗v ← u`, `B: u ← v⊗v`, `u = u1{0:500}`.
 fn inactive_output_cases(runtime: &Runtime) -> Vec<Case<symtn::sector::U1FusionRule, f64>> {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -1063,7 +1063,7 @@ fn dynamic_tree_with_a_fresh_destination_allocates_per_region_not_per_tree() {
 }
 
 /// `dim(C)` below both operands, so `copyC` wins TensorKit's
-/// `_contract_memcost` without scoring the DynamicTree candidates (#1488):
+/// `_contract_memcost` without scoring the DynamicTree candidates:
 /// with `v = u1{-1:8, 0:8, 1:8}` and `c = u1{0:2, 1:1}`,
 ///
 /// - `S1` the sort `A[3,2]·B[1,0] → [2,3,0,1]`, `A: c⊗c ← v⊗v`,
@@ -1132,7 +1132,7 @@ fn small_output_copy_c_shapes_match_tensorkit_with_one_output_transform() {
     }
 }
 
-/// The one shape the `copyC` shortcut still scores (#1488): a swap whose
+/// The one shape the `copyC` shortcut still scores: a swap whose
 /// `dim(C)` ties the smaller operand and whose requested order is the
 /// identity, the only order in which an A·B candidate copies no output:
 /// `A[0,1]·B[2,3] → [0,1,2,3]` over `v⊗v ← v⊗v`. Debug builds check the

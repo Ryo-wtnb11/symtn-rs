@@ -690,7 +690,7 @@ where
     .unwrap()
 }
 
-/// #1559: `isomorphism(V, V)` is the identity on a checked-Generic provider
+/// `isomorphism(V, V)` is the identity on a checked-Generic provider
 /// with fusion multiplicity, and composing it on either side returns the
 /// operand; `isometry` satisfies `w† ∘ w = isomorphism(domain, domain)`.
 fn check_generic_structural_constructors<R>(

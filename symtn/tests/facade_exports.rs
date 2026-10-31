@@ -1,4 +1,4 @@
-//! Export firewall for the `symtn` facade (#1565).
+//! Export firewall for the `symtn` facade.
 //!
 //! Each typed operation has exactly one public path, the method on
 //! `symtn::typed::TensorMap`; lower-layer free functions and whole-crate

@@ -1,7 +1,7 @@
-//! Base-family oracle for the single-precision payloads (#1315).
+//! Base-family oracle for the single-precision payloads.
 //!
 //! Oracle, tolerance and fixtures come from `single_precision_oracle`, the
-//! module this suite shares with the factorization suite (#1324); its rationale
+//! module this suite shares with the factorization suite; its rationale
 //! is documented there.
 //!
 //! Both dtypes are driven from one `Runtime`. That is deliberate: the

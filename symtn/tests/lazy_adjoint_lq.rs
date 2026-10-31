@@ -1,4 +1,4 @@
-//! LQ of a lazy adjoint equals LQ of its materialized adjoint (#2070): the
+//! LQ of a lazy adjoint equals LQ of its materialized adjoint: the
 //! same factor spaces and the same values in the positive-diagonal gauge,
 //! for compact and full LQ, real and complex payloads, non-square coupled
 //! blocks with degeneracy above one, dual legs, and Abelian, fermionic and

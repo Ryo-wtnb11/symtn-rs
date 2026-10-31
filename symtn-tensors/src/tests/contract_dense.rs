@@ -1002,7 +1002,7 @@ fn tensorcontract_structure_replays_explicit_block_terms_and_applies_beta_once()
     assert_eq!(dst.data(), &[259.0]);
 }
 
-fn issue311_contract_structures() -> (BlockStructure, BlockStructure, BlockStructure) {
+fn contract_structures_two_blocks() -> (BlockStructure, BlockStructure, BlockStructure) {
     let lhs = BlockStructure::from_blocks_with_rank(
         2,
         vec![
@@ -1030,7 +1030,7 @@ fn issue311_contract_structures() -> (BlockStructure, BlockStructure, BlockStruc
     (dst, lhs, rhs)
 }
 
-fn issue311_contract_specs() -> [TensorContractBlockSpec; 2] {
+fn contract_specs_two_blocks() -> [TensorContractBlockSpec; 2] {
     [
         TensorContractBlockSpec::with_coefficient(0, 0, 0, 0.5),
         TensorContractBlockSpec::with_coefficient(0, 1, 1, 2.0),
@@ -1040,13 +1040,13 @@ fn issue311_contract_specs() -> [TensorContractBlockSpec; 2] {
 #[test]
 fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
+    let (dst_structure, lhs_structure, rhs_structure) = contract_structures_two_blocks();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
-        &issue311_contract_specs(),
+        &contract_specs_two_blocks(),
     )
     .unwrap();
     let dst_structure = Arc::new(dst_structure);
@@ -1082,13 +1082,13 @@ fn prepared_structure_scales_inactive_destination_once_for_each_beta() {
 #[test]
 fn inactive_scaling_waits_for_complete_raw_replay_validation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
+    let (dst_structure, lhs_structure, rhs_structure) = contract_structures_two_blocks();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
-        &issue311_contract_specs(),
+        &contract_specs_two_blocks(),
     )
     .unwrap();
     let dst_structure = Arc::new(dst_structure);
@@ -1125,13 +1125,13 @@ fn inactive_scaling_waits_for_complete_raw_replay_validation() {
 #[test]
 fn complex_structure_scales_inactive_destination_without_norm_projection() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (dst_structure, lhs_structure, rhs_structure) = issue311_contract_structures();
+    let (dst_structure, lhs_structure, rhs_structure) = contract_structures_two_blocks();
     let structure = TensorContractStructure::compile_structures_with_block_specs(
         &dst_structure,
         &lhs_structure,
         &rhs_structure,
         TensorContractSpec::with_default_output_order(&[1], &[0]),
-        &issue311_contract_specs(),
+        &contract_specs_two_blocks(),
     )
     .unwrap();
     let dst_structure = Arc::new(dst_structure);

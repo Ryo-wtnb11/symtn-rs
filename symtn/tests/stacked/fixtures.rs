@@ -1,4 +1,4 @@
-//! Shared fixtures for the `StackedTensorMap` gates (#1497).
+//! Shared fixtures for the `StackedTensorMap` gates.
 
 #![allow(dead_code, unused_macros)]
 
@@ -133,7 +133,7 @@ macro_rules! for_each_symmetry {
 /// sector dropped (several surviving blocks, some removed); one index of
 /// the last sector (a one-dimensional charged leg); and the first and last
 /// position of every sector of degeneracy at least three, every position of
-/// the others (two runs per such sector, #2095).
+/// the others (two runs per such sector).
 pub fn selections<R>(leg: &symtn::typed::GradedSpace<R>) -> Vec<symtn::typed::LegSelection<R>>
 where
     R: symtn::sector::TypedSectorAdmission,

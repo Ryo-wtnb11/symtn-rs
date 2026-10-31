@@ -1,5 +1,5 @@
 //! The quantum-dimension weight of truncation and weighted reductions is the
-//! exact `dim(c)` in both admission modes (#1871).
+//! exact `dim(c)` in both admission modes.
 //!
 //! TensorKit weights `findtruncated(::SectorVector, ...)` by `dim(c)`
 //! (`src/factorizations/truncation.jl:187,239`), an `Int` for SU(N), so its

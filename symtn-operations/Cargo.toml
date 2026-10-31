@@ -31,15 +31,15 @@ blas-openblas = ["tenferro", "symtn-dense/blas-openblas"]
 blas-mkl = ["tenferro", "symtn-dense/blas-mkl"]
 provider-inject = ["tenferro", "symtn-dense/provider-inject"]
 # Unstable, internal: reference oracle for tree-transform replay (per-block
-# strided driver and scalar recoupling); production replay never uses it
-# (#1767). It also adds `HostKernelAdapter::recoupling_src_times_u_transpose`,
+# strided driver and scalar recoupling); production replay never uses it.
+# It also adds `HostKernelAdapter::recoupling_src_times_u_transpose`,
 # a required trait method, so only in-workspace tests/benches may enable it.
 testing = []
 cuda = ["symtn-dense/cuda"]
 
 [dev-dependencies]
 symtn-operations = { path = ".", default-features = false, features = ["testing"] }
-# Microbench for the #230 non-contiguous strided-combine regime. Informational,
+# Microbench for the non-contiguous strided-combine regime. Informational,
 # not a pass/fail gate (shared CI runners are too noisy); the real gate is the
 # size_of canary in host_scalar_kernels.rs. Only pulled in for `cargo bench`.
 criterion = { version = "0.5", default-features = false }

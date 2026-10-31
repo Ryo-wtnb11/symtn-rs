@@ -1,4 +1,4 @@
-//! CPU-only half of the device tree-transform evidence (issue #1304).
+//! CPU-only half of the device tree-transform evidence.
 //!
 //! The device suite (`cuda_tree_transform.rs`, `#[ignore]`) asserts that the
 //! device executor reproduces the explicit-index oracle in `common`. That is
@@ -366,8 +366,8 @@ fn the_caller_scale_multiplies_the_scatter_once_and_not_the_pack() {
 
 #[test]
 fn a_zero_caller_scale_writes_zeros_over_a_non_finite_source() {
-    // What: the host follows VectorInterface's `scale(x, 0) = zero(x) * 0`
-    // (#1438): a zero scale writes exact zeros over a NaN source, in the
+    // What: the host follows VectorInterface's `scale(x, 0) = zero(x) * 0`:
+    // a zero scale writes exact zeros over a NaN source, in the
     // Single moves and in the Multi scatter whose recoupling GEMM did see
     // the NaN, as TensorKit's `permute!(tdst, tsrc, p, 0, 0)` does; the
     // explicit-index oracle, which the device is compared against, agrees.

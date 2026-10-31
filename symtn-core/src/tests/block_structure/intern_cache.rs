@@ -52,7 +52,7 @@ fn local_block_structure_intern(
 
 #[test]
 fn block_structure_intern_hash_collision_never_aliases() {
-    // What (#1998): a live content of different blocks under the same hash key
+    // What: a live content of different blocks under the same hash key
     // is neither returned for the colliding content nor replaced by it; the
     // colliding content comes back uninterned with its own id.
     let key0 = local_block_structure_intern_key(50);

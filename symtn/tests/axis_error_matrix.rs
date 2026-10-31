@@ -1,4 +1,4 @@
-//! One facade variant per axis-misuse kind (#1873): a malformed permutation
+//! One facade variant per axis-misuse kind: a malformed permutation
 //! is `OperationError::InvalidPermutation { axes, rank }` and a malformed axis
 //! subset is `OperationError::InvalidAxisSet { tensor, axes, rank }` at every
 //! entry point — transform, contract, trace, factorization leg roles, eager

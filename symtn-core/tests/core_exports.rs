@@ -1,4 +1,4 @@
-//! Export firewall for `symtn-core` (#1805).
+//! Export firewall for `symtn-core`.
 //!
 //! Pins the exact names reachable at the crate root, under every feature
 //! combination at once, so adding or removing one fails here and is reviewed
@@ -7,9 +7,8 @@
 //! the few that tests outside the crate use are forwarded only through the
 //! `testing` feature's `symtn_core::testing`, pinned separately below.
 //! `merge_fusion_trees_generic` was deleted, and so were the static-rank
-//! `TensorMap` / `Tensor` and their `Trivial` marker (#2222) and the
-//! static-rank `TensorMapSpace` / `ProductSpace` / `FusionTensorMapSpace`
-//! (#2253).
+//! `TensorMap` / `Tensor` and their `Trivial` marker and the
+//! static-rank `TensorMapSpace` / `ProductSpace` / `FusionTensorMapSpace`.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence. The crate root re-exports its private modules with
@@ -68,7 +67,7 @@ fn testing_gated(code: &str, at: usize) -> bool {
 }
 
 /// Names a module file exports at its top level, each with whether it is
-/// gated behind the `testing` feature (#1854). `pub use child::*` of a
+/// gated behind the `testing` feature. `pub use child::*` of a
 /// child module recurses into the child's file (`dir/child.rs` from `lib.rs`,
 /// `dir/<module>/child.rs` otherwise); `pub mod m` exports `m` without
 /// recursing (its items live under `m::`).
@@ -377,11 +376,11 @@ fn symtn_core_exports_exactly_the_pinned_names() {
 }
 
 /// The infallible Generic symbol tier is test-only: production Generic is
-/// checked only (#1854).
+/// checked only.
 #[test]
 fn infallible_generic_tier_is_exported_only_behind_testing() {
     let expected = [
-        // Measurement counters of the Generic block composer (#1962).
+        // Measurement counters of the Generic block composer.
         "GenericBlockStepCounts",
         "GenericFusionSymbols",
         "GenericRigidSymbols",

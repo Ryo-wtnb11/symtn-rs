@@ -1,5 +1,5 @@
 //! The infallible Generic testing tier weighs a sector by its exact quantum
-//! dimension, as the multiplicity-free tier does (#2076).
+//! dimension, as the multiplicity-free tier does.
 //!
 //! TensorKitSectors `dim(::Sector)` is an exact categorical dimension (`Int`
 //! for SU(2)); TensorKit `findtruncated(::SectorVector, ...)` compares

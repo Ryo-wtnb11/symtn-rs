@@ -1,4 +1,4 @@
-//! #1614: an intermediate network step whose next-use orientation moves legs
+//! An intermediate network step whose next-use orientation moves legs
 //! across the codomain/domain split is one contraction into one retained
 //! buffer, not a contraction followed by a separate permute call into a
 //! second one. On the copyC route the data moved is the same (GEMM into the
@@ -6,7 +6,7 @@
 //! and its second retained buffer.
 //!
 //! This test, with the step loop's structure (no permute path per step), is
-//! the evidence for #1614's gate: symtn-network has no transform-seam
+//! the evidence for the orientation gate: symtn-network has no transform-seam
 //! counter, so the warm transform-lookup count and the retained workspace
 //! bytes stand in for it.
 
@@ -122,7 +122,7 @@ fn split_moving_intermediate_retains_one_buffer_and_one_transform() {
     assert!(warm_lookups <= 1, "warm transform lookups: {warm_lookups}");
     // What: the idle workspace keeps one intermediate buffer plus metadata.
     // A separate orientation permute retains a second intermediate-sized
-    // buffer (1,319,096 B on the pre-#1614 lowering against 660,988 B).
+    // buffer (1,319,096 B with a separate permute against 660,988 B).
     assert!(
         retained >= intermediate_bytes && retained < intermediate_bytes + intermediate_bytes / 4,
         "retained workspace bytes {retained} vs one intermediate buffer {intermediate_bytes}"

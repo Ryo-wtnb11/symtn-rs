@@ -474,7 +474,7 @@ fn sun_checked_generic_adjoint_and_reductions_preserve_provider_and_errors() {
 /// TensorKit's zero-scale rule on the checked-generic `add`/`scale`
 /// (VectorInterface `scale(x, α) = (iszero(α) ? zero(x) : x) * α`, observed on
 /// TensorKit 0.17.1 as in `typed_zero_scale.rs`): a zero coefficient drops its
-/// operand, NaN and `Inf` included (#1442).
+/// operand, NaN and `Inf` included.
 #[test]
 fn checked_generic_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -850,7 +850,7 @@ fn checked_inner_and_norm_take_one_weight_per_sector_and_keep_error_precedence()
         ));
     }
     assert_eq!(provider.coefficient_queries.load(Ordering::Relaxed), 0);
-    // A compact diagonal reduces through the same weights (#1867), so it
+    // A compact diagonal reduces through the same weights, so it
     // fails exactly as the dense and lazy inputs do.
     assert!(matches!(
         diagonal.inner(engine, &diagonal).unwrap_err(),

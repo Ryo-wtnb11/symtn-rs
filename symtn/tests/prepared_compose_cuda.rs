@@ -1,4 +1,4 @@
-//! Device gates of `ComposePlan` and its `ContractWorkspace` (#1639).
+//! Device gates of `ComposePlan` and its `ContractWorkspace`.
 //!
 //! CUDA transfer counters are thread-local, so these tests run concurrently.
 //! Run with `cargo test -p symtn --no-default-features --features cuda,cpu-faer
@@ -343,8 +343,8 @@ fn device_counters_are_pinned_against_the_base() {
     assert_eq!(rows, pinned, "observed rows are printed above");
 }
 
-/// Recorded on qg1 (A100) at the base `ec3dea5d` with these tests and
-/// unchanged by #1775, less the dropped plan-cache columns. Every column is
+/// Recorded on an A100 with these tests, less the plan-cache columns.
+/// Every column is
 /// structural (transfers, allocations, submissions); retained bytes
 /// (column 6) are checked as relations in [`record_counters`] instead, so a
 /// struct layout change cannot fail this table.

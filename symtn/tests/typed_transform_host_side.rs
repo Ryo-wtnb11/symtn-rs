@@ -1,4 +1,4 @@
-//! Host-side gates of the device structural transform (#1322) that need
+//! Host-side gates of the device structural transform that need
 //! no CUDA device — and, deliberately, no `cuda` feature either, so ordinary
 //! CI runs them.
 //!
@@ -146,7 +146,7 @@ fn the_semantic_clear_empties_the_host_transform_caches() {
 }
 
 // ---------------------------------------------------------------------------
-// The Host contract the device `*_into` mirrors (issue #1329)
+// The Host contract the device `*_into` mirrors
 // ---------------------------------------------------------------------------
 
 /// The positions that hold a NaN, so a NaN *pattern* can be compared rather
@@ -218,7 +218,7 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
         symtn::typed::Error::RuleMismatch
     );
 
-    // A lazy-adjoint source is admitted (#1870), so a lazy-adjoint
+    // A lazy-adjoint source is admitted, so a lazy-adjoint
     // destination is what it reports.
     let lazy_source = source.adjoint(engine).unwrap();
     let mut lazy_destination = destination(engine).adjoint(engine).unwrap();
@@ -295,8 +295,8 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     // The three Host destination semantics: Overwrite clears whatever the
-    // destination held, `alpha == 0` writes zeros whatever the source holds
-    // (#1438), and an identity axis list is still written rather than short
+    // destination held, `alpha == 0` writes zeros whatever the source holds,
+    // and an identity axis list is still written rather than short
     // circuited.
     let runtime = Runtime::builder().build().unwrap();
     let v = u1_leg();
@@ -352,7 +352,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
     );
 
     // `alpha == 0`, `-0.0` included, writes VectorInterface's
-    // `scale(x, 0) = zero(x) * 0` (#1438): an exact zero at every position,
+    // `scale(x, 0) = zero(x) * 0`: an exact zero at every position,
     // NaN sources included, as TensorKit's `permute!(tdst, tsrc, p, 0.0,
     // Zero())` does (observed: `0.0 + 0.0im` over a `NaN + 1.0im`
     // destination and an `Inf + 1.0im` source).
@@ -387,7 +387,7 @@ fn host_into_clears_a_poisoned_destination_and_zero_scales_to_zeros() {
 }
 
 // ---------------------------------------------------------------------------
-// Device twist (#1330): the Host-side decisions its lowering rests on
+// Device twist: the Host-side decisions its lowering rests on
 // ---------------------------------------------------------------------------
 
 /// Every twist of `$tensor` over `$cases` keeps an entry or negates it, and

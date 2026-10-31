@@ -1,4 +1,4 @@
-//! `TensorMap::materialize` (#1545), TensorKit `copy`.
+//! `TensorMap::materialize`, TensorKit `copy`.
 //!
 //! Oracles, none of which goes through the reduced-block adjoint map:
 //! - U(1) and SU(2): the physical-basis expansion of the result is the
@@ -652,8 +652,8 @@ mod checked_generic {
                 symtn::typed::__network::network_reuse_class(&lazy, false)
                     == NetworkReuseClass::LazyAdjoint
             );
-            // The #1545 consumer: a lazy adjoint's QR materializes it for the
-            // call (#1755), so it factors exactly like the owned copy.
+            // A lazy adjoint's QR materializes it for the
+            // call, so it factors exactly like the owned copy.
             let owned = lazy.materialize($engine).unwrap();
             assert_eq!(
                 lazy.qr_compact($engine, &[0], &[1, 2])

@@ -1,5 +1,5 @@
 //! A symmetric braiding that certifies the trivial associator gauge but has
-//! non-symmetric R (#2178): permute, braid and contract must apply the Artin
+//! non-symmetric R: permute, braid and contract must apply the Artin
 //! value `R(source-left, source-right)` for every inverted source pair.
 
 use super::*;

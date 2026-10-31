@@ -1,6 +1,6 @@
 //! A lazy adjoint is a storage-conjugate operand of contraction and
 //! composition, and a tree transform of a lazy adjoint is the lazy adjoint
-//! of the transformed parent, in both admission modes (#1865).
+//! of the transformed parent, in both admission modes.
 //!
 //! TensorKit `cfaa073e`: `blas_contract!` (`src/tensors/tensoroperations.jl:383-450`)
 //! contracts `A'` either as `mul!` over `block(parent, c)'` (no copy) or,
@@ -23,7 +23,7 @@
 //! - SU(3) (checked only) with outer multiplicity two (`8 ⊗ 8 → 8`) and a
 //!   dual leg against (i).
 //!
-//! Host only: checked Generic has no device API (#1756); the multiplicity-free
+//! Host only: checked Generic has no device API; the multiplicity-free
 //! device lazy-adjoint gates live in `representation_gates/cuda.rs`.
 
 #![cfg(feature = "cgc-gen")]
@@ -258,7 +258,7 @@ macro_rules! contract_rows {
             a,
             &spec(&[2, 0], &[0, 1], &[1], &[0])
         ));
-        // #2147: `a` is a core operand as is (identity transform) while `t`
+        // `a` is a core operand as is (identity transform) while `t`
         // is permuted, so the DynamicTree core reads `a`'s parent with a
         // GEMM adjoint op instead of copying it.
         let u = t.permute($engine, &[0], &[1, 2]).unwrap();
@@ -273,7 +273,7 @@ macro_rules! contract_rows {
             a,
             &spec(&[0], &[0], &[0, 1], &[2, 3])
         ));
-        // #2159: m1 (keep `a`'s contracted order: `a` free, `t` permuted)
+        // M1 (keep `a`'s contracted order: `a` free, `t` permuted)
         // and m2 (keep `t`'s: `a` permuted) both cost |t| under TensorKit
         // `contract_memcost`, and the tie goes to m1; charging the identity
         // adjoint as a copy took m2 instead.

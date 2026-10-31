@@ -1,5 +1,5 @@
 //! Device tests for `cuda_region_trace_accumulate`, the partial-trace region
-//! primitive (issue #1349): a source block read through one merged
+//! primitive: a source block read through one merged
 //! diagonal axis per traced pair, contracted against the context ones
 //! template and accumulated into a strided destination.
 //!
@@ -312,7 +312,7 @@ fn device_trace_matches_the_unmerged_host_oracle_at_every_dtype() {
     traces_match_the_unmerged_oracle::<Complex32>(&mut ctx);
 }
 
-/// A zero scale is VectorInterface's `scale(x, 0) = 0` (#1438): it adds
+/// A zero scale is VectorInterface's `scale(x, 0) = 0`: it adds
 /// nothing and submits nothing, even with a NaN on the traced diagonal.
 #[test]
 #[ignore = "requires a real CUDA device"]

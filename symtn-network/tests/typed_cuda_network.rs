@@ -164,7 +164,7 @@ fn cuda_pair<R>(
     );
 }
 
-/// #1348: the reversed-output product the canonical predicate refused
+/// The reversed-output product the canonical predicate refused
 /// runs on the device, equals the Host run, and shares the structural plan the
 /// Host call published (one entry, a hit).
 #[test]
@@ -508,9 +508,9 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
     );
 }
 
-/// #1268: canonical `Network::contract` device execution with a genuinely complex
-/// payload, including a lazy conjugate operand, a reversed output (#1348) and
-/// an intra-operand trace (#1350).
+/// Canonical `Network::contract` device execution with a genuinely complex
+/// payload, including a lazy conjugate operand, a reversed output and
+/// an intra-operand trace.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn canonical_cuda_network_executes_complex_payloads_and_still_rejects_the_rest() {
@@ -641,7 +641,7 @@ fn canonical_cuda_network_executes_complex_payloads_and_still_rejects_the_rest()
         trace.to_host(cuda).unwrap().dense_data().unwrap(),
         trace_oracle.dense_data().unwrap(),
     );
-    // #1348: the reversed output the canonical predicate refused runs.
+    // The reversed output the canonical predicate refused runs.
     let reversed = net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["k"], &["i"])
         .contract(cuda, &[&(device[0]), &(device[1])])
         .unwrap();
@@ -681,7 +681,7 @@ fn u1_pair(
     (host, device)
 }
 
-/// #1274: Host and device execution of one topology and one `(R, D)`
+/// Host and device execution of one topology and one `(R, D)`
 /// key separate workspace pools. A shared key would hand the device lease a
 /// `NetworkExecutionWorkspace<_, _, Vec<f64>>` and panic in the registry
 /// downcast.
@@ -716,7 +716,7 @@ fn host_and_cuda_contractions_of_one_topology_use_separate_workspace_pools() {
     );
 }
 
-/// #1274, #1371: a device call rejected from metadata leases no workspace,
+/// A device call rejected from metadata leases no workspace,
 /// and the next valid call reuses the idle one. (A leg mismatch on a
 /// plan-cache hit does not reach execution; quarantine of a failing lease is
 /// the lease-level `panic_quarantines_typed_workspace_lease` unit test.)
@@ -741,7 +741,7 @@ fn a_rejected_cuda_call_leases_no_workspace_and_the_next_call_reuses_the_idle_on
         "a successful device call recycles its lease"
     );
 
-    // #1371: the contracted-leg mismatch is decided before the plan lookup,
+    // The contracted-leg mismatch is decided before the plan lookup,
     // so no workspace is leased, let alone quarantined.
     assert!(
         net(&[op(&["i"], &["j"]), op(&["j"], &["k"])], &["i"], &["k"])
@@ -762,7 +762,7 @@ fn a_rejected_cuda_call_leases_no_workspace_and_the_next_call_reuses_the_idle_on
     assert_eq!(after.idle_workspaces, 1, "the idle workspace is reused");
 }
 
-/// #1274, #1276: shape drift that keeps the
+/// Shape drift that keeps the
 /// payload length identical but changes the block layout still discards the
 /// cached replay state. The length check alone would accept it; the per-operand
 /// sector snapshot must not. Because destinations are reused, a retained
@@ -980,7 +980,7 @@ fn cuda_chain_reuse_matches_returning<R>(
     );
 }
 
-/// #1276: warm `Network::contract` reuses its retained device destinations and
+/// Warm `Network::contract` reuses its retained device destinations and
 /// still returns exactly the returning contraction, for every admitted
 /// categorical structure.
 #[test]
@@ -1070,11 +1070,11 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
     );
 }
 
-/// #1276, #1346: the warm device replay of an N-tensor chain
+/// The warm device replay of an N-tensor chain
 /// performs no host-to-device traffic, no device allocation and no copy for
 /// its N-2 intermediate steps: every destination block of this chain has a
 /// GEMM, so a retained destination needs no reset at all. Only the final,
-/// returned output still uploads its zeros (#740).
+/// returned output still uploads its zeros.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
@@ -1148,9 +1148,9 @@ fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
     drop(warm);
 }
 
-/// #1276: an idle device workspace is charged to the one
+/// An idle device workspace is charged to the one
 /// `workspace_budget_bytes` ledger, so a budget one byte short of its charge
-/// rejects it whole. The charge holds no reset scratch (#1346):
+/// rejects it whole. The charge holds no reset scratch:
 /// a retained device destination is overwritten without a reset.
 #[test]
 #[ignore = "requires a real CUDA device"]
@@ -1220,7 +1220,7 @@ fn the_device_workspace_is_charged_to_the_workspace_budget() {
 }
 
 // ---------------------------------------------------------------------------
-// Single-precision device networks (#1336)
+// Single-precision device networks
 // ---------------------------------------------------------------------------
 
 /// The device network path is generic over the payload dtype, so the chain
@@ -1255,7 +1255,7 @@ where
     (host, device)
 }
 
-/// #1336, with a non-Abelian provider (#1341): a
+/// With a non-Abelian provider, a
 /// `Network::contract` device chain at `f32` and `Complex32` produces the host result of
 /// the same dtype, cold and warm, and the warm replay keeps the
 /// retained-destination contract of the `f64` chain.
@@ -1380,7 +1380,7 @@ fn single_precision_device_chains_match_the_host_and_reuse_their_destinations() 
     assert_chain::<_, Complex32>(engine, cuda, &runtime, &su2, 762_800, single);
 }
 
-/// #1336: the warm single-precision chain costs the same device
+/// The warm single-precision chain costs the same device
 /// calls as the `f64` chain of the same fixture and moves half the bytes.
 ///
 /// Relative, same-process comparison: both dtypes run the same fixture in this
@@ -1439,7 +1439,7 @@ fn a_warm_single_precision_chain_costs_the_same_calls_and_half_the_bytes() {
     }
 
     // Both real and complex lanes: the complex twin is what shows the halving
-    // is the *element size*, not the real/complex split (#1341).
+    // is the *element size*, not the real/complex split.
     for (name, single, double) in [
         (
             "f32/f64",
@@ -1469,7 +1469,7 @@ fn a_warm_single_precision_chain_costs_the_same_calls_and_half_the_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// General device networks (#1348)
+// General device networks
 // ---------------------------------------------------------------------------
 
 /// Device result against a reference of the same dtype, compared at the
@@ -2055,7 +2055,7 @@ fn su2_space(sectors: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
     .unwrap()
 }
 
-/// #1348: general `Network::contract` networks on device equal the Host run of
+/// General `Network::contract` networks on device equal the Host run of
 /// the same expression, cold and warm, for U(1), SU(2), U(1)×SU(2),
 /// fZ2×U(1) and fZ2⊠SU(2) at `f64` and `Complex64` (U(1) also at the single
 /// precision payloads); the codomain↔domain networks of U(1) and SU(2) also
@@ -2281,7 +2281,7 @@ fn device_state(runtime: &Runtime) -> DeviceState {
     }
 }
 
-/// #1348 warm-cost contract: a warm general network — general axes,
+/// Warm-cost contract: a warm general network — general axes,
 /// result and final permutations, reused intermediates, and for the fermion
 /// the dual-leg twist — downloads nothing and creates no plan-cache entry or
 /// workspace. Every intermediate step overwrites its retained buffer.
@@ -2425,12 +2425,12 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
     );
 }
 
-/// #1348: a contracted-leg mismatch on a fresh topology (the
+/// A contracted-leg mismatch on a fresh topology (the
 /// plan-cache miss path) leaves plan cache, pools, transfer counters,
 /// cuTENSOR plans, scratch and executor state unchanged. The topology-hit and
 /// alias-hit paths of this and the non-symmetric class are the symtn-network
-/// unit test `device_metadata_rejections_leave_the_plan_cache_and_device_untouched_on_every_path`
-/// (#1371); the compact class, which is not constructible as a device operand
+/// unit test `device_metadata_rejections_leave_the_plan_cache_and_device_untouched_on_every_path`;
+/// the compact class, which is not constructible as a device operand
 /// of this impl, is the device-free `device_operand_admission` test.
 #[test]
 #[ignore = "requires a real CUDA device"]
@@ -2474,7 +2474,7 @@ fn rejected_cuda_networks_leave_every_device_state_unchanged() {
 use crate::braiding_probe;
 use braiding_probe::{ProbeSector, RealBraidingProbe};
 
-/// #1372: a device `Network::contract` contraction on a non-symmetric (unbraided or
+/// A device `Network::contract` contraction on a non-symmetric (unbraided or
 /// anyonic) rule is rejected by the network preflight with the typed
 /// `contract`'s error — the Host `Network::contract` error — even for the canonical
 /// network, before any device work or plan publication.
@@ -2526,7 +2526,7 @@ fn non_symmetric_cuda_network_contraction_rejects_like_host_before_device_work()
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn cuda_execution_reuses_a_caller_owned_workspace_and_network_contract_caches() {
-    // What (#2022): device `execute` takes a caller-owned workspace that
+    // What: device `execute` takes a caller-owned workspace that
     // repeated calls can pass again with the same result, and
     // `Network::contract` runs device operands through the Runtime's plan
     // cache like Host ones, leasing its pooled workspace on a hit.

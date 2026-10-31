@@ -1,4 +1,4 @@
-//! #1553: every factorization and matrix function takes its leg roles
+//! Every factorization and matrix function takes its leg roles
 //! `(rows, cols)`, and `t.op(rows, cols)` is defined as
 //! `t.permute(rows, cols)?.op(current split)`.
 //!

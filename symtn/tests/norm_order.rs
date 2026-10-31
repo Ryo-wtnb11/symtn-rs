@@ -1,4 +1,4 @@
-//! `TensorMap::norm(p)` is the single norm entry (#1544).
+//! `TensorMap::norm(p)` is the single norm entry.
 //!
 //! Every arm is checked against TensorKit's formula evaluated by hand from
 //! the fill functions: `max |x|` for `p = ∞`, else
@@ -313,8 +313,8 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
 /// A compact Host operand reduces in `O(Σ_c k_c)` and uploads dense; the
 /// device Frobenius arm then gives the same value as the Host compact arm and
 /// the hand oracle `Σ_c dim(c) Σ_k conj(a_k) b_k`, and every other exponent
-/// stays `UnsupportedOnDevice` on the uploaded compact operand (#1867,
-/// #1868). Device storage is multiplicity-free only, so there is no checked
+/// stays `UnsupportedOnDevice` on the uploaded compact operand.
+/// Device storage is multiplicity-free only, so there is no checked
 /// Generic device row.
 #[cfg(feature = "cuda")]
 #[test]

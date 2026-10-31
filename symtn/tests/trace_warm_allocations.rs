@@ -1,5 +1,4 @@
-//! Warm Unique-fusion `trace_pairs` / `trace_pairs_into` allocation contract
-//! (#2192).
+//! Warm Unique-fusion `trace_pairs` / `trace_pairs_into` allocation contract.
 
 use std::hint::black_box;
 use std::sync::Arc;

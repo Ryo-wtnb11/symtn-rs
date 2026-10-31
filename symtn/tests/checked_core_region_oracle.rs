@@ -1,6 +1,6 @@
 //! Checked Generic contraction whose staged operands and output both need a
 //! tree transform, so its core GEMM runs on uncommitted staged structures
-//! (the coupled-region core plan of #2129), against oracles that share no
+//! (the coupled-region core plan), against oracles that share no
 //! core-plan code:
 //!
 //! - the block-product oracle: `block(A_p ∘ B_p, c) = block(A_p, c) ·

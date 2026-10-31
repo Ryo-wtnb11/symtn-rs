@@ -1,5 +1,5 @@
 //! Full QR/LQ/SVD and null spaces of MPS-like sites whose codomain and domain
-//! each carry a coupled sector the other side lacks (#1477). Those sectors are
+//! each carry a coupled sector the other side lacks. Those sectors are
 //! identity-completed (MatrixAlgebraKit `one!`), and full-rank sectors drop
 //! out of the null spaces, so the factors must stay exactly unitary /
 //! complementary on the complete fused spaces.
@@ -219,7 +219,7 @@ fn side_only_full_and_null_factors_are_complete_complex() {
 
 /// TensorKit `initialize_output(qr_full!/lq_full!)`: Q of full QR maps
 /// `fuse(codomain)` into the codomain, Q of full LQ maps the domain into
-/// `fuse(domain)`, so every side-only sector is identity-completed (#1524).
+/// `fuse(domain)`, so every side-only sector is identity-completed.
 /// `$qr_bond`/`$lq_bond` are those fused spaces built by `GradedSpace::fuse`,
 /// independently of the factorization.
 #[cfg(feature = "cgc-gen")]

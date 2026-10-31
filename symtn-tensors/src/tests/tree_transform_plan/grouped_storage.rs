@@ -632,7 +632,7 @@ fn tree_transform_rejects_mismatched_multi_tree_element_count() {
     );
 }
 
-/// Issue #1739: a Multi group packs each source in its own shape order and
+/// A Multi group packs each source in its own shape order and
 /// scatters each column in the destination's, so equal element counts are
 /// not enough; every layout must share one shape.
 fn compile_multi_pair_shapes(

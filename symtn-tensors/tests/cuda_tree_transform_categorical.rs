@@ -1,4 +1,4 @@
-//! Device replay of *provider-compiled* recoupling structures (issue #1310).
+//! Device replay of *provider-compiled* recoupling structures.
 //!
 //! The structure-level device suite in `symtn-operations` proves the executor's
 //! algebra on hand-written fixtures. This one proves it on the structures the
@@ -311,7 +311,7 @@ fn check_scales<T: DeviceScalar>(
 
 /// One SU(2) F-move plan bound at degeneracies 3 and 2: two structures with
 /// different layouts and one shared coefficient payload, as a degeneracy-only
-/// rebinding of a cached group set produces (#1753).
+/// rebinding of a cached group set produces.
 fn degeneracy_pair() -> (Compiled, Compiled) {
     let operation = TreeTransformOperation::permute([0usize, 2, 1, 3], []);
     let space = |degeneracy| su2_space(&[1usize; 4], &four_leg_channels(), degeneracy);

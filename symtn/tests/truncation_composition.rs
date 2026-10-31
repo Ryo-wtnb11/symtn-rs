@@ -1,4 +1,4 @@
-//! Truncation as a composition (#1300, #1534).
+//! Truncation as a composition.
 //!
 //! The invariant: `svd_compact` → `diagview` → `find_truncated` →
 //! `restrict_leg` is a truncated SVD, and `eigh_full` → …
@@ -26,8 +26,8 @@
 //! ## Cross-sector exact ties
 //!
 //! `select_truncation` breaks an exact tie between two sectors in TensorKit's
-//! sector order (#1381), sorting the feed itself when a producer hands it
-//! another order (#1305). The tie fixtures below use non-negative U(1)
+//! sector order, sorting the feed itself when a producer hands it
+//! another order. The tie fixtures below use non-negative U(1)
 //! charges and SU(2) spins, whose TensorKit order is the label order the hand
 //! selection breaks ties in, so the kept bond is part of the exact gate.
 
@@ -403,7 +403,7 @@ fn u1_complex_svd_composition_matches_the_oracle_for_every_policy() {
     svd_policy_sweep!(engine, source, u1_leg(&[(-1, 1), (0, 2)]), "u1 c64");
 }
 
-/// The same composition at single precision (#1324).
+/// The same composition at single precision.
 ///
 /// `real_spectrum` widens the payload's singular values into the `f64` the
 /// decision runs on, and `SpectrumMagnitude` for `f32` / `Complex32` is
@@ -767,7 +767,7 @@ fn signed_cross_sector_eigenvalue_ties_are_broken_in_tensorkit_sector_order() {
         TensorMap::isomorphism(engine, &runtime, [&leg], [&leg]).unwrap();
     // diag(+2, -2) in every sector: three sectors x two magnitudes, all equal.
     // Annotated: the payload dtype is taken solely from float literals, and
-    // `f32` reaching `FactorizationScalar` (#1324) means `eigh_full` does not
+    // `f32` reaching `FactorizationScalar` means `eigh_full` does not
     // pin `{float}` to `f64` before `value.abs()` below resolves.
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -1065,8 +1065,8 @@ fn diagview_reads_a_rectangular_map_and_rejects_a_non_bond_map_and_a_lazy_adjoin
         Err(Error::InvalidArgument(message)) if message.contains("rank-(1,1)")
     ));
 
-    // A rectangular one-leg map is MatrixAlgebraKit's `diagview` input too
-    // (#1984): each block gives its leading `min(m_c, n_c)` diagonal.
+    // A rectangular one-leg map is MatrixAlgebraKit's `diagview` input too:
+    // each block gives its leading `min(m_c, n_c)` diagonal.
     let rectangular: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&other], |_, indices| {
             if indices[0] == indices[1] {
@@ -1236,7 +1236,7 @@ fn find_truncated_rejects_a_malformed_input_spectrum() {
             "NaN and infinite spectra must be rejected: {values:?}"
         );
     }
-    // Stored order is not malformed (#2095): an ascending spectrum is a
+    // Stored order is not malformed: an ascending spectrum is a
     // valid input and keeps everything under `Full`.
     let ascending = [spectrum(0, &[1.0, 2.0, 3.0]), spectrum(1, &[2.0, 1.0])];
     assert!(leg
@@ -1290,7 +1290,7 @@ fn a_selection_from_another_leg_is_rejected_by_both_appliers() {
 /// A caller generic over the payload can name every bound `find_truncated`
 /// needs: `SpectrumMagnitude` is re-exported from `symtn::typed`, so the
 /// device recipe does not have to map the spectrum to `f64` magnitudes first
-/// (#1300 left it unnameable outside the crate; #1297 exports it).
+/// (the type is exported for exactly this use).
 fn find_truncated_generically<R, D>(
     s: &TensorMap<R, D>,
     truncation: &Truncation,

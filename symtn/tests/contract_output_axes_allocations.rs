@@ -1,6 +1,6 @@
 //! Warm eager `contract` with a non-default output order or codomain/domain
 //! split costs no more than `contract` in the default order and split
-//! followed by `permute` (#1461, #1549), and returns the same tensor. TensorKit
+//! followed by `permute`, and returns the same tensor. TensorKit
 //! `blas_contract!` takes the same shape of work when the output layout is not
 //! the GEMM's: a temporary plus a permuting `tensoradd!` (its `copyC` path),
 //! inside the one call.

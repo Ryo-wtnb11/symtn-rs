@@ -371,8 +371,7 @@ fn prepared_final_structure_reuses_one_checked_enumeration() {
 
 #[test]
 fn prepared_complete_structure_hits_without_rebuilding_layout() {
-    // Isolated like symtn-tensors #649/#650's checked_bind_failure
-    // test: this asserts an absolute process-global cache admission
+    // Isolated like symtn-tensors' checked_bind_failure test: this asserts an absolute process-global cache admission
     // count right after a reset, which CACHE_TEST_LOCK does not
     // protect from the crate's many ordinary, unlocked complete-
     // structure builds landing in the same narrow window.
@@ -445,7 +444,7 @@ fn complete_structure_hit_skips_extent_walk_until_evicted() {
     // Isolated like prepared_complete_structure_hits_without_rebuilding_layout:
     // this asserts process-global complete-structure cache counters, which
     // CACHE_TEST_LOCK does not protect from the crate's many ordinary,
-    // unlocked complete-structure builds landing between two reads (#1903).
+    // unlocked complete-structure builds landing between two reads.
     if test_support::run_isolated_or_return(
         "SYMTN_CORE_COMPLETE_STRUCTURE_HIT_SKIPS_WALK_ISOLATED",
         "tests::fusion_space::checked_layout_builder::complete_structure_hit_skips_extent_walk_until_evicted",
@@ -512,7 +511,7 @@ fn complete_structure_split_and_fermionic_rule_force_misses() {
     // Isolated like prepared_complete_structure_hits_without_rebuilding_layout:
     // this asserts process-global complete-structure cache counters, which
     // CACHE_TEST_LOCK does not protect from the crate's many ordinary,
-    // unlocked complete-structure builds landing between two reads (#1903).
+    // unlocked complete-structure builds landing between two reads.
     if test_support::run_isolated_or_return(
         "SYMTN_CORE_COMPLETE_STRUCTURE_SPLIT_FERMIONIC_ISOLATED",
         "tests::fusion_space::checked_layout_builder::complete_structure_split_and_fermionic_rule_force_misses",
@@ -569,7 +568,7 @@ fn complete_structure_overflow_is_rejected_beside_cached_neighbour() {
     // Isolated like prepared_complete_structure_hits_without_rebuilding_layout:
     // this asserts process-global complete-structure cache counters, which
     // CACHE_TEST_LOCK does not protect from the crate's many ordinary,
-    // unlocked complete-structure builds landing between two reads (#1903).
+    // unlocked complete-structure builds landing between two reads.
     if test_support::run_isolated_or_return(
         "SYMTN_CORE_COMPLETE_STRUCTURE_OVERFLOW_ISOLATED",
         "tests::fusion_space::checked_layout_builder::complete_structure_overflow_is_rejected_beside_cached_neighbour",

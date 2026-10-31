@@ -1,6 +1,6 @@
 /// Every factorization of `$t` (an endomorphism) as `(family, error text)`,
-/// for inputs that must all be refused by the shared finite-input stage
-/// (#1986), each error reduced by [`refusal`] so both fusion modes' facade
+/// for inputs that must all be refused by the shared finite-input stage,
+/// each error reduced by [`refusal`] so both fusion modes' facade
 /// errors compare alike.
 macro_rules! nonfinite_factor_errors {
     ($engine:ident, $t:expr) => {{

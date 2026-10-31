@@ -17,7 +17,7 @@ default = []
 cgc-gen = ["fusion-symbols/lie-generated", "dep:num-traits"]
 # Test-only provider tier for this and sibling crates: the infallible Generic
 # symbol traits (`GenericFusionSymbols`, `GenericRigidSymbols`; production
-# Generic is checked only, #1854) and `testing::Provider`, the provider seal
+# Generic is checked only) and `testing::Provider`, the provider seal
 # that native test fixtures implement.
 testing = []
 

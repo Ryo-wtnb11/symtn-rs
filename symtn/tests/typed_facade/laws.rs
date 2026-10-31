@@ -638,7 +638,7 @@ fn reductions_and_factorizations_hold_on_fz2_u1_su2() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #610: the generic product provider as the canonical public route.
+// The generic product provider as the canonical public route.
 //
 // Everything below is written the way a downstream user would have to write
 // it: `ProductFusionRule::try_new` for the provider, `product_sector` for

@@ -1,5 +1,5 @@
 //! The `cuda` feature is additive: every typed method unified over storage
-//! (#1756) has one definition per name, so its path form resolves with and
+//! has one definition per name, so its path form resolves with and
 //! without `cuda`. CI's `cuda-check` compiles this file under `cuda`, where a
 //! Host/CUDA twin pair would be `E0034`-ambiguous.
 //!
