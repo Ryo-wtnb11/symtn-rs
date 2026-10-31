@@ -7,22 +7,25 @@
 //! most `L0 = min(S, J, batch_decision.lanes)`. Nothing here is calibrated or
 //! timed.
 //!
-//! Under Auto the scheduler scores the baseline placement (L0 lanes, largest
-//! job first on the lane of least accumulated serial time) and an
-//! equal-share placement for every lane count from L0 down to one under one
-//! model, and keeps the lowest score, the baseline on ties. A job's modeled time in a lane is its serial time when its
-//! provider would run it on one thread there, otherwise its share of that
-//! time over the provider's granted width plus the token's dispatch cost at
-//! that width. The granted width is itself an estimate composed from the
-//! provider's public decisions (for a Packed GEMM plan an optimistic upper
-//! bound on its grid), and the model has no sublinear speedup, so a lower
-//! score is a scheduling estimate, not a promise of a faster run.
+//! Under Auto, given a grant model, the scheduler scores the baseline
+//! placement (L0 lanes, largest job first on the lane of least accumulated
+//! serial time) and an equal-share placement for every lane count from L0
+//! down to one under one model, and keeps the lowest score, the baseline on
+//! ties. A job's modeled time in a lane is its serial time when its provider
+//! would run it on one thread there, otherwise its share of that time over
+//! the provider's granted width plus the token's dispatch cost at that width.
+//! The granted width is itself an estimate composed from the provider's
+//! public decisions (for a Packed GEMM plan an optimistic upper bound on its
+//! grid), and the model has no sublinear speedup, so a lower score is a
+//! scheduling estimate, not a promise of a faster run. Without a grant model
+//! (the factorizations, see `driver::on_lanes`) the baseline is returned.
 //!
-//! The search costs `O(J log J + J sum(W) + L0 J log L0)` beyond the
-//! provider queries' own width scans counted in `sum(W)`: W is the set of
-//! distinct equal-share widths, `sum(W) <= 2 S H(L0) + L0`, each job's
-//! grant is queried once per width during the sweep, and each lane count's
-//! placement uses one heap per width class.
+//! The search costs `O(J log J + J sum(W) + P J log L0)` beyond the provider
+//! queries' own width scans counted in `sum(W)`: W is the set of distinct
+//! equal-share widths, `sum(W) <= 2 S H(L0) + L0`, each job's grant is
+//! queried once per width during the sweep, a proved lower bound costs
+//! `O(J)` per lane count, and only the `P <= L0` counts whose bound is below
+//! the best score so far are placed, with one heap per width class.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -149,7 +152,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
         times,
         mean_work,
         &mut AllocationScratch::default(),
-        |_, _, _| 1,
+        Some(|_, _, _| 1),
     )
 }
 
@@ -172,13 +175,14 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
 ///
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
 /// `w` reserved slots; Auto scores its candidates with it (see the module
-/// documentation). Forced strategies keep their decision and never call it.
+/// documentation). Without a grant, and under a forced strategy, the
+/// baseline placement is returned and no candidate is scored.
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
     mean_work: f64,
     scratch: &mut AllocationScratch,
-    grant: impl Fn(usize, Duration, usize) -> usize,
+    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
@@ -238,7 +242,7 @@ pub(crate) fn allocate_in(
         lane.jobs.sort_unstable();
         lane.budget = slots / lanes + usize::from(k < slots % lanes);
     }
-    if exec.batch_policy().strategy == BatchStrategy::Auto {
+    if let (BatchStrategy::Auto, Some(grant)) = (exec.batch_policy().strategy, grant) {
         let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
         let mut columns = std::mem::take(&mut scratch.columns);
         let mut narrow = std::mem::take(&mut scratch.narrow);
@@ -258,6 +262,11 @@ pub(crate) fn allocate_in(
         // widen as the count falls, so each width's column is filled once.
         for count in (1..=lanes).rev() {
             columns.prepare((slots, count), jobs, &fill);
+            // A candidate that cannot score strictly lower is not placed:
+            // the choice is the one the full sweep makes.
+            if columns.lower_bound((slots, count), jobs) >= best.0.as_nanos() {
+                continue;
+            }
             let item = |j: usize, width: usize| columns.get(j, width);
             let score = equal_shares(slots, count, &order, &item, &mut load, &mut narrow, None);
             if score < best.0 {
@@ -326,6 +335,33 @@ impl Columns {
             self.items[slot].clear();
             self.items[slot].extend((0..jobs).map(|j| fill(j, width)));
         }
+    }
+
+    /// A lower bound, in nanoseconds, on the score of the equal-share
+    /// placement over `count` lanes of `slots` whose widths' columns are
+    /// prepared: `max(max_j m_j, ceil(sum_j m_j / count))`, where `m_j` is
+    /// job `j`'s smaller item time over the two share widths.
+    ///
+    /// Proof. Every job runs on exactly one lane, whose width is one of the
+    /// two shares, so its item time there is at least `m_j` (the minimum,
+    /// because the item time need not fall as the width grows). A lane's load
+    /// is the sum of its jobs' item times, so the largest load is at least
+    /// any one job's `m_j`, and at least the mean load, which is at least
+    /// `sum_j m_j / count`; a load is whole nanoseconds, hence the ceiling.
+    /// The placement saturates its loads at `Duration::MAX`, so its score is
+    /// at least `min(bound, Duration::MAX)`; any score it is compared with
+    /// is at most `Duration::MAX`, so `bound >= score` still proves the
+    /// candidate cannot score strictly lower.
+    fn lower_bound(&self, (slots, count): (usize, usize), jobs: usize) -> u128 {
+        let narrow = slots / count;
+        let wide = narrow + usize::from(slots % count != 0);
+        let (mut largest, mut total) = (0u128, 0u128);
+        for job in 0..jobs {
+            let m = self.get(job, narrow).min(self.get(job, wide)).as_nanos();
+            largest = largest.max(m);
+            total = total.saturating_add(m);
+        }
+        largest.max(total.div_ceil(count as u128))
     }
 
     fn get(&self, job: usize, width: usize) -> Duration {
@@ -770,7 +806,7 @@ mod tests {
                     times,
                     mean_work,
                     &mut AllocationScratch::default(),
-                    |_, t, w| exec.width_for_within(w, t.as_nanos() as f64, 1),
+                    Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1)),
                 ))
             })
             .unwrap()
@@ -868,6 +904,35 @@ mod tests {
             }
             best
         }
+
+        /// [`choose`] that skips a count whose bound
+        /// `max(max_j m_j, ceil(sum_j m_j / count))`, `m_j` the job's least
+        /// item time over the count's share widths, is not below the best
+        /// score so far; `placed` counts the placements it does make.
+        pub(super) fn choose_pruned(
+            t: &[u64],
+            slots: usize,
+            cap: usize,
+            d: u64,
+            placed: &mut usize,
+        ) -> (u64, Lanes) {
+            let mut best = baseline(t, slots, cap, d);
+            for count in (1..=cap).rev() {
+                let widths = shares(slots, count);
+                let least = |j: usize| widths.iter().map(|&w| item(t[j], w, d)).min().unwrap();
+                let total: u64 = (0..t.len()).map(least).sum();
+                let largest = (0..t.len()).map(least).max().unwrap();
+                if largest.max(total.div_ceil(count as u64)) >= best.0 {
+                    continue;
+                }
+                *placed += 1;
+                let candidate = equal(t, slots, count, d);
+                if candidate.0 < best.0 {
+                    best = candidate;
+                }
+            }
+            best
+        }
     }
 
     /// Purpose: a lane width at which the provider stays serial charges the
@@ -946,9 +1011,9 @@ mod tests {
                 let exec: &Exec<'_> = exec;
                 let mut scratch = AllocationScratch::default();
                 let mut call = || {
-                    let a = allocate_in(exec, &t, 10075.0, &mut scratch, |_, t, w| {
-                        exec.width_for_within(w, t.as_nanos() as f64, 1)
-                    });
+                    let grant =
+                        |_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1);
+                    let a = allocate_in(exec, &t, 10075.0, &mut scratch, Some(grant));
                     let chosen = (a.decision.lanes, a.lanes.len());
                     scratch.keep(a);
                     chosen
@@ -1021,6 +1086,11 @@ mod tests {
             [11364, 11100, 12100]
         );
         assert_eq!(lanes(&a), [(2, vec![1, 3, 4]), (1, vec![0, 2])]);
+        let mut placed = 0;
+        assert_eq!(
+            oracle::choose_pruned(&pruned, 3, 3, d, &mut placed),
+            oracle::choose(&pruned, 3, 3, d)
+        );
 
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
         let mut next = |n: u64| {
@@ -1053,6 +1123,11 @@ mod tests {
                         let a = chosen(&mut engine, &nanos(&t), mean);
                         let cap = a.slots.min(jobs).min(a.decision.lanes).max(1);
                         let (score, want) = oracle::choose(&t, a.slots, cap, d);
+                        let mut placed = 0;
+                        assert_eq!(
+                            oracle::choose_pruned(&t, a.slots, cap, d, &mut placed),
+                            (score, want.clone())
+                        );
                         assert!(score <= oracle::baseline(&t, a.slots, cap, d).0);
                         assert_eq!(lanes(&a), want, "p {p} times {t:?}");
                         assert!(a.lanes.len() <= cap);
@@ -1064,6 +1139,27 @@ mod tests {
                 check(&a, p, 5);
             }
         }
+    }
+
+    /// Purpose: on many blocks no provider would widen (200 blocks below the
+    /// payoff, six slots, flat 100 ns dispatch) Auto returns main's
+    /// allocation, and the lower bound that skips placing hopeless lane
+    /// counts changes no choice: the simulator with and without it agrees,
+    /// while it places fewer than every count.
+    #[test]
+    fn pruning_keeps_main_on_many_tiny_blocks() {
+        let d = 100;
+        let t: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
+        let a = chosen(&mut flat(6, BatchPolicy::default(), d), &nanos(&t), 1e9);
+        let cap = a.slots.min(t.len()).min(a.decision.lanes);
+        assert_eq!((a.slots, cap), (6, 6));
+        let (_, main) = oracle::baseline(&t, a.slots, cap, d);
+        assert_eq!(lanes(&a), main);
+        let mut placed = 0;
+        let pruned = oracle::choose_pruned(&t, a.slots, cap, d, &mut placed);
+        assert_eq!(pruned, oracle::choose(&t, a.slots, cap, d));
+        assert_eq!(pruned.1, main);
+        assert!(placed < cap, "placed {placed} of {cap}");
     }
 
     fn check(a: &Allocation, p: usize, jobs: usize) {

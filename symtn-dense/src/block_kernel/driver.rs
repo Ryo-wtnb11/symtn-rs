@@ -29,7 +29,8 @@ pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
     Gemm,
     /// The engine's `WorkModel`, from which tlinalg makes its own width
-    /// decision for a factorization.
+    /// decision for a factorization. Its batches keep the scheduler's
+    /// baseline placement (see `on_lanes`).
     Factorization,
 }
 
@@ -68,7 +69,8 @@ pub(crate) trait BlockOp: Sync {
     /// the provider's public decisions. This default is the single decision a
     /// per-matrix factorization makes (`width_for` over the work model's time
     /// with one section); a block with extra batch dimensions takes the
-    /// provider's multi-item route, for which it is an approximation.
+    /// provider's multi-item route, for which it is an approximation. The
+    /// driver does not consult it for factorizations yet (see `on_lanes`).
     ///
     /// Why the result is an estimate even where the composition matches the
     /// provider: `serial` is integer nanoseconds and the provider re-normalizes
@@ -149,12 +151,22 @@ fn on_lanes<B: BlockOp>(
         }));
     let mean_work = total_work / jobs.len().max(1) as f64;
     let shared: &Exec<'_> = exec;
+    // Why a factorization keeps the baseline placement: its grant comes from
+    // tlinalg 0.8.0's width rule, whose serial SVD estimate is about ten times
+    // low (and QR's about two), so the model credits a wide lane with a
+    // speedup the provider does not deliver and narrows batches of large
+    // blocks onto too few lanes. The estimate is corrected upstream
+    // (tensor4all/tlinalg-rs#89); on the tlinalg release that contains it,
+    // pass the grant for every kind again and re-measure.
+    let grant = (B::KIND == OpKind::Gemm).then_some(|j: usize, serial: Duration, budget: usize| {
+        op.grant(j, &jobs[j], shared, budget, serial)
+    });
     let allocation = schedule::allocate_in(
         shared,
         &scratch.times,
         mean_work,
         &mut scratch.allocation,
-        |j, serial, budget| op.grant(j, &jobs[j], shared, budget, serial),
+        grant,
     );
     let result = schedule::run(exec.reborrow(), &allocation, jobs, |index, job, exec| {
         op.run(index, job, exec)

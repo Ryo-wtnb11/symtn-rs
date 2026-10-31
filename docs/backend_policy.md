@@ -119,7 +119,8 @@ the provider's public decisions (for a packed GEMM plan an optimistic upper
 bound on its grid), and the model has no sublinear speedup, so the choice is
 a scheduling estimate, not a promise of a faster run. The search adds one
 provider width query per block and distinct share width to each grouped
-submission. Prepared
+submission; a lane count whose proved lower bound on its score is not below
+the best score so far is not placed. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane
@@ -129,7 +130,13 @@ estimate (SVD `m n min(m, n)`, QR `m n k - k^3/3` with `k = min(m, n)`, four
 times that for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
-it. Every block runs up to the first one refused before the engine is entered
+it. Their lanes keep the baseline placement over `L0` lanes, without the
+model search: the provider's current width estimate for one SVD is about ten
+times below its run time (QR about two), so the model would credit one wide
+lane with a speedup the factorization does not deliver and put batches of
+large blocks on too few lanes. The search is re-enabled for them, and
+re-measured, on the tlinalg release that corrects that estimate
+(tensor4all/tlinalg-rs#89). Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view); the error reported is the
 lowest-indexed block's, the one the per-matrix SVD or QR would report, and
 nothing is returned on error. Each block allocates its own provider workspace
