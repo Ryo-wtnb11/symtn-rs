@@ -108,13 +108,18 @@ engine's batch decision, so the work model's fan-out limits are never
 exceeded. The lanes share all of those threads in equal shares: a batch of a
 few large blocks gives each lane several threads, and a batch of many small
 blocks runs one thread per lane. The kernel scores the baseline placement
-(blocks largest first on the lane of least accumulated serial time, over the
-decision's lane count) and an equal-share placement for every lane count up
-to it under one model, and keeps the lowest score, the baseline on ties. The
-model charges a block its serial time where the provider would run it on one
-thread in that lane, otherwise its time over the provider's granted width plus
-the engine's dispatch cost at that width; it has no sublinear speedup, so it
-is a scheduling estimate, not a promise of a faster run. Prepared
+(blocks largest first on the lane of least accumulated serial time, over
+`L0 = min(threads, blocks, decision lanes)` lanes) and an equal-share
+placement for every lane count from `L0` down to one under one model, and
+keeps the lowest score, the baseline on ties. The model charges a block its
+serial time where the provider would run it on one thread in that lane,
+otherwise its time over the provider's granted width plus the engine's
+dispatch cost at that width. The granted width is an estimate composed from
+the provider's public decisions (for a packed GEMM plan an optimistic upper
+bound on its grid), and the model has no sublinear speedup, so the choice is
+a scheduling estimate, not a promise of a faster run. The search adds one
+provider width query per block and distinct share width to each grouped
+submission. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane

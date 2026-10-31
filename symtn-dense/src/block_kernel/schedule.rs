@@ -1,19 +1,28 @@
 //! The block kernels' shared scheduler: J independent dense jobs in canonical
 //! order on one engine's execution context, split into equal-share lanes.
 //!
-//! Every resource number comes from the caller's `Exec`: the slot count from
-//! the token's `width_for` (Auto) or the policy's `BatchDecision` (forced), the
-//! lane count from `batch_decision`. Nothing here is calibrated or timed.
+//! Every resource number comes from the caller's `Exec`: the slot count S
+//! from the token's `width_for` (Auto) or the policy's `BatchDecision`
+//! (forced); a forced policy's lane count is its decision's, and Auto's is at
+//! most `L0 = min(S, J, batch_decision.lanes)`. Nothing here is calibrated or
+//! timed.
 //!
-//! Under Auto the lane count is at most the batch decision's: the scheduler
-//! scores the baseline placement (largest job first on the lane of least
-//! accumulated serial time) and an equal-share placement for every lane
-//! count up to it under one model, and keeps the lowest score, the baseline
-//! on ties. A job's modeled time in a lane is its serial time when its
+//! Under Auto the scheduler scores the baseline placement (L0 lanes, largest
+//! job first on the lane of least accumulated serial time) and an
+//! equal-share placement for every lane count from L0 down to one under one
+//! model, and keeps the lowest score, the baseline on ties. A job's modeled time in a lane is its serial time when its
 //! provider would run it on one thread there, otherwise its share of that
 //! time over the provider's granted width plus the token's dispatch cost at
-//! that width. The model has no sublinear speedup, so a lower score is a
-//! scheduling estimate, not a promise of a faster run.
+//! that width. The granted width is itself an estimate composed from the
+//! provider's public decisions (for a Packed GEMM plan an optimistic upper
+//! bound on its grid), and the model has no sublinear speedup, so a lower
+//! score is a scheduling estimate, not a promise of a faster run.
+//!
+//! The search costs `O(J log J + J sum(W) + L0 J log L0)` beyond the
+//! provider queries' own width scans counted in `sum(W)`: W is the set of
+//! distinct equal-share widths, `sum(W) <= 2 S H(L0) + L0`, each job's
+//! grant is queried once per width during the sweep, and each lane count's
+//! placement uses one heap per width class.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -72,6 +81,10 @@ pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
 #[derive(Debug, Default)]
 pub(crate) struct AllocationScratch {
     lanes: Vec<Lane>,
+    /// Lanes an allocation with fewer lanes set aside, kept so that a later
+    /// allocation of more lanes (a baseline the search then narrows, every
+    /// warm call) reuses their job capacity instead of allocating it again.
+    spare: Vec<Lane>,
     order: Vec<usize>,
     load: Vec<Reverse<(Duration, usize, usize)>>,
     narrow: Vec<Reverse<(Duration, usize, usize)>>,
@@ -89,9 +102,13 @@ impl AllocationScratch {
         use std::mem::size_of;
         self.lanes
             .iter()
+            .chain(&self.spare)
             .map(|lane| lane.jobs.capacity().saturating_mul(size_of::<usize>()))
             .fold(
-                self.lanes.capacity().saturating_mul(size_of::<Lane>()),
+                self.lanes
+                    .capacity()
+                    .saturating_add(self.spare.capacity())
+                    .saturating_mul(size_of::<Lane>()),
                 usize::saturating_add,
             )
             .saturating_add(self.order.capacity().saturating_mul(size_of::<usize>()))
@@ -105,13 +122,18 @@ impl AllocationScratch {
     }
 }
 
-/// `count` empty lanes, reusing `pool`'s lane and job capacity.
-fn lanes_from(mut pool: Vec<Lane>, count: usize) -> Vec<Lane> {
-    pool.truncate(count);
-    pool.resize_with(count, || Lane {
-        budget: 0,
-        jobs: Vec::new(),
-    });
+/// `count` empty lanes, reusing `pool`'s lane and job capacity; lanes beyond
+/// `count` move to `spare`, and missing ones come from it first.
+fn lanes_from(mut pool: Vec<Lane>, spare: &mut Vec<Lane>, count: usize) -> Vec<Lane> {
+    while pool.len() > count {
+        spare.extend(pool.pop());
+    }
+    while pool.len() < count {
+        pool.push(spare.pop().unwrap_or(Lane {
+            budget: 0,
+            jobs: Vec::new(),
+        }));
+    }
     for lane in &mut pool {
         lane.jobs.clear();
     }
@@ -167,7 +189,7 @@ pub(crate) fn allocate_in(
             budget,
             slots: 0,
             decision,
-            lanes: lanes_from(pool, 0),
+            lanes: lanes_from(pool, &mut scratch.spare, 0),
         };
     }
     let (slots, lanes) = if exec.batch_policy().strategy == BatchStrategy::Auto {
@@ -183,7 +205,7 @@ pub(crate) fn allocate_in(
         )
     };
     let lanes = lanes.max(1);
-    let mut assigned = lanes_from(pool, lanes);
+    let mut assigned = lanes_from(pool, &mut scratch.spare, lanes);
     if lanes == 1 {
         assigned[0].budget = slots;
         assigned[0].jobs.extend(0..jobs);
@@ -245,7 +267,7 @@ pub(crate) fn allocate_in(
         if let Some(count) = best.1 {
             columns.prepare((slots, count), jobs, &fill);
             let item = |j: usize, width: usize| columns.get(j, width);
-            assigned = lanes_from(assigned, count);
+            assigned = lanes_from(assigned, &mut scratch.spare, count);
             equal_shares(
                 slots,
                 count,
@@ -905,6 +927,41 @@ mod tests {
         assert_eq!(oracle::equal(&t, 4, 2, 100).0, 16900);
         assert_eq!(oracle::equal(&t, 4, 1, 100).0, 17225);
         assert_eq!(lanes(&a), [(2, vec![0, 2, 3, 6]), (2, vec![1, 4, 5, 7])]);
+    }
+
+    /// Purpose: a warm allocation reuses its scratch even when the search
+    /// narrows main's four lanes to one (a 40000 ns block and three 100 ns
+    /// ones on four slots, flat 100 ns dispatch): the set-aside lanes are
+    /// kept, so a repeated identical allocation allocates and frees nothing.
+    #[test]
+    fn warm_fewer_lane_allocation_allocates_nothing() {
+        use crate::tests::counting_alloc;
+        let t = nanos(&[40000, 100, 100, 100]);
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let mut scratch = AllocationScratch::default();
+                let mut call = || {
+                    let a = allocate_in(exec, &t, 10075.0, &mut scratch, |_, t, w| {
+                        exec.width_for_within(w, t.as_nanos() as f64, 1)
+                    });
+                    let chosen = (a.decision.lanes, a.lanes.len());
+                    scratch.keep(a);
+                    chosen
+                };
+                assert_eq!(call(), (4, 1));
+                for _ in 0..2 {
+                    let (chosen, allocs) = counting_alloc::measure(&mut call);
+                    assert_eq!(chosen, (4, 1));
+                    assert_eq!((allocs.calls, allocs.frees), (0, 0));
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     /// Purpose: a caller's `min_items` above the job count forbids fan-out,

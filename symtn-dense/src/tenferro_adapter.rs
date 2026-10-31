@@ -285,9 +285,12 @@ impl DefaultDenseExecutor {
     ///
     /// Why not a per-run cutoff: it would be an empirical constant in tensor
     /// semantics. The disadvantage accepted here: a long run plus residual
-    /// jobs goes grouped, paying the O(J log J) grouped preparation per
-    /// unbound call instead of the cached O(1) strided analysis plus
-    /// O(S log S) for the residual.
+    /// jobs goes grouped, paying the grouped preparation per unbound call
+    /// (O(J log J) staging, and under Auto the scheduler's lane search:
+    /// O(J sum(W) + L0 J log L0) with one provider grant query per job and
+    /// distinct share width W, `sum(W) <= 2 S H(L0) + L0`, for L0 lanes over
+    /// S slots) instead of the cached O(1) strided analysis plus the
+    /// residual's own preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
         &mut self,
