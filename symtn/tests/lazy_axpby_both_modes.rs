@@ -1,8 +1,7 @@
-//! `axpby` and `axpby_into` with lazy-adjoint operands follow one rule in both
-//! admission modes: one lazy and one owned operand (either order)
-//! give an owned result, two lazy operands the lazy adjoint of their parents'
-//! combination (A10), and a lazy `axpby_into` source is read in its logical
-//! orientation.
+//! `axpby` with lazy-adjoint operands follows one rule in both admission
+//! modes: one lazy and one owned operand (either order) give an owned result,
+//! two lazy operands the lazy adjoint of their parents' combination (A10).
+//! A lazy `axpby_into` source is a cell of `into_admission_matrix.rs`.
 //!
 //! TensorKit `cfaa073e`: `VectorInterface.add` and `add!(ty, tx, α, β)`
 //! (`src/tensors/vectorinterface.jl:67, 84`) loop over blocks, where an
@@ -119,10 +118,9 @@ macro_rules! entries {
     }};
 }
 
-/// Every lazy/owned mix of `axpby` and a lazy `axpby_into` source on
-/// `[V] <- [V, V]` (the adjoint of `[V, V] <- [V]`), against oracle (i), for
-/// a general pair, a zero `alpha`, a zero `beta` (over a NaN destination for
-/// `axpby_into`) and a unit pair.
+/// Every lazy/owned mix of `axpby` on `[V] <- [V, V]` (the adjoint of
+/// `[V, V] <- [V]`), against oracle (i), for a general pair, a zero `alpha`,
+/// a zero `beta` and a unit pair.
 macro_rules! axpby_rows {
     ($engine:ident, $rule:expr, $label:expr, $spin:expr, $D:ty, $conv:expr) => {{
         let runtime = host_runtime();
@@ -145,8 +143,6 @@ macro_rules! axpby_rows {
             x.materialize($engine).unwrap(),
             y.materialize($engine).unwrap(),
         );
-        let nan = conv(Complex64::new(f64::NAN, f64::NAN));
-        let poisoned = y_owned.scale($engine, nan).unwrap();
         let pairs = [
             (Complex64::new(0.7, -0.3), Complex64::new(-1.1, 0.4)),
             (Complex64::new(0.0, 0.0), Complex64::new(-1.1, 0.4)),
@@ -155,7 +151,6 @@ macro_rules! axpby_rows {
         ];
         let mut rows: Rows = Vec::new();
         for (alpha, beta) in pairs {
-            let zero_beta = beta == Complex64::new(0.0, 0.0);
             let (alpha, beta): ($D, $D) = (conv(alpha), conv(beta));
             let mut row = |$engine: &mut dyn Engine,
                            name: &str,
@@ -179,15 +174,6 @@ macro_rules! axpby_rows {
                 "A10: lazy + lazy stays lazy"
             );
             row($engine, "lazy + lazy", lazy_lazy, oracle);
-
-            let start = if zero_beta { &poisoned } else { &y_owned };
-            let mut actual = start.materialize($engine).unwrap();
-            x.axpby_into($engine, &mut actual, alpha, beta).unwrap();
-            let mut expected = start.materialize($engine).unwrap();
-            x_owned
-                .axpby_into($engine, &mut expected, alpha, beta)
-                .unwrap();
-            row($engine, "lazy axpby_into", actual, expected);
         }
         rows
     }};

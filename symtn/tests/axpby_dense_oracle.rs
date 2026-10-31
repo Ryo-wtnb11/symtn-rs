@@ -178,24 +178,6 @@ fn axpby_matches_dense_expansion_on_host() {
     symmetry!(engine, &rt, fz2u1_legs(), block_case, host!(engine));
 }
 
-#[test]
-fn axpby_into_matches_dense_expansion_on_host() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    macro_rules! assign {
-        ($engine:ident) => {
-            |engine: &mut dyn Engine, x: &TensorMap<_, _>, y: &TensorMap<_, _>, a, b| {
-                let mut z = x.materialize(engine).unwrap();
-                y.axpby_into(engine, &mut z, b, a).unwrap();
-                z
-            }
-        };
-    }
-    let rt = Runtime::builder().build().unwrap();
-    symmetry!(engine, &rt, u1_legs(), physical_case, assign!(engine));
-    symmetry!(engine, &rt, su2_legs(), physical_case, assign!(engine));
-    symmetry!(engine, &rt, fz2u1_legs(), block_case, assign!(engine));
-}
-
 #[cfg(feature = "cuda")]
 macro_rules! device {
     ($cuda:ident) => {
