@@ -582,16 +582,6 @@ mod tests {
         }
     }
 
-    impl CountingDense {
-        fn one_thread_faer() -> Self {
-            Self {
-                inner: DefaultDenseExecutor::new(),
-                submissions: 0,
-                jobs: 0,
-            }
-        }
-    }
-
     impl DenseExecutor for CountingDense {
         fn svd(
             &mut self,
@@ -964,95 +954,5 @@ mod tests {
         }
         assert!(destination.iter().all(|value| value.is_nan()));
         assert_eq!(dense.submissions, 0);
-    }
-
-    #[test]
-    #[ignore = "benchmark: run via benchmarks.yml"]
-    fn member_batch_measurement() {
-        use std::time::Instant;
-
-        let (blocks, transform) = fixture();
-        for members in [1, 2, 17] {
-            let source: Vec<f64> = (0..members)
-                .flat_map(|index| [index as f64 + 1.0, 2.0, 3.0, 4.0])
-                .collect();
-            let mut batch_destination = vec![f64::NAN; source.len()];
-            let mut ordinary_destination = batch_destination.clone();
-            let mut batch_workspace = TreeTransformWorkspace::<f64>::default();
-            let mut ordinary_workspace = TreeTransformWorkspace::<f64>::default();
-            let mut batch_dense = CountingDense::one_thread_faer();
-            let mut ordinary_dense = CountingDense::one_thread_faer();
-            let mut batch_engine = symtn_dense::CpuEngine::serial();
-            let mut ordinary_engine = symtn_dense::CpuEngine::serial();
-            let mut batch = || {
-                tree_transform_members_overwrite_raw(
-                    &mut batch_engine,
-                    &mut StridedHostKernelAdapter::default(),
-                    &mut batch_dense,
-                    &mut batch_workspace,
-                    &transform,
-                    &blocks,
-                    &blocks,
-                    &mut batch_destination,
-                    &source,
-                    members,
-                    1,
-                    &[],
-                )
-                .unwrap();
-            };
-            let mut ordinary = || {
-                for member in 0..members {
-                    tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                        &mut ordinary_engine,
-                        &mut StridedHostKernelAdapter::default(),
-                        &mut ordinary_dense,
-                        &mut ordinary_workspace,
-                        &transform,
-                        &blocks,
-                        &blocks,
-                        &mut ordinary_destination[4 * member..4 * member + 4],
-                        &source[4 * member..4 * member + 4],
-                        1.0,
-                        &[],
-                        1,
-                    )
-                    .unwrap();
-                }
-            };
-            let measure = |work: &mut dyn FnMut()| {
-                allocation_oracle::with_session(|| {
-                    let start = Instant::now();
-                    allocation_oracle::with_measurement(work);
-                    (start.elapsed(), allocation_oracle::allocated_bytes())
-                })
-            };
-            let ((batch_cold, batch_cold_bytes), batch_cold_calls) = measure(&mut batch);
-            let ((ordinary_cold, ordinary_cold_bytes), ordinary_cold_calls) =
-                measure(&mut ordinary);
-            let ((batch_warm, batch_warm_bytes), batch_warm_calls) = measure(&mut batch);
-            let ((ordinary_warm, ordinary_warm_bytes), ordinary_warm_calls) =
-                measure(&mut ordinary);
-            assert_eq!(batch_destination, ordinary_destination);
-            let retained = |w: &TreeTransformWorkspace<f64>| {
-                core::mem::size_of::<f64>()
-                    * (w.packed.source().capacity()
-                        + w.packed.destination().capacity()
-                        + w.coefficient_scratch.capacity())
-                    + core::mem::size_of::<DenseGemmBatchJob>() * w.chunk_jobs.capacity()
-                    + core::mem::size_of::<(usize, usize)>() * w.member_ranges.capacity()
-                    + core::mem::size_of::<usize>()
-                        * (w.chunk_runs.capacity()
-                            + w.chunk_scatter_groups.capacity()
-                            + w.fused_indices_heap_capacity()
-                            + w.member_shape.capacity())
-                    + core::mem::size_of::<isize>()
-                        * (w.zero_strides.capacity()
-                            + w.member_dst_strides.capacity()
-                            + w.member_src_strides.capacity())
-            };
-            eprintln!("B={members} batch cold={batch_cold:?} {batch_cold_calls}calls {batch_cold_bytes}bytes warm={batch_warm:?} {batch_warm_calls}calls {batch_warm_bytes}bytes submissions={} retained={}B; ordinary cold={ordinary_cold:?} {ordinary_cold_calls}calls {ordinary_cold_bytes}bytes warm={ordinary_warm:?} {ordinary_warm_calls}calls {ordinary_warm_bytes}bytes submissions={} retained={}B",
-                batch_dense.submissions, retained(&batch_workspace), ordinary_dense.submissions, retained(&ordinary_workspace));
-        }
     }
 }

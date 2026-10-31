@@ -144,10 +144,6 @@ mod allocation_oracle {
         (result, allocations)
     }
 
-    pub(super) fn allocated_bytes() -> usize {
-        ALLOCATED_BYTES.load(Ordering::Relaxed)
-    }
-
     pub(super) fn with_measurement<R>(action: impl FnOnce() -> R) -> R {
         let restore = RestoreMeasurement(MEASURED.with(|measured| measured.replace(true)));
         let result = action();

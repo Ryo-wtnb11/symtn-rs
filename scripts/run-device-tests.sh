@@ -29,11 +29,10 @@ fi
 # exhaustive CPU sweeps, external tools, a recorded CPU xfail). libtest --skip
 # matches substrings; each name below is a full test function name.
 non_device=(
-  checked_generic_public_transform_measurement
   su2_recoupling_matrix_transforms_scale_componentwise
-  ignored_isolated_probe member_batch_measurement
+  ignored_isolated_probe
   axioms_su2_exhaustive axioms_fz2_u1_su2_triple_exhaustive
-  runs_installed_cotengra_when_requested measure_checked_generic_transform_phases
+  runs_installed_cotengra_when_requested
 )
 # Need device 1 as well as device 0; run only with --two-gpu.
 two_gpu_tests=(

@@ -40,14 +40,11 @@ jobs:
         run: cargo bench --locked -p symtn-operations --bench permute_u1_many
         working-directory: symtn
 
-  # Measurements that reach private phases or a counting global allocator
-  # run here in release: the Host contract-batch timing bench, and
-  # measurement-only tests that live beside the suites they measure, tagged
-  # `#[ignore = "benchmark: run via benchmarks.yml"]` and run one thread so
-  # their samples do not contend. Why not PR CI: they print numbers and
-  # assert no contract.
-  ignored-measurements:
-    name: Ignored measurement tests
+  # Why not PR CI: these benches print numbers and assert no contract.
+  # They install the counting global allocator, so they run in release,
+  # one at a time.
+  allocation-counting-benches:
+    name: Allocation-counting benchmarks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,20 +58,12 @@ jobs:
         with:
           workspaces: symtn
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          key: benchmarks-ignored-measurements
+          key: benchmarks-allocation-counting
       - name: typed contract batch measurements
         if: ${{ !cancelled() }}
         run: cargo bench --locked --profile release -p symtn --bench contract_batch_timing
         working-directory: symtn
-      - name: transform-replay member batch measurement
+      - name: checked-Generic public transform (cgc-gen)
         if: ${{ !cancelled() }}
-        run: cargo test --locked --release -p symtn-operations --lib -- --ignored --exact transform_replay::member::tests::member_batch_measurement --nocapture
-        working-directory: symtn
-      - name: checked-Generic public transform measurement (cgc-gen)
-        if: ${{ !cancelled() }}
-        run: cargo test --locked --release -p symtn --no-default-features --features cgc-gen,cpu-faer --test serial -- --ignored --exact permute_overwrite_allocations::checked_generic_public_transform_measurement --nocapture
-        working-directory: symtn
-      - name: checked-Generic transform phase measurement (cgc-gen)
-        if: ${{ !cancelled() }}
-        run: cargo test --locked --release -p symtn-tensors --no-default-features --features cgc-gen,cpu-faer --lib -- --ignored --exact tests::tree_transform_plan::generic::measure_checked_generic_transform_phases --nocapture
+        run: cargo bench --locked -p symtn --no-default-features --features cgc-gen,cpu-faer --bench checked_generic_transform
         working-directory: symtn
