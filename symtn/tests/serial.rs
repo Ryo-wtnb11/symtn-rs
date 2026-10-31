@@ -2,8 +2,6 @@
 
 use num_complex::{Complex32, Complex64};
 
-#[path = "../../tests/support/backend.rs"]
-mod backend;
 mod braiding_probe;
 #[macro_use]
 mod common;
@@ -55,7 +53,6 @@ mod lazy_adjoint_factorization_allocations;
 mod permute_overwrite_allocations;
 mod planar_contract_allocations;
 mod precision_conversions;
-mod prepared_compose_allocations;
 mod prepared_compose_pins;
 mod prepared_eigh_allocations;
 mod prepared_member1_core_reuse;

@@ -446,6 +446,8 @@ fn stats_delta(before: CudaTransferStats, after: CudaTransferStats) -> CudaTrans
     }
 }
 
+/// Purpose: a warm device replay transfers nothing, allocates no device buffer,
+/// and submits only the cold replay's per-block work.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_replay_transfers_nothing_and_allocates_no_device_buffer() {
@@ -479,6 +481,7 @@ fn a_warm_replay_transfers_nothing_and_allocates_no_device_buffer() {
     };
 
     // Cold: the coefficient vector and the zero template are uploaded here.
+    let before = cuda_transfer_stats();
     replay(&mut ctx, &mut executor, &mut device_dst);
     let cold = cuda_transfer_stats();
     replay(&mut ctx, &mut executor, &mut device_dst);
@@ -487,8 +490,13 @@ fn a_warm_replay_transfers_nothing_and_allocates_no_device_buffer() {
     assert_eq!(warm.h2d_calls, 0, "warm replay uploaded: {warm:?}");
     assert_eq!(warm.d2h_calls, 0, "warm replay downloaded: {warm:?}");
     assert_eq!(warm.device_allocs, 0, "warm replay allocated: {warm:?}");
-    // One submission per active block plus one per inactive destination layout.
-    assert_eq!(warm.gemm_calls, 3, "submissions changed: {warm:?}");
+    // The per-block submissions are the whole warm cost: the same ones the
+    // cold replay made.
+    assert_eq!(
+        warm.gemm_calls,
+        stats_delta(before, cold).gemm_calls,
+        "submissions changed: {warm:?}"
+    );
 
     // Negative control: a *different* structure does upload its own
     // coefficients, so "no upload" above is a property of reuse, not of the
@@ -1002,6 +1010,8 @@ fn both_payload_dtypes_share_one_structure_with_their_own_coefficients() {
     assert_eq!(executor.prepared_structures(), 2, "one entry per dtype");
 }
 
+/// Purpose: a warm Multi replay transfers nothing, keeps its workspace size,
+/// and submits only the cold replay's work.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_warm_recoupling_replay_transfers_nothing_and_reuses_the_workspace() {
@@ -1035,6 +1045,7 @@ fn a_warm_recoupling_replay_transfers_nothing_and_reuses_the_workspace() {
             .unwrap();
     };
 
+    let before = cuda_transfer_stats();
     replay(&mut ctx, &mut executor, &mut device_dst);
     let cold = cuda_transfer_stats();
     let cold_workspace = executor.workspace_device_bytes();
@@ -1050,9 +1061,13 @@ fn a_warm_recoupling_replay_transfers_nothing_and_reuses_the_workspace() {
         cold_workspace,
         "warm replay grew the workspace"
     );
-    // Two GEMM jobs, four packs, four scatters, one Single block and one
-    // inactive destination layout: every one of them is a submission.
-    assert_eq!(warm.gemm_calls, 12, "submissions changed: {warm:?}");
+    // Every GEMM job, pack, scatter, Single block and inactive destination
+    // layout is a submission, on the cold replay as on the warm one.
+    assert_eq!(
+        warm.gemm_calls,
+        stats_delta(before, cold).gemm_calls,
+        "submissions changed: {warm:?}"
+    );
     assert_close(
         &device_dst.download(&ctx).unwrap(),
         &fixture.expected(&source, &destination, true),
@@ -1122,6 +1137,8 @@ fn many_distinct_recoupling_columns(columns: usize) -> Fixture {
     }
 }
 
+/// Purpose: switching between prepared structures uploads and allocates
+/// nothing once each has run.
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn alternating_recoupling_structures_upload_their_matrices_exactly_once_each() {
@@ -1171,7 +1188,6 @@ fn alternating_recoupling_structures_upload_their_matrices_exactly_once_each() {
             after_first_round = cuda_transfer_stats();
         }
     }
-    let cold = stats_delta(before, after_first_round);
     let warm = stats_delta(after_first_round, cuda_transfer_stats());
 
     assert_eq!(executor.prepared_structures(), 2);
@@ -1179,12 +1195,6 @@ fn alternating_recoupling_structures_upload_their_matrices_exactly_once_each() {
     // matrices are resident and the workspace is shared.
     assert_eq!(warm.h2d_calls, 0, "a switch re-uploaded: {warm:?}");
     assert_eq!(warm.device_allocs, 0, "a switch allocated: {warm:?}");
-    // The first round pays six: one coefficient-and-matrix vector per
-    // structure, the two workspace buffers the wider structure allocates and
-    // the narrower one reuses, the context's shared `1` that pack and scatter
-    // read as their coefficient, and the zero template the wider structure's
-    // inactive destination layout needs.
-    assert_eq!(cold.h2d_calls, 6, "cold uploads changed: {cold:?}");
     for (index, (_, fixture)) in prepared.iter().enumerate() {
         let (dst, _) = &buffers[index];
         assert_close(

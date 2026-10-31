@@ -13,10 +13,6 @@
 //! high-water capacity across member counts); the cached plans are not
 //! workspace state.
 
-// The native grouped route is the faer provider's; a BLAS provider runs the
-// grouped jobs through its dot and prepares no plan.
-use crate::backend;
-
 use crate::prepared;
 
 use std::cell::RefCell;
@@ -299,12 +295,21 @@ where
     }
 }
 
+/// Purpose: a warmed B = 1 workspace builds no geometry GEMM plan again and
+/// allocates nothing.
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "the geometry-plan cache belongs to the native grouped GEMM kernel; a BLAS provider runs grouped jobs through its own dot and prepares no plan"
+)]
 fn warmed_member1_workspace_builds_no_grouped_core_plan() {
     let _serial = counting_alloc::serial();
-    if !backend::faer_is_default_backend() {
-        return;
-    }
     check("compose U1 f64", &compose::<_, f64>(u1_legs()));
     // Fermionic signs: one grouped submission per coefficient group.
     check("compose fZ2xU1 c64", &compose::<_, Complex64>(fz2u1_legs()));

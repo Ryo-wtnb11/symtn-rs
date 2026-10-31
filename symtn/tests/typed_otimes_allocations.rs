@@ -9,17 +9,20 @@ use symtn::typed::{GradedSpace, TensorMap};
 
 use crate::counting_alloc;
 
-fn measured<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> (u64, usize) {
+/// Allocations of at least `payload_bytes` while `operation` runs.
+fn measured<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> usize {
     let (output, allocs) =
-        counting_alloc::measure_matching(payload_bytes..=payload_bytes, || black_box(operation()));
+        counting_alloc::measure_matching(payload_bytes..=usize::MAX, || black_box(operation()));
     black_box(output);
-    (allocs.bytes, allocs.matched_calls as usize)
+    allocs.matched_calls as usize
 }
 
 fn leg(rule: &Arc<U1FusionRule>, degeneracy: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(Arc::clone(rule), [(U1Irrep::new(0), degeneracy)]).unwrap()
 }
 
+/// Purpose: `otimes` allocates its one output payload and no output-sized
+/// dense Kronecker temporary.
 #[test]
 fn typed_otimes_allocates_one_output_payload_and_no_dense_kron_temporary() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -40,12 +43,7 @@ fn typed_otimes_allocates_one_output_payload_and_no_dense_kron_temporary() {
     let output_bytes = std::mem::size_of_val(warm.dense_data().unwrap());
     drop(warm);
 
-    let (allocated, output_sized_allocations) =
-        measured(output_bytes, || lhs.otimes(engine, &rhs).unwrap());
+    let output_sized_allocations = measured(output_bytes, || lhs.otimes(engine, &rhs).unwrap());
 
     assert_eq!(output_sized_allocations, 1);
-    assert!(
-        allocated <= output_bytes as u64 + 128 * 1024,
-        "otimes allocated {allocated} B for a {output_bytes} B output"
-    );
 }

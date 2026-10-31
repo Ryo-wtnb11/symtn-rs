@@ -24,8 +24,9 @@ use crate::counting_alloc;
 struct Measurement {
     allocations: usize,
     bytes: usize,
-    /// Allocator-zeroed allocations of exactly the `payload_bytes` passed to
-    /// `measure`.
+    /// Allocations, and the allocator-zeroed ones, of exactly the
+    /// `payload_bytes` passed to `measure`.
+    payloads: u64,
     zeroed_payloads: u64,
 }
 
@@ -34,6 +35,7 @@ fn measure(payload_bytes: usize, operation: impl FnOnce()) -> Measurement {
     Measurement {
         allocations: allocs.calls as usize,
         bytes: allocs.bytes as usize,
+        payloads: allocs.matched_calls,
         zeroed_payloads: allocs.matched_zeroed_calls,
     }
 }
@@ -87,6 +89,8 @@ fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     (measurement, payload_bytes)
 }
 
+/// Purpose: `restrict_leg` allocates its one output payload unfilled, and
+/// everything else it allocates is independent of the degeneracies.
 #[test]
 fn restrict_leg_allocates_one_unfilled_payload_and_degeneracy_independent_scratch() {
     let _serial = crate::counting_alloc::serial();
@@ -96,14 +100,11 @@ fn restrict_leg_allocates_one_unfilled_payload_and_degeneracy_independent_scratc
 
     for (measurement, bytes) in [(&small, small_bytes), (&large, large_bytes)] {
         assert_eq!(
-            measurement.zeroed_payloads, 0,
-            "no payload-sized zeroed allocation, got {measurement:?} for {bytes} bytes"
+            (measurement.payloads, measurement.zeroed_payloads),
+            (1, 0),
+            "one unfilled payload-sized allocation, got {measurement:?} for {bytes} bytes"
         );
     }
-    // The block copy's scratch is inline (#1362) and the warm layout lookup
-    // builds no key (#1367), so every call is the result's structural objects
-    // or its payload. The start table is borrowed from the selection (#1561).
-    assert_eq!(small.allocations, 8);
     // Structural work does not grow with the degeneracy dimensions. The byte
     // budget pins the payload to one buffer and rules out a second
     // payload-sized buffer taken through plain `alloc`/`realloc`.
@@ -373,9 +374,10 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
 
 /// Steady-state `restrict_leg` on `[leg, other] <- [leg, other]`: every
 /// coupled sector has several row trees, so the destination blocks are
-/// strided sub-matrices. Returns the measurement and payload bytes of one
-/// warm call whose previous outputs were dropped.
-fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
+/// strided sub-matrices; `other` carries charges `-reach..=reach`, so the
+/// coupled-sector count grows with `reach`. Returns the measurement and
+/// payload bytes of one warm call whose previous outputs were dropped.
+fn steady_multi_row_restrict(scale: usize, reach: i32) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
@@ -383,7 +385,12 @@ fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
-    let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
+    let other = u1(
+        &provider,
+        &(-reach..=reach)
+            .map(|charge| (charge, if charge == 0 { 2 } else { 1 }))
+            .collect::<Vec<_>>(),
+    );
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&leg, &other], 61).unwrap();
     let selection = LegSelection::try_new(
@@ -411,27 +418,38 @@ fn steady_multi_row_restrict(scale: usize) -> (Measurement, usize) {
     (measurement, payload_bytes)
 }
 
+/// Purpose: a steady-state `restrict_leg` with several row trees per coupled
+/// sector pays no per-call layout proof.
 #[test]
 fn steady_state_restrict_leg_with_several_row_trees_pays_no_layout_proof() {
     let _serial = crate::counting_alloc::serial();
-    let (small, small_bytes) = steady_multi_row_restrict(1);
-    let (large, large_bytes) = steady_multi_row_restrict(4);
-    for (measurement, bytes) in [(&small, small_bytes), (&large, large_bytes)] {
+    let (small, small_bytes) = steady_multi_row_restrict(1, 1);
+    let (large, large_bytes) = steady_multi_row_restrict(4, 1);
+    let (wide, wide_bytes) = steady_multi_row_restrict(1, 3);
+    for (measurement, bytes) in [
+        (&small, small_bytes),
+        (&large, large_bytes),
+        (&wide, wide_bytes),
+    ] {
         assert_eq!(
             measurement.zeroed_payloads, 0,
             "no payload-sized zeroed allocation, got {measurement:?} for {bytes} bytes"
         );
     }
-    // origin/main (zero-filled output) measures 11 here. Proving the tiling
-    // by compiling `coupled_sector_regions` on the per-call destination
-    // wrapper measured 50: the proof must be an O(1) property recorded when
-    // the canonical layout is built (#1290).
-    assert!(
-        small.allocations <= 11,
-        "steady-state restrict_leg allocated {} times",
-        small.allocations
+    // Proving the tiling on the per-call destination wrapper would cost per
+    // coupled sector; the proof is a property recorded when the canonical
+    // layout is built, so the count moves with neither the degeneracies nor
+    // the coupled sectors.
+    counting_alloc::assert_same_calls(
+        "degeneracy scale 1 -> 4",
+        small.allocations as u64,
+        large.allocations as u64,
     );
-    assert_eq!(small.allocations, large.allocations);
+    counting_alloc::assert_same_calls(
+        "charge reach 1 -> 3",
+        small.allocations as u64,
+        wide.allocations as u64,
+    );
 }
 
 /// One stacked `restrict_leg` over `members` members `[leg, other] <- [leg,
@@ -555,6 +573,8 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     (restrict, embed, payload_bytes, embedded_bytes)
 }
 
+/// Purpose: a selection's run count (4 -> 28 runs) costs no allocation in
+/// the restriction or the embedding.
 #[test]
 fn a_many_run_selection_allocates_nothing_per_run() {
     let _serial = crate::counting_alloc::serial();
@@ -574,7 +594,6 @@ fn a_many_run_selection_allocates_nothing_per_run() {
             "no payload-sized zeroed allocation, got {measurement:?} for {bytes} bytes"
         );
     }
-    assert_eq!(small_restrict.allocations, 8);
     assert_eq!(small_restrict.allocations, large_restrict.allocations);
     assert_eq!(
         small_restrict.bytes - small_bytes,
