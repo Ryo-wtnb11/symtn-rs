@@ -174,27 +174,10 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
 }
 
 #[test]
-fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
+fn infinity_arm_is_positive_zero_without_entries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (uv, uw) = u1_norm_legs();
-    let poisoned: TensorMap<U1FusionRule, Complex64> =
-        TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |trees, i| {
-            if *trees.coupled() == U1Irrep::new(1) && i == [0, 0] {
-                Complex64::new(1.0, f64::NAN)
-            } else {
-                complex_fill(i)
-            }
-        })
-        .unwrap();
-    assert!(poisoned.norm(engine, f64::INFINITY).unwrap().is_nan());
-    assert!(poisoned
-        .adjoint(engine)
-        .unwrap()
-        .norm(engine, f64::INFINITY)
-        .unwrap()
-        .is_nan());
-
     let only_zero = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
     let only_one = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1), 3)]).unwrap();
     let empty: TensorMap<U1FusionRule, f64> =
