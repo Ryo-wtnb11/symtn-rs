@@ -12,13 +12,15 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use symtn_core::{
     ErasedStructureCacheControl, StructureCache, StructureCacheInfo, StructureCacheKind,
 };
 use tcontract::api::{CSpec, DType, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
-use tcontract::{Plan, PlanConfig, SliceAccumulationSource};
-use tcontract_exec::Exec;
+use tcontract::{Algorithm, Plan, PlanConfig, SliceAccumulationSource};
+use tcontract_exec::batch::batch_decision_within;
+use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
@@ -203,6 +205,47 @@ pub(crate) fn work<T: Scalar>(job: &DenseGemmBatchJob) -> f64 {
     job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
 }
 
+/// The width `plan` hands faer or its packed grid for a job of weighted work
+/// `work` and serial time `serial` on a lane of `budget` slots of `exec`.
+///
+/// Composed from the plan's own two public decisions: under Auto the plan
+/// first narrows its context to `width_for` over its serial estimate (one
+/// section); a Faer plan then limits faer to the batch decision of its one
+/// item (`count = 1`: a block plan is rank 2 with no batch mode), asked with
+/// the faer route's capabilities and the caller's work model. A Packed plan's
+/// final grid comes from a private partition, so its grant is the public
+/// balanced-lanes decision within the narrowed context, an upper bound on that
+/// grid. Faer's item work and its one section match this crate's `work` and
+/// `1` by value, not by an upstream contract; they are re-checked on each
+/// tcontract release. A forced strategy never reaches the scheduler's model.
+pub(crate) fn grant<T: Scalar>(
+    plan: &Plan<T>,
+    work: f64,
+    exec: &Exec<'_>,
+    budget: usize,
+    serial: Duration,
+) -> usize {
+    let narrowed = exec.width_for_within(budget, serial.as_nanos() as f64, 1);
+    let query = BatchQuery::new(1, work);
+    let query = match plan.report().algorithm {
+        Algorithm::Faer => query
+            .with_item_parallel(exec.token_ref().carries_team())
+            .with_outer_only_when_item_serial(true)
+            .with_item_sections(1),
+        Algorithm::Packed => query.with_balanced_lanes(true).with_item_parallel(true),
+        // No rank-2 block plan is elementwise; the narrowed context bounds any
+        // other algorithm's width.
+        _ => return narrowed,
+    };
+    batch_decision_within(exec.batch_policy(), exec, narrowed, &query).item_threads
+}
+
+fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
+    plans[index]
+        .downcast_ref::<Plan<T>>()
+        .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"))
+}
+
 /// One call's blocks: each job's operands, its plan and the scalars.
 struct GemmBlocks<'a, T> {
     jobs: &'a [DenseGemmBatchJob],
@@ -225,6 +268,18 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         work::<T>(&self.jobs[index])
     }
 
+    fn grant(
+        &self,
+        index: usize,
+        (plan, _): &Self::Job,
+        exec: &Exec<'_>,
+        budget: usize,
+        serial: Duration,
+    ) -> usize {
+        let work = work::<T>(&self.jobs[index]);
+        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+    }
+
     fn run(
         &self,
         index: usize,
@@ -232,9 +287,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
-        let plan = self.plans[*plan]
-            .downcast_ref::<Plan<T>>()
-            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
+        let plan = plan_of::<T>(self.plans, *plan);
         plan.execute_slices_accum(
             &mut exec,
             self.alpha,
@@ -277,6 +330,18 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         work::<T>(&self.jobs[index])
     }
 
+    fn grant(
+        &self,
+        index: usize,
+        (plan, _, _): &Self::Job,
+        exec: &Exec<'_>,
+        budget: usize,
+        serial: Duration,
+    ) -> usize {
+        let work = work::<T>(&self.jobs[index]);
+        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+    }
+
     fn run(
         &self,
         index: usize,
@@ -284,9 +349,7 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
-        let plan = self.plans[*plan]
-            .downcast_ref::<Plan<T>>()
-            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
+        let plan = plan_of::<T>(self.plans, *plan);
         *written = plan
             .execute_uninit_slices(
                 &mut exec,

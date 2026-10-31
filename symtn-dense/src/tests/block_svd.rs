@@ -465,8 +465,9 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
     }
 }
 
-/// The scheduler's allocation for jobs of `work` multiply-adds, computed
-/// through the kernel's own cost function inside the linalg entry.
+/// The scheduler's baseline allocation for jobs of `work` multiply-adds
+/// (`schedule::allocate` grants every job one slot), computed through the
+/// kernel's own cost function inside the linalg entry.
 fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> schedule::Allocation {
     engine(threads, policy)
         .with_linalg_pool(|exec, _| {

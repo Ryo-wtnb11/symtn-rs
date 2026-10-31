@@ -103,10 +103,18 @@ Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
 provider's block GEMM kernel (recoupling, block-wise contraction) takes its
 thread count from the engine's cost rule over the batch's estimated serial
-time (Tenferro's own per-flop model), and its lane count from the engine's
-batch decision. The lanes share all of those threads: a batch of a few large
-blocks gives each lane several threads, and a batch of many small blocks runs
-one thread per lane. Blocks are placed largest first on the least-loaded lane; prepared
+time (Tenferro's own per-flop model), and its lane count is at most the
+engine's batch decision, so the work model's fan-out limits are never
+exceeded. The lanes share all of those threads in equal shares: a batch of a
+few large blocks gives each lane several threads, and a batch of many small
+blocks runs one thread per lane. The kernel scores the baseline placement
+(blocks largest first on the lane of least accumulated serial time, over the
+decision's lane count) and an equal-share placement for every lane count up
+to it under one model, and keeps the lowest score, the baseline on ties. The
+model charges a block its serial time where the provider would run it on one
+thread in that lane, otherwise its time over the provider's granted width plus
+the engine's dispatch cost at that width; it has no sublinear speedup, so it
+is a scheduling estimate, not a promise of a faster run. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane

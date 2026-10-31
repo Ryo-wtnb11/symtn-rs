@@ -62,6 +62,29 @@ pub(crate) trait BlockOp: Sync {
     /// The block's weighted multiply-adds, as its provider estimates them.
     fn work(&self, index: usize, job: &Self::Job) -> f64;
 
+    /// The width block `index`'s provider takes on a lane of `budget`
+    /// reserved slots of `exec`, for a block of serial time `serial`: the
+    /// scheduler's model of that provider's own width decision, composed from
+    /// the provider's public decisions. This default is the single decision a
+    /// per-matrix factorization makes (`width_for` over the work model's time
+    /// with one section); a block with extra batch dimensions takes the
+    /// provider's multi-item route, for which it is an approximation.
+    ///
+    /// Why the result is an estimate even where the composition matches the
+    /// provider: `serial` is integer nanoseconds and the provider re-normalizes
+    /// it from its own floating estimate, so near a payoff boundary of an
+    /// extreme estimate the two may round to different sides.
+    fn grant(
+        &self,
+        _: usize,
+        _: &Self::Job,
+        exec: &Exec<'_>,
+        budget: usize,
+        serial: Duration,
+    ) -> usize {
+        exec.width_for_within(budget, serial.as_nanos() as f64, 1)
+    }
+
     /// Runs block `index` on its lane's execution context.
     fn run(&self, index: usize, job: &mut Self::Job, exec: Exec<'_>) -> Result<(), DenseError>;
 }
@@ -125,8 +148,14 @@ fn on_lanes<B: BlockOp>(
             cost(B::KIND, work, &model)
         }));
     let mean_work = total_work / jobs.len().max(1) as f64;
-    let allocation =
-        schedule::allocate_in(exec, &scratch.times, mean_work, &mut scratch.allocation);
+    let shared: &Exec<'_> = exec;
+    let allocation = schedule::allocate_in(
+        shared,
+        &scratch.times,
+        mean_work,
+        &mut scratch.allocation,
+        |j, serial, budget| op.grant(j, &jobs[j], shared, budget, serial),
+    );
     let result = schedule::run(exec.reborrow(), &allocation, jobs, |index, job, exec| {
         op.run(index, job, exec)
     });

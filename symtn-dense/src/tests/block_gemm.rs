@@ -437,9 +437,11 @@ fn costs(jobs: &[DenseGemmBatchJob]) -> (Vec<std::time::Duration>, f64) {
 }
 
 /// The lanes and reserved widths the kernel derives from its own costs and
-/// the engine's decisions: few large jobs under Auto share every slot (no
-/// lane is capped at one thread), forced Split and Inner reserve their
-/// decision, and a reserved width is what each job's child context gets.
+/// the engine's decisions, under the baseline placement (`schedule::allocate`
+/// grants every job one slot, so no fewer-lane candidate scores lower on
+/// equal jobs): few large jobs under Auto share every slot (no lane is capped
+/// at one thread), forced Split and Inner reserve their decision, and a
+/// reserved width is what each job's child context gets.
 #[test]
 fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
     let pool = || crate::Pool::builder().threads(16).build().unwrap();
@@ -493,6 +495,48 @@ fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
         allocation.lanes.len() == 1 || allocation.lanes.iter().all(|l| l.budget == 1),
         "{allocation:?}"
     );
+}
+
+/// Purpose: the scheduler's GEMM grant is faer's final width, not only the
+/// plan's narrowing. A 64x64x64 f64 Faer block on a 4-slot lane (flat 100 ns
+/// dispatch) narrows to 4 slots on its time, but a caller model of 262144
+/// multiply-adds per ns makes faer's own item 1 ns, too small for a team: the
+/// grant is one slot and the block is charged its serial time.
+#[test]
+fn gemm_grant_follows_faer_batch_decision() {
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let row = WidthCosts::flat(std::time::Duration::from_nanos(100));
+    let pool = crate::Pool::builder()
+        .threads(4)
+        .dispatch_costs(DispatchCosts::new(row, row, row))
+        .build()
+        .unwrap();
+    let model = WorkModel::default()
+        .with_muladds_per_ns(262_144.0)
+        .with_item_overhead_ns(0.0);
+    let mut engine =
+        CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
+    let job = batch_job((64, 64, 64), (0, 0, 0));
+    let plan = gemm::Geometry::new(&job, [MatrixOp::Identity; 2])
+        .unwrap()
+        .plan::<f64>()
+        .unwrap();
+    assert_eq!(plan.report().algorithm, tcontract::Algorithm::Faer);
+    let work = gemm::work::<f64>(&job);
+    let t = cost(OpKind::Gemm, work, &model);
+    let (narrowed, granted, item) = engine
+        .with_contraction_exec(|exec, _, _| {
+            assert!(exec.token_ref().carries_team());
+            let granted = gemm::grant(&plan, work, exec, 4, t);
+            Ok((
+                exec.width_for_within(4, t.as_nanos() as f64, 1),
+                granted,
+                schedule::item_time(exec, t, granted),
+            ))
+        })
+        .unwrap();
+    assert_eq!((narrowed, granted), (4, 1));
+    assert_eq!(item, t);
 }
 
 mod plan_cache {
