@@ -38,6 +38,15 @@ impl Mf {
     /// "before provider work" half of a cell.
     fn reset_queries(_: &Z2FusionRule) {}
     fn assert_no_queries(_: &Z2FusionRule) {}
+    /// Every Z2 sector has quantum dimension 1.
+    fn dim(_: Z2Irrep) -> f64 {
+        1.0
+    }
+    /// Left null dimensions of `[l, l] <- [l]`, `l = unit ⊕ charged`, per
+    /// coupled sector: each Z2 sector is reached by two of the four products.
+    fn tall_null_dims() -> [usize; 2] {
+        [1, 1]
+    }
 }
 
 /// Checked Generic mode: the toy provider, whose charged sector is `X`.
@@ -45,7 +54,7 @@ struct Checked;
 
 impl Checked {
     fn provider() -> Arc<CheckedOnlyToy> {
-        Arc::new(CheckedOnlyToy::new_product_probe(0))
+        Arc::new(CheckedOnlyToy::new(0))
     }
     fn unit() -> Label {
         Label::Vacuum
@@ -59,17 +68,40 @@ impl Checked {
     fn assert_no_queries(provider: &CheckedOnlyToy) {
         assert_no_provider_queries(provider);
     }
+    /// `X ⊗ X = 1 ⊕ 2X` fixes `d_X² = 1 + 2 d_X`.
+    fn dim(sector: Label) -> f64 {
+        if sector == Label::X {
+            1.0 + 2.0_f64.sqrt()
+        } else {
+            1.0
+        }
+    }
+    /// Left null dimensions of `[l, l] <- [l]`, `l = 1 ⊕ X`, per coupled
+    /// sector: the unit is reached by `1 1` and `X X`, `X` by `1 X`, `X 1`
+    /// and the two `X X → X` vertices.
+    fn tall_null_dims() -> [usize; 2] {
+        [1, 3]
+    }
 }
 
 /// The facade `Error` inside either mode's error type: multiplicity-free
 /// returns it directly, checked Generic wraps it in `Facade`.
 trait IntoFacade {
     fn into_facade(self) -> symtn::typed::Error;
+    /// The `OperationError` a factorization stage refused with: a facade
+    /// `Operation` in either mode, or checked Generic's `Plan(Operation)`.
+    fn into_operation(self) -> OperationError;
 }
 
 impl IntoFacade for symtn::typed::Error {
     fn into_facade(self) -> symtn::typed::Error {
         self
+    }
+    fn into_operation(self) -> OperationError {
+        match self {
+            symtn::typed::Error::Operation(error) => *error,
+            other => panic!("expected an operation error, got {other:?}"),
+        }
     }
 }
 
@@ -78,6 +110,15 @@ impl<E: fmt::Debug> IntoFacade for GenericTensorError<E> {
         match self {
             GenericTensorError::Facade(error) => error,
             other => panic!("expected a facade error, got {other:?}"),
+        }
+    }
+    fn into_operation(self) -> OperationError {
+        match self {
+            GenericTensorError::Facade(error) => error.into_operation(),
+            GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(error)) => {
+                error
+            }
+            other => panic!("expected an operation error, got {other:?}"),
         }
     }
 }
@@ -115,4 +156,29 @@ macro_rules! in_both_modes {
     };
 }
 
+#[track_caller]
+fn dense_close<T: numerics::Numeric>(what: &str, got: &[T], want: &[T]) {
+    numerics::assert_slices_close(what, got, want, 8);
+}
+
+fn is_space_mismatch(error: &symtn::typed::Error, reason: &str) -> bool {
+    matches!(
+        error,
+        symtn::typed::Error::Operation(error) if matches!(
+            &**error,
+            OperationError::SpaceMismatch { message } if message.contains(reason)
+        )
+    )
+}
+
+#[track_caller]
+fn operation_err<T, E: IntoFacade>(result: Result<T, E>) -> OperationError {
+    match result {
+        Ok(_) => panic!("the call succeeded"),
+        Err(error) => error.into_operation(),
+    }
+}
+
+mod factorization;
 mod matrix_fn;
+mod transform;

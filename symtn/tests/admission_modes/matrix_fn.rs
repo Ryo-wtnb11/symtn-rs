@@ -3,26 +3,12 @@
 
 use super::*;
 
-fn dense_close<T: numerics::Numeric>(what: &str, got: &[T], want: &[T]) {
-    numerics::assert_slices_close(what, got, want, 8);
-}
-
 fn is_numerical_failure(error: &symtn::typed::Error) -> bool {
     matches!(
         error,
         symtn::typed::Error::Operation(error) if matches!(
             **error,
             OperationError::Dense(symtn_dense::DenseError::NumericalFailure { .. })
-        )
-    )
-}
-
-fn is_space_mismatch(error: &symtn::typed::Error, reason: &str) -> bool {
-    matches!(
-        error,
-        symtn::typed::Error::Operation(error) if matches!(
-            &**error,
-            OperationError::SpaceMismatch { message } if message.contains(reason)
         )
     )
 }

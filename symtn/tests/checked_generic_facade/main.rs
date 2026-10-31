@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::HermitianTol;
-#[cfg(feature = "cgc-gen")]
-use symtn::typed::Qr;
 use symtn::typed::Side;
+#[cfg(feature = "cgc-gen")]
+use symtn::typed::{Lq, Qr};
 
 use symtn::expert::DenseBackend;
 
@@ -32,7 +32,7 @@ use symtn::sector::{
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::CheckedGenericStructureError;
 use symtn::typed::{
-    CheckedGenericTensorProductError, Eig, Eigh, GradedSpace, LeftPolar, Lq, RightPolar, Svd,
+    CheckedGenericTensorProductError, Eig, Eigh, GradedSpace, LeftPolar, RightPolar, Svd,
     TensorMap, Truncation, TypedTensorConstructionDispatch,
 };
 use symtn::typed::{Complex32, Complex64, GenericTensorError, Runtime, SectorSpectrum};
