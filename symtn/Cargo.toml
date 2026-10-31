@@ -87,3 +87,8 @@ path = "tests/integration.rs"
 [[test]]
 name = "serial"
 path = "tests/serial.rs"
+
+[[bench]]
+name = "checked_generic_transform"
+harness = false
+required-features = ["cgc-gen"]

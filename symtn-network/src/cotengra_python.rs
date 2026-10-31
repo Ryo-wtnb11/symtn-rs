@@ -1374,10 +1374,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn supervise_shell(
-        script: &str,
-        timeout: Duration,
-    ) -> (Supervision<ExitStatus>, IoOutput, Duration) {
+    fn supervise_shell(script: &str, timeout: Duration) -> (Supervision<ExitStatus>, IoOutput) {
         let mut command = Command::new("sh");
         command
             .arg("-c")
@@ -1396,7 +1393,6 @@ mod tests {
             stderr: spawn_reader(stderr, "stderr", failure_tx),
         };
 
-        let start = Instant::now();
         let result = supervise_child(
             &mut child,
             Some(timeout),
@@ -1404,13 +1400,13 @@ mod tests {
             &mut MonotonicClock::new(),
         );
         let output = workers.join();
-        (result, output, start.elapsed())
+        (result, output)
     }
 
     #[cfg(unix)]
     #[test]
     fn unix_normal_exit_tolerates_an_empty_group() {
-        let (result, output, _) =
+        let (result, output) =
             supervise_shell("printf stdout; printf stderr >&2", Duration::from_secs(2));
 
         assert!(matches!(result, Supervision::Exited(status) if status.success()));
@@ -1422,21 +1418,18 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn unix_leader_exit_kills_pipe_holding_descendant() {
-        let timeout = Duration::from_secs(2);
-        let (result, output, elapsed) = supervise_shell("sleep 5 & exit 0", timeout);
+        // A surviving descendant keeps the pipes open, so `workers.join()`
+        // never returns and the test hangs instead of passing slowly.
+        let (result, output) = supervise_shell("sleep 600 & exit 0", Duration::from_secs(2));
 
         assert!(matches!(result, Supervision::Exited(status) if status.success()));
         assert!(output.errors.is_empty(), "{:?}", output.errors);
-        assert!(
-            elapsed < timeout,
-            "pipe-holding descendant survived for {elapsed:?}"
-        );
     }
 
     #[cfg(unix)]
     #[test]
     fn unix_timeout_kills_descendants_after_draining_both_pipes() {
-        let (result, output, _) = supervise_shell(
+        let (result, output) = supervise_shell(
             "(dd if=/dev/zero bs=131072 count=1 2>/dev/null) & \
                  (dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null) & \
                  wait; sleep 30",

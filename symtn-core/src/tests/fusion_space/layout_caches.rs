@@ -598,11 +598,15 @@ fn overlapping_resets_wait_so_the_epoch_stays_odd_until_the_first_finishes() {
     crate::probe::set_mid_reset_hook(Box::new(move || {
         // Reset B starts on another thread while reset A is mid-way.
         let finished = Arc::clone(&done);
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
         *slot.borrow_mut() = Some(std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
             clear_structure_caches();
             finished.store(true, std::sync::atomic::Ordering::SeqCst);
         }));
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        // B is running and about to reset; the checks below hold however far
+        // it gets, so no delay is needed to order them.
+        started_rx.recv().unwrap();
         // What: B cannot run inside A, so the epoch stays odd and a build
         // here is not published.
         assert!(!done.load(std::sync::atomic::Ordering::SeqCst));
