@@ -94,6 +94,7 @@ fn domain_axes<R, D, S>(t: &symtn::typed::TensorMap<R, D, S>) -> Vec<usize> {
 /// `terms` of the tolerance rule for a product of endomorphisms: an
 /// endomorphism payload holds `sum_c n_c^2` entries, so its square root
 /// bounds every coupled block's contracted length `n_c`.
+#[cfg(feature = "cgc-gen")]
 fn endomorphism_terms(payload_len: usize) -> usize {
     (payload_len as f64).sqrt().ceil() as usize
 }

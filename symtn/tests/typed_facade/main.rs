@@ -7,7 +7,7 @@
 //! with its own category.
 
 use crate::common::ErrorKind as _;
-use crate::{numerics, ulp};
+use crate::numerics;
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.

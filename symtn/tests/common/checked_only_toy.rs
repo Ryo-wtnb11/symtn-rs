@@ -516,6 +516,7 @@ impl TypedSectorAdmission for CheckedOnlyToy {
     }
 }
 
+#[allow(dead_code)]
 fn assert_same_checked_generic_layout_and_close<R, D>(
     actual: &TensorMap<R, D>,
     expected: &TensorMap<R, D>,
