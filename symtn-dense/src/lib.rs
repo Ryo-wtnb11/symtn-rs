@@ -11,6 +11,7 @@ mod dot;
 mod dtype;
 mod error;
 mod executor;
+mod fresh;
 mod layout;
 mod scalar;
 mod tensor;
@@ -30,13 +31,14 @@ mod cuda_hermitian;
 mod cuda_region;
 #[cfg(feature = "tenferro")]
 mod block_kernel {
-    // The BLAS provider keeps its own grouped scheduler until the
-    // factorization kernels run here too.
-    #[cfg(not(feature = "cpu-blas-core"))]
+    // The BLAS provider keeps its own grouped scheduler for initialized
+    // outputs; it runs fresh outputs here when a forced lane policy rules out
+    // its serial vendor loop.
+    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod gemm;
     // The one lane driver, cost function and block-op trait every native
     // kernel runs through.
-    #[cfg(not(feature = "cpu-blas-core"))]
+    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod driver;
     // The native provider's block factorizations; BLAS keeps its serial
     // per-block vendor calls.
@@ -60,6 +62,8 @@ pub use executor::{
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
     MatrixOp,
 };
+#[doc(hidden)]
+pub use fresh::DenseFreshSegments;
 pub use scalar::DenseScalar;
 pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};

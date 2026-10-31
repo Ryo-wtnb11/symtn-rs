@@ -1,8 +1,9 @@
 use num_complex::{Complex32, Complex64};
 
+use crate::fresh::{dispatch_fresh, fresh_serial, FRESH_OP};
 use crate::{
-    DenseDType, DenseDotConfig, DenseError, DenseRead, DenseScalar, DenseTensor, DenseView,
-    DenseViewMut, DenseWrite, Engine,
+    DenseDType, DenseDotConfig, DenseError, DenseFreshSegments, DenseRead, DenseScalar,
+    DenseTensor, DenseView, DenseViewMut, DenseWrite, Engine,
 };
 
 /// One GEMM of a batched matmul over shared flat buffers: the column-major
@@ -443,6 +444,36 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         Err(DenseError::Unsupported {
             op: "matmul_batch_axpby_with_ops_into",
             message: "executor does not implement transpose/adjoint rank-2 batches".to_string(),
+        })
+    }
+
+    /// Batched overwrite matmul into uninitialized destination memory: each
+    /// job's column-major `rows x cols` output becomes
+    /// `alpha * op(lhs_block) op(rhs_block)` with `op = ops[0], ops[1]`
+    /// applied as in [`Self::matmul_batch_axpby_with_ops_into`], written into
+    /// its piece of `segments` (see [`DenseFreshSegments`] for the layout
+    /// contract). No prior destination value is read.
+    ///
+    /// On `Ok`, every job has been reported exactly once through the
+    /// carrier's `written` callback with its own piece, in job order, after
+    /// every job finished; a job with an empty output is reported with an
+    /// empty slice. On `Err`, no job is reported. The default zero-fills each
+    /// job's piece through the carrier's `zeroed` callback and runs it as a
+    /// one-job [`Self::matmul_batch_axpby_with_ops_into`] with `beta = 0`.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    fn matmul_batch_fresh<'a>(
+        &mut self,
+        engine: &mut dyn Engine,
+        segments: DenseFreshSegments<'_, 'a>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        jobs: &[DenseGemmBatchJob],
+        ops: [MatrixOp; 2],
+        alpha: DenseScalar,
+    ) -> Result<(), DenseError> {
+        dispatch_fresh!(FRESH_OP, segments, lhs, rhs, |parts, lhs, rhs| {
+            fresh_serial(self, engine, parts, lhs, rhs, jobs, ops, alpha)
         })
     }
 }

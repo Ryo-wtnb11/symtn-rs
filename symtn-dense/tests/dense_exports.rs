@@ -80,6 +80,7 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         "DenseError",
         "DenseExecutor",
         "DenseFactorization",
+        "DenseFreshSegments",
         "DenseGemmBatchJob",
         "DenseLinalgScopeBody",
         "DenseOwned",
