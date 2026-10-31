@@ -316,8 +316,9 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
-    // One fused index per lane and fused axis; inline up to eight, the rank
-    // metadata width, so a fresh per-call workspace allocates none.
+    // The calling lane's fused index, one entry per fused axis; inline up to
+    // eight, the rank metadata width, so a fresh per-call workspace allocates
+    // none. Forked lanes below that rank keep their own (`LaneIndex`).
     fused_indices: smallvec::SmallVec<[usize; 8]>,
     member_shape: Vec<usize>,
     member_dst_strides: Vec<isize>,
@@ -437,11 +438,69 @@ impl<T> HostTreeTransformWorkspace<T> {
         threads: usize,
         max_fused_rank: usize,
     ) -> Result<(), OperationError> {
-        let len = checked_fused_index_len(threads, max_fused_rank)?;
+        let len =
+            checked_fused_index_len(fused_index_lanes(threads, max_fused_rank), max_fused_rank)?;
         if len > self.fused_indices.len() {
             self.fused_indices.resize(len, 0);
         }
         Ok(())
+    }
+}
+
+/// Fused-index entries a lane keeps inline: the rank metadata width.
+const INLINE_FUSED_RANK: usize = 8;
+
+/// Lanes whose fused indices the shared workspace buffer holds: every lane
+/// above the inline rank, only the calling lane otherwise.
+///
+/// Why not always one shared `threads * rank` buffer: an eager call's
+/// workspace is per call, and that buffer outgrows its inline capacity as
+/// soon as the engine is wider than one, so every parallel call allocated on
+/// the caller thread what the serial call does not. Up to the inline rank a
+/// forked lane keeps its index on its own stack instead ([`LaneIndex`]);
+/// above it the index spills anyway, and one shared buffer keeps a warm
+/// replay allocation-free.
+fn fused_index_lanes(threads: usize, max_fused_rank: usize) -> usize {
+    if max_fused_rank <= INLINE_FUSED_RANK {
+        1
+    } else {
+        threads
+    }
+}
+
+/// The fused-index scratch of the second lane of a fork: a slice of the
+/// shared buffer when it holds every lane, or the lane's own inline index.
+enum LaneIndex<'a> {
+    Shared(&'a mut [usize]),
+    Own(smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>),
+}
+
+impl LaneIndex<'_> {
+    fn get(&mut self) -> &mut [usize] {
+        match self {
+            Self::Shared(indices) => indices,
+            Self::Own(indices) => indices,
+        }
+    }
+}
+
+/// Splits one fork's fused-index scratch: the first `left_threads` lanes keep
+/// the front of `fused_indices`; the rest take the back when the buffer holds
+/// every lane, and their own inline index otherwise.
+fn split_lane_indices(
+    fused_indices: &mut [usize],
+    left_threads: usize,
+    threads: usize,
+    max_fused_rank: usize,
+) -> (&mut [usize], LaneIndex<'_>) {
+    if fused_indices.len() >= threads * max_fused_rank {
+        let (left, right) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+        (left, LaneIndex::Shared(right))
+    } else {
+        (
+            fused_indices,
+            LaneIndex::Own(smallvec::SmallVec::from_elem(0, max_fused_rank)),
+        )
     }
 }
 

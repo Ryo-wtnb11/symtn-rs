@@ -471,6 +471,7 @@ where
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         self.tree_transform(
@@ -551,6 +552,7 @@ where
             .into());
         }
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         let nout = self.codomain_rank();
@@ -591,6 +593,7 @@ where
         num_codomain: usize,
     ) -> Result<Self, FacadeError<R>> {
         if num_codomain == self.codomain_rank() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         self.planar(engine, PlanarRequestKind::Repartition { num_codomain })
@@ -632,6 +635,7 @@ where
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
         if self.axes_are_identity(codomain_axes, domain_axes) {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         self.planar(

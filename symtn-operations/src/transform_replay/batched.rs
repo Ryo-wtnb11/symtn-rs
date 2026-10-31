@@ -354,7 +354,8 @@ where
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
         exec,
@@ -376,7 +377,7 @@ where
         |exec| {
             replay_pack_columns(
                 right_kernels,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 layouts,
                 right_items,
@@ -460,7 +461,8 @@ where
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
         exec,
@@ -486,7 +488,7 @@ where
         |exec| {
             replay_single_blocks(
                 right_kernels,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 blocks,
                 layouts,
@@ -597,7 +599,8 @@ where
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
         exec,
@@ -621,7 +624,7 @@ where
         |exec| {
             replay_scatter_columns(
                 right_kernels,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 layouts,
                 right_items,
@@ -696,7 +699,8 @@ where
     let (left_groups, right_groups) = groups.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let right_kernels = kernels.clone();
     let (left, right) = replay_join(
         exec,
@@ -722,7 +726,7 @@ where
         |exec| {
             replay_scatter_groups(
                 right_kernels,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 layouts,
                 scatter_columns,
@@ -776,7 +780,6 @@ where
 {
     let layouts = task.layouts();
     let max_fused_rank = layouts.max_fused_rank();
-    let fused_index_len = checked_fused_index_len(threads, max_fused_rank)?;
     let storage_conjugate = task.storage_conjugate();
     let source_start = chunk[0].lhs_offset;
     let destination_start = chunk[0].dst_offset;
@@ -827,7 +830,7 @@ where
     replay_region(engine, threads, |exec| {
         replay_pack_columns(
             kernels.clone(),
-            &mut workspace.fused_indices[..fused_index_len],
+            workspace.fused_indices.as_mut_slice(),
             max_fused_rank,
             layouts,
             &schedule.pack_columns[pack_start..*pack_cursor],
@@ -941,7 +944,6 @@ where
     let recoupling_plan = task.recoupling_plan();
     let max_fused_rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
-    let fused_index_len = checked_fused_index_len(threads, max_fused_rank)?;
 
     let single_count = schedule.single_block_count;
     let multi_count = recoupling_plan.jobs().len();
@@ -966,7 +968,7 @@ where
             replay_region(engine, threads, |exec| {
                 replay_single_blocks(
                     kernels.clone(),
-                    &mut workspace.fused_indices[..fused_index_len],
+                    workspace.fused_indices.as_mut_slice(),
                     max_fused_rank,
                     task.blocks(),
                     layouts,
@@ -992,7 +994,7 @@ where
                         exec.reborrow(),
                         kernels,
                         &mut zero_strides,
-                        Some(&mut workspace.fused_indices[..max_fused_rank]),
+                        Some(workspace.fused_indices.as_mut_slice()),
                         layouts,
                         dst_layout,
                         src_layout,
@@ -1043,7 +1045,7 @@ where
             replay_region(engine, threads, |exec| {
                 replay_scatter_groups(
                     kernels.clone(),
-                    &mut workspace.fused_indices[..fused_index_len],
+                    workspace.fused_indices.as_mut_slice(),
                     max_fused_rank,
                     layouts,
                     &schedule.scatter_columns,
@@ -1070,7 +1072,7 @@ where
                             exec.reborrow(),
                             kernels,
                             &mut zero_strides,
-                            Some(&mut workspace.fused_indices[..max_fused_rank]),
+                            Some(workspace.fused_indices.as_mut_slice()),
                             layouts,
                             item.dst_layout,
                             packed_destination,
@@ -1127,17 +1129,22 @@ mod bounded_workspace_tests {
     fn fused_index_arena_is_grow_only_and_reports_overflow() {
         // What: execution scratch retains its largest checked worker/rank arena
         // and reports impossible products without allocating or panicking.
+        // Up to the inline rank it holds the calling lane only, at any width:
+        // forked lanes keep their own index, so a wide eager call stays inline.
         let mut workspace = TreeTransformWorkspace::<f64>::default();
+        workspace.prepare_fused_indices(4, 8).unwrap();
+        assert_eq!(workspace.fused_indices.len(), 8);
+        assert!(!workspace.fused_indices.spilled());
         workspace.prepare_fused_indices(4, 9).unwrap();
         assert_eq!(workspace.fused_indices.len(), 36);
         workspace.prepare_fused_indices(1, 2).unwrap();
         assert_eq!(workspace.fused_indices.len(), 36);
         assert_eq!(
-            workspace.prepare_fused_indices(usize::MAX, 2),
+            workspace.prepare_fused_indices(usize::MAX, 9),
             Err(OperationError::ElementCountOverflow)
         );
         assert_eq!(
-            workspace.prepare_fused_indices(usize::MAX, 1),
+            workspace.prepare_fused_indices(usize::MAX / 8, 10),
             Err(OperationError::ElementCountOverflow)
         );
     }

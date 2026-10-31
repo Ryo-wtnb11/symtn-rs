@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use num_complex::Complex64;
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
-use symtn::typed::{CpuEngine, Pool, Runtime};
+use symtn::typed::{CpuEngine, Runtime};
 use symtn::typed::{GradedSpace, TensorMap};
 
 use crate::counting_alloc;
@@ -67,9 +67,12 @@ fn measure<T>(f: impl FnOnce() -> T) -> (T, usize, usize, usize) {
 const THREADS: usize = 3;
 
 /// The parallel engine: `THREADS` workers, independent of the host's core
-/// count.
+/// count, whose pool declares zero dispatch cost so every parallel section
+/// forks on every host. Why not the host-default costs: they come from the
+/// detected host class, so a section forked on one CI runner stayed serial
+/// on another and the parallel path went unmeasured there.
 fn parallel_engine() -> CpuEngine {
-    CpuEngine::new(Pool::builder().threads(THREADS).build().unwrap())
+    symtn_operations::host_pool::eager_test_engine(THREADS)
 }
 
 type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;

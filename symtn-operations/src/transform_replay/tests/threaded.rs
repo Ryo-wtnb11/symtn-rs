@@ -295,7 +295,11 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
         )
     })
     .unwrap();
-    assert_eq!(workspace.fused_indices.len(), 3 * 2);
+    assert_eq!(
+        workspace.fused_indices.len(),
+        2,
+        "only the calling lane is shared"
+    );
     assert_eq!(destination, expected);
 
     let mut profiled_destination = initial;
@@ -319,7 +323,7 @@ fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
         )
     })
     .unwrap();
-    assert_eq!(profiled_workspace.fused_indices.len(), 3 * 2);
+    assert_eq!(profiled_workspace.fused_indices.len(), 2);
     assert_eq!(profiled_destination, expected);
 }
 
@@ -420,7 +424,9 @@ where
             threads,
         )
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
 
         let mut overwrite = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();
@@ -439,7 +445,9 @@ where
             threads,
         )
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         [axpby, overwrite]
     })
 }

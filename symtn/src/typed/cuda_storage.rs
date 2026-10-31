@@ -1,7 +1,12 @@
 use super::storage::sealed;
 use super::*;
 
-impl<D: CudaPayload> sealed::Sealed for CudaStorage<D> {}
+impl<D: CudaPayload> sealed::Sealed for CudaStorage<D> {
+    fn admit_shortcut_engine(engine: &mut dyn Engine, storage: &Self) -> Result<(), Error> {
+        let lease = crate::runtime::cuda_call(engine)?;
+        ensure_cuda_owns(&lease, "shortcut", &[&storage.0])
+    }
+}
 
 impl<R, D> TypedStorage<R, D> for CudaStorage<D>
 where

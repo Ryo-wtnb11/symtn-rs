@@ -51,7 +51,6 @@ where
     let layouts = structure.layouts();
     let max_fused_rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
-    let fused_index_len = checked_fused_index_len(threads, max_fused_rank)?;
 
     initialize_owned(proof.required_len, |dst_data| {
         let recoupling_plan = structure.recoupling_plan();
@@ -75,7 +74,7 @@ where
                 &schedule.singles,
                 dst_data,
                 0,
-                &mut workspace.fused_indices[..fused_index_len],
+                workspace.fused_indices.as_mut_slice(),
                 max_fused_rank,
                 singles_threads,
                 exec,
@@ -132,7 +131,7 @@ where
                     &workspace.chunk_scatter_groups,
                     dst_data,
                     0,
-                    &mut workspace.fused_indices[..fused_index_len],
+                    workspace.fused_indices.as_mut_slice(),
                     max_fused_rank,
                     scatter_threads,
                     exec,
@@ -212,7 +211,8 @@ where
     let (left_items, right_items) = items.split_at(middle);
     let left_threads = threads / 2;
     let right_threads = threads - left_threads;
-    let (left_indices, right_indices) = fused_indices.split_at_mut(left_threads * max_fused_rank);
+    let (left_indices, mut right_indices) =
+        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let (left, right) = replay_join(
         exec,
         |exec| {
@@ -233,7 +233,7 @@ where
                 right_items,
                 right_data,
                 boundary,
-                right_indices,
+                right_indices.get(),
                 max_fused_rank,
                 right_threads,
                 exec,

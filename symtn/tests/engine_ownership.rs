@@ -162,6 +162,37 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
             t.zeros_like(&mut engine).map(drop).map_err(|e| err(&e)),
             "zeros_like",
         );
+        // Short circuits that return a clone without a kernel admit it the
+        // same way: identity permute, transpose, braid and repartition, and
+        // an empty twist.
+        refused(
+            t.permute(&mut engine, &[0, 1], &[2])
+                .map(drop)
+                .map_err(|e| err(&e)),
+            "identity permute",
+        );
+        refused(
+            t.transpose(&mut engine, &[0, 1], &[2])
+                .map(drop)
+                .map_err(|e| err(&e)),
+            "identity transpose",
+        );
+        refused(
+            t.braid(&mut engine, &[0, 1], &[2], &[0, 1, 2])
+                .map(drop)
+                .map_err(|e| err(&e)),
+            "identity braid",
+        );
+        refused(
+            t.repartition(&mut engine, 2).map(drop).map_err(|e| err(&e)),
+            "identity repartition",
+        );
+        refused(
+            t.twist(&mut engine, &[], symtn::typed::Direction::Forward)
+                .map(drop)
+                .map_err(|e| err(&e)),
+            "empty twist",
+        );
         let mut destination = t.scale(&mut CpuEngine::serial(), 1.0).unwrap();
         let before = destination.dense_data().unwrap().to_vec();
         refused(

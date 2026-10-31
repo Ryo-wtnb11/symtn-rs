@@ -4,7 +4,18 @@
 use super::*;
 
 pub(super) mod sealed {
-    pub trait Sealed {}
+    pub trait Sealed: Sized {
+        /// Admits the caller's engine for an operation that returns without
+        /// any work (an identity permutation, a unit twist): the refusal the
+        /// working path would give, so a short circuit never succeeds on an
+        /// engine the operation itself refuses.
+        fn admit_shortcut_engine(
+            _engine: &mut dyn symtn_dense::Engine,
+            _storage: &Self,
+        ) -> Result<(), crate::typed::Error> {
+            Ok(())
+        }
+    }
 
     /// The proof that a family kernel is called from inside this crate.
     ///
@@ -20,7 +31,11 @@ pub(super) mod sealed {
     pub(crate) const EXEC: ExecToken = ExecToken(());
 }
 
-impl<D> sealed::Sealed for Vec<D> {}
+impl<D> sealed::Sealed for Vec<D> {
+    fn admit_shortcut_engine(engine: &mut dyn Engine, _: &Self) -> Result<(), Error> {
+        admit_host_engine(engine)
+    }
+}
 
 /// One storage's placement and capability set for rule `R`, payload `D`.
 ///
@@ -83,6 +98,19 @@ impl<R, D: 'static> TypedStorage<R, D> for Vec<D> {
 
     fn from_host(_: ExecToken, t: TensorMap<R, D>) -> Result<TensorMap<R, D, Self>, Error> {
         Ok(t)
+    }
+}
+
+impl<R, D, S: TypedStorage<R, D>> TensorMap<R, D, S> {
+    /// [`sealed::Sealed::admit_shortcut_engine`] for this tensor's stored
+    /// payload, called by every short circuit before it returns a clone.
+    pub(super) fn admit_shortcut_engine(&self, engine: &mut dyn Engine) -> Result<(), Error> {
+        match self.storage_body().data.as_ref() {
+            TypedData::Dense(storage) => {
+                <S as sealed::Sealed>::admit_shortcut_engine(engine, storage)
+            }
+            TypedData::Diagonal(_) => Ok(()),
+        }
     }
 }
 

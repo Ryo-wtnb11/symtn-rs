@@ -22,8 +22,8 @@ use std::sync::Arc;
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{
-    ComposePlan, ContractPlan, ContractSpec, CpuEngine, CudaStorage, EighFullPlan, Engine,
-    GradedSpace, HermitianTol, Runtime, StackedTensorMap, TensorMap,
+    ComposePlan, ContractPlan, ContractSpec, CpuEngine, CudaStorage, Direction, EighFullPlan,
+    Engine, GradedSpace, HermitianTol, Runtime, StackedTensorMap, TensorMap,
 };
 
 use crate::prepared::eigh::hermitian_members;
@@ -60,6 +60,18 @@ fn bits(cuda: &mut dyn Engine, tensor: &Device) -> Vec<u64> {
         .collect()
 }
 
+/// Every operation on `tensor` that returns a clone without device work: an
+/// identity permute, transpose, braid or repartition, and an empty or
+/// bosonic (unit) twist.
+fn assert_shortcuts_refused(engine: &mut dyn Engine, tensor: &Device) {
+    assert!(tensor.permute(engine, &[0], &[1]).is_err());
+    assert!(tensor.transpose(engine, &[0], &[1]).is_err());
+    assert!(tensor.braid(engine, &[0], &[1], &[0, 1]).is_err());
+    assert!(tensor.repartition(engine, 1).is_err());
+    assert!(tensor.twist(engine, &[], Direction::Forward).is_err());
+    assert!(tensor.twist(engine, &[0, 1], Direction::Inverse).is_err());
+}
+
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
@@ -78,6 +90,7 @@ fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
         .is_err());
     assert!(lhs.norm(engine, 2.0).is_err());
     assert!(lhs.to_host(engine).is_err());
+    assert_shortcuts_refused(engine, &lhs);
     assert_eq!(cuda_transfer_stats(), stats, "nothing reached the device");
     assert_eq!(bits(cuda, &destination), before);
 }
@@ -102,6 +115,8 @@ fn a_tensor_of_another_engine_on_the_same_device_is_refused_before_any_transfer(
     assert!(lhs.scale(second, 2.0).is_err());
     assert!(lhs.axpby(second, 2.0, &rhs, -3.0).is_err());
     assert!(lhs.permute(second, &[1], &[0]).is_err());
+    // Short circuits that return a clone are refused the same way.
+    assert_shortcuts_refused(second, &lhs);
     assert!(lhs.norm(second, 2.0).is_err());
     assert!(lhs.inner(second, &rhs).is_err());
     assert!(lhs
@@ -147,6 +162,9 @@ fn a_cuda_engine_is_refused_on_host_permutations_and_value_operations() {
     let before = destination.dense_data().unwrap().to_vec();
     // A nonidentity U(1) permutation is a pure Host payload replay.
     assert!(host.permute(cuda, &[1], &[0]).is_err());
+    // An identity permute and an empty twist return a clone, refused alike.
+    assert!(host.permute(cuda, &[0], &[1]).is_err());
+    assert!(host.twist(cuda, &[], Direction::Forward).is_err());
     assert!(host.scale(cuda, 2.0).is_err());
     assert!(host.norm(cuda, 2.0).is_err());
     assert!(host.axpby_into(cuda, &mut destination, 1.0, 1.0).is_err());

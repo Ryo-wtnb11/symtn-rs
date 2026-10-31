@@ -270,7 +270,9 @@ fn overwrite_multi_c64_does_not_read_nan_destinations() {
             )
         })
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(
             dst,
             [
@@ -328,7 +330,9 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
             )
         })
         .unwrap();
-        assert_eq!(workspace.fused_indices.len(), threads * fused_rank);
+        // Below the inline rank only the calling lane's index is shared;
+        // forked lanes keep their own on their stacks.
+        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(dst, expected);
     }
 }

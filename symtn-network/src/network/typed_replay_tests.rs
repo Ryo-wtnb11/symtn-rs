@@ -2179,3 +2179,89 @@ fn plan_with_rejects_a_plan_that_does_not_cover_the_network() {
         .zip(searched)
         .all(|(lhs, rhs)| (lhs - rhs).abs() <= 1e-12 * rhs.abs().max(1.0)));
 }
+
+/// What: one execution workspace driven A -> B -> A with the same chain
+/// uploaded on each engine returns the Host value every time: the device
+/// intermediates retained for one engine are dropped and rebuilt on the
+/// other instead of being refused or submitted.
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "requires a real CUDA device"]
+fn a_network_workspace_follows_the_engine_of_each_call() {
+    let engine = &mut symtn::typed::CpuEngine::serial();
+    let open =
+        || symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0)).unwrap();
+    let (first, second) = (&mut open(), &mut open());
+    let runtime = Runtime::builder().build().unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+    )
+    .unwrap();
+    let host = (0..3)
+        .map(|seed| {
+            TensorMap::<U1FusionRule, f64>::rand_with_seed(
+                engine,
+                &runtime,
+                [&leg],
+                [&leg],
+                748_240 + seed,
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let labels = |names: &[&str]| names.iter().copied().map(label).collect::<Vec<_>>();
+    let network = Network::new(
+        vec![
+            labels(&["a", "b"]),
+            labels(&["b", "c"]),
+            labels(&["c", "d"]),
+        ],
+        vec![false; 3],
+        vec![1; 3],
+        labels(&["a", "d"]),
+        Some(1),
+    )
+    .unwrap();
+    let planned = network
+        .plan(&[&host[0], &host[1], &host[2]], &GreedyDenseOptimizer)
+        .unwrap();
+    let expected = planned
+        .execute(
+            engine,
+            &[&host[0], &host[1], &host[2]],
+            &mut NetworkExecutionWorkspace::default(),
+        )
+        .unwrap();
+    let on = |cuda: &mut dyn Engine| {
+        host.iter()
+            .map(|tensor| tensor.to_cuda(cuda).unwrap())
+            .collect::<Vec<_>>()
+    };
+    let (on_a, on_b) = (on(first), on(second));
+    let mut workspace = NetworkExecutionWorkspace::default();
+    for (what, on_b_engine) in [("A", false), ("B", true), ("A again", false)] {
+        let (cuda, tensors): (&mut dyn Engine, _) = if on_b_engine {
+            (&mut *second, &on_b)
+        } else {
+            (&mut *first, &on_a)
+        };
+        let result = planned
+            .execute(
+                cuda,
+                &[&tensors[0], &tensors[1], &tensors[2]],
+                &mut workspace,
+            )
+            .unwrap_or_else(|error| panic!("{what}: {error}"))
+            .to_host(cuda)
+            .unwrap();
+        for (&got, &want) in result
+            .dense_data()
+            .unwrap()
+            .iter()
+            .zip(expected.dense_data().unwrap())
+        {
+            assert!((got - want).abs() <= 1e-12 * (1.0 + want.abs()), "{what}");
+        }
+    }
+}

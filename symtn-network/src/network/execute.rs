@@ -484,7 +484,7 @@ impl PlannedNetwork {
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D, S>,
         D: TensorScalar,
-        S: NetworkPayloadStorage<D>,
+        S: NetworkOperandStorage<R, D>,
     {
         match self.execute_with_workspace_meter(engine, tensors, workspace, None) {
             Ok(result) => Ok(result),
@@ -506,7 +506,7 @@ impl PlannedNetwork {
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D, S>,
         D: TensorScalar,
-        S: NetworkPayloadStorage<D>,
+        S: NetworkOperandStorage<R, D>,
     {
         debug_assert_eq!(tensors.len(), self.schedule.input_ranks.len());
         let prepared: Result<_, FacadeError<R>> = (|| {
@@ -644,6 +644,17 @@ impl PlannedNetwork {
                 .as_ref()
                 .is_some_and(|tensor| !std::ptr::eq(tensor.provider(), provider))
             {
+                buffers.output = None;
+            }
+        }
+        // Destinations retained for another engine (a device workspace used
+        // with a new engine, or left half-rebuilt by a failed call) are
+        // dropped and rebuilt on this one, never submitted: the admission the
+        // operands passed decides it per buffer.
+        for buffers in &mut workspace.intermediates {
+            if buffers.output.as_ref().is_some_and(|tensor| {
+                S::admit_operands(engine, std::slice::from_ref(&tensor), false).is_err()
+            }) {
                 buffers.output = None;
             }
         }

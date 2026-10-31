@@ -73,6 +73,7 @@ where
             .into());
         }
         if legs.is_empty() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         let provider = self.provider();
@@ -95,9 +96,11 @@ where
                     .into());
                 }
             }
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         if braiding.is_bosonic() {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
@@ -134,6 +137,7 @@ where
             legs,
         )?
         else {
+            self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         };
         if S::as_host(EXEC, self).is_some_and(|t| t.spectrum().is_some()) {
