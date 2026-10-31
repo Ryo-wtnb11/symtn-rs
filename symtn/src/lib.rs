@@ -49,7 +49,8 @@
 //! - [`expert`]: storage, block views, the dense executor seam and cache
 //!   observability;
 //! - `krylov` (feature `krylov`): the [krylov](https://docs.rs/krylov)
-//!   crate re-exported, with Host [`typed::TensorMap`] as its vector type.
+//!   crate re-exported, with Host [`typed::TensorMap`] as its vector type
+//!   and the caller's [`typed::Engine`] as its execution context.
 //!
 //! Checked-provider failures remain structured as
 //! [`typed::GenericTensorError`] variants whose nested errors retain their

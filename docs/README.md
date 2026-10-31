@@ -14,7 +14,7 @@ contain operation examples and method-level bounds.
 | Structured FLOP and storage obligations | [Complexity policy](complexity_parity_policy.md) |
 | Oracles, exactness and tolerances | [Numerical testing](testing_numerics.md) |
 | Optional Python path planner | [cotengra bridge](cotengra_backend.md) |
-| Optional Host tensor solvers | [Krylov integration](krylov.md) |
+| Optional Host tensor solvers on the caller's engine | [Krylov integration](krylov.md) |
 
 For theory, see [TensorKit's manual](https://docs.juliahub.com/General/TensorKit/stable/)
 and the [papers and source references](../symtn/references.md).
