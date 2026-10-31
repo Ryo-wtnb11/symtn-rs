@@ -244,64 +244,67 @@ fn dynamic_tree_route_allocations_are_bounded_by_base() {
     }
 }
 
-/// `d416b1a2`, debug test build, one thread, except the `eager_warm` and
-/// `member17` rows, re-recorded with the block GEMM kernel, which stages an
-/// unbound grouped submission (eager, and every `B > 1` core submission) on
-/// every call: its job records (order, slots, costs), one geometry-index
-/// entry and plan per distinct geometry, and the scheduler's lane tables.
-/// The counts are measured on these fixtures (serial engine, small f64 Faer
-/// plans) and grow with the number of distinct geometries and lanes; the
-/// `cpueinsum` 0.9 `GroupedPlan` took two calls but held one plan per job
-/// (SU2 transformed `member17_warm`: 8 calls / 13563960 B before, 31 /
-/// 229912 after). `B = 1` workspaces keep their plans; `B > 1`
-/// retention is deferred.
+/// `d416b1a2`, debug test build, one thread, except the `eager_cold`,
+/// `eager_warm` and member rows, re-recorded with the block GEMM kernel, its
+/// process-global geometry-plan cache and its executor-kept staging. Every
+/// grouped submission takes its plans from the cache, so a warm call builds
+/// none, and its staging (job records, geometry index, plan-handle slots,
+/// costs, lane tables) from the executor that runs it, so a warm call on a
+/// kept executor (this test's eager context, and every member workspace)
+/// stages without allocating: `member1_warm` and `member17_warm` are zero
+/// (before: 0/0/2/0 and 7/7/31/7) and `eager_warm` drops by the kernel's
+/// seven calls. Cold calls pay the cache admission of new geometries (the
+/// shared `Arc` and the cache's placeholder) and size the staging, so
+/// `member1_cold` moves 10/6/30/6 -> 11/8/22/8 and SU2 transformed
+/// `member17_cold` 104 -> 116 calls. The plan bytes moved from
+/// `member1_retained` to the shared cache.
 const BASE: [(&str, Row); 4] = [
     (
         "U1 transformed",
         Row {
-            eager_cold: (6533, 583202),
-            eager_warm: (23, 24308),
-            member1_cold: (10, 5280),
+            eager_cold: (547, 201537),
+            eager_warm: (16, 2032),
+            member1_cold: (11, 5484),
             member1_warm: (0, 0),
-            member17_cold: (31, 110004),
-            member17_warm: (7, 26756),
-            member1_retained: 4976,
+            member17_cold: (31, 89248),
+            member17_warm: (0, 0),
+            member1_retained: 4592,
         },
     ),
     (
         "U1 identity output",
         Row {
-            eager_cold: (229, 67732),
-            eager_warm: (20, 16276),
-            member1_cold: (6, 624),
+            eager_cold: (114, 36016),
+            eager_warm: (13, 1312),
+            member1_cold: (8, 940),
             member1_warm: (0, 0),
-            member17_cold: (13, 22948),
-            member17_warm: (7, 17652),
-            member1_retained: 368,
+            member17_cold: (13, 8704),
+            member17_warm: (0, 0),
+            member1_retained: 160,
         },
     ),
     (
         "SU2 transformed",
         Row {
-            eager_cold: (27012, 4877124),
-            eager_warm: (25, 39492),
-            member1_cold: (30, 21392),
-            member1_warm: (2, 3040),
-            member17_cold: (104, 751704),
-            member17_warm: (31, 229912),
-            member1_retained: 19152,
+            eager_cold: (22532, 6846533),
+            eager_warm: (17, 2096),
+            member1_cold: (22, 18732),
+            member1_warm: (0, 0),
+            member17_cold: (116, 634996),
+            member17_warm: (0, 0),
+            member1_retained: 16992,
         },
     ),
     (
         "SU2 identity output",
         Row {
-            eager_cold: (412, 54020),
-            eager_warm: (20, 16276),
-            member1_cold: (6, 656),
+            eager_cold: (476, 66500),
+            eager_warm: (13, 1312),
+            member1_cold: (8, 972),
             member1_warm: (0, 0),
-            member17_cold: (13, 23492),
-            member17_warm: (7, 17652),
-            member1_retained: 400,
+            member17_cold: (13, 9248),
+            member17_warm: (0, 0),
+            member1_retained: 192,
         },
     ),
 ];

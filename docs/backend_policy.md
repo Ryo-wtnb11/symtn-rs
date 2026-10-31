@@ -25,20 +25,24 @@ engine; a `Runtime` is not tied to a device.
 On the native provider a Host GEMM batch that is neither one job nor one
 affine run, with or without transposed or adjoint operands, runs on symtn's
 block GEMM kernel: one `tcontract::Plan` per distinct block geometry (scalar
-type, extents, effective strides, conjugation), prepared on every call and
-shared by that call's blocks of the geometry, so preparation is O(J) small
-records plus one plan (and any child heap a Packed `Complex64` plan owns) per
-geometry. A one-member Host `ContractPlan`/`ComposePlan` workspace instead
-keeps one `cpueinsum::GroupedPlan` for each grouped core submission, so a
-warm one-member call prepares no compatible grouped core plan: it is prepared
-on the workspace's first call, reused while the ordered jobs and dtype match
-(payloads, buffers and view offsets are checked on every call, not keyed),
-and released when the workspace runs another member count or plan. Its
-charge (16 KiB plus a few words per job extent for each job, plus the job
-list) is part of `ContractWorkspace::retained_bytes`. This holds for the faer
-provider and the four payload scalars only; BLAS and CUDA builds prepare as
-before, and single-job or affine batches use Tenferro's binary-plan cache,
-whose misses this guarantee does not cover.
+type, extents, effective strides, conjugation). The plans live in the
+process-global structure cache `StructureCacheKind::GemmPlans`, shared by
+every call, `Runtime`, engine and prepared workspace: a warm call, eager or
+prepared, of any member count, looks each geometry up once and prepares no
+plan. The call's staging (O(J) job records, the geometry index, plan
+handles, costs and the lane table) belongs to the dense executor that runs
+it: an eager call's executor lives for the call, while a prepared
+`ContractPlan`/`ComposePlan` workspace keeps its executor, so a warm replay
+on a serial engine allocates nothing; that staging keeps its high-water
+capacity and is part of `ContractWorkspace::retained_bytes`. A pooled
+engine's multi-lane fork still hands its lanes their jobs per call. Offsets, payloads, `alpha`/`beta` and the engine's width and
+policy are execute-time inputs, not part of the key. Each entry is charged
+its inline size, key and entry overhead, 16 KiB, and 8 bytes per
+`3m + 3n + 2k + 4` (a Packed plan's scatter vectors); with a budget of zero,
+or for an entry the budget rejects, every call prepares its plans as before
+with the same results. This holds for the faer provider and the four payload
+scalars only; BLAS and CUDA builds prepare as before, and single-job or
+affine batches use Tenferro's binary-plan cache, outside this cache.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
@@ -79,11 +83,9 @@ thread count from the engine's cost rule over the batch's estimated serial
 time (Tenferro's own per-flop model), and its lane count from the engine's
 batch decision. The lanes share all of those threads: a batch of a few large
 blocks gives each lane several threads, and a batch of many small blocks runs
-one thread per lane. Blocks are placed largest first on the least-loaded lane.
-The grouped core batches of a one-member `ContractPlan`/`ComposePlan`
-workspace are the exception: they reuse the workspace's retained grouped
-plan (above), which under `Auto` runs one GEMM per lane with a single thread
-each.
+one thread per lane. Blocks are placed largest first on the least-loaded lane; prepared
+`ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
+core batches the same way.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`

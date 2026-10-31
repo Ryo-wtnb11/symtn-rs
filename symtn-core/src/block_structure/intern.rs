@@ -28,8 +28,8 @@ pub(super) fn new_block_structure_content(
 }
 
 /// Clears every process-global structure cache: sector, degeneracy and the
-/// registered completed-transformer and composed-coefficient caches. The one
-/// clear-all behind
+/// registered completed-transformer, composed-coefficient and GEMM-plan
+/// caches. The one clear-all behind
 /// `symtn::cache::clear`.
 ///
 /// Live HomSpace identities and block-content ids remain valid. A build whose

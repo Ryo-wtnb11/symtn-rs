@@ -93,35 +93,38 @@ fn row(codomain: &[usize]) -> Row {
 /// Against the `e6e9cac8` base (core `eager_warm` 11, `member17_warm` 1 for
 /// both routes): an eager call now allocates its executor and transform
 /// scratch per call (the Runtime keeps no execution pool; TensorKit's
-/// TensorOperations also allocates temporaries per call), and an unbound
-/// grouped core submission runs on the block GEMM kernel, which stages it
-/// per call: job records (order, slots, costs), one geometry-index entry and
-/// plan per distinct geometry, and the scheduler's lane tables. On this
-/// fixture (serial engine, two small f64 geometries) that measured seven
-/// calls; more distinct geometries or lanes add more. The `cpueinsum` 0.9
-/// `GroupedPlan` it replaced took two, but one plan per job, so B = 17 warm
-/// bytes drop from 248880 to 16700. `B = 1`
-/// workspaces keep their grouped plans, so `member1_warm` is zero; `B > 1`
-/// retention is deferred.
+/// TensorOperations also allocates temporaries per call), and its grouped
+/// core submission runs on the block GEMM kernel, which stages it per call:
+/// job records (order, slots, costs), the geometry index, the plan handles
+/// and the scheduler's lane tables (seven calls on this fixture's serial
+/// engine and two small f64 geometries; more distinct geometries or lanes
+/// add more). The plans themselves come from the process-global
+/// geometry-plan cache, so a warm call builds none (core `eager_warm` bytes
+/// 16140 -> 2012 against the kernel's first, per-call-plan version). A
+/// prepared workspace's executor keeps that staging, so warm member calls
+/// allocate nothing at any member count (`member17_warm` 7 -> 0). Its cold
+/// calls size the staging: `member1_cold` 6 -> 8 (core) and 7 -> 9 (copyC),
+/// and `member17_cold` 15 -> 19 and 19 -> 23, where the staging grows to
+/// B = 17's job count.
 const BASE: [(&str, Row); 2] = [
     (
         "core",
         Row {
-            eager_warm: (18, 16140),
-            member1_cold: (6, 15472),
+            eager_warm: (18, 2012),
+            member1_cold: (8, 812),
             member1_warm: (0, 0),
-            member17_cold: (15, 18516),
-            member17_warm: (7, 16700),
+            member17_cold: (19, 4996),
+            member17_warm: (0, 0),
         },
     ),
     (
         "copyC",
         Row {
-            eager_warm: (22, 19060),
-            member1_cold: (7, 17992),
+            eager_warm: (22, 4932),
+            member1_cold: (9, 3332),
             member1_warm: (0, 0),
-            member17_cold: (19, 61452),
-            member17_warm: (7, 16700),
+            member17_cold: (23, 47932),
+            member17_warm: (0, 0),
         },
     ),
 ];

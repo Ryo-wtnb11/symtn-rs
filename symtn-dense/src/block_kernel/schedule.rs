@@ -60,19 +60,79 @@ pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
     model.item_overhead_ns + work / rate
 }
 
+/// The lane tables and LPT order of earlier allocations, kept by an owner
+/// that schedules repeatedly so a warm allocation reuses their capacity.
+#[derive(Debug, Default)]
+pub(crate) struct AllocationScratch {
+    lanes: Vec<Lane>,
+    order: Vec<usize>,
+    load: Vec<Reverse<(Duration, usize, usize)>>,
+}
+
+impl AllocationScratch {
+    /// Takes `allocation`'s lane tables back for the next allocation.
+    pub(crate) fn keep(&mut self, allocation: Allocation) {
+        self.lanes = allocation.lanes;
+    }
+
+    /// The capacities kept, in bytes. Saturates.
+    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
+    pub(crate) fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.lanes
+            .iter()
+            .map(|lane| lane.jobs.capacity().saturating_mul(size_of::<usize>()))
+            .fold(
+                self.lanes.capacity().saturating_mul(size_of::<Lane>()),
+                usize::saturating_add,
+            )
+            .saturating_add(self.order.capacity().saturating_mul(size_of::<usize>()))
+            .saturating_add(
+                self.load
+                    .capacity()
+                    .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
+            )
+    }
+}
+
+/// `count` empty lanes, reusing `pool`'s lane and job capacity.
+fn lanes_from(mut pool: Vec<Lane>, count: usize) -> Vec<Lane> {
+    pool.truncate(count);
+    pool.resize_with(count, || Lane {
+        budget: 0,
+        jobs: Vec::new(),
+    });
+    for lane in &mut pool {
+        lane.jobs.clear();
+    }
+    pool
+}
+
 /// Equal-split allocation of jobs with serial times `times` (canonical order)
 /// and mean weighted work `mean_work` (multiply-adds; it feeds the
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted twice).
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> Allocation {
+    allocate_in(exec, times, mean_work, &mut AllocationScratch::default())
+}
+
+/// [`allocate`] with its tables drawn from `scratch`.
+pub(crate) fn allocate_in(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    mean_work: f64,
+    scratch: &mut AllocationScratch,
+) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
     let decision = exec.batch_decision(&BatchQuery::new(jobs, mean_work));
+    let pool = std::mem::take(&mut scratch.lanes);
     if jobs == 0 {
         return Allocation {
             budget,
             slots: 0,
             decision,
-            lanes: Vec::new(),
+            lanes: lanes_from(pool, 0),
         };
     }
     let (slots, lanes) = if exec.batch_policy().strategy == BatchStrategy::Auto {
@@ -88,48 +148,45 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
         )
     };
     let lanes = lanes.max(1);
+    let mut assigned = lanes_from(pool, lanes);
     if lanes == 1 {
+        assigned[0].budget = slots;
+        assigned[0].jobs.extend(0..jobs);
         return Allocation {
             budget,
             slots,
             decision,
-            lanes: vec![Lane {
-                budget: slots,
-                jobs: (0..jobs).collect(),
-            }],
+            lanes: assigned,
         };
     }
 
-    let mut order: Vec<usize> = (0..jobs).collect();
+    let mut order = std::mem::take(&mut scratch.order);
+    order.clear();
+    order.extend(0..jobs);
     order.sort_unstable_by_key(|&j| (Reverse(times[j]), j));
-    let mut assigned = vec![Vec::new(); lanes];
     // LPT, ties to the lowest lane. The job count breaks load ties first so
     // zero-time estimates still leave no reserved lane empty.
-    let mut load: BinaryHeap<Reverse<(Duration, usize, usize)>> = (0..lanes)
-        .map(|k| Reverse((Duration::ZERO, 0, k)))
-        .collect();
-    for j in order {
+    let mut load = std::mem::take(&mut scratch.load);
+    load.clear();
+    load.extend((0..lanes).map(|k| Reverse((Duration::ZERO, 0, k))));
+    let mut load = BinaryHeap::from(load);
+    for &j in &order {
         if let Some(Reverse((sum, count, k))) = load.pop() {
-            assigned[k].push(j);
+            assigned[k].jobs.push(j);
             load.push(Reverse((sum.saturating_add(times[j]), count + 1, k)));
         }
     }
-    let lanes = assigned
-        .into_iter()
-        .enumerate()
-        .map(|(k, mut jobs)| {
-            jobs.sort_unstable();
-            Lane {
-                budget: slots / lanes + usize::from(k < slots % lanes),
-                jobs,
-            }
-        })
-        .collect();
+    scratch.order = order;
+    scratch.load = load.into_vec();
+    for (k, lane) in assigned.iter_mut().enumerate() {
+        lane.jobs.sort_unstable();
+        lane.budget = slots / lanes + usize::from(k < slots % lanes);
+    }
     Allocation {
         budget,
         slots,
         decision,
-        lanes,
+        lanes: assigned,
     }
 }
 

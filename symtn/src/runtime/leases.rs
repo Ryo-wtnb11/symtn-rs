@@ -15,6 +15,11 @@ impl ContextLease {
     pub(crate) fn context(&mut self) -> &mut TensorExecutionContext {
         &mut self.0
     }
+
+    /// Bytes of call scratch the context's dense executors keep.
+    pub(crate) fn dense_scratch_bytes(&self) -> usize {
+        self.0.dense_scratch_bytes()
+    }
 }
 
 /// The dense executor one factorization owns for its duration. In unit

@@ -1,7 +1,7 @@
 //! Process-global structure caches: the one public control of symtn's
 //! retained structural data.
 //!
-//! Four caches, each a pure function of its key and each byte-bounded on its
+//! Five caches, each a pure function of its key and each byte-bounded on its
 //! own budget (128 MiB by default), shared by every
 //! [`Runtime`](crate::typed::Runtime) of the process:
 //!
@@ -22,7 +22,11 @@
 //!   (U(1), Z2, ...) never enters it: a degeneracy-only change recomputes
 //!   its one phase per block without allocating per block. A trace keeps its
 //!   multiplicity-free Simple or checked Generic group permutations here as
-//!   well (present entries only), read when its compiled trace misses.
+//!   well (present entries only), read when its compiled trace misses;
+//! - prepared dense GEMM plans per block geometry (scalar type, extents,
+//!   effective strides, conjugation), [`StructureCacheKind::GemmPlans`], on
+//!   the native CPU provider. TensorKit has no counterpart: it calls BLAS
+//!   `mul!` per block, which keeps no plan.
 //!
 //! This mirrors TensorKit's `GLOBAL_CACHES` with `empty_globalcaches!` and
 //! `global_cache_info` (`caches.jl:1-11` @cfaa073).
@@ -48,13 +52,16 @@ pub use symtn_core::{StructureCacheInfo, StructureCacheKind};
 /// [`StructureCacheKind::TreeTransformCoefficients`] caches have no
 /// single-flight, because their builds run Rayon regions and a thread waiting
 /// on another's build could steal work that waits on its own. A concurrent
-/// miss resolved by single-flight builds once and reports no duplicate.
+/// miss resolved by single-flight builds once and reports no duplicate: the
+/// [`StructureCacheKind::GemmPlans`] cache's builds run no parallel region,
+/// so it has single-flight.
 pub fn stats() -> Vec<StructureCacheInfo> {
     symtn_core::structure_cache_infos()
 }
 
 /// Clears every process-global structure cache (sector, degeneracy,
-/// completed tree transformer, composed coefficients) for all Runtimes.
+/// completed tree transformer, composed coefficients, GEMM plans) for all
+/// Runtimes.
 /// Semantic data only: no device executor, scratch or fusion-symbols symbol cache is
 /// touched. Builds in flight across the clear return their result
 /// unpublished.

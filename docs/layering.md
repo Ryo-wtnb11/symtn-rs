@@ -91,7 +91,9 @@ kernels in operator code. Report backend gaps to the owning dependency.
 ## Inside symtn
 
 Dependencies point from facade to execution to structure to providers.
-`symtn-core` does not depend on dense or device execution. Normal dependency
+`symtn-core` does not depend on dense or device execution; `symtn-dense`
+depends on `symtn-core` only for the structure-cache wrapper and registry
+that hold its GEMM plans. Normal dependency
 edges are recorded in the crates' `Cargo.toml` files.
 
 ```text
@@ -113,7 +115,7 @@ see [design](design.md) and [`symtn::typed`](../symtn/src/typed.rs).
 
 **Who owns which cache**
 
-Four process-global, byte-bounded structure caches share the wrapper and
+Five process-global, byte-bounded structure caches share the wrapper and
 registry in [`symtn-core/src/cache.rs`](../symtn-core/src/cache.rs).
 Only the application calls `symtn::cache::{stats, clear, configure_budgets}`
 to observe, clear or size them.
@@ -124,6 +126,7 @@ to observe, clear or size them.
 | Complete HomSpace / block structure | Rule, mode and full HomSpace, including degeneracies | `symtn-core` |
 | Completed tree transformer | Rule, mode, coefficient type, operation/scope, orientation, basis/storage conventions and source/destination content identities | `symtn-tensors` |
 | Composed transformation coefficients | Rule, mode, coefficient type, operation/scope, orientation and ordered source tree group; no degeneracies or content identities | `symtn-tensors` |
+| Dense GEMM plans | Scalar type, block extents, effective A/B/D strides and conjugation; no offsets, values, coefficients or engine settings | `symtn-dense` (native provider) |
 
 A degeneracy-only change can reuse sector structure and composed coefficients.
 Unique fusion bypasses the composed-coefficient cache. Checked Generic
@@ -133,7 +136,7 @@ entries retain replay cores without retaining those structures.
 
 Network contraction-order caches, per-call CUDA copies of prepared structures
 and the engine's cuTENSOR plans are execution resources, separate from these
-four.
+five.
 Elementary-symbol caches remain in fusion-symbols. symtn writes no
 persistent tree-transform plans; network-order persistence is explicit.
 

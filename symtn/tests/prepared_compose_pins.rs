@@ -11,16 +11,15 @@
 //!
 //! Allocation counts and retained bytes are structural contracts, not exact
 //! sizes, so a dense-backend release or a struct layout change cannot fail
-//! them: a warm `execute` and `execute_into` allocate nothing at B = 1 (the
-//! workspace keeps its core's grouped-GEMM plans,
-//! `prepared_member1_core_reuse`) and at most the block GEMM kernel's
-//! per-call staging at B > 1 (seven allocations measured on these
-//! fixtures' serial engine; the count grows with distinct geometries and
-//! lanes), until `B > 1` retention lands; `execute_into` retains nothing new; retained bytes grow with
-//! `B > 1` and return to the B = 1 footprint; and at B = 1 the workspace
-//! retains its output plus the charged grouped-GEMM bindings of its core (no
-//! stacked replay; the base kept a one-member replay there, 208 bytes and 8
-//! allocations on these fixtures).
+//! them: a warm `execute` and `execute_into` allocate nothing at any member
+//! count (the workspace's executor keeps the block GEMM kernel's staging;
+//! the plans come from the process-global geometry-plan cache,
+//! `prepared_member1_core_reuse`); `execute_into` retains nothing new;
+//! retained bytes grow with `B > 1`, and B = 1 again retains at least the
+//! B = 1 footprint (the GEMM staging keeps its high-water capacity); and at
+//! B = 1 the workspace retains at least its output (no stacked replay; the
+//! base kept a one-member replay there, 208 bytes and 8 allocations on
+//! these fixtures).
 //!
 //! The target-wide serial guard keeps this test's cache warm-up ordered.
 
@@ -150,12 +149,9 @@ fn record<R, D>(
                 .len()
             * std::mem::size_of::<D>();
         let retained = workspace.retained_bytes();
-        // A warm B = 1 call reuses the workspace's grouped core plans; at
-        // B > 1 the core runs on the block GEMM kernel, whose per-call
-        // staging (job records, one index entry and plan per distinct
-        // geometry, lane tables) measured seven allocations on these
-        // fixtures' serial engine; it is a fixture bound, not a kernel one.
-        let warm_budget = if count == 1 { 0 } else { 7 };
+        // The workspace's executor keeps the block GEMM kernel's staging,
+        // so a warm call allocates nothing at any member count.
+        let warm_budget = 0;
         // The first `execute_into` may grow the workspace's fill scratch
         // once; the second is warm.
         for (warm_into, mut dst) in fills.into_iter().enumerate() {
@@ -180,10 +176,7 @@ fn record<R, D>(
             "{key}: execute_into retains nothing"
         );
         if count == 1 {
-            assert!(
-                retained >= output_bytes,
-                "{key}: B = 1 retains the output and the core bindings"
-            );
+            assert!(retained >= output_bytes, "{key}: B = 1 retains the output");
         }
         retained_by_call.push(retained);
         rows.push((key, value));
@@ -191,11 +184,12 @@ fn record<R, D>(
     let [one, two, seventeen, again] = retained_by_call[..] else {
         unreachable!()
     };
-    // B = 1 also holds the charged core bindings, which B > 1 releases.
     assert!(two <= seventeen, "{label}: retained grows with B");
-    assert_eq!(
-        again, one,
-        "{label}: B = 1 again retains the B = 1 footprint"
+    // The executor's GEMM staging keeps its high-water capacity from
+    // B = 17; everything else returns to the B = 1 footprint.
+    assert!(
+        again >= one,
+        "{label}: B = 1 again retains at least the B = 1 footprint"
     );
 }
 

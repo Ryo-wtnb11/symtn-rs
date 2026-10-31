@@ -83,7 +83,44 @@ macro_rules! lane_accessor {
     };
 }
 
+/// The dense executors' kept call scratch of one lane: its tree-transform
+/// and its contraction executor.
+fn dense_scratch_bytes<D, Key, C>(lane: &CoefficientCtx<D, Key, C>) -> usize
+where
+    D: symtn_tensors::DenseBlockScalar + symtn_tensors::RecouplingCoefficientAction<C>,
+    C: symtn_tensors::DenseBlockScalar,
+    Key: 'static + Clone + Eq + Hash + Send + Sync,
+    DenseTreeTransformOperations:
+        symtn_tensors::TreeTransformBackend<D, C> + symtn_tensors::TensorContractBackend<D, C>,
+{
+    lane.tree_context()
+        .backend()
+        .dense()
+        .retained_bytes()
+        .saturating_add(lane.contract_backend().dense().retained_bytes())
+}
+
 impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
+    /// The dense executors' kept call scratch of every built lane.
+    pub(crate) fn dense_scratch_bytes(&self) -> usize {
+        let first = match &self.first {
+            None => 0,
+            Some(FirstLane::F64(lane)) => dense_scratch_bytes(lane),
+            Some(FirstLane::C64(lane)) => dense_scratch_bytes(lane),
+            Some(FirstLane::F32(lane)) => dense_scratch_bytes(lane),
+            Some(FirstLane::C32(lane)) => dense_scratch_bytes(lane),
+        };
+        [
+            first,
+            self.f64.as_deref().map_or(0, dense_scratch_bytes),
+            self.c64.as_deref().map_or(0, dense_scratch_bytes),
+            self.f32.as_deref().map_or(0, dense_scratch_bytes),
+            self.c32.as_deref().map_or(0, dense_scratch_bytes),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+
     lane_accessor!(f64_lane, f64, F64, f64);
     lane_accessor!(c64_lane, c64, C64, Complex64);
     lane_accessor!(f32_lane, f32, F32, f32);
@@ -135,6 +172,16 @@ macro_rules! define_tensor_execution_context {
                 &mut self,
             ) -> &mut CoefficientCtx<Complex64, RuleIdentity, Complex64> {
                 built(&mut self.mf_c64_coeff_c64)
+            }
+
+            /// Bytes of call scratch the context's dense executors keep
+            /// between calls (the GEMM kernel's staging), over every built
+            /// lane.
+            pub(crate) fn dense_scratch_bytes(&self) -> usize {
+                [$(self.$field.dense_scratch_bytes(),)+
+                    self.mf_c64_coeff_c64.as_deref().map_or(0, dense_scratch_bytes)]
+                .into_iter()
+                .fold(0, usize::saturating_add)
             }
 
             pub(crate) fn generic_lane<D: ScalarOps>(

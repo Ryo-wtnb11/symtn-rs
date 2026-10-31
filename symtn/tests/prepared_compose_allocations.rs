@@ -1,13 +1,10 @@
 //! Warm Host compose workspace and plan/workspace allocation contract:
-//! after one call at a fixed `B`, `execute` and `execute_into` allocate on
-//! the caller thread at most the core's per-call GEMM staging. At B = 1 the
-//! workspace keeps those plans and a warm call allocates nothing
-//! (`prepared_member1_core_reuse`); at the B = 5 of this test the core runs
-//! on the block GEMM kernel, which stages its geometry plans and lanes on
-//! every call (seven allocations measured on this fixture: serial engine,
-//! small f64 blocks; the count grows with distinct geometries and
-//! lanes) until `B > 1` retention lands. The allocation target
-//! installs one shared counting allocator.
+//! after one call at a fixed `B`, `execute` and `execute_into` allocate
+//! nothing on the caller thread: at any `B` the core runs on the block GEMM
+//! kernel, which takes its geometry plans from the process-global
+//! geometry-plan cache (`prepared_member1_core_reuse`) and its staging (job
+//! records, geometry index, lane tables) from the workspace's executor.
+//! The allocation target installs one shared counting allocator.
 
 // The call budgets are measured on the faer provider; a BLAS provider owns
 // its own scratch allocations (grouped-GEMM metadata, QR/LQ workspaces), which
@@ -36,7 +33,7 @@ fn allocations(f: impl FnOnce()) -> (usize, usize, std::time::Duration) {
 }
 
 #[test]
-fn warm_host_calls_allocate_at_most_the_grouped_core_plan() {
+fn warm_host_calls_allocate_nothing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if !backend::faer_is_default_backend() {
@@ -44,12 +41,10 @@ fn warm_host_calls_allocate_at_most_the_grouped_core_plan() {
     }
     // What: at a fixed B, a second `execute` and a second `execute_into`
     // (whose plan has inactive destination blocks to zero-fill) reuse the
-    // workspace's output, job list and fill strides. The zero fill adds
-    // nothing (`execute_into` == `execute`), and both stay within the block
-    // GEMM kernel's per-call staging measured on this fixture (seven
-    // allocations on a serial engine with small f64 blocks: job
-    // order, geometry index, job slots, plans, costs, lane table, lane jobs;
-    // more distinct geometries or lanes add more). The cold call's count is
+    // workspace's output, job list, fill strides and GEMM staging. The zero
+    // fill adds nothing (`execute_into` == `execute`), and neither allocates
+    // (a serial engine; a pooled engine's multi-lane fork adds its own lane
+    // hand-off per call). The cold call's count is
     // the control that shows the counter sees this thread's allocations.
     let runtime = Runtime::builder().build().unwrap();
     let (v, w) = u1_legs();
@@ -85,7 +80,7 @@ fn warm_host_calls_allocate_at_most_the_grouped_core_plan() {
         plan.execute_into(engine, &lhs, &rhs, &mut dst, &mut ws)
             .unwrap();
     });
-    assert!(warm.0 <= 7, "warm execute allocations: {warm:?}");
+    assert_eq!(warm.0, 0, "warm execute allocations: {warm:?}");
     assert_eq!(
         (warm_into.0, warm_into.1),
         (warm.0, warm.1),

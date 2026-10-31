@@ -2,13 +2,20 @@
 //! tcontract `Plan` per distinct geometry, run on the shared scheduler.
 //!
 //! TensorKit (`mul!` per matched sector) and QSpace (`contractDATA_group`)
-//! set up each block GEMM per call; this kernel does the same per geometry,
-//! so blocks that share a geometry share one prepared plan within the call.
+//! set up each block GEMM per call. A tcontract plan is immutable data of its
+//! geometry alone, so the kernel keeps each in the process-global
+//! [`StructureCacheKind::GemmPlans`] cache: a repeated geometry, in this call
+//! or a later one, reuses the prepared plan.
 
+use std::any::Any;
 use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use tcontract::api::{CSpec, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
+use symtn_core::{
+    ErasedStructureCacheControl, StructureCache, StructureCacheInfo, StructureCacheKind,
+};
+use tcontract::api::{CSpec, DType, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
 use tcontract::{ns_per_flop, Plan, PlanConfig, SliceAccumulationSource};
 use tenferro_cpu::CpuEngine;
 
@@ -21,17 +28,17 @@ use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 /// Transposition lives only in the strides, because tcontract operands carry
 /// only Identity or Conjugate.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct Geometry {
-    mkn: [usize; 3],
-    strides: [[isize; 2]; 3],
-    conj: [bool; 2],
+pub(crate) struct Geometry {
+    pub(crate) mkn: [usize; 3],
+    pub(crate) strides: [[isize; 2]; 3],
+    pub(crate) conj: [bool; 2],
 }
 
 impl Geometry {
     /// The existing op lowering: A is `[1, m]` (Identity) or `[k, 1]`, B is
     /// `[1, k]` or `[n, 1]`, D is `[1, m]`; only Adjoint conjugates. A zero
     /// extent strides as one, as the dependency's compact layouts do.
-    fn new(job: &DenseGemmBatchJob, ops: [MatrixOp; 2]) -> Result<Self, DenseError> {
+    pub(crate) fn new(job: &DenseGemmBatchJob, ops: [MatrixOp; 2]) -> Result<Self, DenseError> {
         let stride = |extent: usize| {
             isize::try_from(extent.max(1)).map_err(|_| DenseError::ElementCountOverflow)
         };
@@ -55,7 +62,7 @@ impl Geometry {
         })
     }
 
-    fn plan<T: Scalar>(&self) -> tcontract::Result<Plan<T>> {
+    pub(crate) fn plan<T: Scalar>(&self) -> tcontract::Result<Plan<T>> {
         let [m, k, n] = self.mkn;
         let spec = |dims: [usize; 2], strides: [isize; 2], conj: bool| {
             let op = if conj { Op::Conjugate } else { Op::Identity };
@@ -69,25 +76,195 @@ impl Geometry {
             spec([m, n], self.strides[2], false)?,
             &Labels::new(&[0, 1], &[1, 2], &[0, 2]),
         )?;
-        Plan::new(&problem, &PlanConfig::default())
+        Plan::from_problem(problem, &PlanConfig::default())
     }
 }
 
+/// The complete key of a cached plan: a plan is a pure function of its
+/// problem and config, and the labels, the in-place accumulation mode and
+/// `PlanConfig::default()` are fixed by [`Geometry::plan`], so the scalar
+/// type and the geometry determine it. The provider is a build choice and
+/// the hardware model is fixed for the process, so neither varies within one
+/// cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GemmPlanKey {
+    dtype: DType,
+    geometry: Geometry,
+}
+
+type ErasedPlan = dyn Any + Send + Sync;
+
+pub(crate) type GemmPlanCache = StructureCache<GemmPlanKey, ErasedPlan>;
+
+/// quick_cache node and the entry's `Arc` control, per entry (as the
+/// completed-transformer cache charges).
+const ENTRY_OVERHEAD_BYTES: usize = 10 * core::mem::size_of::<usize>();
+
+/// Heap a plan owns besides its scatter vectors: the problem's layouts and
+/// roles, the report and diagnostics, a Packed plan's box with its resolved
+/// kernel and folded axes. Checked against live allocations for every dtype,
+/// strategy and op lowering by the dense `gemm_plan_charge` test.
+const PLAN_HEAP_ALLOWANCE: usize = 16 * 1024;
+
+/// The bytes charged for one cached plan: its inline size, the key, the
+/// entry overhead and a bound on its heap. A Packed plan owns one `i64`
+/// scatter entry per role element (`a_m, c_m, d_m` and `b_n, c_n, d_n` of
+/// `m` and `n` entries, `a_k, b_k` of `k`, four batch entries), extents
+/// counted as at least one; a Faer plan owns less. Saturates.
+pub(crate) fn charge<T: Scalar>(key: &GemmPlanKey) -> u64 {
+    let [m, k, n] = key.geometry.mkn.map(|extent| extent.max(1) as u64);
+    let scatter = m
+        .saturating_add(n)
+        .saturating_mul(3)
+        .saturating_add(k.saturating_mul(2))
+        .saturating_add(4)
+        .saturating_mul(core::mem::size_of::<i64>() as u64);
+    [
+        core::mem::size_of::<Plan<T>>(),
+        core::mem::size_of::<GemmPlanKey>(),
+        ENTRY_OVERHEAD_BYTES,
+        PLAN_HEAP_ALLOWANCE,
+    ]
+    .into_iter()
+    .fold(scatter, |total, bytes| total.saturating_add(bytes as u64))
+}
+
+struct GemmPlansControl;
+
+impl ErasedStructureCacheControl for GemmPlansControl {
+    fn info(&self) -> StructureCacheInfo {
+        gemm_plans().info()
+    }
+
+    fn clear(&self) {
+        ErasedStructureCacheControl::clear(gemm_plans())
+    }
+
+    fn set_byte_budget(&self, bytes: u64) {
+        ErasedStructureCacheControl::set_byte_budget(gemm_plans(), bytes)
+    }
+}
+
+/// The process-global geometry-plan cache, registered with `symtn-core`'s
+/// structure-cache registry on first use.
+fn gemm_plans() -> &'static GemmPlanCache {
+    static CACHE: OnceLock<GemmPlanCache> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        // Refused only if another crate claimed the slot first. Then
+        // `symtn::cache::clear` cannot reach this cache, so it admits
+        // nothing: every geometry builds per call, with identical results.
+        let budget =
+            symtn_core::register_structure_cache(StructureCacheKind::GemmPlans, &GemmPlansControl)
+                .unwrap_or(0);
+        StructureCache::new(StructureCacheKind::GemmPlans, budget)
+    })
+}
+
+/// The plan of `geometry` at scalar type `T` from `cache`, built and offered
+/// for admission on a miss. A rejected or unadmitted build is returned
+/// uncached, so a budget of zero builds per lookup with the same plan.
+///
+/// Why single-flight here, unlike the transformer caches: a plan build is
+/// index analysis on the calling thread and runs no engine region, so a
+/// thread waiting on another's build cannot be holding work that build
+/// needs.
+pub(crate) fn cached_plan<T: Scalar>(
+    cache: &GemmPlanCache,
+    geometry: Geometry,
+) -> tcontract::Result<Arc<Plan<T>>> {
+    let key = GemmPlanKey {
+        dtype: T::STORAGE,
+        geometry,
+    };
+    let epoch = symtn_core::core_reset_epoch();
+    let plan = cache.get_or_try_build(&key, epoch, || {
+        let plan: Arc<ErasedPlan> = Arc::new(geometry.plan::<T>()?);
+        #[cfg(test)]
+        crate::probe::add(crate::probe::Event::GemmPlanBuild, 1);
+        Ok::<_, tcontract::Error>((plan, charge::<T>(&key)))
+    })?;
+    Ok(plan
+        .downcast::<Plan<T>>()
+        .unwrap_or_else(|_| unreachable!("the key's dtype fixes the plan type")))
+}
+
 /// Each job's serial time under the dependency's own GEMM model (tcontract's
-/// `ns_per_flop` over `2 m k n` real flops, four times that for complex), and
-/// the mean weighted work `m k n` (times four for complex) the engine's
-/// batch decision takes.
-pub(crate) fn costs<T: Scalar>(jobs: &[DenseGemmBatchJob]) -> (Vec<Duration>, f64) {
+/// `ns_per_flop` over `2 m k n` real flops, four times that for complex),
+/// written to `times`, and the mean weighted work `m k n` (times four for
+/// complex) the engine's batch decision takes.
+pub(crate) fn costs_into<T: Scalar>(jobs: &[DenseGemmBatchJob], times: &mut Vec<Duration>) -> f64 {
     let complex = if T::IS_COMPLEX { 4.0 } else { 1.0 };
     let work = |job: &DenseGemmBatchJob| {
         job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
     };
-    let times = jobs
-        .iter()
-        .map(|job| schedule::estimate(2.0 * work(job) * ns_per_flop()))
-        .collect();
-    let mean = jobs.iter().map(work).sum::<f64>() / jobs.len().max(1) as f64;
-    (times, mean)
+    times.clear();
+    times.extend(
+        jobs.iter()
+            .map(|job| schedule::estimate(2.0 * work(job) * ns_per_flop())),
+    );
+    jobs.iter().map(work).sum::<f64>() / jobs.len().max(1) as f64
+}
+
+/// The kernel's per-call staging: the destination order, the geometry index,
+/// the per-job plan slots, the plan handles, the costs and the lane tables.
+/// An owner that submits repeatedly (an executor of a prepared workspace)
+/// keeps one, so a warm submission reuses every capacity and allocates
+/// nothing; an eager executor's scratch lives for its one call. Holds no
+/// plan between calls: the handles are released when a call ends, and the
+/// geometry-plan cache alone retains plans.
+#[derive(Debug, Default)]
+pub(crate) struct GemmScratch {
+    order: Vec<usize>,
+    geometries: HashMap<Geometry, usize>,
+    slots: Vec<(usize, &'static mut [u8])>,
+    plans: Vec<Arc<ErasedPlan>>,
+    times: Vec<Duration>,
+    schedule: schedule::AllocationScratch,
+}
+
+impl GemmScratch {
+    /// A conservative charge of the capacities this scratch keeps: each
+    /// vector's capacity, and the geometry index's table at its largest
+    /// bucket count for its capacity (entries plus one control byte each,
+    /// plus one group of trailing control bytes). Saturates.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        let index_buckets = self
+            .geometries
+            .capacity()
+            .saturating_mul(8)
+            .div_ceil(7)
+            .max(1)
+            .next_power_of_two();
+        [
+            self.order.capacity().saturating_mul(size_of::<usize>()),
+            index_buckets
+                .saturating_mul(size_of::<(Geometry, usize)>() + 1)
+                .saturating_add(16),
+            self.slots
+                .capacity()
+                .saturating_mul(size_of::<(usize, &mut [u8])>()),
+            self.plans
+                .capacity()
+                .saturating_mul(size_of::<Arc<ErasedPlan>>()),
+            self.times.capacity().saturating_mul(size_of::<Duration>()),
+            self.schedule.retained_bytes(),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+}
+
+/// `vec`'s allocation, emptied, for elements of another lifetime or type of
+/// the same layout.
+///
+/// Why not a transmute: the crate forbids unsafe code. std collects a mapped
+/// `vec::IntoIter` in place when the layouts match; that is an optimization,
+/// not a documented guarantee, so the prepared-workspace allocation tests pin
+/// it (a regression would reallocate, never misbehave).
+fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
+    vec.clear();
+    vec.into_iter().map(|_| unreachable!("emptied")).collect()
 }
 
 /// A job's operand range; an empty one may start anywhere, as validation
@@ -101,16 +278,18 @@ fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 }
 
 /// `D_j = alpha * op(A_j) op(B_j) + beta * D_j` for every job, on the
-/// caller's engine.
+/// caller's engine, staged in `scratch`.
 ///
 /// Every operand range and destination overlap is checked before the first
-/// write. Each distinct geometry is prepared once per call. The jobs then run
-/// on the scheduler's lanes, each into its own disjoint destination slice, so
-/// lane order cannot change a result; every job runs, and the error returned
-/// is the lowest-indexed job's. `beta == 0` reads no destination value.
+/// write. Each distinct geometry's plan is looked up once per call in the
+/// geometry-plan cache. The jobs then run on the scheduler's lanes, each into
+/// its own disjoint destination slice, so lane order cannot change a result;
+/// every job runs, and the error returned is the lowest-indexed job's.
+/// `beta == 0` reads no destination value.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     cpu: &mut CpuEngine,
+    scratch: &mut GemmScratch,
     output: &mut DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -120,9 +299,16 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     beta: T,
 ) -> Result<(), DenseError> {
     let [lhs_len, rhs_len, out_len] = grouped_validate(output, lhs, rhs, jobs)?;
+    let GemmScratch {
+        order,
+        geometries,
+        slots: kept_slots,
+        plans,
+        times,
+        schedule: schedule_scratch,
+    } = scratch;
 
-    // Sized up front: a filtered collect would regrow about log2(J) times.
-    let mut order = Vec::with_capacity(jobs.len());
+    order.clear();
     order.extend((0..jobs.len()).filter(|&j| jobs[j].rows * jobs[j].cols != 0));
     order.sort_unstable_by_key(|&j| (jobs[j].dst_offset, j));
     for pair in order.windows(2) {
@@ -136,35 +322,33 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         }
     }
 
-    // Index the distinct geometries first, so the plans are built in one
-    // exactly sized allocation, in order of first use.
-    let mut geometries = HashMap::new();
-    let mut slots: Vec<(usize, &mut [T])> = Vec::with_capacity(jobs.len());
+    // Index the distinct geometries, in order of first use.
+    geometries.clear();
+    let mut slots: Vec<(usize, &mut [T])> = recycle(std::mem::take(kept_slots));
+    slots.reserve(jobs.len());
     for job in jobs {
         let next = geometries.len();
         let plan = *geometries.entry(Geometry::new(job, ops)?).or_insert(next);
         slots.push((plan, &mut [][..]));
     }
-    let mut plans: Vec<Plan<T>> = Vec::with_capacity(geometries.len());
+    plans.clear();
     for (index, job) in jobs.iter().enumerate() {
         if slots[index].0 == plans.len() {
-            plans.push(
-                Geometry::new(job, ops)?
-                    .plan()
-                    .map_err(|err| grouped_error(format!("job {index}: {err}")))?,
-            );
+            let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), Geometry::new(job, ops)?)
+                .map_err(|err| grouped_error(format!("job {index}: {err}")))?;
+            plans.push(plan);
             #[cfg(test)]
-            crate::probe::add(crate::probe::Event::GemmPlanBuild, 1);
+            crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
         }
     }
-    let (times, mean_work) = costs::<T>(jobs);
+    let mean_work = costs_into::<T>(jobs, times);
 
     let lhs = &lhs.data()[lhs.offset()..lhs.offset() + lhs_len];
     let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
     let offset = output.offset();
     let mut remaining = &mut output.data_mut()[offset..offset + out_len];
     let mut cursor = 0;
-    for &j in &order {
+    for &j in order.iter() {
         let job = &jobs[j];
         let (_, rest) = std::mem::take(&mut remaining).split_at_mut(job.dst_offset - cursor);
         let (slice, tail) = rest.split_at_mut(job.rows * job.cols);
@@ -178,25 +362,34 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     } else {
         SliceAccumulationSource::Output
     };
+    let plans_ref = &*plans;
     let run = |j: usize, slot: &mut (usize, &mut [T]), mut child: tcontract_exec::Exec<'_>| {
         let job = &jobs[j];
         let (plan, destination) = slot;
-        plans[*plan]
-            .execute_slices_accum(
-                &mut child,
-                alpha,
-                (operand(lhs, job.lhs_offset, job.rows * job.contracted), 0),
-                (operand(rhs, job.rhs_offset, job.contracted * job.cols), 0),
-                beta,
-                source,
-                (&mut **destination, 0),
-            )
-            .map_err(|err| grouped_error(format!("job {j}: {err}")))
+        let plan = plans_ref[*plan]
+            .downcast_ref::<Plan<T>>()
+            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
+        plan.execute_slices_accum(
+            &mut child,
+            alpha,
+            (operand(lhs, job.lhs_offset, job.rows * job.contracted), 0),
+            (operand(rhs, job.rhs_offset, job.contracted * job.cols), 0),
+            beta,
+            source,
+            (&mut **destination, 0),
+        )
+        .map_err(|err| grouped_error(format!("job {j}: {err}")))
     };
-    cpu.with_contraction_exec(|exec, _, _| {
-        let allocation = schedule::allocate(exec, &times, mean_work);
-        Ok(schedule::run(exec.reborrow(), &allocation, &mut slots, run))
-    })
-    .map_err(|err| tenferro_error("grouped_gemm", err))?
-    .map_err(|(_, error)| error)
+    let times = &*times;
+    let result = cpu
+        .with_contraction_exec(|exec, _, _| {
+            let allocation = schedule::allocate_in(exec, times, mean_work, schedule_scratch);
+            let result = schedule::run(exec.reborrow(), &allocation, &mut slots, run);
+            schedule_scratch.keep(allocation);
+            Ok(result)
+        })
+        .map_err(|err| tenferro_error("grouped_gemm", err));
+    *kept_slots = recycle(slots);
+    plans.clear();
+    result?.map_err(|(_, error)| error)
 }
