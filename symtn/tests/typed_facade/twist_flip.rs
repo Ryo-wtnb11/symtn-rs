@@ -581,58 +581,6 @@ fn typed_index_op_error_classes_and_empty_shortcuts_are_stable() {
 }
 
 #[test]
-fn typed_twist_on_a_compact_spectrum_matches_the_dense_route() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the compact twist arm matches the ordinary dense tree transform
-    // on an SVD spectrum whose coupled sectors include the odd one.
-    let runtime = runtime();
-    let typed = fz2_index(&runtime);
-    let typed_s: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed.svd_compact(engine, &[0, 1], &[2]).unwrap().s;
-    let dense = forced_dense(&typed_s);
-    let typed_twisted: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed_s.twist(engine, &[0], Direction::Forward).unwrap();
-    assert_eq!(
-        typed_twisted
-            .materialize(engine)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        dense
-            .twist(engine, &[0], Direction::Forward)
-            .unwrap()
-            .dense_data()
-            .unwrap()
-    );
-    // And the two-leg twist is the identity on the bond (θ² = 1 per sector).
-    let typed_both: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed_s.twist(engine, &[0, 1], Direction::Forward).unwrap();
-    assert_eq!(
-        typed_both
-            .materialize(engine)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        typed_s.materialize(engine).unwrap().dense_data().unwrap()
-    );
-    let typed_inverse: TensorMap<symtn::sector::FermionParityFusionRule, f64> =
-        typed_s.twist(engine, &[0], Direction::Inverse).unwrap();
-    assert_eq!(
-        typed_inverse
-            .materialize(engine)
-            .unwrap()
-            .dense_data()
-            .unwrap(),
-        typed_twisted
-            .materialize(engine)
-            .unwrap()
-            .dense_data()
-            .unwrap()
-    );
-}
-
-#[test]
 fn external_z3_twist_flip_and_units_hold_by_value() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();

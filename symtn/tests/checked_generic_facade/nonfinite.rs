@@ -5,7 +5,7 @@ use nonfinite_factor_input::assert_finite_input_refusals;
 
 /// Checked Generic factorizations refuse nonfinite input through the shared
 /// finite-input stage, dense and compact diagonal, real and complex;
-/// the multiplicity-free counterpart is `factorization_nonfinite_input.rs`.
+/// the multiplicity-free counterpart is `non_finite_matrix.rs`.
 #[test]
 fn checked_generic_factorizations_refuse_nonfinite_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
