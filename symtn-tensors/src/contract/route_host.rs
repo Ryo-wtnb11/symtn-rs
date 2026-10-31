@@ -124,6 +124,20 @@ where
     ) -> Result<(), OperationError>;
 }
 
+/// The destination of one route replay.
+pub(super) enum RouteDestination<'d, D> {
+    /// `dst = alpha * contract(lhs, rhs) + init(dst)` into an existing
+    /// payload.
+    Into(&'d mut [D], ContractDestinationInit<D>),
+    /// `alpha * contract(lhs, rhs)` into a fresh payload stored in `output`
+    /// on success (one member only). `zeroed` allocates the zero payload a
+    /// route with an output transform overwrites.
+    Owned {
+        output: &'d mut Vec<D>,
+        zeroed: fn(usize) -> Vec<D>,
+    },
+}
+
 const EAGER_IS_ONE_MEMBER: OperationError = OperationError::UnsupportedTensorContractScope {
     message: "eager Host contraction replays exactly one member",
 };
@@ -637,12 +651,11 @@ fn execute_route_view<S, G, D, C>(
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     scratch: HostRouteScratch<'_, D, C>,
     route: RouteView<'_, C>,
-    (dst_structure, dst_data): (&Arc<BlockStructure>, &mut [D]),
+    (dst_structure, destination): (&Arc<BlockStructure>, RouteDestination<'_, D>),
     lhs_data: &[D],
     rhs_data: &[D],
     members: usize,
     alpha: D,
-    init: ContractDestinationInit<D>,
 ) -> Result<(), OperationError>
 where
     S: HostTreeStage<D, C>,
@@ -650,6 +663,19 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C>,
     C: DenseBlockScalar,
 {
+    let (mut dst_data, mut owned, init) = match destination {
+        RouteDestination::Into(data, init) => (Some(data), None, init),
+        RouteDestination::Owned { output, zeroed } => {
+            if members != 1 {
+                return Err(EAGER_IS_ONE_MEMBER);
+            }
+            (
+                None,
+                Some((output, zeroed)),
+                ContractDestinationInit::Zeroed,
+            )
+        }
+    };
     let HostRouteScratch {
         lhs: lhs_scratch,
         rhs: rhs_scratch,
@@ -696,7 +722,7 @@ where
                 .map_or(core, |source| source.payload_structure);
             exact_len(data.len(), member_len::<D>(payload, members)?)?;
         }
-        exact_len(dst_data.len(), dst_len)?;
+        exact_len(dst_data.as_deref().map_or(0, <[D]>::len), dst_len)?;
         if !slot.replay.replays(plan, members) {
             stacked = Some(stage.stacked_replay(plan, members)?);
         }
@@ -838,10 +864,11 @@ where
     };
     let (left, right) = route.core_order(physical_lhs, physical_rhs);
     let (left_structure, right_structure) = route.core_order(lhs_core, rhs_core);
+    // `None`: the core writes a fresh owned output.
     let core_out = if route.output.is_some() {
-        core_dst.as_mut_slice()
+        Some(core_dst.as_mut_slice())
     } else {
-        &mut *dst_data
+        dst_data.as_deref_mut()
     };
     #[cfg(test)]
     if let Some(slot) = core.as_deref_mut() {
@@ -849,6 +876,26 @@ where
     }
     if members == 1 {
         let mut kernels = crate::StridedHostKernelAdapter::default();
+        let Some(core_out) = core_out else {
+            let (output, _) = owned.as_mut().ok_or(OperationError::InvalidArgument {
+                message: "contraction route has no destination",
+            })?;
+            #[cfg(test)]
+            crate::probe::hit(crate::probe::Event::OwnedCoreReplay);
+            **output = plan.execute_owned(
+                engine,
+                &mut kernels,
+                gemm,
+                fusion_block_workspace,
+                core_dst_structure,
+                left_structure,
+                left,
+                right_structure,
+                right,
+                core_alpha,
+            )?;
+            return Ok(());
+        };
         match core_init {
             ContractDestinationInit::Zeroed => plan.execute_raw_zeroed(
                 engine,
@@ -882,6 +929,9 @@ where
         let Some(CoreReplay::Stacked(replay)) = core.as_deref().map(|slot| &slot.replay) else {
             unreachable!("B > 1 installed its stacked replay");
         };
+        let Some(core_out) = core_out else {
+            return Err(EAGER_IS_ONE_MEMBER);
+        };
         stage.stacked_core(
             engine,
             replay,
@@ -904,6 +954,20 @@ where
                 usize::from(members == 1 && matches!(init, ContractDestinationInit::Zeroed));
         }
     }
+    // L2 keeps the zeroed output plus overwrite transform for an owned
+    // output-transform route; the owned transform writer is a separate step.
+    let mut zeroed_output = None;
+    let dst_data = match (dst_data.take(), owned.as_ref()) {
+        (Some(data), _) => data,
+        (None, Some((_, zeroed))) => {
+            zeroed_output.insert(zeroed(member_len::<D>(dst_structure, 1)?))
+        }
+        (None, None) => {
+            return Err(OperationError::InvalidArgument {
+                message: "contraction route has no destination",
+            })
+        }
+    };
     if members != 1 {
         return stage.overwrite_members(
             engine,
@@ -919,7 +983,7 @@ where
     }
     let (backend, workspace) = stage.ordinary(Stage::Output);
     let source = core_dst.as_slice();
-    match init {
+    let written = match init {
         ContractDestinationInit::Zeroed => backend.tree_transform_structure_overwrite_into_raw(
             engine,
             workspace,
@@ -942,7 +1006,12 @@ where
             output_alpha,
             beta,
         ),
+    };
+    written?;
+    if let (Some((output, _)), Some(data)) = (owned, zeroed_output) {
+        *output = data;
     }
+    Ok(())
 }
 
 /// Replays `resolution` through the one stage sequence of every route; the
@@ -956,12 +1025,11 @@ pub(super) fn execute_route_host<S, G, D, C>(
     fusion_block_workspace: &mut FusionBlockContractWorkspace<D>,
     scratch: HostRouteScratch<'_, D, C>,
     resolution: &StorageContractResolution<C>,
-    dst: (&Arc<BlockStructure>, &mut [D]),
+    dst: (&Arc<BlockStructure>, RouteDestination<'_, D>),
     (lhs_structure, lhs_data): (&Arc<BlockStructure>, &[D]),
     (rhs_structure, rhs_data): (&Arc<BlockStructure>, &[D]),
     members: usize,
     alpha: D,
-    init: ContractDestinationInit<D>,
 ) -> Result<(), OperationError>
 where
     S: HostTreeStage<D, C>,
@@ -981,7 +1049,6 @@ where
         rhs_data,
         members,
         alpha,
-        init,
     )
 }
 
@@ -1016,12 +1083,11 @@ where
         fusion_block_workspace,
         scratch,
         RouteView::dynamic_tree(artifact),
-        dst,
+        (dst.0, RouteDestination::Into(dst.1, init)),
         lhs_data,
         rhs_data,
         members,
         alpha,
-        init,
     )
 }
 
@@ -1164,12 +1230,11 @@ where
             core: Some(core),
         },
         route,
-        (dst_structure, dst),
+        (dst_structure, RouteDestination::Into(dst, init)),
         lhs,
         rhs,
         members,
         D::one(),
-        init,
     )
 }
 

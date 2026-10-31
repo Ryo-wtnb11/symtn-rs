@@ -138,6 +138,28 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
             t.compose(&mut engine, &adjoint).is_backend_failure(),
             "width {threads}: compose"
         );
+        // An owned compose whose operands have no blocks runs no GEMM, and
+        // its destination is all inactive: the engine is still admitted.
+        let su2 = |terms: &[(usize, usize)]| {
+            GradedSpace::try_new(
+                Arc::new(SU2FusionRule),
+                terms
+                    .iter()
+                    .map(|&(twice, degeneracy)| (SU2Irrep::from_twice_spin(twice), degeneracy)),
+            )
+            .unwrap()
+        };
+        let (a, b) = (su2(&[(0, 2), (2, 3)]), su2(&[(1, 3)]));
+        let good = &mut CpuEngine::serial();
+        let lhs: TensorMap<_, f64> =
+            TensorMap::rand_with_seed(good, &runtime, [&a], [&b], 7).unwrap();
+        let rhs: TensorMap<_, f64> =
+            TensorMap::rand_with_seed(good, &runtime, [&b], [&a], 8).unwrap();
+        assert_eq!(lhs.subblock_count(), 0);
+        assert!(
+            lhs.compose(&mut engine, &rhs).is_backend_failure(),
+            "width {threads}: empty-support compose"
+        );
         // Host value operations whose arithmetic needs no token admit the
         // engine too: a value result, a destination write, an in-place
         // update, and the compact-diagonal arms that return before any

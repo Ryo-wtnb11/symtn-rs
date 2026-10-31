@@ -1503,6 +1503,41 @@ mod tests {
         }
     }
 
+    /// What: the owned checked contraction writes the destination through
+    /// the fresh core replay exactly when its route's core writes the
+    /// destination (Core, a DynamicTree without an output transform); a
+    /// route with an output transform (CopyC, `three_stages`) overwrites a
+    /// zeroed payload instead and runs no fresh core replay.
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn owned_contraction_replays_its_core_fresh_iff_the_core_writes_the_destination() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        for (name, n, lhs_axes, rhs_axes, output, nout, route) in FIXTURES {
+            let (_left, lhs, _right, rhs) = bound_pair(n, n);
+            let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
+            let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
+            let core_writes_destination = match route {
+                Route::Core => true,
+                Route::CopyC => false,
+                Route::DynamicTree => name != "three_stages",
+            };
+            let recording = crate::probe::record();
+            contract(
+                engine,
+                (&lhs, &lhs_data),
+                (&rhs, &rhs_data),
+                fixture_axes(lhs_axes, rhs_axes, output),
+                nout,
+            )
+            .unwrap();
+            assert_eq!(
+                recording.get(crate::probe::Event::OwnedCoreReplay),
+                usize::from(core_writes_destination),
+                "{name}"
+            );
+        }
+    }
+
     /// What: on every route a failing provider query (destination, source
     /// spaces and structures, core destination, CopyC temporary, output
     /// structure) or a malformed symbol surfaces exactly, and nothing is

@@ -1,4 +1,7 @@
 //! Behavior tests neither observe nor reset process-global state and run concurrently.
+//!
+//! Fresh heap memory is NaN-poisoned, so an owned output element that no
+//! operation wrote surfaces as NaN in these oracle comparisons.
 
 use num_complex::{Complex32, Complex64};
 
@@ -38,6 +41,11 @@ mod toy_rules;
 mod trace_cases;
 #[macro_use]
 mod truncation_oracle;
+#[path = "../../tests/support/nan_poison_alloc.rs"]
+mod nan_poison_alloc;
+
+#[global_allocator]
+static ALLOCATOR: nan_poison_alloc::NanPoisonAllocator = nan_poison_alloc::NanPoisonAllocator;
 
 mod axis_error_matrix;
 mod axpby_dense_oracle;

@@ -79,9 +79,11 @@ pub(crate) enum Event {
     CompiledTraceHit,
     /// A compiled trace was offered for publication.
     CompiledTracePublication,
+    /// An owned contraction replayed its core into fresh memory.
+    OwnedCoreReplay,
 }
 
-const EVENTS: usize = Event::CompiledTracePublication as usize + 1;
+const EVENTS: usize = Event::OwnedCoreReplay as usize + 1;
 
 /// Runs once, inside the next raw trace execution on this thread.
 pub(crate) type TraceRawExecutionHook = Box<dyn FnOnce() -> Result<(), OperationError>>;

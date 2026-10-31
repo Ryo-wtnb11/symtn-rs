@@ -102,6 +102,27 @@ impl<D: Copy> OwnedOverwriteBuffer<D> {
     }
 }
 
+/// Writes `D::zero()` to every element of `piece` and returns it initialized.
+///
+/// Why not `<[MaybeUninit<D>]>::write_filled`: it is unstable at the
+/// workspace MSRV.
+pub(crate) fn write_zeros<D: Copy + num_traits::Zero>(piece: &mut [MaybeUninit<D>]) -> &mut [D] {
+    for slot in piece.iter_mut() {
+        slot.write(D::zero());
+    }
+    // SAFETY: the loop above wrote a valid `D` to every element of `piece`,
+    // and the returned borrow is `piece`'s own, so nothing can de-initialize
+    // an element while the initialized view is live. `D: Copy` has no drop.
+    unsafe { piece.assume_init_mut() }
+}
+
+/// Runs `write` over `target_len` uninitialized elements and returns them
+/// as a `Vec` of length `target_len` on `Ok`; on `Err` or a panic the
+/// storage is dropped at length zero.
+///
+/// The caller's `write` must initialize every element of its argument
+/// before returning `Ok`; this is the only obligation the length transition
+/// rests on.
 pub(crate) fn initialize_owned<D, E>(
     target_len: usize,
     write: impl FnOnce(&mut [MaybeUninit<D>]) -> Result<(), E>,

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::mem::MaybeUninit;
 use symtn_dense::Engine;
 
 use rustc_hash::FxHashMap;
@@ -344,13 +345,13 @@ pub(crate) fn debug_assert_core_geometry<R>(
 
 /// Adapts a [`TensorContractBackend`] + workspace pair onto the replay
 /// layer's [`Rank2Gemm`] seam.
-pub(crate) struct BackendRank2Gemm<'a, B, W, C = f64> {
+pub(crate) struct BackendRank2Gemm<'a, B: ?Sized, W, C = f64> {
     pub(crate) backend: &'a mut B,
     pub(crate) workspace: &'a mut W,
     pub(crate) coefficient: std::marker::PhantomData<C>,
 }
 
-impl<'a, B, W, C> BackendRank2Gemm<'a, B, W, C> {
+impl<'a, B: ?Sized, W, C> BackendRank2Gemm<'a, B, W, C> {
     pub(crate) fn new(backend: &'a mut B, workspace: &'a mut W) -> Self {
         Self {
             backend,
@@ -362,7 +363,7 @@ impl<'a, B, W, C> BackendRank2Gemm<'a, B, W, C> {
 
 impl<'a, B, D, C> Rank2Gemm<D> for BackendRank2Gemm<'a, B, B::Workspace, C>
 where
-    B: TensorContractBackend<D, C>,
+    B: TensorContractBackend<D, C> + ?Sized,
     D: DenseBlockScalar + RecouplingCoefficientAction<C>,
     C: Copy + num_traits::One,
 {
@@ -447,6 +448,77 @@ where
             rhs_op,
             alpha,
             beta,
+        )
+    }
+
+    fn matmul_rank2_batch_fresh<'f>(
+        &mut self,
+        engine: &mut dyn Engine,
+        segments: &mut [(usize, &'f mut [MaybeUninit<D>])],
+        lhs: &[D],
+        rhs: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        ops: [MatrixOp; 2],
+        alpha: D,
+        written: &mut dyn FnMut(usize, &'f mut [D]),
+    ) -> Result<(), OperationError>
+    where
+        D: Copy + num_traits::Zero,
+    {
+        self.backend.matmul_rank2_batch_fresh_raw(
+            engine,
+            self.workspace,
+            segments,
+            lhs,
+            rhs,
+            jobs,
+            ops,
+            alpha,
+            written,
+        )
+    }
+}
+
+/// A [`Rank2Gemm`] that keeps the trait's zero-then-overwrite fresh
+/// default over `G`'s initialized GEMMs: the default of
+/// [`TensorContractBackend::matmul_rank2_batch_fresh_raw`].
+pub(crate) struct ZeroThenInto<G>(pub(crate) G);
+
+impl<D, G: Rank2Gemm<D>> Rank2Gemm<D> for ZeroThenInto<G> {
+    fn matmul_rank2(
+        &mut self,
+        engine: &mut dyn Engine,
+        dst: &mut [D],
+        lhs: &[D],
+        rhs: &[D],
+        rows: usize,
+        contracted: usize,
+        cols: usize,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError> {
+        self.0
+            .matmul_rank2(engine, dst, lhs, rhs, rows, contracted, cols, alpha, beta)
+    }
+
+    fn matmul_rank2_batch_with_ops(
+        &mut self,
+        engine: &mut dyn Engine,
+        dst: &mut [D],
+        lhs: &[D],
+        rhs: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        runs: &[usize],
+        lhs_op: MatrixOp,
+        rhs_op: MatrixOp,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), OperationError>
+    where
+        D: Copy,
+    {
+        self.0.matmul_rank2_batch_with_ops(
+            engine, dst, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
         )
     }
 }
