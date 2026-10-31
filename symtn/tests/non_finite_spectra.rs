@@ -10,19 +10,20 @@
 
 use report::Report;
 
-use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{SU2Irrep, U1Irrep};
+use symtn::typed::SectorSpectrum;
 use symtn::typed::{Error, OperationError, TensorMap, Truncation};
-use symtn::typed::{GradedSpace, SectorSpectrum};
 
 use crate::fixtures;
 use crate::report;
 use report::cause;
 
 use fixtures::host_runtime;
+
+use crate::legs::{su2_leg_2_2, u1_leg_2_2};
 
 /// pinv's finite-input refusal, the same typed operation error on compact and
 /// dense storage.
@@ -100,35 +101,26 @@ fn complex(value: f64) -> Complex64 {
     Complex64::new(value, 0.0)
 }
 
-fn u1() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
-    )
-    .unwrap()
-}
-
-fn su2() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
 #[test]
 fn u1_real_nan_spectrum_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    assert_nan_spectrum_is_rejected!(engine, u1(), [U1Irrep::new(0), U1Irrep::new(1)], real);
+    assert_nan_spectrum_is_rejected!(
+        engine,
+        u1_leg_2_2(),
+        [U1Irrep::new(0), U1Irrep::new(1)],
+        real
+    );
 }
 
 #[test]
 fn u1_complex_nan_spectrum_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    assert_nan_spectrum_is_rejected!(engine, u1(), [U1Irrep::new(0), U1Irrep::new(1)], complex);
+    assert_nan_spectrum_is_rejected!(
+        engine,
+        u1_leg_2_2(),
+        [U1Irrep::new(0), U1Irrep::new(1)],
+        complex
+    );
 }
 
 #[test]
@@ -136,7 +128,7 @@ fn su2_real_nan_spectrum_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     assert_nan_spectrum_is_rejected!(
         engine,
-        su2(),
+        su2_leg_2_2(),
         [SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1)],
         real
     );
@@ -147,7 +139,7 @@ fn su2_complex_nan_spectrum_is_rejected() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     assert_nan_spectrum_is_rejected!(
         engine,
-        su2(),
+        su2_leg_2_2(),
         [SU2Irrep::from_twice_spin(0), SU2Irrep::from_twice_spin(1)],
         complex
     );
@@ -162,7 +154,7 @@ fn compact_svd_rejects_infinite_input_without_changing_spectrum() {
     let input: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &host_runtime(),
-        &u1(),
+        &u1_leg_2_2(),
         [
             SectorSpectrum {
                 sector: U1Irrep::new(0),
@@ -194,7 +186,7 @@ fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &host_runtime(),
-        &u1(),
+        &u1_leg_2_2(),
         [
             SectorSpectrum {
                 sector: U1Irrep::new(0),
@@ -222,7 +214,7 @@ fn compact_pinv_of_a_finite_diagonal_is_unchanged() {
 fn dense_pinv_of_a_nan_tensor_is_invalid_argument() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let leg = u1();
+    let leg = u1_leg_2_2();
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         let real: TensorMap<_, f64> = TensorMap::from_subblock_fn(
             engine,

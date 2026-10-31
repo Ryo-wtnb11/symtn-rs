@@ -2,6 +2,10 @@ use super::*;
 
 pub(super) use smallvec::smallvec;
 
+#[path = "../../../tests/support/sector_ids.rs"]
+mod sector_ids;
+pub(super) use sector_ids::{excluded_u1_id, su2, u1, z2_even, z2_odd};
+
 pub(super) use std::hash::{Hash, Hasher};
 
 /// Fixture layout: subblocks packed contiguously in key order. Not a product
@@ -25,26 +29,6 @@ where
         SectorStructure::from_keys(rank, keys)?,
         DegeneracyStructure::packed_column_major(rank, shapes)?,
     )
-}
-
-pub(super) fn u1(charge: i32) -> SectorId {
-    U1Irrep::new(charge).sector_id()
-}
-
-pub(super) fn excluded_u1_id() -> SectorId {
-    SectorId::new(u32::MAX as usize)
-}
-
-pub(super) fn z2_even() -> SectorId {
-    Z2Irrep::EVEN.sector_id()
-}
-
-pub(super) fn z2_odd() -> SectorId {
-    Z2Irrep::ODD.sector_id()
-}
-
-pub(super) fn su2(twice_spin: usize) -> SectorId {
-    SU2Irrep::from_twice_spin(twice_spin).sector_id()
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -12,67 +12,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// Removes comments and string and char literals, so that brace depth and
-/// item keywords can be read from what remains.
-fn strip(source: &str) -> String {
-    let bytes = source.as_bytes();
-    let mut out = String::with_capacity(source.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let rest = &source[i..];
-        if rest.starts_with("//") {
-            i += rest.find('\n').unwrap_or(rest.len());
-        } else if rest.starts_with("/*") {
-            i += rest.find("*/").expect("unterminated block comment") + 2;
-        } else if let Some((open, hashes)) = raw_string_open(rest).filter(|_| !ends_in_word(&out)) {
-            let close = format!("\"{}", "#".repeat(hashes));
-            i += open + rest[open..].find(&close).expect("unterminated raw string") + close.len();
-            out.push_str("\"\"");
-        } else if bytes[i] == b'"' {
-            i += 1;
-            while bytes[i] != b'"' {
-                i += if bytes[i] == b'\\' { 2 } else { 1 };
-            }
-            i += 1;
-            out.push_str("\"\"");
-        } else if let Some(len) = char_literal_len(rest) {
-            i += len;
-            out.push_str("' '");
-        } else {
-            let ch = rest.chars().next().unwrap();
-            out.push(ch);
-            i += ch.len_utf8();
-        }
-    }
-    out
-}
-
-fn ends_in_word(text: &str) -> bool {
-    text.ends_with(|c: char| c.is_alphanumeric() || c == '_')
-}
-
-/// Byte length and hash count of a raw-string opener (`r"`, `r#"`,
-/// `br##"`, ...) at the start of `rest`.
-fn raw_string_open(rest: &str) -> Option<(usize, usize)> {
-    let tail = rest.strip_prefix("br").or_else(|| rest.strip_prefix('r'))?;
-    let hashes = tail.len() - tail.trim_start_matches('#').len();
-    tail[hashes..]
-        .starts_with('"')
-        .then_some((rest.len() - tail.len() + hashes + 1, hashes))
-}
-
-/// Byte length of a char literal at the start of `rest`; `None` for a
-/// lifetime or anything else.
-fn char_literal_len(rest: &str) -> Option<usize> {
-    let body = rest.strip_prefix('\'')?;
-    if body.starts_with('\\') {
-        return body[2..].find('\'').map(|end| end + 4);
-    }
-    let first = body.chars().next()?;
-    body[first.len_utf8()..]
-        .starts_with('\'')
-        .then_some(first.len_utf8() + 2)
-}
+use crate::export_scan::{ends_in_word, strip};
 
 /// Leaf names of a `use` tree such as `a::{b, c::{d, e as f}}`.
 fn use_leaves(tree: &str, out: &mut BTreeSet<String>) {

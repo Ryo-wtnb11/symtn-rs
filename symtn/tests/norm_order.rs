@@ -17,6 +17,8 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
+use crate::legs::{su2_norm_legs, u1_norm_legs};
+
 fn real_fill(indices: &[usize]) -> f64 {
     1.0 + 0.5 * indices[0] as f64 - 0.25 * indices[1] as f64
 }
@@ -28,39 +30,9 @@ fn complex_fill(indices: &[usize]) -> Complex64 {
     )
 }
 
-fn u1() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let rule = Arc::new(U1FusionRule);
-    let pairs = |entries: [(i32, usize); 3]| {
-        GradedSpace::try_new(
-            Arc::clone(&rule),
-            entries.map(|(charge, deg)| (U1Irrep::new(charge), deg)),
-        )
-        .unwrap()
-    };
-    (
-        pairs([(-1, 2), (0, 3), (1, 4)]),
-        pairs([(-1, 5), (0, 1), (1, 2)]),
-    )
-}
-
-fn su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let rule = Arc::new(SU2FusionRule);
-    let pairs = |entries: [(usize, usize); 3]| {
-        GradedSpace::try_new(
-            Arc::clone(&rule),
-            entries.map(|(twice_spin, deg)| (SU2Irrep::from_twice_spin(twice_spin), deg)),
-        )
-        .unwrap()
-    };
-    (
-        pairs([(0, 2), (1, 3), (2, 4)]),
-        pairs([(0, 5), (1, 1), (2, 2)]),
-    )
-}
-
 fn compact_su2(rt: &Runtime) -> TensorMap<SU2FusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let (bond, _) = su2();
+    let (bond, _) = su2_norm_legs();
     let spectrum = |twice_spin, values: &[f64]| SectorSpectrum {
         sector: SU2Irrep::from_twice_spin(twice_spin),
         values: values.to_vec(),
@@ -146,8 +118,8 @@ fn assert_hand(
 fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (uv, uw) = u1();
-    let (sv, sw) = su2();
+    let (uv, uw) = u1_norm_legs();
+    let (sv, sw) = su2_norm_legs();
     let u1_f64: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     let u1_c64: TensorMap<U1FusionRule, Complex64> =
@@ -205,7 +177,7 @@ fn every_arm_matches_the_dimension_weighted_entrywise_norm() {
 fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (uv, uw) = u1();
+    let (uv, uw) = u1_norm_legs();
     let poisoned: TensorMap<U1FusionRule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |trees, i| {
             if *trees.coupled() == U1Irrep::new(1) && i == [0, 0] {
@@ -242,7 +214,7 @@ fn infinity_arm_propagates_nan_and_is_positive_zero_without_entries() {
 fn invalid_exponents_are_typed_errors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (uv, uw) = u1();
+    let (uv, uw) = u1_norm_legs();
     let tensor: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     for p in [f64::NAN, f64::NEG_INFINITY, 0.0, -0.0, -1.0] {
@@ -263,8 +235,8 @@ fn device_norm_is_the_frobenius_arm_and_rejects_other_exponents() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let rt = Runtime::builder().build().unwrap();
-    let (uv, uw) = u1();
-    let (sv, sw) = su2();
+    let (uv, uw) = u1_norm_legs();
+    let (sv, sw) = su2_norm_legs();
     let u1_f64: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&uv], [&uw], |_, i| real_fill(i)).unwrap();
     let su2_c64: TensorMap<SU2FusionRule, Complex64> =
@@ -323,7 +295,7 @@ fn compact_host_reductions_match_the_device_frobenius_arm() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let rt = Runtime::builder().build().unwrap();
-    let (bond, _) = su2();
+    let (bond, _) = su2_norm_legs();
     let value = |twice: usize, k: usize, shift: f64| {
         Complex64::new(
             1.0 + 0.5 * k as f64 - shift * twice as f64,

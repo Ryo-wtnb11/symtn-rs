@@ -6,19 +6,19 @@
 use crate::numerics;
 
 use std::hint::black_box;
-use std::sync::Arc;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::HermitianTol;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{Complex64, Runtime};
-use symtn::typed::{GradedSpace, Lq, TensorMap, TensorScalar};
+use symtn::typed::{Lq, TensorMap, TensorScalar};
 
 use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
 use crate::counting_alloc;
+
+use crate::legs::{su2_leg_2_2_1, u1_leg_2_3_2};
 
 #[derive(Debug)]
 #[cfg_attr(
@@ -123,37 +123,13 @@ macro_rules! assert_lq {
     }};
 }
 
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 macro_rules! lq_cases {
     ($engine:ident, $d:ty, $runtime:expr) => {{
-        let u1 = u1_leg();
+        let u1 = u1_leg_2_3_2();
         let a: TensorMap<_, $d> =
             TensorMap::rand_with_seed($engine, $runtime, [&u1], [&u1, &u1], 1478).unwrap();
         assert_lq!($engine, $d, a);
-        let su2 = su2_leg();
+        let su2 = su2_leg_2_2_1();
         let a: TensorMap<_, $d> =
             TensorMap::rand_with_seed($engine, $runtime, [&su2], [&su2, &su2], 1479).unwrap();
         assert_lq!($engine, $d, a);
@@ -192,7 +168,7 @@ fn compact_lq_requests_no_zeroed_output_storage() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = u1_leg();
+    let leg = u1_leg_2_3_2();
     let a: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg, &leg], 1480).unwrap();
     let warm = a.lq_compact(engine, &[0, 1], &[2, 3]).unwrap();
@@ -208,7 +184,9 @@ fn compact_lq_requests_no_zeroed_output_storage() {
 #[cfg(feature = "cgc-gen")]
 mod checked_generic {
     use super::*;
+    use std::sync::Arc;
     use symtn::sector::LieGroupFusionRule;
+    use symtn::typed::GradedSpace;
     use symtn::typed::{LeftPolar, RightPolar};
 
     fn su3_leg(

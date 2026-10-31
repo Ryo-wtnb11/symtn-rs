@@ -15,6 +15,8 @@ use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
 use crate::counting_alloc;
 
+use crate::legs::u1_on;
+
 fn measured_allocations<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> (u64, usize) {
     let (output, allocs) =
         counting_alloc::measure_matching(payload_bytes..=payload_bytes, || black_box(operation()));
@@ -25,16 +27,6 @@ fn measured_allocations<T>(payload_bytes: usize, operation: impl FnOnce() -> T) 
 /// Small fixed allowance for descriptor/layout bookkeeping (copy plans,
 /// derived-space metadata).
 const STRUCTURAL_TOLERANCE: u64 = 128 * 1024;
-
-fn u1_leg(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
 
 fn pseudo_random(state: &mut u64) -> f64 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -50,9 +42,9 @@ fn typed_cat_uses_one_output_allocation_without_scratch() {
     // buffer.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let codomain = u1_leg(&provider, &[(0, 127)]);
-    let left = u1_leg(&provider, &[(0, 251)]);
-    let right = u1_leg(&provider, &[(0, 263)]);
+    let codomain = u1_on(&provider, &[(0, 127)]);
+    let left = u1_on(&provider, &[(0, 251)]);
+    let right = u1_on(&provider, &[(0, 263)]);
     let mut state = 0x5eed_0580u64;
     let lhs: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&left], |_, _| {
@@ -91,8 +83,8 @@ fn typed_absorb_clones_the_destination_once() {
     let destination: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
-        [&u1_leg(&provider, &[(0, 251)])],
-        [&u1_leg(&provider, &[(0, 127)])],
+        [&u1_on(&provider, &[(0, 251)])],
+        [&u1_on(&provider, &[(0, 127)])],
         |_, _| pseudo_random(&mut state),
     )
     .unwrap();
@@ -100,8 +92,8 @@ fn typed_absorb_clones_the_destination_once() {
     let source: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
-        [&u1_leg(&provider, &[(0, 263)])],
-        [&u1_leg(&provider, &[(0, 101)])],
+        [&u1_on(&provider, &[(0, 263)])],
+        [&u1_on(&provider, &[(0, 101)])],
         |_, _| pseudo_random(&mut state),
     )
     .unwrap();
@@ -232,9 +224,9 @@ fn typed_lazy_adjoint_cat_allocates_only_the_output_payload() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let common = u1_leg(&provider, &[(0, 64)]);
-    let left = u1_leg(&provider, &[(0, 192)]);
-    let right = u1_leg(&provider, &[(0, 320)]);
+    let common = u1_on(&provider, &[(0, 64)]);
+    let left = u1_on(&provider, &[(0, 192)]);
+    let right = u1_on(&provider, &[(0, 320)]);
     let lhs_parent: TensorMap<U1FusionRule, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&left], [&common], 388_001).unwrap();
     let rhs_parent: TensorMap<U1FusionRule, Complex64> =
@@ -322,7 +314,7 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
             },
         ],
     );
-    let u1 = u1_leg(&Arc::new(U1FusionRule), &[(-1, 2), (1, 3)]);
+    let u1 = u1_on(&Arc::new(U1FusionRule), &[(-1, 2), (1, 3)]);
     let dual_moving = warm_compact_braid_calls!(
         engine,
         &u1,

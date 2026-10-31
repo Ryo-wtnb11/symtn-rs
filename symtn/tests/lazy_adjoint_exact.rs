@@ -21,11 +21,12 @@ use num_complex::Complex64;
 
 use crate::numerics;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2FusionRule, U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
+
+use crate::legs::{su2_on, u1_on};
 
 trait Exact:
     Copy + PartialEq + std::ops::Add<Output = Self> + std::ops::Mul<Output = Self> + numerics::Numeric
@@ -320,33 +321,13 @@ macro_rules! assert_exact_adjoint {
     }};
 }
 
-fn u1(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn su2(provider: &Arc<SU2FusionRule>, pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
-    )
-    .unwrap()
-}
-
 #[test]
 fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
+    let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
-    let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
     assert_exact_adjoint!(engine, Complex64, [&leg, &dual], [&other]);
     assert_exact_adjoint!(engine, Complex64, [&other], [&dual, &leg, &other]);
@@ -357,8 +338,8 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_u1_legs() {
 fn lazy_adjoint_materialization_and_add_are_exact_on_su2_legs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
-    let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let other = su2(&provider, &[(0, 1), (1, 2)]);
+    let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
+    let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_exact_adjoint!(engine, f64, [&leg, &other], [&leg]);
     assert_exact_adjoint!(engine, Complex64, [&leg, &other, &other], [&leg]);
     assert_exact_adjoint!(engine, Complex64, [&other, &leg], [&leg, &other]);

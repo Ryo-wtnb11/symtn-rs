@@ -37,11 +37,9 @@
 //! carry the same entry multiset: a `dim(c)` weight attached to the wrong
 //! sector changes the answer.
 
-use std::sync::Arc;
-
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{SU2FusionRule, U1FusionRule, U1Irrep};
+use symtn::typed::TensorMap;
 use symtn::typed::{Complex64, Error};
-use symtn::typed::{GradedSpace, TensorMap};
 
 use crate::numerics;
 
@@ -54,6 +52,8 @@ const TERMS: usize = 21;
 use crate::fixtures;
 
 use fixtures::host_runtime;
+
+use crate::legs::{su2_norm_legs, u1_norm_legs};
 
 /// The real fill, in the engine's 0-based degeneracy coordinates.
 ///
@@ -89,42 +89,12 @@ const SU2_C64: [f64; 4] = [
 /// The exponents the oracle rows above are indexed by.
 const POWERS: [f64; 4] = [1.0, 2.0, 3.0, f64::INFINITY];
 
-fn typed_u1() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let rule = Arc::new(U1FusionRule);
-    let pairs = |entries: [(i32, usize); 3]| {
-        GradedSpace::try_new(
-            Arc::clone(&rule),
-            entries.map(|(charge, deg)| (U1Irrep::new(charge), deg)),
-        )
-        .unwrap()
-    };
-    (
-        pairs([(-1, 2), (0, 3), (1, 4)]),
-        pairs([(-1, 5), (0, 1), (1, 2)]),
-    )
-}
-
-fn typed_su2() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let rule = Arc::new(SU2FusionRule);
-    let pairs = |entries: [(usize, usize); 3]| {
-        GradedSpace::try_new(
-            Arc::clone(&rule),
-            entries.map(|(twice_spin, deg)| (SU2Irrep::from_twice_spin(twice_spin), deg)),
-        )
-        .unwrap()
-    };
-    (
-        pairs([(0, 2), (1, 3), (2, 4)]),
-        pairs([(0, 5), (1, 1), (2, 2)]),
-    )
-}
-
 #[test]
 fn typed_norm_p_matches_tensorkit() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (u1_v, u1_w) = typed_u1();
-    let (su2_v, su2_w) = typed_su2();
+    let (u1_v, u1_w) = u1_norm_legs();
+    let (su2_v, su2_w) = su2_norm_legs();
 
     let u1_f64: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&u1_v], [&u1_w], |_, indices| {
@@ -185,7 +155,7 @@ fn typed_norm_p_matches_tensorkit() {
 fn typed_norm_p_rejects_non_positive_and_non_finite_p() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (v, w) = typed_u1();
+    let (v, w) = u1_norm_legs();
     let tensor: TensorMap<U1FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |_, indices| real_fill(indices))
             .unwrap();
@@ -205,7 +175,7 @@ fn typed_norm_p_rejects_non_positive_and_non_finite_p() {
 fn compact_norm_p_equals_the_dense_answer() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (v, w) = typed_su2();
+    let (v, w) = su2_norm_legs();
     let dense: TensorMap<SU2FusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |_, indices| real_fill(indices))
             .unwrap();
@@ -250,7 +220,7 @@ fn poisoned(trees: &symtn::typed::BlockFusionTrees<U1Irrep>) -> bool {
 fn u1_real_with(value: f64) -> TensorMap<U1FusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (v, w) = typed_u1();
+    let (v, w) = u1_norm_legs();
     TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |trees, indices| {
         if poisoned(trees) && indices == [0, 0] {
             value
@@ -265,7 +235,7 @@ fn u1_real_with(value: f64) -> TensorMap<U1FusionRule, f64> {
 fn norm_inf_propagates_nan_hidden_in_the_imaginary_part() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (v, w) = typed_u1();
+    let (v, w) = u1_norm_legs();
     let tensor: TensorMap<U1FusionRule, Complex64> =
         TensorMap::from_subblock_fn(engine, &rt, [&v], [&w], |trees, indices| {
             if poisoned(trees) && indices == [0, 0] {
@@ -286,7 +256,7 @@ fn norm_inf_propagates_nan_hidden_in_the_imaginary_part() {
 fn norm_inf_propagates_nan_through_compact_and_lazy_storage() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
-    let (bond, _) = typed_u1();
+    let (bond, _) = u1_norm_legs();
     let compact = TensorMap::<_, f64>::diagonal(
         engine,
         &rt,
