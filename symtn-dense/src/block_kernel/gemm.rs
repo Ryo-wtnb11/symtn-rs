@@ -9,6 +9,8 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::sync::{Arc, OnceLock};
 
 use symtn_core::{
@@ -20,7 +22,8 @@ use tcontract_exec::Exec;
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use crate::tenferro_adapter::{grouped_error, grouped_validate};
+use crate::fresh::{split_fresh_segments, FreshParts};
+use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -63,20 +66,25 @@ impl Geometry {
     }
 
     pub(crate) fn plan<T: Scalar>(&self) -> tcontract::Result<Plan<T>> {
+        Plan::from_problem(self.problem::<T>()?, &PlanConfig::default())
+    }
+
+    /// The job's column-major GEMM problem: the one every provider's plan
+    /// for this geometry is built from.
+    pub(crate) fn problem<T: Scalar>(&self) -> tcontract::Result<Problem> {
         let [m, k, n] = self.mkn;
         let spec = |dims: [usize; 2], strides: [isize; 2], conj: bool| {
             let op = if conj { Op::Conjugate } else { Op::Identity };
             LayoutSpec::new(&dims, &strides, 0).map(|layout| OperandSpec::new(layout).with_op(op))
         };
-        let problem = Problem::from_labels(
+        Problem::from_labels(
             T::STORAGE,
             spec([m, k], self.strides[0], self.conj[0])?,
             spec([k, n], self.strides[1], self.conj[1])?,
             CSpec::Output(Op::Identity),
             spec([m, n], self.strides[2], false)?,
             &Labels::new(&[0, 1], &[1, 2], &[0, 2]),
-        )?;
-        Plan::from_problem(problem, &PlanConfig::default())
+        )
     }
 }
 
@@ -246,6 +254,60 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     }
 }
 
+/// One fresh call's blocks: each job writes its uninitialized destination
+/// piece and keeps the initialized slice in its slot until the lanes join.
+struct FreshGemmBlocks<'r, 'a, T> {
+    jobs: &'r [DenseGemmBatchJob],
+    plans: &'r [Arc<ErasedPlan>],
+    lhs: &'r [T],
+    rhs: &'r [T],
+    alpha: T,
+    destination: PhantomData<&'a mut [T]>,
+}
+
+impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
+    /// The job's plan index, its uninitialized piece, and that piece once
+    /// written.
+    type Job = (usize, &'a mut [MaybeUninit<T>], &'a mut [T]);
+    const ENTRY: Entry = Entry::Contraction;
+    const KIND: OpKind = OpKind::Gemm;
+    const LABEL: &'static str = "grouped_gemm";
+
+    fn work(&self, index: usize, _: &Self::Job) -> f64 {
+        work::<T>(&self.jobs[index])
+    }
+
+    fn run(
+        &self,
+        index: usize,
+        (plan, piece, written): &mut Self::Job,
+        mut exec: Exec<'_>,
+    ) -> Result<(), DenseError> {
+        let job = &self.jobs[index];
+        let plan = self.plans[*plan]
+            .downcast_ref::<Plan<T>>()
+            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
+        *written = plan
+            .execute_uninit_slices(
+                &mut exec,
+                self.alpha,
+                (
+                    operand(self.lhs, job.lhs_offset, job.rows * job.contracted),
+                    0,
+                ),
+                (
+                    operand(self.rhs, job.rhs_offset, job.contracted * job.cols),
+                    0,
+                ),
+                T::default(),
+                SliceAccumulationSource::Absent,
+                (std::mem::take(piece), 0),
+            )
+            .map_err(|err| grouped_error(format!("job {index}: {err}")))?;
+        Ok(())
+    }
+}
+
 /// The kernel's per-call staging: the destination order, the geometry index,
 /// the per-job plan slots, the plan handles and the lane driver's staging.
 /// An owner that submits repeatedly (an executor of a prepared workspace)
@@ -255,9 +317,10 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
 /// geometry-plan cache alone retains plans.
 #[derive(Debug, Default)]
 pub(crate) struct GemmScratch {
-    order: Vec<usize>,
+    pub(crate) order: Vec<usize>,
     geometries: HashMap<Geometry, usize>,
     slots: Vec<(usize, &'static mut [u8])>,
+    fresh_slots: FreshSlots<'static, u8>,
     plans: Vec<Arc<ErasedPlan>>,
     lanes: LaneScratch,
 }
@@ -284,6 +347,11 @@ impl GemmScratch {
             self.slots
                 .capacity()
                 .saturating_mul(size_of::<(usize, &mut [u8])>()),
+            self.fresh_slots.capacity().saturating_mul(size_of::<(
+                usize,
+                &mut [MaybeUninit<u8>],
+                &mut [u8],
+            )>()),
             self.plans
                 .capacity()
                 .saturating_mul(size_of::<Arc<ErasedPlan>>()),
@@ -291,6 +359,31 @@ impl GemmScratch {
         ]
         .into_iter()
         .fold(0, usize::saturating_add)
+    }
+}
+
+impl GemmScratch {
+    /// The kept job-slot capacity, emptied, for a caller that stages
+    /// `(index, slice)` pairs of its own.
+    #[cfg_attr(not(feature = "cpu-blas-core"), allow(dead_code))]
+    pub(crate) fn take_slots<'a, T>(&mut self) -> Vec<(usize, &'a mut [T])> {
+        recycle(std::mem::take(&mut self.slots))
+    }
+
+    /// Returns [`Self::take_slots`]'s capacity.
+    #[cfg_attr(not(feature = "cpu-blas-core"), allow(dead_code))]
+    pub(crate) fn keep_slots<T>(&mut self, slots: Vec<(usize, &mut [T])>) {
+        self.slots = recycle(slots);
+    }
+
+    /// The kept fresh-slot capacity, emptied.
+    pub(crate) fn take_fresh_slots<'a, T>(&mut self) -> FreshSlots<'a, T> {
+        recycle(std::mem::take(&mut self.fresh_slots))
+    }
+
+    /// Returns [`Self::take_fresh_slots`]'s capacity.
+    pub(crate) fn keep_fresh_slots<T>(&mut self, slots: FreshSlots<'_, T>) {
+        self.fresh_slots = recycle(slots);
     }
 }
 
@@ -308,7 +401,7 @@ fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
 
 /// A job's operand range; an empty one may start anywhere, as validation
 /// does not bound it.
-fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
+pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
     if len == 0 {
         &[]
     } else {
@@ -344,7 +437,9 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         slots: kept_slots,
         plans,
         lanes,
+        ..
     } = scratch;
+    let mut slots: Vec<(usize, &mut [T])> = recycle(std::mem::take(kept_slots));
 
     order.clear();
     order.extend((0..jobs.len()).filter(|&j| jobs[j].rows * jobs[j].cols != 0));
@@ -360,25 +455,10 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         }
     }
 
-    // Index the distinct geometries, in order of first use.
-    geometries.clear();
-    let mut slots: Vec<(usize, &mut [T])> = recycle(std::mem::take(kept_slots));
     slots.reserve(jobs.len());
-    for job in jobs {
-        let next = geometries.len();
-        let plan = *geometries.entry(Geometry::new(job, ops)?).or_insert(next);
-        slots.push((plan, &mut [][..]));
-    }
-    plans.clear();
-    for (index, job) in jobs.iter().enumerate() {
-        if slots[index].0 == plans.len() {
-            let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), Geometry::new(job, ops)?)
-                .map_err(|err| grouped_error(format!("job {index}: {err}")))?;
-            plans.push(plan);
-            #[cfg(test)]
-            crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
-        }
-    }
+    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
+        slots.push((plan, &mut [][..]))
+    })?;
 
     let lhs = &lhs.data()[lhs.offset()..lhs.offset() + lhs_len];
     let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
@@ -411,5 +491,92 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     *kept_slots = recycle(slots);
     plans.clear();
+    result
+}
+
+/// The per-job slots of a fresh call.
+pub(crate) type FreshSlots<'a, T> = Vec<(usize, &'a mut [MaybeUninit<T>], &'a mut [T])>;
+
+/// Indexes the distinct geometries of `jobs` in order of first use, looks
+/// each one's plan up once in the geometry-plan cache, and passes every
+/// job's plan index to `slot`, in job order.
+fn index_plans<T: Scalar>(
+    geometries: &mut HashMap<Geometry, usize>,
+    plans: &mut Vec<Arc<ErasedPlan>>,
+    jobs: &[DenseGemmBatchJob],
+    ops: [MatrixOp; 2],
+    mut slot: impl FnMut(usize),
+) -> Result<(), DenseError> {
+    geometries.clear();
+    plans.clear();
+    for (index, job) in jobs.iter().enumerate() {
+        let geometry = Geometry::new(job, ops)?;
+        let next = geometries.len();
+        let plan = *geometries.entry(geometry).or_insert(next);
+        if plan == plans.len() {
+            plans.push(
+                cached_plan::<T>(gemm_plans(), geometry)
+                    .map_err(|err| grouped_error(format!("job {index}: {err}")))?,
+            );
+            #[cfg(test)]
+            crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
+        }
+        slot(plan);
+    }
+    Ok(())
+}
+
+/// `D_j = alpha * op(A_j) op(B_j)` for every job, written into the job's
+/// uninitialized piece of `parts.segments` on the caller's engine, staged in
+/// `scratch`; the fresh counterpart of [`gemm_batch_into`].
+///
+/// The operand ranges and the job-to-segment placement are checked before
+/// the first write. Each job runs tcontract's fresh entry, which reads no
+/// destination value; jobs run on the scheduler's lanes like
+/// [`gemm_batch_into`]'s. Only when every job succeeded are they reported,
+/// in job order, after the lanes joined; otherwise the lowest-indexed job's
+/// error is returned and nothing is reported.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
+    cpu: &mut CpuEngine,
+    scratch: &mut GemmScratch,
+    parts: FreshParts<'_, 'a, T>,
+    lhs: DenseView<'_, T>,
+    rhs: DenseView<'_, T>,
+    jobs: &[DenseGemmBatchJob],
+    ops: [MatrixOp; 2],
+    alpha: T,
+) -> Result<(), DenseError> {
+    let [lhs_len, rhs_len] = grouped_operand_lens(lhs, rhs, jobs)?;
+    let mut slots: FreshSlots<'a, T> = scratch.take_fresh_slots();
+    let GemmScratch {
+        order,
+        geometries,
+        plans,
+        lanes,
+        ..
+    } = scratch;
+    slots.reserve(jobs.len());
+    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
+        slots.push((plan, &mut [][..], &mut [][..]))
+    })?;
+    split_fresh_segments(parts.segments, jobs, order, |j, piece| slots[j].1 = piece)?;
+
+    let blocks = FreshGemmBlocks {
+        jobs,
+        plans,
+        lhs: &lhs.data()[lhs.offset()..lhs.offset() + lhs_len],
+        rhs: &rhs.data()[rhs.offset()..rhs.offset() + rhs_len],
+        alpha,
+        destination: PhantomData,
+    };
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    if result.is_ok() {
+        for (j, (_, _, written)) in slots.iter_mut().enumerate() {
+            (parts.written)(j, std::mem::take(written));
+        }
+    }
+    plans.clear();
+    scratch.keep_fresh_slots(slots);
     result
 }

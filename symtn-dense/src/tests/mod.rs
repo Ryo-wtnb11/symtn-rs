@@ -16,6 +16,9 @@ mod executor;
     not(feature = "provider-inject")
 ))]
 mod factor_properties;
+mod fresh;
+#[path = "../../../tests/support/numerics.rs"]
+mod numerics;
 mod tensor;
 mod view;
 
