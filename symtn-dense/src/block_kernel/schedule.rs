@@ -20,12 +20,15 @@
 //! scheduling estimate, not a promise of a faster run. Without a grant model
 //! (the factorizations, see `driver::on_lanes`) the baseline is returned.
 //!
-//! The search costs `O(J log J + J sum(W) + P J log L0)` beyond the provider
-//! queries' own width scans counted in `sum(W)`: W is the set of distinct
-//! equal-share widths, `sum(W) <= 2 S H(L0) + L0`, each job's grant is
-//! queried once per width during the sweep, a proved lower bound costs
-//! `O(J)` per lane count, and only the `P <= L0` counts whose bound is below
-//! the best score so far are placed, with one heap per width class.
+//! The search costs `O(J log J + J S + J' sum(W) + L0 J' + P J log L0)`,
+//! counting the provider queries' width scans: every job's grant is queried
+//! once at the full S, and only the `J'` jobs it widens there are queried
+//! again, once per distinct equal-share width during the sweep (W, with
+//! `sum(W) <= 2 S H(L0) + L0`; rebuilding the winner may repeat up to two
+//! widths); a proved lower bound costs `O(J')` per lane count, the other
+//! jobs entering it as one precomputed sum and maximum; and only the
+//! `P <= L0` counts whose bound is below the best score so far are placed,
+//! with one heap per width class.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -131,6 +134,7 @@ fn lanes_from(mut pool: Vec<Lane>, spare: &mut Vec<Lane>, count: usize) -> Vec<L
     while pool.len() > count {
         spare.extend(pool.pop());
     }
+    pool.reserve(count.saturating_sub(pool.len()));
     while pool.len() < count {
         pool.push(spare.pop().unwrap_or(Lane {
             budget: 0,
@@ -246,8 +250,8 @@ pub(crate) fn allocate_in(
         let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
         let mut columns = std::mem::take(&mut scratch.columns);
         let mut narrow = std::mem::take(&mut scratch.narrow);
-        columns.width = [0; 2];
-        columns.prepare((slots, lanes), jobs, &fill);
+        columns.begin(times, |j| grant(j, times[j], slots) > 1);
+        columns.prepare((slots, lanes), &fill);
         let baseline = assigned
             .iter()
             .map(|lane| {
@@ -261,10 +265,10 @@ pub(crate) fn allocate_in(
         // Ties keep the baseline, then the larger lane count. Shares only
         // widen as the count falls, so each width's column is filled once.
         for count in (1..=lanes).rev() {
-            columns.prepare((slots, count), jobs, &fill);
+            columns.prepare((slots, count), &fill);
             // A candidate that cannot score strictly lower is not placed:
             // the choice is the one the full sweep makes.
-            if columns.lower_bound((slots, count), jobs) >= best.0.as_nanos() {
+            if columns.lower_bound((slots, count)) >= best.0.as_nanos() {
                 continue;
             }
             let item = |j: usize, width: usize| columns.get(j, width);
@@ -274,7 +278,7 @@ pub(crate) fn allocate_in(
             }
         }
         if let Some(count) = best.1 {
-            columns.prepare((slots, count), jobs, &fill);
+            columns.prepare((slots, count), &fill);
             let item = |j: usize, width: usize| columns.get(j, width);
             assigned = lanes_from(assigned, &mut scratch.spare, count);
             equal_shares(
@@ -306,21 +310,68 @@ pub(crate) fn allocate_in(
 }
 
 /// Every job's modeled item time at two lane widths, so a width the
-/// candidates share is granted once per job, not once per candidate.
+/// candidates share is granted once per job, not once per candidate. Jobs
+/// whose provider stays serial at the full slot count are queried once and
+/// never again.
 #[derive(Debug, Default)]
 struct Columns {
     /// The width of each column; zero (no lane has it) when unfilled.
     width: [usize; 2],
     items: [Vec<Duration>; 2],
+    /// The jobs the provider widens at the full slot count, ascending.
+    widened: Vec<usize>,
+    /// The sum and the largest of the other jobs' serial times, in ns.
+    serial_total: u128,
+    serial_largest: u128,
 }
 
 impl Columns {
+    /// Starts an allocation of jobs with serial times `times`: both columns
+    /// hold every job's serial time, and `widens(j)` (the provider's grant at
+    /// the full slot count S is above one) splits the jobs.
+    ///
+    /// Why a job serial at S is serial at every share `w <= S`: each step of
+    /// a grant is a released width rule that starts at width one and moves
+    /// only to a width `k` in `2..=b` that both pays and strictly lowers its
+    /// objective, where the payoff and the objective at `k` depend on the
+    /// token's dispatch cost at `k` alone, not on the ceiling `b`
+    /// (threadteam `width_for_by`, reached through `Exec::width_for_within`
+    /// and `batch_decision_within`). A ceiling below `b` scans a prefix of
+    /// the same candidates, so if none qualifies under `b` none qualifies
+    /// under it either; and when the minimum under `b` sits at `q <= b'`
+    /// it is also the minimum under `b'`, so a step's result never grows
+    /// as its ceiling falls. The factorization grant is one such step. The
+    /// GEMM grant's second step runs within the first step's result, which
+    /// is thus at most its value at S: a Faer plan's one-item decision is
+    /// its inner width rule or one thread (`faer_auto`, one item, no lanes),
+    /// and a Packed plan's is its narrowed width (`packed_auto`, one item,
+    /// no lanes), both width rules within that smaller ceiling. Hence a
+    /// grant of one at S is one at every share, and such a job's item time is
+    /// its serial time at every candidate width.
+    fn begin(&mut self, times: &[Duration], widens: impl Fn(usize) -> bool) {
+        self.width = [0; 2];
+        for column in &mut self.items {
+            column.clear();
+            column.extend_from_slice(times);
+        }
+        self.widened.clear();
+        (self.serial_total, self.serial_largest) = (0, 0);
+        for (j, t) in times.iter().enumerate() {
+            if widens(j) {
+                self.widened.push(j);
+            } else {
+                self.serial_total = self.serial_total.saturating_add(t.as_nanos());
+                self.serial_largest = self.serial_largest.max(t.as_nanos());
+            }
+        }
+    }
+
     /// Keeps the columns of the widths of `count` equal shares of `slots`
-    /// (`count <= slots`) and fills a missing one with `fill(job, width)`.
+    /// (`count <= slots`) and fills a missing one's widened jobs with
+    /// `fill(job, width)`; the other jobs keep their serial time.
     fn prepare(
         &mut self,
         (slots, count): (usize, usize),
-        jobs: usize,
         fill: &impl Fn(usize, usize) -> Duration,
     ) {
         let narrow = slots / count;
@@ -332,8 +383,9 @@ impl Columns {
             }
             let slot = usize::from(widths.contains(&self.width[0]));
             self.width[slot] = width;
-            self.items[slot].clear();
-            self.items[slot].extend((0..jobs).map(|j| fill(j, width)));
+            for &j in &self.widened {
+                self.items[slot][j] = fill(j, width);
+            }
         }
     }
 
@@ -352,11 +404,13 @@ impl Columns {
     /// at least `min(bound, Duration::MAX)`; any score it is compared with
     /// is at most `Duration::MAX`, so `bound >= score` still proves the
     /// candidate cannot score strictly lower.
-    fn lower_bound(&self, (slots, count): (usize, usize), jobs: usize) -> u128 {
+    /// The serial jobs' part is their precomputed sum and maximum, so the
+    /// bound costs one step per widened job.
+    fn lower_bound(&self, (slots, count): (usize, usize)) -> u128 {
         let narrow = slots / count;
         let wide = narrow + usize::from(slots % count != 0);
-        let (mut largest, mut total) = (0u128, 0u128);
-        for job in 0..jobs {
+        let (mut largest, mut total) = (self.serial_largest, self.serial_total);
+        for &job in &self.widened {
             let m = self.get(job, narrow).min(self.get(job, wide)).as_nanos();
             largest = largest.max(m);
             total = total.saturating_add(m);
@@ -375,6 +429,11 @@ impl Columns {
             .map(|column| column.capacity())
             .fold(0, usize::saturating_add)
             .saturating_mul(std::mem::size_of::<Duration>())
+            .saturating_add(
+                self.widened
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            )
     }
 }
 
@@ -1141,11 +1200,27 @@ mod tests {
         }
     }
 
+    /// Purpose: a job the provider widens only at some shares is still
+    /// scored at each share while the serial jobs keep their serial time.
+    /// With dispatch costs 3000/2000/1400 ns at widths 2/4/6, a 5000 ns job
+    /// pays only from five slots up: one six-slot lane scores
+    /// `5000 / 6 + 1400 + 5 * 100 = 2733` ns, every narrower share 5000 ns.
+    #[test]
+    fn widened_and_serial_jobs_mix() {
+        let t = [5000, 100, 100, 100, 100, 100];
+        let mut engine = engine_with_costs(6, BatchPolicy::default(), [3000, 2000, 1400]);
+        let a = chosen(&mut engine, &nanos(&t), 1e9);
+        assert_eq!((a.slots, a.decision.lanes), (6, 6));
+        assert_eq!(lanes(&a), [(6, vec![0, 1, 2, 3, 4, 5])]);
+    }
+
     /// Purpose: on many blocks no provider would widen (200 blocks below the
     /// payoff, six slots, flat 100 ns dispatch) Auto returns main's
-    /// allocation, and the lower bound that skips placing hopeless lane
-    /// counts changes no choice: the simulator with and without it agrees,
-    /// while it places fewer than every count.
+    /// allocation, and neither the single full-width query that settles
+    /// every serial block nor the lower bound that skips placing hopeless
+    /// lane counts changes the choice: production equals the plain
+    /// simulator, which agrees with the pruned one while that places fewer
+    /// than every count.
     #[test]
     fn pruning_keeps_main_on_many_tiny_blocks() {
         let d = 100;
