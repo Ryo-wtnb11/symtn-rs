@@ -6,8 +6,9 @@
 //! widths; and a lane panic breaking the engine.
 
 use super::*;
+use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKind};
 use crate::block_kernel::{factor, schedule};
-use tcontract_exec::{BatchPolicy, BatchStrategy, WorkModel};
+use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 #[path = "../../../tests/support/numerics.rs"]
 mod numerics;
@@ -467,7 +468,12 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
 fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> schedule::Allocation {
     engine(threads, policy)
         .with_linalg_pool(|exec, _| {
-            let (times, mean) = factor::costs(exec, work);
+            let model = exec.batch_policy().model;
+            let times: Vec<_> = work
+                .iter()
+                .map(|&w| cost(OpKind::Factorization, w, &model))
+                .collect();
+            let mean = work.iter().sum::<f64>() / work.len() as f64;
             Ok(schedule::allocate(exec, &times, mean))
         })
         .unwrap()
@@ -530,6 +536,25 @@ fn lane_minimum_is_checked_against_work_not_time() {
     assert_eq!(a.decision.lanes, 2);
 }
 
+/// A linalg-entry kernel whose block `self.0` panics.
+struct PanicsAt(usize);
+
+impl BlockOp for PanicsAt {
+    type Job = ();
+    const ENTRY: Entry = Entry::Linalg;
+    const KIND: OpKind = OpKind::Factorization;
+    const LABEL: &'static str = "svd_read";
+
+    fn work(&self, _: usize, _: &()) -> f64 {
+        1.0
+    }
+
+    fn run(&self, index: usize, _: &mut (), _: Exec<'_>) -> Result<(), DenseError> {
+        assert_ne!(index, self.0, "injected lane panic");
+        Ok(())
+    }
+}
+
 /// Purpose: a panicking job unwinds after the lanes join through the guarded
 /// linalg entry, which leaves the engine broken; the next batch then reports
 /// the per-matrix entry's refusal, after the same pre-entry checks.
@@ -537,10 +562,12 @@ fn lane_minimum_is_checked_against_work_not_time() {
 fn lane_panic_breaks_the_engine() {
     let mut engine = engine(4, BatchPolicy::new(BatchStrategy::Outer));
     let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        factor::run_on_lanes(&mut engine, &[1.0; 4], &mut [(); 4], |job, _, _| {
-            assert_ne!(job, 2, "injected lane panic");
-            Ok(())
-        })
+        driver::drive(
+            &mut engine,
+            &PanicsAt(2),
+            &mut [(); 4],
+            &mut LaneScratch::default(),
+        )
     }));
     assert!(unwound.is_err());
     assert!(engine.is_broken());

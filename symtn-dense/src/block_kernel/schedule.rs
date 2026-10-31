@@ -48,12 +48,6 @@ pub(crate) fn estimate(ns: f64) -> Duration {
 /// Serial time of `work` weighted multiply-adds under the engine's work model,
 /// mirroring `tcontract-exec` `batch.rs: item_ns` (a rate that is not `> 0`,
 /// NaN included, counts as 1).
-// The factorization kernels' cost; the GEMM kernel uses the contraction
-// model instead.
-#[cfg_attr(
-    not(any(test, all(feature = "cpu-faer", not(feature = "cpu-blas-core")))),
-    allow(dead_code)
-)]
 pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
     let rate = if model.muladds_per_ns > 0.0 {
         model.muladds_per_ns
@@ -79,7 +73,6 @@ impl AllocationScratch {
     }
 
     /// The capacities kept, in bytes. Saturates.
-    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) fn retained_bytes(&self) -> usize {
         use std::mem::size_of;
         self.lanes
@@ -114,10 +107,7 @@ fn lanes_from(mut pool: Vec<Lane>, count: usize) -> Vec<Lane> {
 /// Equal-split allocation of jobs with serial times `times` (canonical order)
 /// and mean weighted work `mean_work` (multiply-adds; it feeds the
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted twice).
-#[cfg_attr(
-    not(any(test, all(feature = "cpu-faer", not(feature = "cpu-blas-core")))),
-    allow(dead_code)
-)]
+#[cfg(test)]
 pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> Allocation {
     allocate_in(exec, times, mean_work, &mut AllocationScratch::default())
 }

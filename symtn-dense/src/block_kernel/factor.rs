@@ -7,13 +7,15 @@
 //! lane's child token instead of the whole engine, so a block's faer width is
 //! the engine's decision within its lane's reserved share.
 
+use std::marker::PhantomData;
+
 use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
 
-use super::schedule;
+use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
 use crate::{DenseError, DenseRead, DenseTensor, DenseView};
@@ -57,10 +59,29 @@ impl SvdScalar for Complex64 {
 
 /// One block: its validated input, its signed strides and, once run, its
 /// factors.
-struct Job<'a> {
+pub(crate) struct Job<'a> {
     input: DenseRead<'a>,
     strides: StrideVec,
-    factors: Option<[Tensor; 3]>,
+    factors: Option<Vec<DenseTensor>>,
+}
+
+/// The compact SVD of each block on the lane driver.
+struct SvdBlocks<'a>(PhantomData<fn() -> &'a ()>);
+
+impl<'a> BlockOp for SvdBlocks<'a> {
+    type Job = Job<'a>;
+    const ENTRY: Entry = Entry::Linalg;
+    const KIND: OpKind = OpKind::Factorization;
+    const LABEL: &'static str = ENTRY;
+
+    fn work(&self, _: usize, job: &Job<'a>) -> f64 {
+        work(job.input)
+    }
+
+    fn run(&self, _: usize, job: &mut Job<'a>, mut exec: Exec<'_>) -> Result<(), DenseError> {
+        job.factors = Some(factor(job.input, &job.strides, &mut exec)?);
+        Ok(())
+    }
 }
 
 /// Compact SVD of every input, returning `[U, S, Vh]` per input exactly as
@@ -105,53 +126,22 @@ fn svd_batch_on(
     if jobs.is_empty() {
         return refused.map_or(Ok(Vec::new()), Err);
     }
-    let work: Vec<f64> = jobs.iter().map(|job| work(job.input)).collect();
-    run_on_lanes(cpu, &work, &mut jobs, |_, job, mut exec| {
-        job.factors = Some(factor(job.input, &job.strides, &mut exec)?);
-        Ok(())
-    })?;
+    driver::drive(
+        cpu,
+        &SvdBlocks(PhantomData),
+        &mut jobs,
+        &mut LaneScratch::default(),
+    )?;
     if let Some(error) = refused {
         return Err(error);
     }
-    jobs.into_iter()
+    Ok(jobs
+        .into_iter()
         .map(|job| {
             job.factors
                 .unwrap_or_else(|| unreachable!("every job ran without failing"))
-                .into_iter()
-                .map(DenseTensor::from_tenferro)
-                .collect()
         })
-        .collect()
-}
-
-/// Runs `job` for every state on the scheduler's lanes inside the engine's
-/// guarded linalg entry, so a panicking job leaves the engine broken. `work`
-/// holds each job's weighted multiply-adds; the engine's own work model turns
-/// them into times. Returns the lowest-indexed job's error.
-pub(crate) fn run_on_lanes<S: Send>(
-    cpu: &mut CpuEngine,
-    work: &[f64],
-    states: &mut [S],
-    job: impl Fn(usize, &mut S, Exec<'_>) -> Result<(), DenseError> + Sync,
-) -> Result<(), DenseError> {
-    cpu.with_linalg_pool(|exec, _| {
-        let (times, mean_work) = costs(exec, work);
-        let allocation = schedule::allocate(exec, &times, mean_work);
-        Ok(schedule::run(exec.reborrow(), &allocation, states, &job))
-    })
-    .map_err(|err| tenferro_error(ENTRY, err))?
-    .map_err(|(_, error)| error)
-}
-
-/// Each job's serial time under the engine's work model and the mean work,
-/// the two inputs of the scheduler's decision.
-pub(crate) fn costs(exec: &Exec<'_>, work: &[f64]) -> (Vec<std::time::Duration>, f64) {
-    let model = &exec.batch_policy().model;
-    let times = work
-        .iter()
-        .map(|&w| schedule::estimate(schedule::work_model_ns(model, w)))
-        .collect();
-    (times, work.iter().sum::<f64>() / work.len().max(1) as f64)
+        .collect())
 }
 
 /// tlinalg's SVD work estimate: `m n min(m, n)` multiply-adds per matrix,
@@ -205,7 +195,7 @@ fn factor(
     input: DenseRead<'_>,
     strides: &[isize],
     exec: &mut Exec<'_>,
-) -> Result<[Tensor; 3], DenseError> {
+) -> Result<Vec<DenseTensor>, DenseError> {
     match input {
         DenseRead::F32(view) => factor_typed(view, strides, exec),
         DenseRead::F64(view) => factor_typed(view, strides, exec),
@@ -222,7 +212,7 @@ fn factor_typed<T: SvdScalar>(
     view: DenseView<'_, T>,
     strides: &[isize],
     exec: &mut Exec<'_>,
-) -> Result<[Tensor; 3], DenseError> {
+) -> Result<Vec<DenseTensor>, DenseError> {
     let shape = view.shape();
     let [m, n, batch @ ..] = shape else {
         return Err(tenferro_error(
@@ -234,13 +224,17 @@ fn factor_typed<T: SvdScalar>(
     let k = m.min(n);
     let with_batch = |dims: &[usize]| [dims, batch].concat();
     let tensor = |dims: &[usize], data| {
-        Tensor::from_vec_col_major(with_batch(dims), data).map_err(|err| tenferro_error(ENTRY, err))
+        Tensor::from_vec_col_major(with_batch(dims), data)
+            .map_err(|err| tenferro_error(ENTRY, err))
+            .and_then(DenseTensor::from_tenferro)
     };
     let real = |dims: &[usize], data| {
-        Tensor::from_vec_col_major(with_batch(dims), data).map_err(|err| tenferro_error(ENTRY, err))
+        Tensor::from_vec_col_major(with_batch(dims), data)
+            .map_err(|err| tenferro_error(ENTRY, err))
+            .and_then(DenseTensor::from_tenferro)
     };
     if shape.contains(&0) {
-        return Ok([
+        return Ok(vec![
             tensor(&[m, k], Vec::<T>::new())?,
             real(&[k], Vec::<<T as TensorScalar>::Real>::new())?,
             tensor(&[k, n], Vec::<T>::new())?,
@@ -264,7 +258,7 @@ fn factor_typed<T: SvdScalar>(
     // code that publishes them.
     tlinalg::svd::svd(tlinalg::Op::Svd, raw, false, &mut u, &mut s, &mut vt, exec)
         .map_err(|err| tenferro_error(ENTRY, provider_error(err)))?;
-    Ok([
+    Ok(vec![
         tensor(&[m, k], u)?,
         real(&[k], T::real_values(s))?,
         tensor(&[k, n], vt)?,

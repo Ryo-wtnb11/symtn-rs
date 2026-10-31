@@ -7,8 +7,9 @@
 //! concurrent misses build once).
 
 use super::*;
+use crate::block_kernel::driver::{cost, OpKind};
 use crate::block_kernel::{gemm, schedule};
-use tcontract_exec::{BatchPolicy, BatchStrategy};
+use tcontract_exec::{BatchPolicy, BatchStrategy, WorkModel};
 
 trait Scalar: Copy + PartialEq + std::fmt::Debug + 'static {
     const TOL: f64;
@@ -424,6 +425,17 @@ fn the_lowest_indexed_out_of_range_job_is_reported() {
     assert_eq!(out, [-5.0; 8]);
 }
 
+/// The kernel's per-job times and mean work for `f64` jobs, as the driver
+/// derives them (the GEMM cost ignores the engine's work model).
+fn costs(jobs: &[DenseGemmBatchJob]) -> (Vec<std::time::Duration>, f64) {
+    let work: Vec<f64> = jobs.iter().map(gemm::work::<f64>).collect();
+    let times = work
+        .iter()
+        .map(|&w| cost(OpKind::Gemm, w, &WorkModel::default()))
+        .collect();
+    (times, work.iter().sum::<f64>() / work.len() as f64)
+}
+
 /// The lanes and reserved widths the kernel derives from its own costs and
 /// the engine's decisions: few large jobs under Auto share every slot (no
 /// lane is capped at one thread), forced Split and Inner reserve their
@@ -432,8 +444,7 @@ fn the_lowest_indexed_out_of_range_job_is_reported() {
 fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
     let pool = || crate::Pool::builder().threads(16).build().unwrap();
     let large = vec![batch_job((256, 256, 256), (0, 0, 0)); 5];
-    let mut times = Vec::new();
-    let mean = gemm::costs_into::<f64>(&large, &mut times);
+    let (times, mean) = costs(&large);
     let widths = |policy: BatchPolicy| {
         let mut engine = CpuEngine::new(pool()).with_batch_policy(policy);
         engine
@@ -473,8 +484,7 @@ fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
 
     // Many tiny jobs: every reserved width is one or the batch is serial.
     let tiny = vec![batch_job((2, 2, 2), (0, 0, 0)); 200];
-    let mut times = Vec::new();
-    let mean = gemm::costs_into::<f64>(&tiny, &mut times);
+    let (times, mean) = costs(&tiny);
     let mut engine = CpuEngine::new(pool());
     let allocation = engine
         .with_contraction_exec(|exec, _, _| Ok(schedule::allocate(exec, &times, mean)))
