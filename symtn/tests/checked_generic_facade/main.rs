@@ -31,9 +31,11 @@ use symtn::sector::{
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::CheckedGenericStructureError;
+#[cfg(feature = "cgc-gen")]
+use symtn::typed::TypedTensorConstructionDispatch;
 use symtn::typed::{
     CheckedGenericTensorProductError, Eig, Eigh, GradedSpace, LeftPolar, RightPolar, Svd,
-    TensorMap, Truncation, TypedTensorConstructionDispatch,
+    TensorMap, Truncation,
 };
 use symtn::typed::{Complex32, Complex64, GenericTensorError, Runtime, SectorSpectrum};
 
@@ -162,7 +164,6 @@ fn lazy_close_f64(a: f64, b: f64) -> bool {
 
 mod construction;
 mod eig;
-mod error_kinds;
 mod matrix_fn;
 mod nonfinite;
 mod null_polar;
