@@ -61,6 +61,8 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
+use crate::legs::{su2_dim, su2_leg_2_2, u1_leg_2_3_2};
+
 /// One U(1) charge with degeneracy 4: a single 4x4 dense block, a 4-entry
 /// compact spectrum, and `dim(c) == 1` so the weight cannot mask a difference.
 fn leg() -> GradedSpace<U1FusionRule> {
@@ -75,33 +77,6 @@ fn wide_leg() -> GradedSpace<U1FusionRule> {
 }
 
 // --- 1. double precision matches an independent oracle ------------------------
-
-/// Three U(1) charges with unequal degeneracies: several coupled blocks of
-/// different sizes, every `dim(c) == 1`.
-fn u1_multi_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
-}
-
-/// Spin 0 and spin 1/2, so the reductions weight one block by `dim(c) == 1`
-/// and the other by `dim(c) == 2`.
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-        ],
-    )
-    .unwrap()
-}
 
 /// A non-dyadic real: no finite binary expansion, so sums of these depend on
 /// the order they are added in.
@@ -378,15 +353,12 @@ fn u1_dim(_: &U1Irrep) -> f64 {
     1.0
 }
 
-fn su2_dim(sector: &SU2Irrep) -> f64 {
-    (sector.twice_spin() + 1) as f64
-}
-
 fn double_precision_measurements() -> Vec<Measurement> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let u1 = u1_multi_leg();
-    let su2 = su2_leg();
+    let u1 = u1_leg_2_3_2();
+    // Spin 0 and 1/2: the reductions weight one block by dim(c) == 1 and the other by 2.
+    let su2 = su2_leg_2_2();
     let real = |v: f64| Complex64::new(v, 0.0);
     let complex = |v| v;
     let mut out = Vec::new();
@@ -716,12 +688,7 @@ mod checked_generic {
     use symtn::sector::LieGroupFusionRule;
     use symtn::typed::Engine;
 
-    /// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`:
-    /// `(p + 1)(q + 1)(p + q + 2) / 2`.
-    fn su3_dim(labels: &[i64]) -> f64 {
-        let (p, q) = (labels[0] as f64, labels[1] as f64);
-        (p + 1.0) * (q + 1.0) * (p + q + 2.0) / 2.0
-    }
+    use crate::su3::su3_dim;
 
     fn measurements(engine: &mut dyn Engine) -> Vec<Measurement> {
         let runtime = host_runtime();

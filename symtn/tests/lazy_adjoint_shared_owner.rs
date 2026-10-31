@@ -15,6 +15,8 @@ use symtn::typed::{BlockFusionTrees, GradedSpace, TensorMap};
 
 use common::{assert_same_tensor, literal_adjoint_payload, literal_weighted_trace};
 
+use crate::legs::su2_dim;
+
 fn close_c64(a: Complex64, b: Complex64) -> bool {
     (a - b).norm() <= 1e-12 * (1.0 + b.norm())
 }
@@ -289,10 +291,6 @@ fn empty_support_lazy_adjoint_materializes_an_empty_payload() {
         .dense_data()
         .unwrap()
         .is_empty());
-}
-
-fn su2_dim(sector: &SU2Irrep) -> f64 {
-    (sector.twice_spin() + 1) as f64
 }
 
 #[test]

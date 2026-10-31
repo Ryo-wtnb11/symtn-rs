@@ -79,6 +79,8 @@ use symtn::sector::{MultiplicityFreeRigidSymbols, SectorCodec};
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
 
+use crate::legs::su2_leg_2_2_1;
+
 // ---------------------------------------------------------------------------
 // Payload comparison
 // ---------------------------------------------------------------------------
@@ -263,18 +265,6 @@ fn u1_leg(charges: &[(i32, usize)], dual: bool) -> GradedSpace<U1FusionRule> {
     }
 }
 
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 fn fz2_leg() -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
         Arc::new(FermionParityFusionRule),
@@ -315,7 +305,7 @@ fn device_permute_braid_and_planar_match_the_host_for_u1_and_su2() {
     let runtime = runtime();
     let u1 = u1_leg(&[(-1, 2), (0, 1), (1, 2)], false);
     let u1_dual = u1_leg(&[(-1, 1), (0, 2), (1, 1)], true);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
 
     // U(1) with a dual leg and several coupled sectors, both dtypes.
     let real: TensorMap<_, f64> =
@@ -486,7 +476,7 @@ fn device_permutes_match_the_dense_physical_oracle_within_one_side() {
     assert_eq!(actual.shape, shape);
     assert_payload_close(&actual.data, &data, "U(1) device dense oracle");
 
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_tensor: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], complex_fill)
             .unwrap();
@@ -621,7 +611,7 @@ fn device_repartition_reaches_every_split_and_round_trips() {
 
     // SU(2): a bend carries a scalar that is neither 1 nor -1, so the payload
     // is not a reordering of the source.
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_host: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
             .unwrap();
@@ -853,7 +843,7 @@ fn device_rank_five_transforms_match_the_host() {
     device_matches_host!(engine, cuda, "rank-5 repartition", host, |e, t| t
         .repartition(e, 1));
 
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_host: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -960,7 +950,7 @@ fn device_lazy_adjoint_transforms_lower_onto_the_parent_like_the_host() {
 
     // SU(2): the lowered operation recouples, so the transformed adjoint is
     // not a reordering of the adjoint itself.
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_parent: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
     assert_lazy_adjoint_transforms_match_host(engine, cuda, &su2_parent, "SU(2) c64 lazy", true);
@@ -1398,7 +1388,7 @@ fn device_into_matches_the_host_for_recoupling_and_fermionic_providers() {
 
     // SU(2): Multi blocks, so the caller scale reaches the scatter rather than
     // a Single move, and the coefficients are not 1.
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_real: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
             .unwrap();
@@ -1777,7 +1767,7 @@ fn device_into_reads_a_lazy_source_through_its_parent_like_the_host() {
     let d = u1_leg(&[(-2, 2), (-1, 3), (0, 1), (1, 2), (2, 1)], false);
     let u1: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&a, &b, &c], [&d], complex_fill).unwrap();
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_2_1();
     let su2_parent: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
     let fz2 = fz2_leg();

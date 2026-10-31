@@ -3,25 +3,7 @@
 
 use symtn_sectors::*;
 
-fn u1(charge: i32) -> SectorId {
-    U1Irrep::new(charge).sector_id()
-}
-
-fn excluded_u1_id() -> SectorId {
-    SectorId::new(u32::MAX as usize)
-}
-
-fn z2_even() -> SectorId {
-    Z2Irrep::EVEN.sector_id()
-}
-
-fn z2_odd() -> SectorId {
-    Z2Irrep::ODD.sector_id()
-}
-
-fn su2(twice_spin: usize) -> SectorId {
-    SU2Irrep::from_twice_spin(twice_spin).sector_id()
-}
+use crate::sector_ids::{excluded_u1_id, su2, u1, z2_even, z2_odd};
 
 #[test]
 fn fusion_style_kind_matches_tensorkit_multiplicity_free_split() {

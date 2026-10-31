@@ -9,26 +9,17 @@
 
 #![cfg(feature = "cuda")]
 
-use std::sync::Arc;
 use symtn::typed::HermitianTol;
 
 use symtn::expert::cuda_transfer_stats;
-use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{Eigh, GradedSpace, Runtime, TensorMap};
+use symtn::sector::U1FusionRule;
+use symtn::typed::{Eigh, Runtime, TensorMap};
 
 use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
-fn leg(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        charges
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
+use crate::legs::u1_leg;
 
 fn close(
     engine: &mut dyn symtn::typed::Engine,
@@ -61,11 +52,11 @@ fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let small = leg(&[(-1, 2), (0, 1), (1, 2)]);
+    let small = u1_leg(&[(-1, 2), (0, 1), (1, 2)]);
     // The same five coupled sectors with the same matrix sizes (4, 4, 9, 4,
     // 4), reached through one codomain tree each (`fused`) or through nine
     // trees in total (`small x small`).
-    let fused = leg(&[(-2, 4), (-1, 4), (0, 9), (1, 4), (2, 4)]);
+    let fused = u1_leg(&[(-2, 4), (-1, 4), (0, 9), (1, 4), (2, 4)]);
     let one_tree = TensorMap::rand_with_seed(engine, &runtime, [&fused], [&fused], 7).unwrap();
     let many_trees =
         TensorMap::rand_with_seed(engine, &runtime, [&small, &small], [&small, &small], 7).unwrap();

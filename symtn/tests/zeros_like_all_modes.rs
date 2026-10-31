@@ -17,13 +17,15 @@
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{SU2FusionRule, SU2Irrep, TableRule, TableSector, U1FusionRule, U1Irrep};
+use symtn::sector::{TableRule, TableSector};
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{Engine, GradedSpace, SectorSpectrum, TensorMap};
 
 use crate::fixtures;
 
 use fixtures::host_runtime;
+
+use crate::legs::{su2_leg_2_3_1, u1_leg_2_3_1};
 
 /// Source entries cycle through these, so the zeros cannot be a scaled copy.
 const SOURCE: [f64; 5] = [f64::NAN, -0.0, f64::INFINITY, 1.5, -2.25];
@@ -150,30 +152,6 @@ macro_rules! zeros_rows {
     }};
 }
 
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 3),
-            (U1Irrep::new(-1), 1),
-        ],
-    )
-    .unwrap()
-}
-
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 3),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 fn fibonacci_leg() -> GradedSpace<TableRule> {
     GradedSpace::try_new(
         Arc::new(TableRule::fibonacci()),
@@ -188,10 +166,10 @@ const COMPLEX: fn(Complex64) -> Complex64 = |z| z;
 #[test]
 fn multiplicity_free_zeros_like_keeps_space_and_form() {
     let engine = &mut symtn::typed::CpuEngine::serial();
-    zeros_rows!(engine, u1_leg(), f64, REAL);
-    zeros_rows!(engine, u1_leg(), Complex64, COMPLEX);
-    zeros_rows!(engine, su2_leg(), f64, REAL);
-    zeros_rows!(engine, su2_leg(), Complex64, COMPLEX);
+    zeros_rows!(engine, u1_leg_2_3_1(), f64, REAL);
+    zeros_rows!(engine, u1_leg_2_3_1(), Complex64, COMPLEX);
+    zeros_rows!(engine, su2_leg_2_3_1(), f64, REAL);
+    zeros_rows!(engine, su2_leg_2_3_1(), Complex64, COMPLEX);
 }
 
 #[test]
@@ -241,11 +219,11 @@ mod checked {
         let engine = &mut symtn::typed::CpuEngine::serial();
         for (mf, checked) in [
             (
-                zeros_rows!(engine, su2_leg(), f64, REAL),
+                zeros_rows!(engine, su2_leg_2_3_1(), f64, REAL),
                 zeros_rows!(engine, checked_su2_leg(), f64, REAL),
             ),
             (
-                zeros_rows!(engine, su2_leg(), Complex64, COMPLEX),
+                zeros_rows!(engine, su2_leg_2_3_1(), Complex64, COMPLEX),
                 zeros_rows!(engine, checked_su2_leg(), Complex64, COMPLEX),
             ),
         ] {

@@ -15,10 +15,12 @@ use std::sync::Arc;
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::__network::{self, NetworkDegeneracyRestriction};
-use symtn::typed::{GradedSpace, LegSelection, Runtime, TensorMap};
+use symtn::typed::{LegSelection, Runtime, TensorMap};
 use symtn::typed::{StackedTensorMap, Svd};
 
 use crate::counting_alloc;
+
+use crate::legs::u1_on;
 
 #[derive(Debug)]
 struct Measurement {
@@ -40,27 +42,17 @@ fn measure(payload_bytes: usize, operation: impl FnOnce()) -> Measurement {
     }
 }
 
-fn u1(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
-
 /// One `restrict_leg` on a leg whose degeneracies are `scale` times a base
 /// shape: the measurement and the payload byte count for that scale.
 fn restrict_measurement(scale: usize) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(
+    let leg = u1_on(
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
-    let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 41).unwrap();
     let selection = LegSelection::try_new(
@@ -126,7 +118,7 @@ fn three_axis_measurement(scale: usize, sequential: bool) -> (Measurement, usize
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(
+    let leg = u1_on(
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
@@ -217,8 +209,8 @@ fn the_network_restriction_of_several_axes_fills_no_payload() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let zero = U1Irrep::new(0);
-    let rows = u1(&provider, &[(0, 6)]);
-    let columns = u1(&provider, &[(0, 8)]);
+    let rows = u1_on(&provider, &[(0, 6)]);
+    let columns = u1_on(&provider, &[(0, 8)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&rows], [&columns], 43).unwrap();
     let zero_id = TypedSectorAdmission::try_encode_label(provider.as_ref(), &zero).unwrap();
@@ -264,7 +256,7 @@ fn compact_restrict_measurement(scale: usize) -> Measurement {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 2 * scale), (0, 3 * scale)]);
+    let leg = u1_on(&provider, &[(-1, 2 * scale), (0, 3 * scale)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 47).unwrap();
     let Svd { s, .. } = source.svd_compact(engine, &[0], &[1]).unwrap();
@@ -319,8 +311,8 @@ fn lazy_adjoint_add_and_materialization_fill_no_payload() {
     // fill was `vec![0.0; len]`, an allocator-zeroed allocation.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
-    let other = u1(&provider, &[(-1, 1), (0, 2), (1, 3)]);
+    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 3)]);
     let square: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&leg, &other], 53).unwrap();
     let partner: TensorMap<_, f64> =
@@ -381,11 +373,11 @@ fn steady_multi_row_restrict(scale: usize, reach: i32) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(
+    let leg = u1_on(
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
-    let other = u1(
+    let other = u1_on(
         &provider,
         &(-reach..=reach)
             .map(|charge| (charge, if charge == 0 { 2 } else { 1 }))
@@ -459,8 +451,8 @@ fn stacked_restrict_measurement(members: usize) -> (Measurement, usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 2), (0, 3), (1, 2)]);
-    let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
+    let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 2)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let tensors: Vec<TensorMap<_, f64>> = (0..members)
         .map(|seed| {
             TensorMap::rand_with_seed(
@@ -530,11 +522,11 @@ fn alternate_runs_measurement(scale: usize) -> (Measurement, Measurement, usize,
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(
+    let leg = u1_on(
         &provider,
         &[(-1, 2 * scale), (0, 3 * scale), (1, 2 * scale)],
     );
-    let other = u1(&provider, &[(-1, 1), (0, 2), (1, 1)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 2), (1, 1)]);
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 71).unwrap();
     let every_other = |degeneracy: usize| (0..degeneracy).step_by(2).collect::<Vec<_>>();

@@ -15,103 +15,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Drops comments (line, doc and `/* */`) and blanks string literals so that
-/// neither can hide or fake an item.
-fn strip(source: &str) -> String {
-    let mut out = String::with_capacity(source.len());
-    let mut rest = source;
-    while let Some(ch) = rest.chars().next() {
-        if rest.starts_with("//") {
-            rest = &rest[rest.find('\n').unwrap_or(rest.len())..];
-        } else if rest.starts_with("/*") {
-            rest = &rest[rest.find("*/").map_or(rest.len(), |end| end + 2)..];
-            out.push(' ');
-        } else if ch == '"' {
-            let mut escaped = false;
-            let end = rest[1..]
-                .find(|c: char| {
-                    let close = c == '"' && !escaped;
-                    escaped = c == '\\' && !escaped;
-                    close
-                })
-                .map_or(rest.len(), |end| end + 2);
-            rest = &rest[end..];
-            out.push_str("\"\"");
-        } else {
-            out.push(ch);
-            rest = &rest[ch.len_utf8()..];
-        }
-    }
-    out
-}
-
-/// The `testing` gate after [`strip`] blanks its string literal.
-const TESTING_GATE: &str = "#[cfg(any(test, feature = \"\"))]";
-
-/// Whether the item starting at `at` carries [`TESTING_GATE`] among the
-/// attribute lines directly above it.
-fn testing_gated(code: &str, at: usize) -> bool {
-    code[..at]
-        .lines()
-        .rev()
-        .map(str::trim)
-        .skip_while(|line| line.is_empty())
-        .take_while(|line| line.starts_with("#["))
-        .any(|line| line == TESTING_GATE)
-}
+use crate::export_scan::reexports;
 
 /// Leaf names re-exported by `pub use` in `source`, each with whether it is
-/// gated behind the `testing` feature, or an error for any other
-/// inline public item (`pub fn`, `pub enum`, `pub const`, ...) or
-/// `#[macro_export]`, which this firewall would otherwise not see.
+/// gated behind the `testing` feature.
 fn exported_names(source: &str) -> Result<BTreeMap<String, bool>, String> {
-    let code = strip(source);
-    if code.contains("macro_export") {
-        return Err("lib.rs exports a macro_rules! macro".into());
-    }
-    let mut names = BTreeMap::new();
-    for (at, _) in code.match_indices("pub") {
-        let before = code[..at].chars().next_back();
-        if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-            continue;
-        }
-        let after = &code[at + 3..];
-        if after.starts_with('(') || after.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
-            continue; // `pub(crate)` etc., or an identifier such as `public`
-        }
-        let gated = testing_gated(&code, at);
-        let item = after.trim_start();
-        let Some(tree) = item
-            .strip_prefix("use")
-            .filter(|t| t.starts_with(char::is_whitespace))
-        else {
-            let keyword = item.split_whitespace().next().unwrap_or("");
-            return Err(format!("lib.rs gained an inline `pub {keyword}` item"));
-        };
-        let tree = tree[..tree.find(';').ok_or("unterminated pub use")?].trim();
-        let leaves = match tree.find('{') {
-            Some(open) => {
-                let inner = tree[open + 1..]
-                    .trim_end()
-                    .strip_suffix('}')
-                    .ok_or("bad use tree")?;
-                if inner.contains('{') {
-                    return Err(format!("nested use tree: {tree}"));
-                }
-                inner.split(',').collect::<Vec<_>>()
-            }
-            None => vec![tree],
-        };
-        for leaf in leaves
-            .iter()
-            .map(|leaf| leaf.trim())
-            .filter(|l| !l.is_empty())
-        {
-            let name = leaf.rsplit(" as ").next().unwrap();
-            names.insert(name.rsplit("::").next().unwrap().trim().to_owned(), gated);
-        }
-    }
-    Ok(names)
+    Ok(reexports(source)?.without_modules()?.names)
 }
 
 #[test]

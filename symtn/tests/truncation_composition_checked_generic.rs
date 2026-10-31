@@ -39,16 +39,11 @@ use crate::fixtures;
 
 use fixtures::host_runtime;
 
+use crate::su3::su3_dim;
+
 fn fill(state: &mut u64) -> f64 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
     ((*state >> 33) as f64) / (u32::MAX as f64) - 0.5
-}
-
-/// Weyl dimension of the SU(3) irrep with Dynkin labels `(p, q)`:
-/// `(p + 1)(q + 1)(p + q + 2) / 2`.
-fn su3_dim(labels: &[i64]) -> f64 {
-    let (p, q) = (labels[0] as f64, labels[1] as f64);
-    (p + 1.0) * (q + 1.0) * (p + q + 2.0) / 2.0
 }
 
 /// `x^H` as an owned tensor: checked-Generic `compose` takes owned operands

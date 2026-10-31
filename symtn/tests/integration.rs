@@ -11,6 +11,11 @@ mod common;
 mod contract_cases;
 #[path = "../../tests/support/fixtures.rs"]
 mod fixtures;
+#[path = "../../tests/support/legs.rs"]
+mod legs;
+#[cfg(feature = "cgc-gen")]
+#[path = "../../tests/support/su3.rs"]
+mod su3;
 #[macro_use]
 #[path = "support/nonfinite_factor_input.rs"]
 mod nonfinite_factor_input;
@@ -62,6 +67,8 @@ mod eig_value_order;
 mod eigh_hermitian_tolerance;
 mod error_chain;
 mod exp_spectral_route;
+#[path = "../../tests/support/export_scan.rs"]
+mod export_scan;
 mod facade_exports;
 mod factorization_nonfinite_input;
 mod lazy_adjoint_contract_both_modes;

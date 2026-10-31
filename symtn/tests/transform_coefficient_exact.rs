@@ -25,6 +25,8 @@ use symtn::sector::{
 use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
+use crate::legs::{su2_on, u1_on};
+
 /// A deterministic component per `(tree pair, index, salt)`, with signed
 /// zeros, infinities, NaN payloads and subnormals mixed into ordinary values.
 fn component<S: Hash>(trees: &BlockFusionTrees<S>, indices: &[usize], salt: u8) -> f64 {
@@ -167,26 +169,6 @@ fn a_complex_multiply_by_one_cannot_reproduce_the_payloads() {
     }
 }
 
-fn u1(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn su2(provider: &Arc<SU2FusionRule>, pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::clone(provider),
-        pairs
-            .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
-    )
-    .unwrap()
-}
-
 fn bits(data: &[Complex64]) -> Vec<(u64, u64)> {
     data.iter()
         .map(|v| (v.re.to_bits(), v.im.to_bits()))
@@ -197,9 +179,9 @@ fn bits(data: &[Complex64]) -> Vec<(u64, u64)> {
 fn u1_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
+    let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
-    let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
         engine,
@@ -247,9 +229,9 @@ fn u1_transforms_scale_componentwise() {
 fn su2_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
-    let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
+    let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
-    let other = su2(&provider, &[(0, 1), (1, 2)]);
+    let other = su2_on(&provider, &[(0, 1), (1, 2)]);
 
     assert_componentwise!(engine, [&leg, &other], [&dual], |t| t.permute(
         engine,
@@ -371,9 +353,9 @@ fn fermionic_transforms_scale_componentwise() {
 fn traces_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(U1FusionRule);
-    let leg = u1(&provider, &[(-1, 3), (0, 2), (1, 4)]);
+    let leg = u1_on(&provider, &[(-1, 3), (0, 2), (1, 4)]);
     let dual = leg.try_dual().unwrap();
-    let other = u1(&provider, &[(-1, 1), (0, 3), (1, 2)]);
+    let other = u1_on(&provider, &[(-1, 1), (0, 3), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(0, 2)]));
     assert_componentwise!(engine, [&dual, &other], [&dual, &other], |t| t
@@ -388,9 +370,9 @@ fn traces_scale_componentwise() {
     );
 
     let provider = Arc::new(SU2FusionRule);
-    let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
+    let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
     let dual = leg.try_dual().unwrap();
-    let other = su2(&provider, &[(0, 1), (1, 2)]);
+    let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other], [&leg, &other], |t| t
         .trace_pairs(engine, &[(1, 3)]));
     assert_componentwise!(engine, [&other, &dual], [&other, &dual], |t| t
@@ -441,8 +423,8 @@ fn traces_scale_componentwise() {
 fn su2_recoupling_matrix_transforms_scale_componentwise() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(SU2FusionRule);
-    let leg = su2(&provider, &[(0, 2), (1, 3), (2, 1)]);
-    let other = su2(&provider, &[(0, 1), (1, 2)]);
+    let leg = su2_on(&provider, &[(0, 2), (1, 3), (2, 1)]);
+    let other = su2_on(&provider, &[(0, 1), (1, 2)]);
     assert_componentwise!(engine, [&leg, &other, &other], [&leg], |t| t.permute(
         engine,
         &[2, 1, 0],

@@ -32,6 +32,8 @@ use crate::counting_alloc;
 
 use numerics::Numeric;
 
+use crate::legs::{su2_legs, u1_legs};
+
 /// Deterministic fill values, unrelated between salts.
 trait Sample: Numeric + TensorScalar {
     fn sample(k: usize, salt: usize) -> Self;
@@ -83,26 +85,6 @@ macro_rules! filled {
         })
         .unwrap()
     }};
-}
-
-fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
-    let v = GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q), n)),
-    )
-    .unwrap();
-    let w = v.try_dual().unwrap();
-    (v, w)
-}
-
-fn su2_legs() -> (GradedSpace<SU2FusionRule>, GradedSpace<SU2FusionRule>) {
-    let v = GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [(0, 2), (1, 2), (2, 1)].map(|(s, n)| (SU2Irrep::from_twice_spin(s), n)),
-    )
-    .unwrap();
-    let w = v.try_dual().unwrap();
-    (v, w)
 }
 
 fn is_space_mismatch(error: &Error) -> bool {

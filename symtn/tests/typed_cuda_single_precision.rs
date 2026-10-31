@@ -121,6 +121,8 @@ use crate::fixtures;
 
 use fixtures::host_runtime as cuda_runtime;
 
+use crate::legs::u1_leg_2_1_2;
+
 /// Dyadic, index-dependent, and complex-nontrivial where the dtype allows it.
 fn fill<D: DevicePayload, S>(seed: f64) -> impl FnMut(&BlockFusionTrees<S>, &[usize]) -> D {
     let mut ordinal = 0.0_f64;
@@ -132,18 +134,6 @@ fn fill<D: DevicePayload, S>(seed: f64) -> impl FnMut(&BlockFusionTrees<S>, &[us
             0.5 - 0.25 * (ordinal % 5.0) + 0.125 * position,
         )
     }
-}
-
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap()
 }
 
 fn su2_leg() -> GradedSpace<SU2FusionRule> {
@@ -233,7 +223,7 @@ fn device_transfer_round_trips_bit_exactly_at_every_payload() {
     let cuda = &mut crate::common::cuda_engine();
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
     let fz2su2 = fz2_su2_leg();
 
@@ -419,7 +409,7 @@ fn device_arithmetic_matches_the_host_at_every_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
 
     assert_arithmetic_matches_host::<_, f64>(engine, cuda, &runtime, &u1);
@@ -506,7 +496,7 @@ fn device_reductions_match_the_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
 
     assert_reductions_match_host::<_, f64>(engine, cuda, &runtime, &u1);
@@ -654,7 +644,7 @@ fn device_norm_matches_the_host_where_a_payload_sum_would_overflow_or_underflow(
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
     let fz2_u1 = fz2_u1_leg();
 
@@ -861,7 +851,7 @@ fn a_warm_single_precision_reduction_costs_one_extra_device_allocation_per_opera
     }
 
     let runtime = cuda_runtime();
-    let leg = u1_leg();
+    let leg = u1_leg_2_1_2();
     for (single, double, what) in [
         (
             measure::<f32>(engine, cuda, &runtime, &leg),
@@ -978,7 +968,7 @@ fn a_zero_scale_into_clears_a_nan_poisoned_destination() {
     }
 
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     assert_cleared::<_, f64>(engine, cuda, &runtime, &u1);
     assert_cleared::<_, Complex64>(engine, cuda, &runtime, &u1);
     assert_cleared::<_, f32>(engine, cuda, &runtime, &u1);
@@ -1140,7 +1130,7 @@ fn device_contract_and_compose_match_the_host_at_every_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
     let fz2su2 = fz2_su2_leg();
 
@@ -1474,7 +1464,7 @@ fn device_transforms_match_the_host_at_every_payload() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_1_2();
     let su2 = su2_leg();
     let fz2su2 = fz2_su2_leg();
 
@@ -1503,7 +1493,7 @@ fn a_single_precision_into_costs_the_same_every_call() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let leg = u1_leg();
+    let leg = u1_leg_2_1_2();
 
     fn run<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,
@@ -1596,7 +1586,7 @@ fn single_precision_costs_the_same_device_calls_and_half_the_bytes() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
     let runtime = cuda_runtime();
-    let leg = u1_leg();
+    let leg = u1_leg_2_1_2();
 
     fn measure<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,
@@ -1709,7 +1699,7 @@ fn every_payload_dtype_satisfies_both_device_marker_traits() {
 fn a_non_cuda_engine_rejects_every_payload_the_same_way() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = u1_leg();
+    let leg = u1_leg_2_1_2();
 
     fn reject<D: DevicePayload>(
         engine: &mut dyn symtn::typed::Engine,

@@ -12,6 +12,8 @@ mod contract_cases;
 mod counting_alloc;
 #[path = "../../tests/support/fixtures.rs"]
 mod fixtures;
+#[path = "../../tests/support/legs.rs"]
+mod legs;
 #[path = "../../tests/support/numerics.rs"]
 mod numerics;
 #[macro_use]

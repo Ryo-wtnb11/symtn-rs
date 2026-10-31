@@ -48,13 +48,13 @@ use symtn::typed::Engine;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
-};
+use symtn::sector::{FermionParityFusionRule, SU2Irrep, U1Irrep, Z2Irrep};
 use symtn::typed::{
     ContractSpec, Direction, Eigh, Error, GradedSpace, HermitianTol, OperationError, Qr, Runtime,
     SectorSpectrum, Svd, TensorMap,
 };
+
+use crate::legs::{su2_leg_2_3_1, u1_leg_2_3_1};
 
 const POWERS: [f64; 4] = [1.0, 2.0, 3.0, f64::INFINITY];
 
@@ -371,30 +371,6 @@ macro_rules! storage_rows {
 
 fn no_cuda<T, D>(_: &T, _: &T, _: &T, _: &T, _: D, _: D) {}
 
-fn u1_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 3),
-            (U1Irrep::new(-1), 1),
-        ],
-    )
-    .unwrap()
-}
-
-fn su2_leg() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 3),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 fn u1_coupled(c: &U1Irrep) -> usize {
     c.charge().unsigned_abs() as usize
 }
@@ -414,7 +390,7 @@ fn host_rows_match_the_hand_oracle() {
     storage_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         u1_coupled,
         one,
         f64,
@@ -424,7 +400,7 @@ fn host_rows_match_the_hand_oracle() {
     storage_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         u1_coupled,
         one,
         Complex64,
@@ -434,7 +410,7 @@ fn host_rows_match_the_hand_oracle() {
     storage_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_coupled,
         su2_dim,
         f64,
@@ -444,7 +420,7 @@ fn host_rows_match_the_hand_oracle() {
     storage_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_coupled,
         su2_dim,
         Complex64,
@@ -702,7 +678,7 @@ fn cuda_rows_match_host() {
     storage_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         u1_coupled,
         one,
         f64,
@@ -712,7 +688,7 @@ fn cuda_rows_match_host() {
     storage_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         u1_coupled,
         one,
         Complex64,
@@ -722,7 +698,7 @@ fn cuda_rows_match_host() {
     storage_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_coupled,
         su2_dim,
         f64,
@@ -732,7 +708,7 @@ fn cuda_rows_match_host() {
     storage_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_coupled,
         su2_dim,
         Complex64,
@@ -1051,10 +1027,17 @@ fn materialize_host_rows_match_the_hand_oracle() {
         (trees.coupled().twice_spin() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
-    materialize_rows!(engine, &runtime, u1_leg(), one, f64, real);
-    materialize_rows!(engine, &runtime, u1_leg(), one, Complex64, complex);
-    materialize_rows!(engine, &runtime, su2_leg(), su2_dim, f64, real);
-    materialize_rows!(engine, &runtime, su2_leg(), su2_dim, Complex64, complex);
+    materialize_rows!(engine, &runtime, u1_leg_2_3_1(), one, f64, real);
+    materialize_rows!(engine, &runtime, u1_leg_2_3_1(), one, Complex64, complex);
+    materialize_rows!(engine, &runtime, su2_leg_2_3_1(), su2_dim, f64, real);
+    materialize_rows!(
+        engine,
+        &runtime,
+        su2_leg_2_3_1(),
+        su2_dim,
+        Complex64,
+        complex
+    );
     materialize_rows!(engine, &runtime, fz2_leg(), one, f64, real);
     materialize_rows!(engine, &runtime, fz2_leg(), one, Complex64, complex);
 }
@@ -1252,7 +1235,7 @@ fn transform_host_rows_match_the_hand_oracle() {
     transform_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         f64,
         real,
@@ -1261,7 +1244,7 @@ fn transform_host_rows_match_the_hand_oracle() {
     transform_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         Complex64,
         complex,
@@ -1270,7 +1253,7 @@ fn transform_host_rows_match_the_hand_oracle() {
     transform_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         f64,
         real,
@@ -1279,7 +1262,7 @@ fn transform_host_rows_match_the_hand_oracle() {
     transform_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         Complex64,
         complex,
@@ -1467,7 +1450,7 @@ fn transform_cuda_rows_match_host() {
     transform_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         f64,
         real,
@@ -1476,7 +1459,7 @@ fn transform_cuda_rows_match_host() {
     transform_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         Complex64,
         complex,
@@ -1485,7 +1468,7 @@ fn transform_cuda_rows_match_host() {
     transform_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         f64,
         real,
@@ -1494,7 +1477,7 @@ fn transform_cuda_rows_match_host() {
     transform_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         Complex64,
         complex,
@@ -1687,10 +1670,10 @@ fn mixed_lazy_axpby_cuda_rows_match_host() {
             );
         }};
     }
-    let u1 = u1_leg();
+    let u1 = u1_leg_2_3_1();
     let u1_dual = u1.try_dual().unwrap();
     both_dtypes!([&u1, &u1_dual], [&u1]);
-    let su2 = su2_leg();
+    let su2 = su2_leg_2_3_1();
     both_dtypes!([&su2, &su2], [&su2]);
     let fz2 = fz2_leg();
     let fz2_dual = fz2.try_dual().unwrap();
@@ -1861,11 +1844,19 @@ fn contract_host_rows_match_the_hand_oracle() {
         (trees.coupled().twice_spin() + 1) as f64
     };
     let (real, complex) = (|x: Complex64| x.re, |x: Complex64| x);
-    contract_rows!(engine, &runtime, u1_leg(), one, f64, real, no_cuda_contract);
     contract_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
+        one,
+        f64,
+        real,
+        no_cuda_contract
+    );
+    contract_rows!(
+        engine,
+        &runtime,
+        u1_leg_2_3_1(),
         one,
         Complex64,
         complex,
@@ -1874,7 +1865,7 @@ fn contract_host_rows_match_the_hand_oracle() {
     contract_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         f64,
         real,
@@ -1883,7 +1874,7 @@ fn contract_host_rows_match_the_hand_oracle() {
     contract_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         Complex64,
         complex,
@@ -2028,7 +2019,7 @@ fn contract_cuda_rows_match_host() {
     contract_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         f64,
         real,
@@ -2037,7 +2028,7 @@ fn contract_cuda_rows_match_host() {
     contract_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         Complex64,
         complex,
@@ -2046,7 +2037,7 @@ fn contract_cuda_rows_match_host() {
     contract_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         f64,
         real,
@@ -2055,7 +2046,7 @@ fn contract_cuda_rows_match_host() {
     contract_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         Complex64,
         complex,
@@ -2235,7 +2226,7 @@ fn trace_host_rows_match_the_hand_oracle() {
     trace_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         |_: &U1Irrep| 1.0,
         f64,
@@ -2245,7 +2236,7 @@ fn trace_host_rows_match_the_hand_oracle() {
     trace_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         |_: &U1Irrep| 1.0,
         Complex64,
@@ -2255,7 +2246,7 @@ fn trace_host_rows_match_the_hand_oracle() {
     trace_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         |_: &SU2Irrep| 1.0,
         f64,
@@ -2265,7 +2256,7 @@ fn trace_host_rows_match_the_hand_oracle() {
     trace_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         |_: &SU2Irrep| 1.0,
         Complex64,
@@ -2402,7 +2393,7 @@ fn trace_cuda_rows_match_host() {
     trace_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         |_: &U1Irrep| 1.0,
         f64,
@@ -2412,7 +2403,7 @@ fn trace_cuda_rows_match_host() {
     trace_rows!(
         engine,
         &runtime,
-        u1_leg(),
+        u1_leg_2_3_1(),
         one,
         |_: &U1Irrep| 1.0,
         Complex64,
@@ -2422,7 +2413,7 @@ fn trace_cuda_rows_match_host() {
     trace_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         |_: &SU2Irrep| 1.0,
         f64,
@@ -2432,7 +2423,7 @@ fn trace_cuda_rows_match_host() {
     trace_rows!(
         engine,
         &runtime,
-        su2_leg(),
+        su2_leg_2_3_1(),
         su2_dim,
         |_: &SU2Irrep| 1.0,
         Complex64,

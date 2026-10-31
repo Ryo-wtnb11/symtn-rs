@@ -15,12 +15,8 @@
 //! nonzero eigenvector columns, and the truncation error against the discarded
 //! norm.
 
-use std::sync::Arc;
-
 use num_complex::Complex64;
-use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
-};
+use symtn::sector::U1Irrep;
 use symtn::typed::TensorMap;
 use symtn::typed::{Eig, GradedSpace, SectorSpectrum};
 
@@ -35,39 +31,11 @@ use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes, host_runtime};
 
+use crate::legs::{fz2_leg, su2_leg, u1_leg};
+
 fn fill(state: &mut u64) -> f64 {
     *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
     ((*state >> 33) as f64) / (u32::MAX as f64) - 0.5
-}
-
-fn u1_leg(pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn su2_leg(pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        pairs
-            .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn fz2_leg(pairs: &[(bool, usize)]) -> GradedSpace<FermionParityFusionRule> {
-    GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        pairs
-            .iter()
-            .map(|&(odd, degeneracy)| (if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN }, degeneracy)),
-    )
-    .unwrap()
 }
 
 /// The whole gate for one case. `$complex` lifts the source to the complex

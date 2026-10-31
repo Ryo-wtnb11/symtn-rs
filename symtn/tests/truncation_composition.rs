@@ -39,8 +39,7 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
 };
 use symtn::typed::{
     Eigh, GradedSpace, LegSelection, SectorSpectrum, SpectrumMagnitude, Svd, TruncatedSelection,
@@ -57,6 +56,8 @@ use truncation_oracle::{
 use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes, host_runtime};
+
+use crate::legs::{fz2_leg, su2_leg, u1_leg};
 
 /// Asserts that the fixture really is degenerate: every value of every sector
 /// is the *same bit pattern*, so a backend change cannot silently de-tie the
@@ -309,36 +310,6 @@ macro_rules! assert_eigh_composition {
         );
         found
     }};
-}
-
-fn u1_leg(pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        pairs
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn su2_leg(pairs: &[(usize, usize)]) -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        pairs
-            .iter()
-            .map(|&(twice_spin, degeneracy)| (SU2Irrep::from_twice_spin(twice_spin), degeneracy)),
-    )
-    .unwrap()
-}
-
-fn fz2_leg(pairs: &[(bool, usize)]) -> GradedSpace<FermionParityFusionRule> {
-    GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        pairs
-            .iter()
-            .map(|&(odd, degeneracy)| (if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN }, degeneracy)),
-    )
-    .unwrap()
 }
 
 // ---------------------------------------------------------------------------

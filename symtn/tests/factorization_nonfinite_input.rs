@@ -15,13 +15,7 @@ use symtn::typed::{
 use crate::nonfinite_factor_input;
 use nonfinite_factor_input::assert_finite_input_refusals;
 
-fn leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
-    )
-    .unwrap()
-}
+use crate::legs::u1_leg_2_2;
 
 /// The identity with `bad` at one entry of the last coupled-sector block, so
 /// a finite first block does not hide it.
@@ -32,7 +26,7 @@ fn dense_with<D: TensorScalar>(
     zero: D,
 ) -> TensorMap<U1FusionRule, D> {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let leg = leg();
+    let leg = u1_leg_2_2();
     TensorMap::from_subblock_fn(engine, runtime, [&leg], [&leg], |trees, index| {
         let last = *trees.coupled() == U1Irrep::new(1);
         match (last && index == [1, 0], index[0] == index[1]) {
@@ -49,7 +43,7 @@ fn diagonal_with<D: TensorScalar>(runtime: &Runtime, bad: D, one: D) -> TensorMa
     TensorMap::diagonal(
         engine,
         runtime,
-        &leg(),
+        &u1_leg_2_2(),
         [
             SectorSpectrum {
                 sector: U1Irrep::new(0),

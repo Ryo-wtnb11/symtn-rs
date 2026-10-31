@@ -11,9 +11,11 @@
 use std::sync::Arc;
 use symtn::typed::Engine;
 
-use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{Complex64, GradedSpace, Runtime, TensorMap};
 use symtn_network::{contract, plan_cache_stats, Network};
+
+use crate::legs::su2_leg_2_2_1;
 
 /// Asserts the call ran exactly one more contraction through an existing
 /// cached plan (`hit`) or through a new one.
@@ -212,17 +214,5 @@ fn u1() -> GradedSpace<U1FusionRule> {
     .unwrap()
 }
 
-fn su2() -> GradedSpace<SU2FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(SU2FusionRule),
-        [
-            (SU2Irrep::from_twice_spin(0), 2),
-            (SU2Irrep::from_twice_spin(1), 2),
-            (SU2Irrep::from_twice_spin(2), 1),
-        ],
-    )
-    .unwrap()
-}
-
 forms!(u1_f64_forms_match_network_new, f64, u1());
-forms!(su2_c64_forms_match_network_new, Complex64, su2());
+forms!(su2_c64_forms_match_network_new, Complex64, su2_leg_2_2_1());
