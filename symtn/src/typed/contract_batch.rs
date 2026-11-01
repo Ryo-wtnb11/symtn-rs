@@ -453,9 +453,7 @@ where
 ///
 /// Identity orientation only: an adjoint operand must be materialized before
 /// it is packed. A composition whose plan is not the canonical fully-direct
-/// one (for example an expert-layer tiling whose tree stackings differ) is
-/// rejected by [`Self::new`] with the same `UnsupportedTensorContractScope`
-/// the eager device composition reports.
+/// one is rejected by [`Self::new`] with `UnsupportedTensorContractScope`.
 ///
 /// [`Self::workspace`] creates the B-dependent state. On CUDA each workspace
 /// also keeps the zero and `1` templates of its fills, bound to the engine

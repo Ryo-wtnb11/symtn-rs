@@ -15,7 +15,7 @@ use symtn_core::{
     Z2Irrep,
 };
 
-use super::probe::{self, Event, RoutePolicy};
+use super::probe::{self, Event};
 use super::{ContractSpec, GradedSpace, Side, TensorMap};
 use crate::error::{Alternative, Error};
 use crate::runtime::Runtime;
@@ -31,12 +31,6 @@ fn adjoint_entries<T>(f: impl FnOnce() -> T) -> (T, usize) {
     let value = f();
     (value, adjoint.get(Event::AdjointMaterialization))
 }
-
-/// Forces the declined adjoint-oriented cat plan.
-const DECLINE_ORIENTED_CAT: RoutePolicy = RoutePolicy {
-    cat_declines_oriented: true,
-    ..RoutePolicy::DEFAULT
-};
 
 /// The refusal names the operation and the `materialize` remedy.
 fn is_unsupported(error: &impl std::fmt::Display, operation: &'static str) -> bool {
@@ -745,43 +739,10 @@ fn compact_diagonal_partners_read_the_view_in_place() {
     );
 }
 
-/// `cat` refuses an adjoint view only when its copy plan declines, which no
-/// public geometry is known to reach; the test hook forces the decline.
+/// `cat` reads a compact diagonal and a lazy adjoint directly; the result is
+/// bitwise the cat of their materialized forms.
 #[test]
-fn cat_refuses_an_adjoint_view_when_its_plan_declines() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = runtime();
-    let v = u1(&[(-1, 2), (0, 1), (1, 3)]);
-    let w = u1(&[(0, 2), (1, 1)]);
-    let a: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&w], 1).unwrap();
-    let b: TensorMap<_, Complex64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&w], [&v, &v], 2).unwrap();
-    let lazy = b.adjoint(engine).unwrap();
-    let fast = a.cat(engine, &lazy, Side::Domain).unwrap();
-    probe::with_routes(DECLINE_ORIENTED_CAT, || {
-        let lazy_materialize = &lazy.materialize(engine).unwrap();
-        refused!(
-            engine,
-            "cat",
-            a.cat(engine, b.adjoint_view(), Side::Domain),
-            a.cat(engine, &lazy, Side::Domain),
-            a.cat(engine, lazy_materialize, Side::Domain)
-        );
-        // The declined fallback of the owned lazy adjoint equals the plan result.
-        assert_same_tensor!(
-            engine,
-            a.cat(engine, &lazy, Side::Domain).unwrap(),
-            fast,
-            "cat fallback"
-        );
-    });
-}
-
-/// The declined-plan fallback materializes a lazy adjoint while reading a
-/// compact diagonal directly. The result is bitwise the fast-plan result.
-#[test]
-fn cat_fallback_reads_compact_operand_without_densifying() {
+fn cat_reads_compact_operand_without_densifying() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = runtime();
     let bond = u1(&[(-1, 2), (0, 1), (1, 3)]);
@@ -834,25 +795,12 @@ fn cat_fallback_reads_compact_operand_without_densifying() {
                 .unwrap()
                 .cat(engine, oracle_rhs_materialize, side)
                 .unwrap();
-            let fast = lhs.cat(engine, rhs, side).unwrap();
             let diagonal = probe::record();
-            let slow =
-                probe::with_routes(DECLINE_ORIENTED_CAT, || lhs.cat(engine, rhs, side).unwrap());
+            let result = lhs.cat(engine, rhs, side).unwrap();
             let entries = diagonal.get(Event::DiagonalMaterialization);
-            assert_eq!(
-                bits(&slow),
-                bits(&fast),
-                "{name} {side:?}: fallback vs plan"
-            );
-            assert_eq!(
-                bits(&slow),
-                bits(&oracle),
-                "{name} {side:?}: fallback vs oracle"
-            );
-            assert_eq!(slow.codomain(), oracle.codomain(), "{name} {side:?}");
-            assert_eq!(slow.domain(), oracle.domain(), "{name} {side:?}");
-            assert_eq!(slow.codomain(), fast.codomain(), "{name} {side:?}");
-            assert_eq!(slow.domain(), fast.domain(), "{name} {side:?}");
+            assert_eq!(bits(&result), bits(&oracle), "{name} {side:?}: vs oracle");
+            assert_eq!(result.codomain(), oracle.codomain(), "{name} {side:?}");
+            assert_eq!(result.domain(), oracle.domain(), "{name} {side:?}");
             assert_eq!(entries, compact, "{name} {side:?}: densifications");
         }
     }

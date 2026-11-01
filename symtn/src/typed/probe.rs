@@ -23,8 +23,6 @@ pub(crate) struct RoutePolicy {
     /// Device `eigh_full` reverses every odd-indexed sector's order, so the
     /// selector assembly runs a non-identity permutation.
     pub(crate) eigh_reverse_odd_sectors: bool,
-    /// An adjoint-oriented cat plan declines, so its fallback runs.
-    pub(crate) cat_declines_oriented: bool,
 }
 
 impl RoutePolicy {
@@ -34,7 +32,6 @@ impl RoutePolicy {
         svd_treewise: false,
         eigh_force_selector: false,
         eigh_reverse_odd_sectors: false,
-        cat_declines_oriented: false,
     };
 
     /// The policy of the calling thread: the test's, or the production one.
@@ -152,7 +149,6 @@ mod ledger {
         peak: [usize; GAUGES],
         pub(super) routes: RoutePolicy,
         fault: Option<(Fault, usize)>,
-        tensor_product_rhs: Option<symtn_core::BlockStructure>,
         dense: Option<Box<dyn symtn_dense::DenseExecutor + Send>>,
     }
 
@@ -164,7 +160,6 @@ mod ledger {
                 peak: [0; GAUGES],
                 routes: RoutePolicy::DEFAULT,
                 fault: None,
-                tensor_product_rhs: None,
                 dense: None,
             })
         };
@@ -307,14 +302,5 @@ mod ledger {
 
     pub(crate) fn return_injected_dense(executor: Box<dyn symtn_dense::DenseExecutor + Send>) {
         PROBE.with(|probe| probe.borrow_mut().dense = Some(executor));
-    }
-
-    pub(crate) fn override_tensor_product_rhs(structure: Option<symtn_core::BlockStructure>) {
-        PROBE.with(|probe| probe.borrow_mut().tensor_product_rhs = structure);
-    }
-
-    /// The overriding rhs structure, if a test set one.
-    pub(crate) fn tensor_product_rhs() -> Option<symtn_core::BlockStructure> {
-        PROBE.with(|probe| probe.borrow().tensor_product_rhs.clone())
     }
 }

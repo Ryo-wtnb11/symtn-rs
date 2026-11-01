@@ -140,8 +140,7 @@ where
 
     /// The one admission of a compact diagonal's elementwise matrix
     /// functions (inv, pinv, exp, solve) in every fusion mode (#1994): the
-    /// matrix-algebra bond admission without a value check. An expert bond
-    /// layout is admitted like the canonical one, and the result keeps it.
+    /// matrix-algebra bond admission without a value check.
     pub(super) fn admit_compact(
         &self,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],

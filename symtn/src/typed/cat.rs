@@ -4,18 +4,6 @@ impl<R, D> TensorMap<R, D>
 where
     D: TensorScalar,
 {
-    fn owned_cat_layout(&self) -> Result<CatOperandLayout<'_>, Error> {
-        let space = self.logical_space().space();
-        CatOperandLayout::owned(space.structure(), space.nout(), space.nin())
-    }
-
-    fn adjoint_logical_for_cat(&self, engine: &mut dyn Engine) -> Result<Option<Self>, Error> {
-        match &self.repr {
-            TypedTensorRepr::Owned(_) => Ok(None),
-            TypedTensorRepr::Adjoint(_) => self.materialized_tensor_uncached(engine).map(Some),
-        }
-    }
-
     fn cat_operand(&self) -> Result<(CatOperandLayout<'_>, CatOperandData<'_, D>), Error> {
         match &self.repr {
             TypedTensorRepr::Owned(body) => {
@@ -76,9 +64,6 @@ where
     /// One output admission and allocation plus
     /// `O(len(self) + len(other))` work over the compiled per-sector slab plan.
     /// The compact path also initializes structural zeros in the output.
-    /// If an oriented geometry is conservatively declined, correctness
-    /// falls back to operation-local materialization and retries the
-    /// plan against the already-admitted output.
     ///
     /// # Errors
     ///
@@ -88,11 +73,6 @@ where
     /// `SpaceMismatch` for mismatched product spaces on the other side or
     /// concatenated legs of opposite duality. Checked-Generic output-admission failures retain their typed
     /// provider error.
-    ///
-    /// An adjoint view `other` (`t.adjoint_view()`) returns
-    /// [`Error::Unsupported`] when the concatenation plan cannot read it in
-    /// place (non-monotone oriented regions): this operation would copy it.
-    /// Pass `&t.adjoint()?.materialize()?` instead.
     pub fn cat<'a>(
         &self,
         engine: &mut dyn Engine,
@@ -125,60 +105,15 @@ where
         )?;
         let (lhs_layout, lhs_data) = self.cat_operand().map_err(FacadeError::<R>::from)?;
         let (rhs_layout, rhs_data) = other.cat_operand().map_err(FacadeError::<R>::from)?;
-        let data = if let Some(plan) = compile_cat_plan(
+        let data = compile_cat_plan(
             space.space().structure(),
             space.space().nout(),
             [lhs_layout, rhs_layout],
             axis,
             side,
         )
-        .map_err(FacadeError::<R>::from)?
-        {
-            plan.execute(engine, [lhs_data, rhs_data])
-                .map_err(FacadeError::<R>::from)?
-        } else {
-            // Why not recurse through `cat`: output admission has succeeded,
-            // so retry only the local copy plan and never query the provider
-            // or admit the same HomSpace a second time. Why the view is
-            // refused only here: whether the plan declines is known only
-            // after the output layout is admitted.
-            other
-                .refuse_borrowed_view("cat")
-                .map_err(FacadeError::<R>::from)?;
-            // Only a lazy adjoint needs a logical payload; an owned operand
-            // retains its borrowed dense or compact source.
-            let lhs_local = self
-                .adjoint_logical_for_cat(engine)
-                .map_err(FacadeError::<R>::from)?;
-            let rhs_local = other
-                .adjoint_logical_for_cat(engine)
-                .map_err(FacadeError::<R>::from)?;
-            let (lhs_layout, lhs_data) = match &lhs_local {
-                Some(local) => local.cat_operand(),
-                None => self.owned_cat_layout().map(|layout| (layout, lhs_data)),
-            }
-            .map_err(FacadeError::<R>::from)?;
-            let (rhs_layout, rhs_data) = match &rhs_local {
-                Some(local) => local.cat_operand(),
-                None => other.owned_cat_layout().map(|layout| (layout, rhs_data)),
-            }
-            .map_err(FacadeError::<R>::from)?;
-            let plan = compile_cat_plan(
-                space.space().structure(),
-                space.space().nout(),
-                [lhs_layout, rhs_layout],
-                axis,
-                side,
-            )
-            .map_err(FacadeError::<R>::from)?
-            .ok_or_else(|| {
-                FacadeError::<R>::from(internal_layout_error(
-                    "owned cat operands did not produce a copy plan",
-                ))
-            })?;
-            plan.execute(engine, [lhs_data, rhs_data])
-                .map_err(FacadeError::<R>::from)?
-        };
+        .and_then(|plan| plan.execute(engine, [lhs_data, rhs_data]))
+        .map_err(FacadeError::<R>::from)?;
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::dense(space, data)),

@@ -196,8 +196,6 @@ pub(crate) enum CopyOp {
 struct Probe {
     counts: [usize; EVENTS],
     log: Vec<Observation>,
-    force_input_pack: bool,
-    force_lq_zeroed_publication: bool,
 }
 
 impl Default for Probe {
@@ -205,8 +203,6 @@ impl Default for Probe {
         Self {
             counts: [0; EVENTS],
             log: Vec::new(),
-            force_input_pack: false,
-            force_lq_zeroed_publication: false,
         }
     }
 }
@@ -431,27 +427,4 @@ pub(crate) fn mf_svd_fallback<D>(u: &[D], vt: &[D]) {
         u.as_ptr() as usize,
         vt.as_ptr() as usize,
     ));
-}
-
-/// Runs `f` with region admission disabled, so every input packs.
-pub(crate) fn with_forced_input_pack<T>(f: impl FnOnce() -> T) -> T {
-    let previous =
-        PROBE.with(|probe| std::mem::replace(&mut probe.borrow_mut().force_input_pack, true));
-    let result = f();
-    PROBE.with(|probe| probe.borrow_mut().force_input_pack = previous);
-    result
-}
-
-pub(crate) fn input_pack_forced() -> bool {
-    PROBE.with(|probe| probe.borrow().force_input_pack)
-}
-
-/// Routes compact LQ through its zero-and-overwrite publication on this
-/// thread even when the append proof holds.
-pub(crate) fn force_lq_zeroed_publication(force: bool) {
-    PROBE.with(|probe| probe.borrow_mut().force_lq_zeroed_publication = force);
-}
-
-pub(crate) fn lq_zeroed_publication_forced() -> bool {
-    PROBE.with(|probe| probe.borrow().force_lq_zeroed_publication)
 }

@@ -583,10 +583,6 @@ fn validate_tensor_product_source_structures<E>(
     rhs: &symtn_core::BlockStructure,
 ) -> Result<(), CheckedGenericTensorProductError<E>> {
     validate_tensor_product_source_structure("lhs", lhs)?;
-    #[cfg(test)]
-    if let Some(rhs) = crate::typed::probe::tensor_product_rhs() {
-        return validate_tensor_product_source_structure("rhs", &rhs);
-    }
     validate_tensor_product_source_structure("rhs", rhs)
 }
 
@@ -1015,12 +1011,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_tensor_product_rejects_a_later_malformed_key_before_provider_queries() {
-        let provider = Arc::new(CheckedTensorProductSpy {
-            algebra_queries: AtomicUsize::new(0),
-            f_queries: AtomicUsize::new(0),
-        });
-        let (source, data) = checked_tensor_product_source(Arc::clone(&provider));
+    fn tensor_product_source_validator_rejects_a_later_malformed_key() {
         let sector = SectorId::new(0);
         let tree =
             FusionTreeKey::try_new_for_rule(&Z2FusionRule, [sector], sector, [false], [], [])
@@ -1039,14 +1030,11 @@ mod tests {
             1,
         )
         .unwrap();
-        probe::override_tensor_product_rhs(Some(
-            BlockStructure::from_blocks(vec![valid, malformed]).unwrap(),
-        ));
-        provider.reset();
+        let structure = BlockStructure::from_blocks(vec![valid, malformed]).unwrap();
 
         let error =
-            tensorproduct_owned_checked_generic(&source, &data, &source, &data).unwrap_err();
-        probe::override_tensor_product_rhs(None);
+            super::validate_tensor_product_source_structure::<Infallible>("rhs", &structure)
+                .unwrap_err();
 
         assert!(matches!(
             error,
@@ -1055,8 +1043,6 @@ mod tests {
                 actual: 0
             })
         ));
-        assert_eq!(provider.algebra_queries.load(Ordering::Relaxed), 0);
-        assert_eq!(provider.f_queries.load(Ordering::Relaxed), 0);
     }
 
     #[test]

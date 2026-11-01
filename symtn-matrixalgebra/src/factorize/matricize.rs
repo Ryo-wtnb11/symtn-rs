@@ -317,10 +317,6 @@ pub(super) fn input_regions(
     structure: &BlockStructure,
     nout: usize,
 ) -> Result<Option<Arc<[CoupledSectorRegion]>>, OperationError> {
-    #[cfg(test)]
-    if crate::probe::input_pack_forced() {
-        return Ok(None);
-    }
     checked_sector_regions(structure, nout)
 }
 
