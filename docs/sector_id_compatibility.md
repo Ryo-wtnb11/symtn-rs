@@ -27,9 +27,12 @@ Storage uses ID order. Coupled sectors ascend by ID. Within a coupled
 sector, fusion trees nest as TensorKit's `fusiontrees` iterator does (last
 uncoupled sector slowest, then the inner line feeding its vertex in
 `c ⊗ dual(b)` channel order, then the vertex label, then the front of the
-tree), with uncoupled sectors compared by ID. Block row and column order
-therefore differs from TensorKit only where ID order differs from the
-semantic order below. Two operations instead need a semantic basis order:
+tree), with uncoupled sectors compared by ID and inner lines in the
+provider's `c ⊗ dual(b)` channel order. Block row and column order therefore
+differs from TensorKit where ID order differs from the semantic order below,
+or where the provider's channel order differs from TensorKit's (the product
+and SU(N) exceptions below). Two operations instead need a semantic basis
+order:
 
 - At an exact cross-sector truncation tie, `find_truncated` uses the provider's
   `sector_order_key`. Rank selection keeps the earlier sector first; error

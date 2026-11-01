@@ -84,9 +84,11 @@ impl<S> BlockFusionTrees<S> {
 /// the product of its legs' degeneracies, indexed column-major in those legs.
 /// The trees and their ranges, in matrix order, are [`Self::row_trees`] and
 /// [`Self::col_trees`]. That order is TensorKit's `fusiontrees` nesting
-/// with sectors compared by `SectorId`, so it differs from TensorKit only
-/// where the provider's ids do not ascend in TensorKit's sector order (see
-/// `docs/sector_id_compatibility.md`); presenting TensorKit's order would copy.
+/// with external sectors in `SectorId` order and inner lines in the
+/// provider's channel order, so it differs from TensorKit where the ids do
+/// not ascend in TensorKit's sector order or the channel order differs, as
+/// for products and SU(N) (see `docs/sector_id_compatibility.md`); presenting
+/// TensorKit's order would copy.
 #[derive(Debug)]
 pub struct CoupledBlock<'a, R, D, S = Vec<D>> {
     pub(super) rows: usize,

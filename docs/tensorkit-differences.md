@@ -56,8 +56,9 @@ this page records intentional differences.
 ## Conventions
 
 - **Storage versus observable order.** Blocks use `SectorId` order, and the
-  trees inside a block follow TensorKit's `fusiontrees` nesting with that
-  sector order. Truncation
+  trees inside a block follow TensorKit's `fusiontrees` nesting with external
+  sectors in that order and inner lines in the provider's channel order.
+  Truncation
   ties and identity/isometry bases use the semantic ordering described in
   [sector compatibility](sector_id_compatibility.md), including its SU(N)
   inner-line exception.

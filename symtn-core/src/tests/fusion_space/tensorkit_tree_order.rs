@@ -400,3 +400,49 @@ fn su2_four_leg_trees_follow_tensorkit_fusiontrees_order() {
     .collect();
     assert_eq!(all_producer_rows(&rule, &space, 0), expected);
 }
+
+#[test]
+fn homspace_trees_skip_inverse_products_of_unshared_coupled_sectors() {
+    // What: a HomSpace enumerates only the coupled sectors both sides reach,
+    // so the domain never fuses an unshared sector with a dual leg. Here the
+    // domain also reaches spin 78 (id 156), and 156 ⊗ dual(100) leaves the
+    // compact SU(2) id range (ids = twice spin, at most 254), while the one
+    // shared sector, the vacuum, has a single tree by hand: 0 ⊗ 50 → 50,
+    // 50 ⊗ 50 → 0.
+    let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (100, 1), (100, 1)]);
+
+    let keys = hom.fusion_tree_keys(&SU2FusionRule);
+
+    let rows = keys
+        .iter()
+        .map(|key| {
+            let domain = key.domain_tree();
+            (
+                sector_ids(key.codomain_uncoupled()),
+                sector_ids(domain.uncoupled()),
+                sector_ids(domain.innerlines()),
+                domain
+                    .vertices()
+                    .iter()
+                    .map(|v| v.get())
+                    .collect::<Vec<_>>(),
+                key.coupled().id(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        vec![(vec![0], vec![0, 100, 100], vec![100], vec![1, 1], 0)]
+    );
+}
+
+#[test]
+fn homspace_with_disjoint_coupled_sectors_has_no_trees() {
+    // What: when the sides share no coupled sector (codomain reaches only the
+    // vacuum, the domain only spin 100), no tree is built and no dual-leg
+    // product of the domain's unshared sector (200 ⊗ dual(200), beyond the
+    // compact SU(2) id range) is requested.
+    let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (0, 1), (200, 1)]);
+
+    assert!(hom.fusion_tree_keys(&SU2FusionRule).is_empty());
+}
