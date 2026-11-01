@@ -1137,11 +1137,11 @@ fn lq_compact_positive_gauge_idempotent_on_isometry() {
 }
 
 #[test]
-fn lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
+fn lazy_adjoint_lq_tree_route_factors_the_logical_source() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: LQ of the lazy adjoint of a parent that is not region-tiled (an
-    // adjoint view) packs it and publishes by tree identity exactly the
-    // factors LQ of the materialized adjoint publishes.
+    // adjoint view) packs it, publishes on the factor spaces LQ of the
+    // materialized adjoint publishes on, and factors the logical source `X`.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -1167,25 +1167,29 @@ fn lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
             input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0,
             "full {full}"
         );
-        let oracle = if full {
+        let eager = if full {
             crate::factorize::lq_full_dyn(engine, &mut dense, &materialized)
         } else {
             crate::factorize::lq_compact_dyn(engine, &mut dense, &materialized)
         }
         .unwrap();
-        for (expected, tree) in [(&oracle.l, &by_tree.l), (&oracle.q, &by_tree.q)] {
+        for (expected, tree) in [(&eager.l, &by_tree.l), (&eager.q, &by_tree.q)] {
             assert_eq!(
                 expected.space().space(),
                 tree.space().space(),
                 "full {full}"
             );
-            assert_eq!(expected.data(), tree.data(), "full {full}");
         }
+        // Oracle: the logical source `X` itself. `L Q` reconstructs it and
+        // `Q` has orthonormal rows, within the fixture helpers' f64
+        // tolerances (1e-10 per entry, 1e-9 per row dot product).
+        assert_compact_factors_reconstruct_input(&materialized, &by_tree.l, None, &by_tree.q);
+        assert_orthonormal_rows(&bound_factor_matrices(&by_tree.q));
     }
 }
 
 #[test]
-fn checked_lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
+fn checked_lazy_adjoint_lq_tree_route_factors_the_logical_source() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the checked-Generic counterpart of the multiplicity-free test
     // above.
@@ -1211,20 +1215,22 @@ fn checked_lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
             input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0,
             "full {full}"
         );
-        let oracle = if full {
+        let eager = if full {
             crate::factorize::lq_full_dyn_checked_generic(engine, &mut dense, &materialized)
         } else {
             crate::factorize::lq_compact_dyn_checked_generic(engine, &mut dense, &materialized)
         }
         .unwrap();
-        for (expected, tree) in [(&oracle.l, &by_tree.l), (&oracle.q, &by_tree.q)] {
+        for (expected, tree) in [(&eager.l, &by_tree.l), (&eager.q, &by_tree.q)] {
             assert_eq!(
                 expected.space().space(),
                 tree.space().space(),
                 "full {full}"
             );
-            assert_eq!(expected.data(), tree.data(), "full {full}");
         }
+        // Oracle as above: `L Q` reconstructs `X` and `Q` has orthonormal rows.
+        assert_compact_factors_reconstruct_input(&materialized, &by_tree.l, None, &by_tree.q);
+        assert_orthonormal_rows(&bound_factor_matrices(&by_tree.q));
     }
 }
 
