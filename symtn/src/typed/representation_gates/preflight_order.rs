@@ -409,42 +409,10 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
     }
 }
 
-/// `space` re-laid as a padded (expert) layout of its own hom space, with
-/// the payload offset of every block.
-fn padded(
-    space: &BoundDynamicFusionMapSpace<U1FusionRule>,
-) -> (BoundDynamicFusionMapSpace<U1FusionRule>, Vec<usize>) {
-    let structure = space.space().structure();
-    let (mut offset, mut blocks, mut offsets) = (1, Vec::new(), Vec::new());
-    for index in 0..structure.block_count() {
-        let block = structure.block(index).unwrap();
-        blocks.push(
-            BlockSpec::column_major_with_key(block.key().clone(), block.shape().to_vec(), offset)
-                .unwrap(),
-        );
-        offsets.push(offset);
-        offset += block.shape().iter().product::<usize>() + 1;
-    }
-    let layout = DynamicFusionMapSpace::try_from_layout(
-        space.space().homspace().clone(),
-        BlockStructure::from_blocks_with_rank(2, blocks).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(space.provider())
-    .unwrap();
-    let expert = BoundDynamicFusionMapSpace::bind_multiplicity_free_checked(
-        layout.clone(),
-        Arc::clone(space.provider_arc()),
-    )
-    .unwrap();
-    assert_ne!(expert.space().structure(), structure);
-    (expert, offsets)
-}
-
 /// The two layout side effects of one compact-divisor solve (#1995): `D \ t`
-/// lands on the canonical output space whatever `t`'s layout, scaled along
-/// its leading axis (TensorKit `similar(D, domain(D) ← domain(t))`), and
-/// `D \ D'` stays compact on `D`'s own space (`d1.domain`), expert or not.
+/// lands on the canonical output space, scaled along its leading axis
+/// (TensorKit `similar(D, domain(D) ← domain(t))`), and `D \ D'` stays
+/// compact on `D`'s own space (`d1.domain`).
 #[test]
 fn compact_divisor_solve_lands_on_the_documented_spaces() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -473,12 +441,12 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
         .space
         .clone();
 
-    // An owned dense rhs in a padded layout; values name their block and cell.
-    let (expert, offsets) = padded(&canonical);
-    let structure = expert.space().structure();
-    let mut data = vec![f64::NAN; expert.space().required_len().unwrap()];
-    for (index, &offset) in offsets.iter().enumerate() {
-        let shape = structure.block(index).unwrap().shape().to_vec();
+    // An owned dense rhs; values name their block and cell.
+    let structure = canonical.space().structure();
+    let mut data = vec![f64::NAN; canonical.space().required_len().unwrap()];
+    for index in 0..structure.block_count() {
+        let block = structure.block(index).unwrap();
+        let (offset, shape) = (block.offset(), block.shape().to_vec());
         for b in 0..shape[1] {
             for a in 0..shape[0] {
                 data[offset + a + shape[0] * b] = (100 * index + 10 * a + b) as f64 + 1.0;
@@ -487,7 +455,7 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
     }
     let rhs = TensorMap {
         runtime: runtime.clone(),
-        repr: owned_repr(TypedTensorBody::dense(expert.clone(), data)),
+        repr: owned_repr(TypedTensorBody::dense(canonical.clone(), data)),
     };
     let solved = d.solve(engine, &[0], &[1], &rhs, &[0], &[1]).unwrap();
     let body = owned(&solved);
@@ -515,11 +483,11 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
         }
     }
 
-    // `D \ D'` with `D` on the padded bond layout.
-    let d_expert = TensorMap {
+    // `D \ D'` with `D` on the bond layout.
+    let d_scaled = TensorMap {
         runtime: runtime.clone(),
         repr: owned_repr(TypedTensorBody::diagonal(
-            expert.clone(),
+            canonical.clone(),
             TensorMap::<_, f64>::diagonal(engine, &runtime, &v, by_row(&v, 2.0))
                 .unwrap()
                 .spectrum()
@@ -527,9 +495,12 @@ fn compact_divisor_solve_lands_on_the_documented_spaces() {
                 .to_vec(),
         )),
     };
-    let quotient = d_expert.solve(engine, &[0], &[1], &d, &[0], &[1]).unwrap();
+    let quotient = d_scaled.solve(engine, &[0], &[1], &d, &[0], &[1]).unwrap();
     let body = owned(&quotient);
-    assert_eq!(body.space.space().structure(), expert.space().structure());
+    assert_eq!(
+        body.space.space().structure(),
+        canonical.space().structure()
+    );
     let TypedData::Diagonal(spectrum) = body.data.as_ref() else {
         panic!("D \\ D' must stay compact");
     };

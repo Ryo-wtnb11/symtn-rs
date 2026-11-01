@@ -115,12 +115,14 @@ where
     DynamicFusionMapSpace::from_final_homspace_with_primer(rule, adjoint_hom, primer)
 }
 
+/// The adjoint hom space and its layout, each block shape read from the
+/// source storage.
 #[cfg(test)]
 fn build_adjoint_space_dyn_stepwise_oracle<R>(
     rule: &R,
     space: &DynamicFusionMapSpace,
     primer: LayoutKeyBuilder<R>,
-) -> Result<DynamicFusionMapSpace, OperationError>
+) -> Result<(FusionTreeHomSpace, BlockStructure), OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
 {
@@ -161,8 +163,7 @@ where
         blocks,
     )
     .map_err(OperationError::from_core_preserving_context)?;
-    DynamicFusionMapSpace::try_from_layout(adjoint_hom, adjoint_structure)
-        .map_err(OperationError::from_core_preserving_context)
+    Ok((adjoint_hom, adjoint_structure))
 }
 
 fn validate_adjoint_data_extent(
@@ -597,10 +598,9 @@ mod cache_tests {
     use std::cell::Cell;
     use std::ops::{Add, Mul};
     use symtn_core::{
-        BlockSpec, FermionParityFusionRule, FusionProductSpace, FusionTreeKey, Fz2SectorLayout,
-        PackedProductCodec, ProductFusionRule, ProductSectorCodec, ProductSectorLayout,
-        SU2FusionRule, SU2Irrep, SectorId, SectorLeg, Su2SectorLayout, U1FusionRule, U1Irrep,
-        U1SectorLayout, Z2Irrep,
+        FermionParityFusionRule, FusionProductSpace, Fz2SectorLayout, PackedProductCodec,
+        ProductFusionRule, ProductSectorCodec, ProductSectorLayout, SU2FusionRule, SU2Irrep,
+        SectorId, SectorLeg, Su2SectorLayout, U1FusionRule, U1Irrep, U1SectorLayout, Z2Irrep,
     };
 
     type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
@@ -708,35 +708,22 @@ mod cache_tests {
         DynamicFusionMapSpace::from_final_homspace(&rule, hom).unwrap()
     }
 
-    fn u1_rank_one_pair(charge: i32) -> FusionTreePairKey {
+    /// The zero-copy adjoint view of a canonical rectangular U(1) source: an
+    /// admitted space whose strides are not the canonical layout of its own
+    /// hom space.
+    fn u1_view_tensor() -> TestTensor<OutputObservedValue> {
         let rule = U1FusionRule;
-        let sector = U1Irrep::new(charge).sector_id();
-        let tree = FusionTreeKey::try_new_for_rule(
-            &rule,
-            [sector],
-            sector,
-            [false],
-            std::iter::empty(),
-            std::iter::empty(),
-        )
-        .unwrap();
-        FusionTreePairKey::pair(tree.clone(), tree)
-    }
-
-    fn u1_expert_space(
-        homspace: FusionTreeHomSpace,
-        structure: BlockStructure,
-    ) -> Result<DynamicFusionMapSpace, CoreError> {
-        DynamicFusionMapSpace::try_from_layout(homspace, structure)?.try_bind_rule(&U1FusionRule)
-    }
-
-    fn u1_expert_tensor(
-        homspace: FusionTreeHomSpace,
-        structure: BlockStructure,
-    ) -> TestTensor<OutputObservedValue> {
-        let space = u1_expert_space(homspace, structure).unwrap();
-        let len = space.required_len().unwrap();
-        TestTensor::from_vec_with_fusion_space(vec![OutputObservedValue(1.0); len], space).unwrap()
+        let zero = U1Irrep::new(0).sector_id();
+        let homspace = FusionTreeHomSpace::new(
+            FusionProductSpace::new([SectorLeg::new([(zero, 2)], false)]),
+            FusionProductSpace::new([SectorLeg::new([(zero, 3)], false)]),
+        );
+        let parent = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
+        let view = parent
+            .validate_rule(&rule)
+            .and_then(|()| parent.adjoint_view())
+            .unwrap();
+        TestTensor::from_vec_with_fusion_space(vec![OutputObservedValue(1.0); 6], view).unwrap()
     }
 
     fn toy_generic_bound<const ID: u8>() -> BoundDynamicFusionMapSpace<ToyGenericRule<ID>> {
@@ -794,14 +781,14 @@ mod cache_tests {
 
     fn adjoint_data_oracle(
         source: &DynamicFusionMapSpace,
-        target: &DynamicFusionMapSpace,
+        target: &BlockStructure,
         data: &[Complex64],
     ) -> Vec<Complex64> {
         let nout = source.nout();
         let nin = source.nin();
         let mut result = vec![Complex64::new(0.0, 0.0); target.required_len().unwrap()];
-        for index in 0..target.structure().block_count() {
-            let target_block = target.structure().block(index).unwrap();
+        for index in 0..target.block_count() {
+            let target_block = target.block(index).unwrap();
             let BlockKey::FusionTree(target_key) = target_block.key() else {
                 panic!("adjoint oracle requires fusion-tree blocks");
             };
@@ -868,16 +855,16 @@ mod cache_tests {
         let data = (0..source.required_len().unwrap())
             .map(|index| Complex64::new(index as f64 + 1.0, index as f64 + 0.25))
             .collect::<Vec<_>>();
-        let stepwise =
+        let (stepwise_homspace, stepwise) =
             build_adjoint_space_dyn_stepwise_oracle(rule, &source, encoded_layout_primer::<R>)
                 .unwrap();
         let expected_data = adjoint_data_oracle(&source, &stepwise, &data);
 
         let (dynamic, dynamic_data) = adjoint_dyn(rule, &source, &data).unwrap();
-        assert_complete_structure_eq(dynamic.structure(), stepwise.structure());
+        assert_complete_structure_eq(dynamic.structure(), &stepwise);
         assert_eq!(dynamic.nout(), 1);
         assert_eq!(dynamic.nin(), 1);
-        assert_eq!(dynamic.homspace(), stepwise.homspace());
+        assert_eq!(dynamic.homspace(), &stepwise_homspace);
         assert_eq!(dynamic_data, expected_data);
     }
 
@@ -935,7 +922,7 @@ mod cache_tests {
         let data = (0..source.required_len().unwrap())
             .map(|index| Complex64::new(index as f64 + 0.5, index as f64 + 0.125))
             .collect::<Vec<_>>();
-        let stepwise = build_adjoint_space_dyn_stepwise_oracle(
+        let (stepwise_homspace, stepwise) = build_adjoint_space_dyn_stepwise_oracle(
             &rule,
             &source,
             encoded_layout_primer::<TripleRule>,
@@ -944,42 +931,18 @@ mod cache_tests {
         let expected_data = adjoint_data_oracle(&source, &stepwise, &data);
 
         let (dynamic, dynamic_data) = adjoint_dyn(&rule, &source, &data).unwrap();
-        assert_complete_structure_eq(dynamic.structure(), stepwise.structure());
+        assert_complete_structure_eq(dynamic.structure(), &stepwise);
         assert_eq!(dynamic.nout(), 2);
         assert_eq!(dynamic.nin(), 2);
-        assert_eq!(dynamic.homspace(), stepwise.homspace());
+        assert_eq!(dynamic.homspace(), &stepwise_homspace);
         assert_eq!(dynamic_data, expected_data);
     }
 
     #[test]
     fn eager_adjoint_keeps_rule_mismatch_precedence_over_canonical_preflight() {
         // What: a wrong rule is rejected before canonical preflight inspects a
-        // safe public expert structure whose complete blocks are reordered.
-        let zero = U1Irrep::new(0).sector_id();
-        let one = U1Irrep::new(1).sector_id();
-        let leg = || FusionProductSpace::new([SectorLeg::new([(zero, 1), (one, 1)], false)]);
-        let homspace = FusionTreeHomSpace::new(leg(), leg());
-        let canonical = homspace
-            .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
-            .unwrap();
-        let structure = BlockStructure::from_blocks_with_rank(
-            2,
-            [1, 0]
-                .into_iter()
-                .map(|index| {
-                    let block = canonical.block(index).unwrap();
-                    BlockSpec::with_key(
-                        block.key().clone(),
-                        block.shape().to_vec(),
-                        block.strides().to_vec(),
-                        block.offset(),
-                    )
-                    .unwrap()
-                })
-                .collect(),
-        )
-        .unwrap();
-        let tensor = u1_expert_tensor(homspace, structure);
+        // noncanonical (adjoint-view) source.
+        let tensor = u1_view_tensor();
 
         OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
         let error = tensor.adjoint(&SU2FusionRule).unwrap_err();
@@ -992,135 +955,26 @@ mod cache_tests {
     }
 
     #[test]
-    fn eager_adjoint_rejects_missing_expert_block_before_target_work() {
-        // What: omitting one HomSpace block fails with the canonical block count
-        // before the output vector is allocated or initialized.
-        let sectors = [
-            (U1Irrep::new(0).sector_id(), 1),
-            (U1Irrep::new(1).sector_id(), 1),
-        ];
-        let leg = || FusionProductSpace::new([SectorLeg::new(sectors, false)]);
-        let homspace = FusionTreeHomSpace::new(leg(), leg());
-        let structure = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![
-                BlockSpec::column_major_with_key(u1_rank_one_pair(0).into(), vec![1, 1], 0)
-                    .unwrap(),
-            ],
-        )
-        .unwrap();
-        let tensor = u1_expert_tensor(homspace, structure);
-
+    fn eager_adjoint_rejects_a_noncanonical_source_before_target_work() {
+        // What: a source whose strides differ from the canonical coupled
+        // layout of its hom space fails before the output is initialized.
+        let tensor = u1_view_tensor();
         OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
+
         let error = tensor.adjoint(&U1FusionRule).unwrap_err();
 
-        assert_eq!(
-            error,
-            OperationError::Core(CoreError::BlockCountMismatch {
-                expected: 2,
-                actual: 1,
-            })
-        );
+        assert_eq!(error, OperationError::StructureMismatch { tensor: "src" });
         assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
     }
 
     #[test]
-    fn eager_adjoint_rejects_noncanonical_order_and_coverage() {
-        // What: complete expert keys still fail when their source block order
-        // or storage coverage differs from the canonical coupled layout.
-        let sectors = [
-            (U1Irrep::new(0).sector_id(), 1),
-            (U1Irrep::new(1).sector_id(), 1),
-        ];
-        let leg = || FusionProductSpace::new([SectorLeg::new(sectors, false)]);
-        let homspace = FusionTreeHomSpace::new(leg(), leg());
-        let canonical = homspace
-            .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
-            .unwrap();
-
-        let reordered = BlockStructure::from_blocks_with_rank(
-            2,
-            [1, 0]
-                .into_iter()
-                .map(|index| {
-                    let block = canonical.block(index).unwrap();
-                    BlockSpec::with_key(
-                        block.key().clone(),
-                        block.shape().to_vec(),
-                        block.strides().to_vec(),
-                        block.offset(),
-                    )
-                    .unwrap()
-                })
-                .collect(),
-        )
-        .unwrap();
-        let gapped = BlockStructure::from_blocks_with_rank(
-            2,
-            (0..canonical.block_count())
-                .map(|index| {
-                    let block = canonical.block(index).unwrap();
-                    BlockSpec::with_key(
-                        block.key().clone(),
-                        block.shape().to_vec(),
-                        block.strides().to_vec(),
-                        block.offset() + index,
-                    )
-                    .unwrap()
-                })
-                .collect(),
-        )
-        .unwrap();
-
-        for structure in [reordered, gapped] {
-            let tensor = u1_expert_tensor(homspace.clone(), structure);
-            OUTPUT_ZERO_CALLS.with(|calls| calls.set(0));
-
-            let error = tensor.adjoint(&U1FusionRule).unwrap_err();
-
-            assert_eq!(error, OperationError::StructureMismatch { tensor: "src" });
-            assert_eq!(OUTPUT_ZERO_CALLS.with(Cell::get), 0);
-        }
-    }
-
-    #[test]
     fn lazy_adjoint_rejects_noncanonical_source() {
-        // What: metadata-only dagger construction rejects noncanonical source
-        // ordering after confirming that every canonical key is present.
-        let zero = U1Irrep::new(0).sector_id();
-        let one = U1Irrep::new(1).sector_id();
+        // What: metadata-only dagger construction rejects a noncanonical
+        // source layout.
+        let tensor = u1_view_tensor();
 
-        let sectors = [(zero, 1), (one, 1)];
-        let double_leg = || FusionProductSpace::new([SectorLeg::new(sectors, false)]);
-        let double_homspace = FusionTreeHomSpace::new(double_leg(), double_leg());
-        let canonical = double_homspace
-            .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
-            .unwrap();
-        let reordered = BlockStructure::from_blocks_with_rank(
-            2,
-            [1, 0]
-                .into_iter()
-                .map(|index| {
-                    let block = canonical.block(index).unwrap();
-                    BlockSpec::with_key(
-                        block.key().clone(),
-                        block.shape().to_vec(),
-                        block.strides().to_vec(),
-                        block.offset(),
-                    )
-                    .unwrap()
-                })
-                .collect(),
-        )
-        .unwrap();
-        let reordered_tensor = u1_expert_tensor(double_homspace, reordered);
-        let reordered = reordered_tensor.dynamic_space().clone();
-
-        let reordered_error = adjoint_space_dyn(&U1FusionRule, &reordered).unwrap_err();
-        assert_eq!(
-            reordered_error,
-            OperationError::StructureMismatch { tensor: "src" }
-        );
+        let error = adjoint_space_dyn(&U1FusionRule, tensor.dynamic_space()).unwrap_err();
+        assert_eq!(error, OperationError::StructureMismatch { tensor: "src" });
     }
 
     #[test]
@@ -1289,43 +1143,5 @@ mod cache_tests {
         let (encoded_space, encoded_data) = adjoint_dyn(&rule, &source, &data).unwrap();
         assert_eq!(lowered_space, encoded_space);
         assert_eq!(lowered_data, encoded_data);
-    }
-
-    #[test]
-    fn lowered_adjoint_missing_source_key_abandons_prepared_layout() {
-        // What: adjoint source-key mapping fails before its checked target
-        // layout receives an ID or publication.
-        let _guard = crate::test_support::CACHE_TEST_LOCK
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        symtn_core::clear_structure_caches();
-        symtn_core::clear_structure_caches();
-        let rule = U1FusionRule;
-        let one = U1Irrep::new(1).sector_id();
-        let two = U1Irrep::new(2).sector_id();
-        let homspace = FusionTreeHomSpace::new(
-            FusionProductSpace::new([
-                SectorLeg::new([(one, 1)], false),
-                SectorLeg::new([(one, 1)], false),
-            ]),
-            FusionProductSpace::new([SectorLeg::new([(two, 1)], false)]),
-        );
-        let layout = DynamicFusionMapSpace::try_from_layout(
-            homspace,
-            BlockStructure::from_blocks_with_rank(3, Vec::new()).unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap();
-        let source = layout;
-
-        let error = adjoint_space_dyn_with_primer(
-            &rule,
-            &source,
-            checked_metadata_dispatcher::<U1FusionRule>,
-        )
-        .unwrap_err();
-
-        assert!(matches!(error, OperationError::MissingBlockKey { .. }));
     }
 }

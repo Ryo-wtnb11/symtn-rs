@@ -2,13 +2,13 @@
 //! test suite, split by responsibility into sibling files.
 
 use symtn_core::{
-    BlockKey, BlockSpec, BlockStructure, BraidingStyleKind, CheckedGenericAdmissionMode,
-    CheckedGenericFusion, CheckedGenericRigidSymbols, CoreError, CoupledSectorFold,
-    FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace,
-    FusionTreeKey, GenericFArray, GenericFusionSymbols, GenericRMatrix, GenericRigidSymbols,
-    InfallibleGeneric, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg,
-    SectorVec, U1FusionRule, U1Irrep, Z2FusionRule,
+    BlockKey, BraidingStyleKind, CheckedGenericAdmissionMode, CheckedGenericFusion,
+    CheckedGenericRigidSymbols, CoreError, CoupledSectorFold, FermionParityFusionRule,
+    FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace, FusionTreeKey,
+    GenericFArray, GenericFusionSymbols, GenericRMatrix, GenericRigidSymbols, InfallibleGeneric,
+    MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
+    RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, U1FusionRule, U1Irrep,
+    Z2FusionRule,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand, OperationError,
@@ -17,8 +17,8 @@ use symtn_tensors::{
 };
 
 use crate::factorize::{
-    map_square_sectors_dyn_into, pinv_cutoff, typed_from_bound_factor,
-    validate_inverse_region_routes_for_test, BoundTensorMap, TestTensor,
+    pinv_cutoff, typed_from_bound_factor, validate_inverse_region_routes_for_test, BoundTensorMap,
+    TestTensor,
 };
 use crate::test_numerics::numerics;
 use crate::*;
@@ -82,34 +82,6 @@ where
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
     eig_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
-}
-
-fn qr_compact_checked_generic<L, E, R, D>(
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Qr<FactorOutput<R, D>>, CheckedGenericFactorPlanError<R::Error>>
-where
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    R: CheckedGenericFusion,
-    D: FactorScalar,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    qr_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
-}
-
-fn left_null_checked_generic<L, E, R, D>(
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<BoundDynFactor<R, D>, CheckedGenericFactorPlanError<R::Error>>
-where
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    R: CheckedGenericFusion,
-    D: FactorScalar,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    left_null_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
 }
 
 fn dense_source<'a, R, D>(input: &'a BoundDynamicTensorRef<'_, R, D>) -> FactorSource<'a, R, D> {

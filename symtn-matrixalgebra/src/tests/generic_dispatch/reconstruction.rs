@@ -534,21 +534,41 @@ fn full_factorizations_skip_dense_backend_for_disjoint_support() {
     .unwrap();
 }
 
+/// Values of the eager transposes of `general` and `hermitian` (their
+/// adjoints, conjugated back) on the borrowed region path against the
+/// adjoint views of the originals on the packed path: a zero-copy view swaps
+/// axes without conjugating, so both paths read the same matrices.
 fn assert_value_region_paths_match<R, D>(
     rule: Arc<R>,
     general: &TestTensor<D>,
     hermitian: &TestTensor<D>,
 ) where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
-    D: FactorScalar,
+    R: MultiplicityFreeRigidSymbols<Scalar = f64> + Clone,
+    D: FactorScalar + symtn_tensors::ConjugateValue,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let general_padded = padded_copy(rule.as_ref(), general);
-    let hermitian_padded = padded_copy(rule.as_ref(), hermitian);
-    let general_bound = bound_tensor(Arc::clone(&rule), general);
-    let hermitian_bound = bound_tensor(Arc::clone(&rule), hermitian);
-    let general_fallback = bound_tensor(Arc::clone(&rule), &general_padded);
-    let hermitian_fallback = bound_tensor(rule, &hermitian_padded);
+    let transpose = |tensor: &TestTensor<D>| {
+        let adjoint = adjoint(rule.as_ref(), tensor).unwrap();
+        TestTensor::from_vec_with_fusion_space(
+            adjoint
+                .data()
+                .iter()
+                .map(|&value| value.maybe_conj(true))
+                .collect(),
+            adjoint.fusion_space().clone(),
+        )
+        .unwrap()
+    };
+    let general_bound = bound_tensor(Arc::clone(&rule), &transpose(general));
+    let hermitian_bound = bound_tensor(Arc::clone(&rule), &transpose(hermitian));
+    let general_parent = bound_tensor(Arc::clone(&rule), general);
+    let hermitian_parent = bound_tensor(rule, hermitian);
+    let general_view_space = general_parent.space().adjoint_view().unwrap();
+    let hermitian_view_space = hermitian_parent.space().adjoint_view().unwrap();
+    let general_view =
+        BoundDynamicTensorRef::try_new(&general_view_space, general_parent.data()).unwrap();
+    let hermitian_view =
+        BoundDynamicTensorRef::try_new(&hermitian_view_space, hermitian_parent.data()).unwrap();
     assert!(general_bound
         .space()
         .space()
@@ -556,24 +576,8 @@ fn assert_value_region_paths_match<R, D>(
         .coupled_sector_regions(2)
         .unwrap()
         .is_some());
-    assert!(general_fallback
-        .space()
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .is_none());
-    assert!(hermitian_fallback
-        .space()
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .is_none());
-    let general_before = general_bound.data().to_vec();
-    let hermitian_before = hermitian_bound.data().to_vec();
-    let general_fallback_before = general_fallback.data().to_vec();
-    let hermitian_fallback_before = hermitian_fallback.data().to_vec();
+    let general_before = general_parent.data().to_vec();
+    let hermitian_before = hermitian_parent.data().to_vec();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let values_fallbacks_rec = crate::probe::record();
@@ -592,17 +596,10 @@ fn assert_value_region_paths_match<R, D>(
     );
 
     let values_fallbacks_rec = crate::probe::record();
-    let packed_svd =
-        svd_vals_dyn(engine, &mut dense, &general_fallback.as_ref().dynamic()).unwrap();
-    let packed_eigh = eigh_vals_dyn(
-        engine,
-        &mut dense,
-        &hermitian_fallback.as_ref().dynamic(),
-        HermitianTol::DEFAULT,
-    )
-    .unwrap();
-    let packed_eig =
-        eig_vals_dyn(engine, &mut dense, &general_fallback.as_ref().dynamic()).unwrap();
+    let packed_svd = svd_vals_dyn(engine, &mut dense, &general_view).unwrap();
+    let packed_eigh =
+        eigh_vals_dyn(engine, &mut dense, &hermitian_view, HermitianTol::DEFAULT).unwrap();
+    let packed_eig = eig_vals_dyn(engine, &mut dense, &general_view).unwrap();
     assert_eq!(
         values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
         3
@@ -611,16 +608,14 @@ fn assert_value_region_paths_match<R, D>(
     assert_real_spectra_close(&direct_svd, &packed_svd);
     assert_real_spectra_close(&direct_eigh, &packed_eigh);
     assert_complex_spectra_close(&direct_eig, &packed_eig);
-    assert!(general_bound.data() == general_before);
-    assert!(hermitian_bound.data() == hermitian_before);
-    assert!(general_fallback.data() == general_fallback_before);
-    assert!(hermitian_fallback.data() == hermitian_fallback_before);
+    assert!(general_parent.data() == general_before);
+    assert!(hermitian_parent.data() == hermitian_before);
 }
 
 #[test]
 fn value_region_paths_match_packed_oracles_across_supported_rules() {
-    // What: canonical region borrowing and noncanonical packing return the same
-    // ordered spectra for Abelian, non-Abelian, fermionic, and product rules.
+    // What: canonical region borrowing and noncanonical (adjoint-view)
+    // packing agree for Abelian, non-Abelian, fermionic, and product rules.
     let u1 = [
         U1Irrep::new(-1).sector_id(),
         U1Irrep::new(0).sector_id(),

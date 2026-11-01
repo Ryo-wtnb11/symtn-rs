@@ -81,8 +81,8 @@ fn canonical_and_factor_bridge_storage_skip_exact_enumeration() {
         .unwrap();
     assert_eq!(recording.get(crate::probe::Event::ExactStorageFallback), 0);
 
-    // The expert layout constructor skips the exact check exactly when the
-    // structure compiles to coupled-sector regions.
+    // Subset validation skips the exact check exactly when the structure
+    // compiles to coupled-sector regions.
     let recording = crate::probe::record();
     assert!(canonical.coupled_sector_regions(1).unwrap().is_some());
     homspace

@@ -47,150 +47,6 @@ fn checked_generic_polar_covers_scalar_maps() {
 }
 
 #[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_polar_and_pinv_land_a_tiled_source_whose_tree_order_differs_from_fresh_outputs()
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: admission accepts any coupled-sector tiling, so a tiled source
-    // whose multiplicity trees are stacked in reverse of the fresh P / pinv
-    // output order lands in the fresh outputs by tree identity: every factor
-    // equals the one of the fresh-layout source, never an answer in
-    // mismatched coordinates.
-    let (base, base_data) = generic_factorization_input();
-    let base_structure = base.space().structure();
-    let blocks = (0..base_structure.block_count())
-        .rev()
-        .map(|index| {
-            let block = base_structure.block(index).unwrap();
-            let BlockKey::FusionTree(key) = block.key() else {
-                unreachable!("generic input has fusion-tree blocks")
-            };
-            (key.clone(), block.shape().to_vec())
-        })
-        .collect();
-    let structure =
-        BlockStructure::coupled_sector_matrix_with_keys(&FactorGenericRule, 2, 4, blocks).unwrap();
-    let typed_space =
-        DynamicFusionMapSpace::try_from_layout(base.space().homspace().clone(), structure)
-            .unwrap()
-            .try_bind_rule(&FactorGenericRule)
-            .unwrap();
-    let tensor =
-        TestTensor::<f64>::from_block_fn_with_fusion_space(typed_space, 0.0, |key, indices| {
-            let block = base_structure
-                .block(base_structure.find_block_index_by_key(key).unwrap())
-                .unwrap();
-            base_data[block.offset()
-                + indices
-                    .iter()
-                    .zip(block.strides())
-                    .map(|(&index, &stride)| index * stride)
-                    .sum::<usize>()]
-        })
-        .unwrap();
-    // The space was admitted for `FactorGenericRule`, so this
-    // never-failing spy answers under that identity.
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let source = BoundDynamicFusionMapSpace::bind_generic(
-        tensor.fusion_space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let input = BoundDynamicTensorRef::try_new(&source, tensor.data()).unwrap();
-
-    let fresh = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
-        Arc::clone(&provider),
-        base.space().homspace().clone(),
-    )
-    .unwrap();
-    let tiled = source
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .expect("the reordered source is still a coupled-sector tiling");
-    let fresh_regions = fresh
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .unwrap();
-    assert!(tiled
-        .iter()
-        .zip(fresh_regions.iter())
-        .any(|(source, fresh)| source.col_trees() != fresh.col_trees()));
-
-    // The same values on the spy, in the fresh layout.
-    assert_eq!(fresh.space().structure(), base.space().structure());
-    let base_input = BoundDynamicTensorRef::try_new(&fresh, &base_data).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let expected = left_polar_dyn_checked_generic(engine, &mut dense, &base_input).unwrap();
-    let actual = left_polar_dyn_checked_generic(engine, &mut dense, &input).unwrap();
-    assert_blocks_close_by_key("checked W", &expected.w, &actual.w);
-    assert_blocks_close_by_key("checked P", &expected.p, &actual.p);
-
-    let swapped = || {
-        BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
-            Arc::clone(&provider),
-            FusionTreeHomSpace::new(
-                source.space().homspace().domain().clone(),
-                source.space().homspace().codomain().clone(),
-            ),
-        )
-        .unwrap()
-    };
-    let expected = pinv_direct_into_dyn(engine, &mut dense, &base_input, swapped(), 0.0).unwrap();
-    let actual = pinv_direct_into_dyn(engine, &mut dense, &input, swapped(), 0.0).unwrap();
-    assert_blocks_close_by_key("checked pinv", &expected, &actual);
-}
-
-/// Every block of `expected` and `actual`, matched by fusion-tree key and
-/// compared element by element, whatever either layout's block order.
-fn assert_blocks_close_by_key<R, D: FactorScalar>(
-    what: &str,
-    expected: &BoundDynFactor<R, D>,
-    actual: &BoundDynFactor<R, D>,
-) {
-    let (left, right) = (
-        expected.space().space().structure(),
-        actual.space().space().structure(),
-    );
-    assert_eq!(left.block_count(), right.block_count(), "{what}");
-    for index in 0..left.block_count() {
-        let a = left.block(index).unwrap();
-        let b = right
-            .block(right.find_block_index_by_key(a.key()).unwrap())
-            .unwrap();
-        assert_eq!(a.shape(), b.shape(), "{what}");
-        let elements = a.shape().iter().product::<usize>();
-        for linear in 0..elements {
-            let (mut rest, mut x, mut y) = (linear, a.offset(), b.offset());
-            for (axis, &extent) in a.shape().iter().enumerate() {
-                x += (rest % extent) * a.strides()[axis];
-                y += (rest % extent) * b.strides()[axis];
-                rest /= extent;
-            }
-            let (x, y) = (
-                expected.data()[x].widen_complex(),
-                actual.data()[y].widen_complex(),
-            );
-            assert!(
-                (x - y).norm() <= 1e-12,
-                "{what} {index}/{linear}: {x} vs {y}"
-            );
-        }
-    }
-}
-
-#[test]
 fn polar_rejects_wrong_rectangular_direction_before_dense_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: invalid left/right directions are rejected before any sector SVD starts.
@@ -374,7 +230,7 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
     // borrowed source, in either direction. Sectors stream, so the first
     // sector's products run before the second SVD fails.
     let canonical = u1_cross_space_map::<f64>(&[(0, 2), (1, 2)], &[(0, 2), (1, 2)]);
-    let tensor = padded_copy(&U1FusionRule, &canonical);
+    let tensor = canonical;
     let before = tensor.data().to_vec();
     let input = bound_tensor(Arc::new(U1FusionRule), &tensor);
     for left in [true, false] {
@@ -395,8 +251,11 @@ fn polar_second_sector_failure_leaves_the_source_unchanged() {
         assert!(matches!(result, Err(OperationError::Dense(_))));
         assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
         assert_eq!(tensor.data(), before);
-        // The padded input is packed once; no SVD factor is laid out.
-        assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
+        // The canonical input is read in place; no SVD factor is laid out.
+        assert_eq!(
+            input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
+            0
+        );
         assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
     }
 }
@@ -470,7 +329,7 @@ fn polar_valid_direct_and_fallback_layouts_agree() {
         for (direct, fallback) in direct_second.iter().zip(&fallback_second) {
             assert!((direct - fallback).abs() < 1e-10);
         }
-        // The padded input is packed once; no SVD factor is laid out.
+        // The adjoint-view input is packed once; no SVD factor is laid out.
         assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
         assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
     }

@@ -386,8 +386,8 @@ pub fn select_truncation(
     validate_spectra(spectra)?;
     // Cross-sector ties go to the earlier slice position and the norms sum in
     // slice order, so the slice is put in TensorKit's sector order first.
-    // Why sort instead of rejecting: expert layouts and the id-ordered typed
-    // facade legitimately feed other orders, and the O(G log G) permutation
+    // Why sort instead of rejecting: the id-ordered typed facade
+    // legitimately feeds other orders, and the O(G log G) permutation
     // of G slice headers, one key per sector, is spectrum-free work. The
     // `SectorId` after the key only makes the order total for a provider
     // whose keys break the distinctness contract.

@@ -298,50 +298,6 @@ fn checked_generic_eigh_reconstructs_complex_unequal_multi_tree_sectors() {
 }
 
 #[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_eigh_reconstructs_padded_reordered_complex_input() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (source, hermitian, _) = generic_values_endomorphism_input();
-    let source_regions = source
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .unwrap();
-    let (expert, data) = padded_reordered_generic_endomorphism_input(&source, &hermitian);
-    assert!(expert
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .is_none());
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let checked =
-        BoundDynamicFusionMapSpace::bind_generic(expert.space().clone(), Arc::clone(&provider))
-            .unwrap();
-    let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let before = input.data().to_vec();
-    let full = eigh_full_dyn_checked_generic(
-        engine,
-        &mut symtn_dense::DefaultDenseExecutor::new(),
-        &input,
-        HermitianTol::DEFAULT,
-    )
-    .unwrap();
-    assert_complex_checked_eigh_reconstruction(&source_regions, &hermitian, &full);
-    assert_eq!(input.data(), before);
-    assert!(Arc::ptr_eq(full.v().space().provider_arc(), &provider));
-}
-
-#[test]
 fn checked_generic_eigh_stably_keeps_raw_exact_signed_ties() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, mut hermitian, _) = generic_values_endomorphism_input();
@@ -783,31 +739,23 @@ fn eigh_error_preserves_borrowed_input_and_publishes_no_output() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an EIGH backend failure leaves borrowed storage unchanged and returns no vectors.
     let rule = Arc::new(Z2FusionRule);
-    let canonical = hermitian_test_tensor(rule.as_ref(), &[SectorId::new(0), SectorId::new(1)]);
-    let padded = padded_copy(rule.as_ref(), &canonical);
-    for (tensor, is_fallback) in [(&canonical, false), (&padded, true)] {
-        let before = tensor.data().to_vec();
-        let mut dense = ScriptedExecutor::<FailAfterObservingEighInput>::default();
+    let tensor = hermitian_test_tensor(rule.as_ref(), &[SectorId::new(0), SectorId::new(1)]);
+    let before = tensor.data().to_vec();
+    let mut dense = ScriptedExecutor::<FailAfterObservingEighInput>::default();
 
-        let eigh_copy_rec = crate::probe::record();
-        let result = eigh_full(
-            engine,
-            &mut dense,
-            &bound_tensor_ref!(Arc::clone(&rule), tensor),
-        );
+    let result = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::clone(&rule), &tensor),
+    );
 
-        assert!(matches!(result, Err(OperationError::Dense(_))));
-        assert_eq!(tensor.data(), before);
-        assert!(!dense.observed.is_empty());
-        if is_fallback {
-            assert!(eigh_copy_rec.eigh_copy().input_pack_bytes > 0);
-        } else {
-            assert!(dense
-                .observed
-                .iter()
-                .all(|sector| before.windows(sector.len()).any(|window| window == sector)));
-        }
-    }
+    assert!(matches!(result, Err(OperationError::Dense(_))));
+    assert_eq!(tensor.data(), before);
+    assert!(!dense.observed.is_empty());
+    assert!(dense
+        .observed
+        .iter()
+        .all(|sector| before.windows(sector.len()).any(|window| window == sector)));
 }
 
 fn unequal_fallback_eigh_fixtures() -> (TestTensor<f64>, TestTensor<Complex64>) {
@@ -855,113 +803,6 @@ fn unequal_fallback_eigh_fixtures() -> (TestTensor<f64>, TestTensor<Complex64>) 
     )
     .unwrap();
     (real, complex)
-}
-
-#[test]
-fn eigh_fallback_publishes_the_provider_ascending_order() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the noncanonical fallback publishes the solver's ascending order,
-    // ±x ties included, unchanged.
-    let rule = Arc::new(Z2FusionRule);
-    let (source, _) = unequal_fallback_eigh_fixtures();
-    let source_regions = source
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap();
-    let padded = padded_copy(rule.as_ref(), &source);
-    assert!(padded
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_none());
-    let mut dense = ScriptedExecutor::<RecordingEigh>::default();
-
-    let eigh = eigh_full(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::clone(&rule), &padded),
-    )
-    .unwrap();
-
-    assert_eq!(dense.raw_values.len(), source_regions.len());
-    assert_eq!(
-        eigh.eigenvalues
-            .iter()
-            .map(|spectrum| spectrum.sector)
-            .collect::<Vec<_>>(),
-        source_regions
-            .iter()
-            .map(|region| region.coupled())
-            .collect::<Vec<_>>(),
-    );
-    for (spectrum, raw) in eigh.eigenvalues.iter().zip(&dense.raw_values) {
-        // The provider's ascending spectrum (with its ±2 pair) is published
-        // as returned, without a permutation.
-        assert!(raw.windows(2).all(|pair| pair[0] <= pair[1]));
-        assert!(raw.contains(&-2.0) && raw.contains(&2.0));
-        assert_eq!(&spectrum.values, raw);
-    }
-}
-
-#[test]
-fn eigh_fallback_reconstructs_complex_unequal_sectors() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the padded fallback scatters each complex owned V into the public
-    // factor structure without changing any sector's V D V^H reconstruction.
-    let rule = Arc::new(Z2FusionRule);
-    let (_, source) = unequal_fallback_eigh_fixtures();
-    let source_regions = source
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap();
-    let padded = padded_copy(rule.as_ref(), &source);
-    assert!(padded
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_none());
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let eigh = eigh_full(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::clone(&rule), &padded),
-    )
-    .unwrap();
-    let vector_regions = eigh
-        .v
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap();
-    for source_region in source_regions.iter() {
-        let vector_region = vector_regions
-            .iter()
-            .find(|region| region.coupled() == source_region.coupled())
-            .unwrap();
-        let values = &eigh
-            .eigenvalues
-            .iter()
-            .find(|spectrum| spectrum.sector == source_region.coupled())
-            .unwrap()
-            .values;
-        let n = source_region.rows();
-        assert_eq!(vector_region.rows(), n);
-        for column in 0..n {
-            for row in 0..n {
-                let reconstructed = (0..n)
-                    .map(|bond| {
-                        eigh.v.data()[vector_region.range().start + row + n * bond]
-                            * values[bond]
-                            * eigh.v.data()[vector_region.range().start + column + n * bond].conj()
-                    })
-                    .sum::<Complex64>();
-                let expected = source.data()[source_region.range().start + row + n * column];
-                assert!((reconstructed - expected).norm() < 1e-9);
-            }
-        }
-    }
 }
 
 #[test]
@@ -1404,121 +1245,6 @@ fn eigh_c64_reconstructs_real_valued_multi_sector_input_and_fixes_gauge() {
 }
 
 #[test]
-fn eigh_direct_regions_publish_vectors_by_factor_order_and_spectra_by_source_order() {
-    // What: reversed source spans leave spectra in source traversal while V is
-    // interpreted through the published factor's sector regions.
-    fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        let rule = Arc::new(Z2FusionRule);
-        let bound = bound_tensor(Arc::clone(&rule), tensor);
-        let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-            .unwrap()
-            .unwrap();
-        assert!(crate::factorize::compact_factor_plan_routes_for_test(&plan)
-            .iter()
-            .any(|route| {
-                let (source, left, _) = route.factor_regions_for_test();
-                left.is_some_and(|left| left != source)
-            }));
-
-        let mut dense = symtn_dense::DefaultDenseExecutor::new();
-        let eigh = eigh_full(engine, &mut dense, &bound.as_ref()).unwrap();
-        let source_regions = tensor
-            .structure()
-            .coupled_sector_regions(1)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            eigh.eigenvalues
-                .iter()
-                .map(|entry| entry.sector)
-                .collect::<Vec<_>>(),
-            source_regions
-                .iter()
-                .map(|region| region.coupled())
-                .collect::<Vec<_>>()
-        );
-        let vector_regions = eigh
-            .v
-            .structure()
-            .coupled_sector_regions(1)
-            .unwrap()
-            .unwrap();
-        for source in source_regions.iter() {
-            let sector = source.coupled();
-            let vector = vector_regions
-                .iter()
-                .find(|region| region.coupled() == sector)
-                .unwrap();
-            let values = &eigh
-                .eigenvalues
-                .iter()
-                .find(|entry| entry.sector == sector)
-                .unwrap()
-                .values;
-            let n = source.rows();
-            for col in 0..n {
-                for row in 0..n {
-                    let reconstructed = (0..n)
-                        .map(|bond| {
-                            eigh.v.data()[vector.range().start + row + n * bond].widen_complex()
-                                * values[bond]
-                                * eigh.v.data()[vector.range().start + col + n * bond]
-                                    .widen_complex()
-                                    .conj()
-                        })
-                        .sum::<Complex64>();
-                    let expected =
-                        tensor.data()[source.range().start + row + n * col].widen_complex();
-                    assert!(
-                        (reconstructed - expected).norm() < 2e-5,
-                        "sector {sector:?}, entry ({row}, {col})"
-                    );
-                }
-            }
-        }
-    }
-
-    let rule = Z2FusionRule;
-    let source = mixed_rectangular_tensor((3, 3), (2, 2));
-    let mut data = source.data().to_vec();
-    for region in source
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap()
-        .iter()
-    {
-        let n = region.rows();
-        for col in 0..n {
-            for row in 0..n {
-                data[region.range().start + row + n * col] = if row == col {
-                    (row + 2) as f64
-                } else {
-                    (row + col + 1) as f64 * 0.25
-                };
-            }
-        }
-    }
-    let real = reversed_complete_grid_copy(
-        &rule,
-        &TestTensor::<f64>::from_vec_with_fusion_space(data, source.fusion_space().clone())
-            .unwrap(),
-    );
-    check(&real);
-    check(
-        &TestTensor::<Complex64>::from_vec_with_fusion_space(
-            real.data()
-                .iter()
-                .map(|&value| Complex64::new(value, 0.0))
-                .collect(),
-            real.fusion_space().clone(),
-        )
-        .unwrap(),
-    );
-}
-
-#[test]
 fn eig_full_satisfies_the_eigen_equation_for_real_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
@@ -1589,58 +1315,6 @@ fn eig_full_satisfies_the_eigen_equation_for_real_input() {
             "eigen equation violated at raw position {index}: {lhs} != {rhs}"
         );
     }
-}
-
-#[test]
-fn eigh_refuses_a_block_that_stays_hermitian_after_the_column_swap() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: canonical sector blocks [[2,1],[1,2]] (spectrum {3, 1}) stored
-    // with reversed columns read as [[1,2],[2,1]], which is Hermitian with
-    // spectrum {3, -1}. The Hermitian preflight cannot catch it; only the
-    // stacking guard does.
-    let rule = Z2FusionRule;
-    let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(), leg()]),
-        FusionProductSpace::new([leg(), leg()]),
-    );
-    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
-    let canonical = TestTensor::<f64>::from_block_fn_with_fusion_space(space, 0.0, |key, _| {
-        let BlockKey::FusionTree(tree) = key else {
-            unreachable!("fusion-tree blocks")
-        };
-        if tree.codomain_tree() == tree.domain_tree() {
-            2.0
-        } else {
-            1.0
-        }
-    })
-    .unwrap();
-    let swapped = mis_stacked_endomorphism_copy(&rule, &canonical);
-    let provider = Arc::new(rule);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let reference = eigh_vals(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::clone(&provider), &canonical),
-    )
-    .unwrap();
-    assert_eq!(reference.len(), 2);
-    for spectrum in &reference {
-        assert_eq!(spectrum.values.len(), 2);
-        assert!((spectrum.values[0] - 1.0).abs() < 1e-12, "{reference:?}");
-        assert!((spectrum.values[1] - 3.0).abs() < 1e-12, "{reference:?}");
-    }
-    let swapped = bound_tensor(provider, &swapped);
-    assert_stacking_refusal(
-        eigh_vals(engine, &mut dense, &swapped.as_ref()),
-        "eigh_vals ",
-    );
-    assert_stacking_refusal(
-        eigh_full(engine, &mut dense, &swapped.as_ref()),
-        "eigh_full ",
-    );
 }
 
 #[test]

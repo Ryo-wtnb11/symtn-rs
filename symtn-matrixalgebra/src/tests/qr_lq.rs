@@ -95,67 +95,17 @@ fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
         probe.final_adjoint_copy_bytes,
         (left.data().len() + right.data().len()) * std::mem::size_of::<f64>()
     );
-    // Both outputs are appended in storage order, never zero-filled first.
-    assert_eq!(probe.output_prefill_bytes, 0);
-}
-
-#[test]
-fn compact_lq_append_proof_rejects_unordered_routes() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the storage-order proof refuses permuted, gapped and duplicated
-    // routes, and canonical input publishes by appending without a prefill.
-    let charges =
-        [U1Irrep::new(-1), U1Irrep::new(0), U1Irrep::new(1)].map(|charge| charge.sector_id());
-    let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
-    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
-    let mut plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
-    let routes = crate::factorize::compact_factor_plan_routes_for_test(&plan).to_vec();
-    assert!(
-        routes
-            .iter()
-            .filter(|route| route.factor_regions_for_test().1.is_some())
-            .count()
-            >= 2
-    );
-    let mut check = |routes: Vec<_>| {
-        crate::factorize::lq_routes_append_with_routes_for_test(&mut plan, routes).unwrap()
-    };
-    assert!(check(routes.clone()));
-    let mut permuted = routes.clone();
-    permuted.reverse();
-    assert!(!check(permuted));
-    let mut gapped = routes.clone();
-    gapped.remove(0);
-    assert!(!check(gapped));
-    let mut truncated = routes.clone();
-    truncated.pop();
-    assert!(!check(truncated));
-    let mut duplicated = routes.clone();
-    duplicated.insert(1, routes[0]);
-    assert!(!check(duplicated));
-
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let input = bound.as_ref();
-    let compact_lq_copy_rec = crate::probe::record();
-    lq_compact(engine, &mut dense, &input).unwrap();
-    assert_eq!(
-        compact_lq_copy_rec.compact_lq_copy().output_prefill_bytes,
-        0
-    );
 }
 
 #[test]
 fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
-    let (fallback_space, fallback_data) =
-        expert_generic_factorization_input(&canonical_space, &canonical_data, true);
     let (_, canonical_space) = bind_checked_layout(&canonical_space);
-    let (_, fallback_space) = bind_checked_layout(&fallback_space);
+    // The adjoint view is the noncanonical (packed) source.
+    let fallback_space = canonical_space.adjoint_view().unwrap();
     let canonical = BoundDynamicTensorRef::try_new(&canonical_space, &canonical_data).unwrap();
-    let fallback = BoundDynamicTensorRef::try_new(&fallback_space, &fallback_data).unwrap();
+    let fallback = BoundDynamicTensorRef::try_new(&fallback_space, &canonical_data).unwrap();
 
     let mut direct_dense = ScriptedExecutor::new(FailAfterObservingQrInput {
         qr_succeeds: true,
@@ -177,7 +127,7 @@ fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
 #[test]
 fn compact_lq_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: expert noncanonical compact LQ retains positive general pack-and-scatter evidence without direct-region scratch accounting.
+    // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence without direct-region scratch accounting.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -310,84 +260,6 @@ fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
     assert!(matches!(result, Err(OperationError::Dense(_))));
     assert_eq!(tensor.data(), before);
     assert!(!dense.observed.is_empty());
-}
-
-#[test]
-fn compact_svd_qr_lq_direct_regions_follow_factor_order_for_reversed_sector_spans() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
-    let source = mixed_rectangular_tensor((3, 2), (2, 4));
-    let tensor = reversed_complete_grid_copy(&rule, &source);
-    let bound = bound_tensor(Arc::new(rule), &tensor);
-    assert!(bound
-        .space()
-        .space()
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_some());
-    let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
-        .unwrap()
-        .unwrap();
-    assert!(crate::factorize::compact_factor_plan_routes_for_test(&plan)
-        .iter()
-        .any(|route| {
-            let (source, left, right) = route.factor_regions_for_test();
-            left.is_some_and(|left| left != source) || right.is_some_and(|right| right != source)
-        }));
-
-    let input = bound.as_ref();
-    let input = input.dynamic();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let svd = svd_compact_dyn(engine, &mut dense, &input).unwrap();
-    assert_compact_factors_reconstruct_input(&input, svd.u(), Some(svd.s()), svd.vh());
-    assert_eq!(
-        svd.singular_values()
-            .iter()
-            .map(|entry| entry.sector)
-            .collect::<Vec<_>>(),
-        tensor
-            .structure()
-            .coupled_sector_regions(1)
-            .unwrap()
-            .unwrap()
-            .iter()
-            .map(|region| region.coupled())
-            .collect::<Vec<_>>()
-    );
-    let Qr { q, r } = qr_compact_dyn(engine, &mut dense, &input).unwrap();
-    assert_compact_factors_reconstruct_input(&input, &q, None, &r);
-    let Lq { l, q } = lq_compact_dyn(engine, &mut dense, &input).unwrap();
-    assert_compact_factors_reconstruct_input(&input, &l, None, &q);
-
-    let complex = TestTensor::<Complex64>::from_vec_with_fusion_space(
-        tensor
-            .data()
-            .iter()
-            .map(|&value| Complex64::new(value, value * 0.25))
-            .collect(),
-        tensor.fusion_space().clone(),
-    )
-    .unwrap();
-    let complex_bound = bound_tensor(Arc::new(Z2FusionRule), &complex);
-    let complex_ref = complex_bound.as_ref();
-    let complex_input = complex_ref.dynamic();
-    let svd = svd_compact_dyn(engine, &mut dense, &complex_input).unwrap();
-    assert_compact_factors_reconstruct_input(&complex_input, svd.u(), Some(svd.s()), svd.vh());
-    assert_eq!(
-        svd.singular_values()
-            .iter()
-            .map(|entry| entry.sector)
-            .collect::<Vec<_>>(),
-        complex
-            .structure()
-            .coupled_sector_regions(1)
-            .unwrap()
-            .unwrap()
-            .iter()
-            .map(|region| region.coupled())
-            .collect::<Vec<_>>()
-    );
 }
 
 fn assert_rectangular_direct_qr(rows: usize, cols: usize) {

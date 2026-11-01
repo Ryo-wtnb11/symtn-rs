@@ -546,7 +546,7 @@ fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
 }
 
 #[test]
-fn native_full_svd_reconstructs_complex_square_and_padded_inputs() {
+fn native_full_svd_reconstructs_complex_square_input() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let square = one_sector_rectangular_matrix(
         vec![
@@ -558,22 +558,20 @@ fn native_full_svd_reconstructs_complex_square_and_padded_inputs() {
         2,
         2,
     );
-    for tensor in [&square, &padded_copy(&Z2FusionRule, &square)] {
-        let input = bound_tensor(Arc::new(Z2FusionRule), tensor);
-        let Some(mut dense) = NativeFullSvdSpy::new() else {
-            return;
-        };
+    let input = bound_tensor(Arc::new(Z2FusionRule), &square);
+    let Some(mut dense) = NativeFullSvdSpy::new() else {
+        return;
+    };
 
-        let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
+    let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
-        assert_eq!(dense.counts().svd_full, 1);
-        assert_compact_factors_reconstruct_input(
-            &input.as_ref().dynamic(),
-            full.u(),
-            Some(full.s()),
-            full.vh(),
-        );
-    }
+    assert_eq!(dense.counts().svd_full, 1);
+    assert_compact_factors_reconstruct_input(
+        &input.as_ref().dynamic(),
+        full.u(),
+        Some(full.s()),
+        full.vh(),
+    );
 }
 
 #[test]

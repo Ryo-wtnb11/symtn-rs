@@ -2,8 +2,8 @@
 //! through one matrix-algebra authority in both fusion modes.
 //!
 //! The same spectra run on a multiplicity-free U(1) and SU(2) rule and on
-//! the checked SU(3) rule (fusion-symbols), on the canonical bond layout, its dual,
-//! and (multiplicity-free) an expert (padded) layout of the same bond. Every op must take the same route
+//! the checked SU(3) rule (fusion-symbols), on the canonical bond layout and its
+//! dual. Every op must take the same route
 //! class with bit-identical values in every row. The oracle is independent of
 //! the route under test: compact `inv`/`pinv`/`exp`/`\` are elementwise
 //! (TensorKit `src/tensors/diagonal.jl`), `S`/`D` of a diagonal are its
@@ -13,7 +13,6 @@ use super::*;
 use num_complex::{Complex32, Complex64};
 use symtn_core::LieGroupFusionRule;
 use symtn_matrixalgebra::FactorScalar;
-use symtn_tensors::DynamicFusionMapSpace;
 
 /// Route class and bit pattern of a result. Value lists are sorted by
 /// length (the fixtures' degeneracies differ), so sector ids of different
@@ -140,52 +139,6 @@ macro_rules! matrix {
     }};
 }
 
-/// `t` re-laid on a padded (expert) layout of its own bond space: the
-/// spectrum, hom space and provider are unchanged.
-fn expert_layout<R, D>(
-    t: &TensorMap<R, D>,
-    bind: impl FnOnce(
-        DynamicFusionMapSpace,
-        Arc<R>,
-    ) -> Result<BoundDynamicFusionMapSpace<R>, OperationError>,
-) -> TensorMap<R, D>
-where
-    R: symtn_core::FusionRule,
-    D: Clone,
-{
-    let body = owned(t);
-    let TypedData::Diagonal(spectrum) = body.data.as_ref() else {
-        panic!("fixture must be compact");
-    };
-    let space = body.space.space();
-    let structure = space.structure();
-    let (mut offset, mut blocks) = (1, Vec::new());
-    for index in 0..structure.block_count() {
-        let block = structure.block(index).unwrap();
-        blocks.push(
-            BlockSpec::column_major_with_key(block.key().clone(), block.shape().to_vec(), offset)
-                .unwrap(),
-        );
-        offset += block.shape().iter().product::<usize>() + 1;
-    }
-    let layout = DynamicFusionMapSpace::try_from_layout(
-        space.homspace().clone(),
-        BlockStructure::from_blocks_with_rank(2, blocks).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(body.space.provider())
-    .unwrap();
-    let expert = bind(layout, Arc::clone(body.space.provider_arc())).unwrap();
-    assert!(!matches!(
-        expert.space().structure().coupled_sector_regions(1),
-        Ok(Some(regions)) if regions.iter().all(|region| region.has_aligned_diagonal())
-    ));
-    TensorMap {
-        runtime: t.runtime.clone(),
-        repr: owned_repr(TypedTensorBody::diagonal(expert, spectrum.clone())),
-    }
-}
-
 type Rows = Vec<(&'static str, Route)>;
 
 /// `two` on the bond's two-fold sector and `three` on its three-fold one,
@@ -219,8 +172,8 @@ where
 }
 
 /// The matrix of one dtype's spectra, `(two values, three values)`, on the
-/// canonical and the expert layout of U(1), SU(2) and SU(3) bonds; every
-/// layout and rule must agree row by row. Returns the agreed rows.
+/// canonical layout of U(1), SU(2) and SU(3) bonds and their duals; every
+/// rule must agree row by row. Returns the agreed rows.
 fn agreed_matrix<D>(engine: &mut dyn Engine, two: [D; 2], three: [D; 3], rcond: f64) -> Rows
 where
     D: AdvancedLinalgScalar + FactorizationScalar,
@@ -239,11 +192,6 @@ where
         let t: TensorMap<_, D> =
             TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
         all.push((name, matrix!(engine, t, rcond)));
-        let expert = expert_layout(
-            &t,
-            BoundDynamicFusionMapSpace::bind_multiplicity_free_checked,
-        );
-        all.push((name, matrix!(engine, expert, rcond)));
     }
 
     let su2 = Arc::new(SU2FusionRule);
@@ -252,11 +200,6 @@ where
     let t: TensorMap<_, D> =
         TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
     all.push(("su2", matrix!(engine, t, rcond)));
-    let expert = expert_layout(
-        &t,
-        BoundDynamicFusionMapSpace::bind_multiplicity_free_checked,
-    );
-    all.push(("su2 expert", matrix!(engine, expert, rcond)));
 
     let su3 =
         Arc::new(LieGroupFusionRule::new(fusion_symbols::lie::GroupId::su(3).unwrap()).unwrap());
@@ -267,9 +210,6 @@ where
     ] {
         let t: TensorMap<_, D> =
             TensorMap::diagonal(engine, &runtime, &bond, spectra(&bond, two, three)).unwrap();
-        // Why no expert layout here: `bind_generic` needs a `FusionRule`, which
-        // the checked fusion-symbols provider is not; the checked expert-layout
-        // admission is pinned at the seam with a generic spy provider.
         all.push((name, matrix!(engine, t, rcond)));
     }
 

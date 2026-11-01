@@ -252,7 +252,7 @@ where
     )
 }
 
-/// The per-subblock checked core builder: re-bases expert tilings whose
+/// The per-subblock checked core builder: re-bases tilings whose
 /// coupled-sector trees are not canonically aligned, or reports the same
 /// structure error as before the coupled-region route.
 pub(crate) fn compile_checked_generic_core_plan_general(
@@ -503,24 +503,6 @@ impl FusionBlockMatrixLayout {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn finish_all<C>(
-        self,
-        finish: impl FnMut(
-            FusionBlockMatrixGroupBuilder,
-        ) -> Result<FusionBlockMatrixGroup<C>, OperationError>,
-    ) -> FinishedLayout<C> {
-        FinishedLayout {
-            groups: self
-                .groups
-                .into_iter()
-                .flatten()
-                .map(finish)
-                .collect::<Result<_, _>>()
-                .unwrap(),
-        }
-    }
-
     /// Moves out the group of `coupled`; one destination group pairs it once.
     pub(super) fn take_group(
         &mut self,
@@ -535,17 +517,12 @@ impl FusionBlockMatrixLayout {
     }
 }
 
-#[cfg(test)]
-pub(super) struct FinishedLayout<C> {
-    pub(super) groups: Vec<FusionBlockMatrixGroup<C>>,
-}
-
 /// Pairs each destination coupled-sector group with the operand groups of the
 /// same coupled sector, giving every shared GEMM index one tree order.
 ///
 /// Why not trust each operand's own order: the GEMM multiplies rows and
-/// columns by position, and an expert tiling may stack the trees of a
-/// coupled sector in any order, so `lhs` columns and `rhs` rows (and the
+/// columns by position, and each operand group lists a coupled sector's trees
+/// in its own storage's first-appearance order, so `lhs` columns and `rhs` rows (and the
 /// destination rows and columns against the operand ones) could otherwise name
 /// different trees at one position (#1517). Aligned orders are left
 /// untouched, so an operand whose storage already matches keeps its direct
@@ -805,20 +782,6 @@ impl FusionBlockMatrixGroupBuilder {
             block_indices,
             subblocks,
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn finish_operand<R>(
-        self,
-        _rule: &R,
-        source: &FusionOperandLayout<'_>,
-        op: MatrixOp,
-    ) -> Result<FusionBlockMatrixGroup<R::Scalar>, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols,
-        R::Scalar: DenseBlockScalar,
-    {
-        self.finish_operand_generic(source, op)
     }
 
     /// The operand sibling of [`Self::finish_generic`]: a lazy adjoint's

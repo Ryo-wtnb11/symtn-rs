@@ -989,15 +989,13 @@ mod tests {
 
     use num_complex::Complex64;
     use symtn_core::{
-        BlockSpec, BlockStructure, BraidingStyleKind, FusionProductSpace, FusionRule,
-        FusionStyleKind, FusionTreeHomSpace, MultiplicityFreeFusionRule,
-        MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, PhysicalFusionBasis,
-        RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, U1FusionRule,
-        U1Irrep,
+        BraidingStyleKind, FusionProductSpace, FusionRule, FusionStyleKind, FusionTreeHomSpace,
+        MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
+        PhysicalFusionBasis, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec,
+        U1FusionRule, U1Irrep,
     };
 
     use super::*;
-    use crate::DynamicFusionMapSpace;
 
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     struct ProbePhysicalError;
@@ -1409,40 +1407,6 @@ mod tests {
         assert!(project_physical_host(&disjoint, &[1, 1], &[7.0])
             .unwrap()
             .is_empty());
-    }
-
-    #[test]
-    fn projection_preserves_exact_strided_layout_and_zeroes_holes() {
-        let rule = U1FusionRule;
-        let leg = || SectorLeg::new([(U1Irrep::new(0), 1)], false);
-        let homspace = FusionTreeHomSpace::new(
-            FusionProductSpace::new([leg()]),
-            FusionProductSpace::new([leg()]),
-        );
-        let key = homspace.fusion_tree_keys(&rule)[0].clone();
-        let structure = BlockStructure::from_blocks(vec![BlockSpec::with_key(
-            key.into(),
-            vec![1, 1],
-            vec![1, 1],
-            3,
-        )
-        .unwrap()])
-        .unwrap();
-        let layout = DynamicFusionMapSpace::try_from_layout(homspace, structure)
-            .unwrap()
-            .try_bind_rule(&rule)
-            .unwrap();
-        let raw = layout;
-        let bound =
-            BoundDynamicFusionMapSpace::bind_multiplicity_free(raw, Arc::new(rule)).unwrap();
-
-        let projected = project_physical_host(&bound, &[1, 1], &[4.5]).unwrap();
-        assert_eq!(projected.len(), bound.space().required_len().unwrap());
-        assert_eq!(projected, [0.0, 0.0, 0.0, 4.5]);
-        let (_, expanded) =
-            expand_physical_host(BoundDynamicTensorRef::try_new(&bound, &projected).unwrap())
-                .unwrap();
-        assert_eq!(expanded, [4.5]);
     }
 
     #[test]

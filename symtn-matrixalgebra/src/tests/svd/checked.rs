@@ -545,41 +545,6 @@ fn checked_generic_full_svd_local_shape_error_precedes_provider_query() {
     assert_eq!(provider.calls.get(), 0);
 }
 
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_native_full_svd_reconstructs_complex_interleaved_square_trees() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (canonical, _, data) = generic_values_endomorphism_input();
-    let (interleaved_space, interleaved_data) =
-        interleaved_generic_endomorphism_input(&canonical, &data);
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let space = BoundDynamicFusionMapSpace::bind_generic(
-        interleaved_space.space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let input = BoundDynamicTensorRef::try_new(&space, &interleaved_data).unwrap();
-    let Some(mut dense) = NativeFullSvdSpy::new() else {
-        return;
-    };
-
-    let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
-
-    assert_eq!(dense.counts().svd_full, 2);
-    assert_compact_factors_reconstruct_input(&input, full.u(), Some(full.s()), full.vh());
-    assert!(Arc::ptr_eq(full.u().space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(full.s().space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(full.vh().space().provider_arc(), &provider));
-}
-
 fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize::FactorScalar>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (base, data) = generic_factorization_input();
@@ -881,143 +846,10 @@ fn checked_generic_svd_compact_enumerates_each_factor_layout_once() {
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn compact_diagonal_on_an_expert_bond_layout_is_normalized_not_refused() {
-    // What: a compact diagonal whose bond space has an expert (padded) layout
-    // is re-derived in canonical layout before the direct route, so its
-    // values, eigenvalues and null space equal those on the canonical bond,
-    // and its compact QR factors stay on the given expert space.
-    let x = SectorId::new(1);
-    let vacuum = SectorId::new(0);
-    let leg = SectorLeg::new([(vacuum, 1), (x, 2)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg.clone()]),
-        FusionProductSpace::new([leg]),
-    );
-    let source = BoundDynamicFusionMapSpace::from_final_homspace_generic(
-        Arc::new(FactorGenericRule),
-        homspace,
-    )
-    .unwrap();
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: RuleIdentity::new_unique::<LateGenericSpy>(),
-    });
-    let canonical = bind_to_spy(&source, &provider);
-    let source_structure = source.space().structure();
-    let mut offset = 1usize;
-    let mut blocks = Vec::new();
-    for index in 0..source_structure.block_count() {
-        let block = source_structure.block(index).unwrap();
-        blocks.push(
-            BlockSpec::column_major_with_key(block.key().clone(), block.shape().to_vec(), offset)
-                .unwrap(),
-        );
-        offset += block.shape().iter().product::<usize>() + 1;
-    }
-    let structure = BlockStructure::from_blocks_with_rank(2, blocks).unwrap();
-    let layout =
-        DynamicFusionMapSpace::try_from_layout(canonical.space().homspace().clone(), structure)
-            .unwrap()
-            .try_bind_rule(provider.as_ref())
-            .unwrap();
-    let expert =
-        BoundDynamicFusionMapSpace::bind_generic(layout.clone(), Arc::clone(&provider)).unwrap();
-    assert!(!matches!(
-        expert.space().structure().coupled_sector_regions(1),
-        Ok(Some(regions)) if regions.iter().all(|region| region.has_aligned_diagonal())
-    ));
-    let spectrum = [
-        SectorSpectrum {
-            sector: vacuum,
-            values: vec![-2.0],
-        },
-        SectorSpectrum {
-            sector: x,
-            values: vec![0.0, 3.0],
-        },
-    ];
-    let diagonal = |space| FactorSource::Diagonal {
-        space,
-        spectrum: &spectrum,
-    };
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    assert_eq!(
-        svd_vals_checked_generic(&mut dense, diagonal(&expert)).unwrap(),
-        svd_vals_checked_generic(&mut dense, diagonal(&canonical)).unwrap()
-    );
-    assert_eq!(
-        eig_vals_checked_generic(&mut dense, diagonal(&expert)).unwrap(),
-        eig_vals_checked_generic(&mut dense, diagonal(&canonical)).unwrap()
-    );
-    let expert_null = left_null_checked_generic(&mut dense, diagonal(&expert)).unwrap();
-    let canonical_null = left_null_checked_generic(&mut dense, diagonal(&canonical)).unwrap();
-    assert_eq!(expert_null.data(), canonical_null.data());
-    assert_eq!(
-        expert_null.space().space().structure(),
-        canonical_null.space().space().structure()
-    );
-    let Qr { q, r } = qr_compact_checked_generic(&mut dense, diagonal(&expert)).unwrap();
-    for factor in [q, r] {
-        let FactorOutput::Diagonal { space, .. } = factor else {
-            panic!("a compact diagonal's QR factors stay compact");
-        };
-        assert_eq!(space.space().structure(), expert.space().structure());
-    }
-    // The elementwise matrix functions admit the expert layout through
-    // the same structural admission (no dense fallback), and a spectrum
-    // factor's bond `fuse(V)` is the canonical layout, not the expert one.
-    admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&expert, &spectrum).unwrap();
-    let bond = |space| {
-        spectrum_bond::<CheckedGenericAdmissionMode, _, _>(space, &spectrum)
-            .unwrap()
-            .space()
-            .structure()
-            .clone()
-    };
-    assert_eq!(bond(&expert), bond(&canonical));
-    assert_ne!(bond(&expert), *expert.space().structure());
-    let mut missing = spectrum.to_vec();
-    missing.pop();
-    assert!(matches!(
-        admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&expert, &missing),
-        Err(CheckedGenericFactorPlanError::Operation(
-            OperationError::InvalidArgument { message }
-        )) if message.contains("sector count")
-    ));
-}
-
-/// `space` re-laid with one padding element before every block: an expert
-/// layout of the same hom space whose regions are not aligned diagonals.
-fn padded_layout(space: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
-    let structure = space.structure();
-    let (mut offset, mut blocks) = (1usize, Vec::new());
-    for index in 0..structure.block_count() {
-        let block = structure.block(index).unwrap();
-        blocks.push(
-            BlockSpec::column_major_with_key(block.key().clone(), block.shape().to_vec(), offset)
-                .unwrap(),
-        );
-        offset += block.shape().iter().product::<usize>() + 1;
-    }
-    DynamicFusionMapSpace::try_from_layout(
-        space.homspace().clone(),
-        BlockStructure::from_blocks_with_rank(2, blocks).unwrap(),
-    )
-    .unwrap()
-}
-
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
 fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
     // What: the admission of inv/pinv/exp/solve is a
     // structural check on the bond's blocks. Warm, it allocates nothing and
-    // queries no provider, on the canonical and on an expert layout, in both
-    // fusion modes; misuse is still refused.
+    // queries no provider, in both fusion modes; misuse is still refused.
     use super::super::null_space::counting_alloc;
 
     let leg = SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 3)], false);
@@ -1044,13 +876,6 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
         homspace.clone(),
     )
     .unwrap();
-    let mf_expert = BoundDynamicFusionMapSpace::bind_multiplicity_free_checked(
-        padded_layout(mf_canonical.space())
-            .try_bind_rule(mf.as_ref())
-            .unwrap(),
-        Arc::clone(&mf),
-    )
-    .unwrap();
 
     let source = BoundDynamicFusionMapSpace::from_final_homspace_generic(
         Arc::new(FactorGenericRule),
@@ -1064,149 +889,44 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
         identity: RuleIdentity::new_unique::<LateGenericSpy>(),
     });
     let checked_canonical = bind_to_spy(&source, &provider);
-    let checked_expert = BoundDynamicFusionMapSpace::bind_generic(
-        padded_layout(checked_canonical.space())
-            .try_bind_rule(provider.as_ref())
-            .unwrap(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
 
-    let mut report = Vec::new();
-    for (name, space) in [("mf canonical", &mf_canonical), ("mf expert", &mf_expert)] {
-        let admit = || {
-            admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(
-                space, &spectrum,
-            )
-        };
-        admit().unwrap();
-        let ((), allocs) = counting_alloc::measure(|| admit().unwrap());
-        report.push((name, allocs.calls, allocs.bytes, 0));
-        assert!(
-            matches!(admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(space, &short), Err(OperationError::InvalidArgument { message }) if message.contains("length"))
-        );
-    }
-    for (name, space) in [
-        ("checked canonical", &checked_canonical),
-        ("checked expert", &checked_expert),
-    ] {
-        let admit =
-            || admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(space, &spectrum);
-        admit().unwrap();
-        provider.calls.set(0);
-        let ((), allocs) = counting_alloc::measure(|| admit().unwrap());
-        report.push((name, allocs.calls, allocs.bytes, provider.calls.get()));
-        assert!(matches!(
-            admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(space, &short),
-            Err(CheckedGenericFactorPlanError::Operation(
-                OperationError::InvalidArgument { message }
-            )) if message.contains("length")
-        ));
-    }
+    let admit = || {
+        admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(
+            &mf_canonical,
+            &spectrum,
+        )
+    };
+    admit().unwrap();
+    let ((), allocs) = counting_alloc::measure(|| admit().unwrap());
+    let mut report = vec![("mf canonical", allocs.calls, allocs.bytes, 0)];
+    assert!(matches!(
+        admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(
+            &mf_canonical,
+            &short
+        ),
+        Err(OperationError::InvalidArgument { message }) if message.contains("length")
+    ));
+
+    let admit = || {
+        admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&checked_canonical, &spectrum)
+    };
+    admit().unwrap();
+    provider.calls.set(0);
+    let ((), allocs) = counting_alloc::measure(|| admit().unwrap());
+    report.push((
+        "checked canonical",
+        allocs.calls,
+        allocs.bytes,
+        provider.calls.get(),
+    ));
+    assert!(matches!(
+        admit_compact_diagonal::<CheckedGenericAdmissionMode, _, _>(&checked_canonical, &short),
+        Err(CheckedGenericFactorPlanError::Operation(
+            OperationError::InvalidArgument { message }
+        )) if message.contains("length")
+    ));
     eprintln!("admission (calls, bytes, provider queries): {report:?}");
     for (name, calls, bytes, queries) in report {
         assert_eq!((calls, bytes, queries), (0, 0, 0), "{name}");
-    }
-}
-
-#[test]
-fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admission() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: compact QR/LQ/polar keep the input space and emit
-    // their spectra in region order. On an aligned expert layout whose
-    // blocks are not in sector order that order is not sector order, so the
-    // elementwise admission must accept an unsorted spectrum exactly as the
-    // region admission does, and still refuse misuse.
-    let mf = Arc::new(U1FusionRule);
-    let leg = SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 3)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg.clone()]),
-        FusionProductSpace::new([leg]),
-    );
-    let canonical = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::clone(&mf),
-        homspace.clone(),
-    )
-    .unwrap();
-    // The same blocks, contiguous and aligned, stored in reverse sector order.
-    let structure = canonical.space().structure();
-    let mut offset = 0usize;
-    let mut blocks = Vec::new();
-    for index in (0..structure.block_count()).rev() {
-        let block = structure.block(index).unwrap();
-        blocks.push(
-            BlockSpec::column_major_with_key(block.key().clone(), block.shape().to_vec(), offset)
-                .unwrap(),
-        );
-        offset += block.shape().iter().product::<usize>();
-    }
-    let reversed = BoundDynamicFusionMapSpace::bind_multiplicity_free_checked(
-        DynamicFusionMapSpace::try_from_layout(
-            homspace,
-            BlockStructure::from_blocks_with_rank(2, blocks).unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(mf.as_ref())
-        .unwrap(),
-        Arc::clone(&mf),
-    )
-    .unwrap();
-    let regions = reversed
-        .space()
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .unwrap();
-    assert!(regions.iter().all(|region| region.has_aligned_diagonal()));
-
-    let sorted = [
-        SectorSpectrum {
-            sector: SectorId::new(0),
-            values: vec![1.0, -2.0],
-        },
-        SectorSpectrum {
-            sector: SectorId::new(1),
-            values: vec![3.0, 4.0, -5.0],
-        },
-    ];
-    let unsorted = [sorted[1].clone(), sorted[0].clone()];
-    type Mf = symtn_core::MultiplicityFreeAdmissionMode;
-    for spectrum in [&sorted[..], &unsorted[..]] {
-        admit_compact_diagonal::<Mf, _, _>(&reversed, spectrum).unwrap();
-        admit_compact_diagonal::<Mf, _, _>(&canonical, spectrum).unwrap();
-    }
-    // Region order is what QR emits; on this layout it is the reverse of
-    // sector order, and that spectrum is admitted.
-    let Qr { q, .. } = qr_compact_from_source::<Mf, _, _, _, _>(
-        engine,
-        &mut symtn_dense::DefaultDenseExecutor::new(),
-        FactorSource::Diagonal {
-            space: &reversed,
-            spectrum: &sorted,
-        },
-    )
-    .unwrap();
-    let FactorOutput::Diagonal { space, values } = q else {
-        panic!("compact QR of a diagonal stays compact");
-    };
-    let emitted: Vec<_> = values.iter().map(|entry| entry.sector).collect();
-    let region_order: Vec<_> = regions.iter().map(|region| region.coupled()).collect();
-    assert_eq!(emitted, region_order);
-    assert_eq!(emitted, [SectorId::new(1), SectorId::new(0)]);
-    admit_compact_diagonal::<Mf, _, _>(&space, &values).unwrap();
-
-    let mut short = unsorted.to_vec();
-    short[0].values.pop();
-    let mut duplicate = unsorted.to_vec();
-    duplicate[1].sector = duplicate[0].sector;
-    for (malformed, reason) in [
-        (&short[..], "length"),
-        (&duplicate[..], "twice"),
-        (&unsorted[..1], "sector count"),
-    ] {
-        assert!(matches!(
-            admit_compact_diagonal::<Mf, _, _>(&reversed, malformed),
-            Err(OperationError::InvalidArgument { message }) if message.contains(reason)
-        ));
     }
 }

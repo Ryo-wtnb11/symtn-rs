@@ -2,8 +2,6 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
-#[cfg(all(test, feature = "cgc-gen"))]
-use symtn_core::BlockStructure;
 use symtn_core::{
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericStructureError, CoreError,
     FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace, FusionTreePairKey,
@@ -120,24 +118,6 @@ impl<R> fmt::Debug for BoundDynamicFusionMapSpace<R> {
             .field("space", &self.space)
             .field("provider_type", &std::any::type_name::<R>())
             .finish_non_exhaustive()
-    }
-}
-
-#[cfg(all(test, feature = "cgc-gen"))]
-impl<R> BoundDynamicFusionMapSpace<R> {
-    /// The same binding over a caller-restacked layout of the same trees:
-    /// the only way a test obtains a non-canonical checked Generic operand,
-    /// since checked admission always derives the canonical layout.
-    pub(crate) fn with_test_structure(&self, structure: BlockStructure) -> Self {
-        Self {
-            space: DynamicFusionMapSpace {
-                subblock_structure: structure.into_shared(),
-                adjoint: OnceLock::new(),
-                ..self.space.clone()
-            },
-            provider: Arc::clone(&self.provider),
-            layout_build: self.layout_build,
-        }
     }
 }
 
@@ -497,8 +477,8 @@ where
         })
     }
 
-    /// Expert admission boundary for an already-constructed multiplicity-free
-    /// dynamic layout.
+    /// Binds an existing multiplicity-free dynamic layout (a canonical layout
+    /// or an adjoint view of one) to `provider`.
     pub fn bind_multiplicity_free(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -557,7 +537,7 @@ where
     /// Structural, algebraic, and complete-grid proofs run before any layout
     /// or admission state is published, and the provider only needs to certify
     /// [`CheckedFusionAlgebra`] rather than the sealed built-in lowered codec.
-    /// Matching unchecked Subset and Complete stamps are revalidated.
+    /// A matching unchecked Complete stamp is revalidated.
     pub fn bind_multiplicity_free_checked(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -981,17 +961,16 @@ where
     /// Creates the zero-copy adjoint lowering/replay view while retaining the
     /// exact provider allocation of the source binding.
     ///
-    /// This preserves the source blocks' offsets and custom strides while
-    /// swapping their logical codomain/domain axes. It is an expert view
-    /// capability used by lazy lowering, not an owned ordinary adjoint output
-    /// layout.
+    /// This preserves the source blocks' offsets and strides while swapping
+    /// their logical codomain/domain axes. It is a view used by lazy lowering,
+    /// not an owned ordinary adjoint output layout.
     pub fn adjoint_view(&self) -> Result<Self, OperationError> {
         let space = self.space.adjoint_view()?;
         Self::from_derived_like(self, space)
     }
 
-    /// Expert admission boundary for an already-constructed
-    /// multiplicity-aware dynamic layout.
+    /// Binds an existing multiplicity-aware dynamic layout (a canonical layout
+    /// or an adjoint view of one) to `provider`.
     pub fn bind_generic(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,

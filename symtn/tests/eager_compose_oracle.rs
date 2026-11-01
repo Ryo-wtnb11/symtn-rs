@@ -7,8 +7,6 @@
 //! adjoint enters the oracle materialized (the exact block copy
 //! `block(t^H, c) = block(t, c)^H`). Rejected compositions are matched by
 //! their typed error.
-//! The non-canonical (irregular-core) tilings are checked in the lib test
-//! `typed::contract_stacking_tests`, where an expert layout can be built.
 
 use crate::common;
 

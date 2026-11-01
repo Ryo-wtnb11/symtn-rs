@@ -12,26 +12,20 @@ use symtn_core::{
     U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
-    build_tree_pair_transform_group_plan, BoundDynamicFusionMapSpace, DynamicFusionMapSpace,
-    RuleIdentity, TreeTransformBlockSpec, TreeTransformExecutionContext, TreeTransformOperation,
+    build_tree_pair_transform_group_plan, BoundDynamicFusionMapSpace, RuleIdentity,
+    TreeTransformBlockSpec, TreeTransformExecutionContext, TreeTransformOperation,
     TreeTransformStructure,
 };
 
-/// `structure` over the all-codomain hom space of `legs`, bound to `rule`
-/// through the expert admission of an explicit layout: the source an eager
-/// transform stages.
-fn bound_source<R: MultiplicityFreeFusionRule, const N: usize>(
+/// The canonical all-codomain space of `legs`, bound to `rule`: the source
+/// an eager transform stages.
+fn bound_source<R: MultiplicityFreeRigidSymbols>(
     rule: Arc<R>,
     legs: impl IntoIterator<Item = SectorLeg>,
-    structure: BlockStructure,
 ) -> BoundDynamicFusionMapSpace<R> {
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new(legs), FusionProductSpace::new([]));
-    let space = DynamicFusionMapSpace::try_from_layout(homspace, structure)
-        .unwrap()
-        .try_bind_rule(rule.as_ref())
-        .unwrap();
-    BoundDynamicFusionMapSpace::bind_multiplicity_free(space, rule).unwrap()
+    BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(rule, homspace).unwrap()
 }
 
 /// The eager staging of `operation` on `source`: destination derivation plus
@@ -174,29 +168,6 @@ impl MultiplicityFreeRigidSymbols for AdmissionCountingSu2Rule {
     }
 }
 
-fn rank_129_su2_vacuum_structure() -> BlockStructure {
-    const RANK: usize = 129;
-
-    let vacuum = SectorId::new(0);
-    let key = FusionTreePairKey::pair(
-        FusionTreeKey::try_new_for_rule(
-            &SU2FusionRule,
-            vec![vacuum; RANK],
-            vacuum,
-            vec![false; RANK],
-            vec![vacuum; RANK - 2],
-            vec![MultiplicityIndex::ONE; RANK - 1],
-        )
-        .unwrap(),
-        FusionTreeKey::try_new_for_rule(&SU2FusionRule, [], vacuum, [], [], []).unwrap(),
-    );
-    BlockStructure::from_parts(
-        SectorStructure::from_keys(RANK, [BlockKey::from(key)]).unwrap(),
-        DegeneracyStructure::packed_column_major(RANK, [vec![1; RANK]]).unwrap(),
-    )
-    .unwrap()
-}
-
 #[test]
 fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_work() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -208,14 +179,10 @@ fn rank_129_second_exact_warm_staging_resolves_without_allocation_or_provider_wo
         nsymbol_calls: Arc::clone(&calls),
     };
     let vacuum = SU2FusionRule.vacuum();
-    let source = bound_source::<_, 129>(
+    let source = bound_source(
         Arc::new(rule),
         (0..129).map(|_| SectorLeg::new([(vacuum, 1)], false)),
-        rank_129_su2_vacuum_structure(),
     );
-    // A hand-built layout is lookup-only unless admitted; mark it canonical
-    // so the exact key publishes.
-    symtn_core::testing::mark_structure_canonical(source.space().structure());
     let operation = TreeTransformOperation::permute(0..129, []);
     let mut context = TreeTransformExecutionContext::<f64, RuleIdentity>::default();
     let cold = stage(engine, &mut context, &source, &operation);
