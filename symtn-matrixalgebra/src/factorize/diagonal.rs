@@ -106,17 +106,14 @@ where
 ///
 /// Why not [`admit_diagonal_bond`] itself: an elementwise map reads no
 /// coupled-sector region, so a sector-sorted spectrum is matched against the
-/// bond's blocks directly, with no per-sector map and no canonical layout
-/// for an expert bond. A bound one-leg space has one block per coupled
+/// bond's blocks directly, with no per-sector map. A bound one-leg space has
+/// one block per coupled
 /// sector, so a count match plus a match per block covers every entry
 /// exactly once.
 ///
-/// An unsorted spectrum takes the region admission. It is reachable: the
-/// diagonal constructor and the spectrum factors sort by sector, but compact
-/// QR/LQ/polar keep the input space and emit their phase and magnitude
-/// spectra in region order ([`diagonal_phase_magnitude_spectra`]), which on
-/// an aligned expert layout whose blocks are not in sector order is not
-/// sector order.
+/// An unsorted spectrum takes the region admission: compact QR/LQ/polar
+/// keep the input space and emit their phase and magnitude spectra in region
+/// order ([`diagonal_phase_magnitude_spectra`]).
 #[doc(hidden)]
 pub fn admit_compact_diagonal<M, R, D>(
     space: &BoundDynamicFusionMapSpace<R>,

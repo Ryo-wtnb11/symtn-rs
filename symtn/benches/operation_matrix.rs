@@ -10,7 +10,7 @@ use symtn::typed::Engine;
 
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    Complex64, ContractSpec, CpuEngine, Eig, Error, GradedSpace, Pool, Qr, Runtime, TensorMap,
+    Complex64, ContractSpec, CpuEngine, Eig, Error, GradedSpace, Pool, Runtime, TensorMap,
     TensorScalar,
 };
 
@@ -25,7 +25,7 @@ use symtn::sector::{
 };
 use symtn::typed::FactorScalar;
 use symtn::typed::FusionTreeKey;
-use symtn_core::{BlockSpec, BlockStructure, FusionProductSpace, FusionTreeHomSpace};
+use symtn_core::{FusionProductSpace, FusionTreeHomSpace};
 use symtn_dense::strided_batch_runs;
 use symtn_matrixalgebra::seam::{
     eig_full_from_source, lq_compact_from_source, lq_full_from_source, qr_compact_from_source,
@@ -33,7 +33,7 @@ use symtn_matrixalgebra::seam::{
     EigFullDyn, FactorSource,
 };
 use symtn_matrixalgebra::BoundDynFactor;
-use symtn_tensors::{BoundDynamicFusionMapSpace, BoundDynamicTensorRef, DynamicFusionMapSpace};
+use symtn_tensors::{BoundDynamicFusionMapSpace, BoundDynamicTensorRef};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
@@ -867,226 +867,6 @@ fn layout_generic_value(sector: SectorId, row: usize, column: usize) -> f64 {
     diagonal + ((row + 1) * 3 + (column + 1) * 5 + sector.id()) as f64 / 32.0
 }
 
-fn block_value(data: &[f64], block: BlockRef<'_>, row: usize, column: usize) -> f64 {
-    data[block.offset() + row * block.strides()[0] + column * block.strides()[1]]
-}
-
-fn fill_layout_generic_data(space: &BoundDynamicFusionMapSpace<LayoutGenericRule>) -> Vec<f64> {
-    let structure = space.space().structure();
-    let mut data = vec![0.0; space.space().required_len().unwrap()];
-    for index in 0..structure.block_count() {
-        let block = structure.block(index).unwrap();
-        let sector = block.key().as_fusion_tree_pair().unwrap().coupled();
-        for column in 0..block.shape()[1] {
-            for row in 0..block.shape()[0] {
-                let offset =
-                    block.offset() + row * block.strides()[0] + column * block.strides()[1];
-                data[offset] = layout_generic_value(sector, row, column);
-            }
-        }
-    }
-    data
-}
-
-struct LayoutGenericInput {
-    space: BoundDynamicFusionMapSpace<LayoutGenericRule>,
-    data: Vec<f64>,
-}
-
-fn layout_generic_qr_fixture(
-    degeneracy: usize,
-) -> Result<(LayoutGenericInput, LayoutGenericInput), Box<dyn std::error::Error>> {
-    let provider = Arc::new(LayoutGenericRule);
-    let vacuum = SectorId::new(0);
-    let charge = SectorId::new(1);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([SectorLeg::new(
-            [(vacuum, degeneracy), (charge, 2 * degeneracy)],
-            false,
-        )]),
-        FusionProductSpace::new([SectorLeg::new(
-            [(vacuum, 2 * degeneracy), (charge, degeneracy)],
-            false,
-        )]),
-    );
-    let ordinary = BoundDynamicFusionMapSpace::from_final_homspace_generic(
-        Arc::clone(&provider),
-        homspace.clone(),
-    )?;
-    let expert = |reverse: bool| {
-        let ordinary_structure = ordinary.space().structure();
-        let mut offset = 1;
-        let mut blocks = Vec::with_capacity(ordinary_structure.block_count());
-        let mut indices = (0..ordinary_structure.block_count()).collect::<Vec<_>>();
-        if reverse {
-            indices.reverse();
-        }
-        for index in indices {
-            let block = ordinary_structure.block(index)?;
-            blocks.push(BlockSpec::column_major_with_key(
-                block.key().clone(),
-                block.shape().to_vec(),
-                offset,
-            )?);
-            offset += block.element_count()? + 1;
-        }
-        let structure = BlockStructure::from_blocks_with_rank(2, blocks)?;
-        let layout = DynamicFusionMapSpace::try_from_layout(homspace.clone(), structure)?
-            .try_bind_rule(provider.as_ref())?;
-        let dynamic = layout;
-        let bound = BoundDynamicFusionMapSpace::bind_generic(dynamic, Arc::clone(&provider))?;
-        let data = fill_layout_generic_data(&bound);
-        Ok::<_, Box<dyn std::error::Error>>(LayoutGenericInput { space: bound, data })
-    };
-    Ok((expert(false)?, expert(true)?))
-}
-
-fn assert_layout_generic_source(
-    space: &BoundDynamicFusionMapSpace<LayoutGenericRule>,
-    data: &[f64],
-) {
-    let structure = space.space().structure();
-    assert_eq!(structure.block_count(), 2);
-    for index in 0..structure.block_count() {
-        let block = structure.block(index).unwrap();
-        let sector = block.key().as_fusion_tree_pair().unwrap().coupled();
-        for column in 0..block.shape()[1] {
-            for row in 0..block.shape()[0] {
-                assert_eq!(
-                    block_value(data, block, row, column),
-                    layout_generic_value(sector, row, column)
-                );
-            }
-        }
-    }
-}
-
-fn factor_block_for_sector<'a>(
-    factor: &'a BoundDynFactor<LayoutGenericRule, f64>,
-    sector: SectorId,
-) -> BlockRef<'a> {
-    let structure = factor.space().space().structure();
-    (0..structure.block_count())
-        .map(|index| structure.block(index).unwrap())
-        .find(|block| block.key().as_fusion_tree_pair().unwrap().coupled() == sector)
-        .expect("the compact factor retains every source sector")
-}
-
-fn assert_layout_generic_factors_equal(
-    actual: &BoundDynFactor<LayoutGenericRule, f64>,
-    expected: &BoundDynFactor<LayoutGenericRule, f64>,
-) {
-    assert_eq!(
-        actual.space().space().homspace(),
-        expected.space().space().homspace()
-    );
-    let actual_structure = actual.space().space().structure();
-    let expected_structure = expected.space().space().structure();
-    assert_eq!(
-        actual_structure.block_count(),
-        expected_structure.block_count()
-    );
-    for index in 0..expected_structure.block_count() {
-        let expected_block = expected_structure.block(index).unwrap();
-        let actual_block = actual_structure.block_by_key(expected_block.key()).unwrap();
-        assert_eq!(actual_block.shape(), expected_block.shape());
-        for column in 0..expected_block.shape()[1] {
-            for row in 0..expected_block.shape()[0] {
-                let actual_value = block_value(actual.data(), actual_block, row, column);
-                let expected_value = block_value(expected.data(), expected_block, row, column);
-                let tolerance = 512.0 * f64::EPSILON * expected_value.abs().max(1.0);
-                assert!((actual_value - expected_value).abs() <= tolerance);
-            }
-        }
-    }
-}
-
-fn assert_layout_generic_qr_reconstructs(
-    left: &BoundDynFactor<LayoutGenericRule, f64>,
-    right: &BoundDynFactor<LayoutGenericRule, f64>,
-) {
-    for sector in [SectorId::new(0), SectorId::new(1)] {
-        let left_block = factor_block_for_sector(left, sector);
-        let right_block = factor_block_for_sector(right, sector);
-        assert_eq!(left_block.shape()[1], right_block.shape()[0]);
-        for column in 0..right_block.shape()[1] {
-            for row in 0..left_block.shape()[0] {
-                let actual = (0..left_block.shape()[1])
-                    .map(|inner| {
-                        block_value(left.data(), left_block, row, inner)
-                            * block_value(right.data(), right_block, inner, column)
-                    })
-                    .sum::<f64>();
-                let expected = layout_generic_value(sector, row, column);
-                let tolerance = 2048.0 * f64::EPSILON * expected.abs().max(1.0);
-                assert!((actual - expected).abs() <= tolerance);
-            }
-        }
-    }
-}
-
-fn run_layout_generic_qr(
-    engine: &mut dyn Engine,
-    degeneracy: usize,
-    min_time: Duration,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !operation_enabled("qr_compact_generic_layout") || !form_enabled("owned") {
-        return Ok(());
-    }
-    let (ordered, reordered) = layout_generic_qr_fixture(degeneracy)?;
-    assert_layout_generic_source(&ordered.space, &ordered.data);
-    assert_layout_generic_source(&reordered.space, &reordered.data);
-    let ordered_structure = ordered.space.space().structure();
-    let reordered_structure = reordered.space.space().structure();
-    assert_eq!(
-        ordered_structure.block(0)?.key(),
-        reordered_structure.block(1)?.key()
-    );
-    assert_eq!(
-        ordered_structure.block(1)?.key(),
-        reordered_structure.block(0)?.key()
-    );
-
-    let ordered_input = BoundDynamicTensorRef::try_new(&ordered.space, &ordered.data)?;
-    let reordered_input = BoundDynamicTensorRef::try_new(&reordered.space, &reordered.data)?;
-    let mut preflight_dense = DefaultDenseExecutor::new();
-    let ordered_expected = qr_compact_dense(engine, &mut preflight_dense, &ordered_input)
-        .map_err(checked_compact_example_error)?;
-    let reordered_expected = qr_compact_dense(engine, &mut preflight_dense, &reordered_input)
-        .map_err(checked_compact_example_error)?;
-    assert_layout_generic_factors_equal(&reordered_expected.q, &ordered_expected.q);
-    assert_layout_generic_factors_equal(&reordered_expected.r, &ordered_expected.r);
-    assert_layout_generic_qr_reconstructs(&ordered_expected.q, &ordered_expected.r);
-    assert_layout_generic_qr_reconstructs(&reordered_expected.q, &reordered_expected.r);
-
-    println!(
-        "# GenericLayout: qr_fixture_matrices=2 row_trees=2 col_trees=2 source_blocks=2 matrix_shapes={}x{},{}x{}",
-        degeneracy,
-        2 * degeneracy,
-        2 * degeneracy,
-        degeneracy
-    );
-    for (symmetry, input) in [
-        ("GenericLayout-ordered", &ordered_input),
-        ("GenericLayout-reordered", &reordered_input),
-    ] {
-        let runtime = benchmark_runtime()?;
-        let mut dense = DefaultDenseExecutor::new();
-        let Qr { q: left, r: right } = bench(
-            &runtime,
-            symmetry,
-            "qr_compact_generic_layout",
-            "owned",
-            "first_after_setup",
-            "warm_after_setup",
-            min_time,
-            || qr_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error),
-        )?;
-        assert_layout_generic_qr_reconstructs(&left, &right);
-    }
-    Ok(())
-}
-
 struct CheckedLayoutInput<D> {
     space: BoundDynamicFusionMapSpace<LayoutGenericRule>,
     data: Vec<D>,
@@ -1132,7 +912,7 @@ fn fill_checked_layout_data<D: HarnessScalar>(
 fn checked_layout_fixture<D: HarnessScalar>(
     degeneracy: usize,
     sector_count: usize,
-) -> Result<(CheckedLayoutInput<D>, CheckedLayoutInput<D>), Box<dyn std::error::Error>> {
+) -> Result<CheckedLayoutInput<D>, Box<dyn std::error::Error>> {
     checked_layout_fixture_with_aspect(degeneracy, sector_count, CheckedMatrixAspect::Alternating)
 }
 
@@ -1140,7 +920,7 @@ fn checked_layout_fixture_with_aspect<D: HarnessScalar>(
     degeneracy: usize,
     sector_count: usize,
     aspect: CheckedMatrixAspect,
-) -> Result<(CheckedLayoutInput<D>, CheckedLayoutInput<D>), Box<dyn std::error::Error>> {
+) -> Result<CheckedLayoutInput<D>, Box<dyn std::error::Error>> {
     let provider = Arc::new(LayoutGenericRule);
     let codomain = (0..sector_count)
         .map(|sector| {
@@ -1170,39 +950,10 @@ fn checked_layout_fixture_with_aspect<D: HarnessScalar>(
         FusionProductSpace::new([SectorLeg::new(codomain, false)]),
         FusionProductSpace::new([SectorLeg::new(domain, false)]),
     );
-    let canonical = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
-        Arc::clone(&provider),
-        homspace.clone(),
-    )?;
-    let canonical_data = fill_checked_layout_data(&canonical);
-
-    let canonical_structure = canonical.space().structure();
-    let mut offset = 1;
-    let mut blocks = Vec::with_capacity(canonical_structure.block_count());
-    for index in (0..canonical_structure.block_count()).rev() {
-        let block = canonical_structure.block(index)?;
-        blocks.push(BlockSpec::column_major_with_key(
-            block.key().clone(),
-            block.shape().to_vec(),
-            offset,
-        )?);
-        offset += block.element_count()? + 1;
-    }
-    let structure = BlockStructure::from_blocks_with_rank(2, blocks)?;
-    let layout = DynamicFusionMapSpace::try_from_layout(homspace, structure)?
-        .try_bind_rule(provider.as_ref())?;
-    let fallback = BoundDynamicFusionMapSpace::bind_generic(layout, provider)?;
-    let fallback_data = fill_checked_layout_data(&fallback);
-    Ok((
-        CheckedLayoutInput {
-            space: canonical,
-            data: canonical_data,
-        },
-        CheckedLayoutInput {
-            space: fallback,
-            data: fallback_data,
-        },
-    ))
+    let space =
+        BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(provider, homspace)?;
+    let data = fill_checked_layout_data(&space);
+    Ok(CheckedLayoutInput { space, data })
 }
 
 fn factor_block<'a, D>(
@@ -1408,15 +1159,10 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
         min_time,
         || checked_layout_fixture::<D>(degeneracy, sector_count),
     )?);
-    let (canonical, fallback) = checked_layout_fixture::<D>(degeneracy, sector_count)?;
-    let (canonical_changed, fallback_changed) =
-        checked_layout_fixture::<D>(degeneracy + 1, sector_count)?;
+    let canonical = checked_layout_fixture::<D>(degeneracy, sector_count)?;
+    let canonical_changed = checked_layout_fixture::<D>(degeneracy + 1, sector_count)?;
     let canonical_structure = canonical.space.space().structure();
     assert_eq!(canonical_structure.block_count(), sector_count);
-    assert_eq!(
-        fallback.space.space().structure().block_count(),
-        sector_count
-    );
     let mut matrix_shapes = Vec::with_capacity(sector_count);
     for sector in 0..sector_count {
         let block = canonical_structure.block(sector)?;
@@ -1427,7 +1173,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
         matrix_shapes.push(format!("{}x{}", block.shape()[0], block.shape()[1]));
     }
     println!(
-        "# GenericCheckedInput: workload={} dtype={} labels=0..{} G={} row_trees={} col_trees={} source_blocks={} matrix_shapes={} layouts=canonical,padded_reordered setup=fixture+binding+literal_preflight_outside_timer measured=public_owned_factorization+fresh_return+drop caller_allocations=requested_only peak_native_worker=NA",
+        "# GenericCheckedInput: workload={} dtype={} labels=0..{} G={} row_trees={} col_trees={} source_blocks={} matrix_shapes={} layouts=canonical setup=fixture+binding+literal_preflight_outside_timer measured=public_owned_factorization+fresh_return+drop caller_allocations=requested_only peak_native_worker=NA",
         workload,
         D::NAME,
         sector_count - 1,
@@ -1442,10 +1188,8 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
         degeneracy,
         degeneracy + 1
     );
-    for (layout, fixture, changed_fixture) in [
-        ("canonical", canonical, canonical_changed),
-        ("fallback", fallback, fallback_changed),
-    ] {
+    let (layout, fixture, changed_fixture) = ("canonical", canonical, canonical_changed);
+    {
         let input = BoundDynamicTensorRef::try_new(&fixture.space, &fixture.data)?;
         let changed_input =
             BoundDynamicTensorRef::try_new(&changed_fixture.space, &changed_fixture.data)?;
@@ -1578,24 +1322,22 @@ fn eig_value<D: HarnessScalar>(sector: usize, row: usize, column: usize) -> D {
 fn eig_fixture<D: HarnessScalar>(
     degeneracy: usize,
     sector_count: usize,
-) -> Result<(CheckedLayoutInput<D>, CheckedLayoutInput<D>), Box<dyn std::error::Error>> {
-    let (mut canonical, mut fallback) =
+) -> Result<CheckedLayoutInput<D>, Box<dyn std::error::Error>> {
+    let mut fixture =
         checked_layout_fixture_with_aspect(degeneracy, sector_count, CheckedMatrixAspect::Square)?;
-    for fixture in [&mut canonical, &mut fallback] {
-        let structure = fixture.space.space().structure();
-        for block_index in 0..structure.block_count() {
-            let block = structure.block(block_index)?;
-            let sector = block.key().as_fusion_tree_pair().unwrap().coupled().id();
-            for column in 0..block.shape()[1] {
-                for row in 0..block.shape()[0] {
-                    fixture.data
-                        [block.offset() + row * block.strides()[0] + column * block.strides()[1]] =
-                        eig_value(sector, row, column);
-                }
+    let structure = fixture.space.space().structure();
+    for block_index in 0..structure.block_count() {
+        let block = structure.block(block_index)?;
+        let sector = block.key().as_fusion_tree_pair().unwrap().coupled().id();
+        for column in 0..block.shape()[1] {
+            for row in 0..block.shape()[0] {
+                fixture.data
+                    [block.offset() + row * block.strides()[0] + column * block.strides()[1]] =
+                    eig_value(sector, row, column);
             }
         }
     }
-    Ok((canonical, fallback))
+    Ok(fixture)
 }
 
 fn multitree_eig_value<D: HarnessScalar>(
@@ -1682,7 +1424,7 @@ fn fill_multitree_eig_data<D: HarnessScalar>(
 fn multitree_eig_fixture<D: HarnessScalar>(
     degeneracy: usize,
     sector_count: usize,
-) -> Result<(CheckedLayoutInput<D>, CheckedLayoutInput<D>), Box<dyn std::error::Error>> {
+) -> Result<CheckedLayoutInput<D>, Box<dyn std::error::Error>> {
     let provider = Arc::new(LayoutGenericRule);
     let first = SectorLeg::new(
         (0..sector_count).map(|sector| (SectorId::new(sector), degeneracy)),
@@ -1694,39 +1436,10 @@ fn multitree_eig_fixture<D: HarnessScalar>(
     );
     let product = FusionProductSpace::new([first, second]);
     let homspace = FusionTreeHomSpace::new(product.clone(), product);
-    let canonical = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
-        Arc::clone(&provider),
-        homspace.clone(),
-    )?;
-    let canonical_data = fill_multitree_eig_data(&canonical, degeneracy, sector_count);
-
-    let canonical_structure = canonical.space().structure();
-    let mut offset = 1;
-    let mut blocks = Vec::with_capacity(canonical_structure.block_count());
-    for index in (0..canonical_structure.block_count()).rev() {
-        let block = canonical_structure.block(index)?;
-        blocks.push(BlockSpec::column_major_with_key(
-            block.key().clone(),
-            block.shape().to_vec(),
-            offset,
-        )?);
-        offset += block.element_count()? + 1;
-    }
-    let structure = BlockStructure::from_blocks_with_rank(4, blocks)?;
-    let layout = DynamicFusionMapSpace::try_from_layout(homspace, structure)?
-        .try_bind_rule(provider.as_ref())?;
-    let fallback = BoundDynamicFusionMapSpace::bind_generic(layout, provider)?;
-    let fallback_data = fill_multitree_eig_data(&fallback, degeneracy, sector_count);
-    Ok((
-        CheckedLayoutInput {
-            space: canonical,
-            data: canonical_data,
-        },
-        CheckedLayoutInput {
-            space: fallback,
-            data: fallback_data,
-        },
-    ))
+    let space =
+        BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(provider, homspace)?;
+    let data = fill_multitree_eig_data(&space, degeneracy, sector_count);
+    Ok(CheckedLayoutInput { space, data })
 }
 
 fn assert_multitree_source<D: HarnessScalar>(
@@ -1767,35 +1480,6 @@ fn assert_multitree_source<D: HarnessScalar>(
         }
     }
     assert!(visited.into_iter().all(|value| value));
-}
-
-fn assert_multitree_layouts<D>(
-    canonical: &CheckedLayoutInput<D>,
-    fallback: &CheckedLayoutInput<D>,
-    degeneracy: usize,
-    sector_count: usize,
-) {
-    let canonical = canonical.space.space().structure();
-    let fallback = fallback.space.space().structure();
-    assert_eq!(canonical.block_count(), fallback.block_count());
-    for index in 0..canonical.block_count() {
-        let canonical_block = canonical.block(index).unwrap();
-        let fallback_block = fallback.block(canonical.block_count() - index - 1).unwrap();
-        assert_eq!(canonical_block.key(), fallback_block.key());
-        assert_eq!(canonical_block.shape(), fallback_block.shape());
-    }
-    let mut fallback_offset = 1;
-    for index in 0..canonical.block_count() {
-        let fallback_block = fallback.block(index).unwrap();
-        assert_eq!(fallback_block.offset(), fallback_offset);
-        fallback_offset += fallback_block.element_count().unwrap() + 1;
-    }
-    let matrix_dimension = sector_count * degeneracy;
-    assert_eq!(
-        canonical.required_len().unwrap(),
-        sector_count * matrix_dimension * matrix_dimension
-    );
-    assert_eq!(fallback.required_len().unwrap(), fallback_offset - 1);
 }
 
 fn multitree_factor_matrices<D: HarnessScalar>(
@@ -2119,31 +1803,17 @@ fn run_checked_eig<D: HarnessScalar<Eig = Complex64>>(
             Ok::<_, Box<dyn std::error::Error>>(())
         },
     )?;
-    let (canonical, fallback) = eig_fixture::<D>(degeneracy, sector_count)?;
-    let (canonical_changed, fallback_changed) = eig_fixture::<D>(degeneracy + 1, sector_count)?;
-    let (control_canonical, control_fallback) =
+    let fixture = eig_fixture::<D>(degeneracy, sector_count)?;
+    let changed_fixture = eig_fixture::<D>(degeneracy + 1, sector_count)?;
+    let control =
         checked_layout_fixture_with_aspect(degeneracy, sector_count, CheckedMatrixAspect::Square)?;
-    let (control_canonical_changed, control_fallback_changed) = checked_layout_fixture_with_aspect(
+    let changed_control = checked_layout_fixture_with_aspect(
         degeneracy + 1,
         sector_count,
         CheckedMatrixAspect::Square,
     )?;
-    for (layout, fixture, changed_fixture, control, changed_control) in [
-        (
-            "canonical",
-            canonical,
-            canonical_changed,
-            control_canonical,
-            control_canonical_changed,
-        ),
-        (
-            "padded_reordered",
-            fallback,
-            fallback_changed,
-            control_fallback,
-            control_fallback_changed,
-        ),
-    ] {
+    let layout = "canonical";
+    {
         let input = BoundDynamicTensorRef::try_new(&fixture.space, &fixture.data)?;
         let changed_input =
             BoundDynamicTensorRef::try_new(&changed_fixture.space, &changed_fixture.data)?;
@@ -2371,20 +2041,10 @@ fn run_checked_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
             Ok::<_, Box<dyn std::error::Error>>(())
         },
     )?;
-    let (canonical, fallback) = multitree_eig_fixture::<D>(degeneracy, sector_count)?;
-    let (canonical_changed, fallback_changed) =
-        multitree_eig_fixture::<D>(degeneracy + 1, sector_count)?;
-    assert_multitree_layouts(&canonical, &fallback, degeneracy, sector_count);
-    assert_multitree_layouts(
-        &canonical_changed,
-        &fallback_changed,
-        degeneracy + 1,
-        sector_count,
-    );
-    for (layout, fixture, changed_fixture) in [
-        ("canonical", canonical, canonical_changed),
-        ("padded_reordered", fallback, fallback_changed),
-    ] {
+    let fixture = multitree_eig_fixture::<D>(degeneracy, sector_count)?;
+    let changed_fixture = multitree_eig_fixture::<D>(degeneracy + 1, sector_count)?;
+    let layout = "canonical";
+    {
         let input = BoundDynamicTensorRef::try_new(&fixture.space, &fixture.data)?;
         let changed_input =
             BoundDynamicTensorRef::try_new(&changed_fixture.space, &changed_fixture.data)?;
@@ -2572,14 +2232,11 @@ fn run_full_qr_fixture<D: HarnessScalar>(
         min_time,
         || checked_layout_fixture_with_aspect::<D>(degeneracy, sector_count, aspect),
     )?);
-    let (canonical, padded) =
-        checked_layout_fixture_with_aspect::<D>(degeneracy, sector_count, aspect)?;
-    let (canonical_changed, padded_changed) =
+    let fixture = checked_layout_fixture_with_aspect::<D>(degeneracy, sector_count, aspect)?;
+    let changed_fixture =
         checked_layout_fixture_with_aspect::<D>(degeneracy + 1, sector_count, aspect)?;
-    for (layout, fixture, changed_fixture) in [
-        ("canonical", canonical, canonical_changed),
-        ("padded", padded, padded_changed),
-    ] {
+    let layout = "canonical";
+    {
         let input = BoundDynamicTensorRef::try_new(&fixture.space, &fixture.data)?;
         let changed =
             BoundDynamicTensorRef::try_new(&changed_fixture.space, &changed_fixture.data)?;
@@ -2643,7 +2300,7 @@ fn run_full_qr_lowering(
         return Ok(());
     }
     let min_time = min_time.max(Duration::from_millis(100));
-    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical,padded dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features engine_threads=OP_MATRIX_THREADS");
+    println!("# FullQr: fixed_global_D=32 geometries=few-large:G2:d32,many-small:G16:d2 shapes=square,wide,tall layouts=canonical dtypes=f64,c64 fixture_and_literal_preflight_outside_factor_timers dense_executor=DefaultDenseExecutor factorization_provider=compiled_cpu_features engine_threads=OP_MATRIX_THREADS");
     for (workload, degeneracy, sectors) in [("few-large", 32, 2), ("many-small", 2, 16)] {
         for (shape_name, aspect) in [
             ("square", CheckedMatrixAspect::Square),
@@ -3000,6 +2657,7 @@ fn run_checked_sun(
     qr_only: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use symtn::sector::LieGroupFusionRule;
+    use symtn::typed::Qr;
 
     let space = GradedSpace::try_new(provider, [(label, degeneracy)])?;
     if form_enabled("destination") {
@@ -3693,7 +3351,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | "contract_input_swap"
                 | "contract_input_output_swap"
                 | "qr_compact"
-                | "qr_compact_generic_layout"
                 | "checked_compact_input"
                 | "eig_source_geometry"
                 | "eig_output_placement"
@@ -3768,7 +3425,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("# comparison_protocol=unconditional A-baseline,B-candidate,B-candidate,A-baseline; three fresh child processes per position");
     }
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("eig_source_geometry") {
-        println!("# eig_source_geometry_scope=rank2 MF and checked Generic EIG complete owned result dropped inside every measured call; checked canonical and padded/reordered layouts are both affected");
+        println!("# eig_source_geometry_scope=rank2 MF and checked Generic EIG complete owned result dropped inside every measured call; checked canonical layouts are affected");
         println!("# eig_source_geometry_fixtures=few-large:G2:d{degeneracy};many-small:G16:d{};changed_shape=d+1;dtypes=f64,c64;complex_input_has_nonzero_imaginary_part", (degeneracy / 16).max(1));
         println!("# eig_source_geometry_oracle=known spectrum,finite nonzero eigenvectors,scale-invariant AV=VL,provider identity,block geometry,source preservation; full preflight outside timers");
         println!("# eig_source_geometry_control=checked compact QR over identical input geometry and scalar types");
@@ -3779,7 +3436,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("eig_output_placement") {
         println!("# eig_output_placement_scope=rank4 checked Generic full EIG affected; rank4 checked compact QR paired-publication control; rank2 MF full EIG affected");
-        println!("# eig_output_placement_fixtures=few-large:G2:T2:d{degeneracy}:source_blocks8;many-small:G16:T16:d{}:source_blocks4096;changed_shape=d+1;layouts=canonical,padded_reordered;dtypes=f64,c64", (degeneracy / 16).max(1));
+        println!("# eig_output_placement_fixtures=few-large:G2:T2:d{degeneracy}:source_blocks8;many-small:G16:T16:d{}:source_blocks4096;changed_shape=d+1;layouts=canonical;dtypes=f64,c64", (degeneracy / 16).max(1));
         println!("# eig_output_placement_oracle=literal_full_keys,known_distinct_spectrum,finite_nonzero_eigenvectors,scale_invariant_AV_equals_VLambda,QR_reconstruction_and_orthogonality,provider_identity,source_preservation;full_preflight_outside_timers");
         println!("# eig_output_placement_first_scope=first_after_preflight; Runtime and process-global metadata may already be warm; complete owned result dropped inside every measured call");
         println!("# eig_output_placement_cache_counters=MF rows observe their execution Runtime; checked EIG and QR use DefaultDenseExecutor directly, so printed Runtime cache counters are not execution-owned and are NA for interpretation");
@@ -3798,7 +3455,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("OP_MATRIX_OPERATION").as_deref() == Ok("eig_output_placement") {
         return run_eig_output_placement(engine, degeneracy, min_time);
     }
-    run_layout_generic_qr(engine, degeneracy, min_time)?;
     run_checked_compact_input(engine, degeneracy, min_time)?;
     run_full_qr_lowering(engine, min_time)?;
     run_provider!(

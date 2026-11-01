@@ -606,15 +606,13 @@ fn scalar_copy<D: FactorScalar>(source: &TestTensor<f64>, real_only: bool) -> Te
     .unwrap()
 }
 
-/// What: canonical and consistently reordered inputs to the
-/// multiplicity-free full QR/LQ, null and eigen ops pack nothing, and
-/// mis-stacked tilings keep their factors and their eigen refusals.
+/// What: canonical inputs to the multiplicity-free full QR/LQ, null and
+/// eigen ops pack nothing.
 fn assert_multiplicity_free_full_family_borrows_input<R, D>(rule: R, sectors: &[SectorId])
 where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + Clone,
     D: FactorScalar,
 {
-    let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(rule.clone());
     let general = scalar_copy::<D>(&tsvd_test_tensor(&rule, sectors), false);
     let tall = scalar_copy::<D>(&multiplicity_free_tall_test_tensor(&rule, sectors), false);
@@ -634,39 +632,6 @@ where
     };
 
     assert_eq!(input_pack_bytes(&general, &hermitian), 0);
-    // Consistently reordered tree stacking is still a tiling.
-    assert_eq!(
-        input_pack_bytes(
-            &reversed_coupled_tree_basis_copy(&rule, &general),
-            &reversed_coupled_tree_basis_copy(&rule, &hermitian),
-        ),
-        0
-    );
-
-    // Mis-stacked: factors computed, eigen ops refused.
-    let mis_stacked = bind(&mis_stacked_endomorphism_copy(&rule, &general));
-    let mis_stacked_hermitian = bind(&mis_stacked_endomorphism_copy(&rule, &hermitian));
-    let mis_stacked = mis_stacked.as_ref();
-    let mis_stacked_hermitian = mis_stacked_hermitian.as_ref();
-    let (mis_stacked, mis_stacked_hermitian) =
-        (mis_stacked.dynamic(), mis_stacked_hermitian.dynamic());
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let dense = &mut dense;
-    qr_full_dyn(engine, dense, &mis_stacked).unwrap();
-    lq_full_dyn(engine, dense, &mis_stacked).unwrap();
-    left_null_dyn(engine, dense, &mis_stacked).unwrap();
-    right_null_dyn(engine, dense, &mis_stacked).unwrap();
-    let refusal = |error: Option<OperationError>| -> Result<(), OperationError> {
-        Err(error.expect("mis-stacked eigen input must be refused"))
-    };
-    assert_stacking_refusal(
-        refusal(eig_full_dyn(engine, dense, &mis_stacked).err()),
-        "eig_full ",
-    );
-    assert_stacking_refusal(
-        refusal(eigh_full_dyn(engine, dense, &mis_stacked_hermitian, HermitianTol::DEFAULT).err()),
-        "eigh_full ",
-    );
 }
 
 #[test]
@@ -869,39 +834,6 @@ fn checked_generic_full_null_eigen_ops_borrow_canonical_multiplicity_input() {
     // space borrow their regions.
     assert_checked_factor_generic_full_family_borrows_input::<f64>();
     assert_checked_factor_generic_full_family_borrows_input::<Complex64>();
-}
-
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_full_null_ops_keep_packing_padded_input() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: a padded tiling is not admitted, so it still packs.
-    let (canonical_space, canonical_data) = generic_factorization_input();
-    let (expert_space, expert_data) =
-        expert_generic_factorization_input(&canonical_space, &canonical_data, true);
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let expert_space =
-        BoundDynamicFusionMapSpace::bind_generic(expert_space.space().clone(), provider).unwrap();
-    let expert = BoundDynamicTensorRef::try_new(&expert_space, &expert_data).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let packed_len = canonical_data.len() * std::mem::size_of::<f64>();
-    let input_pack_bytes_rec = crate::probe::record();
-    qr_full_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    lq_full_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    left_null_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    right_null_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    assert_eq!(
-        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-        4 * packed_len
-    );
 }
 
 #[test]

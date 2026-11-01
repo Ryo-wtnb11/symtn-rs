@@ -37,17 +37,6 @@ print an explicit trace exclusion because this exact `LieGroupFusionRule` lacks 
 exclusion because it lacks the required multiplicity-free dispatch bounds.
 The checked-Generic API exists; these operations are neither emulated nor
 replaced for the exact SU(N) fixtures.
-The `qr_compact_generic_layout` selector adds one lower-level public owned-QR
-control for an infallible Generic provider. It compares the same two-sector
-rank-(1,1) tensor in two padded expert layouts: canonical key order and the
-same blocks in reverse order. Both inputs therefore use staged matrix assembly;
-only the reversed order requires output scatter. Its two sector matrices have
-shapes `d x 2d` and `2d x d`, where `d` is `OP_MATRIX_DEGENERACY`. Fixture
-construction, keyed source-coordinate checks, factor-coordinate comparison,
-and direct `Q * R` reconstruction are outside the timers. Because that
-preflight calls QR, its first timed phase is labeled `first_after_setup`; the
-measurement is a matched production-build layout control, not a cold-start
-claim.
 Runtime tree-transform counters are reported as cold and warm deltas. The same
 snapshots report process-global fusion-layout and complete-HomSpace cache
 deltas, with charged bytes before and after each phase. The fusion-layout cache
@@ -108,15 +97,6 @@ OP_MATRIX_OPERATION=contract_input_swap \
 OP_MATRIX_FORM=destination \
 OP_MATRIX_PROFILE_PAUSE_MS=30000 \
 OP_MATRIX_MIN_MS=0 benchmarks/operation_matrix.sh
-```
-
-The matched Generic compact-QR layout control is:
-
-```sh
-OP_MATRIX_OPERATION=qr_compact_generic_layout \
-OP_MATRIX_FORM=owned \
-OP_MATRIX_MIN_MS=100 \
-benchmarks/operation_matrix.sh
 ```
 
 ## Oriented uniform-run diagnostic
@@ -197,8 +177,7 @@ in baseline A, with separate output files for all four wrapper invocations.
 
 The checked-Generic compact input-lowering group runs public compact QR, SVD,
 and LQ on the same source geometry. It covers `f64` and genuinely complex
-`Complex64` payloads, and compares a canonical contiguous layout with a padded,
-reversed-block fallback. `few-large` uses two sectors with alternating matrix
+`Complex64` payloads on the canonical layout. `few-large` uses two sectors with alternating matrix
 shapes `d x 2d` and `2d x d`; `many-small` uses labels 0 through 15 with the
 same alternating geometry and `max(1,d/16)` in place of `d`. Fixture
 construction, provider binding, literal
@@ -220,8 +199,7 @@ benchmarks/operation_matrix.sh
 `eig_source_geometry` is an explicit-only rank-2 measurement group for MF U(1)
 and checked-Generic full EIG. It covers `f64` and genuinely complex
 `Complex64`, few-large `G=2,d=D`, and many-small
-`G=16,d=max(1,D/16)`. Checked inputs use canonical and padded reversed layouts;
-both layouts exercise the EIG geometry path. Compact QR over separate inputs
+`G=16,d=max(1,D/16)`. Checked inputs use the canonical layout. Compact QR over separate inputs
 with identical geometry and scalar types is the unchanged control.
 
 Fixed and alternating `d`/`d+1` inputs are preconstructed. Full preflight
@@ -251,8 +229,7 @@ one-sided factor publication. Checked-Generic full EIG is the affected rank-4
 route. Each side has two sector legs under the XOR fixture rule: few-large uses
 `G=2,T=2,d=D`, while many-small uses
 `G=16,T=16,d=max(1,D/16)`. The corresponding canonical inputs have 8 and 4,096
-source blocks. Reversed blocks with one-element gaps exercise the existing
-fallback. Checked compact QR over the same geometry is the unchanged paired
+source blocks. Checked compact QR over the same geometry is the unchanged paired
 publication control. Existing rank-2 MF EIG rows are included as affected
 `T=1` evidence.
 
@@ -285,7 +262,7 @@ benchmarks/operation_matrix.sh
 QR/LQ lowering. It fixes global `D=32`: few-large uses `G=2,d=32`, and
 many-small uses `G=16,d=2`. The sweep covers homogeneous square `d x d`, wide
 `d x 2d`, and tall `2d x d` sectors, `f64` and genuinely complex
-`Complex64`, and canonical and padded reversed layouts. QR's direct-input
+`Complex64`, on the canonical layout. QR's direct-input
 cases are square/wide and its unchanged completion control is tall; LQ's
 direct-input cases are square/tall and its completion control is wide.
 
@@ -314,8 +291,7 @@ benchmarks/operation_matrix.sh
 ```
 
 The grouped output separates three scopes. `checked_compact_input_fixture`
-times construction and payload initialization of both canonical and fallback
-fixtures (`fixture_first`/`fixture_repeat`). The ordinary QR/SVD/LQ rows keep one
+times construction and payload initialization of the canonical fixtures (`fixture_first`/`fixture_repeat`). The ordinary QR/SVD/LQ rows keep one
 fixed preconstructed input. Their `_shape_alternating` controls alternate
 preconstructed `d` and `d+1` inputs with one dense executor per numerical
 family; fixture construction is excluded, and literal preflight has already

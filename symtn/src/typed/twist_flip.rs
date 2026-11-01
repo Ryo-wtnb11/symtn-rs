@@ -48,10 +48,6 @@ where
     /// has no in-place strided scale (`cuda_region_axpby` cannot alias its
     /// source and destination), so it is not expressible.
     ///
-    /// Flat elements that belong to no block — only reachable under a padded
-    /// expert layout — are zero here, where Host copies the source bytes
-    /// through; device structural results follow that convention.
-    ///
     /// # Errors
     ///
     /// An out-of-range leg is rejected before the empty-list short circuit.

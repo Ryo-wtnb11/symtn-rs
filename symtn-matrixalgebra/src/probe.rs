@@ -91,7 +91,6 @@ events! {
         adjoint_scratch_fill_bytes: LqAdjointFillBytes,
         final_adjoint_copy_calls: LqFinalAdjointCopyCalls,
         final_adjoint_copy_bytes: LqFinalAdjointCopyBytes,
-        output_prefill_bytes: LqOutputPrefillBytes,
     }
     /// Copies of Hermitian eigendecomposition.
     EighCopyProbe => eigh_copy {
@@ -384,10 +383,6 @@ pub(crate) fn lq_adjoint_fill<D>(elements: usize) {
 pub(crate) fn lq_final_adjoint_copy<D>(elements: usize) {
     hit(Event::LqFinalAdjointCopyCalls);
     add(Event::LqFinalAdjointCopyBytes, bytes::<D>(elements));
-}
-
-pub(crate) fn lq_output_prefill<D>(elements: usize) {
-    add(Event::LqOutputPrefillBytes, bytes::<D>(elements));
 }
 
 pub(crate) fn checked_compact_input<D>(

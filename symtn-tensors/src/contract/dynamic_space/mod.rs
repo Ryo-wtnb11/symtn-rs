@@ -1,9 +1,9 @@
 use std::sync::{Arc, OnceLock};
 
 use symtn_core::{
-    validate_block_storage_injective, BlockKey, BlockStructure, CoreError, FusionRule,
-    FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace, FusionTreePairKey,
-    FusionTreePairOrientation, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
+    BlockKey, BlockStructure, CoreError, FusionRule, FusionSpaceAdmission, FusionStyleKind,
+    FusionTreeHomSpace, FusionTreePairKey, FusionTreePairOrientation, MultiplicityFreeRigidSymbols,
+    PreparedBlockStructure, RuleIdentity,
 };
 
 use crate::{OperationError, TreeTransformOperation};
@@ -111,8 +111,8 @@ where
 ///
 /// Ordinary operation-output layouts are built from their final hom space with
 /// [`Self::from_final_homspace_multiplicity_free`] or
-/// [`Self::from_final_homspace_generic`]. The `bind_*` methods are expert
-/// admission boundaries for an already-constructed dynamic layout. Generic
+/// [`Self::from_final_homspace_generic`]. The `bind_*` methods rebind an
+/// existing layout to a provider. Generic
 /// roots require the provider-owned [`FusionStyleKind::Generic`] capability;
 /// tree keys do not carry a duplicate binding-mode flag. A missing rule
 /// identity is rejected rather than inferred.
@@ -364,69 +364,6 @@ impl DynamicFusionMapSpace {
                 })?;
         }
         Ok(())
-    }
-
-    /// Expert constructor for a caller-selected block layout over `homspace`.
-    ///
-    /// Use this at an import or custom-layout boundary where the
-    /// [`BlockStructure`] (gapped, reordered, or a tree subset) has already
-    /// been prepared; ordinary operation outputs derive their layout from the
-    /// final hom space instead. This checks only that the structure rank is
-    /// the hom-space rank and that logical block footprints do not overlap.
-    /// The result is unbound: key, sector, duality, and logical-shape
-    /// admission is [`Self::try_bind_rule`] or a `BoundDynamicFusionMapSpace`
-    /// `bind_*` constructor.
-    #[doc(hidden)]
-    pub fn try_from_layout(
-        homspace: FusionTreeHomSpace,
-        structure: BlockStructure,
-    ) -> Result<Self, CoreError> {
-        let nout = homspace.codomain().len();
-        let nin = homspace.domain().len();
-        if structure.rank() != nout + nin {
-            return Err(CoreError::StructureRankMismatch {
-                expected: nout + nin,
-                actual: structure.rank(),
-            });
-        }
-        // Why not always run the pairwise footprint check: canonical
-        // coupled-sector regions already cover storage exactly once.
-        if structure.coupled_sector_regions(nout)?.is_none() {
-            validate_block_storage_injective(&structure)?;
-        }
-        Ok(Self {
-            nout,
-            nin,
-            homspace: Arc::new(homspace),
-            subblock_structure: BlockStructure::canonicalize_shared(structure.into_shared()),
-            admission: FusionSpaceAdmission::Unbound,
-            adjoint: OnceLock::new(),
-        })
-    }
-
-    /// Expert subset admission of a [`Self::try_from_layout`] layout.
-    ///
-    /// This certifies every present block against the rule and hom-space split,
-    /// sector membership, duality, and logical degeneracy shape. Missing valid
-    /// pairs remain structural zeros. It does not rebuild, repack, or otherwise
-    /// select the caller's storage order, strides, or offsets. A space already
-    /// admitted under the same rule is returned unchanged.
-    #[doc(hidden)]
-    pub fn try_bind_rule<R: FusionRule>(mut self, rule: &R) -> Result<Self, CoreError> {
-        let actual = rule.rule_identity();
-        if let Some(expected) = self.admission.rule_identity() {
-            if expected != &actual {
-                return Err(CoreError::FusionRuleMismatch {
-                    expected: expected.clone(),
-                    actual,
-                });
-            }
-            return Ok(self);
-        }
-        self.homspace
-            .validate_subblock_structure_subset(rule, &self.subblock_structure)?;
-        self.admission = FusionSpaceAdmission::Subset(actual);
-        Ok(self)
     }
 
     /// Space of the tree-transformed (permute / braid / transpose) tensor:

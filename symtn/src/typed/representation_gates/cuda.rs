@@ -1158,43 +1158,15 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
     ));
 }
 
-/// `space` with every block keyed opaquely instead of by its fusion-tree
-/// pair (a structure cannot mix key kinds): same geometry, no adjoint
-/// partner.
-#[cfg(feature = "cuda")]
-fn with_opaque_keys(
-    space: &symtn_tensors::DynamicFusionMapSpace,
-) -> symtn_tensors::DynamicFusionMapSpace {
-    let structure = space.structure();
-    let specs = (0..structure.block_count())
-        .map(|i| {
-            let block = structure.block(i).unwrap();
-            BlockSpec::with_key(
-                BlockKey::opaque([i as u64]),
-                block.shape().to_vec(),
-                block.strides().to_vec(),
-                block.offset(),
-            )
-            .unwrap()
-        })
-        .collect();
-    DynamicFusionMapSpace::try_from_layout(
-        space.homspace().clone(),
-        BlockStructure::from_blocks_with_rank(space.rank(), specs).unwrap(),
-    )
-    .unwrap()
-}
-
 /// The device lowering of the one [`symtn_tensors::AdjointBlockMap`]
 /// (`cuda_adjoint_lowering`) against hand-computed copies and tables, without
 /// a device. Per block of the adjoint layout the parent block is looked up by
 /// hand (the pair with its trees swapped) and its strides are permuted by
 /// hand (adjoint axis `a` is parent axis `nout + a` for `a < nin`, else
-/// `a - nin`). With `zero_blocks` the adjoint layout keys its blocks
-/// opaquely, so none has an adjoint source and each must read as zero. Applying the
-/// lowering to the parent on the Host must equal the Host materialization.
+/// `a - nin`). Applying the lowering to the parent on the Host must equal
+/// the Host materialization.
 #[cfg(feature = "cuda")]
-fn assert_cuda_adjoint_lowering_matches_hand<R, D>(t: &TensorMap<R, D>, zero_blocks: bool)
+fn assert_cuda_adjoint_lowering_matches_hand<R, D>(t: &TensorMap<R, D>)
 where
     R: symtn_core::TypedSectorAdmission<
             Sector = <R as symtn_core::SectorCodec>::Sector,
@@ -1212,20 +1184,15 @@ where
     };
     let parent_space = view.parent.space.space();
     let logical = view.logical_space.space();
-    let adjoint_space = if zero_blocks {
-        with_opaque_keys(logical)
-    } else {
-        logical.clone()
-    };
-    let map = symtn_tensors::AdjointBlockMap::new(parent_space, &adjoint_space);
+    let map = symtn_tensors::AdjointBlockMap::new(parent_space, logical);
     let lowering = super::super::cuda_transfer::cuda_adjoint_lowering(&map, D::IS_COMPLEX).unwrap();
     // The elementwise kernels read every dtype through the copies (#1874).
     let regions = super::super::cuda_transfer::cuda_adjoint_lowering(&map, false).unwrap();
 
     let (nout, nin) = (parent_space.nout(), parent_space.nin());
     let parent_structure = parent_space.structure();
-    let structure = adjoint_space.structure();
-    let len = adjoint_space.required_len().unwrap();
+    let structure = logical.structure();
+    let len = logical.required_len().unwrap();
     let elements = |shape: &[usize], strides: &[usize], offset: usize| {
         let mut offsets = vec![offset];
         for (&extent, &stride) in shape.iter().zip(strides) {
@@ -1238,7 +1205,6 @@ where
     };
     let mut copies = Vec::new();
     let mut table = vec![0usize; len];
-    let mut zeros = Vec::new();
     for index in 0..structure.block_count() {
         let block = structure.block(index).unwrap();
         let destination = (
@@ -1247,8 +1213,7 @@ where
             block.offset(),
         );
         let BlockKey::FusionTree(key) = block.key() else {
-            zeros.push(destination);
-            continue;
+            panic!("an adjoint layout keys its blocks by fusion-tree pair");
         };
         let swapped = BlockKey::FusionTree(FusionTreePairKey::pair(
             key.domain_tree().clone(),
@@ -1277,16 +1242,7 @@ where
             region.offset(),
         )
     };
-    let lowered_zeros: Vec<_> = lowering.zeros.iter().map(geometry).collect();
-    assert_eq!(lowered_zeros, zeros, "zero regions");
-    assert_eq!(
-        zeros.len(),
-        if zero_blocks {
-            structure.block_count()
-        } else {
-            0
-        }
-    );
+    assert!(lowering.zeros.is_empty(), "every block has a parent");
     if D::IS_COMPLEX {
         assert!(lowering.copies.is_empty(), "complex lowers to a table");
         assert_eq!(lowering.table, table, "element table");
@@ -1300,8 +1256,7 @@ where
         .map(|(source, destination)| (geometry(source), geometry(destination)))
         .collect();
     assert_eq!(lowered, copies, "strided copies");
-    let lowered_zeros: Vec<_> = regions.zeros.iter().map(geometry).collect();
-    assert_eq!(lowered_zeros, zeros, "zero regions without a table");
+    assert!(regions.zeros.is_empty(), "every block has a parent");
 
     // The lowering, run on the Host, is the Host materialization.
     let parent = t.dense_data().unwrap();
@@ -1319,18 +1274,10 @@ where
             }
         }
     }
-    for (shape, strides, offset) in &zeros {
-        for dst in elements(shape, strides, *offset) {
-            assert_ne!(output[dst], D::zero(), "the zero block is not vacuous");
-            output[dst] = D::zero();
-        }
-    }
     let expected =
-        symtn_tensors::materialize_adjoint_data_dyn(parent_space, &adjoint_space, parent).unwrap();
+        symtn_tensors::materialize_adjoint_data_dyn(parent_space, logical, parent).unwrap();
     assert_eq!(output, expected);
-    if !zero_blocks {
-        assert_eq!(output, lazy.materialize(cpu).unwrap().dense_data().unwrap());
-    }
+    assert_eq!(output, lazy.materialize(cpu).unwrap().dense_data().unwrap());
 }
 
 #[cfg(feature = "cuda")]
@@ -1348,7 +1295,7 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     }
     let runtime = Runtime::builder().build().unwrap();
 
-    // U(1) `[V, V*] <- [V]`, with and without zero blocks.
+    // U(1) `[V, V*] <- [V]`.
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
@@ -1363,10 +1310,8 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         TensorMap::from_subblock_fn(cpu, &runtime, [&u1, &u1_dual], [&u1], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&u1, &u1_dual], [&u1], complex_fill).unwrap();
-    for zero_blocks in [false, true] {
-        assert_cuda_adjoint_lowering_matches_hand(&real, zero_blocks);
-        assert_cuda_adjoint_lowering_matches_hand(&complex, zero_blocks);
-    }
+    assert_cuda_adjoint_lowering_matches_hand(&real);
+    assert_cuda_adjoint_lowering_matches_hand(&complex);
 
     // SU(2): several fusion-tree blocks per coupled sector, each a strided
     // view into its coupled-sector matrix.
@@ -1383,10 +1328,8 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
         TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], fill).unwrap();
     let complex: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&su2, &su2], [&su2], complex_fill).unwrap();
-    for zero_blocks in [false, true] {
-        assert_cuda_adjoint_lowering_matches_hand(&real, zero_blocks);
-        assert_cuda_adjoint_lowering_matches_hand(&complex, zero_blocks);
-    }
+    assert_cuda_adjoint_lowering_matches_hand(&real);
+    assert_cuda_adjoint_lowering_matches_hand(&complex);
 
     // Fermion parity with a dual leg.
     let fz2 = GradedSpace::try_new(
@@ -1398,31 +1341,8 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     let complex: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &fz2_dual], [&fz2], complex_fill)
             .unwrap();
-    assert_cuda_adjoint_lowering_matches_hand(&complex, false);
+    assert_cuda_adjoint_lowering_matches_hand(&complex);
     let real: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(cpu, &runtime, [&fz2, &fz2_dual], [&fz2], fill).unwrap();
-    assert_cuda_adjoint_lowering_matches_hand(&real, true);
-
-    // A parent without the swapped pair: the map's `MissingBlockKey`, the
-    // Host error, on the device lowering too (§4 L6).
-    let lazy = complex.adjoint(cpu).unwrap();
-    let TypedTensorRepr::Adjoint(view) = &lazy.repr else {
-        panic!("dense adjoint is lazy");
-    };
-    let parent = with_opaque_keys(view.parent.space.space());
-    let logical = view.logical_space.space();
-    let host = symtn_tensors::materialize_adjoint_data_dyn(
-        &parent,
-        logical,
-        complex.dense_data().unwrap(),
-    );
-    assert!(matches!(host, Err(OperationError::MissingBlockKey { .. })));
-    let device = super::super::cuda_transfer::cuda_adjoint_lowering(
-        &symtn_tensors::AdjointBlockMap::new(&parent, logical),
-        true,
-    );
-    assert!(matches!(
-        device,
-        Err(Error::Operation(op)) if matches!(*op, OperationError::MissingBlockKey { .. })
-    ));
+    assert_cuda_adjoint_lowering_matches_hand(&real);
 }

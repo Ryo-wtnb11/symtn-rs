@@ -3,31 +3,6 @@
 use super::*;
 
 #[test]
-fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (canonical_space, canonical_data) = generic_factorization_input();
-    let (padded_space, _) = padded_generic_factorization_input(&canonical_space, &canonical_data);
-    let input = BoundDynamicTensorRef::try_new(&canonical_space, &canonical_data).unwrap();
-    let called = Cell::new(false);
-    let result = map_square_sectors_dyn_into(
-        engine,
-        &mut ScriptedExecutor::new(RejectExecutorCalls),
-        &input,
-        padded_space,
-        |_| -> Result<(), OperationError> {
-            called.set(true);
-            unreachable!("layout rejection precedes kernel initialization")
-        },
-        |_, _, _, _, _, _| unreachable!("layout rejection precedes dense work"),
-    );
-    assert!(matches!(
-        result,
-        Err(OperationError::UnsupportedTensorContractScope { .. })
-    ));
-    assert!(!called.get());
-}
-
-#[test]
 fn generic_exp_direct_reuses_the_exact_input_provider_and_layout() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(FactorGenericRule);
@@ -125,7 +100,7 @@ fn pinv_satisfies_the_moore_penrose_identity() {
         space,
     )
     .unwrap();
-    let tensor = padded_copy(&rule, &canonical);
+    let tensor = canonical.clone();
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let mut context = default_context();
     let compact_svd_copy_rec = crate::probe::record();
@@ -148,8 +123,11 @@ fn pinv_satisfies_the_moore_penrose_identity() {
             "Moore-Penrose violated at raw position {index}: {lhs} != {rhs}"
         );
     }
-    // The padded input is packed once; no SVD factor is laid out.
-    assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
+    // The canonical input is read in place; no SVD factor is laid out.
+    assert_eq!(
+        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
+        0
+    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -501,44 +479,6 @@ fn pinv_direct_into_rejects_foreign_authority_and_wrong_output_before_execution(
     );
 }
 
-#[test]
-fn solve_left_direct_into_rejects_late_tree_route_before_execution() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: an admitted output with the right identity and HomSpace still
-    // cannot reinterpret a different coupled-tree basis.
-    let source = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let output = reversed_coupled_tree_basis_copy(&Z2FusionRule, &source);
-    let provider = Arc::new(Z2FusionRule);
-    let divisor = bound_tensor(Arc::clone(&provider), &source);
-    let rhs = bound_tensor(Arc::clone(&provider), &source);
-    let output_space = BoundDynamicFusionMapSpace::bind_multiplicity_free(
-        output.fusion_space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let mut dense = ScriptedExecutor::<SolveCallSpy>::default();
-
-    let error = solve_left_direct_into_dyn(
-        engine,
-        &mut dense,
-        &divisor.as_ref().dynamic(),
-        &rhs.as_ref().dynamic(),
-        output_space,
-    )
-    .unwrap_err();
-
-    assert!(
-        matches!(
-            error,
-            OperationError::SpaceMismatch {
-                message: "solve coupled-sector tree bases are incompatible"
-            }
-        ),
-        "{error:?}"
-    );
-    assert_eq!(dense.counts().solve, 0);
-}
-
 fn u1_block_map<D>(blocks: &[(i32, usize, usize, Vec<D>)]) -> TestTensor<D>
 where
     D: Copy + Zero,
@@ -702,137 +642,6 @@ fn inv_uses_each_u1_sector_scale_for_phased_c64_values() {
     assert!(
         (small * scalar_u1_block(inverse.tensor(), 1) - Complex64::new(1.0, 0.0)).norm() < 1e-12
     );
-}
-
-#[test]
-fn inv_solves_padded_u1_sectors_and_matches_the_dense_oracle() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: a legal expert layout uses the same sector solves and restores each
-    // dense inverse to the destination block layout.
-    let tensor = u1_block_endomorphism(&[
-        (0, 2, vec![2.0_f64, 1.0, 3.0, 4.0]),
-        (1, 2, vec![1.0_f64, 2.0, 0.0, 3.0]),
-    ]);
-    let padded = padded_copy(&U1FusionRule, &tensor);
-    assert!(padded
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_none());
-    let mut dense = ScriptedExecutor::<SolveCallSpy>::default();
-    let mut context = default_context();
-
-    let inverse = inv(
-        engine,
-        &mut dense,
-        &mut context,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &padded),
-    )
-    .unwrap();
-
-    let expected = [
-        (U1Irrep::new(0).sector_id(), vec![0.8, -0.2, -0.6, 0.4]),
-        (
-            U1Irrep::new(1).sector_id(),
-            vec![1.0, -2.0 / 3.0, 0.0, 1.0 / 3.0],
-        ),
-    ];
-    for (sector, _, _, values) in dense_sector_matrices(1, inverse.tensor()) {
-        let oracle = expected
-            .iter()
-            .find_map(|(candidate, values)| (*candidate == sector).then_some(values))
-            .unwrap();
-        for (&actual, &expected) in values.iter().zip(oracle) {
-            assert!((actual - expected).abs() < 1.0e-12);
-        }
-    }
-    assert_eq!(dense.counts().solve, 2);
-}
-
-#[test]
-fn inv_reorders_a_complete_expert_tree_grid_by_key() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: an expert layout's block order cannot transpose matrix axes or
-    // replace fusion-tree identity as the inverse routing authority.
-    let rule = Z2FusionRule;
-    let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(), leg()]),
-        FusionProductSpace::new([leg(), leg()]),
-    );
-    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
-    let tree_code = |tree: &FusionTreeKey| {
-        tree.uncoupled()
-            .iter()
-            .fold(0usize, |value, sector| value * 2 + sector.id())
-    };
-    let diagonal = |tree: &FusionTreeKey, row: usize| 2.0 + tree_code(tree) as f64 + row as f64;
-    let upper = |tree: &FusionTreeKey| 0.25 + tree_code(tree) as f64 * 0.125;
-    let canonical = TestTensor::from_block_fn_with_fusion_space(space, 0.0, |key, indices| {
-        let BlockKey::FusionTree(key) = key else {
-            return 0.0;
-        };
-        if key.codomain_tree() != key.domain_tree() {
-            return 0.0;
-        }
-        let row = indices[0] + 2 * indices[1];
-        let col = indices[2] + 2 * indices[3];
-        if row == col {
-            diagonal(key.codomain_tree(), row)
-        } else if row == 0 && col == 1 {
-            upper(key.codomain_tree())
-        } else {
-            0.0
-        }
-    })
-    .unwrap();
-    let reordered = reversed_complete_grid_copy(&rule, &canonical);
-    assert!(reordered
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .is_none());
-    let mut dense = ScriptedExecutor::<SolveCallSpy>::default();
-    let mut context = default_context();
-
-    let inverse = inv(
-        engine,
-        &mut dense,
-        &mut context,
-        &bound_tensor_ref!(Arc::new(rule), &reordered),
-    )
-    .unwrap();
-
-    for index in 0..inverse.structure().block_count() {
-        let block = inverse.structure().block(index).unwrap();
-        let BlockKey::FusionTree(key) = block.key() else {
-            panic!("inverse output must retain fusion-tree blocks")
-        };
-        for row in 0..4 {
-            for col in 0..4 {
-                let position = block.offset()
-                    + (row % 2) * block.strides()[0]
-                    + (row / 2) * block.strides()[1]
-                    + (col % 2) * block.strides()[2]
-                    + (col / 2) * block.strides()[3];
-                let expected = if key.codomain_tree() != key.domain_tree() {
-                    0.0
-                } else if row == col {
-                    diagonal(key.codomain_tree(), row).recip()
-                } else if row == 0 && col == 1 {
-                    -upper(key.codomain_tree())
-                        / (diagonal(key.codomain_tree(), 0) * diagonal(key.codomain_tree(), 1))
-                } else {
-                    0.0
-                };
-                assert!(
-                    (inverse.data()[position] - expected).abs() < 1.0e-12,
-                    "tree={key:?} row={row} col={col}"
-                );
-            }
-        }
-    }
-    assert_eq!(dense.counts().solve, 2);
 }
 
 #[test]
@@ -1080,7 +889,7 @@ fn pinv_keeps_its_global_rcond_cutoff() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: public pinv still drops singular values relative to the global maximum.
     let canonical = u1_block_endomorphism(&[(0, 1, vec![1.0_f64]), (1, 1, vec![1e-14])]);
-    let tensor = padded_copy(&U1FusionRule, &canonical);
+    let tensor = canonical;
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
     let input_pack_bytes_rec = crate::probe::record();
@@ -1095,58 +904,11 @@ fn pinv_keeps_its_global_rcond_cutoff() {
 
     assert!((scalar_u1_block(inverse.tensor(), 0) - 1.0).abs() < 1e-12);
     assert_eq!(scalar_u1_block(inverse.tensor(), 1), 0.0);
-    // The padded input is packed once; no SVD factor is laid out.
-    assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
-    assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
-}
-
-#[test]
-fn pinv_adjoint_parent_reconstructs_complex_padded_rectangular_sectors() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
-    let source = mixed_rectangular_c32_tensor();
-    let canonical = TestTensor::<Complex64>::from_vec_with_fusion_space(
-        source
-            .data()
-            .iter()
-            .map(|value| Complex64::new(value.re as f64, value.im as f64))
-            .collect(),
-        source.fusion_space().clone(),
-    )
-    .unwrap();
-    let parent = padded_copy(&rule, &canonical);
-    let provider = Arc::new(rule);
-    let bound = bound_tensor(Arc::clone(&provider), &parent);
-    assert!(
-        crate::factorize::compact_factor_plan_for_test(bound.space())
-            .unwrap()
-            .is_none()
+    // The canonical input is read in place; no SVD factor is laid out.
+    assert_eq!(
+        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
+        0
     );
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let mut context = TensorContractFusionExecutionContext::<Complex64, RuleIdentity>::default();
-    let compact_svd_copy_rec = crate::probe::record();
-    let input_pack_bytes_rec = crate::probe::record();
-    let output =
-        pinv_adjoint_parent_into_mf(engine, &mut dense, &bound.as_ref().dynamic(), 0.0).unwrap();
-    let output: BoundTensorMap<_, _> = typed_from_bound_factor(output).unwrap();
-    let adjoint = adjoint(provider.as_ref(), &canonical).unwrap();
-    let first = crate::compose::compose(
-        engine,
-        &mut context,
-        provider.as_ref(),
-        &adjoint,
-        output.tensor(),
-    )
-    .unwrap();
-    let reconstructed =
-        crate::compose::compose(engine, &mut context, provider.as_ref(), &first, &adjoint).unwrap();
-
-    assert_eq!(reconstructed.structure(), adjoint.structure());
-    for (&actual, &expected) in reconstructed.data().iter().zip(adjoint.data()) {
-        assert!((actual - expected).norm() < 1.0e-10);
-    }
-    // The padded input is packed once; no SVD factor is laid out.
-    assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -1464,48 +1226,6 @@ fn exp_of_the_oracle_tensor_matches_tensorkit_anchors() {
     );
 }
 
-#[test]
-fn exp_agrees_between_the_direct_region_and_packed_layouts() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the same blocks reached through the canonical coupled-sector
-    // regions and through the packed matricization fall-back produce the same
-    // tensor — the kernel sees identical matrices on both routes.
-    let tensor = exp_oracle_tensor::<f64>(4.0);
-    let packed = padded_copy(&U1FusionRule, &tensor);
-    assert!(tensor
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_some());
-    assert!(packed
-        .structure()
-        .coupled_sector_regions(1)
-        .unwrap()
-        .is_none());
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let direct = exp(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
-    )
-    .unwrap();
-    let fallback = exp(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &packed),
-    )
-    .unwrap();
-
-    for charge in [0, 1] {
-        assert_eq!(
-            u1_block_matrix(direct.tensor(), charge),
-            u1_block_matrix(fallback.tensor(), charge),
-            "packed layout changed the exponential of charge {charge}"
-        );
-    }
-}
-
 // ============================================================================
 // Multi-tree coupled sectors.
 //
@@ -1697,37 +1417,6 @@ fn exp_of_a_multi_tree_sector_matches_the_series_entrywise() {
     assert_eq!(spy.counts().solve, sources.len(), "one solve per sector");
 
     assert_multitree_exp_matches_the_series(exponential.tensor(), &sources, "direct regions");
-}
-
-#[test]
-fn exp_of_a_multi_tree_sector_matches_the_series_through_the_packed_layout() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the same gate on the matricization fall-back, where the sector
-    // matrix is assembled tree by tree and written back through
-    // `reorder_inverse_solution` — the route that has to rebuild the tree
-    // layout rather than inherit it.
-    let tensor = exp_multitree_fixture();
-    let packed = padded_copy(&U1FusionRule, &tensor);
-    assert!(
-        packed
-            .structure()
-            .coupled_sector_regions(2)
-            .unwrap()
-            .is_none(),
-        "the padded copy must take the matricization fall-back"
-    );
-    let sources = coupled_sector_matrices(&tensor);
-
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let exponential = exp(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &packed),
-    )
-    .unwrap();
-
-    // The output layout is always canonical, so the same reader applies.
-    assert_multitree_exp_matches_the_series(exponential.tensor(), &sources, "packed layout");
 }
 
 #[test]
@@ -2536,86 +2225,6 @@ fn pinv_cutoff_rejects_a_non_finite_singular_value_instead_of_dropping_it() {
 }
 
 #[test]
-fn hermitian_exp_accepts_consistently_reordered_tree_stacking_with_facade_values() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: reversing rows and columns together is the same operator in a
-    // permuted basis, so exp's spectral route passes the stacking guard and
-    // publishes the facade's values block by block: `V f(D) V^H` composes
-    // eigenvectors published in the fresh factor layout by tree identity.
-    // The Padé route refuses the layout explicitly instead
-    // ("inverse output tree basis does not transpose the source basis").
-    let rule = U1FusionRule;
-    let sectors = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
-    let scaled = |tensor: TestTensor<f64>| {
-        TestTensor::<f64>::from_vec_with_fusion_space(
-            tensor.data().iter().map(|value| 0.1 * value).collect(),
-            tensor.fusion_space().clone(),
-        )
-        .unwrap()
-    };
-    let provider = Arc::new(rule);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    {
-        let facade = scaled(hermitian_test_tensor(&rule, &sectors));
-        let reordered = reversed_coupled_tree_basis_copy(&rule, &facade);
-        let expected = exp(
-            engine,
-            &mut dense,
-            &bound_tensor_ref!(Arc::clone(&provider), &facade),
-        )
-        .unwrap();
-        let actual = exp(
-            engine,
-            &mut dense,
-            &bound_tensor_ref!(Arc::clone(&provider), &reordered),
-        )
-        .unwrap();
-        let (expected, actual) = (expected.tensor(), actual.tensor());
-        let scale = expected
-            .data()
-            .iter()
-            .fold(1.0f64, |max, value| max.max(value.abs()));
-        let structure = expected.structure();
-        for index in 0..structure.block_count() {
-            let key = structure.block(index).unwrap().key().clone();
-            let (left, right) = (
-                expected.block_by_key(&key).unwrap(),
-                actual.block_by_key(&key).unwrap(),
-            );
-            assert_eq!(left.shape(), right.shape());
-            let mut multi = vec![0usize; left.shape().len()];
-            loop {
-                let at = |view: &symtn_core::BlockView<'_, f64>| {
-                    view.data()[view.offset()
-                        + multi
-                            .iter()
-                            .zip(view.strides())
-                            .map(|(&index, &stride)| index * stride)
-                            .sum::<usize>()]
-                };
-                let (a, b) = (at(&left), at(&right));
-                assert!(
-                    (a - b).abs() <= 1e-12 * scale,
-                    "{key:?} {multi:?}: {a} vs {b}"
-                );
-                let Some(axis) = (0..multi.len()).find(|&axis| {
-                    multi[axis] += 1;
-                    if multi[axis] < left.shape()[axis] {
-                        true
-                    } else {
-                        multi[axis] = 0;
-                        false
-                    }
-                }) else {
-                    break;
-                };
-                let _ = axis;
-            }
-        }
-    }
-}
-
-#[test]
 #[expect(
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
@@ -2674,47 +2283,39 @@ fn mf_pinv_exp_and_polar_publish_no_factor_layout() {
     // and polar factors recompose each coupled sector into their output by one
     // GEMM: no factor space is staged, no SVD factor is scattered into a
     // factor layout, and no fusion contraction runs (the seams take no
-    // contraction context). Region and packed inputs, U(1)-like Z2 and SU(2)
-    // with degeneracy 2.
+    // contraction context). U(1)-like Z2 and SU(2) with degeneracy 2.
     fn check<R>(rule: R, sectors: &[SectorId])
     where
         R: MultiplicityFreeRigidSymbols<Scalar = f64> + Clone,
     {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let provider = Arc::new(rule.clone());
-        for padded in [false, true] {
-            let general = tsvd_test_tensor(&rule, sectors);
-            let hermitian = hermitian_test_tensor(&rule, sectors);
-            let (general, hermitian) = if padded {
-                (padded_copy(&rule, &general), padded_copy(&rule, &hermitian))
-            } else {
-                (general, hermitian)
-            };
-            let general = bound_tensor(Arc::clone(&provider), &general);
-            let hermitian = bound_tensor(Arc::clone(&provider), &hermitian);
-            let (general, hermitian) = (general.as_ref(), hermitian.as_ref());
-            let (general, hermitian) = (general.dynamic(), hermitian.dynamic());
-            let mut dense = ScriptedExecutor::<MatrixFunctionCallSpy>::default();
-            let stage_rec = crate::probe::record();
-            let stages = || stage_rec.get(crate::probe::Event::MfFactorSpaceStage);
-            let compact_svd_copy_rec = crate::probe::record();
-            let before = stages();
+        let general = tsvd_test_tensor(&rule, sectors);
+        let hermitian = hermitian_test_tensor(&rule, sectors);
+        let general = bound_tensor(Arc::clone(&provider), &general);
+        let hermitian = bound_tensor(Arc::clone(&provider), &hermitian);
+        let (general, hermitian) = (general.as_ref(), hermitian.as_ref());
+        let (general, hermitian) = (general.dynamic(), hermitian.dynamic());
+        let mut dense = ScriptedExecutor::<MatrixFunctionCallSpy>::default();
+        let stage_rec = crate::probe::record();
+        let stages = || stage_rec.get(crate::probe::Event::MfFactorSpaceStage);
+        let compact_svd_copy_rec = crate::probe::record();
+        let before = stages();
 
-            pinv_into_mf(engine, &mut dense, &general, 1e-12).unwrap();
-            pinv_adjoint_parent_into_mf(engine, &mut dense, &general, 1e-12).unwrap();
-            left_polar_dyn(engine, &mut dense, &general).unwrap();
-            right_polar_dyn(engine, &mut dense, &general).unwrap();
-            let solves = dense.counts().solve;
-            exp_into_mf(engine, &mut dense, &hermitian).unwrap();
-            assert_eq!(dense.counts().solve, solves, "Hermitian exp is spectral");
+        pinv_into_mf(engine, &mut dense, &general, 1e-12).unwrap();
+        pinv_adjoint_parent_into_mf(engine, &mut dense, &general, 1e-12).unwrap();
+        left_polar_dyn(engine, &mut dense, &general).unwrap();
+        right_polar_dyn(engine, &mut dense, &general).unwrap();
+        let solves = dense.counts().solve;
+        exp_into_mf(engine, &mut dense, &hermitian).unwrap();
+        assert_eq!(dense.counts().solve, solves, "Hermitian exp is spectral");
 
-            assert_eq!(stages(), before, "padded={padded}: factor spaces staged");
-            assert_eq!(
-                compact_svd_copy_rec.compact_svd_copy(),
-                Default::default(),
-                "padded={padded}: SVD factor layout"
-            );
-        }
+        assert_eq!(stages(), before, "factor spaces staged");
+        assert_eq!(
+            compact_svd_copy_rec.compact_svd_copy(),
+            Default::default(),
+            "SVD factor layout"
+        );
     }
     check(Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
     check(

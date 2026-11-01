@@ -1019,40 +1019,6 @@ where
     space.transformed_layout_probe(rule, operation)
 }
 
-#[cfg(test)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the test seam keeps injected layout probes and each planning input independently controllable"
-)]
-fn select_tensorcontract_fusion_plan_from_spaces_with_probe<R>(
-    rule: &R,
-    dst: &DynamicFusionMapSpace,
-    lhs: &DynamicFusionMapSpace,
-    rhs: &DynamicFusionMapSpace,
-    axes: TensorContractSpec<'_>,
-    lhs_source_conjugate: bool,
-    rhs_source_conjugate: bool,
-    probe: LayoutProbeBuilder<R>,
-    primer: Option<LayoutKeyBuilder<R>>,
-) -> Result<FusionContractPlan, OperationError>
-where
-    R: MultiplicityFreeRigidSymbols,
-    R::Scalar: DenseBlockScalar,
-{
-    select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations(
-        rule,
-        dst,
-        lhs,
-        rhs,
-        axes,
-        lhs_source_conjugate,
-        rhs_source_conjugate,
-        probe,
-        primer,
-        &FORWARD_ORIENTATIONS,
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 fn select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations<R, S, P>(
     rule: &R,
@@ -1449,8 +1415,7 @@ where
 /// of the selector ([`prepare_tensorcontract_fusion_plan_dyn_raw_canonical`]),
 /// over both orientations, with `twist` reading the core-right twist.
 /// Every layout is canonical: checked admission derives the canonical
-/// layout of every operand and destination (`with_test_structure` is the
-/// only, test-only, exception).
+/// layout of every operand and destination.
 pub(crate) fn select_complete_tensorcontract_fusion_plan<E>(
     twist: impl Fn(&FusionTreeHomSpace, &[usize]) -> Result<bool, E>,
     dst: &DynamicFusionMapSpace,
@@ -1730,13 +1695,12 @@ mod tests {
     use crate::probe::{self, Event};
     use crate::{TreeTransformOperation, TreeTransformOperationKind};
     use symtn_core::{
-        BlockKey, BlockStructure, FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace,
-        SU2FusionRule, SectorId, SectorLeg, U1FusionRule,
+        FermionParityFusionRule, FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg,
+        U1FusionRule,
     };
     use symtn_operations::{OutputAxisOrder, TensorContractSpec};
 
     std::thread_local! {
-        static REJECT_NEXT_PROBE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         static OPERAND_PREFLIGHT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
 
@@ -1755,37 +1719,12 @@ mod tests {
         })
     }
 
-    fn reject_next_probe(
-        rule: &U1FusionRule,
-        space: &DynamicFusionMapSpace,
-        operation: &TreeTransformOperation,
-        primer: Option<super::LayoutKeyBuilder<U1FusionRule>>,
-    ) -> Result<super::TransformedLayoutProbe, crate::OperationError> {
-        if REJECT_NEXT_PROBE.replace(false) {
-            Err(crate::OperationError::UnsupportedTensorContractScope {
-                message: "test candidate layout unavailable",
-            })
-        } else {
-            super::encoded_layout_probe(rule, space, operation, primer)
-        }
-    }
-
     fn single_sector_space(rule: &U1FusionRule, dimensions: [usize; 4]) -> DynamicFusionMapSpace {
         let homspace = FusionTreeHomSpace::from_sector_ids(
             [(0, dimensions[0]), (0, dimensions[1])],
             [(0, dimensions[2]), (0, dimensions[3])],
         );
         DynamicFusionMapSpace::from_final_homspace(rule, homspace).unwrap()
-    }
-
-    fn subset_copy(rule: &U1FusionRule, complete: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
-        DynamicFusionMapSpace::try_from_layout(
-            complete.homspace().clone(),
-            BlockStructure::clone(complete.structure()),
-        )
-        .unwrap()
-        .try_bind_rule(rule)
-        .unwrap()
     }
 
     fn selected_contract_axes(
@@ -1835,8 +1774,8 @@ mod tests {
         let rule = U1FusionRule;
         let lhs_typed = single_sector_space(&rule, [2, 3, 4, 5]);
         let rhs_typed = single_sector_space(&rule, [5, 4, 6, 7]);
-        let lhs = subset_copy(&rule, &lhs_typed);
-        let rhs = subset_copy(&rule, &rhs_typed);
+        let lhs = lhs_typed;
+        let rhs = rhs_typed;
         let dst = single_sector_space(&rule, [2, 3, 6, 7]);
         let lhs_layout = FusionOperand::direct(&lhs)
             .prepare(&rule, encoded_layout_primer::<U1FusionRule>)
@@ -1966,23 +1905,19 @@ mod tests {
     }
 
     #[test]
-    fn complete_selector_skips_loser_layouts_and_matches_exact_fallback() {
+    fn complete_selector_skips_loser_layouts() {
         let rule = U1FusionRule;
-        let lhs_complete = single_sector_space(&rule, [16, 16, 2, 3]);
-        let rhs_complete = single_sector_space(&rule, [3, 2, 1, 1]);
-        let dst_complete = single_sector_space(&rule, [16, 16, 1, 1]);
-        let lhs = lhs_complete.clone();
-        let rhs = rhs_complete.clone();
-        let dst = dst_complete.clone();
+        let lhs = single_sector_space(&rule, [16, 16, 2, 3]);
+        let rhs = single_sector_space(&rule, [3, 2, 1, 1]);
+        let dst = single_sector_space(&rule, [16, 16, 1, 1]);
         let axes = TensorContractSpec::with_default_output_order(&[2, 3], &[1, 0]);
         let scored_candidates = contracted_axis_order_candidates(&[2, 3], &[1, 0]).len()
             * crate::contract::fusion::CACHED_ORIENTATIONS.len();
 
         let candidate_score_calls_rec = probe::record();
         let candidate_build_calls_rec = probe::record();
-        let complete =
-            prepare_tensorcontract_fusion_plan_dyn_raw_canonical(&rule, &dst, &lhs, &rhs, axes)
-                .unwrap();
+        prepare_tensorcontract_fusion_plan_dyn_raw_canonical(&rule, &dst, &lhs, &rhs, axes)
+            .unwrap();
         // What: Complete cold selection performs one semantic HomSpace preflight
         // and scores all stable candidates without constructing their layouts.
         assert_eq!(
@@ -1996,31 +1931,6 @@ mod tests {
             ),
             (1, 0)
         );
-
-        let candidate_score_calls_rec = probe::record();
-        let candidate_build_calls_rec = probe::record();
-        let exact = prepare_tensorcontract_fusion_plan_dyn_raw_canonical(
-            &rule,
-            &subset_copy(&rule, &dst_complete),
-            &subset_copy(&rule, &lhs_complete),
-            &subset_copy(&rule, &rhs_complete),
-            axes,
-        )
-        .unwrap();
-        // What: the conservative expert fallback probes both operands for each
-        // candidate and selects the same mathematical winner.
-        assert_eq!(
-            candidate_score_calls_rec.get(Event::CandidateScore),
-            scored_candidates
-        );
-        assert_eq!(
-            (
-                candidate_build_calls_rec.get(Event::ContractPreflight),
-                candidate_build_calls_rec.get(Event::CandidateLayoutProbe)
-            ),
-            (1, 2 * scored_candidates)
-        );
-        assert_eq!(complete, exact);
     }
 
     #[test]
@@ -2078,38 +1988,6 @@ mod tests {
         // and materialization cost as the exact transformed-layout probe.
         assert!(complete.rhs_requires_twist());
         assert_eq!(complete, exact);
-    }
-
-    #[test]
-    fn exact_fallback_skips_an_unavailable_loser() {
-        let rule = U1FusionRule;
-        let lhs = single_sector_space(&rule, [1, 1, 2, 3]);
-        let rhs = single_sector_space(&rule, [3, 2, 16, 16]);
-        let dst = single_sector_space(&rule, [1, 1, 16, 16]);
-        let lhs = subset_copy(&rule, &lhs);
-        let rhs = subset_copy(&rule, &rhs);
-        let dst = subset_copy(&rule, &dst);
-        let axes = TensorContractSpec::with_default_output_order(&[2, 3], &[1, 0]);
-        let expected =
-            prepare_tensorcontract_fusion_plan_dyn_raw(&rule, &dst, &lhs, &rhs, axes).unwrap();
-
-        REJECT_NEXT_PROBE.set(true);
-        let actual = super::select_tensorcontract_fusion_plan_from_spaces_with_probe(
-            &rule,
-            &dst,
-            &lhs,
-            &rhs,
-            axes,
-            false,
-            false,
-            reject_next_probe,
-            None,
-        )
-        .unwrap();
-
-        // What: a candidate-local capability failure cannot reject a later
-        // stable candidate that selects the same valid winner.
-        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -2262,62 +2140,5 @@ mod tests {
         assert_eq!(reverse.orientation(), FusionContractOrientation::RhsLhs);
         assert!(reverse.lhs_source_conjugate());
         assert!(!reverse.rhs_source_conjugate());
-    }
-
-    #[test]
-    fn selector_cost_materializes_identity_operand_with_missing_structural_zero() {
-        // What: an identity-axis operand with an incomplete SU2 tree grid is
-        // charged for the complete core layout instead of treated as borrowed.
-        let rule = SU2FusionRule;
-        let lhs = DynamicFusionMapSpace::from_final_homspace(
-            &rule,
-            FusionTreeHomSpace::from_sector_ids([], []),
-        )
-        .unwrap();
-        let rhs_hom = FusionTreeHomSpace::from_sector_ids([], [(1, 1), (1, 1), (1, 1), (1, 1)]);
-        let rhs_keys = rhs_hom.fusion_tree_keys(&rule);
-        assert_eq!(rhs_keys.len(), 2);
-        let rhs = DynamicFusionMapSpace::try_from_layout(
-            rhs_hom.clone(),
-            crate::tests::packed_fixture_structure(
-                4,
-                [(BlockKey::from(rhs_keys[0].clone()), vec![1, 1, 1, 1])],
-            )
-            .unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap();
-        let dst_hom = rhs_hom.permute(&rule, &[0, 1, 2, 3], &[]).unwrap();
-        let dst_keys = dst_hom.fusion_tree_keys(&rule);
-        let dst = DynamicFusionMapSpace::try_from_layout(
-            dst_hom,
-            crate::tests::packed_fixture_structure(
-                4,
-                dst_keys
-                    .iter()
-                    .cloned()
-                    .map(|key| (BlockKey::from(key), vec![1, 1, 1, 1])),
-            )
-            .unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap();
-        let facts = prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
-            &rule,
-            &dst,
-            &lhs,
-            &rhs,
-            TensorContractSpec::new(&[], &[], OutputAxisOrder::from_axes(&[0, 1, 2, 3])),
-        )
-        .unwrap();
-
-        assert_eq!(facts.len(), 2);
-        assert!(!facts[0].rhs_exact_identity_borrowable());
-        assert_eq!(facts[0].lhs_materialized_elements(), 0);
-        assert_eq!(facts[0].rhs_materialized_elements(), 2);
-        assert_eq!(facts[0].output_materialized_elements(), 2);
-        assert_eq!(facts[0].total_materialized_elements(), 4);
     }
 }
