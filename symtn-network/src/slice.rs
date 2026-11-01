@@ -1119,6 +1119,34 @@ mod tests {
         (ir, plan, cost)
     }
 
+    /// By hand, for `ab,bc,cd->ad` with dims a=2, b=2, c=8, d=2 and the order
+    /// `(ab,bc)->ac`, then `(ac,cd)->ad`: the steps cost `a*b*c` and `a*c*d`
+    /// elements, so slicing `c` (internal, dim 8) leaves `2*2*1 + 2*1*2 = 8`
+    /// per slice over 8 slices. Slicing the output `a` too halves the work per
+    /// slice (`2*1*1 + 1*1*2 = 4`) and doubles the slices (16).
+    #[test]
+    fn total_flops_and_kinds_follow_the_sliced_labels() {
+        let (ir, plan, cost) = chain_abc(2, 2, 8, 2);
+        let (a, c) = (TemporaryLabel::new("a"), TemporaryLabel::new("c"));
+
+        let internal = slice_plan_for_ordered(&ir, &plan, &cost, std::slice::from_ref(&c));
+        assert_eq!(internal.sliced_kinds(), &[SliceKind::Internal]);
+        assert_eq!(internal.per_slice_flops(), 8.0);
+        assert_eq!(internal.total_flops(), 64.0);
+
+        let both = slice_plan_for_ordered(&ir, &plan, &cost, &[c, a]);
+        assert_eq!(
+            both.sliced_kinds(),
+            &[SliceKind::Internal, SliceKind::Output]
+        );
+        assert_eq!(both.per_slice_flops(), 4.0);
+        assert_eq!(both.total_flops(), 64.0);
+
+        let none = slice_plan_for_ordered(&ir, &plan, &cost, &[]);
+        assert!(none.sliced_kinds().is_empty());
+        assert_eq!(none.total_flops(), 64.0);
+    }
+
     #[test]
     fn greedy_slice_reaches_target_width() {
         // Intermediate "ac" = a*c = 2*8 = 16 is the peak; output "ad" = 4.

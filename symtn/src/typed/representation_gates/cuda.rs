@@ -179,7 +179,7 @@ fn a_cpu_engine_upload_is_refused_before_compact_expansion_and_lazy_materializat
 
 #[cfg(feature = "cuda")]
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
