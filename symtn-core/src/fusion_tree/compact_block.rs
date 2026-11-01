@@ -1,19 +1,21 @@
 use super::*;
 
-fn apply_first_compact_block_terms<S, K, F, I>(
+fn apply_first_compact_block_terms<S, K, F>(
     basis: &[K],
     mut transform: F,
 ) -> Result<(Vec<K>, DenseColumns<S>), CoreError>
 where
     S: Clone + Add<Output = S>,
     K: Eq + Hash,
-    F: FnMut(&K) -> Result<I, CoreError>,
-    I: IntoIterator<Item = (K, S)>,
+    F: FnMut(&K, &mut Vec<(K, S)>) -> Result<(), CoreError>,
 {
-    let mut index: FxHashMap<K, usize> = FxHashMap::default();
+    let mut index: FxHashMap<K, usize> =
+        FxHashMap::with_capacity_and_hasher(basis.len(), Default::default());
     let mut columns = DenseColumns::with_capacity(basis.len(), basis.len());
+    let mut terms = Vec::new();
     for (source, source_local) in basis.iter().enumerate() {
-        for (destination_local, coefficient) in transform(source_local)? {
+        transform(source_local, &mut terms)?;
+        for (destination_local, coefficient) in terms.drain(..) {
             let row = match index.get(&destination_local) {
                 Some(&row) => row,
                 None => {
@@ -42,8 +44,9 @@ where
 
 /// Run one compact move over `basis`: the first move of a chain writes the
 /// source columns directly (`columns == None`); later moves compose through
-/// the previous coefficient matrix. The move itself is `transform`.
-fn apply_compact_block_terms<S, K, F, I>(
+/// the previous coefficient matrix. The move itself is `transform`, which
+/// appends one basis row's terms to the move's reused term buffer.
+fn apply_compact_block_terms<S, K, F>(
     basis: &[K],
     columns: Option<&DenseColumns<S>>,
     transform: F,
@@ -51,8 +54,7 @@ fn apply_compact_block_terms<S, K, F, I>(
 where
     S: Clone + Add<Output = S> + Mul<Output = S>,
     K: Eq + Hash,
-    F: FnMut(&K) -> Result<I, CoreError>,
-    I: IntoIterator<Item = (K, S)>,
+    F: FnMut(&K, &mut Vec<(K, S)>) -> Result<(), CoreError>,
 {
     match columns {
         None => apply_first_compact_block_terms(basis, transform),
@@ -77,7 +79,9 @@ where
 {
     let prepared = prepare_multiplicity_free_artin(rule, &basis.frame, index, inverse)?;
     let (locals, next_columns) =
-        apply_compact_block_terms(&basis.locals, columns, |local| prepared.apply(rule, local))?;
+        apply_compact_block_terms(&basis.locals, columns, |local, terms| {
+            prepared.apply_into(rule, local, terms)
+        })?;
     Ok((
         CompactMultiplicityFreeTreeBasis {
             frame: prepared.output_frame,
@@ -94,19 +98,10 @@ pub(super) fn scatter_compact_tree_block<S>(
 where
     S: Clone,
 {
-    let mut rows_per_source = vec![Vec::new(); columns.num_src];
     // Why not materialize in each source column: the full external frame is
     // identical for the row and must be rebuilt only once at the API edge.
     let destinations = basis.frame.materialize_all(basis.locals.iter());
-    for destination_row in 0..basis.locals.len() {
-        let destination_key = destinations.key(destination_row);
-        for (source, coefficient) in columns.row(destination_row).iter().enumerate() {
-            if let Some(coefficient) = coefficient {
-                rows_per_source[source].push((destination_key.clone(), coefficient.clone()));
-            }
-        }
-    }
-    rows_per_source
+    columns.source_rows(|row| destinations.key(row))
 }
 
 pub(crate) fn compact_bendright_block<R>(
@@ -145,9 +140,11 @@ where
 {
     let prepared = MultiplicityFreeBend::prepare(&basis.frame, bend)?;
     let kernel = SimpleK(rule);
-    let (locals, next_columns) = apply_compact_block_terms(&basis.locals, columns, |local| {
-        Ok(std::iter::once(prepared.apply(&kernel, local)?))
-    })?;
+    let (locals, next_columns) =
+        apply_compact_block_terms(&basis.locals, columns, |local, terms| {
+            terms.push(prepared.apply(&kernel, local)?);
+            Ok(())
+        })?;
     let frame = prepared.output_frame(rule, &basis.frame)?;
     Ok((
         CompactMultiplicityFreeTreePairBasis { frame, locals },
@@ -383,20 +380,21 @@ where
     R::Scalar: Clone + Add<Output = R::Scalar> + Mul<Output = R::Scalar>,
 {
     let prepared = prepare_multiplicity_free_artin(rule, &basis.frame.codomain, index, inverse)?;
-    let (locals, next_columns) = apply_compact_block_terms(&basis.locals, columns, |local| {
-        let domain = local.domain.clone();
-        Ok(prepared.apply(rule, &local.codomain)?.into_iter().map(
-            move |(codomain, coefficient)| {
+    let mut codomain_terms = Vec::new();
+    let (locals, next_columns) =
+        apply_compact_block_terms(&basis.locals, columns, |local, terms| {
+            prepared.apply_into(rule, &local.codomain, &mut codomain_terms)?;
+            terms.extend(codomain_terms.drain(..).map(|(codomain, coefficient)| {
                 (
                     MultiplicityFreeTreePairLocal {
                         codomain,
-                        domain: domain.clone(),
+                        domain: local.domain.clone(),
                     },
                     coefficient,
                 )
-            },
-        ))
-    })?;
+            }));
+            Ok(())
+        })?;
     let frame = MultiplicityFreeTreePairFrame {
         codomain: prepared.output_frame,
         domain: basis.frame.domain,
@@ -482,17 +480,8 @@ pub(crate) fn scatter_compact_block<S: Clone>(
     columns: DenseColumns<S>,
 ) -> Vec<Vec<(FusionTreePairKey, S)>> {
     record_compact_block_dimensions(&basis, &columns);
-    let mut rows_per_source = vec![Vec::new(); columns.num_src];
     let destinations = basis.frame.materialize_all(basis.locals.iter());
-    for destination_row in 0..basis.locals.len() {
-        let destination = materialized_pair(&destinations, destination_row);
-        for (source, coefficient) in columns.row(destination_row).iter().enumerate() {
-            if let Some(coefficient) = coefficient {
-                rows_per_source[source].push((destination.clone(), coefficient.clone()));
-            }
-        }
-    }
-    rows_per_source
+    columns.source_rows(|row| materialized_pair(&destinations, row))
 }
 
 pub(crate) fn order_compact_block<S: Clone>(
@@ -593,17 +582,10 @@ pub(super) fn scatter_compact_tree_pair_block<S: Clone>(
     if block.records_dimensions {
         scatter_compact_block(block.basis, block.columns)
     } else {
-        let mut rows_per_source = vec![Vec::new(); block.columns.num_src];
         let destinations = block.basis.frame.materialize_all(block.basis.locals.iter());
-        for destination_row in 0..block.basis.locals.len() {
-            let destination = materialized_pair(&destinations, destination_row);
-            for (source, coefficient) in block.columns.row(destination_row).iter().enumerate() {
-                if let Some(coefficient) = coefficient {
-                    rows_per_source[source].push((destination.clone(), coefficient.clone()));
-                }
-            }
-        }
-        rows_per_source
+        block
+            .columns
+            .source_rows(|row| materialized_pair(&destinations, row))
     }
 }
 

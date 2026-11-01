@@ -673,8 +673,9 @@ fn generic_full_key_block_composition_matches_per_source_replay() {
         columns.row_mut(row)[source] = Some(1.0);
     }
 
-    let (dst_basis, dst_columns) = compose_block_terms(&basis, &columns, |key| {
-        generic_bendright_tree_pair(&rule, key)
+    let (dst_basis, dst_columns) = compose_block_terms(&basis, &columns, |key, terms| {
+        terms.extend(generic_bendright_tree_pair(&rule, key)?);
+        Ok::<_, CoreError>(())
     })
     .unwrap();
 

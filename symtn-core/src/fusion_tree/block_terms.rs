@@ -276,6 +276,33 @@ impl<S> DenseColumns<S> {
         row
     }
 
+    /// Per source, its `(destination(row), coefficient)` entries in row
+    /// order. Each owned source row is allocated once at its exact length.
+    pub(crate) fn source_rows<D: Clone>(
+        &self,
+        mut destination: impl FnMut(usize) -> D,
+    ) -> Vec<Vec<(D, S)>>
+    where
+        S: Clone,
+    {
+        let mut lengths = vec![0; self.num_src];
+        for entries in self.data.chunks_exact(self.num_src.max(1)) {
+            for (length, entry) in lengths.iter_mut().zip(entries) {
+                *length += usize::from(entry.is_some());
+            }
+        }
+        let mut rows: Vec<Vec<(D, S)>> = lengths.into_iter().map(Vec::with_capacity).collect();
+        for row in 0..self.num_rows {
+            let key = destination(row);
+            for (source, coefficient) in self.row(row).iter().enumerate() {
+                if let Some(coefficient) = coefficient {
+                    rows[source].push((key.clone(), coefficient.clone()));
+                }
+            }
+        }
+        rows
+    }
+
     #[inline]
     pub(crate) fn row(&self, row: usize) -> &[Option<S>] {
         let start = row * self.num_src;
@@ -293,7 +320,10 @@ impl<S> DenseColumns<S> {
 /// terms are spread across all source columns (`dst += step · source`). The
 /// dense block composer for multiplicity-free keys and compact locals; the
 /// Generic keyed block uses the sparse [`compose_generic_block`].
-pub(crate) fn compose_block_terms<K, S, E, F, I>(
+///
+/// `transform(key, terms)` appends `key`'s move terms to `terms`, one buffer
+/// the composer clears and reuses for every basis row.
+pub(crate) fn compose_block_terms<K, S, E, F>(
     basis: &[K],
     columns: &DenseColumns<S>,
     mut transform: F,
@@ -301,8 +331,7 @@ pub(crate) fn compose_block_terms<K, S, E, F, I>(
 where
     K: Eq + Hash,
     S: Clone + Add<Output = S> + Mul<Output = S>,
-    F: FnMut(&K) -> Result<I, E>,
-    I: IntoIterator<Item = (K, S)>,
+    F: FnMut(&K, &mut Vec<(K, S)>) -> Result<(), E>,
 {
     let num_src = columns.num_src;
     // Dedup destination tree-pairs to dense rows. The key is *moved* into the
@@ -311,10 +340,13 @@ where
     // from the map by row index afterwards. Rows are assigned in first-
     // appearance order, so the rebuilt `next_basis` order — and therefore every
     // coefficient — is bit-for-bit identical to pushing the key eagerly.
-    let mut index: FxHashMap<K, usize> = FxHashMap::default();
+    let mut index: FxHashMap<K, usize> =
+        FxHashMap::with_capacity_and_hasher(basis.len(), Default::default());
     let mut next_columns: DenseColumns<S> = DenseColumns::with_capacity(num_src, basis.len());
+    let mut terms = Vec::new();
     for (source_row, source_key) in basis.iter().enumerate() {
-        for (dst_key, step_coefficient) in transform(source_key)? {
+        transform(source_key, &mut terms)?;
+        for (dst_key, step_coefficient) in terms.drain(..) {
             let row = match index.get(&dst_key) {
                 Some(&row) => row,
                 None => {
