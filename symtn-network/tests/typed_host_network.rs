@@ -562,3 +562,41 @@ fn host_network_contraction_requires_symmetric_braiding() {
     assert_host_network_contraction_rejects_non_symmetric::<false>(engine);
     assert_host_network_contraction_rejects_non_symmetric::<true>(engine);
 }
+
+#[test]
+fn network_contract_agrees_across_engine_widths() {
+    // A three-tensor chain on legs whose sectors have different degeneracies:
+    // each pairwise step has several unequal blocks for the scheduler to split.
+    let runtime = Runtime::builder().build().unwrap();
+    let leg = u1_leg_2_3_2();
+    let make = |seed| {
+        TensorMap::<_, f64>::rand_with_seed(
+            &mut symtn::typed::CpuEngine::serial(),
+            &runtime,
+            [&leg],
+            [&leg],
+            seed,
+        )
+        .unwrap()
+    };
+    let (a, b, c) = (make(750_200), make(750_201), make(750_202));
+    let network = net(
+        &[op(&["i"], &["j"]), op(&["j"], &["k"]), op(&["k"], &["l"])],
+        &["i"],
+        &["l"],
+    );
+    let serial = network
+        .contract(&mut symtn::typed::CpuEngine::serial(), &[&a, &b, &c])
+        .unwrap();
+    let pool = symtn::typed::Pool::builder().threads(4).build().unwrap();
+    let wide = network
+        .contract(&mut symtn::typed::CpuEngine::new(pool), &[&a, &b, &c])
+        .unwrap();
+    let terms = leg.dim().unwrap().ceil() as usize;
+    numerics::assert_slices_close(
+        "width 4 vs 1",
+        wide.dense_data().unwrap(),
+        serial.dense_data().unwrap(),
+        terms * terms,
+    );
+}

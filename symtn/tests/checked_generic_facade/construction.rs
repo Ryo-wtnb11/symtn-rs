@@ -470,7 +470,7 @@ fn checked_generic_subblocks_decode_transactionally_and_keep_outer_multiplicity(
 
 #[cfg(feature = "cuda")]
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn checked_only_provider_roundtrips_through_typed_cuda_without_algebra_dispatch() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
