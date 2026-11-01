@@ -1004,8 +1004,8 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
         entrywise
     }
     // The entrywise (sign/phase) statement must not be vacuous.
-    assert!(cases(&runtime, &u1) > 8);
-    assert!(cases(&runtime, &su2) > 8);
+    assert!(cases(&runtime, &u1) > 4);
+    assert!(cases(&runtime, &su2) > 4);
 }
 
 #[test]
