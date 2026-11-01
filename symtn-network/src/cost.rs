@@ -119,6 +119,30 @@ mod tests {
         TemporaryLabel::new(s)
     }
 
+    #[test]
+    fn with_unit_dims_forces_only_the_named_known_labels_to_one() {
+        let ir = test_ir(&[&["a", "b"], &["b", "c"]], &["a", "c"]);
+        let infos = vec![
+            DenseTensorInfo::new(vec![2, 3]),
+            DenseTensorInfo::new(vec![3, 4]),
+        ];
+        let cost = DenseCostModel::from_network(&ir, &infos).unwrap();
+        let legs = [label("a"), label("b"), label("c")];
+        assert_eq!(cost.tensor_size(&legs), 24);
+
+        let unit = cost.with_unit_dims(&[label("b"), label("absent")]);
+        assert_eq!(unit.dim(&label("a")), Some(2));
+        assert_eq!(unit.dim(&label("b")), Some(1));
+        assert_eq!(unit.dim(&label("c")), Some(4));
+        assert_eq!(unit.dim(&label("absent")), None);
+        assert_eq!(unit.tensor_size(&legs), 8);
+        assert_eq!(
+            cost.dim(&label("b")),
+            Some(3),
+            "the source model is unchanged"
+        );
+    }
+
     /// `tensor_size` (and thus `pair_cost`) must SATURATE on overflow instead of
     /// wrapping. With five legs of dimension 2^14 the true element count is
     /// 2^70, far beyond `usize::MAX` (2^64-1 on this target): a plain `.product()`

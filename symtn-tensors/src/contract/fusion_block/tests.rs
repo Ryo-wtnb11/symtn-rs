@@ -1171,7 +1171,7 @@ fn rank22_adjoint_reentry_keeps_matrix_orientation() {
 /// `cargo test --features cuda -- --ignored`.
 #[cfg(feature = "cuda")]
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn storage_direct_replay_on_cuda_matches_host() {
     use symtn_dense::CudaDenseContext;
     use symtn_operations::cuda::{CudaStorage, CudaStorageGemm};

@@ -54,7 +54,7 @@ fn assert_direct_contract_and_compose<R>(
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
@@ -156,7 +156,7 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
@@ -231,7 +231,7 @@ fn typed_cuda_fermionic_contract_is_minus_six_and_compose_stays_plus_six() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mutation() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();

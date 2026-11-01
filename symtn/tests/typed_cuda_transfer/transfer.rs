@@ -27,7 +27,7 @@ where
 }
 
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
