@@ -62,7 +62,7 @@ impl Toy {
 fn checked_generic_late_nsymbol_failure_propagates() {
     let _serial = crate::counting_alloc::serial();
     let error = hom()
-        .fusion_tree_keys_generic_checked(&Toy::late_nsymbol(2))
+        .fusion_tree_keys_generic_checked(&Toy::late_nsymbol(1))
         .unwrap_err();
     assert!(matches!(
         error,

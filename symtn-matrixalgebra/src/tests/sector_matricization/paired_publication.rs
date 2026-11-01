@@ -870,6 +870,14 @@ fn assert_checked_pair_matches_two_enumeration_construction<
     assert_eq!(right.data(), plain_right.data());
 }
 
+/// The provider queries of one checked Generic layout enumeration of `hom`.
+fn single_enumeration_log(hom: &FusionTreeHomSpace) -> Vec<String> {
+    let probe = RecordingGeneric::new();
+    hom.prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(&probe)
+        .unwrap();
+    probe.log()
+}
+
 #[test]
 #[allow(clippy::arc_with_non_send_sync)] // The checked API needs Arc identity; the recorder is a single-threaded RefCell log.
 fn checked_paired_enumerates_each_factor_layout_once() {
@@ -892,16 +900,10 @@ fn checked_paired_enumerates_each_factor_layout_once() {
         let once = recorder.log();
 
         let (left_hom, right_hom) = paired_output_homs(&homspace, &pairs());
-        let side_log = |hom: &FusionTreeHomSpace| {
-            let probe = RecordingGeneric::new();
-            hom.prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(&probe)
-                .unwrap();
-            probe.log()
-        };
-        let (once_left, once_right) = (side_log(&left_hom), side_log(&right_hom));
-        // Vertex fixture: each side folds its one-leg bond once and
-        // queries channels plus the multiplicity of its single vertex.
-        assert_eq!((once_left.len(), once_right.len()), (3, 3));
+        let (once_left, once_right) = (
+            single_enumeration_log(&left_hom),
+            single_enumeration_log(&right_hom),
+        );
         assert_eq!(once, [once_left.clone(), once_right.clone()].concat());
 
         let former = Arc::new(RecordingGeneric::new());
@@ -957,11 +959,14 @@ fn checked_paired_placement_error_precedes_bound_space() {
     // What: a factor key whose tree the matricization lacks fails after
     // that side's single enumeration and before any publication; the
     // left side is validated completely before the right side is
-    // enumerated: the left error surfaces after 3 queries and the right
-    // error after 6 (a two-pass route would take 3 and 9: left keys, left
-    // space, right keys).
+    // enumerated: the left error surfaces after exactly the left side's
+    // single enumeration and the right error after the left's then the
+    // right's (a two-pass route would repeat each side's queries).
     for side in [FactorSide::Left, FactorSide::Right] {
         let (homspace, mut matrix, pair) = vertex_tree_factor_fixture(false);
+        let (left_hom, right_hom) =
+            paired_output_homs(&homspace, &[vertex_tree_factor_fixture(false).2]);
+        let once_left = single_enumeration_log(&left_hom);
         match side {
             FactorSide::Left => matrix.row_trees.truncate(1),
             FactorSide::Right => matrix.col_trees.truncate(1),
@@ -975,12 +980,15 @@ fn checked_paired_placement_error_precedes_bound_space() {
             vec![pair],
         )
         .unwrap_err();
-        let (expected_message, expected_calls) = match side {
+        let (expected_message, expected_log) = match side {
             FactorSide::Left => (
                 "factor codomain tree absent from the source matricization",
-                3,
+                once_left,
             ),
-            FactorSide::Right => ("factor domain tree absent from the source matricization", 6),
+            FactorSide::Right => (
+                "factor domain tree absent from the source matricization",
+                [once_left, single_enumeration_log(&right_hom)].concat(),
+            ),
         };
         assert!(matches!(
             error,
@@ -988,7 +996,7 @@ fn checked_paired_placement_error_precedes_bound_space() {
                 OperationError::SpaceMismatch { message }
             ) if message == expected_message
         ));
-        assert_eq!(recorder.log().len(), expected_calls);
+        assert_eq!(recorder.log(), expected_log);
         let probe = generic_pair_rec.generic_pair_publication();
         assert_eq!(
             (probe.canonical_publications, probe.fallback_publications),

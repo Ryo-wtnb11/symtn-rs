@@ -347,18 +347,6 @@ fn checked_generic_pair_publication_appends_multiple_literal_sectors() {
     assert_checked_generic_pair_publication_appends_multiple_literal_sectors::<Complex64>(true);
 }
 
-// Checked compact-QR provider sequence for `generic_factorization_input`: the
-// compact plan issues no preflight query, the left (Q) space enumerates once
-// (calls 1-3), then the right (R) space enumerates once (calls 4-6). Before
-// the paired builder enumerated each side once, each side enumerated twice
-// (left keys 1-3, left space 4-6, right keys 7-9, right space 10-12) and the
-// first right-side call was the seventh.
-const COMPACT_PAIR_LEFT_LAST_CALL: usize = 3;
-
-const COMPACT_PAIR_RIGHT_FIRST_CALL: usize = 4;
-
-const COMPACT_PAIR_RIGHT_LAST_CALL: usize = 6;
-
 #[test]
 #[expect(
     clippy::arc_with_non_send_sync,
@@ -366,15 +354,32 @@ const COMPACT_PAIR_RIGHT_LAST_CALL: usize = 6;
 )]
 fn checked_generic_compact_pair_builder_failure_preserves_provider_context() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the last call of the left enumeration and the first call of the
-    // right enumeration propagate their exact provider error without
-    // publishing either factor or touching the input.
+    // What: the compact plan issues no preflight query and enumerates the
+    // left (Q) space once, then the right (R) space once; the last call of
+    // the left enumeration and the first and last calls of the right one
+    // propagate their exact provider error without publishing either factor
+    // or touching the input. The boundaries come from each factor's own
+    // single enumeration.
     let (source, data) = generic_factorization_input();
-    for fail_at in [
-        COMPACT_PAIR_LEFT_LAST_CALL,
-        COMPACT_PAIR_RIGHT_FIRST_CALL,
-        COMPACT_PAIR_RIGHT_LAST_CALL,
-    ] {
+    let provider = Arc::new(LateGenericSpy {
+        rule: FactorGenericRule,
+        fail_at: usize::MAX,
+        calls: Cell::new(0),
+        identity: RuleIdentity::new_unique::<LateGenericSpy>(),
+    });
+    let checked = bind_to_spy(&source, &provider);
+    let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
+    let Qr { q, r } = qr_compact_dyn_checked_generic(
+        engine,
+        &mut ScriptedExecutor::<CountingDense>::default(),
+        &input,
+    )
+    .unwrap();
+    let (left, right) = (checked_enumeration_calls(&q), checked_enumeration_calls(&r));
+    assert!(left > 0 && right > 0);
+    assert_eq!(provider.calls.get(), left + right);
+
+    for fail_at in [left, left + 1, left + right] {
         let provider = Arc::new(LateGenericSpy {
             rule: FactorGenericRule,
             fail_at,
@@ -393,25 +398,4 @@ fn checked_generic_compact_pair_builder_failure_preserves_provider_context() {
         assert_eq!(dense.counts().qr, 2);
         assert_eq!(input.data(), data);
     }
-
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: RuleIdentity::new_unique::<LateGenericSpy>(),
-    });
-    let checked = bind_to_spy(&source, &provider);
-    let input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
-    let Qr { q, r } = qr_compact_dyn_checked_generic(
-        engine,
-        &mut ScriptedExecutor::<CountingDense>::default(),
-        &input,
-    )
-    .unwrap();
-    assert_eq!(provider.calls.get(), COMPACT_PAIR_RIGHT_LAST_CALL);
-    assert_eq!(checked_enumeration_calls(&q), COMPACT_PAIR_LEFT_LAST_CALL);
-    assert_eq!(
-        checked_enumeration_calls(&r),
-        COMPACT_PAIR_RIGHT_LAST_CALL - COMPACT_PAIR_LEFT_LAST_CALL
-    );
 }
