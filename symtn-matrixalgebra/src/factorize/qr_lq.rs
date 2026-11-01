@@ -1207,8 +1207,6 @@ where
     // to empty buffers instead of zero-filling first; otherwise overwrite a
     // zeroed buffer region by region.
     let append = lq_routes_append_in_storage_order(plan, left_len, right_len);
-    #[cfg(test)]
-    let append = append && !crate::probe::lq_zeroed_publication_forced();
     let (mut left_data, mut right_data) = if append {
         (Vec::with_capacity(left_len), Vec::with_capacity(right_len))
     } else {

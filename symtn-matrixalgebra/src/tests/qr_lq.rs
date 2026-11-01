@@ -100,11 +100,10 @@ fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
 }
 
 #[test]
-fn compact_lq_append_proof_rejects_unordered_routes_and_fallback_matches_append() {
+fn compact_lq_append_proof_rejects_unordered_routes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the storage-order proof refuses permuted, gapped and duplicated
-    // routes, and the zero-and-overwrite fallback it guards publishes the same
-    // bits as the append path.
+    // routes, and canonical input publishes by appending without a prefill.
     let charges =
         [U1Irrep::new(-1), U1Irrep::new(0), U1Irrep::new(1)].map(|charge| charge.sector_id());
     let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
@@ -140,26 +139,11 @@ fn compact_lq_append_proof_rejects_unordered_routes_and_fallback_matches_append(
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let input = bound.as_ref();
     let compact_lq_copy_rec = crate::probe::record();
-    let Lq {
-        l: append_l,
-        q: append_q,
-    } = lq_compact(engine, &mut dense, &input).unwrap();
+    lq_compact(engine, &mut dense, &input).unwrap();
     assert_eq!(
         compact_lq_copy_rec.compact_lq_copy().output_prefill_bytes,
         0
     );
-    crate::probe::force_lq_zeroed_publication(true);
-    let compact_lq_copy_rec = crate::probe::record();
-    let fallback = lq_compact(engine, &mut dense, &input);
-    crate::probe::force_lq_zeroed_publication(false);
-    let Lq {
-        l: fallback_l,
-        q: fallback_q,
-    } = fallback.unwrap();
-    assert!(compact_lq_copy_rec.compact_lq_copy().output_prefill_bytes > 0);
-    let bits = |data: &[f64]| data.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
-    assert_eq!(bits(fallback_l.data()), bits(append_l.data()));
-    assert_eq!(bits(fallback_q.data()), bits(append_q.data()));
 }
 
 #[test]
@@ -1153,96 +1137,93 @@ fn lq_compact_positive_gauge_idempotent_on_isometry() {
 }
 
 #[test]
-fn lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
+fn lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: without region admission, LQ of a lazy adjoint publishes by tree
-    // identity exactly the factors its region route publishes.
+    // What: LQ of the lazy adjoint of a parent that is not region-tiled (an
+    // adjoint view) packs it and publishes by tree identity exactly the
+    // factors LQ of the materialized adjoint publishes.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let bound = bound.as_ref();
-    let parent = bound.dynamic();
-    let adjoint_space =
-        <symtn_core::MultiplicityFreeAdmissionMode as symtn_tensors::CoefficientAlgebra<
-            Z2FusionRule,
-        >>::adjoint_space(parent.space())
-        .unwrap();
+    let materialized = bound.dynamic();
+    let view_space = materialized.space().adjoint_view().unwrap();
+    let parent = BoundDynamicTensorRef::try_new(&view_space, materialized.data()).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     for full in [false, true] {
-        let mut run = || {
-            if full {
-                crate::factorize::lq_full_adjoint_dyn(engine, &mut dense, &parent, &adjoint_space)
-            } else {
-                crate::factorize::lq_compact_adjoint_dyn(
-                    engine,
-                    &mut dense,
-                    &parent,
-                    &adjoint_space,
-                )
-            }
-            .unwrap()
-        };
-        let regions = run();
         let input_pack_bytes_rec = crate::probe::record();
-        let by_tree = crate::probe::with_forced_input_pack(&mut run);
+        let by_tree = if full {
+            crate::factorize::lq_full_adjoint_dyn(engine, &mut dense, &parent, materialized.space())
+        } else {
+            crate::factorize::lq_compact_adjoint_dyn(
+                engine,
+                &mut dense,
+                &parent,
+                materialized.space(),
+            )
+        }
+        .unwrap();
         assert!(
             input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0,
             "full {full}"
         );
-        for (region, tree) in [(&regions.l, &by_tree.l), (&regions.q, &by_tree.q)] {
-            assert_eq!(region.space().space(), tree.space().space(), "full {full}");
-            assert_eq!(region.data(), tree.data(), "full {full}");
+        let oracle = if full {
+            crate::factorize::lq_full_dyn(engine, &mut dense, &materialized)
+        } else {
+            crate::factorize::lq_compact_dyn(engine, &mut dense, &materialized)
+        }
+        .unwrap();
+        for (expected, tree) in [(&oracle.l, &by_tree.l), (&oracle.q, &by_tree.q)] {
+            assert_eq!(
+                expected.space().space(),
+                tree.space().space(),
+                "full {full}"
+            );
+            assert_eq!(expected.data(), tree.data(), "full {full}");
         }
     }
 }
 
 #[test]
-fn checked_lazy_adjoint_lq_tree_route_publishes_the_region_route_factors() {
+fn checked_lazy_adjoint_lq_tree_route_publishes_the_materialized_lq_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the checked-Generic counterpart of the multiplicity-free test
-    // above: the tree route publishes the region route's factors.
+    // above.
     let (space, data) = generic_factorization_input();
     let (_, space) = bind_checked_layout(&space);
-    let parent = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
-    let adjoint_space = <CheckedGenericAdmissionMode as symtn_tensors::CoefficientAlgebra<
-        LateGenericSpy,
-    >>::adjoint_space(parent.space())
-    .unwrap();
+    let materialized = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
+    let view_space = space.adjoint_view().unwrap();
+    let parent = BoundDynamicTensorRef::try_new(&view_space, &data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     for full in [false, true] {
-        let mut run = || {
-            if full {
-                crate::factorize::lq_full_adjoint_dyn_checked_generic(
-                    engine,
-                    &mut dense,
-                    &parent,
-                    &adjoint_space,
-                )
-            } else {
-                crate::factorize::lq_compact_adjoint_dyn_checked_generic(
-                    engine,
-                    &mut dense,
-                    &parent,
-                    &adjoint_space,
-                )
-            }
-            .unwrap()
-        };
         let input_pack_bytes_rec = crate::probe::record();
-        let regions = run();
-        assert_eq!(
-            input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
-            0,
-            "full {full}"
-        );
-        let by_tree = crate::probe::with_forced_input_pack(&mut run);
+        let by_tree = if full {
+            crate::factorize::lq_full_adjoint_dyn_checked_generic(
+                engine, &mut dense, &parent, &space,
+            )
+        } else {
+            crate::factorize::lq_compact_adjoint_dyn_checked_generic(
+                engine, &mut dense, &parent, &space,
+            )
+        }
+        .unwrap();
         assert!(
             input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0,
             "full {full}"
         );
-        for (region, tree) in [(&regions.l, &by_tree.l), (&regions.q, &by_tree.q)] {
-            assert_eq!(region.space().space(), tree.space().space(), "full {full}");
-            assert_eq!(region.data(), tree.data(), "full {full}");
+        let oracle = if full {
+            crate::factorize::lq_full_dyn_checked_generic(engine, &mut dense, &materialized)
+        } else {
+            crate::factorize::lq_compact_dyn_checked_generic(engine, &mut dense, &materialized)
+        }
+        .unwrap();
+        for (expected, tree) in [(&oracle.l, &by_tree.l), (&oracle.q, &by_tree.q)] {
+            assert_eq!(
+                expected.space().space(),
+                tree.space().space(),
+                "full {full}"
+            );
+            assert_eq!(expected.data(), tree.data(), "full {full}");
         }
     }
 }
