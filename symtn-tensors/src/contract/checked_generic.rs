@@ -13,7 +13,8 @@ use crate::mode::{ContractRequest, ContractSide, ContractStaging, StagedContract
 use crate::tree_transform::{CheckedGenericPlanError, CheckedPendingCoefficients};
 use crate::validate_oriented_fusion_layout;
 use crate::{
-    ConjugateValue, DenseRecouplingScalar, OperationError, RecouplingCoefficientAction, ZeroBytes,
+    ConjugateValue, DenseRecouplingScalar, DenseTreeTransformOperations, OperationError,
+    RecouplingCoefficientAction, ZeroBytes,
 };
 
 use super::backend::TensorContractBackend;
@@ -545,7 +546,10 @@ where
     }
 }
 
-impl<D, BT, BC> TensorContractFusionExecutionContext<D, RuleIdentity, BT, BC>
+/// The owned checked entries, over the dense tree backend whose owned writer
+/// their output transform uses.
+impl<D, X, BC>
+    TensorContractFusionExecutionContext<D, RuleIdentity, DenseTreeTransformOperations<X>, BC>
 where
     D: DenseRecouplingScalar
         + RecouplingCoefficientAction<f64>
@@ -553,7 +557,7 @@ where
         + Copy
         + Zero
         + ZeroBytes,
-    BT: TreeTransformBackend<D, f64>,
+    X: symtn_dense::DenseExecutor,
     BC: TensorContractBackend<D, f64>,
 {
     /// Contracts two checked Generic tensors, the result split after its
@@ -604,6 +608,51 @@ where
         )
     }
 
+    /// Canonical composition (TensorKit `mul!`) of two checked Generic
+    /// tensors: `lhs.domain` is glued to `rhs.codomain` in order; operands
+    /// as in [`Self::tensorcontract_checked_generic_in`].
+    ///
+    /// It plans through the shared [`plan_compose`](super::plan_compose)
+    /// rung in the checked mode and replays on the Host route executor: one
+    /// coefficient-free block GEMM per coupled sector, or the checked
+    /// irregular core for a non-canonical tiling. No leg crosses another,
+    /// hence no braiding style is required. The destination is staged,
+    /// planned over as a preview, and committed only after the replay
+    /// succeeds (#2063).
+    ///
+    /// This concrete cross-crate entrypoint is internal and unstable despite
+    /// being public for `symtn`; downstream callers must not rely on it.
+    #[doc(hidden)]
+    #[allow(clippy::type_complexity)]
+    pub fn tensorcompose_checked_generic_in<P>(
+        &mut self,
+        engine: &mut dyn Engine,
+        lhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
+        rhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
+    ) -> CheckedContractResult<P, D>
+    where
+        P: CheckedGenericRigidSymbols<Scalar = f64>,
+    {
+        self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
+            engine,
+            lhs,
+            rhs,
+            ContractRequest::Compose,
+        )
+    }
+}
+
+impl<D, BT, BC> TensorContractFusionExecutionContext<D, RuleIdentity, BT, BC>
+where
+    D: DenseRecouplingScalar
+        + RecouplingCoefficientAction<f64>
+        + ConjugateValue
+        + Copy
+        + Zero
+        + ZeroBytes,
+    BT: TreeTransformBackend<D, f64>,
+    BC: TensorContractBackend<D, f64>,
+{
     /// `dst = alpha · contract(lhs, rhs) + beta · dst` for checked Generic
     /// operands (as in [`Self::tensorcontract_checked_generic_in`]) and an
     /// existing destination: the same staging, the staged destination
@@ -649,39 +698,6 @@ where
             dst_data,
             alpha,
             beta,
-        )
-    }
-
-    /// Canonical composition (TensorKit `mul!`) of two checked Generic
-    /// tensors: `lhs.domain` is glued to `rhs.codomain` in order; operands
-    /// as in [`Self::tensorcontract_checked_generic_in`].
-    ///
-    /// It plans through the shared [`plan_compose`](super::plan_compose)
-    /// rung in the checked mode and replays on the Host route executor: one
-    /// coefficient-free block GEMM per coupled sector, or the checked
-    /// irregular core for a non-canonical tiling. No leg crosses another,
-    /// hence no braiding style is required. The destination is staged,
-    /// planned over as a preview, and committed only after the replay
-    /// succeeds (#2063).
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    #[doc(hidden)]
-    #[allow(clippy::type_complexity)]
-    pub fn tensorcompose_checked_generic_in<P>(
-        &mut self,
-        engine: &mut dyn Engine,
-        lhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-        rhs: (&BoundDynamicFusionMapSpace<P>, FusionOperand<'_>, &[D]),
-    ) -> CheckedContractResult<P, D>
-    where
-        P: CheckedGenericRigidSymbols<Scalar = f64>,
-    {
-        self.tensorcontract_in::<CheckedContractStage<'_, P>, P>(
-            engine,
-            lhs,
-            rhs,
-            ContractRequest::Compose,
         )
     }
 }
@@ -1142,27 +1158,31 @@ mod tests {
             .collect()
     }
 
-    fn homspace(_rule: &GenericMultiplicityRule, nout: usize, nin: usize) -> FusionTreeHomSpace {
-        let leg = || SectorLeg::new([(SectorId::new(1), 1)], false);
+    /// Legs carrying sector 1 with `degeneracy`.
+    fn homspace(nout: usize, nin: usize, degeneracy: usize) -> FusionTreeHomSpace {
+        let leg = || SectorLeg::new([(SectorId::new(1), degeneracy)], false);
         FusionTreeHomSpace::new(
             FusionProductSpace::new((0..nout).map(|_| leg())),
             FusionProductSpace::new((0..nin).map(|_| leg())),
         )
     }
 
+    type SpyPair = (
+        Arc<CheckedGenericSpy>,
+        BoundDynamicFusionMapSpace<CheckedGenericSpy>,
+        Arc<CheckedGenericSpy>,
+        BoundDynamicFusionMapSpace<CheckedGenericSpy>,
+    );
+
+    fn bound_pair(nout: usize, nin: usize) -> SpyPair {
+        bound_pair_with_degeneracy(nout, nin, 1)
+    }
+
     #[allow(clippy::arc_with_non_send_sync)]
-    fn bound_pair(
-        nout: usize,
-        nin: usize,
-    ) -> (
-        Arc<CheckedGenericSpy>,
-        BoundDynamicFusionMapSpace<CheckedGenericSpy>,
-        Arc<CheckedGenericSpy>,
-        BoundDynamicFusionMapSpace<CheckedGenericSpy>,
-    ) {
+    fn bound_pair_with_degeneracy(nout: usize, nin: usize, degeneracy: usize) -> SpyPair {
         let left = Arc::new(CheckedGenericSpy::new());
         let right = Arc::new(CheckedGenericSpy::new());
-        let homspace = homspace(&left.rule, nout, nin);
+        let homspace = homspace(nout, nin, degeneracy);
         let lhs = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
             Arc::clone(&left),
             homspace.clone(),
@@ -1499,6 +1519,59 @@ mod tests {
             None => TensorContractSpec::with_default_output_order(lhs, rhs),
             Some(output) => {
                 TensorContractSpec::new(lhs, rhs, symtn_operations::OutputAxisOrder::Axes(output))
+            }
+        }
+    }
+
+    /// What: the owned checked contraction writes the destination through
+    /// the fresh core replay exactly when its route's core writes the
+    /// destination (Core, a DynamicTree without an output transform). A
+    /// route with an output transform (CopyC, `three_stages`) runs no fresh
+    /// core replay; its transform writes a fresh payload once when every
+    /// destination block is one contiguous interval, and otherwise
+    /// overwrites an allocator-zeroed payload.
+    ///
+    /// The two-leg sector-1 codomain and domain each reach sector 1 through
+    /// two fusion trees (multiplicity 2). At degeneracy 1 every block is one
+    /// element, hence one interval; at degeneracy 2 the four 4x4 blocks tile
+    /// one 8x8 coupled matrix, so each block is strided and the overwrite
+    /// proof fails.
+    #[test]
+    fn owned_contraction_output_takes_the_fresh_writer_its_route_and_layout_admit() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        for degeneracy in [1, 2] {
+            for (name, n, lhs_axes, rhs_axes, output, nout, route) in FIXTURES {
+                let (_left, lhs, _right, rhs) = bound_pair_with_degeneracy(n, n, degeneracy);
+                let lhs_data = ramp(lhs.space().required_len().unwrap(), 0.25, -1.0);
+                let rhs_data = ramp(rhs.space().required_len().unwrap(), -0.5, 1.5);
+                let core_writes_destination = match route {
+                    Route::Core => true,
+                    Route::CopyC => false,
+                    Route::DynamicTree => name != "three_stages",
+                };
+                let transform_writes = !core_writes_destination;
+                let recording = crate::probe::record();
+                contract(
+                    engine,
+                    (&lhs, &lhs_data),
+                    (&rhs, &rhs_data),
+                    fixture_axes(lhs_axes, rhs_axes, output),
+                    nout,
+                )
+                .unwrap();
+                let counts = [
+                    crate::probe::Event::OwnedCoreReplay,
+                    crate::probe::Event::OwnedOutputOverwrite,
+                    crate::probe::Event::OwnedOutputZeroedFallback,
+                ]
+                .map(|event| recording.get(event));
+                let expected = [
+                    core_writes_destination,
+                    transform_writes && degeneracy == 1,
+                    transform_writes && degeneracy == 2,
+                ]
+                .map(usize::from);
+                assert_eq!(counts, expected, "{name} at degeneracy {degeneracy}");
             }
         }
     }

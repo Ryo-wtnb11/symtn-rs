@@ -4,6 +4,7 @@
 //! builds these plans; nothing here consumes fusion rules.
 
 use std::collections::HashSet;
+use std::mem::MaybeUninit;
 use std::ops::Mul;
 use std::sync::Arc;
 
@@ -31,6 +32,9 @@ const NON_COUPLED_OPERAND_MESSAGE: &str =
 
 mod execute;
 mod gemm;
+mod owned;
+#[cfg(test)]
+mod owned_tests;
 mod plan;
 #[cfg(test)]
 mod tests;
@@ -102,6 +106,25 @@ struct FusionIrregularGroupExecution {
     scratch: FusionGroupScratchLayout,
 }
 
+impl FusionIrregularGroupExecution {
+    /// The GEMM operands: the packed scratch regions of `scratch` for the
+    /// operands this group packs, else the caller's payloads.
+    fn operands<'d, D>(&self, scratch: &'d [D], lhs: &'d [D], rhs: &'d [D]) -> (&'d [D], &'d [D]) {
+        let lhs = if self.class.packs_lhs() {
+            &scratch[..self.scratch.lhs_len]
+        } else {
+            lhs
+        };
+        let rhs = if self.class.packs_rhs() {
+            let start = self.scratch.rhs_offset;
+            &scratch[start..start + self.scratch.rhs_len]
+        } else {
+            rhs
+        };
+        (lhs, rhs)
+    }
+}
+
 type CompiledGroupExecution = (
     Vec<Rank2GemmBatchJob>,
     Vec<FusionIrregularGroupExecution>,
@@ -113,6 +136,9 @@ pub struct HostFusionBlockContractWorkspace<T> {
     // Zero-stride source layout of the `Axpby(0)` inactive-block assignment,
     // kept here so a warmed replay allocates nothing.
     zero_strides: Vec<isize>,
+    // Which jobs of the current fresh GEMM call have reported their output
+    // (owned replay); reset at the start of every call.
+    fresh_reported: Vec<bool>,
 }
 
 pub type FusionBlockContractWorkspace<T> = HostFusionBlockContractWorkspace<T>;
@@ -122,6 +148,7 @@ impl<T> Default for HostFusionBlockContractWorkspace<T> {
         Self {
             scratch: HostScratchBuffer::default(),
             zero_strides: Vec::new(),
+            fresh_reported: Vec::new(),
         }
     }
 }
@@ -144,7 +171,8 @@ pub enum ContractDestinationInit<D> {
     /// not leak into the output.
     Axpby(D),
     /// The caller proves every destination element is already `D::zero()`
-    /// (an owned output born from `alloc_zeroed`). Inactive blocks are not
+    /// (an `alloc_zeroed` payload or a zero-filled member output; an owned
+    /// eager output uses `execute_owned` instead). Inactive blocks are not
     /// touched at all: plan validation proves each destination block is
     /// owned by exactly one GEMM job, one scatter group, or the inactive
     /// list, so `Axpby(0)` would only rewrite zeros that are already there.
@@ -182,6 +210,10 @@ pub struct FusionBlockContractPlan<C = f64> {
     // per coefficient (a fermionic twist uniform per coupled sector) with no
     // per-replay partition and no extra plan field.
     direct_batch_runs: Vec<usize>,
+    // `direct_batch` split into its coefficient batches: one GEMM call each.
+    direct_calls: Vec<owned::DirectCall>,
+    // Which call or zero fill initializes each element of an owned output.
+    fresh: owned::FreshLayout,
     irregular: Vec<FusionIrregularGroupExecution>,
     max_irregular_scratch_len: usize,
     lhs_op: MatrixOp,

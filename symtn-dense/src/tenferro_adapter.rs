@@ -8,7 +8,7 @@ use crate::executor::{batch_offset, strided_batch_run_len};
 #[cfg(feature = "cpu-blas-core")]
 use crate::fresh::{check_fresh_segments, place_fresh_jobs};
 use crate::fresh::{
-    dispatch_fresh, split_fresh_segments, zero_piece, FreshParts, FreshScalar, FRESH_OP,
+    dispatch_fresh, split_single_fresh_segment, zero_piece, FreshParts, FreshScalar, FRESH_OP,
 };
 use crate::layout::strides_to_isize;
 use crate::{
@@ -1530,14 +1530,9 @@ impl DefaultDenseExecutor {
         let beta = T::scalar(T::default());
         let identity = ops == [MatrixOp::Identity; 2];
         if jobs.len() == 1 {
-            let mut piece = None;
-            split_fresh_segments(
-                parts.segments,
-                jobs,
-                &mut self.gemm_scratch.order,
-                |_, found| piece = Some(found),
-            )?;
-            let Some(piece) = piece else {
+            // Why not `split_fresh_segments`: its staged order would be this
+            // route's only allocation on a per-call executor.
+            let Some(piece) = split_single_fresh_segment(parts.segments, &first)? else {
                 (parts.written)(0, &mut []);
                 return Ok(());
             };

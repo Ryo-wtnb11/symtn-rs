@@ -206,48 +206,6 @@ fn checked_generic_full_qr_failure_is_typed_and_nonpublishing() {
 }
 
 #[test]
-fn checked_generic_full_lq_reconstructs_and_preserves_provider() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, _| 2.0).unwrap();
-    let Lq { l, q } = source.lq_full(engine, &[0, 1], &[2]).unwrap();
-    assert!(std::ptr::eq(l.provider(), provider.as_ref()));
-    assert!(std::ptr::eq(q.provider(), provider.as_ref()));
-    let rebuilt = l.compose(engine, &q).unwrap();
-    assert_eq!(
-        rebuilt.dense_data().unwrap().len(),
-        source.dense_data().unwrap().len()
-    );
-    assert!(rebuilt
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(source.dense_data().unwrap())
-        .all(|(actual, expected)| (actual - expected).abs() < 1e-12));
-}
-
-#[test]
-fn checked_generic_full_lq_supports_complex_scalars() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new_product_probe(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
-    let source: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, _| {
-            Complex64::new(2.0, 1.0)
-        })
-        .unwrap();
-    let Lq { l, q } = source.lq_full(engine, &[0, 1], &[2]).unwrap();
-    let rebuilt = l.compose(engine, &q).unwrap();
-    assert!((rebuilt.norm(engine, 2.0).unwrap() - source.norm(engine, 2.0).unwrap()).abs() < 1e-12);
-}
-
-#[test]
 fn checked_generic_full_lq_failure_is_typed_and_nonpublishing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();

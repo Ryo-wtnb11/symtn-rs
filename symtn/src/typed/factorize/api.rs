@@ -1283,7 +1283,7 @@ where
     /// and returns a map `domain <- codomain`. This facade's seam agrees: a
     /// rank-one codomain and a rank-two domain with the same coupled-sector
     /// dimensions are accepted, and the result carries the two spaces swapped.
-    /// The pin is `inv_accepts_isomorphic_but_unequal_codomain_and_domain`.
+    /// The pin is `inv_accepts_isomorphic_unequal_spaces_and_rejects_nonisomorphic`.
     ///
     /// # Errors
     ///
@@ -1293,7 +1293,7 @@ where
     ///   coupled-sector block is singular, in both storages: the dense solve
     ///   fails, and the compact arm finds a zero entry before any solve runs.
     ///   Never a panic; pinned by
-    ///   `inv_reports_a_singular_input_as_a_typed_error`.
+    ///   `inv_of_a_singular_sector_fails_on_both_storages_and_keeps_the_source`.
     ///
     /// # Complexity
     ///

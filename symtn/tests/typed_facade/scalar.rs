@@ -1,83 +1,6 @@
 use super::*;
 
 #[test]
-fn add_carries_complex_coefficients() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: `D` is the coefficient type too, so the c64 instantiation carries
-    // genuinely complex coefficients through the same method.
-    let runtime = runtime();
-    let typed = z2_complex_tensor(&runtime);
-    let alpha = Complex64::new(0.5, -2.0);
-    let beta = Complex64::new(-1.5, 0.25);
-
-    let other = typed.permute(engine, &[1, 0], &[2]).unwrap();
-    let typed_sum = typed.axpby(engine, alpha, &other, beta).unwrap();
-    let expected: Vec<_> = typed
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(other.dense_data().unwrap())
-        .map(|(&lhs, &rhs)| alpha * lhs + beta * rhs)
-        .collect();
-
-    assert_eq!(typed_sum.dense_data().unwrap(), expected);
-}
-
-#[test]
-fn add_rejects_a_different_runtime_and_a_different_space() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the two checks this facade makes itself, in order — the runtime
-    // identity the expert layer never sees, then the space equality that makes
-    // the element-wise combination meaningful.
-    let other_runtime = runtime();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-    let elsewhere = z2_tensor(&other_runtime);
-    let other_split = z2_tensor_split(&runtime, 1);
-
-    assert!(matches!(
-        typed.axpby(engine, 1.0, &elsewhere, 1.0).unwrap_err(),
-        symtn::typed::Error::RuntimeMismatch
-    ));
-    assert!(matches!(
-        typed.axpby(engine, 1.0, &other_split, 1.0).unwrap_err(),
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
-}
-
-#[test]
-fn scale_multiplies_every_real_and_complex_entry() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-    let scaled = typed.scale(engine, -2.5).unwrap();
-    for (&actual, &source) in scaled
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(typed.dense_data().unwrap())
-    {
-        assert_eq!(actual, -2.5 * source);
-    }
-
-    let typed_c = z2_complex_tensor(&runtime);
-    let factor = Complex64::new(0.25, 3.0);
-    let scaled = typed_c.scale(engine, factor).unwrap();
-    for (&actual, &source) in scaled
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(typed_c.dense_data().unwrap())
-    {
-        assert_eq!(actual, factor * source);
-    }
-}
-
-#[test]
 fn scaling_by_the_inverse_norm_divides_by_the_dimension_weighted_norm() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -128,51 +51,6 @@ fn inner_uses_the_same_dimension_weight_as_norm() {
 }
 
 #[test]
-fn inner_conjugates_its_first_argument() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: the conjugation is on `self`, so for a complex payload
-    // `<a, b> = conj(<b, a>)` and the two are genuinely different numbers.
-    // A dropped conjugation makes both sides equal and this test fail.
-    let runtime = runtime();
-    let typed = z2_complex_tensor(&runtime);
-    // The extra `i` is what makes the product genuinely complex: this fixture's
-    // imaginary part is a function of its real one, so the plain permuted
-    // partner happens to give a real inner product and could not see a phase.
-    let imaginary = Complex64::new(0.0, 1.0);
-    let other = typed
-        .permute(engine, &[1, 0], &[2])
-        .unwrap()
-        .scale(engine, imaginary)
-        .unwrap();
-    let value = typed.inner(engine, &other).unwrap();
-    assert_eq!(value, other.inner(engine, &typed).unwrap().conj());
-    assert_ne!(value, other.inner(engine, &typed).unwrap());
-    assert!(value.im.abs() > 1e-6, "the fixture must have a real phase");
-}
-
-#[test]
-fn inner_rejects_a_different_runtime_and_a_different_space() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let other_runtime = runtime();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-    let elsewhere = z2_tensor(&other_runtime);
-    let other_split = z2_tensor_split(&runtime, 1);
-
-    assert!(matches!(
-        typed.inner(engine, &elsewhere).unwrap_err(),
-        symtn::typed::Error::RuntimeMismatch
-    ));
-    assert!(matches!(
-        typed.inner(engine, &other_split).unwrap_err(),
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
-}
-
-#[test]
 fn tr_uses_the_nonabelian_dimension_weight() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
@@ -202,77 +80,9 @@ fn tr_uses_the_nonabelian_dimension_weight() {
     );
 }
 
-#[test]
-fn tr_requires_an_endomorphism() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-
-    assert!(matches!(
-        typed.tr(engine).unwrap_err(),
-        symtn::typed::Error::Operation(operation)
-            if matches!(*operation, symtn::typed::OperationError::SpaceMismatch { .. })
-    ));
-}
-
 // ---------------------------------------------------------------------------
 // `TensorMap::adjoint`.
 // ---------------------------------------------------------------------------
-
-#[test]
-fn adjoint_swaps_spaces_and_is_an_involution() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = runtime();
-    let typed = z2_tensor(&runtime);
-
-    let adjoint = typed.adjoint(engine).unwrap();
-    assert_same_legs(&adjoint.codomain(), &typed.domain());
-    assert_same_legs(&adjoint.domain(), &typed.codomain());
-
-    let roundtrip = adjoint.adjoint(engine).unwrap();
-    assert_same_legs(&roundtrip.codomain(), &typed.codomain());
-    assert_same_legs(&roundtrip.domain(), &typed.domain());
-    assert_eq!(roundtrip.dense_data().unwrap(), typed.dense_data().unwrap());
-}
-
-#[test]
-fn adjoint_conjugates_a_complex_payload() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    // What: c64 entries come back conjugated, not merely transposed. Compared
-    // as multisets, because the transpose moves entries around: the point is
-    // that the *values* are the conjugated ones and not the original ones.
-    let runtime = runtime();
-    let typed = z2_complex_tensor(&runtime);
-
-    let adjoint = typed.adjoint(engine).unwrap();
-    let sorted = |values: &mut Vec<Complex64>| {
-        values.sort_by(|a, b| a.re.total_cmp(&b.re).then(a.im.total_cmp(&b.im)));
-    };
-    let mut got: Vec<Complex64> = adjoint
-        .materialize(engine)
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .to_vec();
-    let mut conjugated: Vec<Complex64> = typed
-        .dense_data()
-        .unwrap()
-        .iter()
-        .map(|v| v.conj())
-        .collect();
-    let mut plain: Vec<Complex64> = typed.dense_data().unwrap().to_vec();
-    sorted(&mut got);
-    sorted(&mut conjugated);
-    sorted(&mut plain);
-    assert_eq!(got, conjugated);
-    assert_ne!(
-        got, plain,
-        "the fixture must have a non-zero imaginary part"
-    );
-}
 
 #[test]
 fn adjoint_carries_an_external_provider() {

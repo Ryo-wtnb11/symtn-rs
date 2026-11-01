@@ -79,9 +79,17 @@ pub(crate) enum Event {
     CompiledTraceHit,
     /// A compiled trace was offered for publication.
     CompiledTracePublication,
+    /// An owned contraction replayed its core into fresh memory.
+    OwnedCoreReplay,
+    /// An owned contraction's output transform wrote a fresh payload once
+    /// under its overwrite proof.
+    OwnedOutputOverwrite,
+    /// An owned contraction's output transform had no overwrite proof and
+    /// overwrote an allocator-zeroed payload.
+    OwnedOutputZeroedFallback,
 }
 
-const EVENTS: usize = Event::CompiledTracePublication as usize + 1;
+const EVENTS: usize = Event::OwnedOutputZeroedFallback as usize + 1;
 
 /// Runs once, inside the next raw trace execution on this thread.
 pub(crate) type TraceRawExecutionHook = Box<dyn FnOnce() -> Result<(), OperationError>>;

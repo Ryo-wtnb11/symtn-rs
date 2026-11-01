@@ -72,6 +72,9 @@ mod typed_cuda_contract_batch;
 mod typed_diagonal_allocations;
 mod typed_otimes_allocations;
 
+#[path = "admission_modes/main.rs"]
+mod admission_modes;
+
 mod checked_generic_braiding;
 
 #[path = "checked_generic_facade/main.rs"]

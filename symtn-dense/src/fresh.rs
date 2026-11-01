@@ -196,6 +196,47 @@ pub(crate) fn split_fresh_segments<'a, E>(
     Ok(())
 }
 
+/// [`split_fresh_segments`] of one job: its piece, or `None` for an empty
+/// output, without staging a destination order.
+pub(crate) fn split_single_fresh_segment<'a, E>(
+    segments: &mut [(usize, &'a mut [E])],
+    job: &DenseGemmBatchJob,
+) -> Result<Option<&'a mut [E]>, DenseError> {
+    check_segment_order(segments)?;
+    let len = job
+        .rows
+        .checked_mul(job.cols)
+        .ok_or(DenseError::ElementCountOverflow)?;
+    if len == 0 {
+        return Ok(None);
+    }
+    let start = job.dst_offset;
+    let end = start
+        .checked_add(len)
+        .ok_or(DenseError::OffsetOverflow { value: start })?;
+    let (first, memory) = segments
+        .iter_mut()
+        .find(|(first, memory)| *first <= start && end <= first + memory.len())
+        .ok_or(DenseError::OutOfBounds)?;
+    let (_, rest) = core::mem::take(memory).split_at_mut(start - *first);
+    Ok(Some(rest.split_at_mut(len).0))
+}
+
+/// Segments in ascending, non-overlapping order, else
+/// [`DenseError::OutOfBounds`].
+fn check_segment_order<E>(segments: &[(usize, &mut [E])]) -> Result<(), DenseError> {
+    let mut previous_end = 0;
+    for (start, memory) in segments.iter() {
+        if *start < previous_end {
+            return Err(DenseError::OutOfBounds);
+        }
+        previous_end = start
+            .checked_add(memory.len())
+            .ok_or(DenseError::OffsetOverflow { value: *start })?;
+    }
+    Ok(())
+}
+
 /// The refusals of [`split_fresh_segments`], leaving `order` holding the
 /// nonempty jobs in destination order.
 pub(crate) fn check_fresh_segments<E>(
@@ -208,13 +249,7 @@ pub(crate) fn check_fresh_segments<E>(
             .checked_add(len)
             .ok_or(DenseError::OffsetOverflow { value: start })
     };
-    let mut previous_end = 0;
-    for (start, memory) in segments.iter() {
-        if *start < previous_end {
-            return Err(DenseError::OutOfBounds);
-        }
-        previous_end = end(*start, memory.len())?;
-    }
+    check_segment_order(segments)?;
     order.clear();
     for (index, job) in jobs.iter().enumerate() {
         let len = job

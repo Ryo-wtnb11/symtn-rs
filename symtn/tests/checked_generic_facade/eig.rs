@@ -354,30 +354,12 @@ fn sun_checked_generic_eig_nonnormal_cross_mu_projectors_for_both_dtypes() {
 }
 
 #[test]
-fn checked_generic_eigh_vals_preserves_spectrum_and_dtype() {
+fn checked_generic_compact_eigh_vals_surfaces_a_decode_failure() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(CheckedOnlyToy::new(0));
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.5).unwrap();
-
-    let spectra = source
-        .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
-        .unwrap();
-    assert_eq!(spectra.len(), 1);
-    assert_eq!(spectra[0].sector, Label::X);
-    assert_eq!(spectra[0].values, vec![2.5]);
-
-    let complex = source.convert::<Complex64>(engine).unwrap();
-    assert_eq!(
-        complex
-            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
-            .unwrap(),
-        spectra
-    );
-
     let compact: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
@@ -388,12 +370,6 @@ fn checked_generic_eigh_vals_preserves_spectrum_and_dtype() {
         }],
     )
     .unwrap();
-    assert_eq!(
-        compact
-            .eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT)
-            .unwrap(),
-        spectra
-    );
     provider.fail_decode.store(true, Ordering::Relaxed);
     assert!(matches!(
         compact.eigh_vals(engine, &[0], &[1], HermitianTol::DEFAULT),
@@ -402,124 +378,6 @@ fn checked_generic_eigh_vals_preserves_spectrum_and_dtype() {
         ))
     ));
     provider.fail_decode.store(false, Ordering::Relaxed);
-}
-
-fn assert_checked_generic_eigh_factors<D>(
-    source: &TensorMap<CheckedOnlyToy, D>,
-    close: impl Fn(D, D) -> f64 + Copy,
-    adjoint: impl Fn(D) -> D + Copy,
-) where
-    D: symtn::typed::FactorizationScalar + symtn::typed::SpectrumMagnitude + fmt::Debug,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let Eigh { d, v } = source
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
-        .unwrap();
-    assert!(std::ptr::eq(d.provider(), source.provider()));
-    assert!(std::ptr::eq(v.provider(), source.provider()));
-    assert!(symtn::typed::__network::runtime_identity(d.runtime()).matches(source.runtime()));
-    assert!(symtn::typed::__network::runtime_identity(v.runtime()).matches(source.runtime()));
-    assert_eq!(v.codomain(), source.codomain());
-    assert_eq!(d.codomain(), d.domain());
-    assert_eq!(v.domain(), d.codomain());
-    let spectrum = symtn::expert::diagonal_spectrum(engine, &d)
-        .unwrap()
-        .unwrap();
-    assert_eq!(spectrum.iter().map(|s| s.values.len()).sum::<usize>(), 3);
-    assert_eq!(
-        d.materialize(engine).unwrap().dense_data().unwrap().len(),
-        9
-    );
-
-    for (actual, expected) in source
-        .compose(engine, &v)
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .iter()
-        .zip(v.compose(engine, &d).unwrap().dense_data().unwrap())
-    {
-        assert!(close(*actual, *expected) < 1e-10);
-    }
-    let vectors = v.dense_data().unwrap();
-    let diagonal_materialized = d.materialize(engine).unwrap();
-    let diagonal = diagonal_materialized.dense_data().unwrap();
-    for column in 0..3 {
-        for row in 0..3 {
-            let gram = (0..3).fold(D::from_real(0.0), |sum, inner| {
-                sum + adjoint(vectors[inner + row * 3]) * vectors[inner + column * 3]
-            });
-            assert!(close(gram, D::from_real(f64::from(row == column))) < 1e-10);
-            let rebuilt = (0..3).fold(D::from_real(0.0), |sum, inner| {
-                sum + vectors[row + inner * 3]
-                    * diagonal[inner + inner * 3]
-                    * adjoint(vectors[column + inner * 3])
-            });
-            assert!(close(rebuilt, source.dense_data().unwrap()[row + column * 3]) < 1e-10);
-        }
-    }
-
-    // The truncated eigendecomposition is a composition.
-    let found = d.domain()[0]
-        .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(5))
-        .unwrap();
-    let truncated_d = d
-        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
-        .unwrap();
-    let truncated_v = v
-        .restrict_leg(engine, &[(v.codomain_rank(), &found.selection)])
-        .unwrap();
-    assert!(std::ptr::eq(truncated_d.provider(), source.provider()));
-    assert!(std::ptr::eq(truncated_v.provider(), source.provider()));
-    // The kept values carry the same values in the same order, exactly — no
-    // rounding, and no reordering of the values inside a sector.
-    let compact = truncated_d.diagview(engine).unwrap();
-    assert_eq!(compact.len(), 1);
-    assert_eq!(compact[0].sector, Label::X);
-    for (actual, expected) in compact[0]
-        .values
-        .iter()
-        .zip([D::from_real(-3.0), D::from_real(2.0)])
-    {
-        assert_eq!(close(*actual, expected), 0.0);
-    }
-    let expected_error = (1.0 + 2.0_f64.sqrt()).sqrt();
-    assert!((found.error - expected_error).abs() < 1e-12);
-}
-
-#[test]
-fn checked_generic_eigh_full_and_trunc_preserve_contract_for_both_dtypes() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
-            [-3.0, 2.0, 1.0][index[0]] * f64::from(index[0] == index[1])
-        })
-        .unwrap();
-    assert_checked_generic_eigh_factors(
-        &source,
-        |actual, expected| (actual - expected).abs(),
-        |value| value,
-    );
-    let complex = source.convert::<Complex64>(engine).unwrap();
-    assert_checked_generic_eigh_factors(
-        &complex,
-        |actual, expected| (actual - expected).norm(),
-        |value| value.conj(),
-    );
-    let Eigh { d: complex_d, .. } = complex
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT)
-        .unwrap();
-    assert!(complex_d
-        .materialize(engine)
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .iter()
-        .all(|value| value.im == 0.0));
 }
 
 #[test]
@@ -563,39 +421,6 @@ fn checked_generic_eigh_lazy_success_and_failure_leave_the_view_lazy() {
         symtn::typed::__network::network_reuse_class(&lazy, false)
             == symtn::typed::__network::NetworkReuseClass::LazyAdjoint
     );
-}
-
-#[test]
-fn checked_generic_eigh_rejects_invalid_inputs_before_publication() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let wide = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 2)]).unwrap();
-    let narrow = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 1)]).unwrap();
-    let nonendomorphism: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&narrow], |_, _| 1.0).unwrap();
-    assert!(matches!(nonendomorphism
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::SpaceMismatch { message }))) if message.contains("endomorphism")));
-
-    let nonhermitian: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
-            [[0.0, 1.0], [0.0, 0.0]][index[0]][index[1]]
-        })
-        .unwrap();
-    assert!(matches!(nonhermitian
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("Hermitian coupled-sector blocks")));
-    let nonfinite: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
-            if index[0] == index[1] {
-                f64::NAN
-            } else {
-                0.0
-            }
-        })
-        .unwrap();
-    assert!(matches!(nonfinite
-        .eigh_full(engine, &[0], &[1], HermitianTol::DEFAULT), Err(GenericTensorError::Plan(symtn::typed::CheckedGenericPlanError::Operation(symtn::typed::OperationError::InvalidArgument { message }))) if message.contains("input components must be finite")));
 }
 
 #[test]
@@ -891,40 +716,6 @@ fn checked_generic_eig_ties_are_stable_and_degenerate_projectors_are_invariant()
         ],
         3,
     );
-}
-
-#[test]
-fn checked_generic_eig_truncation_reports_discarded_spectrum_norm_only() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(CheckedOnlyToy::new(0));
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(Label::X, 3)]).unwrap();
-    let source: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {
-            [-3.0, 2.0, 1.0][index[0]] * f64::from(index[0] == index[1])
-        })
-        .unwrap();
-    // The truncated eigendecomposition is a composition.
-    let Eig { d, v } = source.eig_full(engine, &[0], &[1]).unwrap();
-    let found = d.domain()[0]
-        .find_truncated(&d.diagview(engine).unwrap(), &Truncation::rank(5))
-        .unwrap();
-    let truncated_d = d
-        .restrict_leg(engine, &[(0, &found.selection), (1, &found.selection)])
-        .unwrap();
-    let truncated_v = v
-        .restrict_leg(engine, &[(v.codomain_rank(), &found.selection)])
-        .unwrap();
-    assert!(std::ptr::eq(truncated_d.provider(), provider.as_ref()));
-    assert!(std::ptr::eq(truncated_v.provider(), provider.as_ref()));
-    let kept = truncated_d.diagview(engine).unwrap();
-    assert_eq!(kept[0].sector, Label::X);
-    assert_eq!(
-        kept[0].values,
-        vec![Complex64::new(-3.0, 0.0), Complex64::new(2.0, 0.0)]
-    );
-    assert!((found.error - (1.0 + 2.0_f64.sqrt()).sqrt()).abs() < 1.0e-12);
 }
 
 /// Independent oracle for the published eigenvector gauge, per

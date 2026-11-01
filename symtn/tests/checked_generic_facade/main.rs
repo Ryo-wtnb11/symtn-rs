@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use symtn::typed::ContractSpec;
 use symtn::typed::HermitianTol;
-#[cfg(feature = "cgc-gen")]
-use symtn::typed::Qr;
 use symtn::typed::Side;
+#[cfg(feature = "cgc-gen")]
+use symtn::typed::{Lq, Qr};
 
 use symtn::expert::DenseBackend;
 
@@ -31,9 +31,11 @@ use symtn::sector::{
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::CheckedGenericStructureError;
+#[cfg(feature = "cgc-gen")]
+use symtn::typed::TypedTensorConstructionDispatch;
 use symtn::typed::{
-    CheckedGenericTensorProductError, Eig, Eigh, GradedSpace, LeftPolar, Lq, RightPolar, Svd,
-    TensorMap, Truncation, TypedTensorConstructionDispatch,
+    CheckedGenericTensorProductError, Eig, Eigh, GradedSpace, LeftPolar, RightPolar, Svd,
+    TensorMap, Truncation,
 };
 use symtn::typed::{Complex32, Complex64, GenericTensorError, Runtime, SectorSpectrum};
 
@@ -94,6 +96,7 @@ fn domain_axes<R, D, S>(t: &symtn::typed::TensorMap<R, D, S>) -> Vec<usize> {
 /// `terms` of the tolerance rule for a product of endomorphisms: an
 /// endomorphism payload holds `sum_c n_c^2` entries, so its square root
 /// bounds every coupled block's contracted length `n_c`.
+#[cfg(feature = "cgc-gen")]
 fn endomorphism_terms(payload_len: usize) -> usize {
     (payload_len as f64).sqrt().ceil() as usize
 }
@@ -161,7 +164,6 @@ fn lazy_close_f64(a: f64, b: f64) -> bool {
 
 mod construction;
 mod eig;
-mod error_kinds;
 mod matrix_fn;
 mod nonfinite;
 mod null_polar;

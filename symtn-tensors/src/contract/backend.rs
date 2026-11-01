@@ -1,4 +1,5 @@
 use num_traits::One;
+use std::mem::MaybeUninit;
 use std::sync::Arc;
 use symtn_core::{BlockStructure, Placement};
 use symtn_dense::Engine;
@@ -8,6 +9,9 @@ use symtn_operations::fusion_replay::{
 };
 
 use crate::host_scratch::HostScratchBuffer;
+use symtn_operations::fusion_replay::Rank2Gemm;
+
+use super::fusion_block::{BackendRank2Gemm, ZeroThenInto};
 use symtn_operations::{scale_raw_strided_kernel_trusted, tensoradd_raw_strided_kernel};
 
 use crate::{
@@ -162,6 +166,32 @@ where
         Err(OperationError::UnsupportedTensorContractScope {
             message: "contract backend does not implement transpose/adjoint rank-2 batches",
         })
+    }
+
+    /// Batched overwrite GEMM into uninitialized job segments, reporting
+    /// each finished job: [`Rank2Gemm::matmul_rank2_batch_fresh`] at this
+    /// boundary. The default zero-fills each job's piece and runs it through
+    /// [`Self::matmul_rank2_batch_with_ops_axpby_into_raw`] with `beta = 0`.
+    #[doc(hidden)]
+    #[allow(clippy::too_many_arguments)]
+    fn matmul_rank2_batch_fresh_raw<'a>(
+        &mut self,
+        engine: &mut dyn Engine,
+        workspace: &mut Self::Workspace,
+        segments: &mut [(usize, &'a mut [MaybeUninit<D>])],
+        lhs_data: &[D],
+        rhs_data: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        ops: [MatrixOp; 2],
+        alpha: D,
+        written: &mut dyn FnMut(usize, &'a mut [D]),
+    ) -> Result<(), OperationError> {
+        ZeroThenInto(BackendRank2Gemm::<Self, Self::Workspace, C>::new(
+            self, workspace,
+        ))
+        .matmul_rank2_batch_fresh(
+            engine, segments, lhs_data, rhs_data, jobs, ops, alpha, written,
+        )
     }
 }
 
@@ -427,6 +457,44 @@ where
                 beta.dense_scalar(),
             )
         })
+    }
+
+    fn matmul_rank2_batch_fresh_raw<'a>(
+        &mut self,
+        engine: &mut dyn Engine,
+        _workspace: &mut Self::Workspace,
+        segments: &mut [(usize, &'a mut [MaybeUninit<D>])],
+        lhs_data: &[D],
+        rhs_data: &[D],
+        jobs: &[Rank2GemmBatchJob],
+        ops: [MatrixOp; 2],
+        alpha: D,
+        written: &mut dyn FnMut(usize, &'a mut [D]),
+    ) -> Result<(), OperationError> {
+        let (lhs_shape, rhs_shape, flat_strides) = ([lhs_data.len()], [rhs_data.len()], [1]);
+        let lhs = D::dense_read(DenseView::new_trusted(
+            lhs_data,
+            &lhs_shape,
+            &flat_strides,
+            0,
+        ));
+        let rhs = D::dense_read(DenseView::new_trusted(
+            rhs_data,
+            &rhs_shape,
+            &flat_strides,
+            0,
+        ));
+        self.dense_mut()
+            .matmul_batch_fresh(
+                engine,
+                D::dense_fresh_segments(segments, written),
+                lhs,
+                rhs,
+                jobs,
+                ops,
+                alpha.dense_scalar(),
+            )
+            .map_err(OperationError::Dense)
     }
 }
 

@@ -1,4 +1,7 @@
 //! Behavior tests neither observe nor reset process-global state and run concurrently.
+//!
+//! Fresh heap memory is NaN-poisoned, so an owned output element that no
+//! operation wrote surfaces as NaN in these oracle comparisons.
 
 use num_complex::{Complex32, Complex64};
 
@@ -38,18 +41,21 @@ mod toy_rules;
 mod trace_cases;
 #[macro_use]
 mod truncation_oracle;
+#[path = "../../tests/support/nan_poison_alloc.rs"]
+mod nan_poison_alloc;
+
+#[global_allocator]
+static ALLOCATOR: nan_poison_alloc::NanPoisonAllocator = nan_poison_alloc::NanPoisonAllocator;
 
 mod axis_error_matrix;
 mod axpby_dense_oracle;
 mod batched_failure_contract;
-mod beta_destinations;
 mod c64_compose_contract_identity;
 mod capability_markers;
 mod checked_core_region_oracle;
 mod checked_generic_absorb;
 mod checked_generic_trace_duality;
 mod checked_generic_trace_oracle;
-mod compact_reductions_both_modes;
 mod compact_spectrum_axpby_lazy_adjoint;
 mod complex_symbol_lazy_adjoint;
 mod contract_into_reordered_overwrite;
@@ -70,19 +76,16 @@ mod exp_spectral_route;
 #[path = "../../tests/support/export_scan.rs"]
 mod export_scan;
 mod facade_exports;
-mod factorization_nonfinite_input;
+mod into_coefficient_pairs;
 mod lazy_adjoint_contract_both_modes;
-mod lazy_adjoint_exact;
-mod lazy_adjoint_factorizations;
-mod lazy_adjoint_lq;
+mod lazy_adjoint_matrix;
 mod lazy_adjoint_non_self_dual_contract;
 mod lazy_adjoint_shared_owner;
-mod lazy_axpby_both_modes;
 mod lie_group_tensors;
 mod mf_linalg_conformance;
 mod mf_structural_conformance;
 mod named_factorization_reconstruction;
-mod non_finite_spectra;
+mod non_finite_matrix;
 mod norm_order;
 mod null_space_nonabelian;
 mod path_form_additive;

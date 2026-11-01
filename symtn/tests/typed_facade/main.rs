@@ -7,7 +7,7 @@
 //! with its own category.
 
 use crate::common::ErrorKind as _;
-use crate::{numerics, ulp};
+use crate::numerics;
 
 /// TensorKit's argument-free `transpose(t)`: the full planar rotation, which
 /// carries every codomain leg across the boundary and every domain leg back.
@@ -48,9 +48,7 @@ use symtn::sector::{
 use symtn::sector::{TableRule, TableSector};
 use symtn::typed::FusionAlgebraError;
 use symtn::typed::{Complex64, Runtime};
-use symtn::typed::{
-    Eig, Eigh, GradedSpace, LeftPolar, Lq, Qr, RightPolar, Svd, TensorMap, Truncation,
-};
+use symtn::typed::{GradedSpace, LeftPolar, Lq, Qr, Svd, TensorMap};
 
 use crate::report;
 
@@ -1330,18 +1328,6 @@ fn fz2_u1_su2_typed_legs() -> (GradedSpace<Fz2U1Su2Rule>, GradedSpace<Fz2U1Su2Ru
 // Typed constructors — `rand_with_seed` and the structural
 // family (`isomorphism`/`isometry`).
 // ---------------------------------------------------------------------------
-
-fn u1_typed_leg() -> GradedSpace<symtn::sector::U1FusionRule> {
-    GradedSpace::try_new(
-        Arc::new(symtn::sector::U1FusionRule),
-        [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
-            (symtn::sector::U1Irrep::new(-1), 3),
-        ],
-    )
-    .unwrap()
-}
 
 fn fz2_typed_leg() -> GradedSpace<symtn::sector::FermionParityFusionRule> {
     GradedSpace::try_new(
