@@ -98,12 +98,19 @@ where
 /// sparse column per original source) instead of re-running the per-source
 /// term list. `columns[i]` maps `src index -> coefficient` for `basis[i]`.
 ///
-/// This is the TensorKit 0.17 `artin_braid`/`fsbraid` batching: the elementary
-/// step (bend / Artin braid) is walked ONCE for the block and its coefficients
-/// are spread across all source columns, so intermediate allocation is
-/// O(steps) rather than O(steps × sources) — the term-list style symtn used
-/// (equivalent to TensorKit ≤0.16's per-tree `FusionTreeDict`) allocated a
-/// fresh accumulator and cloned keys per source per step.
+/// This follows TensorKit 0.17's block-wise decomposition (`fsbraid` walking
+/// `artin_braid` on a whole `FusionTreeBlock`): each elementary step (bend /
+/// Artin braid) runs once per basis row of the block and its coefficients are
+/// spread across all source columns, instead of re-running the step per
+/// source with a fresh accumulator and cloned keys. The per-step containers
+/// (dedup map, coefficient matrix, rebuilt basis) are presized to the
+/// incoming basis and grow, amortized, only when the step reaches more
+/// destinations than incoming rows; a row's move terms go through one buffer
+/// reused for the whole step, so no container is allocated per basis row.
+/// TensorKit's step does allocate per row (the `intersect` of fusion
+/// channels); the reused buffer is a Rust-side improvement over it. A
+/// completed TensorKit `treebraider` cache hit runs no step at all and
+/// compares with symtn's cached transform, not with this construction.
 /// Dense coefficient matrix (TK's `Matrix{E}`): rows are destination basis
 /// trees, columns the original sources. Stored row-major in ONE flat
 /// allocation that grows amortized as rows are added, instead of a
@@ -385,13 +392,13 @@ where
     Ok((next_basis, next_columns))
 }
 
-pub(super) struct CompactMultiplicityFreeTreeBasis {
+pub(crate) struct CompactMultiplicityFreeTreeBasis {
     pub(super) frame: MultiplicityFreeTreeFrame,
     pub(super) locals: Vec<MultiplicityFreeTreeLocal>,
 }
 
 impl CompactMultiplicityFreeTreeBasis {
-    pub(super) fn from_group<R>(
+    pub(crate) fn from_group<R>(
         group: ValidatedFusionTreeBlockGroup<'_, R>,
     ) -> Result<Self, CoreError> {
         let src_keys = group.src_keys;

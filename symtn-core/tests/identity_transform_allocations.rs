@@ -403,11 +403,12 @@ where
     allocations - output.len()
 }
 
-/// Purpose: a warm compact block transform allocates per move and per owned
-/// source row, never per source inside a move (Artin term buffers, row
-/// growth), so doubling the sources does not raise the remaining calls.
+/// Purpose: beyond its owned source rows, a whole warm compact block
+/// transform costs no more allocation calls for 16 sources than for 8. The
+/// sources share one destination block, so this bounds the aggregate cost;
+/// the per-move contract is `compact_moves_allocate_per_move_not_per_row`.
 #[test]
-fn compact_block_warm_allocations_do_not_restore_per_source_scratch() {
+fn compact_block_warm_allocations_do_not_grow_with_sources() {
     let _serial = crate::counting_alloc::serial();
     let spin = |twice| SU2Irrep::from_twice_spin(twice).sector_id();
     let fermionic_su2 =

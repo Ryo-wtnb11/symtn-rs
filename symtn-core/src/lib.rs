@@ -1,4 +1,7 @@
-#![forbid(unsafe_code)]
+// Why not `forbid` in test builds: the unit tests install a counting global
+// allocator, the one `unsafe` impl, behind a scoped `allow`.
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 
 //! Structural vocabulary of symtn: spaces and sectors, fusion trees and their
 //! keys, block structures and block views, and the structure caches.

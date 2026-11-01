@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct ValidatedFusionTreeBlockGroup<'a, R> {
+pub(crate) struct ValidatedFusionTreeBlockGroup<'a, R> {
     rule: &'a R,
     pub(super) src_keys: &'a [FusionTreeKey],
     rank: usize,
@@ -9,7 +9,7 @@ pub(super) struct ValidatedFusionTreeBlockGroup<'a, R> {
 }
 
 #[cfg(any(test, feature = "testing"))]
-fn validate_fusion_tree_block_group_for_rule<'a, R>(
+pub(crate) fn validate_fusion_tree_block_group_for_rule<'a, R>(
     rule: &'a R,
     src_keys: &'a [FusionTreeKey],
 ) -> Result<Option<ValidatedFusionTreeBlockGroup<'a, R>>, CoreError>

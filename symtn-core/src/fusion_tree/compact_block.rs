@@ -66,7 +66,7 @@ where
 // pair's domain as a rider): that form measured ~1% slower on the cold braid
 // plan build, insensitive to codegen units and LTO, while the two dedicated
 // moves below share all surgery through `PreparedMultiplicityFreeArtin`.
-pub(super) fn compact_artin_tree_block<R>(
+pub(crate) fn compact_artin_tree_block<R>(
     rule: &R,
     basis: CompactMultiplicityFreeTreeBasis,
     columns: Option<&DenseColumns<R::Scalar>>,
