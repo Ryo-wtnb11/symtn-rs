@@ -446,3 +446,125 @@ fn homspace_with_disjoint_coupled_sectors_has_no_trees() {
 
     assert!(hom.fusion_tree_keys(&SU2FusionRule).is_empty());
 }
+
+/// SU(2) that counts every fusion-product query (channels or multiplicity).
+struct FusionQueryCountingSu2 {
+    queries: std::cell::Cell<usize>,
+}
+
+impl FusionQueryCountingSu2 {
+    fn query(&self) {
+        self.queries.set(self.queries.get() + 1);
+    }
+}
+
+impl symtn_sectors::testing::Provider for FusionQueryCountingSu2 {}
+
+impl FusionRule for FusionQueryCountingSu2 {
+    fn rule_identity(&self) -> RuleIdentity {
+        RuleIdentity::of_type::<Self>()
+    }
+
+    fn fusion_style(&self) -> FusionStyleKind {
+        FusionRule::fusion_style(&SU2FusionRule)
+    }
+
+    fn braiding_style(&self) -> BraidingStyleKind {
+        FusionRule::braiding_style(&SU2FusionRule)
+    }
+
+    fn vacuum(&self) -> SectorId {
+        FusionRule::vacuum(&SU2FusionRule)
+    }
+
+    fn dual(&self, sector: SectorId) -> SectorId {
+        FusionRule::dual(&SU2FusionRule, sector)
+    }
+
+    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
+        self.query();
+        SU2FusionRule.fusion_channels(left, right)
+    }
+
+    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
+        self.query();
+        SU2FusionRule.nsymbol(left, right, coupled)
+    }
+}
+
+impl MultiplicityFreeFusionRule for FusionQueryCountingSu2 {}
+
+impl CheckedFusionAlgebra for FusionQueryCountingSu2 {
+    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
+        SU2FusionRule.try_dual_sector(sector)
+    }
+
+    fn try_fusion_channels(
+        &self,
+        left: SectorId,
+        right: SectorId,
+    ) -> Result<SectorVec, FusionAlgebraError> {
+        self.query();
+        SU2FusionRule.try_fusion_channels(left, right)
+    }
+
+    fn try_nsymbol(
+        &self,
+        left: SectorId,
+        right: SectorId,
+        coupled: SectorId,
+    ) -> Result<usize, FusionAlgebraError> {
+        self.query();
+        SU2FusionRule.try_nsymbol(left, right, coupled)
+    }
+}
+
+#[test]
+fn a_leg_without_sectors_has_no_trees_and_queries_no_fusion() {
+    // What: a leg with no sectors empties the product space, so every
+    // producer returns no tree without fusing any prefix: here 200 ⊗ 200
+    // would leave the compact SU(2) id range. Rank zero stays the unit
+    // with one vacuum tree.
+    let leg =
+        |sectors: &[usize]| SectorLeg::new(sectors.iter().map(|&s| (SectorId::new(s), 1)), false);
+    let empty = FusionProductSpace::new([leg(&[200]), leg(&[200]), leg(&[])]);
+    let rule = FusionQueryCountingSu2 {
+        queries: std::cell::Cell::new(0),
+    };
+    let tree_count =
+        |groups: &[CoupledFusionTrees]| groups.iter().map(|g| g.trees.len()).sum::<usize>();
+
+    assert_eq!(
+        tree_count(&fusion_trees_by_coupled_for_space(&rule, &empty)),
+        0
+    );
+    assert_eq!(
+        tree_count(&try_fusion_trees_by_coupled_for_space_checked(&rule, &empty).unwrap()),
+        0
+    );
+    assert_eq!(
+        tree_count(&fusion_trees_by_coupled_for_space_generic(&rule, &empty).0),
+        0
+    );
+    assert_eq!(rule.queries.get(), 0);
+
+    let unit = FusionProductSpace::new([]);
+    let vacuum = |groups: Vec<CoupledFusionTrees>| {
+        groups
+            .iter()
+            .map(|g| (g.coupled.id(), g.trees.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        vacuum(fusion_trees_by_coupled_for_space(&rule, &unit)),
+        [(0, 1)]
+    );
+    assert_eq!(
+        vacuum(try_fusion_trees_by_coupled_for_space_checked(&rule, &unit).unwrap()),
+        [(0, 1)]
+    );
+    assert_eq!(
+        vacuum(fusion_trees_by_coupled_for_space_generic(&rule, &unit).0),
+        [(0, 1)]
+    );
+}

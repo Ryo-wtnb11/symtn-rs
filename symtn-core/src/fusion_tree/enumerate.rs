@@ -204,6 +204,17 @@ impl<'a> SpaceFusionSteps<'a> {
         mut nsymbol: impl FnMut(SectorId, SectorId, SectorId) -> Result<usize, E>,
     ) -> Result<Self, E> {
         let legs = space.legs();
+        // A leg without sectors empties the product (unlike rank zero, the
+        // unit with one vacuum tree), and an empty selection keeps no tree:
+        // neither may query a prefix product, which a bounded provider can
+        // fail to represent.
+        if legs.iter().any(|leg| leg.sectors().is_empty()) || within.is_some_and(<[_]>::is_empty) {
+            return Ok(Self {
+                space,
+                levels: Vec::new(),
+                coupled: Vec::new(),
+            });
+        }
         let mut reached = match legs.first() {
             None => vec![vacuum()],
             Some(leg) => leg.sectors().to_vec(),
