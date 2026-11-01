@@ -70,6 +70,7 @@ macro_rules! on_each_engine {
     };
 }
 
+pub(crate) mod algebra;
 mod contract;
 mod leg_roles;
 mod trace;
