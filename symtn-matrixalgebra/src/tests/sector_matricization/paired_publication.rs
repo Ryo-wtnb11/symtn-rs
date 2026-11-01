@@ -900,8 +900,9 @@ fn checked_paired_enumerates_each_factor_layout_once() {
         };
         let (once_left, once_right) = (side_log(&left_hom), side_log(&right_hom));
         // Vertex fixture: each side folds its one-leg bond once and
-        // queries channels plus the multiplicity of its single vertex.
-        assert_eq!((once_left.len(), once_right.len()), (3, 3));
+        // queries channels for its fold, in-table channels for its tree
+        // walk and the multiplicity of each channel.
+        assert_eq!((once_left.len(), once_right.len()), (4, 4));
         assert_eq!(once, [once_left.clone(), once_right.clone()].concat());
 
         let former = Arc::new(RecordingGeneric::new());
@@ -957,8 +958,8 @@ fn checked_paired_placement_error_precedes_bound_space() {
     // What: a factor key whose tree the matricization lacks fails after
     // that side's single enumeration and before any publication; the
     // left side is validated completely before the right side is
-    // enumerated: the left error surfaces after 3 queries and the right
-    // error after 6 (a two-pass route would take 3 and 9: left keys, left
+    // enumerated: the left error surfaces after 4 queries and the right
+    // error after 8 (a two-pass route would take 4 and 12: left keys, left
     // space, right keys).
     for side in [FactorSide::Left, FactorSide::Right] {
         let (homspace, mut matrix, pair) = vertex_tree_factor_fixture(false);
@@ -978,9 +979,9 @@ fn checked_paired_placement_error_precedes_bound_space() {
         let (expected_message, expected_calls) = match side {
             FactorSide::Left => (
                 "factor codomain tree absent from the source matricization",
-                3,
+                4,
             ),
-            FactorSide::Right => ("factor domain tree absent from the source matricization", 6),
+            FactorSide::Right => ("factor domain tree absent from the source matricization", 8),
         };
         assert!(matches!(
             error,

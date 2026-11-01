@@ -349,15 +349,15 @@ fn checked_generic_pair_publication_appends_multiple_literal_sectors() {
 
 // Checked compact-QR provider sequence for `generic_factorization_input`: the
 // compact plan issues no preflight query, the left (Q) space enumerates once
-// (calls 1-3), then the right (R) space enumerates once (calls 4-6). Before
+// (calls 1-4), then the right (R) space enumerates once (calls 5-8). Before
 // the paired builder enumerated each side once, each side enumerated twice
-// (left keys 1-3, left space 4-6, right keys 7-9, right space 10-12) and the
-// first right-side call was the seventh.
-const COMPACT_PAIR_LEFT_LAST_CALL: usize = 3;
+// (left keys 1-4, left space 5-8, right keys 9-12, right space 13-16) and the
+// first right-side call was the ninth.
+const COMPACT_PAIR_LEFT_LAST_CALL: usize = 4;
 
-const COMPACT_PAIR_RIGHT_FIRST_CALL: usize = 4;
+const COMPACT_PAIR_RIGHT_FIRST_CALL: usize = 5;
 
-const COMPACT_PAIR_RIGHT_LAST_CALL: usize = 6;
+const COMPACT_PAIR_RIGHT_LAST_CALL: usize = 8;
 
 #[test]
 #[expect(

@@ -6,8 +6,8 @@
 //!
 //! The order is part of the result: a partial identity selects the leading
 //! trees, and an isomorphism between different spaces pairs row and column
-//! trees by position. symtn stores a block's trees in its own order (see
-//! `CoupledBlock`), so the main oracle is the physical dense tensor
+//! trees by position. symtn stores a block's trees in TensorKit's nesting
+//! but with `SectorId` sector order (see `CoupledBlock`), so the main oracle is the physical dense tensor
 //! (`to_physical_dense`, TensorKit's `convert(Array, t)` layout) against
 //! literals checked against TensorKit 0.17.1. The block-identity checks pin
 //! the block structure for fixtures whose storage order is TensorKit's.

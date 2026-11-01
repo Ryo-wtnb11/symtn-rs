@@ -85,6 +85,12 @@ where
     Ok(())
 }
 
+/// The fusion trees of every coupled sector of `space`, ascending by coupled
+/// sector. Within a sector the trees follow TensorKit's `fusiontrees(P, c)`
+/// (`_fusiontree_iterate`): last uncoupled sector slowest, then the inner
+/// line feeding its vertex in `coupled ⊗ dual(last)` order, then the vertex
+/// label, then the front of the tree; uncoupled sectors iterate by
+/// `SectorId`. Trees of one uncoupled tuple therefore need not be adjacent.
 pub(crate) fn fusion_trees_by_coupled_for_space<R>(
     rule: &R,
     space: &FusionProductSpace,
@@ -107,49 +113,24 @@ pub(crate) fn fusion_trees_by_coupled_for_space_within<R>(
 where
     R: MultiplicityFreeFusionRule,
 {
-    // Group trees by coupled sector via a `coupled -> index` map so the merge
-    // is O(1) per (tuple, coupled) pair. The previous `grouped.iter_mut().find`
-    // linear scan was O(P·C) (P = tuple×coupled iterations, C = distinct
-    // coupled sectors); the map removes the C factor. The final `sort_by_key`
-    // still fixes the canonical order, so the map need not preserve it.
-    let mut rows = CoupledTreeRows::default();
-    let mut uncoupled = Vec::with_capacity(space.len());
-    let mut is_dual = Vec::with_capacity(space.len());
-    let result: Result<(), std::convert::Infallible> =
-        space.try_visit_selected_leg_tuples(&mut |tuple| {
-            uncoupled.clear();
-            is_dual.clear();
-            for leg in tuple {
-                uncoupled.push(leg.sector());
-                is_dual.push(leg.is_dual());
-            }
-            let mut externals_row = None;
-            for coupled in reachable_coupled_sectors(rule, &uncoupled) {
-                if within.is_some_and(|within| within.binary_search(&coupled).is_err()) {
-                    continue;
-                }
-                let group = rows.group(coupled);
-                let first = rows.builder.len();
-                push_fusion_trees_for_coupled_sharing(
-                    rule,
-                    &mut rows.builder,
-                    &uncoupled,
-                    &is_dual,
-                    &uncoupled,
-                    coupled,
-                    &mut externals_row,
-                );
-                rows.assign(group, first);
-            }
-            Ok(())
-        });
-    match result {
-        Ok(()) => {}
+    let steps = SpaceFusionSteps::try_new(
+        space,
+        || rule.vacuum(),
+        |sector| Ok::<_, std::convert::Infallible>(rule.dual(sector)),
+        |front, last| Ok(rule.fusion_channels(front, last)),
+        |front, last, coupled| Ok(rule.nsymbol(front, last, coupled)),
+    );
+    let steps = match steps {
+        Ok(steps) => steps,
         Err(never) => match never {},
-    }
-    let mut grouped = rows.finish();
-    grouped.sort_by_key(|group| group.coupled);
-    grouped
+    };
+    let coupled = steps
+        .coupled()
+        .iter()
+        .copied()
+        .filter(|coupled| within.is_none_or(|within| within.binary_search(coupled).is_ok()))
+        .collect::<Vec<_>>();
+    steps.collect(&coupled)
 }
 
 /// Checked sibling of [`fusion_trees_by_coupled_for_space`] for external
@@ -159,15 +140,9 @@ where
 /// using only the fallible [`CheckedFusionAlgebra`] primitives, returning the
 /// exact [`FusionAlgebraError`] instead of relying on the infallible hot-path
 /// methods, which may panic or overflow on an unrepresentable sector produced
-/// by an external provider.
-///
-/// Why a sibling and not a shared enumeration core: the built-in lowered fast
-/// path decodes each sector to an associated type and the infallible path calls
-/// `fusion_channels`/`nsymbol` directly; threading either through a shared
-/// generic core would perturb their output ordering or dispatch. This walk is
-/// structurally identical to the infallible enumerator, so its keys and order
-/// match byte-for-byte on any provider whose checked methods agree with their
-/// infallible counterparts.
+/// by an external provider. Both run the one [`SpaceFusionSteps`] walk, so
+/// keys and order match byte-for-byte on any provider whose checked methods
+/// agree with their infallible counterparts.
 pub(crate) fn try_fusion_trees_by_coupled_for_space_checked<R>(
     rule: &R,
     space: &FusionProductSpace,
@@ -175,149 +150,222 @@ pub(crate) fn try_fusion_trees_by_coupled_for_space_checked<R>(
 where
     R: CheckedFusionAlgebra,
 {
-    let mut rows = CoupledTreeRows::default();
-    let mut uncoupled = Vec::with_capacity(space.len());
-    let mut is_dual = Vec::with_capacity(space.len());
-    space.try_visit_selected_leg_tuples(&mut |tuple| {
-        uncoupled.clear();
-        is_dual.clear();
-        for leg in tuple {
-            uncoupled.push(leg.sector());
-            is_dual.push(leg.is_dual());
-        }
-        let mut externals_row = None;
-        for coupled in try_reachable_coupled_sectors_checked(rule, &uncoupled)? {
-            let group = rows.group(coupled);
-            let first = rows.builder.len();
-            try_push_fusion_trees_for_coupled_checked(
-                rule,
-                &mut rows.builder,
-                &uncoupled,
-                &is_dual,
-                coupled,
-                &mut externals_row,
-            )?;
-            rows.assign(group, first);
-        }
-        Ok::<(), FusionAlgebraError>(())
-    })?;
-    let mut grouped = rows.finish();
-    grouped.sort_by_key(|group| group.coupled);
-    Ok(grouped)
+    let steps = SpaceFusionSteps::try_new(
+        space,
+        || rule.vacuum(),
+        |sector| rule.try_dual_sector(sector),
+        |front, last| rule.try_fusion_channels(front, last),
+        |front, last, coupled| rule.try_nsymbol(front, last, coupled),
+    )?;
+    Ok(steps.collect(steps.coupled()))
 }
 
-fn try_reachable_coupled_sectors_checked<R>(
-    rule: &R,
-    effective: &[SectorId],
-) -> Result<Vec<SectorId>, FusionAlgebraError>
-where
-    R: CheckedFusionAlgebra,
-{
-    let mut acc: Vec<SectorId> = match effective.first() {
-        None => vec![rule.vacuum()],
-        Some(&first) => vec![first],
-    };
-    for &last in effective.iter().skip(1) {
-        let mut next = Vec::new();
-        for &front in &acc {
-            next.extend(rule.try_fusion_channels(front, last)?);
-        }
-        next.sort_unstable();
-        next.dedup();
-        acc = next;
-    }
-    acc.sort_unstable();
-    acc.dedup();
-    Ok(acc)
-}
-
-fn try_push_fusion_trees_for_coupled_checked<R>(
-    rule: &R,
-    builder: &mut TreeArenaBuilder,
-    uncoupled: &[SectorId],
-    is_dual: &[bool],
+/// One fusion vertex of a product space: `front ⊗ last → coupled` with
+/// `labels` vertex labels, where `front` is a sector reachable by fusing the
+/// legs before `last`'s leg.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FusionStep {
     coupled: SectorId,
-    externals_row: &mut Option<usize>,
-) -> Result<(), FusionAlgebraError>
-where
-    R: CheckedFusionAlgebra,
-{
-    // `inner_rev` accumulates the inner lines outermost-first as the walk
-    // descends; the stored key wants innermost-first, so emit reverses it.
-    let mut inner_rev: Vec<SectorId> = Vec::new();
-    let vertices = uncoupled.len().saturating_sub(1);
-    try_visit_fusion_trees_checked(rule, uncoupled, coupled, &mut inner_rev, &mut |inner_rev| {
-        let inner = inner_rev.iter().rev().copied();
-        match *externals_row {
-            Some(row) => {
-                builder.push_lines_with_externals_of(row, coupled, inner);
-            }
-            None => {
-                *externals_row = Some(builder.push_parts(
-                    uncoupled.iter().copied(),
-                    coupled,
-                    is_dual.iter().copied(),
-                    inner,
-                    std::iter::repeat_n(MultiplicityIndex::ONE, vertices),
-                ));
-            }
-        }
-        Ok(())
-    })
+    last: SectorId,
+    front: SectorId,
+    labels: usize,
 }
 
-fn try_visit_fusion_trees_checked<R, F>(
-    rule: &R,
-    effective: &[SectorId],
-    coupled: SectorId,
-    inner_rev: &mut Vec<SectorId>,
-    emit: &mut F,
-) -> Result<(), FusionAlgebraError>
-where
-    R: CheckedFusionAlgebra,
-    F: FnMut(&[SectorId]) -> Result<(), FusionAlgebraError>,
-{
-    match effective.len() {
-        0 => {
-            if coupled == rule.vacuum() {
-                emit(inner_rev)?;
-            }
-        }
-        1 => {
-            if effective[0] == coupled {
-                emit(inner_rev)?;
-            }
-        }
-        2 => {
-            if rule.try_nsymbol(effective[0], effective[1], coupled)? != 0 {
-                emit(inner_rev)?;
-            }
-        }
-        _ => {
-            let last = effective[effective.len() - 1];
-            let front_effective = &effective[..effective.len() - 1];
-            let dual_last = rule.try_dual_sector(last)?;
-            // Inner line `a` ranges over `coupled ⊗ dual(last)`; `Nsymbol(a,
-            // last, coupled)` is the last vertex. Identical to the infallible
-            // `visit_fusion_trees` walk so the emitted key order matches.
-            for front_coupled in rule.try_fusion_channels(coupled, dual_last)? {
-                if rule.try_nsymbol(front_coupled, last, coupled)? == 0 {
-                    continue;
+/// The fusion trees of a product space for every coupled sector, stored as
+/// the vertices of each leg (TensorKit's `fusiontrees(P, c)` for every `c`).
+///
+/// Built by one forward fold over the legs' sector sets, like TensorKit's
+/// `blocksectors`; it records each live vertex instead of only the reached
+/// sectors. Every recorded `front` has at least one tree, so the walk visits
+/// no dead branch: O(trees · legs · log vertices) after the
+/// O(vertices · log vertices) build, independent of how many uncoupled tuples
+/// reach a coupled sector.
+struct SpaceFusionSteps<'a> {
+    space: &'a FusionProductSpace,
+    /// `levels[k - 1]`: the vertices fusing leg `k`, sorted by
+    /// `(coupled, last)`, then in walk order of `front`.
+    levels: Vec<Vec<FusionStep>>,
+    /// Coupled sectors with at least one tree, ascending.
+    coupled: Vec<SectorId>,
+}
+
+impl<'a> SpaceFusionSteps<'a> {
+    fn try_new<E>(
+        space: &'a FusionProductSpace,
+        vacuum: impl FnOnce() -> SectorId,
+        mut dual: impl FnMut(SectorId) -> Result<SectorId, E>,
+        mut channels: impl FnMut(SectorId, SectorId) -> Result<SectorVec, E>,
+        mut nsymbol: impl FnMut(SectorId, SectorId, SectorId) -> Result<usize, E>,
+    ) -> Result<Self, E> {
+        let legs = space.legs();
+        let mut reached = match legs.first() {
+            None => vec![vacuum()],
+            Some(leg) => leg.sectors().to_vec(),
+        };
+        let mut levels = Vec::with_capacity(legs.len().saturating_sub(1));
+        for (index, leg) in legs.iter().enumerate().skip(1) {
+            let mut forward = Vec::new();
+            for &front in &reached {
+                for &last in leg.sectors() {
+                    for coupled in channels(front, last)? {
+                        let labels = nsymbol(front, last, coupled)?;
+                        if labels > 0 {
+                            forward.push(FusionStep {
+                                coupled,
+                                last,
+                                front,
+                                labels,
+                            });
+                        }
+                    }
                 }
-                inner_rev.push(front_coupled);
-                let result = try_visit_fusion_trees_checked(
-                    rule,
-                    front_effective,
-                    front_coupled,
-                    inner_rev,
-                    emit,
-                );
-                inner_rev.pop();
-                result?;
+            }
+            forward.sort_unstable_by_key(|step| (step.coupled, step.last, step.front));
+            forward.dedup();
+            reached = forward.iter().map(|step| step.coupled).collect();
+            reached.dedup();
+            let level = if index == 1 {
+                // The front is the first uncoupled sector, which iterates in
+                // leg order (TensorKit's two-leg `_fusiontree_iterate`).
+                forward
+            } else {
+                // The front is an inner line, which iterates as
+                // `coupled ⊗ dual(last)` (TensorKit's `vertexiterN`), possibly
+                // not in id order; that list also decides which fronts
+                // (and how many times) the backward walk visits.
+                let mut level = Vec::with_capacity(forward.len());
+                for run in forward.chunk_by(|a, b| (a.coupled, a.last) == (b.coupled, b.last)) {
+                    let (coupled, last) = (run[0].coupled, run[0].last);
+                    for front in channels(coupled, dual(last)?)? {
+                        if let Ok(at) = run.binary_search_by_key(&front, |step| step.front) {
+                            level.push(run[at]);
+                        }
+                    }
+                }
+                level
+            };
+            levels.push(level);
+        }
+        Ok(Self {
+            space,
+            levels,
+            coupled: reached,
+        })
+    }
+
+    fn coupled(&self) -> &[SectorId] {
+        &self.coupled
+    }
+
+    /// The trees of each of `coupled`, one group per sector in ascending
+    /// order, in one shared arena.
+    fn collect(&self, coupled: &[SectorId]) -> Vec<CoupledFusionTrees> {
+        let mut coupled = coupled.to_vec();
+        coupled.sort_unstable();
+        coupled.dedup();
+        // Trees of one tuple are not adjacent in this order, so equal
+        // external runs are shared by content.
+        let mut builder = TreeArenaBuilder::sharing();
+        let mut walk = TreeWalk::new(self.space);
+        let mut ranges = Vec::with_capacity(coupled.len());
+        for &sector in &coupled {
+            let first = builder.len();
+            self.push_trees(sector, &mut walk, &mut builder);
+            ranges.push((sector, first..builder.len()));
+        }
+        let arena = builder.freeze();
+        ranges
+            .into_iter()
+            .map(|(coupled, rows)| CoupledFusionTrees {
+                coupled,
+                trees: rows.map(|row| arena.key(row)).collect(),
+            })
+            .collect()
+    }
+
+    fn push_trees(&self, coupled: SectorId, walk: &mut TreeWalk, builder: &mut TreeArenaBuilder) {
+        match self.space.len() {
+            0 => {
+                if self.coupled.contains(&coupled) {
+                    walk.push(coupled, builder);
+                }
+            }
+            legs => self.visit(legs - 1, coupled, coupled, walk, builder),
+        }
+    }
+
+    /// TensorKit's `_fusiontree_iterate` (fusiontrees/iterator.jl): at leg
+    /// `level`, the uncoupled sector varies slowest, then the inner line
+    /// feeding its vertex, then the vertex label, then the front of the tree
+    /// recursively. Uncoupled sectors ascend by `SectorId`; inner lines
+    /// keep `coupled ⊗ dual(last)` channel order.
+    fn visit(
+        &self,
+        level: usize,
+        sector: SectorId,
+        coupled: SectorId,
+        walk: &mut TreeWalk,
+        builder: &mut TreeArenaBuilder,
+    ) {
+        if level == 0 {
+            if self.space.legs()[0]
+                .sectors()
+                .binary_search(&sector)
+                .is_ok()
+            {
+                walk.uncoupled[0] = sector;
+                walk.push(coupled, builder);
+            }
+            return;
+        }
+        let steps = &self.levels[level - 1];
+        let start = steps.partition_point(|step| step.coupled < sector);
+        for step in steps[start..]
+            .iter()
+            .take_while(|step| step.coupled == sector)
+        {
+            walk.uncoupled[level] = step.last;
+            if level >= 2 {
+                walk.lines[level - 2] = step.front;
+            }
+            for label in 1..=step.labels {
+                walk.vertices[level - 1] =
+                    MultiplicityIndex::new(label).expect("vertex labels start at one");
+                self.visit(level - 1, step.front, coupled, walk, builder);
             }
         }
     }
-    Ok(())
+}
+
+/// The tree under construction during a [`SpaceFusionSteps`] walk.
+struct TreeWalk {
+    uncoupled: Vec<SectorId>,
+    is_dual: Vec<bool>,
+    /// Inner lines, innermost first: `lines[j]` fuses legs `0..=j + 1`.
+    lines: Vec<SectorId>,
+    vertices: Vec<MultiplicityIndex>,
+}
+
+impl TreeWalk {
+    fn new(space: &FusionProductSpace) -> Self {
+        let legs = space.len();
+        Self {
+            uncoupled: vec![SectorId::new(0); legs],
+            is_dual: space.legs().iter().map(SectorLeg::is_dual).collect(),
+            lines: vec![SectorId::new(0); legs.saturating_sub(2)],
+            vertices: vec![MultiplicityIndex::ONE; legs.saturating_sub(1)],
+        }
+    }
+
+    fn push(&self, coupled: SectorId, builder: &mut TreeArenaBuilder) {
+        builder.push_parts(
+            self.uncoupled.iter().copied(),
+            coupled,
+            self.is_dual.iter().copied(),
+            self.lines.iter().copied(),
+            self.vertices.iter().copied(),
+        );
+    }
 }
 
 pub(crate) fn fusion_trees_by_coupled_for_selected_space<R>(
@@ -414,49 +462,43 @@ pub(crate) fn fusion_trees_by_coupled_for_space_generic_checked<R>(
 where
     R: CheckedGenericFusion,
 {
-    // Vertex labels vary within a tuple, so runs are shared by content.
-    let mut rows = CoupledTreeRows {
-        builder: TreeArenaBuilder::sharing(),
-        ..CoupledTreeRows::default()
-    };
+    // The clean classification is per tuple (a sector clean in one tuple but
+    // tainted in another is tainted overall), so it still folds every tuple;
+    // the trees of the clean sectors then come from the one space walk.
     let mut aggregate = CoupledSectorFoldBuilder::default();
     let mut uncoupled = Vec::with_capacity(space.len());
-    let mut is_dual = Vec::with_capacity(space.len());
     space.try_visit_selected_leg_tuples(&mut |tuple| {
-        // `effective_sectors` is the uncoupled sectors verbatim (it ignores the
-        // rule); inlined here to avoid its mult-free bound.
         uncoupled.clear();
-        is_dual.clear();
-        for leg in tuple {
-            uncoupled.push(leg.sector());
-            is_dual.push(leg.is_dual());
-        }
+        uncoupled.extend(tuple.iter().map(|leg| leg.sector()));
         let fold = rule
             .try_coupled_sector_fold(&uncoupled)
             .map_err(CheckedGenericStructureError::Provider)?;
-        for &coupled in fold.clean() {
-            let group = rows.group(coupled);
-            let first = rows.builder.len();
-            push_generic_fusion_trees_for_coupled_checked(
-                rule,
-                &mut rows.builder,
-                &uncoupled,
-                &is_dual,
-                &uncoupled,
-                coupled,
-            )?;
-            rows.assign(group, first);
-        }
         aggregate.absorb(fold);
         Ok::<(), CheckedGenericStructureError<R::Error>>(())
     })?;
     // Tainted-anywhere beats clean-somewhere, and an unknown split anywhere
     // demotes every candidate; both live in the builder's seal.
     let aggregate = aggregate.seal();
-    let mut grouped = rows.finish();
-    // Drop tree groups of sectors that lost their clean status across tuples.
-    grouped.retain(|group| aggregate.clean().contains(&group.coupled));
-    grouped.sort_by_key(|group| group.coupled);
+    // `fusion_channels_in_table`: a clean sector has no tree through a
+    // frontier inner line, so skipping frontier channels drops only branches
+    // that never reach a walked sector.
+    let steps = SpaceFusionSteps::try_new(
+        space,
+        || rule.vacuum(),
+        |sector| {
+            rule.try_dual(sector)
+                .map_err(CheckedGenericStructureError::Provider)
+        },
+        |front, last| {
+            rule.try_fusion_channels_in_table(front, last)
+                .map_err(CheckedGenericStructureError::Provider)
+        },
+        |front, last, coupled| {
+            rule.try_nsymbol(front, last, coupled)
+                .map_err(CheckedGenericStructureError::Provider)
+        },
+    )?;
+    let grouped = steps.collect(aggregate.clean());
     Ok((grouped, aggregate))
 }
 

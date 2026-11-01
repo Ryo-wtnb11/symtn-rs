@@ -232,3 +232,171 @@ fn checked_generic_external_axis_leg_keeps_provider_boundary() {
     assert_eq!(dual.sectors(), &[a]);
     assert!(dual.is_dual());
 }
+
+/// `(uncoupled, inner lines, vertices)` ids of each tree of `coupled`.
+fn tree_rows(groups: &[CoupledFusionTrees], coupled: usize) -> Vec<TreeRow> {
+    let ids = |sectors: &[SectorId]| sectors.iter().map(|s| s.id()).collect::<Vec<_>>();
+    groups
+        .iter()
+        .find(|group| group.coupled == SectorId::new(coupled))
+        .expect("coupled sector present")
+        .trees
+        .iter()
+        .map(|tree| {
+            (
+                ids(tree.uncoupled()),
+                ids(tree.innerlines()),
+                tree.vertices().iter().map(|v| v.get()).collect(),
+            )
+        })
+        .collect()
+}
+
+type TreeRow = (Vec<usize>, Vec<usize>, Vec<usize>);
+
+fn product_space(sectors: &[usize], is_dual: &[bool]) -> FusionProductSpace {
+    FusionProductSpace::new(
+        is_dual
+            .iter()
+            .map(|&dual| SectorLeg::new(sectors.iter().map(|&s| (SectorId::new(s), 1)), dual)),
+    )
+}
+
+/// Every producer of a space's trees: infallible, checked and Generic.
+fn all_producer_rows<R>(rule: &R, space: &FusionProductSpace, coupled: usize) -> Vec<TreeRow>
+where
+    R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
+{
+    let infallible = tree_rows(&fusion_trees_by_coupled_for_space(rule, space), coupled);
+    let checked = tree_rows(
+        &try_fusion_trees_by_coupled_for_space_checked(rule, space).unwrap(),
+        coupled,
+    );
+    let (generic, _) = fusion_trees_by_coupled_for_space_generic(rule, space);
+    assert_eq!(checked, infallible);
+    assert_eq!(tree_rows(&generic, coupled), infallible);
+    infallible
+}
+
+#[test]
+fn fibonacci_three_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // What: within a coupled sector, trees of different uncoupled tuples
+    // interleave by TensorKit's nesting (last leg, then the inner line, then
+    // the front), not grouped by tuple. TensorKit 0.17.1:
+    // V = Vect[FibonacciAnyon](:I=>1, :τ=>1); fusiontrees(V ⊗ V ⊗ V', c),
+    // with ids I = 0, τ = 1 (both orders list I first).
+    let rule = TableRule::fibonacci();
+    let space = product_space(&[0, 1], &[false, false, true]);
+    let expected_vacuum: Vec<TreeRow> = vec![
+        ([0, 0, 0], [0], [1, 1]),
+        ([1, 1, 0], [0], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([1, 1, 1], [1], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    let expected_tau: Vec<TreeRow> = vec![
+        ([1, 0, 0], [1], [1, 1]),
+        ([0, 1, 0], [1], [1, 1]),
+        ([1, 1, 0], [1], [1, 1]),
+        ([0, 0, 1], [0], [1, 1]),
+        ([1, 1, 1], [0], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([1, 1, 1], [1], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 0), expected_vacuum);
+    assert_eq!(all_producer_rows(&rule, &space, 1), expected_tau);
+}
+
+#[test]
+fn su2_three_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // TensorKit 0.17.1, ids = twice spin (both orders ascend in spin):
+    // V = Vect[SU2Irrep](0=>1, 1//2=>1, 1=>1); fusiontrees(V ⊗ V' ⊗ V, c).
+    let rule = SU2FusionRule;
+    let space = product_space(&[0, 1, 2], &[false, true, false]);
+    let expected_half: Vec<TreeRow> = vec![
+        ([1, 0, 0], [1], [1, 1]),
+        ([0, 1, 0], [1], [1, 1]),
+        ([2, 1, 0], [1], [1, 1]),
+        ([1, 2, 0], [1], [1, 1]),
+        ([0, 0, 1], [0], [1, 1]),
+        ([1, 1, 1], [0], [1, 1]),
+        ([2, 2, 1], [0], [1, 1]),
+        ([2, 0, 1], [2], [1, 1]),
+        ([1, 1, 1], [2], [1, 1]),
+        ([0, 2, 1], [2], [1, 1]),
+        ([2, 2, 1], [2], [1, 1]),
+        ([1, 0, 2], [1], [1, 1]),
+        ([0, 1, 2], [1], [1, 1]),
+        ([2, 1, 2], [1], [1, 1]),
+        ([1, 2, 2], [1], [1, 1]),
+        ([2, 1, 2], [3], [1, 1]),
+        ([1, 2, 2], [3], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    let expected_one: Vec<TreeRow> = vec![
+        ([2, 0, 0], [2], [1, 1]),
+        ([1, 1, 0], [2], [1, 1]),
+        ([0, 2, 0], [2], [1, 1]),
+        ([2, 2, 0], [2], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([2, 1, 1], [1], [1, 1]),
+        ([1, 2, 1], [1], [1, 1]),
+        ([2, 1, 1], [3], [1, 1]),
+        ([1, 2, 1], [3], [1, 1]),
+        ([0, 0, 2], [0], [1, 1]),
+        ([1, 1, 2], [0], [1, 1]),
+        ([2, 2, 2], [0], [1, 1]),
+        ([2, 0, 2], [2], [1, 1]),
+        ([1, 1, 2], [2], [1, 1]),
+        ([0, 2, 2], [2], [1, 1]),
+        ([2, 2, 2], [2], [1, 1]),
+        ([2, 2, 2], [4], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 1), expected_half);
+    assert_eq!(all_producer_rows(&rule, &space, 2), expected_one);
+}
+
+#[test]
+fn su2_four_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // What: two inner lines, each slower than the legs in front of it.
+    // TensorKit 0.17.1, ids = twice spin:
+    // W = Vect[SU2Irrep](1//2=>1, 1=>1); fusiontrees(W ⊗ W ⊗ W' ⊗ W, SU2Irrep(0)).
+    let rule = SU2FusionRule;
+    let space = product_space(&[1, 2], &[false, false, true, false]);
+    let expected: Vec<TreeRow> = vec![
+        ([1, 1, 1, 1], [0, 1], [1, 1, 1]),
+        ([2, 2, 1, 1], [0, 1], [1, 1, 1]),
+        ([1, 1, 1, 1], [2, 1], [1, 1, 1]),
+        ([2, 2, 1, 1], [2, 1], [1, 1, 1]),
+        ([2, 1, 2, 1], [1, 1], [1, 1, 1]),
+        ([1, 2, 2, 1], [1, 1], [1, 1, 1]),
+        ([2, 1, 2, 1], [3, 1], [1, 1, 1]),
+        ([1, 2, 2, 1], [3, 1], [1, 1, 1]),
+        ([2, 1, 1, 2], [1, 2], [1, 1, 1]),
+        ([1, 2, 1, 2], [1, 2], [1, 1, 1]),
+        ([2, 1, 1, 2], [3, 2], [1, 1, 1]),
+        ([1, 2, 1, 2], [3, 2], [1, 1, 1]),
+        ([1, 1, 2, 2], [0, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [0, 2], [1, 1, 1]),
+        ([1, 1, 2, 2], [2, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [2, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [4, 2], [1, 1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 0), expected);
+}

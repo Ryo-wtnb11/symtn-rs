@@ -530,9 +530,9 @@ fn checked_one_sided_enumerates_the_output_layout_once() {
             .unwrap();
             let once = recorder.log();
             // Vertex fixture: the one-leg bond side folds once, the
-            // two-leg side queries channels and the multiplicity of its
-            // single vertex.
-            assert_eq!(once.len(), 3, "{once:?}");
+            // two-leg side queries channels for its fold, in-table channels
+            // for its tree walk and the multiplicity of each channel.
+            assert_eq!(once.len(), 4, "{once:?}");
 
             let former = Arc::new(RecordingGeneric::new());
             let output_hom = one_sided_output_hom(&homspace, &dimensions, side);
@@ -600,7 +600,7 @@ fn checked_one_sided_placement_error_precedes_bound_space() {
                 OperationError::SpaceMismatch { message }
             ) if message == expected_message
         ));
-        assert_eq!(recorder.log().len(), 3);
+        assert_eq!(recorder.log().len(), 4);
         let probe = one_sided_rec.one_sided_publication();
         assert_eq!(
             (probe.canonical_publications, probe.fallback_publications),

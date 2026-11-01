@@ -83,8 +83,9 @@ impl<S> BlockFusionTrees<S> {
 /// trees. Each tree owns a contiguous range of rows (columns) whose length is
 /// the product of its legs' degeneracies, indexed column-major in those legs.
 /// The trees and their ranges, in matrix order, are [`Self::row_trees`] and
-/// [`Self::col_trees`]. That order is symtn's storage order, which is in
-/// general a permutation of TensorKit's `fusiontrees` order (see
+/// [`Self::col_trees`]. That order is TensorKit's `fusiontrees` nesting
+/// with sectors compared by `SectorId`, so it differs from TensorKit only
+/// where the provider's ids do not ascend in TensorKit's sector order (see
 /// `docs/sector_id_compatibility.md`); presenting TensorKit's order would copy.
 #[derive(Debug)]
 pub struct CoupledBlock<'a, R, D, S = Vec<D>> {
