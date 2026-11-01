@@ -390,15 +390,14 @@ pub use block_layout::{Direction, Duality, Side};
 mod cuda_factor;
 #[cfg(feature = "cuda")]
 pub(crate) use cuda_factor::{
-    assemble_aligned_left_factor, assemble_left_factor, assemble_right_factor,
-    copy_left_factor_treewise, copy_whole_factor, cuda_download_spectra, cuda_hermitian_regions,
+    assemble_aligned_left_factor, copy_whole_factor, cuda_download_spectra, cuda_hermitian_regions,
     cuda_qr_region, cuda_svd_region, dense_err, ensure_cuda_owns, fill_diagonal_values,
     require_finite_cuda_input, typed_cuda_eigh_region, upload_selector,
 };
 #[cfg(feature = "cuda")]
 use cuda_factor::{
-    download_cuda_reduction_partials, executed_routes, validate_cuda_svd_middle_regions,
-    TypedCudaQrScratch, TypedCudaSvdScratch,
+    download_cuda_reduction_partials, executed_routes, require_aligned_route,
+    validate_cuda_svd_middle_regions, TypedCudaQrScratch, TypedCudaSvdScratch,
 };
 #[cfg(feature = "cuda")]
 use symtn_matrixalgebra::seam::{compact_factor_routes, CompactFactorPlan, CompactFactorRoute};

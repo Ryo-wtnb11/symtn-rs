@@ -1,48 +1,6 @@
 //! Test probes of the facade (#2221): one thread-local ledger of [`Event`]
-//! counts and [`Gauge`] peaks, read through [`record`], plus the
-//! [`RoutePolicy`] that forces the branches no public geometry reaches and
-//! the armed [`Fault`].
-//!
-//! Only [`RoutePolicy`] exists outside tests: there it is the constant
-//! production policy, so a forced branch folds away and a release build
-//! carries no probe state.
-
-/// Test-only overrides of an execution route. Production code reads
-/// [`RoutePolicy::current`] once per operation and never branches on
-/// `cfg(test)`; outside tests every field is `false`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct RoutePolicy {
-    /// Every eigh route (eager CUDA and the batched Host plan) takes the
-    /// per-tree assembly, so the branch aligned fixtures never take runs.
-    pub(crate) eigh_treewise: bool,
-    /// Every compact-SVD device route is treated as non-aligned.
-    pub(crate) svd_treewise: bool,
-    /// Device `eigh_full` assembles through the selector GEMM even when every
-    /// order is the identity.
-    pub(crate) eigh_force_selector: bool,
-    /// Device `eigh_full` reverses every odd-indexed sector's order, so the
-    /// selector assembly runs a non-identity permutation.
-    pub(crate) eigh_reverse_odd_sectors: bool,
-}
-
-impl RoutePolicy {
-    /// The production policy: no override.
-    pub(crate) const DEFAULT: Self = Self {
-        eigh_treewise: false,
-        svd_treewise: false,
-        eigh_force_selector: false,
-        eigh_reverse_odd_sectors: false,
-    };
-
-    /// The policy of the calling thread: the test's, or the production one.
-    #[inline(always)]
-    pub(crate) fn current() -> Self {
-        #[cfg(test)]
-        return ledger::PROBE.with(|probe| probe.borrow().routes);
-        #[cfg(not(test))]
-        Self::DEFAULT
-    }
-}
+//! counts and [`Gauge`] peaks, read through [`record`], plus the armed
+//! [`Fault`]. Nothing here exists outside tests.
 
 #[cfg(test)]
 pub(crate) use ledger::*;
@@ -50,8 +8,6 @@ pub(crate) use ledger::*;
 #[cfg(test)]
 mod ledger {
     use std::cell::RefCell;
-
-    use super::RoutePolicy;
 
     /// One observed occurrence in facade execution. Each fact has one event.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,7 +45,7 @@ mod ledger {
         /// A device QR decomposition ran on one region.
         #[cfg(feature = "cuda")]
         CudaQrDecomposition,
-        /// A whole or per-tree factor copy on a device assembly route.
+        /// A whole-factor copy on a device assembly route.
         #[cfg(feature = "cuda")]
         CudaFactorCopy,
         /// A host-built assembly selector was uploaded.
@@ -147,7 +103,6 @@ mod ledger {
         counts: [usize; EVENTS],
         live: [usize; GAUGES],
         peak: [usize; GAUGES],
-        pub(super) routes: RoutePolicy,
         fault: Option<(Fault, usize)>,
         dense: Option<Box<dyn symtn_dense::DenseExecutor + Send>>,
     }
@@ -158,7 +113,6 @@ mod ledger {
                 counts: [0; EVENTS],
                 live: [0; GAUGES],
                 peak: [0; GAUGES],
-                routes: RoutePolicy::DEFAULT,
                 fault: None,
                 dense: None,
             })
@@ -233,15 +187,6 @@ mod ledger {
         }
     }
 
-    /// Runs `f` under `routes`, restoring the previous policy afterwards.
-    pub(crate) fn with_routes<T>(routes: RoutePolicy, f: impl FnOnce() -> T) -> T {
-        let previous =
-            PROBE.with(|probe| std::mem::replace(&mut probe.borrow_mut().routes, routes));
-        let value = f();
-        PROBE.with(|probe| probe.borrow_mut().routes = previous);
-        value
-    }
-
     /// Arms `fault` to fire at its `ordinal`-th (one-based) [`fires`] check.
     pub(crate) fn arm(fault: Fault, ordinal: usize) {
         PROBE.with(|probe| probe.borrow_mut().fault = Some((fault, ordinal)));
@@ -271,7 +216,6 @@ mod ledger {
         })
     }
 
-    /// Replaces the rhs structure the checked tensor product validates.
     /// While the returned guard lives, every factorization on this thread
     /// runs on `executor` instead of a fresh default one (the facade's only
     /// dense-executor seam is this test hook); dropping the guard restores

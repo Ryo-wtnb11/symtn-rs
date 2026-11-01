@@ -14,8 +14,9 @@ use symtn_dense::{
 };
 
 /// The phases `cuda_svd_gauge_phases` computes for the column-major
-/// `rows x k` matrix `u`, read off the diagonal of `right_selector`
-/// (`diag(phase)`), and the `gauge_ops` the phases alone cost.
+/// `rows x k` matrix `u`, read off the diagonal of `scale_right` applied
+/// to the `k x k` identity (`diag(phase)`), and the `gauge_ops` the phases
+/// alone cost.
 fn device_phases<D: CudaScalar + Copy>(u: Vec<D>, rows: usize, k: usize) -> (Vec<D>, u64) {
     let mut engine =
         symtn_dense::CudaEngine::open(symtn_dense::CudaDeviceId::from_ordinal(0)).unwrap();
@@ -26,8 +27,18 @@ fn device_phases<D: CudaScalar + Copy>(u: Vec<D>, rows: usize, k: usize) -> (Vec
     let before = cuda_transfer_stats().gauge_ops;
     let phases = cuda_svd_gauge_phases::<D>(&mut ctx, &storage, rows, k, &weights).unwrap();
     let ops = cuda_transfer_stats().gauge_ops - before;
+    let identity = (0..k * k)
+        .map(|index| {
+            if index % (k + 1) == 0 {
+                D::ONE
+            } else {
+                D::ZERO
+            }
+        })
+        .collect();
+    let identity = CudaDenseStorage::upload_members(&ctx, identity, k, k).unwrap();
     let diagonal = phases
-        .right_selector::<D>(&mut ctx)
+        .scale_right::<D>(&mut ctx, &identity, k)
         .unwrap()
         .download::<D>(&ctx)
         .unwrap();

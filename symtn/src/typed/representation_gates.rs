@@ -11,6 +11,7 @@ mod compact_transforms;
 mod contract;
 #[cfg(feature = "cuda")]
 mod cuda;
+#[cfg(feature = "cuda")]
 mod cuda_factorize;
 mod dense_faults;
 mod dense_lease;

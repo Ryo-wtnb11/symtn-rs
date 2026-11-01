@@ -430,30 +430,6 @@ impl CudaSvdPhases {
         ))?;
         CudaDenseStorage::from_tensor::<D>(SVD_GAUGE_OP, scaled, ctx.device)
     }
-
-    /// `diag(conj(phase))` as a `k x k` right operand for an assembly GEMM
-    /// that already multiplies by a selector: `embed_diagonal`, plus `conj`
-    /// for a complex payload.
-    pub fn left_selector<D: CudaScalar>(
-        &self,
-        ctx: &mut CudaDenseContext,
-    ) -> Result<CudaDenseStorage, DenseError> {
-        self.with_left_phase::<D, _>(ctx, |ctx, phase| {
-            let selector = gauge_op(ctx.backend.embed_diagonal(phase, 0, 1))?;
-            CudaDenseStorage::from_tensor::<D>(SVD_GAUGE_OP, selector, ctx.device)
-        })
-    }
-
-    /// `diag(phase)` as a `k x k` left operand for an assembly GEMM:
-    /// one `embed_diagonal`.
-    pub fn right_selector<D: CudaScalar>(
-        &self,
-        ctx: &mut CudaDenseContext,
-    ) -> Result<CudaDenseStorage, DenseError> {
-        ensure_cuda_device(ctx.device, SVD_GAUGE_OP, &[("phases", self.device)])?;
-        let selector = gauge_op(ctx.backend.embed_diagonal(&self.phase, 0, 1))?;
-        CudaDenseStorage::from_tensor::<D>(SVD_GAUGE_OP, selector, ctx.device)
-    }
 }
 pub(super) fn validate_svd_factor_shapes(
     u_shape: &[usize],

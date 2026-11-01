@@ -140,8 +140,7 @@ pub(super) struct EighRoutePlan<R> {
     /// Each route's diagonal in `d`: `(offset, step)` within a member.
     diagonals: Vec<(usize, usize)>,
     /// Each route's `(source row, target row, rows)` copies within its
-    /// target region: one for a layout-aligned route, one per codomain tree
-    /// otherwise.
+    /// target region: one whole-region copy (see `route_copies`).
     pub(super) copies: Vec<Vec<(usize, usize, usize)>>,
     d_len: usize,
     v_len: usize,
@@ -585,8 +584,6 @@ where
                             }
                             Err(other) => return Err(other),
                         };
-                        // One contiguous copy for an aligned route, one row slice
-                        // per column and codomain tree otherwise.
                         let (ref range, target_rows) = targets[index];
                         let target = &mut v_member[range.clone()];
                         for &(source_row, target_row, rows) in &copies[index] {
@@ -741,11 +738,10 @@ where
         let mut spectrum_offsets = Vec::with_capacity(routes.len());
         let mut copies = Vec::with_capacity(routes.len());
         let mut spectrum_len = 0usize;
-        let policy = crate::typed::probe::RoutePolicy::current();
         for route in &routes {
             spectrum_offsets.push(spectrum_len);
             spectrum_len += route.rank();
-            copies.push(route_copies(&plan, route, policy)?);
+            copies.push(route_copies(&plan, route)?);
         }
         let diagonals = route_diagonals(&routes, &middle_space)?;
         let placement = source.signature.placement;
@@ -775,35 +771,23 @@ where
     }
 }
 
-/// A route's `(source row, target row, rows)` copies within its target region,
-/// exactly the placements of eager's assembly: the whole region when the
-/// plan proved it layout-aligned, else one row slice per codomain tree,
-/// matched by tree identity.
+/// A route's `(source row, target row, rows)` copies within its target region:
+/// owned facade storage is canonical, so the plan proves every eigenvector
+/// region layout-aligned and it is one whole-region copy, as in eager.
 fn route_copies(
     plan: &symtn_matrixalgebra::seam::CompactFactorPlan,
     route: &symtn_matrixalgebra::seam::CompactFactorRoute,
-    policy: crate::typed::probe::RoutePolicy,
 ) -> Result<Vec<(usize, usize, usize)>, Error> {
-    let target = &plan.left_regions()[left_region(route)?];
-    if plan.left_preserves_trees(route) && !policy.eigh_treewise {
-        return Ok(vec![(0, 0, target.rows())]);
+    if !plan.left_preserves_trees(route) {
+        return Err(internal_layout_error(
+            "an EIGH eigenvector region does not reproduce its source tree layout",
+        ));
     }
-    let source = &plan.source_regions()[route.source_region()];
-    let mut copies = Vec::with_capacity(target.row_trees().len());
-    for target_tree in target.row_trees() {
-        let rows = target_tree.extent()?;
-        if rows == 0 {
-            continue;
-        }
-        let src_row = source
-            .row_trees()
-            .iter()
-            .find(|tree| tree.tree() == target_tree.tree())
-            .map(|tree| tree.offset())
-            .ok_or_else(|| internal_layout_error("codomain tree missing in the source sector"))?;
-        copies.push((src_row, target_tree.offset(), rows));
-    }
-    Ok(copies)
+    Ok(vec![(
+        0,
+        0,
+        plan.left_regions()[left_region(route)?].rows(),
+    )])
 }
 
 /// An executed route's eigenvector region.
