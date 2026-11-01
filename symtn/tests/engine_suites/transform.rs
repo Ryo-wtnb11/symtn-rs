@@ -174,3 +174,201 @@ on_each_engine! {
         );
     }
 }
+
+fn u1_rank_four(
+    engine: &mut dyn Engine,
+    runtime: &Runtime,
+) -> TensorMap<symtn::sector::U1FusionRule, f64> {
+    let u1 = u1_leg_2_1_2();
+    TensorMap::from_subblock_fn(engine, runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap()
+}
+
+/// The spaces and fusion-tree identities of every block, in block order.
+fn identity<R, D>(tensor: &TensorMap<R, D>) -> impl PartialEq + std::fmt::Debug
+where
+    R: symtn::sector::TypedSectorAdmission<
+            Sector = <R as symtn::sector::SectorCodec>::Sector,
+            Error = symtn::typed::FusionAlgebraError,
+            Mode = symtn::sector::MultiplicityFreeAdmissionMode,
+        > + symtn::sector::MultiplicityFreeRigidSymbols<Scalar = f64>
+        + symtn::sector::CheckedFusionAlgebra
+        + symtn::sector::SectorCodec,
+    D: symtn::typed::TensorScalar,
+    <R as symtn::sector::SectorCodec>::Sector: std::fmt::Debug,
+{
+    (
+        tensor
+            .codomain()
+            .iter()
+            .chain(tensor.domain().iter())
+            .map(|leg| (leg.is_dual(), leg.degeneracies().to_vec()))
+            .collect::<Vec<_>>(),
+        (0..tensor.subblock_count())
+            .map(|index| tensor.subblock_fusion_trees(index).unwrap())
+            .collect::<Vec<_>>(),
+    )
+}
+
+on_each_engine! {
+    /// permute composition, braid inverse, bosonic braid == permute and the
+    /// transpose involution, each evaluated entirely on the engine.
+    fn transform_laws_hold<B>() {
+        let device = &mut B::engine();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let host = u1_rank_four(engine, &runtime);
+        let source = B::upload(device, &host);
+        macro_rules! values {
+            ($moved:expr) => {{
+                let moved = $moved;
+                B::download(device, &moved).dense_data().unwrap().to_vec()
+            }};
+        }
+        let close = |what: &str, got: &[f64], want: &[f64]| numerics::assert_slices_close(what, got, want, TERMS);
+
+        let first = [2usize, 0, 3, 1];
+        let second = [1usize, 0, 3, 2];
+        let stepwise = values!(source
+            .permute(device, &first[..2], &first[2..])
+            .unwrap()
+            .permute(device, &second[..2], &second[2..])
+            .unwrap());
+        let composed: Vec<usize> = second.iter().map(|&axis| first[axis]).collect();
+        let direct = values!(source.permute(device, &composed[..2], &composed[2..]).unwrap());
+        close("permute composition", &stepwise, &direct);
+        assert_ne!(direct, host.dense_data().unwrap(), "the composition must move the payload");
+
+        // braid o braid^-1 == id, with the levels carried along the strands.
+        let axes = [2usize, 0, 3, 1];
+        let levels = [4usize, 1, 3, 2];
+        let braided = source.braid(device, &axes[..2], &axes[2..], &levels).unwrap();
+        let mut inverse = [0usize; 4];
+        for (index, &axis) in axes.iter().enumerate() {
+            inverse[axis] = index;
+        }
+        let carried: Vec<usize> = axes.iter().map(|&axis| levels[axis]).collect();
+        close(
+            "braid inverse round trip",
+            &values!(braided.braid(device, &inverse[..2], &inverse[2..], &carried).unwrap()),
+            host.dense_data().unwrap(),
+        );
+
+        // A bosonic braid is the permute for any levels.
+        let permuted = values!(source.permute(device, &axes[..2], &axes[2..]).unwrap());
+        close("bosonic braid == permute", &values!(braided), &permuted);
+
+        // Transpose is a bitwise involution that restores spaces and trees.
+        let once = source.transpose(device, &[3, 2], &[1, 0]).unwrap();
+        let twice = once.transpose(device, &[3, 2], &[1, 0]).unwrap();
+        let twice = B::download(device, &twice);
+        assert_eq!(twice.dense_data().unwrap(), host.dense_data().unwrap());
+        assert_eq!(identity(&twice), identity(&host));
+    }
+}
+
+on_each_engine! {
+    /// Every repartition of a rank-four tensor round-trips bitwise back to
+    /// the original split; a bend of an SU(2) tensor carries a scalar that is
+    /// neither 1 nor -1, so its payload is not a reordering of the source.
+    fn repartition_reaches_every_split_and_round_trips<B>() {
+        let device = &mut B::engine();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let host = u1_rank_four(engine, &runtime);
+        let source = B::upload(device, &host);
+        for num_codomain in 0..=4 {
+            let moved = source.repartition(device, num_codomain).unwrap();
+            let back = moved.repartition(device, 2).unwrap();
+            let back = B::download(device, &back);
+            assert_eq!(back.dense_data().unwrap(), host.dense_data().unwrap(), "split {num_codomain}");
+            assert_eq!(identity(&back), identity(&host), "split {num_codomain}");
+        }
+
+        let su2 = su2_leg_2_2_1();
+        let su2_host: TensorMap<_, f64> =
+            TensorMap::from_subblock_fn(engine, &runtime, [&su2, &su2], [&su2, &su2], real_fill)
+                .unwrap();
+        let su2_source = B::upload(device, &su2_host);
+        for num_codomain in [0usize, 1, 3, 4] {
+            let moved = su2_source.repartition(device, num_codomain).unwrap();
+            let moved = B::download(device, &moved);
+            assert_ne!(
+                sorted_parts(su2_host.dense_data().unwrap()),
+                sorted_parts(moved.dense_data().unwrap()),
+                "SU(2) repartition to {num_codomain} is a bare reordering"
+            );
+        }
+    }
+}
+
+on_each_engine! {
+    /// TensorKit 0.17.1: the 2-norm of the complex SU(2) fixture permuted by
+    /// `[1, 0], [3, 2]` is a value computed outside symtn.
+    fn complex_su2_permute_has_the_tensorkit_norm<B>() {
+        let device = &mut B::engine();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let host = crate::tk_complex_su2::source(engine, &runtime);
+        let source = B::upload(device, &host);
+        let permuted = source.permute(device, &[1, 0], &[3, 2]).unwrap();
+        let permuted = B::download(device, &permuted);
+        assert_ne!(
+            sorted_parts(host.dense_data().unwrap()),
+            sorted_parts(permuted.dense_data().unwrap()),
+            "the permute must apply coefficients other than 1"
+        );
+        let norm = permuted.norm(engine, 2.0).unwrap();
+        assert!(
+            (norm - 40.741_733_994_626_32).abs() <= 1e-10 * 41.0,
+            "TensorKit norm of the permuted tensor: got {norm}"
+        );
+    }
+}
+
+on_each_engine! {
+    /// A structure with no admissible block: the output upload, the replay and
+    /// the download all survive it, for the lazy adjoint and `*_into` too.
+    fn transforms_of_an_empty_tensor_are_empty<B>() {
+        let device = &mut B::engine();
+        let engine = &mut symtn::typed::CpuEngine::serial();
+        let runtime = Runtime::builder().build().unwrap();
+        let codomain = u1_leg(&[(1, 2)]);
+        let domain = u1_leg(&[(0, 3)]);
+        let host: TensorMap<_, f64> =
+            TensorMap::from_subblock_fn(engine, &runtime, [&codomain], [&domain], |_, _| 1.0)
+                .unwrap();
+        assert_eq!(host.subblock_count(), 0);
+        let source = B::upload(device, &host);
+
+        for (what, moved) in [
+            ("permute", source.permute(device, &[1], &[0]).unwrap()),
+            ("braid", source.braid(device, &[1], &[0], &[1, 2]).unwrap()),
+            ("transpose", source.transpose(device, &[1], &[0]).unwrap()),
+            ("repartition", source.repartition(device, 0).unwrap()),
+        ] {
+            let moved = B::download(device, &moved);
+            assert!(moved.materialize(engine).unwrap().dense_data().unwrap().is_empty(), "{what}");
+            assert_eq!(moved.subblock_count(), 0, "{what}: expected no blocks");
+        }
+        let adjoint = source.adjoint(device).unwrap();
+        let moved = adjoint.transpose(device, &[1], &[0]).unwrap();
+        let moved = B::download(device, &moved);
+        assert!(moved.materialize(engine).unwrap().dense_data().unwrap().is_empty());
+
+        let model = host.permute(engine, &[1], &[0]).unwrap();
+        let mut destination = B::upload(device, &model);
+        drop(model);
+        source.permute_into(device, &[1], &[0], &mut destination, 2.0, 0.0).unwrap();
+        assert!(B::download(device, &destination).dense_data().unwrap().is_empty());
+    }
+}
+
+fn u1_leg(charges: &[(i32, usize)]) -> GradedSpace<symtn::sector::U1FusionRule> {
+    GradedSpace::try_new(
+        Arc::new(symtn::sector::U1FusionRule),
+        charges
+            .iter()
+            .map(|&(c, d)| (symtn::sector::U1Irrep::new(c), d)),
+    )
+    .unwrap()
+}

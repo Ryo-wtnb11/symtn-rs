@@ -659,18 +659,25 @@ fn structure_lookups_find_exactly_the_content_equal_block() {
 /// a contract: blocks are grouped by coupled sector in ascending order
 /// (TensorKit `blocksectors` sorts), and each coupled sector lists its tree
 /// pairs column-major, domain tree outer and codomain tree inner (TensorKit
-/// `sectorstructure`). On each side, trees are ordered by their uncoupled
-/// sectors with the last leg most significant, then by inner lines and
-/// vertices, outermost first. TensorKit's `FusionTreeIterator` instead
-/// interleaves each inner line with the uncoupled sectors, so the per-side
-/// order differs from TensorKit on non-Abelian sides of rank three or more.
+/// `sectorstructure`). On each side, trees follow TensorKit's
+/// `FusionTreeIterator` nesting (`_fusiontree_iterate`): the last uncoupled
+/// sector varies slowest, then the inner line feeding its vertex, then that
+/// vertex, then the rest of the tree; for the first two legs `(u₂, u₁, μ)`.
+/// Each slot compares by `SectorId` (these rules list channels in id order).
 #[test]
 fn structure_block_order_is_coupled_then_column_major_tree_pairs() {
     fn tree_rank(tree: &FusionTreeKey) -> Vec<usize> {
-        let ids = |sectors: &[SectorId]| sectors.iter().rev().map(|s| s.id()).collect::<Vec<_>>();
-        let mut rank = ids(tree.uncoupled());
-        rank.extend(ids(tree.innerlines()));
-        rank.extend(tree.vertices().iter().rev().map(|v| v.get()));
+        let (uncoupled, lines, vertices) = (tree.uncoupled(), tree.innerlines(), tree.vertices());
+        let mut rank = Vec::new();
+        for leg in (1..uncoupled.len()).rev() {
+            rank.push(uncoupled[leg].id());
+            rank.push(if leg >= 2 {
+                lines[leg - 2].id()
+            } else {
+                uncoupled[0].id()
+            });
+            rank.push(vertices[leg - 1].get());
+        }
         rank
     }
     // A coupled sector reached with fusion multiplicity two, so the vertex

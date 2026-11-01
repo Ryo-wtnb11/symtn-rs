@@ -26,10 +26,11 @@ fn fill(c0: i64, labels: [i64; 5], idx: &[usize]) -> f64 {
     (value.rem_euclid(41) - 20) as f64
 }
 
-#[test]
-fn complex_su2_structural_invariants_match_tensorkit() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
+/// The fixture TensorKit's values below were computed on.
+pub fn source(
+    engine: &mut dyn symtn::typed::Engine,
+    runtime: &Runtime,
+) -> TensorMap<SU2FusionRule, Complex64> {
     let rule = Arc::new(SU2FusionRule);
     let space = GradedSpace::try_new(
         rule,
@@ -39,9 +40,9 @@ fn complex_su2_structural_invariants_match_tensorkit() {
         ],
     )
     .unwrap();
-    let source: TensorMap<_, Complex64> = TensorMap::from_subblock_fn(
+    TensorMap::from_subblock_fn(
         engine,
-        &runtime,
+        runtime,
         [&space, &space],
         [&space, &space],
         |trees, idx| {
@@ -58,7 +59,14 @@ fn complex_su2_structural_invariants_match_tensorkit() {
             Complex64::new(fill(11, labels, idx), fill(17, labels, idx) / 3.0)
         },
     )
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn complex_su2_structural_invariants_match_tensorkit() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let source = source(engine, &runtime);
     let permuted = source.permute(engine, &[1, 0], &[3, 2]).unwrap();
     let gram = source
         .adjoint(engine)
