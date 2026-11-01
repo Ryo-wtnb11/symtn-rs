@@ -31,8 +31,8 @@
 //!   (budget, batch policy, mean work, team, dispatch costs, per-block
 //!   serial times and grant inputs), [`StructureCacheKind::LaneAllocations`],
 //!   on the native CPU provider, so a repeated batch on a fresh executor
-//!   skips the lane search. Neither TensorKit nor QSpace has a counterpart:
-//!   both run blocks serially or under BLAS threads, with no lane search.
+//!   skips the lane search. Neither TensorKit nor QSpace has a model-based
+//!   lane search or a cache of its result.
 //!
 //! This mirrors TensorKit's `GLOBAL_CACHES` with `empty_globalcaches!` and
 //! `global_cache_info` (`caches.jl:1-11` @cfaa073).

@@ -56,8 +56,8 @@ pub enum StructureCacheKind {
     /// Searched lane allocations of block batches per schedule input (budget,
     /// batch policy, mean work, team, dispatch costs, per-block serial times
     /// and grant inputs), shared by every Runtime and engine of the process.
-    /// No TensorKit or QSpace analogue: both run blocks serially or under
-    /// BLAS threads, with no lane search.
+    /// No TensorKit or QSpace analogue: neither has a model-based lane search
+    /// or a cache of its result.
     LaneAllocations,
 }
 

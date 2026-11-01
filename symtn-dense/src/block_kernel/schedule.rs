@@ -1614,7 +1614,8 @@ mod tests {
                 let exec: &Exec<'_> = exec;
                 let grant =
                     Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1));
-                for last in 100..164 {
+                let batches = 100..164;
+                for last in batches.clone() {
                     let t = nanos(&[40000, 100, 100, last]);
                     let mut scratch = AllocationScratch::default();
                     let cached = allocate_in(
@@ -1634,7 +1635,10 @@ mod tests {
                 }
                 assert!(bounded.info().evictions() > 0);
                 let info = tiny.info();
-                assert_eq!((info.entries(), info.rejections()), (0, 64));
+                assert_eq!(
+                    (info.entries(), info.rejections()),
+                    (0, batches.end - batches.start)
+                );
                 Ok(())
             })
             .unwrap();
