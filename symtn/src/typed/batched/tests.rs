@@ -8,17 +8,6 @@ use symtn_core::{Placement, RuleIdentity, TensorStorage, U1FusionRule, U1Irrep};
 use super::super::Runtime;
 use super::super::{owned_repr, GradedSpace, TensorMap, TypedTensorBody};
 
-use super::super::probe::{self, RoutePolicy};
-
-/// Forces every eigh route onto the per-tree copies, so the branch the
-/// fixtures' aligned routes never take is exercised.
-fn eigh_routes(treewise: bool) -> RoutePolicy {
-    RoutePolicy {
-        eigh_treewise: treewise,
-        ..RoutePolicy::DEFAULT
-    }
-}
-
 #[test]
 fn spectra_publication_failure_does_not_publish_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -104,11 +93,10 @@ fn compose_failure_after_the_output_is_taken_keeps_it_unobservable() {
 }
 
 #[test]
-fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() {
+fn host_eigenvector_stack_equals_eager_bitwise_over_multi_tree_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: on Host the per-tree placement (one row slice per column
-    // and codomain tree) writes exactly the bits of the aligned one (one
-    // copy per sector), and both are eager's `d` and `v` per member.
+    // What: over sectors with several codomain trees, each member's `d` and
+    // `v` are eager's bits.
     use super::EighFullPlan;
     use symtn_core::{SU2FusionRule, SU2Irrep};
 
@@ -131,42 +119,26 @@ fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() 
         })
         .collect();
     let stack = super::StackedTensorMap::pack(&members).unwrap();
-    let mut run = |treewise: bool| {
-        let plan = probe::with_routes(eigh_routes(treewise), || {
-            EighFullPlan::new(
-                engine,
-                &stack,
-                &[0, 1],
-                &[2, 3],
-                super::HermitianTol::DEFAULT,
-            )
-            .unwrap()
-        });
-        let mut workspace = plan.workspace().unwrap();
-        let copies: usize = plan.routes.copies.iter().map(Vec::len).sum();
-        let routes = plan.routes.copies.len();
-        let output = plan.execute(engine, &stack, &mut workspace).unwrap();
-        (
-            copies,
-            routes,
-            output.d.storage.clone(),
-            output.v.storage.clone(),
-        )
-    };
-    let (aligned_copies, routes, aligned_d, aligned_v) = run(false);
-    let (tree_copies, _, tree_d, tree_v) = run(true);
-    assert_eq!(aligned_copies, routes, "every fixture route is aligned");
-    assert!(tree_copies > routes, "several codomain trees per sector");
-    assert!(tree_v == aligned_v && tree_d == aligned_d);
-    let d_len = aligned_d.len() / members.len();
-    let v_len = aligned_v.len() / members.len();
+    let plan = EighFullPlan::new(
+        engine,
+        &stack,
+        &[0, 1],
+        &[2, 3],
+        super::HermitianTol::DEFAULT,
+    )
+    .unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let output = plan.execute(engine, &stack, &mut workspace).unwrap();
+    let (stack_d, stack_v) = (output.d.storage.clone(), output.v.storage.clone());
+    let d_len = stack_d.len() / members.len();
+    let v_len = stack_v.len() / members.len();
     for (member, input) in members.iter().enumerate() {
         let crate::typed::Eigh { d, v } = input
             .eigh_full(engine, &[0, 1], &[2, 3], super::HermitianTol::DEFAULT)
             .unwrap();
-        assert!(tree_v[member * v_len..][..v_len] == *v.dense_data().unwrap());
+        assert!(stack_v[member * v_len..][..v_len] == *v.dense_data().unwrap());
         assert!(
-            tree_d[member * d_len..][..d_len]
+            stack_d[member * d_len..][..d_len]
                 == *d.materialize(engine).unwrap().dense_data().unwrap()
         );
     }
@@ -175,13 +147,12 @@ fn host_tree_wise_eigenvector_copies_equal_the_aligned_ones_and_eager_bitwise() 
 #[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn tree_wise_eigenvector_copies_equal_the_aligned_ones_bitwise() {
+fn device_eigenvector_stack_equals_eager_bitwise_over_multi_tree_sectors() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    // What: the per-tree placement (one copy per codomain tree) writes
-    // exactly the bits of the aligned placement (one copy per sector),
-    // and both are eager's device `v` at B = 1.
+    // What: over sectors with several codomain trees, the device `v` at
+    // B = 1 is eager's device `v` bit for bit.
     use super::EighFullPlan;
     use symtn_core::{SU2FusionRule, SU2Irrep};
 
@@ -189,7 +160,7 @@ fn tree_wise_eigenvector_copies_equal_the_aligned_ones_bitwise() {
     let j = SU2Irrep::from_twice_spin;
     let leg =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(j(0), 2), (j(1), 2), (j(2), 1)]).unwrap();
-    let members: Vec<_> = (0..3)
+    let members: Vec<_> = (0..1)
         .map(|seed| {
             let x = TensorMap::<_, f64>::rand_with_seed(
                 &mut *cpu,
@@ -203,52 +174,18 @@ fn tree_wise_eigenvector_copies_equal_the_aligned_ones_bitwise() {
             x.axpby(&mut *cpu, 1.0, &adjoint, 1.0).unwrap()
         })
         .collect();
-    let stack = super::StackedTensorMap::pack(&members)
-        .unwrap()
-        .to_cuda(cuda)
-        .unwrap();
-    let mut run = |treewise: bool| {
-        let plan = probe::with_routes(eigh_routes(treewise), || {
-            EighFullPlan::new(
-                &mut *cuda,
-                &stack,
-                &[0, 1],
-                &[2, 3],
-                super::HermitianTol::DEFAULT,
-            )
-            .unwrap()
-        });
-        let mut workspace = plan.workspace().unwrap();
-        let copies: usize = plan.routes.copies.iter().map(Vec::len).sum();
-        let routes = plan.routes.copies.len();
-        let output = plan.execute(cuda, &stack, &mut workspace).unwrap();
-        (
-            copies,
-            routes,
-            output.v.to_host(cuda).unwrap(),
-            output.d.to_host(cuda).unwrap(),
-        )
-    };
-    let (aligned_copies, routes, aligned_v, aligned_d) = run(false);
-    let (tree_copies, _, tree_v, tree_d) = run(true);
-    assert_eq!(aligned_copies, routes, "every fixture route is aligned");
-    assert!(tree_copies > routes, "several codomain trees per sector");
-    assert!(tree_v.storage == aligned_v.storage);
-    assert!(tree_d.storage == aligned_d.storage);
     let single = super::StackedTensorMap::pack(&members[..1])
         .unwrap()
         .to_cuda(cuda)
         .unwrap();
-    let plan = probe::with_routes(eigh_routes(true), || {
-        EighFullPlan::new(
-            cuda,
-            &single,
-            &[0, 1],
-            &[2, 3],
-            super::HermitianTol::DEFAULT,
-        )
-        .unwrap()
-    });
+    let plan = EighFullPlan::new(
+        cuda,
+        &single,
+        &[0, 1],
+        &[2, 3],
+        super::HermitianTol::DEFAULT,
+    )
+    .unwrap();
     let mut workspace = plan.workspace().unwrap();
     let v = plan
         .execute(cuda, &single, &mut workspace)

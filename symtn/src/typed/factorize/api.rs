@@ -248,10 +248,9 @@ where
     /// Owned dense device storage is factored as a stream over the coupled
     /// sectors, each gauge-fixed on the device by the backend's
     /// positive-diagonal QR (`R_jj` real and non-negative, phase 1 kept where
-    /// `R_jj == 0`), so nothing of either factor crosses to the host. A route
-    /// whose factor region reproduces the source's tree layout is assembled
-    /// by one whole-factor device copy; any other route keeps the per-tree
-    /// identity-selector GEMM. A moved leg-role split is one device permute.
+    /// `R_jj == 0`), so nothing of either factor crosses to the host. Each
+    /// factor of a route is placed by one whole-factor device copy. A moved
+    /// leg-role split is one device permute.
     /// A lazy adjoint device operand returns [`Error::UnsupportedOnDevice`]
     /// before any output exists.
     ///
@@ -360,10 +359,9 @@ where
     /// `u`, the first largest-magnitude entry is real and non-negative, and
     /// the matching `vh` row takes the inverse phase. The fix-up runs on the
     /// device without a download (`symtn_dense::cuda_svd_gauge_phases`):
-    /// 13 Tenferro ops per route for the phases, then per side either a
-    /// `k x k` diagonal selector that the non-aligned assembly GEMM
-    /// multiplies by anyway (1 op) or a scaling of the aligned factor before
-    /// its copy (2 ops), plus one `conj` for a complex left side. They are
+    /// 13 Tenferro ops per route for the phases, then per side a scaling of
+    /// the factor before its copy (2 ops), plus one `conj` for a complex left
+    /// side. They are
     /// counted in `CudaTransferStats::gauge_ops`.
     pub fn svd_compact(
         &self,
@@ -445,9 +443,9 @@ where
     /// the only numerical payload that crosses to the host, where they are
     /// put in the Host order (ascending per sector; cuSOLVER `syevd` already
     /// returns it, so only an O(n) check runs); the eigenvectors stay on the
-    /// device and are copied into `v` (one copy per route, or per codomain
-    /// tree on a non-aligned route). Only if some sector's order is not the
-    /// identity are the columns gathered by a selector GEMM instead.
+    /// device and are copied into `v` (one copy per route). Only if some
+    /// sector's order is not the identity are the columns gathered by a
+    /// selector GEMM instead.
     ///
     /// A nonfinite entry returns [`Error::Operation`] (an `InvalidArgument`:
     /// `eigh input components must be finite`) as on the Host: after the

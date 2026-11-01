@@ -1,10 +1,8 @@
 use super::*;
-#[cfg(feature = "cuda")]
-use crate::typed::probe::{Fault, Gauge, RoutePolicy};
+use crate::typed::probe::{Fault, Gauge};
 
 /// `(qr calls, factor copies, selector uploads, output uploads, assembly
 /// GEMMs, live route scratch, peak route scratch)` in `recording`.
-#[cfg(feature = "cuda")]
 fn qr_counts(recording: &probe::Recording) -> (usize, usize, usize, usize, usize, usize, usize) {
     let (live, peak) = recording.gauge(Gauge::CudaQrScratch);
     (
@@ -20,7 +18,6 @@ fn qr_counts(recording: &probe::Recording) -> (usize, usize, usize, usize, usize
 
 /// `(successful results, spectrum scalars, output uploads, live route
 /// scratch, peak route scratch)` of device SVD in `recording`.
-#[cfg(feature = "cuda")]
 fn svd_counts(recording: &probe::Recording) -> (usize, usize, usize, usize, usize) {
     let (live, peak) = recording.gauge(Gauge::CudaSvdScratch);
     (
@@ -32,47 +29,6 @@ fn svd_counts(recording: &probe::Recording) -> (usize, usize, usize, usize, usiz
     )
 }
 
-#[cfg(feature = "cuda")]
-fn svd_routes(treewise: bool) -> RoutePolicy {
-    RoutePolicy {
-        svd_treewise: treewise,
-        ..RoutePolicy::DEFAULT
-    }
-}
-
-/// `(factor_copies, selector_uploads, assembly_gemms)` a compact QR or
-/// compact SVD assembly must perform for this plan: an aligned side is one
-/// whole-factor copy and no selector upload, a non-aligned side is one GEMM
-/// per nonempty target tree.
-#[cfg(feature = "cuda")]
-fn cuda_route_assembly_counts(plan: &CompactFactorPlan) -> (usize, usize, usize) {
-    let nonempty_trees = |trees: &[CoupledTreeExtent]| {
-        trees
-            .iter()
-            .filter(|tree| tree.extent().is_ok_and(|extent| extent != 0))
-            .count()
-    };
-    let mut counts = (0, 0, 0);
-    for (route, left, right) in executed_routes(plan) {
-        let aligned_left = plan.left_preserves_trees(route);
-        let aligned_right = plan.right_preserves_trees(route);
-        if aligned_left {
-            counts.0 += 1;
-        } else {
-            counts.2 += nonempty_trees(plan.left_regions()[left].row_trees());
-        }
-        if aligned_right {
-            counts.0 += 1;
-        } else {
-            counts.2 += nonempty_trees(plan.right_regions()[right].col_trees());
-        }
-        if !(aligned_left && aligned_right) {
-            counts.1 += 1;
-        }
-    }
-    counts
-}
-
 /// The factor spaces and routes every device factorization publishes through
 /// are the Host plan's, checked without a device.
 ///
@@ -82,7 +38,6 @@ fn cuda_route_assembly_counts(plan: &CompactFactorPlan) -> (usize, usize, usize)
 /// sectors goes through `compact_factor_routes`, `executed_routes` and the SVD
 /// diagonal validation. Every space must equal the Host eager factorization's
 /// output space, so a device-local bond, space or route rule fails here.
-#[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     let cpu = &mut crate::typed::CpuEngine::serial();
@@ -197,7 +152,6 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     assert_host_spaces(&host, &device.compact_factor_plan().unwrap());
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_work() {
     let cpu = &mut crate::typed::CpuEngine::serial();
@@ -276,7 +230,6 @@ fn typed_cuda_factorizations_reject_compact_lazy_and_truncation_before_runtime_w
     }
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
@@ -310,7 +263,6 @@ fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
     ));
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
@@ -459,120 +411,16 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
     ));
 }
 
-/// Z2 endomorphism whose canonical sector blocks are `[[2,1],[1,2]]`
-/// (spectrum {3, 1}), stored with rows stacked by ascending codomain tree
-/// and columns by descending domain tree, so each block reads
-/// `[[1,2],[2,1]]`: still Hermitian, but with spectrum {3, -1}.
-fn mis_stacked_hermitian_z2(runtime: &Runtime) -> TensorMap<Z2FusionRule, f64> {
-    let rule = Z2FusionRule;
-    let leg = || {
-        SectorLeg::new(
-            [
-                (Z2Irrep::new(0).sector_id(), 1),
-                (Z2Irrep::new(1).sector_id(), 1),
-            ],
-            false,
-        )
-    };
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(), leg()]),
-        FusionProductSpace::new([leg(), leg()]),
-    );
-    let mut blocks: Vec<(FusionTreePairKey, Vec<usize>)> = homspace
-        .fusion_tree_keys(&rule)
-        .iter()
-        .map(|key| (key.clone(), vec![1; 4]))
-        .collect();
-    blocks.sort_by(|(a, _), (b, _)| {
-        a.codomain_tree()
-            .cmp(b.codomain_tree())
-            .then(b.domain_tree().cmp(a.domain_tree()))
-    });
-    let structure = BlockStructure::coupled_sector_matrix_with_keys(&rule, 2, 4, blocks).unwrap();
-    let regions = structure.coupled_sector_regions(2).unwrap().unwrap();
-    assert!(regions
-        .iter()
-        .all(|region| region.row_trees() != region.col_trees()));
-    let space = DynamicFusionMapSpace::try_from_layout(homspace, structure)
-        .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap();
-    let space =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(space.clone(), Arc::new(rule)).unwrap();
-    let mut fill = |key: &BlockKey, _: &[usize]| -> f64 {
-        let BlockKey::FusionTree(tree) = key else {
-            unreachable!("fusion-tree blocks")
-        };
-        if tree.codomain_tree() == tree.domain_tree() {
-            2.0
-        } else {
-            1.0
-        }
-    };
-    let data = crate::typed::block_layout::apply_fill(
-        space.space(),
-        crate::typed::block_layout::Fill::BlockFn(&mut fill),
-    )
-    .unwrap();
-    TensorMap {
-        runtime: runtime.clone(),
-        repr: owned_repr(TypedTensorBody {
-            space,
-            data: Arc::new(TypedData::Dense(data)),
-        }),
-    }
-}
-
-#[test]
-fn host_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let tensor = mis_stacked_hermitian_z2(&runtime);
-    let error = format!(
-        "{:?}",
-        tensor
-            .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
-            .err()
-    );
-    assert!(error.contains("eigh_full requires identical"), "{error}");
-}
-
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn typed_cuda_eigh_refuses_a_mis_stacked_block_that_stays_hermitian() {
-    let cuda =
-        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    // What: the device path reads the same tiling as the host and must
-    // refuse it too, instead of returning the {3, -1} spectrum of the
-    // column-permuted block.
-    let runtime = Runtime::builder().build().unwrap();
-    let device = mis_stacked_hermitian_z2(&runtime).to_cuda(cuda).unwrap();
-    assert!(matches!(
-        device.eigh_full(cuda, &codomain_axes(&device), &domain_axes(&device), HermitianTol::DEFAULT),
-        Err(Error::Operation(error))
-            if matches!(
-                error.as_ref(),
-                symtn_tensors::OperationError::UnsupportedTensorContractScope { message }
-                    if message.starts_with("eigh_full requires identical")
-            )
-    ));
-}
-
-#[cfg(feature = "cuda")]
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
+fn typed_cuda_eigh_ascending_order_assembles_by_one_copy_per_sector() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    // What: cuSOLVER's ascending order is the published one (#1985), so an
-    // aligned route copies its eigenvectors once and the general path once
-    // per codomain tree, with no selector. The selector-GEMM assembly (one
-    // GEMM per route or per tree, one selector upload per call), still the
-    // path for a non-identity order, is forced for comparison. All four are
-    // exact data movement and publish the same values; the GEMM's `x * 1 + 0`
-    // may turn a `-0.0` into `+0.0`, so zeros are compared by value.
+    // What: cuSOLVER's ascending order is the published one, so each route
+    // copies its eigenvectors once, with no selector upload and no GEMM,
+    // over multi-tree sectors, and every column pairs with its value
+    // (`t v = v d`).
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -605,165 +453,86 @@ fn typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise() {
         "the fixture needs multi-tree sectors"
     );
 
-    let mut outputs = Vec::new();
-    for (treewise, forced, uploads, copies, gemms) in [
-        (false, false, 0, sectors.len(), 0),
-        (true, false, 0, trees, 0),
-        (false, true, 1, 0, sectors.len()),
-        (true, true, 1, 0, trees),
-    ] {
-        let routes = RoutePolicy {
-            eigh_treewise: treewise,
-            eigh_force_selector: forced,
-            ..RoutePolicy::DEFAULT
-        };
-        let recording = probe::record();
-        let Eigh { d, v } = probe::with_routes(routes, || {
-            device
-                .eigh_full(
-                    cuda,
-                    &codomain_axes(&device),
-                    &domain_axes(&device),
-                    HermitianTol::DEFAULT,
-                )
-                .unwrap()
-        });
-        assert_eq!(recording.get(Event::CudaSelectorUpload), uploads);
-        let (_, factor_copies, _, _, assembly_gemms, _, _) = qr_counts(&recording);
-        assert_eq!((factor_copies, assembly_gemms), (copies, gemms));
-        outputs.push((d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap()));
-    }
-    let bits = |map: &TensorMap<U1FusionRule, f64>| {
-        map.dense_data()
-            .unwrap()
-            .iter()
-            .map(|value| (value + 0.0).to_bits())
-            .collect::<Vec<_>>()
-    };
-    for (d, v) in &outputs[1..] {
-        assert_eq!(bits(&outputs[0].0), bits(d));
-        assert_eq!(bits(&outputs[0].1), bits(v));
-    }
-    let (d, v) = &outputs[0];
+    let recording = probe::record();
+    let Eigh { d, v } = device
+        .eigh_full(
+            cuda,
+            &codomain_axes(&device),
+            &domain_axes(&device),
+            HermitianTol::DEFAULT,
+        )
+        .unwrap();
+    assert_eq!(recording.get(Event::CudaSelectorUpload), 0);
+    let (_, factor_copies, _, _, assembly_gemms, _, _) = qr_counts(&recording);
+    assert_eq!((factor_copies, assembly_gemms), (sectors.len(), 0));
+    let (d, v) = (d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap());
     assert_typed_map_close(
         cpu,
         &source
-            .compose(&mut crate::typed::CpuEngine::serial(), v)
+            .compose(&mut crate::typed::CpuEngine::serial(), &v)
             .unwrap(),
-        &v.compose(&mut crate::typed::CpuEngine::serial(), d)
+        &v.compose(&mut crate::typed::CpuEngine::serial(), &d)
             .unwrap(),
         1.0e-10,
     );
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn typed_cuda_eigh_selector_applies_a_non_identity_order() {
+fn typed_cuda_eigh_selector_assembly_applies_a_non_identity_order() {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
         &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    // What: cuSOLVER's order is already ascending, so the selector assembly
-    // only runs for a non-identity order. Reversing every odd sector's order
-    // (test toggle) makes that permutation real next to identity sectors:
-    // values follow the injected order, every column pairs with its value
-    // (`t v = v d`), and one selector is uploaded, on aligned and per-tree
-    // routes alike.
+    // What: a solver order that is not ascending (cuSOLVER's normally is,
+    // but `total_cmp` still orders `-0.0` before `+0.0`) publishes column
+    // `c` of the sector's `v` as raw eigenvector `order[c]`. The selector is
+    // packed and read at a nonzero offset as `eigh_full` packs one per route.
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap();
-    let source = TensorMap::<U1FusionRule, f64>::rand_with_seed(
-        cpu,
-        &runtime,
-        [&leg, &leg],
-        [&leg, &leg],
-        13,
-    )
-    .unwrap();
-    let adjoint = source.adjoint(cpu).unwrap();
-    let source = source.axpby(cpu, 1.0, &adjoint, 1.0).unwrap();
-    let device = source.to_cuda(cuda).unwrap();
-    let sectors = sector_regions(
-        device.logical_space().space().structure(),
-        device.logical_space().space().nout(),
-    )
-    .unwrap();
-    let trees: usize = sectors.iter().map(|region| region.row_trees().len()).sum();
-    let reversed: Vec<bool> = sectors
-        .iter()
-        .enumerate()
-        .map(|(index, region)| index % 2 == 1 && region.rows() >= 2)
-        .collect();
-    assert!(reversed.iter().any(|&r| r) && reversed.iter().any(|&r| !r));
-    let mut eigh = |device: &TensorMap<U1FusionRule, f64, CudaStorage<f64>>| {
-        let Eigh { d, v } = device
-            .eigh_full(
-                cuda,
-                &codomain_axes(device),
-                &domain_axes(device),
-                HermitianTol::DEFAULT,
-            )
-            .unwrap();
-        (d.to_host(cuda).unwrap(), v.to_host(cuda).unwrap())
-    };
-    let (ascending, _) = eigh(&device);
-    let ascending = ascending.diagview(cpu).unwrap();
-    // The spectra list the sectors in source-region order.
-    assert_eq!(
-        ascending
-            .iter()
-            .map(|entry| entry.values.len())
-            .collect::<Vec<_>>(),
-        sectors
-            .iter()
-            .map(|region| region.rows())
-            .collect::<Vec<_>>()
-    );
-
-    for (treewise, gemms) in [(false, sectors.len()), (true, trees)] {
-        let routes = RoutePolicy {
-            eigh_treewise: treewise,
-            eigh_reverse_odd_sectors: true,
-            ..RoutePolicy::DEFAULT
-        };
-        let recording = probe::record();
-        let (d, v) = probe::with_routes(routes, || eigh(&device));
-        assert_eq!(recording.get(Event::CudaSelectorUpload), 1);
-        let (_, factor_copies, _, _, assembly_gemms, _, _) = qr_counts(&recording);
-        assert_eq!((factor_copies, assembly_gemms), (0, gemms));
-        for ((entry, want), &reverse) in d
-            .diagview(cpu)
+    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
+    let device =
+        TensorMap::<U1FusionRule, f64>::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, _| 1.0)
             .unwrap()
+            .to_cuda(cuda)
+            .unwrap();
+    let plan = device.compact_factor_plan().unwrap();
+    let (route, left, _) = executed_routes(&plan).next().unwrap();
+    let target = &plan.left_regions()[left];
+    let n = route.rank();
+    assert_eq!((n, target.rows(), target.range().start), (3, 3, 0));
+
+    let mut order = vec![0; n];
+    assert!(symtn_matrixalgebra::seam::ascending_eigh_order(
+        &[2.0, -1.0, 0.5],
+        &mut order
+    ));
+    assert_eq!(order, [1, 2, 0]);
+    let offset = 4;
+    let mut lease = crate::runtime::cuda_call(cuda).unwrap();
+    let ctx = &mut *lease;
+    // Raw eigenvector `j` (column-major) is `[3j + 1, 3j + 2, 3j + 3]`.
+    let raw = CudaStorage::<f64>::upload_owned(ctx, (1..=9).map(f64::from).collect()).unwrap();
+    let selector = upload_selector(
+        ctx,
+        offset + n * n,
+        1,
+        order
             .iter()
-            .zip(&ascending)
-            .zip(&reversed)
-        {
-            let mut want = want.values.clone();
-            if reverse {
-                want.reverse();
-            }
-            assert_eq!(entry.values, want, "treewise {treewise}");
-        }
-        assert_typed_map_close(
-            cpu,
-            &source
-                .compose(&mut crate::typed::CpuEngine::serial(), &v)
-                .unwrap(),
-            &v.compose(&mut crate::typed::CpuEngine::serial(), &d)
-                .unwrap(),
-            1.0e-10,
+            .enumerate()
+            .map(|(column, &row)| (offset + row + n * column, 0, 1.0)),
+    )
+    .unwrap();
+    let mut v = CudaStorage::<f64>::upload_owned(ctx, vec![0.0; n * n]).unwrap();
+    assemble_aligned_left_factor(ctx, &mut v, target, &raw.0, n, &selector, offset, n).unwrap();
+    let v = v.download(ctx).unwrap();
+    let expected = [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 1.0, 2.0, 3.0];
+    for (actual, expected) in v.iter().zip(expected) {
+        assert!(
+            (actual - expected).abs() <= 4.0 * f64::EPSILON * expected,
+            "{v:?}"
         );
     }
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
@@ -794,32 +563,10 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
         .filter(|region| region.rows() != 0 && region.cols() != 0)
         .count();
     let source_device = source.to_cuda(cuda).unwrap();
-    // Per-route transfer and kernel counts follow the proved layout flag.
+    // Every route places each factor by one whole-factor copy; the
+    // assembly uploads and downloads nothing.
     let plan = source_device.compact_factor_plan().unwrap();
-    let (factor_copies, selector_uploads, assembly_gemms) = cuda_route_assembly_counts(&plan);
-    let routes = executed_routes(&plan).count();
-    assert_eq!(routes, nonempty);
-    // Both factor spaces of this fixture reproduce the source tree layout,
-    // so every route takes the whole-factor copy and the assembly uploads
-    // and downloads nothing. The non-aligned fallback is a layout
-    // property, not a workload one: the Host plan's tree-order predicate
-    // decides it, and the test `RoutePolicy` forces it on the device.
-    assert!(
-        executed_routes(&plan)
-            .all(|(route, _, _)| plan.left_preserves_trees(route)
-                && plan.right_preserves_trees(route)),
-        "expected an all-aligned route mix, got {:?}",
-        executed_routes(&plan)
-            .map(|(route, _, _)| (
-                plan.left_preserves_trees(route),
-                plan.right_preserves_trees(route)
-            ))
-            .collect::<Vec<_>>()
-    );
-    assert_eq!(
-        (factor_copies, selector_uploads, assembly_gemms),
-        (2 * routes, 0, 0)
-    );
+    assert_eq!(executed_routes(&plan).count(), nonempty);
 
     let recording = probe::record();
     source_device
@@ -834,12 +581,12 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
         qr_counts(&recording),
         (
             nonempty,
-            factor_copies,
-            selector_uploads,
-            2,
-            assembly_gemms,
+            2 * nonempty,
             0,
-            usize::from(nonempty != 0),
+            2,
+            0,
+            0,
+            usize::from(nonempty != 0)
         )
     );
 
@@ -894,7 +641,6 @@ fn typed_cuda_qr_work_and_preflight_are_streamed_and_transactional() {
     assert_eq!(qr_counts(&recording), (0, 0, 0, 2, 0, 0, 0));
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
@@ -929,10 +675,8 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
         .map(|region| region.rows().min(region.cols()))
         .sum();
     let source_device = source.to_cuda(cuda).unwrap();
-    // Compact SVD assembles through the same aligned-copy dispatch as QR
-    // and shares its copy/selector/GEMM observation.
-    let plan = source_device.compact_factor_plan().unwrap();
-    let (factor_copies, _, assembly_gemms) = cuda_route_assembly_counts(&plan);
+    // Compact SVD assembles by the same whole-factor copies as QR and
+    // shares its copy/selector/GEMM observation.
     let recording = probe::record();
     source_device
         .svd_compact(
@@ -946,12 +690,9 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
         (nonempty, singular_values, 3, 0, usize::from(nonempty != 0))
     );
     // No device QR and no QR output upload happen here; the shared events
-    // record only this assembly's copies and GEMMs. The SVD builds its gauge
-    // selectors on the device, so it uploads none.
-    assert_eq!(
-        qr_counts(&recording),
-        (0, factor_copies, 0, 0, assembly_gemms, 0, 0)
-    );
+    // record only this assembly's copies; the gauge scales on the device,
+    // so no selector is uploaded.
+    assert_eq!(qr_counts(&recording), (0, 2 * nonempty, 0, 0, 0, 0, 0));
 
     let malformed_storage = {
         let call = crate::runtime::cuda_call(cuda).unwrap();
@@ -996,71 +737,8 @@ fn typed_cuda_svd_work_is_streamed_and_preflight_is_transactional() {
     assert_eq!(svd_counts(&recording), (0, 0, 0, 0, 0));
 }
 
-#[cfg(feature = "cuda")]
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn typed_cuda_svd_non_aligned_routes_upload_no_selector_and_the_same_diagonal() {
-    let cpu = &mut crate::typed::CpuEngine::serial();
-    let cuda =
-        &mut crate::typed::CudaEngine::open(crate::typed::CudaDeviceId::from_ordinal(0)).unwrap();
-    // What: the rustdoc's upload count, three zero-initialized factors
-    // and no selector upload even on non-aligned routes (the gauge
-    // selector is built on the device), and a diagonal that does not
-    // depend on the assembly path.
-    let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(
-        Arc::new(U1FusionRule),
-        [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
-        ],
-    )
-    .unwrap();
-    let source =
-        TensorMap::<U1FusionRule, f64>::rand_with_seed(cpu, &runtime, [&leg, &leg], [&leg], 13)
-            .unwrap();
-    let device = source.to_cuda(cuda).unwrap();
-    let routes = sector_regions(
-        source.logical_space().space().structure(),
-        source.logical_space().space().nout(),
-    )
-    .unwrap()
-    .iter()
-    .filter(|region| region.rows() != 0 && region.cols() != 0)
-    .count();
-    let mut diagonals = Vec::new();
-    for (treewise, selectors) in [(false, 0), (true, 0)] {
-        let recording = probe::record();
-        let Svd { s, .. } = probe::with_routes(svd_routes(treewise), || {
-            device
-                .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
-                .unwrap()
-        });
-        let (_, _, creations, _, _) = svd_counts(&recording);
-        let (_, _, selector_uploads, _, _, _, _) = qr_counts(&recording);
-        assert_eq!(
-            (creations, selector_uploads),
-            (3, selectors),
-            "treewise {treewise}"
-        );
-        diagonals.push(
-            s.to_host(cuda)
-                .unwrap()
-                .dense_data()
-                .unwrap()
-                .iter()
-                .map(|value| value.to_bits())
-                .collect::<Vec<_>>(),
-        );
-    }
-    assert!(routes > 1);
-    assert_eq!(diagonals[0], diagonals[1]);
-}
-
 /// Each nonempty coupled sector of a host tensor as `(sector, rows, cols,
 /// column-major widened values)`.
-#[cfg(feature = "cuda")]
 fn gauge_sector_matrices<R, D>(
     tensor: &TensorMap<R, D>,
 ) -> Vec<(SectorId, usize, usize, Vec<Complex64>)>
@@ -1089,7 +767,6 @@ where
 /// `A = U diag(g) Vh` from the Host SVD of `host`, with every sector's
 /// spectrum replaced by `g(i) = 2` for `i < 2` and `1 / (2 + i)` after:
 /// an exactly degenerate top pair in every sector of dimension >= 2.
-#[cfg(feature = "cuda")]
 fn with_degenerate_spectrum<R, D>(host: &TensorMap<R, D>) -> TensorMap<R, D>
 where
     R: symtn_core::TypedSectorAdmission<
@@ -1129,7 +806,6 @@ where
 /// group, or a vector whose pivot is ambiguous at solver rounding, agrees
 /// by its projector. Also: the pivot of every device `u` column is real
 /// and non-negative. Returns how many vectors were compared entrywise.
-#[cfg(feature = "cuda")]
 fn assert_device_svd_gauge_matches_host<R, D>(host: &TensorMap<R, D>) -> usize
 where
     R: symtn_core::TypedSectorAdmission<
@@ -1282,14 +958,12 @@ where
     entrywise
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     // What: #1552's three-part consistency contract against the Host SVD
     // over U(1) and SU(2), f64 and c64, generic and exactly degenerate
-    // spectra, and aligned as well as forced per-tree (non-aligned)
-    // assembly, where the gauge rides the selector GEMM instead.
+    // spectra.
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
@@ -1323,15 +997,10 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
             TensorMap::<R, f64>::rand_with_seed(cpu, runtime, [leg, leg], [leg], 21).unwrap();
         let complex =
             TensorMap::<R, Complex64>::rand_with_seed(cpu, runtime, [leg, leg], [leg], 22).unwrap();
-        let mut entrywise = 0;
-        for treewise in [false, true] {
-            probe::with_routes(svd_routes(treewise), || {
-                entrywise += assert_device_svd_gauge_matches_host(&real);
-                entrywise += assert_device_svd_gauge_matches_host(&complex);
-                assert_device_svd_gauge_matches_host(&with_degenerate_spectrum(&real));
-                assert_device_svd_gauge_matches_host(&with_degenerate_spectrum(&complex));
-            });
-        }
+        let entrywise = assert_device_svd_gauge_matches_host(&real)
+            + assert_device_svd_gauge_matches_host(&complex);
+        assert_device_svd_gauge_matches_host(&with_degenerate_spectrum(&real));
+        assert_device_svd_gauge_matches_host(&with_degenerate_spectrum(&complex));
         entrywise
     }
     // The entrywise (sign/phase) statement must not be vacuous.
@@ -1339,7 +1008,6 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     assert!(cases(&runtime, &su2) > 8);
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
@@ -1412,14 +1080,12 @@ fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
     );
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_download() {
     // What: the rustdoc's cost of the gauge. Per nonempty route, 13 ops for
-    // the phases, 2 per aligned side (broadcast, mul) or 1 per non-aligned
-    // side (the selector's embed_diagonal), and 1 conj for a complex left
-    // side. Per call, one gauge-weight upload (no per-route identity
+    // the phases, 2 per side (broadcast, mul), and 1 conj for a complex
+    // left side. Per call, one gauge-weight upload (no per-route identity
     // selectors); nothing is downloaded.
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
@@ -1453,44 +1119,29 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
             .map(|(route, _, _)| regions[route.source_region()].rows())
             .max()
             .unwrap();
-        for treewise in [false, true] {
-            let expected_ops: u64 = executed_routes(&plan)
-                .map(|(route, _, _)| {
-                    let side = |aligned: bool| if aligned && !treewise { 2 } else { 1 };
-                    13 + side(plan.left_preserves_trees(route))
-                        + side(plan.right_preserves_trees(route))
-                        + u64::from(<D as symtn_dense::CudaScalar>::IS_COMPLEX)
-                })
-                .sum();
-            let recording = probe::record();
-            let before = symtn_dense::cuda_transfer_stats();
-            let Svd { u, s, vh } = probe::with_routes(svd_routes(treewise), || {
-                device
-                    .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
-                    .unwrap()
-            });
-            let after = symtn_dense::cuda_transfer_stats();
-            let (_, _, selector_uploads, _, _, _, _) = qr_counts(&recording);
-            assert_eq!(selector_uploads, 0, "treewise {treewise}");
-            assert_eq!(
-                after.gauge_ops - before.gauge_ops,
-                expected_ops,
-                "treewise {treewise}"
-            );
-            // The finite-input scan's one scalar (#2038); nothing else.
-            assert_eq!(after.d2h_calls - before.d2h_calls, 1, "treewise {treewise}");
-            assert_eq!(after.h2d_calls - before.h2d_calls, 4, "treewise {treewise}");
-            let len = |t: &TensorMap<U1FusionRule, D, CudaStorage<D>>| {
-                t.logical_space().space().required_len().unwrap()
-            };
-            let payload = |len: usize| (len * std::mem::size_of::<D>()) as u64;
-            assert_eq!(
-                after.h2d_bytes - before.h2d_bytes,
-                payload(len(&u) + len(&s) + len(&vh))
-                    + (max_rows * std::mem::size_of::<i64>()) as u64,
-                "treewise {treewise}"
-            );
-        }
+        let expected_ops: u64 = executed_routes(&plan)
+            .map(|_| 13 + 2 + 2 + u64::from(<D as symtn_dense::CudaScalar>::IS_COMPLEX))
+            .sum();
+        let recording = probe::record();
+        let before = symtn_dense::cuda_transfer_stats();
+        let Svd { u, s, vh } = device
+            .svd_compact(cuda, &codomain_axes(&device), &domain_axes(&device))
+            .unwrap();
+        let after = symtn_dense::cuda_transfer_stats();
+        let (_, _, selector_uploads, _, _, _, _) = qr_counts(&recording);
+        assert_eq!(selector_uploads, 0);
+        assert_eq!(after.gauge_ops - before.gauge_ops, expected_ops);
+        // The finite-input scan's one scalar (#2038); nothing else.
+        assert_eq!(after.d2h_calls - before.d2h_calls, 1);
+        assert_eq!(after.h2d_calls - before.h2d_calls, 4);
+        let len = |t: &TensorMap<U1FusionRule, D, CudaStorage<D>>| {
+            t.logical_space().space().required_len().unwrap()
+        };
+        let payload = |len: usize| (len * std::mem::size_of::<D>()) as u64;
+        assert_eq!(
+            after.h2d_bytes - before.h2d_bytes,
+            payload(len(&u) + len(&s) + len(&vh)) + (max_rows * std::mem::size_of::<i64>()) as u64
+        );
     }
     check::<f64>(&runtime, &leg, 31);
     check::<Complex64>(&runtime, &leg, 32);
@@ -1499,7 +1150,6 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
 /// An independent reference for `s` (#1536): each nonempty
 /// sector's cuSOLVER spectrum, downloaded and placed on a host zero
 /// buffer by [`fill_diagonal_values`]. Returned as widened bits.
-#[cfg(feature = "cuda")]
 fn downloaded_svd_diagonal_bits<R, D>(
     engine: &mut dyn Engine,
     device: &TensorMap<R, D, CudaStorage<D>>,
@@ -1542,13 +1192,11 @@ where
     host.into_iter().map(widened_bits).collect()
 }
 
-#[cfg(feature = "cuda")]
 fn widened_bits<D: FactorScalar>(value: D) -> (u64, u64) {
     let value = value.widen_complex();
     (value.re.to_bits(), value.im.to_bits())
 }
 
-#[cfg(feature = "cuda")]
 fn assert_device_svd_diagonal_matches_the_downloaded_one<R, D>(host: &TensorMap<R, D>)
 where
     R: symtn_core::TypedSectorAdmission<
@@ -1616,7 +1264,6 @@ where
     }
 }
 
-#[cfg(feature = "cuda")]
 /// Every fixture below has a coupled sector on one side only: it has no
 /// block, no route and no diagonal region, and must not shift the others.
 fn assert_device_svd_diagonal_every_dtype<R>(
@@ -1693,14 +1340,13 @@ fn assert_device_svd_diagonal_every_dtype<R>(
     );
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitwise() {
     // What: `s` is written by a device strided copy of each sector's
     // spectrum; it must equal, bit for bit, the host-filled `s` built from
     // the same solver's downloaded spectra, across symmetries, dtypes,
-    // multi-tree (non-aligned) sectors and an empty coupled sector.
+    // multi-tree sectors and an empty coupled sector.
     let runtime = Runtime::builder().build().unwrap();
 
     let u1 = Arc::new(U1FusionRule);
@@ -1751,13 +1397,11 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
 
 /// A payload built from widened components; the imaginary part is dropped
 /// for a real payload.
-#[cfg(feature = "cuda")]
 trait NonfiniteFixture: CudaFactorizationPayload {
     const MAX: f64;
     const SUBNORMAL: f64;
     fn from_parts(re: f64, im: f64) -> Self;
 }
-#[cfg(feature = "cuda")]
 impl NonfiniteFixture for f32 {
     const MAX: f64 = f32::MAX as f64;
     const SUBNORMAL: f64 = (f32::MIN_POSITIVE / 4.0) as f64;
@@ -1765,7 +1409,6 @@ impl NonfiniteFixture for f32 {
         re as f32
     }
 }
-#[cfg(feature = "cuda")]
 impl NonfiniteFixture for f64 {
     const MAX: f64 = f64::MAX;
     const SUBNORMAL: f64 = f64::MIN_POSITIVE / 4.0;
@@ -1773,7 +1416,6 @@ impl NonfiniteFixture for f64 {
         re
     }
 }
-#[cfg(feature = "cuda")]
 impl NonfiniteFixture for num_complex::Complex32 {
     const MAX: f64 = f32::MAX as f64;
     const SUBNORMAL: f64 = (f32::MIN_POSITIVE / 4.0) as f64;
@@ -1781,7 +1423,6 @@ impl NonfiniteFixture for num_complex::Complex32 {
         num_complex::Complex32::new(re as f32, im as f32)
     }
 }
-#[cfg(feature = "cuda")]
 impl NonfiniteFixture for Complex64 {
     const MAX: f64 = f64::MAX;
     const SUBNORMAL: f64 = f64::MIN_POSITIVE / 4.0;
@@ -1793,7 +1434,6 @@ impl NonfiniteFixture for Complex64 {
 /// Three U(1) sectors of `rows x cols` blocks, real symmetric and
 /// diagonally dominant when square; `entry` replaces the last element of the
 /// last sector, so a check that stopped early would miss it.
-#[cfg(feature = "cuda")]
 fn finite_input_fixture<D: NonfiniteFixture>(
     runtime: &Runtime,
     rows: usize,
@@ -1826,7 +1466,6 @@ fn finite_input_fixture<D: NonfiniteFixture>(
     .unwrap()
 }
 
-#[cfg(feature = "cuda")]
 #[derive(Clone, Copy, Debug)]
 enum FiniteInputOp {
     Qr,
@@ -1835,7 +1474,6 @@ enum FiniteInputOp {
 }
 
 /// Runs `op` on the current split; the error is rendered for comparison.
-#[cfg(feature = "cuda")]
 fn run_finite_input_op<D, S>(
     engine: &mut dyn Engine,
     tensor: &TensorMap<U1FusionRule, D, S>,
@@ -1856,7 +1494,6 @@ where
     .map_err(|err| format!("{err:?}"))
 }
 
-#[cfg(feature = "cuda")]
 fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runtime: &Runtime) {
     let cpu = &mut crate::typed::CpuEngine::serial();
     let cuda =
@@ -1934,7 +1571,6 @@ fn assert_device_refuses_nonfinite_input_like_the_host<D: NonfiniteFixture>(runt
     }
 }
 
-#[cfg(feature = "cuda")]
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn typed_cuda_factorizations_refuse_nonfinite_input_with_the_host_error() {

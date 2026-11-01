@@ -137,32 +137,6 @@ where
     R: MultiplicityFreeRigidSymbols<Scalar = f64> + CheckedFusionAlgebra + SectorCodec,
     D: CudaFactorizationPayload,
 {
-    /// The `k x k` identity selector the non-aligned assembly GEMMs need.
-    /// A fully aligned route assembles by copy and uploads nothing.
-    fn identity_selector(
-        cuda: &mut CudaDenseContext,
-        rank: usize,
-        aligned_left: bool,
-        aligned_right: bool,
-    ) -> Result<Option<CudaStorage<D>>, Error> {
-        if aligned_left && aligned_right {
-            return Ok(None);
-        }
-        upload_selector(
-            cuda,
-            rank,
-            rank,
-            (0..rank).map(|index| (index, index, D::ONE)),
-        )
-        .map(Some)
-    }
-
-    fn route_selector(selector: &Option<CudaStorage<D>>) -> Result<&CudaStorage<D>, Error> {
-        selector.as_ref().ok_or_else(|| {
-            internal_layout_error("a non-aligned factor route has no assembly selector")
-        })
-    }
-
     /// The Host compact factor plan of this tensor's matrix view: the one
     /// authority for the bond, the factor spaces and the sector routes.
     pub(super) fn compact_factor_plan(&self) -> Result<CompactFactorPlan, Error> {
@@ -211,7 +185,6 @@ where
         // As for typed CUDA QR, all provider work and final-space admission
         // complete before the execution lock and before any output exists.
         let (source, plan) = self.cuda_factor_preflight(engine, "svd_compact", None)?;
-        let treewise = probe::RoutePolicy::current().svd_treewise;
         let left_space = plan.left_space(self.logical_space())?;
         let right_space = plan.right_space(self.logical_space())?;
         let middle_space = plan.bond_space(self.logical_space())?;
@@ -255,8 +228,7 @@ where
                 let source_region = &plan.source_regions()[route.source_region()];
                 let left_region = &plan.left_regions()[left];
                 let right_region = &plan.right_regions()[right];
-                let aligned_left = !treewise && plan.left_preserves_trees(route);
-                let aligned_right = !treewise && plan.right_preserves_trees(route);
+                require_aligned_route(&plan, route)?;
                 let (raw_left, spectrum, raw_right) = cuda_svd_region::<D>(
                     cuda,
                     &source.0,
@@ -272,10 +244,8 @@ where
                 let weights = weights.as_ref().ok_or_else(|| {
                     internal_layout_error("a compact SVD route has no gauge weights")
                 })?;
-                // The Host gauge (first largest-|U| entry of each column real
-                // and non-negative) is folded into the selector a non-aligned
-                // side multiplies by anyway; only an aligned side, which is a
-                // plain copy, pays a separate scaling pass.
+                // The Host gauge: the first largest-|U| entry of each column
+                // real and non-negative.
                 let phases = cuda_svd_gauge_phases::<D>(
                     cuda,
                     &raw_left,
@@ -284,61 +254,21 @@ where
                     weights,
                 )
                 .map_err(dense_err)?;
-                let (left, left_selector) = if aligned_left {
-                    let left = phases
-                        .scale_left::<D>(cuda, &raw_left, source_region.rows())
-                        .map_err(dense_err)?;
-                    (left, None)
-                } else {
-                    let selector = phases.left_selector::<D>(cuda).map_err(dense_err)?;
-                    (raw_left, Some(selector))
-                };
-                let (right, right_selector) = if aligned_right {
-                    let right = phases
-                        .scale_right::<D>(cuda, &raw_right, source_region.cols())
-                        .map_err(dense_err)?;
-                    (right, None)
-                } else {
-                    let selector = phases.right_selector::<D>(cuda).map_err(dense_err)?;
-                    (raw_right, Some(selector))
-                };
-                drop(phases);
+                let left = phases
+                    .scale_left::<D>(cuda, &raw_left, source_region.rows())
+                    .map_err(dense_err)?;
+                let right = phases
+                    .scale_right::<D>(cuda, &raw_right, source_region.cols())
+                    .map_err(dense_err)?;
+                drop((phases, raw_left, raw_right));
                 // The scratch owns all route-local allocations. It is dropped
                 // at the end of this iteration, bounding peak raw-factor
                 // storage independently of the number of sectors.
-                let scratch =
-                    TypedCudaSvdScratch::<D>::new(left, right, left_selector, right_selector);
+                let scratch = TypedCudaSvdScratch::<D>::new(left, right);
                 // Compact SVD keeps the full rank by construction, so the same
                 // proved layout identity applies as for QR.
-                if aligned_left {
-                    copy_whole_factor(cuda, &mut left_data, left_region, &scratch.left)?;
-                } else {
-                    assemble_left_factor(
-                        cuda,
-                        &mut left_data,
-                        left_region,
-                        source_region,
-                        &scratch.left,
-                        rank,
-                        TypedCudaSvdScratch::<D>::selector(&scratch.left_selector)?,
-                        0,
-                        rank,
-                    )?;
-                }
-                if aligned_right {
-                    copy_whole_factor(cuda, &mut right_data, right_region, &scratch.right)?;
-                } else {
-                    assemble_right_factor(
-                        cuda,
-                        &mut right_data,
-                        right_region,
-                        source_region,
-                        TypedCudaSvdScratch::<D>::selector(&scratch.right_selector)?,
-                        rank,
-                        rank,
-                        &scratch.right,
-                    )?;
-                }
+                copy_whole_factor(cuda, &mut left_data, left_region, &scratch.left)?;
+                copy_whole_factor(cuda, &mut right_data, right_region, &scratch.right)?;
                 symtn_dense::cuda_copy_spectrum_into::<D>(
                     cuda,
                     spectrum,
@@ -380,7 +310,6 @@ where
             "eigh_full",
             Some(symtn_matrixalgebra::seam::EndomorphismFamily::EighFull),
         )?;
-        let policy = probe::RoutePolicy::current();
 
         // Admission is complete. Validate every block before the first EIGH so
         // a late nonfinite or non-Hermitian sector cannot trigger partial
@@ -429,7 +358,7 @@ where
             let mut spectra = Vec::with_capacity(plan.source_regions().len());
             let mut orders = Vec::with_capacity(plan.source_regions().len());
             let mut permuted = false;
-            for (region, sector_index) in plan.source_regions().iter().zip(0usize..) {
+            for region in plan.source_regions().iter() {
                 let n = region.rows();
                 let values = if n == 0 {
                     Vec::new()
@@ -445,13 +374,6 @@ where
                 }
                 let mut order = vec![0; n];
                 let reorder = symtn_matrixalgebra::seam::ascending_eigh_order(&values, &mut order);
-                // A test policy reverses every odd sector's order, so the
-                // selector path sees a real, non-identity permutation.
-                let reorder = reorder
-                    || (policy.eigh_reverse_odd_sectors && sector_index % 2 == 1 && n >= 2 && {
-                        order.reverse();
-                        true
-                    });
                 let sorted = if reorder {
                     permuted = true;
                     order.iter().map(|&index| values[index]).collect()
@@ -464,12 +386,7 @@ where
                 });
                 orders.push(order);
             }
-            (
-                spectra,
-                vectors,
-                orders,
-                permuted || policy.eigh_force_selector,
-            )
+            (spectra, vectors, orders, permuted)
         };
 
         // Every factor-space admission is provider work on the host: no CUDA
@@ -533,25 +450,15 @@ where
                     .take()
                     .ok_or_else(|| internal_layout_error("CUDA EIGH route has no eigenvectors"))?;
                 let left_region = &plan.left_regions()[left];
+                if !plan.left_preserves_trees(route) {
+                    return Err(internal_layout_error(
+                        "a CUDA EIGH eigenvector region does not reproduce its source tree layout",
+                    ));
+                }
                 let n = route.rank();
-                let aligned = plan.left_preserves_trees(route) && !policy.eigh_treewise;
-                let Some(selector) = selector.as_ref() else {
-                    if aligned {
-                        copy_whole_factor(cuda, &mut vector_data, left_region, &raw)?;
-                    } else {
-                        copy_left_factor_treewise(
-                            cuda,
-                            &mut vector_data,
-                            left_region,
-                            &plan.source_regions()[route.source_region()],
-                            &raw,
-                            n,
-                        )?;
-                    }
-                    continue;
-                };
-                if aligned {
-                    assemble_aligned_left_factor(
+                match selector.as_ref() {
+                    None => copy_whole_factor(cuda, &mut vector_data, left_region, &raw)?,
+                    Some(selector) => assemble_aligned_left_factor(
                         cuda,
                         &mut vector_data,
                         left_region,
@@ -560,19 +467,7 @@ where
                         selector,
                         selector_offset,
                         n,
-                    )?;
-                } else {
-                    assemble_left_factor(
-                        cuda,
-                        &mut vector_data,
-                        left_region,
-                        &plan.source_regions()[route.source_region()],
-                        &raw,
-                        n,
-                        &selector.0,
-                        selector_offset,
-                        n,
-                    )?;
+                    )?,
                 }
             }
             (diagonal_data, vector_data)
@@ -675,12 +570,10 @@ where
             #[cfg(test)]
             probe::hit(probe::Event::CudaQrOutputUpload);
             for (route, left, right) in executed_routes(&plan) {
-                let rank = route.rank();
                 let source_region = &plan.source_regions()[route.source_region()];
                 let left_region = &plan.left_regions()[left];
                 let right_region = &plan.right_regions()[right];
-                let aligned_left = plan.left_preserves_trees(route);
-                let aligned_right = plan.right_preserves_trees(route);
+                require_aligned_route(&plan, route)?;
                 let (raw_left, raw_right) = cuda_qr_region::<D>(
                     cuda,
                     &source.0,
@@ -688,37 +581,9 @@ where
                     source_region.rows(),
                     source_region.cols(),
                 )?;
-                let selector = Self::identity_selector(cuda, rank, aligned_left, aligned_right)?;
-                let scratch = TypedCudaQrScratch::new(raw_left, raw_right, selector);
-                if aligned_left {
-                    copy_whole_factor(cuda, &mut left_data, left_region, &scratch.left)?;
-                } else {
-                    assemble_left_factor(
-                        cuda,
-                        &mut left_data,
-                        left_region,
-                        source_region,
-                        &scratch.left,
-                        rank,
-                        &Self::route_selector(&scratch.selector)?.0,
-                        0,
-                        rank,
-                    )?;
-                }
-                if aligned_right {
-                    copy_whole_factor(cuda, &mut right_data, right_region, &scratch.right)?;
-                } else {
-                    assemble_right_factor(
-                        cuda,
-                        &mut right_data,
-                        right_region,
-                        source_region,
-                        &Self::route_selector(&scratch.selector)?.0,
-                        rank,
-                        rank,
-                        &scratch.right,
-                    )?;
-                }
+                let scratch = TypedCudaQrScratch::new(raw_left, raw_right);
+                copy_whole_factor(cuda, &mut left_data, left_region, &scratch.left)?;
+                copy_whole_factor(cuda, &mut right_data, right_region, &scratch.right)?;
             }
             (left_data, right_data)
         };
