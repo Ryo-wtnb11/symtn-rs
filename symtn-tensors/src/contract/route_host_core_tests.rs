@@ -265,7 +265,7 @@ fn eager_host_routes_accumulate_alpha_times_product_plus_beta_times_destination(
     // No physical basis for fermions: the unit product is the eager one,
     // checked against TensorKit's `blas_contract!` steps with the twist on
     // the same geometry by the typed layer
-    // (`symtn/tests/typed_contract_host_oracle.rs`).
+    // (`symtn/tests/engine_suites/contract.rs`).
     check_accumulation_with(
         "fermionic twisted dynamicTree",
         &fermionic,

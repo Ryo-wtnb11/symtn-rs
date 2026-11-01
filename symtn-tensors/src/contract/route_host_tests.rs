@@ -7,7 +7,7 @@
 //! operands, or, for the twisted fermionic fixture (no physical basis), the
 //! eager contraction of those operands, whose values the typed layer checks
 //! against TensorKit's `blas_contract!` steps on the same geometry
-//! (`symtn/tests/typed_contract_host_oracle.rs`, `contract_cases::fermionic_general`).
+//! (`symtn/tests/engine_suites/contract.rs`, `contract_cases::fermionic_general`).
 
 use super::*;
 use crate::contract::fusion_block::FusionBlockContractWorkspace;
