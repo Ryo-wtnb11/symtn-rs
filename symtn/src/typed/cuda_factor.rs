@@ -110,8 +110,9 @@ pub(crate) fn cuda_download_spectra<D: CudaPayload>(
 /// Only valid on a route the plan proved layout-aligned: the target's
 /// codomain trees tile it exactly as the source's do.
 ///
-/// The product is exact data movement: each selector column holds a single
-/// unit entry. Why not Tenferro `gather`: at 0.7.1 it reads owned index
+/// Each selector column holds a single unit entry, so the product is
+/// mathematically a column permutation of `factor`; it is still a GEMM, so
+/// the result is not promised to be the source bits. Why not Tenferro `gather`: at 0.7.1 it reads owned index
 /// tensors only, so one index upload per call would need a device slice copy
 /// per route to feed it.
 #[allow(clippy::too_many_arguments)]
