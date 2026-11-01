@@ -142,9 +142,14 @@ again, once per distinct share width during the sweep (rebuilding the winning
 placement may repeat up to two widths), since a block the provider keeps
 serial at the full count stays serial at every narrower share; a lane count
 whose proved lower bound on its score is not below the best score so far is
-not placed. An executor that schedules repeatedly keeps its last searched
-allocation, and a batch whose times, grant inputs, engine policy, mean work,
-budget and dispatch costs are all unchanged replays it without a query. Prepared
+not placed. Each searched allocation is kept in the process-global structure
+cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
+function of (the engine's budget, work model, team and dispatch cost at every
+width, the mean work, and each block's serial time and grant inputs), so a
+batch already searched, on any executor including an eager call's fresh one,
+rebuilds its lanes without a query. Each entry is charged its inline key and
+entry, the entry overhead, and its per-block, per-width and per-lane slices;
+with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane

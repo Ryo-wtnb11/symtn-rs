@@ -109,7 +109,7 @@ pub(crate) type GemmPlanCache = StructureCache<GemmPlanKey, ErasedPlan>;
 
 /// quick_cache node and the entry's `Arc` control, per entry (as the
 /// completed-transformer cache charges).
-const ENTRY_OVERHEAD_BYTES: usize = 10 * core::mem::size_of::<usize>();
+pub(crate) const ENTRY_OVERHEAD_BYTES: usize = 10 * core::mem::size_of::<usize>();
 
 /// Heap a plan owns besides its scatter vectors: the problem's layouts and
 /// roles, the report and diagnostics, a Packed plan's box with its resolved

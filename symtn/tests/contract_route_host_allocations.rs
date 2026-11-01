@@ -8,7 +8,10 @@
 //! - a warm eager call and a new workspace's cold call cost per call, not per
 //!   block: a larger structure of the same family (more sectors, so more
 //!   blocks) adds fewer allocation calls than it adds blocks;
-//! - dropping a warmed workspace frees no more than its `retained_bytes`.
+//! - dropping a warmed workspace frees no more than its `retained_bytes`;
+//! - on a four-thread engine, a second identical eager contraction (a fresh
+//!   dense executor) takes its lane allocation from the process-global
+//!   lane-allocation cache instead of searching again.
 //!
 //! Exact counts are printed, not pinned: they move with platform and
 //! dependency internals. The blocks stay small enough that the dense
@@ -19,7 +22,9 @@ use std::sync::Arc;
 
 use symtn::cache::StructureCacheKind;
 use symtn::sector::{U1FusionRule, U1Irrep};
-use symtn::typed::{ContractPlan, ContractSpec, GradedSpace, Runtime, StackedTensorMap, TensorMap};
+use symtn::typed::{
+    ContractPlan, ContractSpec, CpuEngine, GradedSpace, Pool, Runtime, StackedTensorMap, TensorMap,
+};
 
 use crate::counting_alloc;
 
@@ -188,4 +193,59 @@ fn core_and_copy_c_route_allocations_follow_their_contracts() {
             );
         }
     }
+}
+
+fn lane_allocations() -> (u64, u64) {
+    let info = symtn::cache::stats()
+        .into_iter()
+        .find(|info| info.kind() == StructureCacheKind::LaneAllocations)
+        .unwrap();
+    (info.hits(), info.misses())
+}
+
+#[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "the lane search is the native grouped GEMM kernel's; a BLAS provider runs its own batch"
+)]
+fn warm_eager_contract_takes_its_lane_allocation_from_the_cache() {
+    let _serial = crate::counting_alloc::serial();
+    let engine = &mut CpuEngine::new(Pool::builder().threads(4).build().unwrap());
+    let runtime = Runtime::builder().build().unwrap();
+    let rule = Arc::new(U1FusionRule);
+    // Unequal blocks large enough that the engine grants the batch several
+    // threads, so the kernel searches its lanes.
+    let v = GradedSpace::try_new(
+        rule,
+        (-3..=3).map(|charge: i32| {
+            (
+                U1Irrep::new(charge),
+                48 - 8 * charge.unsigned_abs() as usize,
+            )
+        }),
+    )
+    .unwrap();
+    let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 5).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v], [&v], 6).unwrap();
+    let spec = ContractSpec {
+        lhs: &[1],
+        rhs: &[0],
+        codomain: &[0],
+        domain: &[1],
+    };
+    let cold = a.contract(engine, &b, &spec).unwrap();
+    let (hits, misses) = lane_allocations();
+    let warm = a.contract(engine, &b, &spec).unwrap();
+    let (warm_hits, warm_misses) = lane_allocations();
+    // What: the warm call is a hit and searches nothing new; the result is
+    // the cold call's.
+    assert!(warm_hits > hits, "{hits} -> {warm_hits}");
+    assert_eq!(warm_misses, misses);
+    assert_eq!(warm.dense_data().unwrap(), cold.dense_data().unwrap());
 }

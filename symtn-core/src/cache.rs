@@ -10,8 +10,8 @@
 //! [`structure_cache_infos`], [`set_structure_cache_byte_budget`] and
 //! [`clear_structure_caches`] cover every kind, including the
 //! completed-transformer and composed-coefficient caches that `symtn-tensors`
-//! owns and the GEMM-plan cache that `symtn-dense` owns, each registered on
-//! first use ([`register_structure_cache`]).
+//! owns and the GEMM-plan and lane-allocation caches that `symtn-dense`
+//! owns, each registered on first use ([`register_structure_cache`]).
 //!
 //! Why `quick_cache` and not one `RwLock<LruCache>` per cache: a warm hit is
 //! one shard read with a borrowed key, eviction weighs entries by their
@@ -53,16 +53,23 @@ pub enum StructureCacheKind {
     /// strides, conjugation), shared by every Runtime and engine of the
     /// process. No TensorKit analogue: TensorKit calls BLAS `mul!` per block.
     GemmPlans,
+    /// Searched lane allocations of block batches per schedule input (budget,
+    /// batch policy, mean work, team, dispatch costs, per-block serial times
+    /// and grant inputs), shared by every Runtime and engine of the process.
+    /// No TensorKit or QSpace analogue: both run blocks serially or under
+    /// BLAS threads, with no lane search.
+    LaneAllocations,
 }
 
 impl StructureCacheKind {
     /// Every structure cache, in a fixed order.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::SectorStructure,
         Self::DegeneracyStructure,
         Self::CompletedTreeTransformer,
         Self::TreeTransformCoefficients,
         Self::GemmPlans,
+        Self::LaneAllocations,
     ];
 }
 
@@ -266,7 +273,7 @@ impl<K, V> Lifecycle<K, V> for CountEvictions {
 /// One structure cache: values are `Arc<V>`, weighed by the bytes the caller
 /// charges for them. Cross-crate only for the completed-transformer and
 /// composed-coefficient caches, whose owners live in `symtn-tensors`, and the
-/// GEMM-plan cache, whose owner lives in `symtn-dense`.
+/// GEMM-plan and lane-allocation caches, whose owner lives in `symtn-dense`.
 #[doc(hidden)]
 pub struct StructureCache<K, V: ?Sized> {
     kind: StructureCacheKind,
@@ -559,12 +566,14 @@ impl ExternalSlot {
 static COMPLETED_TREE_TRANSFORMER: ExternalSlot = ExternalSlot::new();
 static TREE_TRANSFORM_COEFFICIENTS: ExternalSlot = ExternalSlot::new();
 static GEMM_PLANS: ExternalSlot = ExternalSlot::new();
+static LANE_ALLOCATIONS: ExternalSlot = ExternalSlot::new();
 
 fn external_slot(kind: StructureCacheKind) -> Option<&'static ExternalSlot> {
     match kind {
         StructureCacheKind::CompletedTreeTransformer => Some(&COMPLETED_TREE_TRANSFORMER),
         StructureCacheKind::TreeTransformCoefficients => Some(&TREE_TRANSFORM_COEFFICIENTS),
         StructureCacheKind::GemmPlans => Some(&GEMM_PLANS),
+        StructureCacheKind::LaneAllocations => Some(&LANE_ALLOCATIONS),
         StructureCacheKind::SectorStructure | StructureCacheKind::DegeneracyStructure => None,
     }
 }
@@ -618,6 +627,7 @@ pub fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         StructureCacheKind::CompletedTreeTransformer => &COMPLETED_TREE_TRANSFORMER,
         StructureCacheKind::TreeTransformCoefficients => &TREE_TRANSFORM_COEFFICIENTS,
         StructureCacheKind::GemmPlans => &GEMM_PLANS,
+        StructureCacheKind::LaneAllocations => &LANE_ALLOCATIONS,
     };
     if let Some(control) = slot.control.get() {
         return control.info();
@@ -666,6 +676,7 @@ pub fn set_structure_cache_byte_budget(kind: StructureCacheKind, bytes: u64) {
         StructureCacheKind::CompletedTreeTransformer => &COMPLETED_TREE_TRANSFORMER,
         StructureCacheKind::TreeTransformCoefficients => &TREE_TRANSFORM_COEFFICIENTS,
         StructureCacheKind::GemmPlans => &GEMM_PLANS,
+        StructureCacheKind::LaneAllocations => &LANE_ALLOCATIONS,
     };
     let control = {
         let mut pending = slot
@@ -691,6 +702,7 @@ pub(crate) fn clear_registered_structure_caches() {
         &COMPLETED_TREE_TRANSFORMER,
         &TREE_TRANSFORM_COEFFICIENTS,
         &GEMM_PLANS,
+        &LANE_ALLOCATIONS,
     ] {
         if let Some(control) = slot.control.get() {
             control.clear();
@@ -997,7 +1009,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_listed_once_and_the_externally_owned_kinds_have_their_own_slots() {
-        assert_eq!(StructureCacheKind::ALL.len(), 5);
+        assert_eq!(StructureCacheKind::ALL.len(), 6);
         for kind in StructureCacheKind::ALL {
             assert_eq!(
                 StructureCacheKind::ALL
@@ -1007,14 +1019,18 @@ mod tests {
                 1
             );
         }
-        // What: the two `symtn-tensors` caches and the `symtn-dense` cache
-        // register in distinct slots; the core-owned kinds refuse
+        // What: the two `symtn-tensors` caches and the two `symtn-dense`
+        // caches register in distinct slots; the core-owned kinds refuse
         // registration.
         let completed = external_slot(StructureCacheKind::CompletedTreeTransformer).unwrap();
         let coefficients = external_slot(StructureCacheKind::TreeTransformCoefficients).unwrap();
         let gemm = external_slot(StructureCacheKind::GemmPlans).unwrap();
         assert!(!std::ptr::eq(completed, coefficients));
-        assert!(!std::ptr::eq(gemm, completed) && !std::ptr::eq(gemm, coefficients));
+        let lanes = external_slot(StructureCacheKind::LaneAllocations).unwrap();
+        let slots = [completed, coefficients, gemm, lanes];
+        for (i, a) in slots.iter().enumerate() {
+            assert!(slots[i + 1..].iter().all(|b| !std::ptr::eq(*a, *b)));
+        }
         assert!(external_slot(StructureCacheKind::SectorStructure).is_none());
         assert!(external_slot(StructureCacheKind::DegeneracyStructure).is_none());
         let info = structure_cache_info(StructureCacheKind::TreeTransformCoefficients);

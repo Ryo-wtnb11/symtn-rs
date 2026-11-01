@@ -29,17 +29,25 @@
 //! two widths). A proved lower bound costs `O(J')` per lane count for the J'
 //! widened jobs, the others entering it as one precomputed sum and maximum,
 //! and only the `P <= L0` counts whose bound is below the best score so far
-//! are placed, with one heap per width class. A repeated call whose inputs
-//! are all unchanged replays the scratch's last searched allocation in
-//! `O(J + S)` without a query.
+//! are placed, with one heap per width class. A searched allocation is kept
+//! in the process-global [`StructureCacheKind::LaneAllocations`] cache, so a
+//! call whose inputs were all searched before, on any executor, rebuilds it
+//! in `O(J + P)` without a query.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use tcontract_exec::{BatchDecision, BatchPolicy, BatchQuery, BatchStrategy, Exec, WorkModel};
+use symtn_core::{
+    ErasedStructureCacheControl, StructureCache, StructureCacheEquivalent, StructureCacheInfo,
+    StructureCacheKind,
+};
+use tcontract_exec::{BatchDecision, BatchQuery, BatchStrategy, Exec, WorkModel};
+
+use super::gemm::ENTRY_OVERHEAD_BYTES;
 
 /// One lane: its reserved slot budget and its jobs in ascending canonical
 /// order.
@@ -99,7 +107,6 @@ pub(crate) struct AllocationScratch {
     narrow: Vec<Reverse<(Duration, usize, usize)>>,
     columns: Columns,
     keys: Vec<GrantKey>,
-    memo: Memo,
 }
 
 impl AllocationScratch {
@@ -131,118 +138,220 @@ impl AllocationScratch {
             )
             .saturating_add(self.columns.retained_bytes())
             .saturating_add(self.keys.capacity().saturating_mul(size_of::<GrantKey>()))
-            .saturating_add(self.memo.retained_bytes())
     }
 }
 
 /// What a job's grant depends on besides its serial time and the execution
 /// context: jobs with equal keys and equal serial times get equal grants at
-/// every width. Every op whose jobs share one scratch must give different
-/// grant inputs different keys.
+/// every width. Every op that reaches the process-global
+/// [`lane_allocations`] cache must give different grant inputs different
+/// keys.
 pub(crate) type GrantKey = [u64; 2];
 
-/// The last searched allocation and everything it was computed from: one
-/// entry, replaced by every searched allocation, so its bytes are bounded by
-/// the largest batch the owner has scheduled.
+/// Everything a searched allocation is a function of, as the
+/// [`StructureCacheKind::LaneAllocations`] cache keys it.
 ///
 /// Why the key is complete: a searched allocation is a function of the
-/// context's budget P, its batch policy (strategy and work model), the mean
-/// work (the batch decision), the token's dispatch cost at every width
-/// `2..=P` (the slot count, the batch decision, every grant and every item
-/// time read only those), whether the token carries a team (the Faer grant's
-/// item parallelism), the jobs' serial times in canonical order (the slot
-/// count, the order, the placements and the scores) and their grant keys
-/// (every other grant input). The grant function itself is fixed by the
-/// owner's op, whose keys distinguish its grant inputs.
-#[derive(Debug, Default)]
-struct Memo {
+/// context's budget P, its work model (the strategy is Auto, the only one
+/// that searches), the mean work (the batch decision), the token's dispatch
+/// cost at every width `2..=P` (the slot count, the batch decision, every
+/// grant and every item time read only those), whether the token carries a
+/// team (the Faer grant's item parallelism), the jobs' serial times in
+/// canonical order (the slot count, the order, the placements and the
+/// scores) and their grant keys (every other grant input). The grant
+/// function itself is not keyed: the process-global cache is reached only
+/// through `driver::on_lanes`, which searches only GEMM blocks, and every
+/// GEMM block op grants through `gemm::grant`, whose other inputs its keys
+/// carry. Floats are keyed by their bits, so equality is reflexive and a
+/// differently signed zero only searches again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaneAllocationKey {
     budget: usize,
-    policy: BatchPolicy,
+    model: [u64; 5],
     mean_work: u64,
     team: bool,
-    costs: Vec<Duration>,
-    times: Vec<Duration>,
-    keys: Vec<GrantKey>,
-    slots: usize,
-    /// The batch decision; none until the first store.
-    decision: Option<BatchDecision>,
-    /// Each lane's budget and the end of its jobs in `jobs`.
-    lanes: Vec<(usize, usize)>,
-    jobs: Vec<usize>,
+    costs: Box<[Duration]>,
+    times: Box<[Duration]>,
+    keys: Box<[GrantKey]>,
 }
 
-impl Memo {
-    /// The stored batch decision when every key field equals this call's.
-    fn hit(
-        &self,
-        exec: &Exec<'_>,
-        times: &[Duration],
-        keys: &[GrantKey],
-        mean_work: f64,
-    ) -> Option<BatchDecision> {
-        let same = self.budget == exec.budget()
-            && self.policy == *exec.batch_policy()
-            && self.mean_work == mean_work.to_bits()
-            && self.team == exec.token_ref().carries_team()
-            && self.times == times
-            && self.keys == keys
-            && self.costs.len() + 1 == self.budget
-            && self.costs.iter().enumerate().all(|(i, &cost)| {
-                NonZeroUsize::new(i + 2)
-                    .is_some_and(|width| exec.token_ref().dispatch_cost(width) == cost)
-            });
-        self.decision.filter(|_| same)
+/// One call's [`LaneAllocationKey`], borrowed: a lookup reads the dispatch
+/// costs from the token instead of staging them, so a hit allocates nothing.
+struct LaneAllocationQuery<'a, 'e> {
+    exec: &'a Exec<'e>,
+    times: &'a [Duration],
+    keys: &'a [GrantKey],
+    mean_work: f64,
+}
+
+/// The work model's fields, by bits.
+fn model_bits(model: &WorkModel) -> [u64; 5] {
+    [
+        model.item_overhead_ns.to_bits(),
+        model.muladds_per_ns.to_bits(),
+        model.min_work_per_lane_ns.to_bits(),
+        model.min_items as u64,
+        model.min_items_per_lane as u64,
+    ]
+}
+
+/// The token's dispatch cost at every width `2..=budget`.
+fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a {
+    (2..=exec.budget())
+        .filter_map(NonZeroUsize::new)
+        .map(|width| exec.token_ref().dispatch_cost(width))
+}
+
+/// The one hash of a key and of its borrowed query, field by field.
+#[allow(clippy::too_many_arguments)]
+fn hash_key<H: Hasher>(
+    state: &mut H,
+    budget: usize,
+    model: [u64; 5],
+    mean_work: u64,
+    team: bool,
+    costs: (usize, impl Iterator<Item = Duration>),
+    times: &[Duration],
+    keys: &[GrantKey],
+) {
+    (budget, model, mean_work, team).hash(state);
+    state.write_usize(costs.0);
+    costs.1.for_each(|cost| cost.hash(state));
+    times.hash(state);
+    keys.hash(state);
+}
+
+impl Hash for LaneAllocationKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_key(
+            state,
+            self.budget,
+            self.model,
+            self.mean_work,
+            self.team,
+            (self.costs.len(), self.costs.iter().copied()),
+            &self.times,
+            &self.keys,
+        );
+    }
+}
+
+impl LaneAllocationQuery<'_, '_> {
+    fn model(&self) -> [u64; 5] {
+        model_bits(&self.exec.batch_policy().model)
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn store(
-        &mut self,
-        exec: &Exec<'_>,
-        times: &[Duration],
-        keys: &[GrantKey],
-        mean_work: f64,
-        slots: usize,
-        decision: BatchDecision,
-        lanes: &[Lane],
-    ) {
-        self.budget = exec.budget();
-        self.policy = *exec.batch_policy();
-        self.mean_work = mean_work.to_bits();
-        self.team = exec.token_ref().carries_team();
-        self.costs.clear();
-        self.costs.extend(
-            (2..=self.budget)
-                .filter_map(NonZeroUsize::new)
-                .map(|width| exec.token_ref().dispatch_cost(width)),
-        );
-        self.times.clear();
-        self.times.extend_from_slice(times);
-        self.keys.clear();
-        self.keys.extend_from_slice(keys);
-        self.slots = slots;
-        self.decision = Some(decision);
-        self.lanes.clear();
-        self.jobs.clear();
-        for lane in lanes {
-            self.jobs.extend_from_slice(&lane.jobs);
-            self.lanes.push((lane.budget, self.jobs.len()));
+    fn team(&self) -> bool {
+        self.exec.token_ref().carries_team()
+    }
+
+    fn to_key(&self) -> LaneAllocationKey {
+        LaneAllocationKey {
+            budget: self.exec.budget(),
+            model: self.model(),
+            mean_work: self.mean_work.to_bits(),
+            team: self.team(),
+            costs: dispatch_costs(self.exec).collect(),
+            times: self.times.into(),
+            keys: self.keys.into(),
         }
     }
+}
 
-    fn retained_bytes(&self) -> usize {
-        use std::mem::size_of;
-        [
-            self.costs.capacity().saturating_mul(size_of::<Duration>()),
-            self.times.capacity().saturating_mul(size_of::<Duration>()),
-            self.keys.capacity().saturating_mul(size_of::<GrantKey>()),
-            self.lanes
-                .capacity()
-                .saturating_mul(size_of::<(usize, usize)>()),
-            self.jobs.capacity().saturating_mul(size_of::<usize>()),
-        ]
-        .into_iter()
-        .fold(0, usize::saturating_add)
+impl Hash for LaneAllocationQuery<'_, '_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let budget = self.exec.budget();
+        hash_key(
+            state,
+            budget,
+            self.model(),
+            self.mean_work.to_bits(),
+            self.team(),
+            (budget.saturating_sub(1), dispatch_costs(self.exec)),
+            self.times,
+            self.keys,
+        );
     }
+}
+
+impl StructureCacheEquivalent<LaneAllocationKey> for LaneAllocationQuery<'_, '_> {
+    fn equivalent(&self, key: &LaneAllocationKey) -> bool {
+        key.budget == self.exec.budget()
+            && key.model == self.model()
+            && key.mean_work == self.mean_work.to_bits()
+            && key.team == self.team()
+            && *key.times == *self.times
+            && *key.keys == *self.keys
+            && key.costs.len() + 1 == key.budget
+            && key.costs.iter().copied().eq(dispatch_costs(self.exec))
+    }
+}
+
+/// A searched allocation, immutable: the slot count, the batch decision,
+/// each lane's budget and the end of its jobs in `jobs`.
+#[derive(Debug)]
+pub(crate) struct LaneAllocationEntry {
+    slots: usize,
+    decision: BatchDecision,
+    lanes: Box<[(usize, usize)]>,
+    jobs: Box<[usize]>,
+}
+
+pub(crate) type LaneAllocationCache = StructureCache<LaneAllocationKey, LaneAllocationEntry>;
+
+/// The bytes charged for one cached allocation: the inline key and entry,
+/// the entry overhead, and its boxed slices (`P - 1` costs, J times, keys
+/// and job indices, one pair per lane). Saturates.
+fn charge(key: &LaneAllocationKey, entry: &LaneAllocationEntry) -> u64 {
+    use std::mem::size_of;
+    [
+        size_of::<LaneAllocationKey>(),
+        size_of::<LaneAllocationEntry>(),
+        ENTRY_OVERHEAD_BYTES,
+        key.costs.len().saturating_mul(size_of::<Duration>()),
+        key.times.len().saturating_mul(size_of::<Duration>()),
+        key.keys.len().saturating_mul(size_of::<GrantKey>()),
+        entry
+            .lanes
+            .len()
+            .saturating_mul(size_of::<(usize, usize)>()),
+        entry.jobs.len().saturating_mul(size_of::<usize>()),
+    ]
+    .into_iter()
+    .fold(0, |total: u64, bytes| total.saturating_add(bytes as u64))
+}
+
+struct LaneAllocationsControl;
+
+impl ErasedStructureCacheControl for LaneAllocationsControl {
+    fn info(&self) -> StructureCacheInfo {
+        lane_allocations().info()
+    }
+
+    fn clear(&self) {
+        ErasedStructureCacheControl::clear(lane_allocations())
+    }
+
+    fn set_byte_budget(&self, bytes: u64) {
+        ErasedStructureCacheControl::set_byte_budget(lane_allocations(), bytes)
+    }
+}
+
+/// The process-global lane-allocation cache, registered with `symtn-core`'s
+/// structure-cache registry on first use.
+pub(crate) fn lane_allocations() -> &'static LaneAllocationCache {
+    static CACHE: OnceLock<LaneAllocationCache> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        // Refused only if another crate claimed the slot first. Then
+        // `symtn::cache::clear` cannot reach this cache, so it admits
+        // nothing: every batch searches per call, with identical results.
+        let budget = symtn_core::register_structure_cache(
+            StructureCacheKind::LaneAllocations,
+            &LaneAllocationsControl,
+        )
+        .unwrap_or(0);
+        StructureCache::new(StructureCacheKind::LaneAllocations, budget)
+    })
 }
 
 /// `count` empty lanes, reusing `pool`'s lane and job capacity; lanes beyond
@@ -274,6 +383,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
         |_| [0; 2],
         mean_work,
         &mut AllocationScratch::default(),
+        &LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0),
         Some(|_, _, _| 1),
     )
 }
@@ -298,16 +408,22 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
 /// `w` reserved slots, and `key(j)` its other inputs (see [`GrantKey`]);
 /// Auto scores its candidates with it (see the module documentation), and
-/// replays the scratch's last searched allocation when every input it was
-/// computed from is unchanged (see [`Memo`]). Without a grant, and under a
-/// forced strategy, the baseline placement is returned and no candidate is
-/// scored; `key` is then not called.
+/// takes a searched allocation from `cache` when one was computed from the
+/// same inputs (see [`LaneAllocationKey`]), offering each new search for
+/// admission. Without a grant, and under a forced strategy, the baseline
+/// placement is returned and no candidate is scored; `key` is then not
+/// called.
+///
+/// Why a lookup and a publish rather than the cache's single-flight build:
+/// that build takes an owned key, which a hit would have to stage. Racing
+/// misses of one key each search, and the losers count as duplicate builds.
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
     key: impl Fn(usize) -> GrantKey,
     mean_work: f64,
     scratch: &mut AllocationScratch,
+    cache: &LaneAllocationCache,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
     // The keys are staged only where a search can run (two or more jobs and
@@ -317,7 +433,7 @@ pub(crate) fn allocate_in(
     if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
         keys.extend((0..times.len()).map(key));
     }
-    let allocation = allocate_with(exec, times, &keys, mean_work, scratch, grant);
+    let allocation = allocate_with(exec, times, &keys, mean_work, scratch, cache, grant);
     scratch.keys = keys;
     allocation
 }
@@ -328,30 +444,35 @@ fn allocate_with(
     keys: &[GrantKey],
     mean_work: f64,
     scratch: &mut AllocationScratch,
+    cache: &LaneAllocationCache,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
     let pool = std::mem::take(&mut scratch.lanes);
-    let searches = grant.is_some()
+    // The keys are staged only where a search can run.
+    let query = (grant.is_some()
         && exec.batch_policy().strategy == BatchStrategy::Auto
-        && keys.len() == jobs;
-    let hit = searches
-        .then(|| scratch.memo.hit(exec, times, keys, mean_work))
-        .flatten();
-    if let Some(decision) = hit {
-        let memo = &scratch.memo;
-        let mut lanes = lanes_from(pool, &mut scratch.spare, memo.lanes.len());
+        && !keys.is_empty())
+    .then_some(LaneAllocationQuery {
+        exec,
+        times,
+        keys,
+        mean_work,
+    });
+    let epoch = symtn_core::core_reset_epoch();
+    if let Some(entry) = query.as_ref().and_then(|query| cache.get(query)) {
+        let mut lanes = lanes_from(pool, &mut scratch.spare, entry.lanes.len());
         let mut start = 0;
-        for (lane, &(budget, end)) in lanes.iter_mut().zip(&memo.lanes) {
+        for (lane, &(budget, end)) in lanes.iter_mut().zip(&entry.lanes) {
             lane.budget = budget;
-            lane.jobs.extend_from_slice(&memo.jobs[start..end]);
+            lane.jobs.extend_from_slice(&entry.jobs[start..end]);
             start = end;
         }
         return Allocation {
             budget,
-            slots: memo.slots,
-            decision,
+            slots: entry.slots,
+            decision: entry.decision,
             lanes,
         };
     }
@@ -457,9 +578,23 @@ fn allocate_with(
         }
         scratch.columns = columns;
         scratch.narrow = narrow;
-        scratch
-            .memo
-            .store(exec, times, keys, mean_work, slots, decision, &assigned);
+        if let Some(query) = query {
+            let key = query.to_key();
+            let mut ends = Vec::with_capacity(assigned.len());
+            let mut placed = Vec::with_capacity(jobs);
+            for lane in &assigned {
+                placed.extend_from_slice(&lane.jobs);
+                ends.push((lane.budget, placed.len()));
+            }
+            let entry = LaneAllocationEntry {
+                slots,
+                decision,
+                lanes: ends.into(),
+                jobs: placed.into(),
+            };
+            let bytes = charge(&key, &entry);
+            cache.publish(&key, Arc::new(entry), bytes, epoch);
+        }
     }
     scratch.order = order;
     scratch.load = load;
@@ -1073,6 +1208,7 @@ mod tests {
                     |_| [0; 2],
                     mean_work,
                     &mut AllocationScratch::default(),
+                    &uncached(),
                     Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1)),
                 ))
             })
@@ -1081,6 +1217,16 @@ mod tests {
 
     fn lanes(a: &Allocation) -> Vec<(usize, Vec<usize>)> {
         a.lanes.iter().map(|l| (l.budget, l.jobs.clone())).collect()
+    }
+
+    /// A lane-allocation cache of its own, so a test sees no other test's
+    /// entries; a budget of zero admits nothing.
+    fn cache(budget: u64) -> LaneAllocationCache {
+        LaneAllocationCache::new(StructureCacheKind::LaneAllocations, budget)
+    }
+
+    fn uncached() -> LaneAllocationCache {
+        cache(0)
     }
 
     /// A test-local model of the scheduler for a flat dispatch cost `d` and
@@ -1261,14 +1407,13 @@ mod tests {
         assert_eq!(lanes(&a), [(2, vec![0, 2, 3, 6]), (2, vec![1, 4, 5, 7])]);
     }
 
-    /// Purpose: a warm allocation reuses its scratch even when the search
-    /// narrows main's four lanes to one (a 40000 ns block and three 100 ns
-    /// ones on four slots, flat 100 ns dispatch). Two batches alternate, so
-    /// each call misses the replay and searches: the set-aside lanes and
-    /// the replay's tables are kept, and a warm call allocates and frees
-    /// nothing.
+    /// Purpose: a cached allocation is rebuilt into the scratch's kept lane
+    /// tables, so a warm hit allocates and frees nothing even where the
+    /// search narrowed main's four lanes to one (a 40000 ns block and three
+    /// 100 ns ones on four slots, flat 100 ns dispatch). Two batches
+    /// alternate, so each hit replaces the other's lanes.
     #[test]
-    fn warm_fewer_lane_allocation_allocates_nothing() {
+    fn warm_cached_fewer_lane_allocation_allocates_nothing() {
         use crate::tests::counting_alloc;
         let batches = [
             nanos(&[40000, 100, 100, 100]),
@@ -1279,6 +1424,7 @@ mod tests {
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
         let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+        let cache = cache(1 << 20);
         engine
             .with_contraction_exec(|exec, _, _| {
                 let exec: &Exec<'_> = exec;
@@ -1289,7 +1435,15 @@ mod tests {
                         queries.set(queries.get() + 1);
                         exec.width_for_within(w, t.as_nanos() as f64, 1)
                     };
-                    let a = allocate_in(exec, t, |j| keys[j], 10075.0, &mut scratch, Some(grant));
+                    let a = allocate_in(
+                        exec,
+                        t,
+                        |j| keys[j],
+                        10075.0,
+                        &mut scratch,
+                        &cache,
+                        Some(grant),
+                    );
                     let chosen = (a.decision.lanes, a.lanes.len());
                     scratch.keep(a);
                     chosen
@@ -1301,7 +1455,7 @@ mod tests {
                     queries.set(0);
                     let (chosen, allocs) = counting_alloc::measure(|| call(t));
                     assert_eq!(chosen, (4, 1));
-                    assert!(queries.get() > 0, "the call searched");
+                    assert_eq!(queries.get(), 0, "the call hit");
                     assert_eq!((allocs.calls, allocs.frees), (0, 0));
                 }
                 Ok(())
@@ -1333,6 +1487,7 @@ mod tests {
                         |j| keys[j],
                         1e9,
                         &mut AllocationScratch::default(),
+                        &uncached(),
                         Some(grant),
                     ))
                 })
@@ -1355,19 +1510,21 @@ mod tests {
         assert_eq!(count, times.len());
     }
 
-    /// Purpose: a repeated allocation with every input unchanged replays the
-    /// last searched one without a grant query, and changing any one input
-    /// it depends on (a serial time, a grant key, the mean work, the work
-    /// model, the dispatch costs, the budget, the token's team) searches
-    /// again.
+    /// Purpose: a repeated allocation with every input unchanged is taken
+    /// from the cache without a grant query and equals the searched one;
+    /// changing any one input it depends on (a serial time, a grant key, the
+    /// mean work, the work model, the dispatch costs, the budget, the
+    /// token's team) searches again; after a clear, and on a disabled cache
+    /// at every call, it searches and finds the cached allocation.
     #[test]
-    fn unchanged_inputs_replay_and_any_change_searches() {
+    fn unchanged_inputs_hit_and_any_change_searches() {
         let t = nanos(&[40000, 100, 100, 100]);
         let keys = [[0; 2]; 4];
         let model = WorkModel::default()
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
         let policy = BatchPolicy::default().with_model(model);
+        let cache = cache(1 << 20);
         let mut scratch = AllocationScratch::default();
         let queries = std::cell::Cell::new(0);
         // Runs one allocation on `exec` and returns its lanes and whether
@@ -1378,7 +1535,15 @@ mod tests {
                 queries.set(queries.get() + 1);
                 exec.width_for_within(w, t.as_nanos() as f64, 1)
             };
-            let a = allocate_in(exec, t, |j| keys[j], mean, &mut scratch, Some(grant));
+            let a = allocate_in(
+                exec,
+                t,
+                |j| keys[j],
+                mean,
+                &mut scratch,
+                &cache,
+                Some(grant),
+            );
             let result = (lanes(&a), queries.get() > 0);
             scratch.keep(a);
             result
@@ -1396,20 +1561,26 @@ mod tests {
         let mut other_time = t.clone();
         other_time[3] = Duration::from_nanos(101);
         assert!(on(&mut base, &other_time, &keys, 10075.0).1);
-        on(&mut base, &t, &keys, 10075.0);
         let mut other_key = keys;
         other_key[2] = [1, 0];
         assert!(on(&mut base, &t, &other_key, 10075.0).1);
-        on(&mut base, &t, &keys, 10075.0);
         assert!(on(&mut base, &t, &keys, 10076.0).1);
-        on(&mut base, &t, &keys, 10075.0);
         let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
         assert!(on(&mut flat(4, other_model, 100), &t, &keys, 10075.0).1);
-        on(&mut base, &t, &keys, 10075.0);
         assert!(on(&mut flat(4, policy, 101), &t, &keys, 10075.0).1);
-        on(&mut base, &t, &keys, 10075.0);
         assert!(on(&mut flat(5, policy, 100), &t, &keys, 10075.0).1);
-        on(&mut base, &t, &keys, 10075.0);
+        // The base entry survived the other keys' admissions.
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+        ErasedStructureCacheControl::clear(&cache);
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+        ErasedStructureCacheControl::set_byte_budget(&cache, 0);
+        for _ in 0..2 {
+            assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+        }
+        ErasedStructureCacheControl::set_byte_budget(&cache, 1 << 20);
+
         // The same pool and dispatch costs, through a plain token without
         // the engine's team.
         use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
@@ -1423,6 +1594,50 @@ mod tests {
         let plain = Exec::new(&borrowed, 4).unwrap().with_batch_policy(policy);
         assert!(!plain.token_ref().carries_team());
         assert!(run(&plain, &t, &keys, 10075.0).1);
+    }
+
+    /// Purpose: the cache's retained bytes stay within its budget. Distinct
+    /// batches beyond what a small budget holds evict older entries, and an
+    /// entry above the largest admissible size is rejected, with the same
+    /// allocation as a search.
+    #[test]
+    fn admission_respects_the_byte_budget() {
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+        let keys = [[0; 2]; 4];
+        let bounded = cache(4096);
+        let tiny = cache(64);
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let grant =
+                    Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1));
+                for last in 100..164 {
+                    let t = nanos(&[40000, 100, 100, last]);
+                    let mut scratch = AllocationScratch::default();
+                    let cached = allocate_in(
+                        exec,
+                        &t,
+                        |j| keys[j],
+                        10075.0,
+                        &mut scratch,
+                        &bounded,
+                        grant,
+                    );
+                    let rejected =
+                        allocate_in(exec, &t, |j| keys[j], 10075.0, &mut scratch, &tiny, grant);
+                    assert_eq!(cached, rejected);
+                    let info = bounded.info();
+                    assert!(info.charged_bytes() <= info.byte_budget(), "{info:?}");
+                }
+                assert!(bounded.info().evictions() > 0);
+                let info = tiny.info();
+                assert_eq!((info.entries(), info.rejections()), (0, 64));
+                Ok(())
+            })
+            .unwrap();
     }
 
     /// Purpose: a caller's `min_items` above the job count forbids fan-out,

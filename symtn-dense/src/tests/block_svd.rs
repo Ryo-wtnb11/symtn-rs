@@ -594,6 +594,10 @@ fn factorization_batches_keep_the_baseline_placement() {
                 |_| [0; 2],
                 10075.0,
                 &mut schedule::AllocationScratch::default(),
+                &schedule::LaneAllocationCache::new(
+                    symtn_core::StructureCacheKind::LaneAllocations,
+                    0,
+                ),
                 Some(grant),
             ))
         })

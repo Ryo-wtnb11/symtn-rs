@@ -116,7 +116,7 @@ see [design](design.md) and [`symtn::typed`](../symtn/src/typed.rs).
 
 **Who owns which cache**
 
-Five process-global, byte-bounded structure caches share the wrapper and
+Six process-global, byte-bounded structure caches share the wrapper and
 registry in [`symtn-core/src/cache.rs`](../symtn-core/src/cache.rs).
 Only the application calls `symtn::cache::{stats, clear, configure_budgets}`
 to observe, clear or size them.
@@ -128,6 +128,7 @@ to observe, clear or size them.
 | Completed tree transformer | Rule, mode, coefficient type, operation/scope, orientation, basis/storage conventions and source/destination content identities | `symtn-tensors` |
 | Composed transformation coefficients | Rule, mode, coefficient type, operation/scope, orientation and ordered source tree group; no degeneracies or content identities | `symtn-tensors` |
 | Dense GEMM plans | Scalar type, block extents, effective A/B/D strides and conjugation; no offsets, values, coefficients or engine settings | `symtn-dense` (native provider) |
+| Lane allocations | Engine budget, work model, mean work, team, dispatch costs, per-block serial times and grant inputs; no offsets or values | `symtn-dense` (native provider) |
 
 A degeneracy-only change can reuse sector structure and composed coefficients.
 Unique fusion bypasses the composed-coefficient cache. Checked Generic
@@ -137,7 +138,7 @@ entries retain replay cores without retaining those structures.
 
 Network contraction-order caches, per-call CUDA copies of prepared structures
 and the engine's cuTENSOR plans are execution resources, separate from these
-five.
+six.
 Elementary-symbol caches remain in fusion-symbols. symtn writes no
 persistent tree-transform plans; network-order persistence is explicit.
 

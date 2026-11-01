@@ -178,6 +178,7 @@ fn on_lanes<B: BlockOp>(
         |j| op.grant_key(j, &jobs[j]),
         mean_work,
         &mut scratch.allocation,
+        schedule::lane_allocations(),
         grant,
     );
     let result = schedule::run(exec.reborrow(), &allocation, jobs, |index, job, exec| {
