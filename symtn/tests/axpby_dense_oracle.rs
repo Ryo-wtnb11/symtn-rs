@@ -190,7 +190,7 @@ macro_rules! device {
 
 #[cfg(feature = "cuda")]
 #[test]
-#[ignore]
+#[ignore = "requires a CUDA device"]
 fn axpby_matches_dense_expansion_on_cuda() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
