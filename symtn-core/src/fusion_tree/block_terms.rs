@@ -98,12 +98,19 @@ where
 /// sparse column per original source) instead of re-running the per-source
 /// term list. `columns[i]` maps `src index -> coefficient` for `basis[i]`.
 ///
-/// This is the TensorKit 0.17 `artin_braid`/`fsbraid` batching: the elementary
-/// step (bend / Artin braid) is walked ONCE for the block and its coefficients
-/// are spread across all source columns, so intermediate allocation is
-/// O(steps) rather than O(steps × sources) — the term-list style symtn used
-/// (equivalent to TensorKit ≤0.16's per-tree `FusionTreeDict`) allocated a
-/// fresh accumulator and cloned keys per source per step.
+/// This follows TensorKit 0.17's block-wise decomposition (`fsbraid` walking
+/// `artin_braid` on a whole `FusionTreeBlock`): each elementary step (bend /
+/// Artin braid) runs once per basis row of the block and its coefficients are
+/// spread across all source columns, instead of re-running the step per
+/// source with a fresh accumulator and cloned keys. The per-step containers
+/// (dedup map, coefficient matrix, rebuilt basis) are presized to the
+/// incoming basis and grow, amortized, only when the step reaches more
+/// destinations than incoming rows; a row's move terms go through one buffer
+/// reused for the whole step, so no container is allocated per basis row.
+/// TensorKit's step does allocate per row (the `intersect` of fusion
+/// channels); the reused buffer is a Rust-side improvement over it. A
+/// completed TensorKit `treebraider` cache hit runs no step at all and
+/// compares with symtn's cached transform, not with this construction.
 /// Dense coefficient matrix (TK's `Matrix{E}`): rows are destination basis
 /// trees, columns the original sources. Stored row-major in ONE flat
 /// allocation that grows amortized as rows are added, instead of a
@@ -276,6 +283,33 @@ impl<S> DenseColumns<S> {
         row
     }
 
+    /// Per source, its `(destination(row), coefficient)` entries in row
+    /// order. Each owned source row is allocated once at its exact length.
+    pub(crate) fn source_rows<D: Clone>(
+        &self,
+        mut destination: impl FnMut(usize) -> D,
+    ) -> Vec<Vec<(D, S)>>
+    where
+        S: Clone,
+    {
+        let mut lengths = vec![0; self.num_src];
+        for entries in self.data.chunks_exact(self.num_src.max(1)) {
+            for (length, entry) in lengths.iter_mut().zip(entries) {
+                *length += usize::from(entry.is_some());
+            }
+        }
+        let mut rows: Vec<Vec<(D, S)>> = lengths.into_iter().map(Vec::with_capacity).collect();
+        for row in 0..self.num_rows {
+            let key = destination(row);
+            for (source, coefficient) in self.row(row).iter().enumerate() {
+                if let Some(coefficient) = coefficient {
+                    rows[source].push((key.clone(), coefficient.clone()));
+                }
+            }
+        }
+        rows
+    }
+
     #[inline]
     pub(crate) fn row(&self, row: usize) -> &[Option<S>] {
         let start = row * self.num_src;
@@ -293,7 +327,10 @@ impl<S> DenseColumns<S> {
 /// terms are spread across all source columns (`dst += step · source`). The
 /// dense block composer for multiplicity-free keys and compact locals; the
 /// Generic keyed block uses the sparse [`compose_generic_block`].
-pub(crate) fn compose_block_terms<K, S, E, F, I>(
+///
+/// `transform(key, terms)` appends `key`'s move terms to `terms`, one buffer
+/// the composer clears and reuses for every basis row.
+pub(crate) fn compose_block_terms<K, S, E, F>(
     basis: &[K],
     columns: &DenseColumns<S>,
     mut transform: F,
@@ -301,8 +338,7 @@ pub(crate) fn compose_block_terms<K, S, E, F, I>(
 where
     K: Eq + Hash,
     S: Clone + Add<Output = S> + Mul<Output = S>,
-    F: FnMut(&K) -> Result<I, E>,
-    I: IntoIterator<Item = (K, S)>,
+    F: FnMut(&K, &mut Vec<(K, S)>) -> Result<(), E>,
 {
     let num_src = columns.num_src;
     // Dedup destination tree-pairs to dense rows. The key is *moved* into the
@@ -311,10 +347,13 @@ where
     // from the map by row index afterwards. Rows are assigned in first-
     // appearance order, so the rebuilt `next_basis` order — and therefore every
     // coefficient — is bit-for-bit identical to pushing the key eagerly.
-    let mut index: FxHashMap<K, usize> = FxHashMap::default();
+    let mut index: FxHashMap<K, usize> =
+        FxHashMap::with_capacity_and_hasher(basis.len(), Default::default());
     let mut next_columns: DenseColumns<S> = DenseColumns::with_capacity(num_src, basis.len());
+    let mut terms = Vec::new();
     for (source_row, source_key) in basis.iter().enumerate() {
-        for (dst_key, step_coefficient) in transform(source_key)? {
+        transform(source_key, &mut terms)?;
+        for (dst_key, step_coefficient) in terms.drain(..) {
             let row = match index.get(&dst_key) {
                 Some(&row) => row,
                 None => {
@@ -353,13 +392,13 @@ where
     Ok((next_basis, next_columns))
 }
 
-pub(super) struct CompactMultiplicityFreeTreeBasis {
+pub(crate) struct CompactMultiplicityFreeTreeBasis {
     pub(super) frame: MultiplicityFreeTreeFrame,
     pub(super) locals: Vec<MultiplicityFreeTreeLocal>,
 }
 
 impl CompactMultiplicityFreeTreeBasis {
-    pub(super) fn from_group<R>(
+    pub(crate) fn from_group<R>(
         group: ValidatedFusionTreeBlockGroup<'_, R>,
     ) -> Result<Self, CoreError> {
         let src_keys = group.src_keys;

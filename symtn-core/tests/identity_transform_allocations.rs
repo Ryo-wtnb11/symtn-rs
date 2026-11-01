@@ -9,8 +9,8 @@ use symtn_core::{
     BraidingStyleKind, FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind,
     FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey, FusionTreePairOrientation,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    MultiplicityIndex, PreparedTreePairOperation, RuleIdentity, SU2FusionRule, SU2Irrep, SectorId,
-    SectorLeg, SectorVec, Z2FusionRule, Z2Irrep,
+    MultiplicityIndex, PreparedTreePairOperation, ProductFusionRule, RuleIdentity, SU2FusionRule,
+    SU2Irrep, SectorId, SectorLeg, SectorVec, Z2FusionRule, Z2Irrep,
 };
 
 use crate::counting_alloc;
@@ -372,51 +372,71 @@ fn indexed_adjoint_simple_group_allocates_only_owned_rows() {
     counting_alloc::assert_same_calls("Simple-group sources 2 -> 5", small as u64, large as u64);
 }
 
-#[test]
-fn compact_block_warm_allocations_do_not_restore_per_source_scratch() {
-    let _serial = crate::counting_alloc::serial();
-    let rule = SU2FusionRule;
-    let spin_one = SU2Irrep::from_twice_spin(2).sector_id();
-    let codomain: [SectorLeg; 8] = std::array::from_fn(|_| SectorLeg::new([(spin_one, 1)], false));
+/// Warm allocation calls of the compact non-identity block permutation
+/// (reversed rank-8 codomain) of the first `source_count` trees of
+/// `codomain_leg^⊗8 ← domain_leg`, less its owned source rows.
+fn compact_block_warm_calls_beyond_owned_rows<R>(
+    rule: &R,
+    codomain_leg: SectorId,
+    domain_leg: SectorId,
+    source_count: usize,
+) -> usize
+where
+    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
+{
     let hom = FusionTreeHomSpace::new(
-        FusionProductSpace::new(codomain),
-        FusionProductSpace::new([SectorLeg::new([(spin_one, 1)], false)]),
+        FusionProductSpace::new(std::array::from_fn::<_, 8, _>(|_| {
+            SectorLeg::new([(codomain_leg, 1)], false)
+        })),
+        FusionProductSpace::new([SectorLeg::new([(domain_leg, 1)], false)]),
     );
-    let keys = hom.fusion_tree_keys(&rule);
-    let sources = &keys[..16];
-    let codomain_permutation = [7usize, 6, 5, 4, 3, 2, 1, 0];
-    let domain_permutation = [8usize];
-    let _ = multiplicity_free_permute_tree_pair_block(
-        &rule,
-        sources,
-        &codomain_permutation,
-        &domain_permutation,
-    )
-    .unwrap();
+    let keys = hom.fusion_tree_keys(rule);
+    let sources = &keys[..source_count];
+    let run = || {
+        multiplicity_free_permute_tree_pair_block(rule, sources, &[7, 6, 5, 4, 3, 2, 1, 0], &[8])
+            .unwrap()
+    };
+    let _ = run();
 
-    let (output, allocations) = measured_allocations(|| {
-        black_box(
-            multiplicity_free_permute_tree_pair_block(
-                &rule,
-                sources,
-                &codomain_permutation,
-                &domain_permutation,
-            )
-            .unwrap(),
-        )
-    });
+    let (output, allocations) = measured_allocations(|| black_box(run()));
+    assert_eq!(output.len(), source_count);
+    allocations - output.len()
+}
 
-    // What: the fixed 16-source non-Abelian warm transform retains one compact
-    // block workspace. Frozen identity adds one final innerline owner per 232
-    // destination rows, two external owners per 28 Artin steps, and four bend
-    // vertex owners, but no per-source scratch.
-    assert_eq!(output.len(), sources.len());
-    const COMPACT_WORKSPACE_BUDGET: usize = 3072;
-    const FROZEN_OWNER_ALLOWANCE: usize = 232 + 2 * 28 + 4;
-    assert!(
-        allocations <= COMPACT_WORKSPACE_BUDGET + FROZEN_OWNER_ALLOWANCE,
-        "compact warm block allocated {allocations} times"
-    );
+/// Purpose: beyond its owned source rows, a whole warm compact block
+/// transform costs no more allocation calls for 16 sources than for 8. The
+/// sources share one destination block, so this bounds the aggregate cost;
+/// the per-move contract is `compact_moves_allocate_per_move_not_per_row`.
+#[test]
+fn compact_block_warm_allocations_do_not_grow_with_sources() {
+    let _serial = crate::counting_alloc::serial();
+    let spin = |twice| SU2Irrep::from_twice_spin(twice).sector_id();
+    let fermionic_su2 =
+        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap();
+    let odd_half = fermionic_su2.encode_component_ids(Z2Irrep::ODD.sector_id(), spin(1));
+    let even_one = fermionic_su2.encode_component_ids(Z2Irrep::EVEN.sector_id(), spin(2));
+
+    let bosonic = |sources| {
+        compact_block_warm_calls_beyond_owned_rows(&SU2FusionRule, spin(2), spin(2), sources)
+    };
+    let fermionic = |sources| {
+        compact_block_warm_calls_beyond_owned_rows(&fermionic_su2, odd_half, even_one, sources)
+    };
+    for (what, small, large) in [
+        ("SU(2) sources 8 -> 16", bosonic(8), bosonic(16)),
+        (
+            "fermionic SU(2) sources 8 -> 16",
+            fermionic(8),
+            fermionic(16),
+        ),
+    ] {
+        // What: the remaining calls may fall as the moves' destination sets
+        // saturate, but never grow with the source count.
+        assert!(
+            large <= small,
+            "{what}: {small} -> {large} allocation calls"
+        );
+    }
 }
 
 #[test]

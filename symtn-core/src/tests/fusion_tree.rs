@@ -3,6 +3,7 @@ use super::*;
 mod block_terms_and_grids;
 #[cfg(feature = "cgc-gen")]
 mod checked_generic_tree_pair;
+mod compact_move_allocations;
 mod generic_trees;
 mod symbol_probes;
 mod tree_key;

@@ -1,7 +1,7 @@
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct ValidatedFusionTreeBlockGroup<'a, R> {
+pub(crate) struct ValidatedFusionTreeBlockGroup<'a, R> {
     rule: &'a R,
     pub(super) src_keys: &'a [FusionTreeKey],
     rank: usize,
@@ -9,7 +9,7 @@ pub(super) struct ValidatedFusionTreeBlockGroup<'a, R> {
 }
 
 #[cfg(any(test, feature = "testing"))]
-fn validate_fusion_tree_block_group_for_rule<'a, R>(
+pub(crate) fn validate_fusion_tree_block_group_for_rule<'a, R>(
     rule: &'a R,
     src_keys: &'a [FusionTreeKey],
 ) -> Result<Option<ValidatedFusionTreeBlockGroup<'a, R>>, CoreError>
@@ -1068,32 +1068,30 @@ where
         group.codomain_rank,
         prepared.target_codomain_rank,
         |(basis, columns), bend| {
-            compose_block_terms(&basis, &columns, |key| match bend {
-                Bend::Left => multiplicity_free_bendleft_tree_pair(rule, key),
-                Bend::Right => multiplicity_free_bendright_tree_pair(rule, key),
+            compose_block_terms(&basis, &columns, |key, terms| {
+                terms.extend(match bend {
+                    Bend::Left => multiplicity_free_bendleft_tree_pair(rule, key),
+                    Bend::Right => multiplicity_free_bendright_tree_pair(rule, key),
+                }?);
+                Ok(())
             })
         },
     )?;
     let (basis, columns) = run_cycles(repartitioned, cycle, |(basis, columns), direction| {
-        compose_block_terms(&basis, &columns, |key| match direction {
-            PreparedCycleDirection::Clockwise => {
-                multiplicity_free_cycle_clockwise_tree_pair_stepwise_oracle(rule, key)
-            }
-            PreparedCycleDirection::Anticlockwise => {
-                multiplicity_free_cycle_anticlockwise_tree_pair_stepwise_oracle(rule, key)
-            }
+        compose_block_terms(&basis, &columns, |key, terms| {
+            terms.extend(match direction {
+                PreparedCycleDirection::Clockwise => {
+                    multiplicity_free_cycle_clockwise_tree_pair_stepwise_oracle(rule, key)
+                }
+                PreparedCycleDirection::Anticlockwise => {
+                    multiplicity_free_cycle_anticlockwise_tree_pair_stepwise_oracle(rule, key)
+                }
+            }?);
+            Ok(())
         })
     })?;
 
-    let mut rows_per_source = vec![Vec::new(); num_src];
-    for (destination_row, destination) in basis.iter().enumerate() {
-        for (source, coefficient) in columns.row(destination_row).iter().enumerate() {
-            if let Some(coefficient) = coefficient {
-                rows_per_source[source].push((destination.clone(), coefficient.clone()));
-            }
-        }
-    }
-    Ok(rows_per_source)
+    Ok(columns.source_rows(|row| basis[row].clone()))
 }
 
 /// The multiplicity-free column-batched driver of the shared block schedule.
