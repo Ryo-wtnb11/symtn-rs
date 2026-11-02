@@ -44,7 +44,7 @@
 //! widened (time, key) group once per reserved width it evaluates.
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -576,30 +576,17 @@ fn allocate_with(
         }
         let mut moldable = std::mem::take(&mut scratch.moldable);
         let candidate = std::mem::take(&mut moldable.lanes);
-        // Queried once per (time, key) group and width, as the sweep is.
-        let grants = std::cell::RefCell::new(std::mem::take(&mut moldable.grants));
-        grants.borrow_mut().clear();
-        let (widens, rep) = (&columns.widens, &columns.rep);
-        let granted = |j: usize, width: usize| {
-            if !widens[j] {
-                return 1;
-            }
-            let r = rep[j];
-            *grants
-                .borrow_mut()
-                .entry((r, width))
-                .or_insert_with(|| grant(r, times[r], width))
-        };
-        let item = |j: usize, width: usize| item_time(exec, times[j], granted(j, width));
+        let provider = |r: usize, width: usize| grant(r, times[r], width);
+        let item_of = |serial: Duration, width: usize| item_time(exec, serial, width);
         let (candidate, score) = moldable.place(
             (slots, lanes),
             &order,
             times,
-            (&item, &granted),
+            &columns,
+            (&item_of, &provider),
             candidate,
             &mut scratch.spare,
         );
-        moldable.grants = grants.into_inner();
         // Ties keep the baseline and the equal shares.
         let wins = score.is_some_and(|score| score < best.0);
         moldable.lanes = if wins {
@@ -838,8 +825,97 @@ struct Moldable {
     /// The width-one lanes, by `(load, jobs, lane)`.
     thin: Vec<Reverse<(Duration, usize, usize)>>,
     lanes: Vec<Lane>,
-    /// Each queried grant, by (representative job, width).
-    grants: HashMap<(usize, usize), usize>,
+    grants: Grants,
+}
+
+/// The grants the reservation queried, each at most once per
+/// (representative, width), in dense tables, so their capacities are their
+/// whole allocation. A zero cell is not yet queried (no width rule grants
+/// zero slots; such a grant would only be queried again).
+#[derive(Debug, Default)]
+struct Grants {
+    /// S, the length of a `heavy` row.
+    slots: usize,
+    /// Each representative's row: below `heavy_rows` a row of `heavy`,
+    /// otherwise of `tail`; `usize::MAX` for the jobs never queried.
+    row: Vec<usize>,
+    heavy_rows: usize,
+    tail_rows: usize,
+    /// The jobs above the mean load: every width `1..=S`, row-major.
+    heavy: Vec<usize>,
+    /// Each width's column of `tail`, or `usize::MAX`.
+    column: Vec<usize>,
+    /// The other widened jobs, column-major over the widths they meet.
+    tail: Vec<usize>,
+}
+
+impl Grants {
+    /// Gives a row to each widened representative: a `heavy` row to those
+    /// of the `heavy` jobs, a `tail` row to the others.
+    fn begin(&mut self, slots: usize, heavy: &[usize], columns: &Columns) {
+        let jobs = columns.rep.len();
+        self.slots = slots;
+        self.row.clear();
+        self.row.resize(jobs, usize::MAX);
+        self.heavy_rows = 0;
+        for &j in heavy {
+            let r = columns.rep[j];
+            if columns.widens[j] && self.row[r] == usize::MAX {
+                self.row[r] = self.heavy_rows;
+                self.heavy_rows += 1;
+            }
+        }
+        self.tail_rows = 0;
+        for j in 0..jobs {
+            if columns.widens[j] && columns.rep[j] == j && self.row[j] == usize::MAX {
+                self.row[j] = self.heavy_rows + self.tail_rows;
+                self.tail_rows += 1;
+            }
+        }
+        self.heavy.clear();
+        self.heavy.resize(self.heavy_rows * slots, 0);
+        self.column.clear();
+        self.column.resize(slots + 1, usize::MAX);
+        self.tail.clear();
+    }
+
+    /// Job `j`'s grant at `width <= S`: one slot for a job the provider keeps
+    /// serial at S (see [`Columns::begin`]), otherwise its representative's
+    /// grant, queried with `query(representative, width)` on first use.
+    fn get(
+        &mut self,
+        columns: &Columns,
+        j: usize,
+        width: usize,
+        query: &impl Fn(usize, usize) -> usize,
+    ) -> usize {
+        if !columns.widens[j] {
+            return 1;
+        }
+        let r = columns.rep[j];
+        let row = self.row[r];
+        let cell = if row < self.heavy_rows {
+            &mut self.heavy[row * self.slots + width - 1]
+        } else {
+            if self.column[width] == usize::MAX {
+                self.column[width] = self.tail.len() / self.tail_rows;
+                self.tail.resize(self.tail.len() + self.tail_rows, 0);
+            }
+            &mut self.tail[self.column[width] * self.tail_rows + row - self.heavy_rows]
+        };
+        if *cell == 0 {
+            *cell = query(r, width);
+        }
+        *cell
+    }
+
+    fn retained_bytes(&self) -> usize {
+        [&self.row, &self.heavy, &self.column, &self.tail]
+            .into_iter()
+            .map(Vec::capacity)
+            .fold(0, usize::saturating_add)
+            .saturating_mul(std::mem::size_of::<usize>())
+    }
 }
 
 /// `n` nanoseconds as a duration, saturating.
@@ -854,9 +930,11 @@ impl Moldable {
     /// Places the jobs, `order` largest first, on lanes of uneven widths
     /// over `slots`, and returns the lanes with the modeled makespan, or no
     /// score when more than `cap` lanes hold jobs (the batch decision's lane
-    /// count, which the candidate must not exceed). `item(j, w)` is job `j`'s
-    /// modeled time on a lane of `w` slots and `grant(j, w)` its provider's
-    /// width there; `lanes` is empty on entry.
+    /// count, which the candidate must not exceed). `query(r, w)` is the
+    /// provider's width for representative job `r` (see `columns`) on a lane
+    /// of `w` slots, queried at most once per pair, and `item_of(t, q)` the
+    /// modeled time of a job of serial time `t` granted `q` slots; `lanes` is
+    /// empty on entry.
     ///
     /// 1. The target's lower bound is `LB = max(ceil(sum t / S), max_j
     ///    min_w item(j, w))`. Only jobs above the mean load can raise the
@@ -876,18 +954,30 @@ impl Moldable {
     ///
     /// The score is the completed placement's, not the target: a passing
     /// target does not prove that the tail fits under it.
+    #[allow(clippy::too_many_arguments)]
     fn place(
         &mut self,
         (slots, cap): (usize, usize),
         order: &[usize],
         times: &[Duration],
-        (item, grant): (
-            &impl Fn(usize, usize) -> Duration,
+        columns: &Columns,
+        (item_of, query): (
+            &impl Fn(Duration, usize) -> Duration,
             &impl Fn(usize, usize) -> usize,
         ),
         mut lanes: Vec<Lane>,
         spare: &mut Vec<Lane>,
     ) -> (Vec<Lane>, Option<Duration>) {
+        let Self {
+            table,
+            targets,
+            wide,
+            thin,
+            grants,
+            ..
+        } = self;
+        let grant = |g: &mut Grants, j: usize, w: usize| g.get(columns, j, w, query);
+        let item = |g: &mut Grants, j: usize, w: usize| item_of(times[j], grant(g, j, w));
         let total = times
             .iter()
             .fold(0u128, |sum, t| sum.saturating_add(t.as_nanos()));
@@ -896,11 +986,14 @@ impl Moldable {
             .iter()
             .take_while(|&&j| times[j].as_nanos() > mean)
             .count();
-        self.table.clear();
+        grants.begin(slots, &order[..heavy], columns);
+        table.clear();
         for &j in &order[..heavy] {
-            self.table.extend((1..=slots).map(|width| item(j, width)));
+            for width in 1..=slots {
+                table.push(item(grants, j, width));
+            }
         }
-        let table = &self.table;
+        let table = &*table;
         let row = |i: usize| &table[i * slots..(i + 1) * slots];
         let bound = (0..heavy)
             .filter_map(|i| row(i).iter().min())
@@ -909,13 +1002,13 @@ impl Moldable {
             .iter()
             .take_while(|&&j| times[j] > bound)
             .count();
-        self.targets.clear();
-        self.targets.push(bound);
+        targets.clear();
+        targets.push(bound);
         for i in 0..large {
-            self.targets.extend(row(i).iter().filter(|&&t| t >= bound));
+            targets.extend(row(i).iter().filter(|&&t| t >= bound));
         }
-        self.targets.sort_unstable();
-        self.targets.dedup();
+        targets.sort_unstable();
+        targets.dedup();
         // Every target is at least each large job's least item time.
         let need = |i: usize, target: Duration| {
             1 + row(i)
@@ -935,64 +1028,68 @@ impl Moldable {
                 .fold(0usize, usize::saturating_add)
                 <= slots
         };
-        let target = self.targets[self.targets.partition_point(|&t| !passes(t))];
+        let target = targets[targets.partition_point(|&t| !passes(t))];
         let reserved = reserved(target);
         let used: usize = (0..reserved).map(|i| need(i, target)).sum();
 
         let count = reserved + (slots - used);
         lanes = lanes_from(lanes, spare, count);
-        self.wide.clear();
+        wide.clear();
         for (i, (lane, &j)) in lanes.iter_mut().zip(order).take(reserved).enumerate() {
             let width = need(i, target);
             lane.budget = width;
             lane.jobs.push(j);
-            self.wide.push((row(i)[width - 1], 1));
+            wide.push((row(i)[width - 1], 1));
         }
-        let mut thin = BinaryHeap::from(std::mem::take(&mut self.thin));
-        thin.clear();
+        let mut heap = BinaryHeap::from(std::mem::take(thin));
+        heap.clear();
         for (k, lane) in lanes.iter_mut().enumerate().skip(reserved) {
             lane.budget = 1;
-            thin.push(Reverse((Duration::ZERO, 0, k)));
+            heap.push(Reverse((Duration::ZERO, 0, k)));
         }
         for &j in &order[reserved..] {
-            let mut best = thin
-                .peek()
-                .map(|&Reverse((load, jobs, k))| (load.saturating_add(item(j, 1)), jobs, k));
-            for (k, &(load, jobs)) in self.wide.iter().enumerate() {
-                let key = (load.saturating_add(item(j, lanes[k].budget)), jobs, k);
+            let mut best = heap.peek().map(|&Reverse((load, jobs, k))| {
+                (load.saturating_add(item(grants, j, 1)), jobs, k)
+            });
+            for (k, &(load, jobs)) in wide.iter().enumerate() {
+                let key = (
+                    load.saturating_add(item(grants, j, lanes[k].budget)),
+                    jobs,
+                    k,
+                );
                 best = Some(best.map_or(key, |best| best.min(key)));
             }
             let Some((load, jobs, k)) = best else {
                 unreachable!("a target passes with at least one lane")
             };
             if k < reserved {
-                self.wide[k] = (load, jobs + 1);
+                wide[k] = (load, jobs + 1);
             } else {
-                thin.pop();
-                thin.push(Reverse((load, jobs + 1, k)));
+                heap.pop();
+                heap.push(Reverse((load, jobs + 1, k)));
             }
             lanes[k].jobs.push(j);
         }
-        let mut idle = thin
+        let mut idle = heap
             .iter()
             .filter(|Reverse((_, jobs, _))| *jobs == 0)
             .count();
-        let mut score = thin
+        let mut score = heap
             .iter()
             .map(|&Reverse((load, _, _))| load)
             .max()
             .unwrap_or(Duration::ZERO);
-        self.thin = thin.into_vec();
+        *thin = heap.into_vec();
         if count - idle > cap {
             return (lanes, None);
         }
         for (lane, &j) in lanes.iter_mut().zip(order).take(reserved) {
-            while idle > 0 && grant(j, lane.budget + 1) > grant(j, lane.budget) {
+            while idle > 0 && grant(grants, j, lane.budget + 1) > grant(grants, j, lane.budget) {
                 lane.budget += 1;
                 idle -= 1;
             }
             let load = lane.jobs.iter().fold(Duration::ZERO, |sum, &j| {
-                sum.saturating_add(item(j, lane.budget))
+                sum.saturating_add(item(grants, j, lane.budget))
             });
             score = score.max(load);
         }
@@ -1024,11 +1121,7 @@ impl Moldable {
                     .capacity()
                     .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
             )
-            .saturating_add(
-                self.grants
-                    .capacity()
-                    .saturating_mul(size_of::<((usize, usize), usize)>()),
-            )
+            .saturating_add(self.grants.retained_bytes())
             .saturating_add(
                 self.lanes
                     .iter()
@@ -1798,17 +1891,21 @@ mod tests {
         assert_eq!(lanes(&a), [(2, vec![0, 2, 3, 6]), (2, vec![1, 4, 5, 7])]);
     }
 
-    /// Purpose: a cached allocation is rebuilt into the scratch's kept lane
-    /// tables, so a warm hit allocates and frees nothing even where the
-    /// search narrowed main's four lanes to one (a 40000 ns block and three
-    /// 100 ns ones on four slots, flat 100 ns dispatch). Two batches
-    /// alternate, so each hit replaces the other's lanes.
+    /// Purpose: the allocation scratch's reuse is visible and complete. A
+    /// cached allocation is rebuilt into the scratch's kept lane tables, so
+    /// a warm hit allocates and frees nothing, even where the search
+    /// narrowed main's four lanes to one (a 40000 ns block and three 100 ns
+    /// ones on four slots, flat 100 ns dispatch) or reserved uneven lanes
+    /// (blocks of 100, 100, 1000 and 2000 ns: three slots and one); the
+    /// batches alternate, so each hit replaces another's lanes. Dropping the
+    /// scratch then frees at most its `retained_bytes`.
     #[test]
-    fn warm_cached_fewer_lane_allocation_allocates_nothing() {
+    fn warm_cached_allocation_allocates_nothing_and_scratch_is_charged() {
         use crate::tests::counting_alloc;
         let batches = [
-            nanos(&[40000, 100, 100, 100]),
-            nanos(&[40000, 100, 100, 101]),
+            (nanos(&[40000, 100, 100, 100]), 1),
+            (nanos(&[40000, 100, 100, 101]), 1),
+            (nanos(&[100, 100, 1000, 2000]), 2),
         ];
         let keys = [[0; 2]; 4];
         let model = WorkModel::default()
@@ -1839,16 +1936,23 @@ mod tests {
                     scratch.keep(a);
                     chosen
                 };
-                for t in &batches {
-                    assert_eq!(call(t), (4, 1));
+                for (t, lanes) in &batches {
+                    assert_eq!(call(t), (4, *lanes));
                 }
-                for t in batches.iter().chain(&batches) {
+                for (t, lanes) in batches.iter().chain(&batches) {
                     queries.set(0);
                     let (chosen, allocs) = counting_alloc::measure(|| call(t));
-                    assert_eq!(chosen, (4, 1));
+                    assert_eq!(chosen, (4, *lanes));
                     assert_eq!(queries.get(), 0, "the call hit");
                     assert_eq!((allocs.calls, allocs.frees), (0, 0));
                 }
+                let charged = scratch.retained_bytes();
+                let ((), dropped) = counting_alloc::measure(|| drop(scratch));
+                assert!(
+                    dropped.freed_bytes as usize <= charged,
+                    "{} freed, {charged} charged",
+                    dropped.freed_bytes
+                );
                 Ok(())
             })
             .unwrap();

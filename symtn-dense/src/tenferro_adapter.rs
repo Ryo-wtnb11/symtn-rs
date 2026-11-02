@@ -290,9 +290,13 @@ impl DefaultDenseExecutor {
     /// one provider grant query per distinct (time, plan algorithm, work)
     /// group at the full slot count S, further queries per distinct share
     /// width only for the groups widened there, a lower bound per lane count,
-    /// and a placement for each lane count the bound does not rule out, or
-    /// the lane-allocation cache's entry when every input was searched
-    /// before; see `block_kernel::schedule`) instead of the cached O(1)
+    /// a placement for each lane count the bound does not rule out, and the
+    /// large-block reservation: a query at every width up to S for the
+    /// (fewer than S) blocks above the mean load, its target search, and one
+    /// placement of the other blocks over the reserved and one-slot lanes;
+    /// a call whose every input was searched before instead takes the
+    /// lane-allocation cache's entry without a query; see
+    /// `block_kernel::schedule` for the complexity) instead of the cached O(1)
     /// strided analysis plus the residual's own preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
