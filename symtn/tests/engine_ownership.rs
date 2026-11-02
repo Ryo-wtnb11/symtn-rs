@@ -94,10 +94,10 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     }
 }
 
-/// The eigh, eigh-values, svd-values, pinv, qr and trace outputs of `t`, as
-/// one payload each, so a width that splits the block scheduler differently
-/// shows in any of them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 6] {
+/// The eigh, eigh-values, svd-values, pinv, qr, trace and general eig
+/// outputs of `t`, as one payload each, so a width that splits the block
+/// scheduler differently shows in any of them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
@@ -137,6 +137,28 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 6
     let mut qr_out = qr.q.dense_data().unwrap().to_vec();
     qr_out.extend_from_slice(qr.r.dense_data().unwrap());
     let traced = gram.trace_pairs(engine, &[(0, 2)]).unwrap();
+    // General eig of the domain gram, whose blocks have simple spectra: the
+    // spectrum and the reconstruction `V D V⁻¹` are gauge-free.
+    let cogram = adjoint.compose(engine, t).unwrap();
+    let eig = cogram.eig_full(engine, &[0], &[1]).unwrap();
+    let inverse = eig.v.inv(engine, &[0], &[1]).unwrap();
+    let reconstructed = eig
+        .v
+        .compose(engine, &eig.d)
+        .unwrap()
+        .compose(engine, &inverse)
+        .unwrap();
+    let mut eig_out = Vec::new();
+    for entry in cogram.eig_vals(engine, &[0], &[1]).unwrap() {
+        eig_out.extend(entry.values.iter().flat_map(|value| [value.re, value.im]));
+    }
+    eig_out.extend(
+        reconstructed
+            .dense_data()
+            .unwrap()
+            .iter()
+            .flat_map(|value| [value.re, value.im]),
+    );
     [
         eigh_out,
         eigh_vals_out,
@@ -144,6 +166,7 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 6
         pinv_out,
         qr_out,
         traced.dense_data().unwrap().to_vec(),
+        eig_out,
     ]
 }
 
@@ -156,7 +179,15 @@ fn factorizations_and_trace_agree_across_widths() {
         .unwrap();
     let serial = other_ops(&mut CpuEngine::serial(), &t);
     let wide = other_ops(&mut engine(4), &t);
-    let names = ["eigh", "eigh_vals", "svd_vals", "pinv", "qr", "trace"];
+    let names = [
+        "eigh",
+        "eigh_vals",
+        "svd_vals",
+        "pinv",
+        "qr",
+        "trace",
+        "eig",
+    ];
     for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);
     }

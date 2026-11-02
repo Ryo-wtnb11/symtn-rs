@@ -103,12 +103,13 @@ contract (symtn)
   -> operand/output tree transforms (symtn-operations)
   -> grouped block GEMM (symtn-dense -> Tenferro)
 
-svd / qr / eigh (symtn)
+svd / qr / eigh / eig (symtn)
   -> admit leg roles and source
   -> factor spaces and per-sector stages (symtn-matrixalgebra)
   -> dense factorization (symtn-dense -> Tenferro; native compact and
-     values-only SVD, compact QR and Hermitian EIGH: symtn-dense block
-     kernel -> tlinalg on the engine's guarded linalg entry)
+     values-only SVD, compact QR, Hermitian EIGH and general EIG:
+     symtn-dense block kernel -> tlinalg on the engine's guarded linalg
+     entry)
   -> publish factors in the validated spaces
 ```
 

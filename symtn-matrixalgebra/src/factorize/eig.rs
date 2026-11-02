@@ -621,23 +621,28 @@ where
 
     let mut pairs: Vec<FactorPair<D::Eig>> = Vec::with_capacity(matricizations.len());
     let mut eigenvalues = Vec::with_capacity(matricizations.len());
-    for index in 0..matricizations.len() {
-        let matrix = matricizations.get(index)?;
-        let n = matrix.rows;
-        let (sorted_values, sorted_vectors) = eig_sector_stage(engine, dense, matrix.data, n)?;
-        eigenvalues.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: sorted_values,
-        });
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: n,
-            left: sorted_vectors,
-            left_rows: n,
-            right: Vec::new(),
-            right_leading: n,
-        });
-    }
+    let (sectors, blocks) = sector_blocks(&matricizations)?;
+    eig_sectors_staged(
+        engine,
+        dense,
+        &blocks,
+        |index, sorted_values, sorted_vectors| {
+            let (sector, n) = (sectors[index], blocks[index].1);
+            eigenvalues.push(SectorSpectrum {
+                sector,
+                values: sorted_values,
+            });
+            pairs.push(FactorPair {
+                sector,
+                kept: n,
+                left: sorted_vectors,
+                left_rows: n,
+                right: Vec::new(),
+                right_leading: n,
+            });
+            Ok(())
+        },
+    )?;
 
     let v_factor = with_input_geometry!(&matricizations, |geometry| build_left_bound_factor(
         input.space(),
@@ -1131,11 +1136,13 @@ pub fn require_finite_eigh_input<D: FactorScalar>(data: &[D]) -> Result<(), Oper
     require_finite_factor_input(data.iter().copied(), FactorFamily::Eigh)
 }
 
-/// General eigendecomposition of one `n x n` endomorphism sector, shared by
-/// both fusion modes: values in [`lexicographic_eig_order`], eigenvectors
-/// reordered to match, scaled to unit 2-norm and phase-gauged.
+/// General eigendecompositions of the `n x n` column-major endomorphism
+/// sectors `blocks` (`(data, n, n)`) as one executor batch, shared by both
+/// fusion modes: `stage` receives, in sector order, each sector's values in
+/// [`lexicographic_eig_order`] and its eigenvectors reordered to match,
+/// scaled to unit 2-norm and phase-gauged.
 ///
-/// Result checks, in this order: eigenvalues finite
+/// Result checks per sector, in this order: eigenvalues finite
 /// ([`validate_complex_eigenvalues`]), then every eigenvector entry finite
 /// ([`validate_eigenvectors`]). Both are the solver's numerical failure on an
 /// admitted finite input; faer's back-substitution overflows to NaN on large
@@ -1151,51 +1158,58 @@ pub fn require_finite_eigh_input<D: FactorScalar>(data: &[D]) -> Result<(), Oper
 /// equation, and `V^-1` reconstruction is promised only for diagonalizable
 /// inputs. The callers' strict finite-input stage is symtn's approved
 /// deviation (#1983); MAK passes non-finite input to LAPACK.
-fn eig_sector_stage<E, D>(
+fn eig_sectors_staged<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
-    matrix: &[D],
-    n: usize,
-) -> Result<(Vec<Complex64>, Vec<D::Eig>), OperationError>
+    blocks: &[(&[D], usize, usize)],
+    mut stage: impl FnMut(usize, Vec<Complex64>, Vec<D::Eig>) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let shape = [n, n];
-    let strides = [1usize, n];
-    let view = DenseView::new(matrix, &shape, &strides, 0).map_err(OperationError::Dense)?;
-    let outputs = dense
-        .eig(engine, D::dense_read(view))
-        .map_err(OperationError::Dense)?;
-    if outputs.len() != 2 {
-        return Err(OperationError::Dense(arity_mismatch(
-            "eig",
-            2,
-            outputs.len(),
-        )));
-    }
-    validate_dense_shape(outputs[0].shape(), &[n])?;
-    validate_dense_shape(outputs[1].shape(), &[n, n])?;
-    let values =
-        <D::Eig as FactorScalar>::dense_slice(&outputs[0]).map_err(OperationError::Dense)?;
-    let vectors =
-        <D::Eig as FactorScalar>::dense_slice(&outputs[1]).map_err(OperationError::Dense)?;
-    let complex_values: Vec<Complex64> =
-        values.iter().map(|&value| value.widen_complex()).collect();
-    validate_complex_eigenvalues(&complex_values)?;
-    validate_eigenvectors(vectors)?;
-    let mut order = vec![0; n];
-    lexicographic_eig_order(&complex_values, &mut order);
-    let sorted_values: Vec<Complex64> = order.iter().map(|&index| complex_values[index]).collect();
-    let mut sorted_vectors = vec![<D::Eig as num_traits::Zero>::zero(); n * n];
-    for (position, &index) in order.iter().enumerate() {
-        unit_norm_column_into(
-            &vectors[index * n..(index + 1) * n],
-            &mut sorted_vectors[position * n..(position + 1) * n],
-        );
-    }
-    eigenvector_gauge(&mut sorted_vectors, n, n, n);
-    Ok((sorted_values, sorted_vectors))
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(blocks, &mut layouts)?;
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::Eig,
+        &inputs,
+        |index, outcome| {
+            let n = blocks[index].1;
+            let outputs = outcome.map_err(OperationError::Dense)?;
+            if outputs.len() != 2 {
+                return Err(OperationError::Dense(arity_mismatch(
+                    "eig",
+                    2,
+                    outputs.len(),
+                )));
+            }
+            validate_dense_shape(outputs[0].shape(), &[n])?;
+            validate_dense_shape(outputs[1].shape(), &[n, n])?;
+            let values = <D::Eig as FactorScalar>::dense_slice(&outputs[0])
+                .map_err(OperationError::Dense)?;
+            let vectors = <D::Eig as FactorScalar>::dense_slice(&outputs[1])
+                .map_err(OperationError::Dense)?;
+            let complex_values: Vec<Complex64> =
+                values.iter().map(|&value| value.widen_complex()).collect();
+            validate_complex_eigenvalues(&complex_values)?;
+            validate_eigenvectors(vectors)?;
+            let mut order = vec![0; n];
+            lexicographic_eig_order(&complex_values, &mut order);
+            let sorted_values: Vec<Complex64> =
+                order.iter().map(|&index| complex_values[index]).collect();
+            let mut sorted_vectors = vec![<D::Eig as num_traits::Zero>::zero(); n * n];
+            for (position, &index) in order.iter().enumerate() {
+                unit_norm_column_into(
+                    &vectors[index * n..(index + 1) * n],
+                    &mut sorted_vectors[position * n..(position + 1) * n],
+                );
+            }
+            eigenvector_gauge(&mut sorted_vectors, n, n, n);
+            stage(index, sorted_values, sorted_vectors)
+        },
+    )
 }
 
 /// Writes `source / ‖source‖₂` into `dest`: LAPACK `geev`'s unit 2-norm
@@ -1275,28 +1289,32 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let mut eigenvalues = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices.get(index)?;
-        let n = matrix.rows;
-        let shape = [matrix.rows, matrix.cols];
-        let strides = [1usize, matrix.rows];
-        let view =
-            DenseView::new(matrix.data, &shape, &strides, 0).map_err(OperationError::Dense)?;
-        let values_tensor = dense
-            .eig_vals(engine, D::dense_read(view))
-            .map_err(OperationError::Dense)?;
-        validate_dense_shape(values_tensor.shape(), &[n])?;
-        let values =
-            <D::Eig as FactorScalar>::dense_slice(&values_tensor).map_err(OperationError::Dense)?;
-        let mut sorted: Vec<Complex64> = values[..n].iter().map(|&v| v.widen_complex()).collect();
-        validate_complex_eigenvalues(&sorted)?;
-        sort_spectrum(&mut sorted, lexicographic_eig_cmp);
-        eigenvalues.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: sorted,
-        });
-    }
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut layouts)?;
+    let mut eigenvalues = Vec::with_capacity(blocks.len());
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::EigVals,
+        &inputs,
+        |index, outcome| {
+            let values_tensor = single_output(outcome, "eig_vals")?;
+            let n = blocks[index].1;
+            validate_dense_shape(values_tensor.shape(), &[n])?;
+            let values = <D::Eig as FactorScalar>::dense_slice(&values_tensor)
+                .map_err(OperationError::Dense)?;
+            let mut sorted: Vec<Complex64> =
+                values[..n].iter().map(|&v| v.widen_complex()).collect();
+            validate_complex_eigenvalues(&sorted)?;
+            sort_spectrum(&mut sorted, lexicographic_eig_cmp);
+            eigenvalues.push(SectorSpectrum {
+                sector: sectors[index],
+                values: sorted,
+            });
+            Ok(())
+        },
+    )?;
     Ok(eigenvalues)
 }
 
@@ -1826,26 +1844,30 @@ where
 
     let mut pairs: Vec<FactorPair<D::Eig>> = Vec::with_capacity(matrices.len());
     let mut eigenvalues = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices
-            .get(index)
-            .map_err(CheckedGenericFactorPlanError::from)?;
-        let n = matrix.rows;
-        let (sorted_values, sorted_vectors) = eig_sector_stage(engine, dense, matrix.data, n)
-            .map_err(CheckedGenericFactorPlanError::from)?;
-        eigenvalues.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: sorted_values,
-        });
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: n,
-            left: sorted_vectors,
-            left_rows: n,
-            right: Vec::new(),
-            right_leading: 0,
-        });
-    }
+    let (sectors, blocks) =
+        sector_blocks(&matrices).map_err(CheckedGenericFactorPlanError::from)?;
+    eig_sectors_staged(
+        engine,
+        dense,
+        &blocks,
+        |index, sorted_values, sorted_vectors| {
+            let (sector, n) = (sectors[index], blocks[index].1);
+            eigenvalues.push(SectorSpectrum {
+                sector,
+                values: sorted_values,
+            });
+            pairs.push(FactorPair {
+                sector,
+                kept: n,
+                left: sorted_vectors,
+                left_rows: n,
+                right: Vec::new(),
+                right_leading: 0,
+            });
+            Ok(())
+        },
+    )
+    .map_err(CheckedGenericFactorPlanError::from)?;
 
     let v = with_input_geometry!(&matrices, |geometry| {
         let dimensions = geometry

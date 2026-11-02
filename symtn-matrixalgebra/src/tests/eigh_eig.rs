@@ -1505,7 +1505,8 @@ fn overflowing_eigh_outputs(order: usize) -> Vec<DenseTensor> {
 
 /// A stateful executor: its first EIGH solve returns a non-finite eigenvalue,
 /// and every linear-algebra scope refuses at exit, telling whether a second
-/// EIGH solve ran inside it. Values-only EIGH reaches the real solver.
+/// EIGH solve ran inside it. Values-only EIGH and the general eig entries
+/// reach the real solver.
 #[derive(Default)]
 struct NonFiniteFirstEighRefusingScope {
     eigh_calls: usize,
@@ -1513,7 +1514,7 @@ struct NonFiniteFirstEighRefusingScope {
 
 impl Observer for NonFiniteFirstEighRefusingScope {
     fn script(script: &mut Script) {
-        script.set(Op::EighVals, Action::Forward);
+        script.set_all(&[Op::EighVals, Op::Eig, Op::EigVals], Action::Forward);
     }
 
     fn call(&mut self, call: Call<'_, '_>) -> Option<Reply> {
@@ -1559,41 +1560,53 @@ fn eigh_full_checks_each_sector_before_the_next_solve_inside_its_scope() {
 }
 
 #[test]
-fn eigh_vals_runs_outside_any_linalg_scope() {
-    // What: values-only EIGH opens no linear-algebra scope, so a scope that
-    // would refuse does not affect it.
+fn eigh_vals_and_general_eig_run_outside_any_linalg_scope() {
+    // What: values-only EIGH, full EIG and values-only EIG open no
+    // linear-algebra scope, so a scope that would refuse does not affect
+    // them.
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = two_sector_hermitian();
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let input = bound.as_ref();
     let mut dense = ScriptedExecutor::<NonFiniteFirstEighRefusingScope>::default();
 
-    let values = eigh_vals(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
-    )
-    .unwrap();
+    let eigh = eigh_vals(engine, &mut dense, &input).unwrap();
+    let eig = eig_full(engine, &mut dense, &input).unwrap().eigenvalues;
+    let eig_values = eig_vals(engine, &mut dense, &input).unwrap();
 
-    let mut spectra = values
-        .iter()
-        .map(|entry| entry.values.clone())
-        .collect::<Vec<_>>();
-    spectra.sort_by(|a, b| a[0].total_cmp(&b[0]));
-    for (got, want) in spectra.iter().zip([[1.0, 2.0], [3.0, 4.0]]) {
-        for (got, want) in got.iter().zip(want) {
-            assert!((got - want).abs() <= 1.0e-12, "{got} against {want}");
+    let real = |spectra: Vec<Vec<f64>>| {
+        let mut spectra = spectra;
+        spectra.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(spectra.len(), 2);
+        for (got, want) in spectra.iter().zip([[1.0, 2.0], [3.0, 4.0]]) {
+            assert_eq!(got.len(), 2);
+            for (got, want) in got.iter().zip(want) {
+                assert!((got - want).abs() <= 1.0e-12, "{got} against {want}");
+            }
         }
+    };
+    real(eigh.into_iter().map(|entry| entry.values).collect());
+    for spectra in [eig, eig_values] {
+        for value in spectra.iter().flat_map(|entry| &entry.values) {
+            assert!(value.im.abs() <= 1.0e-12, "{value}");
+        }
+        real(
+            spectra
+                .into_iter()
+                .map(|entry| entry.values.iter().map(|value| value.re).collect())
+                .collect(),
+        );
     }
-    assert_eq!(spectra.len(), 2);
 }
 
-/// A forwarded batch whose sector 0 delivers a non-finite eigenvalue and
+/// A forwarded batch whose sector 0 delivers the invalid output `first` and
 /// whose sector 1 delivers `second`.
-struct NonFiniteThen {
+struct InvalidThen {
     first: Option<Vec<DenseTensor>>,
     second: Option<Reply>,
 }
 
-impl Observer for NonFiniteThen {
+impl Observer for InvalidThen {
     fn script(script: &mut Script) {
         script.set(Op::FactorizeBatch, Action::Forward);
     }
@@ -1624,7 +1637,7 @@ fn eigh_full_reports_the_first_sector_failure_over_later_batch_outcomes() {
         message: "injected failure".to_string(),
     };
     for second in [Err(solver_failure), Ok(f64_eigh_outputs(1))] {
-        let mut dense = ScriptedExecutor::new(NonFiniteThen {
+        let mut dense = ScriptedExecutor::new(InvalidThen {
             first: Some(overflowing_eigh_outputs(2)),
             second: Some(second),
         });
@@ -1646,4 +1659,56 @@ fn eigh_full_reports_the_first_sector_failure_over_later_batch_outcomes() {
             "{error:?}"
         );
     }
+}
+
+/// The executor's general eig outputs of the `1 x 1` matrix `[1]`: valid
+/// outputs, but of the wrong extent for a `2 x 2` sector.
+fn one_by_one_eig_outputs() -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    symtn_dense::DefaultDenseExecutor::new()
+        .eig(
+            engine,
+            DenseRead::F64(symtn_dense::DenseView::new(&[1.0], &[1, 1], &[1, 1], 0).unwrap()),
+        )
+        .unwrap()
+}
+
+#[test]
+fn eig_full_and_eig_vals_report_the_first_sector_failure_over_a_later_solver_failure() {
+    // What: a batch that solved every sector before delivering reports the
+    // lowest sector's failure, as the per-sector loop does: sector 0's
+    // wrongly shaped output, not sector 1's solver error.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let input = bound.as_ref();
+    let solver_failure = || DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op: "eig_read",
+        message: "injected failure".to_string(),
+    };
+    let short = OperationError::ShapeMismatch {
+        dst: vec![2],
+        src: vec![1],
+    };
+
+    let mut dense = ScriptedExecutor::new(InvalidThen {
+        first: Some(one_by_one_eig_outputs()),
+        second: Some(Err(solver_failure())),
+    });
+    let error = eig_full(engine, &mut dense, &input)
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(error, short);
+
+    let mut values = one_by_one_eig_outputs();
+    values.truncate(1);
+    let mut dense = ScriptedExecutor::new(InvalidThen {
+        first: Some(values),
+        second: Some(Err(solver_failure())),
+    });
+    let error = eig_vals(engine, &mut dense, &input)
+        .map(|_| ())
+        .unwrap_err();
+    assert_eq!(error, short);
 }

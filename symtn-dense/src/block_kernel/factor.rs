@@ -1,20 +1,22 @@
 //! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, Hermitian eigendecomposition and their values-only forms): one tlinalg
-//! call per block, the blocks spread over the lane driver's lanes on the
-//! caller's engine.
+//! QR, Hermitian and general eigendecomposition and their values-only
+//! forms): one tlinalg call per block, the blocks spread over the lane
+//! driver's lanes on the caller's engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
-//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`) does
-//! (same provider, same validation, same error values), but on
-//! its lane's child token instead of the whole engine, so a block's faer
-//! width is the engine's decision within its lane's reserved share. Each
-//! factor is a fresh `Vec` from the provider's `Vec` entry: its length is the
-//! factor's logical size and it carries no recycled-buffer history (its
-//! capacity is the provider's reservation, not necessarily the length).
+//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
+//! `eig_read`, `eigvals`) does (same provider, same validation, same error
+//! values, the same eigenvector normalization), but on its lane's child token
+//! instead of the whole engine, so a block's faer width is the engine's
+//! decision within its lane's reserved share. Each factor is a fresh `Vec`
+//! from the provider's `Vec` entry: its length is the factor's logical size
+//! and it carries no recycled-buffer history (its capacity is the provider's
+//! reservation, not necessarily the length).
 
 use std::marker::PhantomData;
+use std::ops::Div;
 
-use num_complex::{Complex32, Complex64};
+use num_complex::{Complex, Complex32, Complex64};
 use strided_view::RawStridedRef;
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
@@ -210,6 +212,67 @@ impl Factor for SvdVals {
     }
 }
 
+/// General eigendecomposition: `[values, vectors]` of shapes `[n, b..]` and
+/// `[n, n, b..]` in the input's complex counterpart, each eigenvector column
+/// scaled to unit 2-norm as tenferro's per-matrix entry publishes it.
+pub(crate) struct Eig;
+
+impl Factor for Eig {
+    const ENTRY: &'static str = "eig_read";
+    const OP: tlinalg::Op = tlinalg::Op::Eig;
+    const SQUARE: bool = true;
+
+    fn work(n: usize, _: usize) -> f64 {
+        tlinalg::eig::estimate_work::<f64>(n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let (mut values, mut vectors) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            T::eig(raw, &mut values, Some(&mut vectors), exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+            T::unit_columns(&mut vectors, n).map_err(|err| tenferro_error(Self::ENTRY, err))?;
+        }
+        Ok(vec![
+            output::<Self, T::EigScalar>(&[n], batch, values)?,
+            output::<Self, T::EigScalar>(&[n, n], batch, vectors)?,
+        ])
+    }
+}
+
+/// General eigenvalues only: `[values]` of shape `[n, b..]` in the input's
+/// complex counterpart.
+pub(crate) struct EigVals;
+
+impl Factor for EigVals {
+    const ENTRY: &'static str = "eig_values";
+    const OP: tlinalg::Op = tlinalg::Op::EigValues;
+    const SQUARE: bool = true;
+
+    fn work(n: usize, _: usize) -> f64 {
+        tlinalg::eig::estimate_work::<f64>(n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut values = Vec::new();
+        if let Some(raw) = raw {
+            T::eig(raw, &mut values, None, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![output::<Self, T::EigScalar>(&[n], batch, values)?])
+    }
+}
+
 /// A column-major factor of shape `dims` followed by `batch`.
 fn output<F: Factor, T: TensorScalar>(
     dims: &[usize],
@@ -239,14 +302,83 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
         raw: RawStridedRef<'_, Self>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
+
+    /// The complex counterpart, in which the general eigendecomposition
+    /// publishes its values and vectors.
+    type EigScalar: TensorScalar;
+
+    /// tlinalg's general eigenvalues and, when `vectors` is given, its
+    /// eigenvectors (unnormalized).
+    fn eig(
+        raw: RawStridedRef<'_, Self>,
+        values: &mut Vec<Self::EigScalar>,
+        vectors: Option<&mut Vec<Self::EigScalar>>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()>;
+
+    /// Scales each length-`n` column of `vectors` to unit 2-norm.
+    fn unit_columns(vectors: &mut [Self::EigScalar], n: usize) -> tenferro_tensor::Result<()>;
+}
+
+/// tenferro's eigenvector gauge (`FaerEig::normalize_eig_vectors`, private
+/// to tenferro-linalg), with the same arithmetic and error: each column is
+/// divided by its 2-norm, computed in `f64` after scaling by the largest
+/// component and rounded once to the column's precision; a column whose norm
+/// is zero or not finite is the provider's numerical failure.
+fn unit_columns<R>(
+    vectors: &mut [Complex<R>],
+    n: usize,
+    round: fn(f64) -> R,
+) -> tenferro_tensor::Result<()>
+where
+    R: Copy + Into<f64> + Div<Output = R>,
+{
+    let non_finite = || {
+        linalg_error(
+            "eig",
+            tenferro_linalg::Error::NonFinite {
+                op: "eig",
+                role: "eigenvector column",
+            },
+        )
+    };
+    for column in vectors.chunks_exact_mut(n) {
+        let magnitude = column.iter().fold(0.0_f64, |largest, value| {
+            largest.max(value.re.into().abs().max(value.im.into().abs()))
+        });
+        if magnitude == 0.0 {
+            return Err(non_finite());
+        }
+        let norm = magnitude
+            * column
+                .iter()
+                .map(|value| {
+                    let re = value.re.into() / magnitude;
+                    let im = value.im.into() / magnitude;
+                    re * re + im * im
+                })
+                .sum::<f64>()
+                .sqrt();
+        let scale = round(norm);
+        let wide: f64 = scale.into();
+        if !norm.is_finite() || !wide.is_finite() || wide == 0.0 {
+            return Err(non_finite());
+        }
+        for value in column.iter_mut() {
+            *value = Complex::new(value.re / scale, value.im / scale);
+        }
+    }
+    Ok(())
 }
 
 // Why one impl per concrete scalar: tlinalg's values-only real type is an
 // associated type of a trait it does not export, so it equals
 // `TensorScalar::Real` only once the scalar is concrete.
 macro_rules! scalar {
-    ($ty:ty, |$values:ident| $real:expr) => {
+    ($ty:ty, $complex:ty, $part:ty, |$values:ident| $real:expr) => {
         impl Scalar for $ty {
+            type EigScalar = $complex;
+
             fn real_values($values: Vec<$ty>) -> Vec<<$ty as TensorScalar>::Real> {
                 $real
             }
@@ -268,17 +400,35 @@ macro_rules! scalar {
                 tlinalg::svd::svd_values(tlinalg::Op::SvdValues, raw, &mut values, exec)?;
                 Ok(values)
             }
+
+            fn eig(
+                raw: RawStridedRef<'_, $ty>,
+                values: &mut Vec<$complex>,
+                vectors: Option<&mut Vec<$complex>>,
+                exec: &mut Exec<'_>,
+            ) -> tlinalg::Result<()> {
+                match vectors {
+                    Some(vectors) => {
+                        tlinalg::eig::eig(tlinalg::Op::Eig, raw, values, vectors, exec)
+                    }
+                    None => tlinalg::eig::eig_values(tlinalg::Op::EigValues, raw, values, exec),
+                }
+            }
+
+            fn unit_columns(vectors: &mut [$complex], n: usize) -> tenferro_tensor::Result<()> {
+                unit_columns(vectors, n, |norm| norm as $part)
+            }
         }
     };
 }
 
-scalar!(f32, |values| values);
-scalar!(f64, |values| values);
-scalar!(Complex32, |values| values
+scalar!(f32, Complex32, f32, |values| values);
+scalar!(f64, Complex64, f64, |values| values);
+scalar!(Complex32, Complex32, f32, |values| values
     .into_iter()
     .map(|value| value.re)
     .collect());
-scalar!(Complex64, |values| values
+scalar!(Complex64, Complex64, f64, |values| values
     .into_iter()
     .map(|value| value.re)
     .collect());
@@ -318,7 +468,8 @@ pub(crate) type Sink<'s> =
 
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
-/// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`)
+/// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
+/// `eig`, `eig_vals`)
 /// returns it.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
@@ -354,6 +505,8 @@ pub(crate) fn factorize(
         Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
         Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
         Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
+        Op::Eig => factorize_batch::<Eig>(engine, inputs, sink),
+        Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
     }
 }
 
@@ -461,7 +614,7 @@ fn factor<F: Factor>(
     }
 }
 
-/// tenferro's `svd_impl`/`qr_impl`/`eigh_impl` (and values-only forms) on
+/// tenferro's `svd_impl`/`qr_impl`/`eigh_impl`/`eig_impl` (and values-only forms) on
 /// one input: rank check, the square check where the provider requires one,
 /// the empty-extent shortcut, then the provider's batched factorization.
 fn factor_typed<F: Factor, T: Scalar>(

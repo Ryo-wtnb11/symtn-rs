@@ -2274,6 +2274,8 @@ fn factorize_batch_serial(
         DenseFactorization::Eigh => "eigh_read",
         DenseFactorization::EighVals => "eigh_values",
         DenseFactorization::SvdVals => "svd_values",
+        DenseFactorization::Eig => "eig_read",
+        DenseFactorization::EigVals => "eig_values",
     };
     let solve =
         |exec: &mut dyn Engine, input: DenseRead<'_>| -> Result<Vec<DenseTensor>, DenseError> {
@@ -2284,6 +2286,13 @@ fn factorize_batch_serial(
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
                 DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
                 DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),
+                DenseFactorization::Eig => input.eig_read(exec).map(|(w, v)| vec![w, v]),
+                // The per-matrix `eig_vals` route: a contiguity pre-pass, then
+                // the owned values call.
+                DenseFactorization::EigVals => exec
+                    .to_contiguous_read(input)
+                    .and_then(|owned| owned.eigvals(exec))
+                    .map(|w| vec![w]),
             }
             .map_err(|err| tenferro_error(entry, err))?;
             tensors
