@@ -5,23 +5,22 @@ pub(crate) mod sealed {
     use super::*;
     use strided_kernel::execution;
 
-    /// The smallest paying element count of one token shape, found at most
-    /// once per call and token shape on one thread.
+    /// The smallest element count that widens on one token shape, found at
+    /// most once per call and token shape on one thread.
     ///
-    /// Why: Strided's `parallel_width` scans every width up to the budget on each
-    /// call, so asking it for every small block of a serial replay costs
-    /// O(blocks x budget) and makes wide engines slower on small tensors. A
-    /// width pays only if `estimate >= PAYS * dispatch_cost(width)`, which is
-    /// monotone in the cost, so no width pays exactly when the cheapest one does
-    /// not: one `pays` query against that width rejects a block in O(1), and only
-    /// blocks it admits pay for the full width search.
+    /// Why: Strided's `parallel_width` scans every width up to the budget on
+    /// each call, so asking it for every block (or every component a threaded
+    /// replay classifies) costs O(blocks x budget) and makes wide engines
+    /// slower on small tensors. Its answer is monotone in the element count
+    /// (see [`LeafGate::scan`]), so one threshold per token shape answers
+    /// every later query exactly in O(1).
     ///
-    /// Why lazy: the O(budget + log bound) scan runs only when an overwrite of
-    /// a role with a retained plan reaches admission, so a call of planless or
-    /// accumulating blocks pays nothing. A gate lives on the thread that runs
-    /// its blocks, because a token's dispatch cost depends on the calling
-    /// thread: one per call for the calling thread's unsplit lists, one per
-    /// forked leaf otherwise.
+    /// Why lazy: the scan runs only when an overwrite of a role with a
+    /// retained plan reaches admission, so a call of planless or accumulating
+    /// blocks pays nothing. A gate lives on the thread that runs its blocks,
+    /// because a token's dispatch cost depends on the calling thread: one per
+    /// call for the calling thread's unsplit lists, one per forked leaf
+    /// otherwise.
     pub struct LeafGate {
         /// The largest element count any planned role this gate admits has.
         bound: usize,
@@ -45,10 +44,20 @@ pub(crate) mod sealed {
             }
         }
 
-        /// The smallest element count up to `bound` whose copy estimate pays
-        /// at the token's cheapest width, or `None` when none does. A copy
-        /// estimate is monotone in the element count, so a binary search over
-        /// `pays` at that one width finds it in O(log bound).
+        /// The smallest element count up to `bound` at which Strided's
+        /// `parallel_width` for a copy exceeds one, or `None` when `bound`
+        /// does not.
+        ///
+        /// Why a bisection is exact: the copy estimate is monotone in the
+        /// element count, and `parallel_width > 1` holds exactly when some
+        /// width `k >= 2` both pays (`estimate >= PAYS * D(k)`) and beats one
+        /// worker (`D(k) + estimate / k < estimate`); each condition only
+        /// gets easier as the estimate grows, so their union is monotone.
+        /// Free dispatch (`D = 0`) still needs a nonzero estimate to beat one
+        /// worker, so an empty or zero-cost copy never widens. A width pays
+        /// only if the cheapest dispatch cost pays, so the first count that
+        /// pays there bounds the search from below in O(budget + log bound),
+        /// and the bisection above it asks Strided O(log bound) times.
         fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
             #[cfg(test)]
             GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
@@ -67,16 +76,36 @@ pub(crate) mod sealed {
             let cheapest = cheapest?;
             let class = execution::KernelClass::Copy;
             let pays = |elements: usize| exec.pays(class.estimate(elements), 1, cheapest);
-            if !pays(bound) {
+            let widens = |elements: usize| {
+                #[cfg(test)]
+                WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
+                execution::parallel_width(exec, class, elements).get() > 1
+            };
+            if !pays(bound) || !widens(bound) {
                 return None;
             }
-            if pays(0) {
-                return Some(0);
+            // The first paying count: no smaller count widens.
+            let first_paying = if pays(0) {
+                0
+            } else {
+                let (mut below, mut at) = (0usize, bound);
+                while at - below > 1 {
+                    let middle = below + (at - below) / 2;
+                    if pays(middle) {
+                        at = middle;
+                    } else {
+                        below = middle;
+                    }
+                }
+                at
+            };
+            if widens(first_paying) {
+                return Some(first_paying);
             }
-            let (mut below, mut at) = (0usize, bound);
+            let (mut below, mut at) = (first_paying, bound);
             while at - below > 1 {
                 let middle = below + (at - below) / 2;
-                if pays(middle) {
+                if widens(middle) {
                     at = middle;
                 } else {
                     below = middle;
@@ -86,8 +115,8 @@ pub(crate) mod sealed {
         }
 
         /// Exactly `parallel_width(exec, Copy, elements) > 1` for
-        /// `elements <= bound`: a block below the paying size is rejected
-        /// without a width search.
+        /// `elements <= bound`, in O(1) once the token shape's threshold is
+        /// known.
         ///
         /// Why the memo is keyed by budget and team authority: one gate
         /// serves every unsplit block list of a call on the calling thread,
@@ -113,13 +142,7 @@ pub(crate) mod sealed {
                     min_elements
                 }
             };
-            match min_elements {
-                Some(min) if elements >= min => {
-                    execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
-                        > 1
-                }
-                _ => false,
-            }
+            min_elements.is_some_and(|min| elements >= min)
         }
     }
 
@@ -127,6 +150,8 @@ pub(crate) mod sealed {
     thread_local! {
         /// Dispatch-cost scans this thread's gates ran (test observation).
         pub(crate) static GATE_SCANS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+        /// Strided width searches this thread's gates ran (test observation).
+        pub(crate) static WIDTH_QUERIES: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
     }
 
     /// Unnameable outside this crate, so its methods are crate-internal.

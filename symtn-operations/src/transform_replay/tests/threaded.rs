@@ -949,6 +949,13 @@ fn component_splits_balance_moved_elements_not_component_count() {
 /// widest)` of one Single each and returns every leaf's Singles with the
 /// token budget it ran on, sorted.
 fn record_single_leaves(atoms: &[(isize, usize, usize)]) -> Vec<(Vec<u32>, usize)> {
+    record_single_phase(atoms).0
+}
+
+/// [`record_single_leaves`] and the Strided width searches the phase ran on
+/// the calling thread.
+fn record_single_phase(atoms: &[(isize, usize, usize)]) -> (Vec<(Vec<u32>, usize)>, usize) {
+    use crate::kernel_adapter::sealed::WIDTH_QUERIES;
     use crate::transform_structure::TreeTransformSingleAtom;
     let mut schedule = TreeTransformParallelSchedule::default();
     let mut weight_before = 0;
@@ -975,35 +982,37 @@ fn record_single_leaves(atoms: &[(isize, usize, usize)]) -> Vec<(Vec<u32>, usize
     let mut fused_indices = [0usize; 3];
     let mut narrow = Vec::new();
     let gate = LeafGate::new(schedule.widest_single);
-    crate::host_pool::test_pool(3)
-        .install(|engine| {
-            replay_region(engine, |exec| {
-                replay_single_phase(
-                    &schedule,
-                    &mut narrow,
-                    &mut dst,
-                    &mut fused_indices,
-                    1,
-                    3,
-                    exec,
-                    &gate,
-                    schedule.widest_single,
-                    true,
-                    &|items, _, _, _, exec, _| {
-                        leaves
-                            .lock()
-                            .unwrap()
-                            .push((items.to_vec(), exec.budget().get()));
-                        Ok(())
-                    },
-                )
-            })
+    let mut pool = crate::host_pool::test_pool(3);
+    let queries = WIDTH_QUERIES.with(|queries| queries.get());
+    pool.install(|engine| {
+        replay_region(engine, |exec| {
+            replay_single_phase(
+                &schedule,
+                &mut narrow,
+                &mut dst,
+                &mut fused_indices,
+                1,
+                3,
+                exec,
+                &gate,
+                schedule.widest_single,
+                true,
+                &|items, _, _, _, exec, _| {
+                    leaves
+                        .lock()
+                        .unwrap()
+                        .push((items.to_vec(), exec.budget().get()));
+                    Ok(())
+                },
+            )
         })
-        .unwrap()
-        .unwrap();
+    })
+    .unwrap()
+    .unwrap();
+    let queries = WIDTH_QUERIES.with(|queries| queries.get()) - queries;
     let mut leaves = leaves.into_inner().unwrap();
     leaves.sort_unstable();
-    leaves
+    (leaves, queries)
 }
 
 #[test]
@@ -1016,5 +1025,109 @@ fn wide_components_run_alone_on_the_whole_token_before_narrow_ones_split() {
     assert_eq!(
         leaves,
         [(vec![0], 1), (vec![1], 3), (vec![2], 1), (vec![3], 1)]
+    );
+}
+
+#[test]
+fn classifying_more_wide_components_asks_strided_no_more_often() {
+    // What: deciding which components widen takes one threshold search per
+    // token shape, so a phase with three times the wide components asks
+    // Strided for a width exactly as often.
+    const LARGE: usize = 1 << 24;
+    let phase = |wide: isize| {
+        let atoms = std::iter::once((0, 1, 1))
+            .chain((1..=wide).map(|lo| (lo, LARGE, LARGE)))
+            .chain([(wide + 1, 1, 1)])
+            .collect::<Vec<_>>();
+        record_single_phase(&atoms)
+    };
+    let (few, few_queries) = phase(2);
+    let (many, many_queries) = phase(6);
+    assert_eq!(few.iter().filter(|(_, budget)| *budget == 3).count(), 2);
+    assert_eq!(many.iter().filter(|(_, budget)| *budget == 3).count(), 6);
+    assert!(few_queries > 0);
+    assert_eq!(many_queries, few_queries);
+}
+
+#[test]
+fn narrow_single_scratch_is_charged_by_capacity() {
+    // What: the Single phase's narrow-atom list counts in the workspace's
+    // retained bytes by its capacity.
+    let mut workspace = TreeTransformWorkspace::<f64>::default();
+    let before = workspace.retained_bytes();
+    workspace.narrow_atoms.reserve_exact(4);
+    assert_eq!(
+        workspace.retained_bytes() - before,
+        workspace.narrow_atoms.capacity() * std::mem::size_of::<NarrowAtom>()
+    );
+}
+
+#[test]
+fn a_wide_multi_component_runs_on_the_whole_token_between_split_narrow_ones() {
+    use crate::kernel_adapter::observed::ObservedKernels;
+    // What: in a threaded overwrite whose middle Multi component's columns
+    // widen on the whole token, those columns run on all three workers,
+    // the two narrow components around it split one and two workers, and
+    // every block holds `U * source`.
+    const LARGE: usize = 1 << 20;
+    let structure = Arc::new(
+        BlockStructure::packed_column_major(1, [2, 2, LARGE, LARGE, 2, 2].map(|len| vec![len]))
+            .unwrap(),
+    );
+    let matrix = [2.0, -1.0, 0.5, 3.0];
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[0, 2, 4].map(|first| {
+            TreeTransformBlockSpec::multi(
+                vec![first, first + 1],
+                vec![first, first + 1],
+                matrix.to_vec(),
+            )
+        }),
+    )
+    .unwrap();
+    assert_eq!(transform.parallel_schedule().scatter_component_count(), 3);
+    let len = structure.required_len().unwrap();
+    let source = (0..len)
+        .map(|value| (value % 97) as f64 - 48.0)
+        .collect::<Vec<_>>();
+    let mut expected = vec![0.0; len];
+    let mut start = 0;
+    for block_len in [2, LARGE, 2] {
+        for element in 0..block_len {
+            let (a, b) = (source[start + element], source[start + block_len + element]);
+            expected[start + element] = matrix[0] * a + matrix[1] * b;
+            expected[start + block_len + element] = matrix[2] * a + matrix[3] * b;
+        }
+        start += 2 * block_len;
+    }
+    let mut kernels = ObservedKernels::recording();
+    let budgets = std::sync::Arc::clone(&kernels.copy_budgets);
+    let mut destination = vec![f64::NAN; len];
+    crate::host_pool::test_pool(3)
+        .install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut kernels,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut destination,
+                &source,
+                1.0,
+                &[],
+                3,
+            )
+        })
+        .unwrap();
+    assert!(destination == expected);
+    let mut budgets = budgets.lock().unwrap().clone();
+    budgets.sort_unstable();
+    assert_eq!(
+        budgets,
+        [(2, 1), (2, 1), (2, 2), (2, 2), (LARGE, 3), (LARGE, 3)]
     );
 }

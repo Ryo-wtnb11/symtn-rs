@@ -244,9 +244,13 @@ split hands the left `⌊w/2⌋` of `w` workers
 the components whose destination elements are closest to that fraction of
 the total, never dividing a component, and runs that side on the same
 share of the token. A split of the scatter phase lists its atoms and each
-chunk's components: O(atoms + chunk groups) metadata that an eager call's
-call-local workspace allocates once per call and a reused workspace keeps; a
-serial or one-component phase allocates neither. Inside the replay each Single block
+chunk's components, and a Single phase with both wide and narrow components
+lists its narrow ones: O(atoms + chunk groups) metadata that an eager call's
+call-local workspace allocates once per call and a reused workspace keeps
+(and reports in its retained bytes); a serial or one-component phase, and a
+Single phase of one tier, allocates none. Whether a component is wide is one
+comparison against the smallest widening element count, which the replay
+finds once per token shape. Inside the replay each Single block
 and scatter column keeps the token share of the worker that visits it, the
 whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained

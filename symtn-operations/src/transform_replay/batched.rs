@@ -640,7 +640,9 @@ pub(super) struct NarrowAtom {
 /// Why two tiers: a few large components split between lanes run each on a
 /// fraction of the token that one of them alone would use whole, while many
 /// small ones only gain from running side by side. `narrow` is the narrow
-/// list's scratch, used only when both tiers are present.
+/// list's scratch (O(atoms), workspace-retained and charged), used only when
+/// both tiers are present; classification asks the gate's O(1) threshold
+/// once per atom.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_single_phase<T: Send + Sync>(
     schedule: &TreeTransformParallelSchedule,
@@ -850,10 +852,11 @@ impl<'a, T> ScatterTarget<'a, T> {
     /// component can run at once; O(atoms), reusing the workspace's slice
     /// capacity.
     ///
-    /// Only this split allocates scratch beyond the serial replay's: the atom
-    /// list and the chunk unit list, O(atoms + chunk groups) metadata kept by
-    /// a reused workspace and allocated once by a call-local one. A serial
-    /// or one-component phase allocates neither.
+    /// The scatter split's scratch: the atom list and the chunk unit list,
+    /// O(atoms + chunk groups) metadata kept by a reused workspace and
+    /// allocated once by a call-local one. A serial or one-component scatter
+    /// allocates neither. (The Single phase's narrow list,
+    /// [`replay_single_phase`], is the only other split scratch.)
     pub(super) fn new<D>(
         workspace: &mut TreeTransformWorkspace<D>,
         schedule: &TreeTransformParallelSchedule,

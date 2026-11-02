@@ -399,6 +399,9 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.chunk_units.capacity(),
             std::mem::size_of::<ScatterUnit>(),
+        ) + bytes(
+            self.narrow_atoms.capacity(),
+            std::mem::size_of::<NarrowAtom>(),
         ) + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
     }
 
