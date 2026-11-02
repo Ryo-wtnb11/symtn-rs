@@ -105,8 +105,11 @@ operations. Per-method bounds remain authoritative; see the
 
 ## Parallel execution
 
-Every numerical operation takes the caller's engine
-(`engine: &mut dyn Engine`). A `CpuEngine::serial()` runs on the calling
+Every numerical operation takes the caller's execution context
+(`cx: &mut (impl ExecContext + ?Sized)`): an engine (`&mut CpuEngine`,
+`&mut dyn Engine`), which runs with the default execution options, or a
+`Configured` engine that carries `ExecOptions` (the lane allocation, below)
+for the calls it is passed to. A `CpuEngine::serial()` runs on the calling
 thread; `CpuEngine::new(pool)` runs on a caller-owned `Pool` of threads. The
 engine owns the threads and the dense provider's resources an operation uses:
 its thread team, its buffer pool and its provider scratch. symtn stores no
@@ -125,6 +128,10 @@ engine's batch decision, so the work model's fan-out limits are never
 exceeded. Each lane reserves a nonzero share of those threads, the shares
 summing to at most the thread count, and each block runs on a context of
 exactly its lane's share; a thread no lane reserves stays idle for the call.
+Which placements the kernel scores is the call's `LaneAllocation`: the
+default `Moldable` scores every candidate below, and `EqualShare` scores the
+baseline and the equal-share placements only, without the large-block
+reservation.
 A batch of a few large blocks gives each lane several threads, and a batch
 of many small blocks runs one thread per lane. The kernel scores the
 baseline placement (equal shares over `L0 = min(threads, blocks, decision
@@ -160,7 +167,7 @@ thread-count) blocks above the mean load, and the reserved lanes' widths for
 the others. Each searched allocation is kept in the process-global structure
 cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
 function of (the kernel's kind, GEMM or factorization, which fixes the grant;
-the engine's budget, work model, team and dispatch cost at every width, the
+the call's lane allocation, which fixes the candidates; the engine's budget, work model, team and dispatch cost at every width, the
 mean work, and each block's serial time and grant inputs), so a
 batch already searched, on any executor including an eager call's fresh one,
 rebuilds its lanes without a query. Each entry is charged its inline key and
@@ -224,8 +231,56 @@ placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
 destination length against the pool's dispatch cost) admits the parallel
 section. A serial engine never forks. Results are bit-identical for one
-configuration (provider, build, engine width, inputs); no promise is made
-across widths or providers. BLAS-internal threads remain separate.
+configuration (provider, build, engine width, batch policy and work model,
+lane allocation, inputs), whether the lane allocation is searched or taken
+from the cache; no promise is made across widths, providers or lane
+allocations, which agree within rounding. BLAS-internal threads remain
+separate.
+
+### Lane allocation
+
+A call's `LaneAllocation` (from its `ExecContext`; `Moldable` unless a
+`Configured` context selects another) applies to every phase of the call
+that searches a block placement, judged on the batch the executor will
+actually receive: a grouped GEMM batch of a contraction (two or more blocks
+that are not one strided submission: into an initialized destination, one
+self-disjoint affine run; into a fresh owned output, one gapless affine run),
+a grouped recoupling GEMM batch of a tree transform (the parallel replay
+submits the Multi blocks in chunks of its worker count, a member replay all
+members' blocks at once; a serial replay submits each Multi block alone, which
+does not search), and an SVD, values-only SVD, Hermitian eigen (full and
+values-only) or general-eigenvalue batch of two or more blocks. It is applied on every
+call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
+workspace or a network's pooled workspace kept from an earlier call; a
+workspace never keeps an earlier call's allocation. Other phases run as
+with the default: a single GEMM and an admitted affine strided GEMM run
+(which do not search), transforms that submit no grouped recoupling batch
+(unique fusion, a serial replay, one Multi block per chunk, compact
+diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
+the full general eigendecomposition, the prepared batched `EighFullPlan`,
+and operations without dense blocks (norms, linear combinations,
+transfers).
+
+The default lane allocation adds no restriction. Another allocation needs
+the native provider's CPU engine under the `Auto` batch policy, the only
+configuration that searches. On a CPU engine, participation is decided per
+phase from the call's plan (its GEMM batches, the destination form its core
+writes, and the recoupling batches its transforms submit at the engine's
+replay width) before the call writes a destination, and a participating phase is refused with
+`OperationError::Dense(DenseError::Unsupported { op: "lane_allocation", .. })`
+when the build links a BLAS provider (which has no lane allocator for its
+grouped GEMM and factorization routes) or when the engine's batch policy is
+forced (`Inner`, `Outer`, `Split`, `Sequential`), which fixes the placement
+itself: symtn does not override the engine's policy, and does not silently
+run another placement than the one requested. A factorization batch, whose
+outputs are fresh, is refused when it would run. A CUDA engine has no lane
+allocator and no Host fallback: a contraction, transform, prepared plan or
+compact SVD/eigh call with another allocation is refused before any upload
+or submission. On the native provider under `Auto`, a call that has nothing
+to search (one block, or one thread) runs as with the default. A
+factorization whose leg roles need a permute with a grouped recoupling batch
+first is refused for that permute even when its own dense stage ignores the
+allocation.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
 An eager operation builds its execution scratch (tree-transform and

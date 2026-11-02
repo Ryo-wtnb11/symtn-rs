@@ -104,6 +104,21 @@ where
     ///     TensorMap::zeros(engine, &runtime, [&tau], [&tau]).unwrap();
     /// ```
     pub fn zeros<'a, Codomain, Domain>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        codomain: Codomain,
+        domain: Domain,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        Codomain: IntoIterator<Item = &'a GradedSpace<R>>,
+        Domain: IntoIterator<Item = &'a GradedSpace<R>>,
+        R: 'a,
+    {
+        let (engine, _) = cx.parts();
+        Self::zeros_impl(engine, runtime, codomain, domain)
+    }
+
+    fn zeros_impl<'a, Codomain, Domain>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
@@ -140,6 +155,23 @@ where
     /// One layout admission, one decode per stored block, and one callback per
     /// stored element.
     pub fn from_subblock_fn<'a, Codomain, Domain, F>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        codomain: Codomain,
+        domain: Domain,
+        fill: F,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        Codomain: IntoIterator<Item = &'a GradedSpace<R>>,
+        Domain: IntoIterator<Item = &'a GradedSpace<R>>,
+        F: FnMut(&BlockFusionTrees<R::Sector>, &[usize]) -> D,
+        R: 'a,
+    {
+        let (engine, _) = cx.parts();
+        Self::from_subblock_fn_impl(engine, runtime, codomain, domain, fill)
+    }
+
+    fn from_subblock_fn_impl<'a, Codomain, Domain, F>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
@@ -200,6 +232,22 @@ where
     ///
     /// One layout admission and one `O(stored_len)` payload allocation/fill.
     pub fn rand_with_seed<'a, Codomain, Domain>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        codomain: Codomain,
+        domain: Domain,
+        seed: u64,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        Codomain: IntoIterator<Item = &'a GradedSpace<R>>,
+        Domain: IntoIterator<Item = &'a GradedSpace<R>>,
+        R: 'a,
+    {
+        let (engine, _) = cx.parts();
+        Self::rand_with_seed_impl(engine, runtime, codomain, domain, seed)
+    }
+
+    fn rand_with_seed_impl<'a, Codomain, Domain>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: Codomain,
@@ -337,6 +385,21 @@ where
     /// One fused-content fold over the legs, one sort of each coupled block's
     /// trees, plus one `O(stored_len)` payload.
     pub fn isomorphism<'a, C, M>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        codomain: C,
+        domain: M,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        C: IntoIterator<Item = &'a GradedSpace<R>>,
+        M: IntoIterator<Item = &'a GradedSpace<R>>,
+        R: 'a,
+    {
+        let (engine, _) = cx.parts();
+        Self::isomorphism_impl(engine, runtime, codomain, domain)
+    }
+
+    fn isomorphism_impl<'a, C, M>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: C,
@@ -374,6 +437,21 @@ where
     /// One fused-content fold over the legs, one sort of each coupled block's
     /// trees, plus one `O(stored_len)` payload.
     pub fn isometry<'a, C, M>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        codomain: C,
+        domain: M,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        C: IntoIterator<Item = &'a GradedSpace<R>>,
+        M: IntoIterator<Item = &'a GradedSpace<R>>,
+        R: 'a,
+    {
+        let (engine, _) = cx.parts();
+        Self::isometry_impl(engine, runtime, codomain, domain)
+    }
+
+    fn isometry_impl<'a, C, M>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         codomain: C,
@@ -401,9 +479,20 @@ where
     /// Dense and compact payloads are freshly initialized to exact positive
     /// zero, independently of non-finite source values. A lazy adjoint zeros
     /// its canonical parent and stays a lazy adjoint.
-    pub fn zeros_like(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
+    pub fn zeros_like(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<Self, FacadeError<R>> {
+        let (engine, options) = cx.parts();
+        self.zeros_like_impl(engine, options)
+    }
+
+    fn zeros_like_impl(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+    ) -> Result<Self, FacadeError<R>> {
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self.parent_of(view).zeros_like(engine)?;
+            let parent = self
+                .parent_of(view)
+                .zeros_like(&mut Invocation::new(engine, options))?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         if let Some(spectrum) = self.spectrum() {

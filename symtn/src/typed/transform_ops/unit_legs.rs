@@ -8,6 +8,7 @@ where
     pub(in crate::typed) fn insert_unit_multiplicity_free(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         insertion: UnitLegInsertion,
     ) -> Result<Self, Error>
     where
@@ -42,7 +43,7 @@ where
             insertion,
         )
         .map_err(map_checked_unit_layout_error)?;
-        let data = self.shareable_dense_payload(engine);
+        let data = self.shareable_dense_payload(engine, options);
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
@@ -52,6 +53,7 @@ where
     pub(in crate::typed) fn remove_unit_multiplicity_free(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         axis: usize,
     ) -> Result<Self, Error>
     where
@@ -102,7 +104,7 @@ where
             insertion,
         )
         .map_err(map_checked_unit_layout_error)?;
-        let data = self.shareable_dense_payload(engine);
+        let data = self.shareable_dense_payload(engine, options);
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
@@ -148,7 +150,19 @@ where
     /// [`GenericTensorError`] variants.
     pub fn insert_unit(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        position: usize,
+        seam: Side,
+        dual: Duality,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, options) = cx.parts();
+        self.insert_unit_impl(engine, options, position, seam, dual)
+    }
+
+    fn insert_unit_impl(
+        &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         position: usize,
         seam: Side,
         dual: Duality,
@@ -158,7 +172,7 @@ where
             Side::Domain => UnitLegInsertion::Left { position, dual },
             Side::Codomain => UnitLegInsertion::Right { position, dual },
         };
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(engine, self, insertion)
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::insert_unit(engine, options, self, insertion)
     }
 
     /// TensorKit `removeunit(t, i)`: removes the canonical unit leg at flat
@@ -176,15 +190,26 @@ where
     /// [`GenericTensorError`] variants.
     pub fn remove_unit(
         &self,
-        engine: &mut dyn Engine,
+        cx: &mut (impl ExecContext + ?Sized),
         axis: usize,
     ) -> Result<Self, FacadeError<R>> {
-        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(engine, self, axis)
+        let (engine, options) = cx.parts();
+        self.remove_unit_impl(engine, options, axis)
+    }
+
+    fn remove_unit_impl(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+        axis: usize,
+    ) -> Result<Self, FacadeError<R>> {
+        <R::Mode as TypedTensorUnitDispatch<R, D>>::remove_unit(engine, options, self, axis)
     }
 }
 
 pub(in crate::typed) fn generic_insert_unit<R, D>(
     engine: &mut dyn Engine,
+    options: ExecOptions,
     tensor: &TensorMap<R, D>,
     insertion: UnitLegInsertion,
 ) -> Result<TensorMap<R, D>, GenericTensorError<R::Error>>
@@ -231,7 +256,7 @@ where
         .logical_space()
         .commit_final_homspace_generic_bound_checked(prepared)
         .map_err(map_checked_unit_commit_error)?;
-    let data = tensor.shareable_dense_payload(engine);
+    let data = tensor.shareable_dense_payload(engine, options);
     Ok(TensorMap {
         runtime: tensor.runtime.clone(),
         repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),
@@ -240,6 +265,7 @@ where
 
 pub(in crate::typed) fn generic_remove_unit<R, D>(
     engine: &mut dyn Engine,
+    options: ExecOptions,
     tensor: &TensorMap<R, D>,
     axis: usize,
 ) -> Result<TensorMap<R, D>, GenericTensorError<R::Error>>
@@ -302,7 +328,7 @@ where
         .logical_space()
         .commit_final_homspace_generic_bound_checked(prepared)
         .map_err(map_checked_unit_commit_error)?;
-    let data = tensor.shareable_dense_payload(engine);
+    let data = tensor.shareable_dense_payload(engine, options);
     Ok(TensorMap {
         runtime: tensor.runtime.clone(),
         repr: owned_repr(TypedTensorBody::with_shared_payload(destination, data)),

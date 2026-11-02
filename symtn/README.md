@@ -17,6 +17,20 @@ Start with the primitive examples below. The main
 | Reduce and inspect | `trace_pairs`, `inner`, `norm`, `blocks`, `subblocks` |
 | Factorize | `qr_compact`, `svd_compact`, `eigh_full` |
 
+Every numerical operation takes the caller's engine first. To change how
+grouped dense blocks are placed on the engine's threads for the calls you
+make, pass a `Configured` engine instead (see the
+[backend policy](../docs/backend_policy.md#lane-allocation) for its scope):
+
+```rust
+use symtn::typed::{Configured, CpuEngine, LaneAllocation, Pool};
+
+let pool = Pool::builder().threads(4).build()?;
+let mut cx = Configured::new(CpuEngine::new(pool))
+    .with_lane_allocation(LaneAllocation::EqualShare);
+let c = a.contract(&mut cx, &b, &spec)?; // equal-share lanes
+```
+
 For index notation and network planning, add `symtn-network` and run its
 [contract example](../symtn-network/examples/contract.rs). Mathematical conventions
 are in [tensor-map mathematics](src/mathematics.md).
@@ -35,7 +49,7 @@ Contraction-order planners and their configuration (`opt-path`, `cotengra-python
 The `krylov` feature makes Host `TensorMap` a vector of the
 [krylov](https://docs.rs/krylov) crate (re-exported as `symtn::krylov`), so
 `eigsolve`, `exponentiate` and `linsolve` run directly on tensors, on the
-caller's `Engine` (krylov's vector context), with closures as linear maps (`svdsolve` takes a user type implementing
+caller's execution context (`dyn ExecContext`, krylov's vector context), with closures as linear maps (`svdsolve` takes a user type implementing
 `AdjointMap`); the [krylov correspondence](../docs/krylov.md)
 records the TensorKit and QSpace counterparts. krylov needs a LAPACK provider
 in the final binary: enable a `blas-*` feature or link one yourself (the

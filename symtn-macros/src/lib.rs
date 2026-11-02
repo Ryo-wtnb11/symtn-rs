@@ -37,7 +37,7 @@ struct Operand {
 }
 
 struct Contraction {
-    /// The caller's engine expression, evaluated once.
+    /// The caller's engine or execution-context expression, evaluated once.
     engine: Expr,
     output: Option<Labels>,
     operands: Vec<Operand>,
@@ -360,8 +360,9 @@ fn expand(input: TokenStream) -> Result<TokenStream> {
     Ok(quote! {
         {
             use ::symtn_network::NetworkOperand as _;
-            // Reborrowed, so a `&mut dyn Engine` binding stays usable after
-            // the call.
+            // Reborrowed, so a `&mut` engine or execution-context binding
+            // stays usable after the call, and the scalar readback runs on the
+            // same context (and its options) as the contraction.
             let __symtn_engine = &mut *(#engine);
             static __SYMTN_CONTRACT_NETWORK: ::std::sync::OnceLock<::symtn_network::Network> =
                 ::std::sync::OnceLock::new();

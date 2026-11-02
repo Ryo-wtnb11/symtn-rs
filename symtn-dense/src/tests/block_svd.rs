@@ -521,6 +521,7 @@ fn every_admitted_outcome_and_the_refusal_reach_the_sink_in_order() {
             &PanicsAt(0),
             &mut [(); 2],
             &mut LaneScratch::default(),
+            crate::LaneAllocation::Moldable,
         )
     }));
     assert!(unwound.is_err() && broken.is_broken());
@@ -676,6 +677,7 @@ fn lane_panic_breaks_the_engine() {
             &PanicsAt(2),
             &mut [(); 4],
             &mut LaneScratch::default(),
+            crate::LaneAllocation::Moldable,
         )
     }));
     assert!(unwound.is_err());

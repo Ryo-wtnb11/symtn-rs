@@ -108,9 +108,11 @@ where
     /// its own; it is a scale followed by one permutation.
     ///
     /// The patterns are [`Self::diagonal_contract_pattern`]'s.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn try_contract_diagonal(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         other: &Self,
         lhs_axes: &[usize],
         rhs_axes: &[usize],
@@ -136,7 +138,7 @@ where
                 };
                 match layout {
                     None => Ok(Some(product)),
-                    Some(operation) => product.tree_transform(engine, operation).map(Some),
+                    Some(operation) => product.tree_transform(engine, options, operation).map(Some),
                 }
             }
             DiagonalContractPattern::Scaled {
@@ -148,7 +150,7 @@ where
                 let completed = scaled.scaled_axis(Some(axis), spectrum)?;
                 let completed = match layout {
                     None => completed,
-                    Some(operation) => completed.tree_transform(engine, operation)?,
+                    Some(operation) => completed.tree_transform(engine, options, operation)?,
                 };
                 if !rebind {
                     return Ok(Some(completed));
@@ -195,9 +197,11 @@ where
     ///   order, or else read by the compact-source transform `_into` onto
     ///   the output order (contract is permute(compose) here: the pattern
     ///   excludes the fermionic twist).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn try_contract_diagonal_into(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         other: &Self,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
@@ -269,6 +273,7 @@ where
         let probe_operation = operation.clone();
         tensor.tree_transform_into(
             engine,
+            options,
             destination,
             alpha,
             beta,
@@ -555,6 +560,7 @@ where
 /// route.
 pub(super) fn transform_rank_one_diagonal<R, D>(
     engine: &mut dyn Engine,
+    options: ExecOptions,
     tensor: &TensorMap<R, D>,
     operation: &TreeTransformOperation,
 ) -> Result<Option<TensorMap<R, D>>, FacadeError<R>>
@@ -579,7 +585,7 @@ where
         destination,
         output,
     } = <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_bond_spectrum(
-        engine, tensor, spectrum, operation, braid,
+        engine, options, tensor, spectrum, operation, braid,
     )?;
     let data = match (output, braid) {
         (BondOutput::Spectrum(spectrum), false) => {

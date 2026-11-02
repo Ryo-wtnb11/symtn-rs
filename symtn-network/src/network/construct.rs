@@ -1,6 +1,6 @@
 use super::*;
 use crate::ContractError;
-use symtn::typed::Engine;
+use symtn::typed::ExecContext;
 
 struct LoweredTypedNetwork<R> {
     ir: NetworkIR,
@@ -381,7 +381,35 @@ impl Network {
     )]
     pub fn execute_symmetric_sliced<R, D>(
         &self,
-        engine: &mut dyn Engine,
+        cx: &mut (impl ExecContext + ?Sized),
+        tensors: &[&TensorMap<R, D>],
+        plan: SymmetricSlicedPlan,
+        measured_payload_ceiling: usize,
+    ) -> std::result::Result<
+        (TensorMap<R, D>, SymmetricSliceStats),
+        SymmetricSliceExecutionError<FacadeError<R>>,
+    >
+    where
+        R: TypedSectorAdmission,
+        R::Mode: NetworkModeDispatch<R, D>,
+        D: TensorScalar,
+    {
+        let (engine, options) = cx.parts();
+        self.execute_symmetric_sliced_impl(
+            &mut crate::Borrowed { engine, options },
+            tensors,
+            plan,
+            measured_payload_ceiling,
+        )
+    }
+
+    #[expect(
+        clippy::type_complexity,
+        reason = "the public sliced execution API returns its tensor and measured statistics together"
+    )]
+    fn execute_symmetric_sliced_impl<R, D>(
+        &self,
+        engine: &mut dyn ExecContext,
         tensors: &[&TensorMap<R, D>],
         plan: SymmetricSlicedPlan,
         measured_payload_ceiling: usize,

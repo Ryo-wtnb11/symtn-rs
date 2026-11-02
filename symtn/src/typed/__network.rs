@@ -29,6 +29,15 @@ pub fn with_extension_slot<T>(runtime: &Runtime, f: impl FnOnce(&mut ExtensionSl
 /// device work.
 #[cfg(feature = "cuda")]
 pub fn cuda_engine_device<R, D: CudaPayload>(
+    cx: &mut (impl ExecContext + ?Sized),
+    tensors: &[&TensorMap<R, D, CudaStorage<D>>],
+) -> Result<usize, Error> {
+    let (engine, _) = cx.parts();
+    cuda_engine_device_impl(engine, tensors)
+}
+
+#[cfg(feature = "cuda")]
+fn cuda_engine_device_impl<R, D: CudaPayload>(
     engine: &mut dyn Engine,
     tensors: &[&TensorMap<R, D, CudaStorage<D>>],
 ) -> Result<usize, Error> {
@@ -124,6 +133,20 @@ where
 
 /// Adds every block of `source` into the matching rectangle of `destination`.
 pub fn network_scatter_add_assign<R, D>(
+    cx: &mut (impl ExecContext + ?Sized),
+    destination: &mut TensorMap<R, D>,
+    source: &TensorMap<R, D>,
+    ranges: &[Option<std::ops::Range<usize>>],
+) -> Result<(), Error>
+where
+    R: TypedSectorAdmission,
+    D: TensorScalar,
+{
+    let (engine, _) = cx.parts();
+    network_scatter_add_assign_impl(engine, destination, source, ranges)
+}
+
+fn network_scatter_add_assign_impl<R, D>(
     engine: &mut dyn Engine,
     destination: &mut TensorMap<R, D>,
     source: &TensorMap<R, D>,

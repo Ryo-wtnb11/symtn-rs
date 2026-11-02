@@ -789,7 +789,7 @@ fn conversion_payload_allocations() {
         &large,
         lengths,
         &[std::mem::size_of::<f64>()],
-        TensorMap::convert::<f64>,
+        |t: &_, engine: &mut dyn Engine| t.convert::<f64>(engine),
     );
     assert_payload_allocations(
         engine,
@@ -798,7 +798,7 @@ fn conversion_payload_allocations() {
         &large,
         lengths,
         &[std::mem::size_of::<Complex32>()],
-        TensorMap::convert::<Complex32>,
+        |t: &_, engine: &mut dyn Engine| t.convert::<Complex32>(engine),
     );
     assert_payload_allocations(
         engine,
@@ -823,7 +823,7 @@ fn conversion_payload_allocations() {
         &large_wide,
         lengths,
         &[std::mem::size_of::<f32>()],
-        TensorMap::convert::<f32>,
+        |t: &_, engine: &mut dyn Engine| t.convert::<f32>(engine),
     );
     assert_payload_allocations(
         engine,
@@ -862,7 +862,7 @@ fn conversion_payload_allocations() {
         &large_c64,
         lengths,
         &[std::mem::size_of::<Complex32>()],
-        TensorMap::convert::<Complex32>,
+        |t: &_, engine: &mut dyn Engine| t.convert::<Complex32>(engine),
     );
 
     // A lazy-adjoint source: the result is owned, at the cost of an
@@ -879,7 +879,7 @@ fn conversion_payload_allocations() {
         &large_lazy,
         lengths,
         &[std::mem::size_of::<f32>(), std::mem::size_of::<f64>()],
-        TensorMap::convert::<f64>,
+        |t: &_, engine: &mut dyn Engine| t.convert::<f64>(engine),
     );
 }
 

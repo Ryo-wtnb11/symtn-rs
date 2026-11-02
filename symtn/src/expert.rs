@@ -38,6 +38,7 @@ use crate::sector::{
 use crate::typed::{
     Error, FacadeError, SectorSpectrum, TensorMap, TensorScalar, TypedTensorRootDispatch,
 };
+use crate::typed::{ExecContext, ExecOptions};
 use symtn_dense::Engine;
 
 /// Returns the compact diagonal spectrum without materializing dense data.
@@ -50,6 +51,20 @@ use symtn_dense::Engine;
     reason = "the compact readback exposes provider-labelled sector spectra"
 )]
 pub fn diagonal_spectrum<R, D>(
+    cx: &mut (impl ExecContext + ?Sized),
+    tensor: &TensorMap<R, D>,
+) -> Result<Option<Vec<SectorSpectrum<R::Sector, D>>>, FacadeError<R>>
+where
+    R: TypedSectorAdmission,
+    R::Mode: TypedTensorRootDispatch<R>,
+    D: TensorScalar,
+{
+    let (engine, _) = cx.parts();
+    diagonal_spectrum_impl(engine, tensor)
+}
+
+#[allow(clippy::type_complexity)]
+fn diagonal_spectrum_impl<R, D>(
     engine: &mut dyn Engine,
     tensor: &TensorMap<R, D>,
 ) -> Result<Option<Vec<SectorSpectrum<R::Sector, D>>>, FacadeError<R>>
@@ -72,7 +87,7 @@ where
 /// Scale `tol` to the payload dtype, as
 /// [`FactorizationScalar`](crate::typed::FactorizationScalar) describes.
 pub fn is_diagonal<R, D>(
-    engine: &mut dyn Engine,
+    cx: &mut (impl ExecContext + ?Sized),
     tensor: &TensorMap<R, D>,
     tol: f64,
 ) -> Result<bool, Error>
@@ -80,5 +95,19 @@ where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: TensorScalar,
 {
-    tensor.is_diagonal(engine, tol)
+    let (engine, options) = cx.parts();
+    is_diagonal_impl(engine, options, tensor, tol)
+}
+
+fn is_diagonal_impl<R, D>(
+    engine: &mut dyn Engine,
+    options: ExecOptions,
+    tensor: &TensorMap<R, D>,
+    tol: f64,
+) -> Result<bool, Error>
+where
+    R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
+    D: TensorScalar,
+{
+    tensor.is_diagonal(engine, options, tol)
 }

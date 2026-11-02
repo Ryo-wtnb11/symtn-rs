@@ -12,7 +12,13 @@ impl ContextLease {
         Self(TensorExecutionContext::new())
     }
 
-    pub(crate) fn context(&mut self) -> &mut TensorExecutionContext {
+    /// The context for one call running with `options`: every lane it
+    /// hands out runs those options.
+    pub(crate) fn context(
+        &mut self,
+        options: crate::typed::ExecOptions,
+    ) -> &mut TensorExecutionContext {
+        self.0.set_lane_allocation(options.lane_allocation());
         &mut self.0
     }
 
