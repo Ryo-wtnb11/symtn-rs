@@ -4,8 +4,8 @@ pub(crate) mod sealed {
     use super::*;
     use strided_kernel::execution;
 
-    /// The cheapest-dispatch width of one token, found once per list of blocks a
-    /// leaf visits on that token.
+    /// The cheapest-dispatch width of one token, found at most once per list
+    /// of blocks a leaf visits on that token.
     ///
     /// Why: Strided's `parallel_width` scans every width up to the budget on each
     /// call, so asking it for every small block of a serial replay costs
@@ -14,14 +14,26 @@ pub(crate) mod sealed {
     /// monotone in the cost, so no width pays exactly when the cheapest one does
     /// not: one `pays` query against that width rejects a block in O(1), and only
     /// blocks it admits pay for the full width search.
+    ///
+    /// Why lazy: the O(budget) scan runs only when an overwrite of a role with
+    /// a retained plan reaches admission, so a list of planless or
+    /// accumulating blocks pays nothing. A gate lives inside its list's leaf,
+    /// on the thread that runs it, and every call passes that list's token,
+    /// because a token's dispatch cost depends on the calling thread.
     pub struct LeafGate {
-        cheapest: Option<core::num::NonZeroUsize>,
+        cheapest: core::cell::OnceCell<Option<core::num::NonZeroUsize>>,
     }
 
     impl LeafGate {
-        /// O(budget) dispatch-cost queries; build it on the thread that runs the
-        /// blocks, since the token's cost depends on the calling thread.
-        pub(crate) fn new(exec: &crate::host_pool::Exec<'_>) -> Self {
+        pub(crate) fn new() -> Self {
+            Self {
+                cheapest: core::cell::OnceCell::new(),
+            }
+        }
+
+        fn scan(exec: &crate::host_pool::Exec<'_>) -> Option<core::num::NonZeroUsize> {
+            #[cfg(test)]
+            GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
             let mut cheapest = None;
             let mut best = core::time::Duration::MAX;
             for width in 2..=exec.budget().get() {
@@ -34,19 +46,25 @@ pub(crate) mod sealed {
                     cheapest = Some(width);
                 }
             }
-            Self { cheapest }
+            cheapest
         }
 
-        /// Exactly `parallel_width(exec, Copy, elements) > 1`, for the token this
-        /// gate was built from.
+        /// Exactly `parallel_width(exec, Copy, elements) > 1`, for the one
+        /// token every call on this gate passes.
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
-            let Some(cheapest) = self.cheapest else {
+            let Some(cheapest) = *self.cheapest.get_or_init(|| Self::scan(exec)) else {
                 return false;
             };
             let class = execution::KernelClass::Copy;
             exec.pays(class.estimate(elements), 1, cheapest)
                 && execution::parallel_width(exec, class, elements).get() > 1
         }
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        /// Dispatch-cost scans this thread's gates ran (test observation).
+        pub(crate) static GATE_SCANS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
     }
 
     /// Unnameable outside this crate, so its methods are crate-internal.

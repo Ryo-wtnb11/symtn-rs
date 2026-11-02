@@ -42,7 +42,7 @@ mod tests {
                 crate::host_pool::eager_test_pool(threads),
             ] {
                 pool.with_exec(|exec| {
-                    let gate = sealed::LeafGate::new(&exec);
+                    let gate = sealed::LeafGate::new();
                     let mut seen = [false; 2];
                     for &n in &elements {
                         let widens = parallel_width(&exec, KernelClass::Copy, n).get() > 1;

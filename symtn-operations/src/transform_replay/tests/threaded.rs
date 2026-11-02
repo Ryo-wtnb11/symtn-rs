@@ -501,3 +501,112 @@ fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
         assert_eq!(overwrite, recoupling_expected(&src, &dst, alpha, None));
     }
 }
+
+/// What: the leaf gate's dispatch-cost scan runs only when an overwrite of a
+/// role with a retained plan reaches admission, once per block list: a list
+/// of planless roles and an accumulating list scan nothing, an overwrite list
+/// of planned roles scans exactly once on a wide engine.
+#[test]
+fn leaf_gate_scans_only_for_planned_overwrites() {
+    use crate::kernel_adapter::sealed::GATE_SCANS;
+    let scans = |replay: &mut dyn FnMut(&mut dyn Engine)| {
+        let mut pool = crate::host_pool::eager_test_pool(4);
+        pool.install(|engine| {
+            let before = GATE_SCANS.with(|scans| scans.get());
+            replay(engine);
+            GATE_SCANS.with(|scans| scans.get()) - before
+        })
+    };
+
+    // Eight Multi groups of one-element blocks: Strided estimates their copy
+    // at zero time, so no scatter role retains a plan.
+    let tiny = Arc::new(BlockStructure::packed_column_major(1, vec![vec![1]; 16]).unwrap());
+    let specs = (0..8)
+        .map(|g| {
+            TreeTransformBlockSpec::multi(
+                vec![2 * g, 2 * g + 1],
+                vec![2 * g, 2 * g + 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )
+        })
+        .collect::<Vec<_>>();
+    let planless = TreeTransformStructure::compile_structures(&tiny, &tiny, &specs).unwrap();
+    assert_eq!(planless.layouts().retained_plan_count(), 0);
+    let source = (1..=16).map(f64::from).collect::<Vec<_>>();
+    let mut destination = vec![f64::NAN; 16];
+    let planless_scans = scans(&mut |engine| {
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &planless,
+            &tiny,
+            &tiny,
+            &mut destination,
+            &source,
+            1.0,
+            &[],
+            1,
+        )
+        .unwrap();
+    });
+    assert_eq!(destination, source);
+    assert_eq!(planless_scans, 0);
+
+    // Three planned Singles of `BLOCK` elements, accumulated, then overwritten.
+    let blocks =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![ROWS, COLS]; 3]).unwrap());
+    let singles = TreeTransformStructure::compile_structures(
+        &blocks,
+        &blocks,
+        &(0..3)
+            .map(|b| TreeTransformBlockSpec::single(b, b, 2.0))
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    assert_eq!(singles.layouts().retained_plan_count(), 3);
+    let source = (1..=3 * BLOCK as u32).map(f64::from).collect::<Vec<_>>();
+    let mut destination = vec![1.0; source.len()];
+    let accumulate_scans = scans(&mut |engine| {
+        tree_transform_structure_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &singles,
+            &blocks,
+            &blocks,
+            &mut destination,
+            &source,
+            1.0,
+            0.5,
+            1,
+        )
+        .unwrap();
+    });
+    let accumulated = source.iter().map(|&v| 2.0 * v + 0.5).collect::<Vec<_>>();
+    assert_eq!(destination, accumulated);
+    assert_eq!(accumulate_scans, 0);
+
+    let overwrite_scans = scans(&mut |engine| {
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &singles,
+            &blocks,
+            &blocks,
+            &mut destination,
+            &source,
+            1.0,
+            &[],
+            1,
+        )
+        .unwrap();
+    });
+    let overwritten = source.iter().map(|&v| 2.0 * v).collect::<Vec<_>>();
+    assert_eq!(destination, overwritten);
+    assert_eq!(overwrite_scans, 1);
+}

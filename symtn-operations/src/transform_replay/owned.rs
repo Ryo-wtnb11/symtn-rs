@@ -96,7 +96,7 @@ where
                 exec,
                 &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
                 &|items, dst, dst_start, fused_index, mut exec| {
-                    let gate = LeafGate::new(&exec);
+                    let gate = LeafGate::new();
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
                         write_uninit_layout_from_source(
@@ -167,7 +167,7 @@ where
                     exec,
                     &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
                     &|groups, dst, dst_start, fused_index, mut exec| {
-                        let gate = LeafGate::new(&exec);
+                        let gate = LeafGate::new();
                         for &group in groups {
                             for item in &scatter_columns[scatter_groups[group].columns.clone()] {
                                 write_uninit_layout_from_packed(
