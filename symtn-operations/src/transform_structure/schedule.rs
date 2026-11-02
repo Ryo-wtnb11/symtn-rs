@@ -32,6 +32,9 @@ pub(crate) struct TreeTransformScatterGroupReplay {
     pub columns: Range<usize>,
     /// The ownership component of this Multi group's scatter columns.
     pub component: u32,
+    /// Elements of the group's largest column with a compiled plan (zero
+    /// without one): whether the column may widen on a token.
+    pub widest: usize,
 }
 
 /// One maximal run of overlapping Single destination intervals, in address
@@ -46,6 +49,9 @@ pub(crate) struct TreeTransformSingleAtom {
     pub lo: isize,
     /// Destination elements written by every earlier atom.
     pub weight_before: usize,
+    /// Elements of the atom's largest Single with a compiled plan (zero
+    /// without one).
+    pub widest: usize,
 }
 
 /// One maximal run of overlapping Multi scatter-column destination
@@ -80,6 +86,8 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub single_block_count: usize,
     pub packed_column_count: usize,
     pub scattered_column_count: usize,
+    /// The largest `widest` of any Single atom.
+    pub widest_single: usize,
 }
 
 impl TreeTransformParallelSchedule {
@@ -87,6 +95,42 @@ impl TreeTransformParallelSchedule {
     #[inline]
     pub fn single_component_count(&self) -> usize {
         self.single_atoms.len().saturating_sub(1)
+    }
+
+    /// Records the planned-leaf sizes (`widest`) from the finished layout
+    /// table, whose roles carry the compiled plans. O(items).
+    pub(super) fn record_planned_widths(
+        &mut self,
+        blocks: &[TreeTransformBlock],
+        layouts: &TreeTransformLayoutTable,
+    ) -> Result<(), OperationError> {
+        let planned = |layout: usize| -> Result<usize, OperationError> {
+            Ok(if layouts.role(layout)?.plan.is_some() {
+                layouts.entry(layout).element_count
+            } else {
+                0
+            })
+        };
+        for atom in 0..self.single_component_count() {
+            let items =
+                self.single_atoms[atom].item as usize..self.single_atoms[atom + 1].item as usize;
+            let mut widest = 0;
+            for &block in &self.singles[items] {
+                if let TreeTransformBlock::Single { dst_layout, .. } = blocks[block as usize] {
+                    widest = widest.max(planned(dst_layout)?);
+                }
+            }
+            self.single_atoms[atom].widest = widest;
+            self.widest_single = self.widest_single.max(widest);
+        }
+        for group in &mut self.scatter_groups {
+            let mut widest = 0;
+            for column in &self.scatter_columns[group.columns.clone()] {
+                widest = widest.max(planned(column.dst_layout)?);
+            }
+            group.widest = widest;
+        }
+        Ok(())
     }
 
     /// Ownership components of the Multi scatter columns.
@@ -172,6 +216,7 @@ pub(super) fn compile_parallel_schedule(
                 item: checked_u32(singles.len())?,
                 lo: dst_lo,
                 weight_before,
+                widest: 0,
             });
         }
         atom_hi = Some(atom_hi.map_or(dst_hi, |hi| hi.max(dst_hi)));
@@ -187,6 +232,7 @@ pub(super) fn compile_parallel_schedule(
                 .checked_add(1)
                 .ok_or(OperationError::ElementCountOverflow)?,
             weight_before,
+            widest: 0,
         });
     }
     single_atoms.shrink_to_fit();
@@ -222,6 +268,7 @@ pub(super) fn compile_parallel_schedule(
             scatter_groups.push(TreeTransformScatterGroupReplay {
                 columns: group_start..group_start,
                 component: 0,
+                widest: 0,
             });
             continue;
         }
@@ -267,6 +314,7 @@ pub(super) fn compile_parallel_schedule(
         scatter_groups.push(TreeTransformScatterGroupReplay {
             columns: group_start..scatter_columns.len(),
             component: 0,
+            widest: 0,
         });
     }
     pack_columns.sort_unstable_by_key(|item| item.packed_offset);
@@ -302,6 +350,7 @@ pub(super) fn compile_parallel_schedule(
         single_block_count,
         packed_column_count,
         scattered_column_count,
+        widest_single: 0,
     })
 }
 

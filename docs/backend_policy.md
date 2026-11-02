@@ -236,9 +236,17 @@ recoupling scatter columns over ownership components compiled with the
 transform: blocks whose destination ranges overlap (canonical coupled-sector
 blocks interleave) share an atom, and a component is the set of atoms its
 blocks write, a Multi block's columns always together, so one component can
-own several separated atoms. Each split hands the left `⌊w/2⌋` of `w` workers
+own several separated atoms. An overwrite first runs each wide component
+(one whose largest planned block Strided's own rule, `parallel_width` for a
+copy of its elements, would widen on the whole token) alone on the whole
+token, one after another; only the remaining narrow components split. Each
+split hands the left `⌊w/2⌋` of `w` workers
 the components whose destination elements are closest to that fraction of
-the total, never dividing a component. Inside the replay each Single block
+the total, never dividing a component, and runs that side on the same
+share of the token. A split of the scatter phase lists its atoms and each
+chunk's components: O(atoms + chunk groups) metadata that an eager call's
+call-local workspace allocates once per call and a reused workspace keeps; a
+serial or one-component phase allocates neither. Inside the replay each Single block
 and scatter column keeps the token share of the worker that visits it, the
 whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained

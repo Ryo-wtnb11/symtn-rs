@@ -158,9 +158,23 @@ pub fn fork(exec: Exec<'_>, jobs: usize, f: impl Fn(usize, Exec<'_>) + Sync) {
     exec.fork(jobs, f);
 }
 
-/// Runs `left` and `right` as two jobs of `exec`, each with its half of the
-/// budget, and returns both results.
-pub fn join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
+/// Runs `left` and `right` as two jobs of `exec` and returns both results.
+/// `left` gets the share of the token's budget that `left_lanes` of a
+/// split's `lanes` stand for (rounded down, at least one slot), `right` the
+/// rest, so a caller that balances its work for `left_lanes / lanes` runs
+/// each side on the slots it was balanced for. A serial token runs both
+/// inline.
+///
+/// Why not `fork`'s even split: it gives an odd budget's spare slot to the
+/// first job, the opposite of a split that balances the left side for the
+/// floor of half its lanes.
+pub fn join<A, B, RA, RB>(
+    exec: Exec<'_>,
+    left_lanes: usize,
+    lanes: usize,
+    left: A,
+    right: B,
+) -> (RA, RB)
 where
     A: FnOnce(Exec<'_>) -> RA + Send + Sync,
     B: FnOnce(Exec<'_>) -> RB + Send + Sync,
@@ -176,7 +190,7 @@ where
     let right = RwLock::new(Some(right));
     let left_out = RwLock::new(None);
     let right_out = RwLock::new(None);
-    fork(exec, 2, |job, child| {
+    let job = |job: usize, child: Exec<'_>| {
         if job == 0 {
             let run = take(&left);
             *write(&left_out) = Some(run(child));
@@ -184,7 +198,17 @@ where
             let run = take(&right);
             *write(&right_out) = Some(run(child));
         }
-    });
+    };
+    let budget = exec.budget().get();
+    if budget < 2 {
+        fork(exec, 2, job);
+    } else {
+        let left_share = (budget.saturating_mul(left_lanes) / lanes.max(1)).clamp(1, budget - 1);
+        // INVARIANT: both shares are nonzero and sum to the budget, the only
+        // conditions under which `fork_sized` refuses.
+        exec.fork_sized(&[left_share, budget - left_share], job)
+            .expect("join shares are nonzero and sum to the budget");
+    }
     (take(&left_out), take(&right_out))
 }
 

@@ -80,21 +80,26 @@ where
             profile.strided_kernel += start.elapsed();
         }
         let blocks = structure.blocks();
-        // Singles split over their ownership atoms exactly as the initialised
-        // parallel replay does; one atom stays on the calling lane.
+        // Singles run over their ownership atoms in the initialised parallel
+        // replay's two tiers; one atom stays on the calling lane.
         let start = profile.as_ref().map(|_| std::time::Instant::now());
+        let HostTreeTransformWorkspace {
+            fused_indices,
+            narrow_atoms,
+            ..
+        } = &mut *workspace;
         replay_region(engine, |exec| {
-            split_join_atoms(
-                &schedule.singles,
-                &schedule.single_atoms,
+            replay_single_phase(
+                schedule,
+                narrow_atoms,
                 dst_data,
-                0,
-                workspace.fused_indices.as_mut_slice(),
+                fused_indices.as_mut_slice(),
                 max_fused_rank,
                 threads,
                 exec,
-                Some(&gate),
+                &gate,
                 layouts.max_planned_elements(),
+                true,
                 &|items, dst, dst_start, fused_index, mut exec, gate| {
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
@@ -133,96 +138,130 @@ where
         }
         let chunk_size = threads.max(1);
         reserve_multi_chunk_scratch(workspace, recoupling_plan.jobs(), chunk_size)?;
-        let mut target = ScatterTarget::new(workspace, schedule, threads, dst_data)?;
+        let mut target = ScatterTarget::new(
+            workspace,
+            schedule,
+            threads,
+            recoupling_plan.jobs().len(),
+            dst_data,
+        )?;
         let mut pack_cursor = 0;
-        for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
-            let destination_start = replay_multi_chunk(
-                engine,
-                dense,
-                workspace,
-                task,
-                schedule,
-                chunk_index * chunk_size,
-                chunk,
-                &mut pack_cursor,
-                src_data,
-                threads,
-                profile.as_deref_mut(),
-            )?;
-            let HostTreeTransformWorkspace {
-                packed,
-                fused_indices,
-                chunk_scatter_groups,
-                chunk_units,
-                ..
-            } = &mut *workspace;
-            let packed = packed.destination().as_slice();
-            let scatter_columns = &schedule.scatter_columns;
-            let scatter_groups = &schedule.scatter_groups;
-            let start = profile.as_ref().map(|_| std::time::Instant::now());
-            match &mut target {
-                ScatterTarget::Atoms(slots) => replay_region(engine, |exec| {
-                    split_join_components(
-                        chunk_units,
-                        chunk_scatter_groups,
-                        &schedule.component_slots,
-                        slots,
-                        0,
-                        fused_indices.as_mut_slice(),
-                        max_fused_rank,
-                        threads,
-                        exec,
-                        Some(&gate),
-                        layouts.max_planned_elements(),
-                        &|groups, slots, slot_base, fused_index, mut exec, gate| {
-                            for &group in groups {
-                                for item in &scatter_columns[scatter_groups[group].columns.clone()]
-                                {
-                                    write_uninit_layout_from_packed(
-                                        exec.reborrow(),
-                                        gate,
-                                        layouts,
-                                        item.dst_layout,
-                                        &mut *slots[item.slot as usize - slot_base],
-                                        atom_start(layouts, item)?,
-                                        packed,
-                                        item.packed_offset - destination_start,
-                                        alpha,
-                                        fused_index,
-                                    )?;
+        // Why a closure: an error still returns the atom-list capacity to
+        // the workspace before it propagates.
+        let mut replay_chunks = || -> Result<(), OperationError> {
+            for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
+                let destination_start = replay_multi_chunk(
+                    engine,
+                    dense,
+                    workspace,
+                    task,
+                    schedule,
+                    chunk_index * chunk_size,
+                    chunk,
+                    &mut pack_cursor,
+                    src_data,
+                    threads,
+                    matches!(target, ScatterTarget::Atoms(_)),
+                    profile.as_deref_mut(),
+                )?;
+                let HostTreeTransformWorkspace {
+                    packed,
+                    fused_indices,
+                    chunk_scatter_groups,
+                    chunk_units,
+                    ..
+                } = &mut *workspace;
+                let packed = packed.destination().as_slice();
+                let scatter_columns = &schedule.scatter_columns;
+                let scatter_groups = &schedule.scatter_groups;
+                let start = profile.as_ref().map(|_| std::time::Instant::now());
+                match &mut target {
+                    ScatterTarget::Atoms(slots) => {
+                        let leaf = |units: &[ScatterUnit],
+                                    slots: &mut [&mut [MaybeUninit<D>]],
+                                    slot_base: usize,
+                                    fused_index: &mut [usize],
+                                    mut exec: Exec<'_>,
+                                    gate: &LeafGate| {
+                            for unit in units {
+                                for &group in unit.groups(chunk_scatter_groups) {
+                                    for item in
+                                        &scatter_columns[scatter_groups[group].columns.clone()]
+                                    {
+                                        write_uninit_layout_from_packed(
+                                            exec.reborrow(),
+                                            gate,
+                                            layouts,
+                                            item.dst_layout,
+                                            &mut *slots[item.slot as usize - slot_base],
+                                            atom_start(layouts, item)?,
+                                            packed,
+                                            item.packed_offset - destination_start,
+                                            alpha,
+                                            &mut *fused_index,
+                                        )?;
+                                    }
                                 }
                             }
                             Ok(())
-                        },
-                    )
-                })??,
-                ScatterTarget::Whole(dst) => replay_region(engine, |mut exec| {
-                    let fused_index = &mut fused_indices[..max_fused_rank];
-                    for &group in chunk_scatter_groups.iter() {
-                        for item in &scatter_columns[scatter_groups[group].columns.clone()] {
-                            write_uninit_layout_from_packed(
-                                exec.reborrow(),
+                        };
+                        replay_region(engine, |mut exec| {
+                            run_wide_units(
+                                chunk_units,
+                                slots,
+                                &mut fused_indices[..max_fused_rank],
+                                threads,
+                                &mut exec,
                                 &gate,
-                                layouts,
-                                item.dst_layout,
-                                dst,
-                                0,
-                                packed,
-                                item.packed_offset - destination_start,
-                                alpha,
-                                fused_index,
+                                true,
+                                &leaf,
                             )?;
-                        }
+                            split_join_components(
+                                chunk_units,
+                                &schedule.component_slots,
+                                slots,
+                                0,
+                                fused_indices.as_mut_slice(),
+                                max_fused_rank,
+                                threads,
+                                exec,
+                                Some(&gate),
+                                layouts.max_planned_elements(),
+                                &leaf,
+                            )
+                        })??
                     }
-                    Ok::<(), OperationError>(())
-                })??,
+                    ScatterTarget::Whole(dst) => replay_region(engine, |mut exec| {
+                        let fused_index = &mut fused_indices[..max_fused_rank];
+                        for &group in chunk_scatter_groups.iter() {
+                            for item in &scatter_columns[scatter_groups[group].columns.clone()] {
+                                write_uninit_layout_from_packed(
+                                    exec.reborrow(),
+                                    &gate,
+                                    layouts,
+                                    item.dst_layout,
+                                    dst,
+                                    0,
+                                    packed,
+                                    item.packed_offset - destination_start,
+                                    alpha,
+                                    fused_index,
+                                )?;
+                            }
+                        }
+                        Ok::<(), OperationError>(())
+                    })??,
+                }
+                if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+                    profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
+                    profile.multi_scatter += start.elapsed();
+                }
             }
-            if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-                profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
-                profile.multi_scatter += start.elapsed();
-            }
-        }
+            Ok(())
+        };
+        let replayed = replay_chunks();
         target.finish(workspace);
+        replayed?;
         debug_assert_eq!(pack_cursor, schedule.pack_columns.len());
         Ok(())
     })?;
@@ -1124,6 +1163,37 @@ mod owned_overwrite_tests {
             .unwrap()
             .unwrap();
         assert_eq!(actual, source.map(|value| -3.0 * value));
+    }
+
+    #[test]
+    fn serial_owned_replay_keeps_no_component_scratch() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        // What: a serial owned replay of several Multi components builds no
+        // ownership split, so a fresh workspace keeps no component scratch.
+        let (structure, transform) = crate::transform_replay::tests::su2_interleaved_fixture();
+        assert!(transform.parallel_schedule().scatter_component_count() > 1);
+        let source = (1..=60).map(f64::from).collect::<Vec<_>>();
+        let mut workspace = TreeTransformWorkspace::default();
+        let owned = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
+            &mut DefaultDenseExecutor::new(),
+            &mut workspace,
+            &transform,
+            &structure,
+            &structure,
+            2,
+            &source,
+            1.0,
+            1,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            owned,
+            Some(crate::transform_replay::tests::su2_oracle(&source, 1.0))
+        );
+        assert_eq!(workspace.chunk_units.capacity(), 0);
+        assert_eq!(workspace.atom_slices.capacity(), 0);
     }
 
     struct FailingGemm;

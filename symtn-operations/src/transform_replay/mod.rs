@@ -28,7 +28,6 @@ use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
 use crate::transform_structure::{
     TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterReplay,
-    TreeTransformSingleAtom,
 };
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
@@ -157,6 +156,8 @@ mod allocation_oracle {
 
     pub(super) fn join<A, B, RA, RB>(
         exec: crate::host_pool::Exec<'_>,
+        left_lanes: usize,
+        lanes: usize,
         left: A,
         right: B,
     ) -> (RA, RB)
@@ -173,6 +174,8 @@ mod allocation_oracle {
         let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
         let result = crate::host_pool::join(
             exec,
+            left_lanes,
+            lanes,
             |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
                 let result = left(exec);
@@ -325,6 +328,8 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
     chunk_units: Vec<ScatterUnit>,
+    // Narrow Single atoms of a threaded replay that also has wide ones.
+    narrow_atoms: Vec<NarrowAtom>,
     // Capacity of the per-call atom slice list of component-owned scatter
     // (`take_atom_slices`); always empty between calls.
     atom_slices: Vec<&'static [u8]>,
@@ -352,6 +357,7 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
             chunk_units: Vec::new(),
+            narrow_atoms: Vec::new(),
             atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
@@ -596,7 +602,7 @@ mod allocation_oracle_tests {
     /// any measured scope: building an engine and its first fork allocate.
     fn two_slots() -> TestPool {
         let mut engine = crate::host_pool::test_pool(2);
-        engine.with_exec(|exec| allocation_oracle::join(exec, |_| (), |_| ()));
+        engine.with_exec(|exec| allocation_oracle::join(exec, 1, 2, |_| (), |_| ()));
         engine
     }
 
@@ -610,6 +616,8 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
+                        1,
+                        2,
                         |_| assert!(allocation_oracle::is_measured()),
                         |_| assert!(allocation_oracle::is_measured()),
                     )
@@ -627,6 +635,8 @@ mod allocation_oracle_tests {
         engine.with_exec(|exec| {
             allocation_oracle::join(
                 exec,
+                1,
+                2,
                 |_| assert!(!allocation_oracle::is_measured()),
                 |_| assert!(!allocation_oracle::is_measured()),
             )
@@ -642,9 +652,13 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
+                        1,
+                        2,
                         |exec| {
                             allocation_oracle::join(
                                 exec,
+                                1,
+                                2,
                                 |_| assert!(allocation_oracle::is_measured()),
                                 |_| assert!(allocation_oracle::is_measured()),
                             );
@@ -697,6 +711,8 @@ mod allocation_oracle_tests {
                     engine.with_exec(|exec| {
                         replay_join(
                             exec,
+                            1,
+                            2,
                             |_| panic!("expected replay join panic"),
                             |_| assert!(allocation_oracle::is_measured()),
                         )

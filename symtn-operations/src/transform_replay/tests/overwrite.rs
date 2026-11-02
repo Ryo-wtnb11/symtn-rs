@@ -535,3 +535,89 @@ fn strided_replay_scales_inactive_destinations() {
         assert_eq!(dst.data(), &expected(beta));
     }
 }
+
+#[test]
+fn a_failed_component_replay_keeps_its_scratch_for_the_retry() {
+    // What: a dense error during a threaded replay that splits Multi scatter
+    // over two ownership components leaves the workspace's retained scratch
+    // as warm as before, and the retry writes the identity result.
+    let structure = Arc::new(
+        BlockStructure::packed_column_major(1, [vec![2], vec![2], vec![2], vec![2]]).unwrap(),
+    );
+    let replay = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[
+            TreeTransformBlockSpec::multi(vec![0, 1], vec![0, 1], vec![1.0, 0.0, 0.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![2, 3], vec![2, 3], vec![1.0, 0.0, 0.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    assert_eq!(replay.parallel_schedule().scatter_component_count(), 2);
+    let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let mut workspace = TreeTransformWorkspace::default();
+    let mut dst = [f64::NAN; 8];
+    let mut pool = crate::host_pool::test_pool(3);
+    fn run<E: DenseExecutor>(
+        pool: &mut crate::host_pool::TestPool,
+        dense: &mut E,
+        workspace: &mut TreeTransformWorkspace<f64>,
+        replay: &TreeTransformStructure<f64>,
+        structure: &Arc<BlockStructure>,
+        dst: &mut [f64],
+        source: &[f64],
+    ) -> Result<(), OperationError> {
+        pool.install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                dense,
+                workspace,
+                replay,
+                structure,
+                structure,
+                dst,
+                source,
+                1.0,
+                &[],
+                3,
+            )
+        })
+    }
+    let mut fresh = DefaultDenseExecutor::new();
+    run(
+        &mut pool,
+        &mut fresh,
+        &mut workspace,
+        &replay,
+        &structure,
+        &mut dst,
+        &source,
+    )
+    .unwrap();
+    let warm = workspace.retained_bytes();
+
+    let mut failing = FailFirstBatchExecutor::new();
+    assert!(run(
+        &mut pool,
+        &mut failing,
+        &mut workspace,
+        &replay,
+        &structure,
+        &mut dst,
+        &source
+    )
+    .is_err());
+    assert_eq!(workspace.retained_bytes(), warm);
+    run(
+        &mut pool,
+        &mut failing,
+        &mut workspace,
+        &replay,
+        &structure,
+        &mut dst,
+        &source,
+    )
+    .unwrap();
+    assert_eq!(dst, source);
+}

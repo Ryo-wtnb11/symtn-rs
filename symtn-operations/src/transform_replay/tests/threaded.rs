@@ -930,6 +930,11 @@ fn component_splits_balance_moved_elements_not_component_count() {
     assert_eq!(split(&[1, 1, 10], 2), 2);
     // 1 and 3 are equally far from half of 4: the earlier boundary.
     assert_eq!(split(&[1, 2, 1], 2), 1);
+    // The executing split runs each side on the token share it was
+    // balanced for: at three workers the three light components get one
+    // slot and the heavy one two.
+    let leaves = record_single_leaves(&[(0, 1, 1), (1, 1, 1), (2, 1, 1), (3, 6, 6)]);
+    assert_eq!(leaves, [(vec![0, 1, 2], 1), (vec![3], 2)]);
     // The fixture's Single atoms at three lanes: 8 of 28 elements is the
     // closest left share to a third.
     let (_, transform) = su2_interleaved_fixture();
@@ -937,5 +942,79 @@ fn component_splits_balance_moved_elements_not_component_count() {
     assert_eq!(
         balanced_boundary(atoms.len() - 1, 3, |part| atoms[part].weight_before),
         1
+    );
+}
+
+/// Runs a three-worker threaded Single phase over atoms `(lo, weight,
+/// widest)` of one Single each and returns every leaf's Singles with the
+/// token budget it ran on, sorted.
+fn record_single_leaves(atoms: &[(isize, usize, usize)]) -> Vec<(Vec<u32>, usize)> {
+    use crate::transform_structure::TreeTransformSingleAtom;
+    let mut schedule = TreeTransformParallelSchedule::default();
+    let mut weight_before = 0;
+    for (item, &(lo, weight, widest)) in atoms.iter().enumerate() {
+        schedule.singles.push(item as u32);
+        schedule.single_atoms.push(TreeTransformSingleAtom {
+            item: item as u32,
+            lo,
+            weight_before,
+            widest,
+        });
+        weight_before += weight;
+        schedule.widest_single = schedule.widest_single.max(widest);
+    }
+    let end = atoms.last().map_or(0, |&(lo, _, _)| lo + 1);
+    schedule.single_atoms.push(TreeTransformSingleAtom {
+        item: atoms.len() as u32,
+        lo: end,
+        weight_before,
+        widest: 0,
+    });
+    let leaves = std::sync::Mutex::new(Vec::new());
+    let mut dst = vec![0.0f64; end as usize];
+    let mut fused_indices = [0usize; 3];
+    let mut narrow = Vec::new();
+    let gate = LeafGate::new(schedule.widest_single);
+    crate::host_pool::test_pool(3)
+        .install(|engine| {
+            replay_region(engine, |exec| {
+                replay_single_phase(
+                    &schedule,
+                    &mut narrow,
+                    &mut dst,
+                    &mut fused_indices,
+                    1,
+                    3,
+                    exec,
+                    &gate,
+                    schedule.widest_single,
+                    true,
+                    &|items, _, _, _, exec, _| {
+                        leaves
+                            .lock()
+                            .unwrap()
+                            .push((items.to_vec(), exec.budget().get()));
+                        Ok(())
+                    },
+                )
+            })
+        })
+        .unwrap()
+        .unwrap();
+    let mut leaves = leaves.into_inner().unwrap();
+    leaves.sort_unstable();
+    leaves
+}
+
+#[test]
+fn wide_components_run_alone_on_the_whole_token_before_narrow_ones_split() {
+    // What: a Single phase with one component whose planned block widens on
+    // the whole token and three that do not runs the wide one alone on all
+    // three workers, then splits the narrow ones one per worker.
+    const LARGE: usize = 1 << 24;
+    let leaves = record_single_leaves(&[(0, 1, 1), (1, LARGE, LARGE), (2, 1, 1), (3, 1, 1)]);
+    assert_eq!(
+        leaves,
+        [(vec![0], 1), (vec![1], 3), (vec![2], 1), (vec![3], 1)]
     );
 }
