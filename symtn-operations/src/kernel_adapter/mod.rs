@@ -43,9 +43,25 @@ mod tests {
             ] {
                 pool.with_exec(|exec| {
                     let gate = sealed::LeafGate::new();
+                    let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
+                    // The first widened count, by bisection on Strided's own
+                    // answer, so the sweep also covers its exact boundary.
+                    let mut around = Vec::new();
+                    if widens(usize::MAX >> 8) {
+                        let (mut below, mut at) = (0usize, usize::MAX >> 8);
+                        while at - below > 1 {
+                            let middle = below + (at - below) / 2;
+                            if widens(middle) {
+                                at = middle;
+                            } else {
+                                below = middle;
+                            }
+                        }
+                        around.extend(at.saturating_sub(64)..at + 64);
+                    }
                     let mut seen = [false; 2];
-                    for &n in &elements {
-                        let widens = parallel_width(&exec, KernelClass::Copy, n).get() > 1;
+                    for &n in elements.iter().chain(&around) {
+                        let widens = widens(n);
                         assert_eq!(
                             gate.widens(&exec, n),
                             widens,

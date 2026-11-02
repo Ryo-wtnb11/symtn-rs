@@ -200,24 +200,24 @@ pub(super) fn validate_strided_ranks(
     Ok(())
 }
 
-/// The compiled plan a leaf replays `baked` with on `exec`: present when the
-/// role carries a plan and `gate` (Strided's own copy cost rule, the rule
-/// `UpdatePlan` itself applies) gives `exec` more than one worker.
+/// The compiled plan a leaf replays `role` (of `elements` elements) with on
+/// `exec`: present when the role carries a plan and `gate` (Strided's own
+/// copy cost rule, the rule `UpdatePlan` itself applies) gives `exec` more
+/// than one worker. Callers ask only for overwrites.
 ///
 /// Why not replay the plan at width one: it then runs the same serial loop
 /// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
 /// strided's spilled replay allocates a cursor per worker range, while the
 /// baked walk reuses the replay workspace's index.
 #[inline]
-pub(crate) fn threaded_plan<'a>(
-    baked: Option<BakedFusedLayout<'a>>,
+pub(crate) fn admitted_plan<'a>(
+    role: BakedFusedLayout<'a>,
+    elements: usize,
     exec: &crate::host_pool::Exec<'_>,
     gate: &LeafGate,
 ) -> Option<&'a UpdatePlan> {
-    let baked = baked?;
-    let plan = baked.plan?;
-    gate.widens(exec, baked.dims.iter().product())
-        .then_some(plan)
+    let plan = role.plan?;
+    gate.widens(exec, elements).then_some(plan)
 }
 
 /// `dst = op(src)` over `baked` by its compiled `plan` on `exec`. The plan's
@@ -553,6 +553,7 @@ where
     }
 }
 
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fused_pair_baked_with_index<T, Apply, ElementOp>(
     layout: &mut FusedLayoutScratch,

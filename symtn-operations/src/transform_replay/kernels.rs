@@ -60,6 +60,7 @@ where
 /// One Single block of compiled replay on the caller's token share: the
 /// adapter's planned overwrite when `gate` (built from that share) widens the
 /// block, the strided kernel otherwise.
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
@@ -91,40 +92,49 @@ where
         + RecouplingCoefficientAction<C>,
     C: Copy + Sync,
 {
-    if let Some(result) = kernels.planned_transform(
-        exec.reborrow(),
-        gate,
-        layouts.role(dst_index)?,
+    let role = layouts.role(dst_index)?;
+    let dst = layouts.entry(dst_index);
+    let src_offset = layouts.entry(src_index).offset;
+    let scale = TransformScale::new(alpha, coefficient);
+    if mode.overwrites() {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+            if let Some(result) = kernels.planned_transform(
+                exec.reborrow(),
+                plan,
+                role,
+                dst_data,
+                src_data,
+                dst.offset,
+                src_offset,
+                source_conjugate,
+                scale,
+            ) {
+                return result;
+            }
+        }
+    }
+    kernels.transform_strided_baked(
+        exec,
+        zero_strides,
         dst_data,
         src_data,
-        layouts.entry(dst_index).offset,
-        layouts.entry(src_index).offset,
+        role.dims(),
+        role.dst_strides(),
+        role.src_strides(),
+        dst.offset,
+        src_offset,
         source_conjugate,
-        TransformScale::new(alpha, coefficient),
+        scale,
         match mode {
             DestinationMode::Axpby(beta) => Some(beta),
             DestinationMode::Overwrite => None,
         },
-    ) {
-        return result;
-    }
-    tree_transform_single_with_strided_kernel(
-        exec,
-        kernels,
-        zero_strides,
+        Some(role),
         fused_index,
-        layouts,
-        dst_index,
-        src_index,
-        coefficient,
-        source_conjugate,
-        dst_data,
-        src_data,
-        alpha,
-        mode,
     )
 }
 
+#[cfg(any(test, feature = "testing"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_with_strided_kernel<A, D, C>(
     exec: crate::host_pool::Exec<'_>,
@@ -403,7 +413,8 @@ where
 
 /// One recoupling scatter column of compiled replay on the caller's token
 /// share: the adapter's planned overwrite when `gate` (built from that share)
-/// widens the column, [`scatter_column_into_layout`] otherwise.
+/// widens the column, the strided scatter otherwise.
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
@@ -423,29 +434,32 @@ where
     A: HostKernelAdapter<T>,
     T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
 {
-    if let Some(result) = kernels.planned_scatter(
-        exec.reborrow(),
-        gate,
-        layouts.role(entry_index)?,
-        dst_data,
-        packed,
-        layouts.entry(entry_index).offset,
-        offset_to_isize(packed_offset)?,
-        alpha,
-        match mode {
-            DestinationMode::Axpby(beta) => Some(beta),
-            DestinationMode::Overwrite => None,
-        },
-    ) {
-        return result;
+    let role = layouts.role(entry_index)?;
+    let dst = layouts.entry(entry_index);
+    let packed_offset = offset_to_isize(packed_offset)?;
+    if mode.overwrites() {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+            if let Some(result) = kernels.planned_scatter(
+                exec.reborrow(),
+                plan,
+                role,
+                dst_data,
+                packed,
+                dst.offset,
+                packed_offset,
+                alpha,
+            ) {
+                return result;
+            }
+        }
     }
-    scatter_column_into_layout(
+    scatter_role(
         exec,
         kernels,
         zero_strides,
         fused_index,
-        layouts,
-        entry_index,
+        role,
+        dst.offset,
         packed,
         packed_offset,
         dst_data,
@@ -454,6 +468,7 @@ where
     )
 }
 
+#[cfg(any(test, feature = "testing"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_into_layout<A, T>(
     exec: crate::host_pool::Exec<'_>,
@@ -473,8 +488,41 @@ where
     T: Copy,
 {
     let role = layouts.role(entry_index)?;
-    let offset = layouts.entry(entry_index).offset;
-    let packed_offset = offset_to_isize(packed_offset)?;
+    scatter_role(
+        exec,
+        kernels,
+        zero_strides,
+        fused_index,
+        role,
+        layouts.entry(entry_index).offset,
+        packed,
+        offset_to_isize(packed_offset)?,
+        dst_data,
+        alpha,
+        mode,
+    )
+}
+
+/// A scatter column's strided kernel over its resolved role and offsets.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn scatter_role<A, T>(
+    exec: crate::host_pool::Exec<'_>,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    role: crate::BakedFusedLayout<'_>,
+    offset: isize,
+    packed: &[T],
+    packed_offset: isize,
+    dst_data: &mut [T],
+    alpha: T,
+    mode: DestinationMode<T>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<T>,
+    T: Copy,
+{
     match mode {
         DestinationMode::Axpby(beta) => {
             zero_strides.clear();

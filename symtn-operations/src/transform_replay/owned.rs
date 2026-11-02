@@ -460,6 +460,7 @@ where
         exec,
         gate,
         layouts.role(dst_index)?,
+        layouts.entry(dst_index).element_count,
         dst,
         src,
         layouts.entry(dst_index).offset - dst_start,
@@ -470,12 +471,13 @@ where
 }
 
 /// Writes one role into uninitialized memory: its compiled plan across
-/// `exec` when [`threaded_plan`] admits one, the baked walk otherwise.
+/// `exec` when [`admitted_plan`] admits one, the baked walk otherwise.
 #[allow(clippy::too_many_arguments)]
 fn write_role_uninit<D, F>(
     exec: Exec<'_>,
     gate: &LeafGate,
     role: crate::BakedFusedLayout<'_>,
+    elements: usize,
     dst: &mut [MaybeUninit<D>],
     src: &[D],
     dst_offset: isize,
@@ -487,7 +489,7 @@ where
     D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
     F: Fn(D) -> D + Send + Sync,
 {
-    match threaded_plan(Some(role), &exec, gate) {
+    match admitted_plan(role, elements, &exec, gate) {
         Some(plan) => planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map),
         None => write_fused_uninit(role, dst, src, dst_offset, src_offset, fused_index, map),
     }
@@ -517,6 +519,7 @@ where
     // fused walk over `packed` starting at `packed_offset` reproduces the
     // column-major gather `packed[packed_offset + linear]`.
     let role = layouts.role(dst_index)?;
+    let elements = layouts.entry(dst_index).element_count;
     let dst_offset = layouts.entry(dst_index).offset - dst_start;
     let src_offset = offset_to_isize(packed_offset)?;
     if alpha.is_one() {
@@ -524,6 +527,7 @@ where
             exec,
             gate,
             role,
+            elements,
             dst,
             packed,
             dst_offset,
@@ -536,6 +540,7 @@ where
             exec,
             gate,
             role,
+            elements,
             dst,
             packed,
             dst_offset,

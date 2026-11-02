@@ -490,30 +490,31 @@ where
         for &item in items {
             let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
             let role = layouts.role(dst_layout)?;
-            let scale = TransformScale::new(
-                alpha.at(layouts.entry(dst_layout).offset),
-                coefficients[coefficient],
-            );
+            let dst = layouts.entry(dst_layout);
+            let scale = TransformScale::new(alpha.at(dst.offset), coefficients[coefficient]);
             let beta = match mode {
                 DestinationMode::Axpby(beta) => Some(beta),
                 DestinationMode::Overwrite => None,
             };
-            let dst_offset = layouts.entry(dst_layout).offset - dst_start;
+            let dst_offset = dst.offset - dst_start;
             let src_offset = layouts.entry(src_layout).offset;
-            if let Some(result) = kernels.planned_transform(
-                exec.reborrow(),
-                &gate,
-                role,
-                dst_data,
-                src_data,
-                dst_offset,
-                src_offset,
-                storage_conjugate,
-                scale,
-                beta,
-            ) {
-                result?;
-                continue;
+            if mode.overwrites() {
+                if let Some(plan) = admitted_plan(role, dst.element_count, &exec, &gate) {
+                    if let Some(result) = kernels.planned_transform(
+                        exec.reborrow(),
+                        plan,
+                        role,
+                        dst_data,
+                        src_data,
+                        dst_offset,
+                        src_offset,
+                        storage_conjugate,
+                        scale,
+                    ) {
+                        result?;
+                        continue;
+                    }
+                }
             }
             kernels.transform_strided_baked(
                 exec.reborrow(),
@@ -639,25 +640,26 @@ where
         let gate = LeafGate::new();
         for item in items {
             let role = layouts.role(item.dst_layout)?;
-            let offset = layouts.entry(item.dst_layout).offset - dst_start;
+            let dst = layouts.entry(item.dst_layout);
+            let offset = dst.offset - dst_start;
             let packed_offset = offset_to_isize(item.packed_offset - packed_start)?;
-            let column_alpha = alpha.at(layouts.entry(item.dst_layout).offset);
-            if let Some(result) = kernels.planned_scatter(
-                exec.reborrow(),
-                &gate,
-                role,
-                dst_data,
-                packed_destination,
-                offset,
-                packed_offset,
-                column_alpha,
-                match mode {
-                    DestinationMode::Axpby(beta) => Some(beta),
-                    DestinationMode::Overwrite => None,
-                },
-            ) {
-                result?;
-                continue;
+            let column_alpha = alpha.at(dst.offset);
+            if mode.overwrites() {
+                if let Some(plan) = admitted_plan(role, dst.element_count, &exec, &gate) {
+                    if let Some(result) = kernels.planned_scatter(
+                        exec.reborrow(),
+                        plan,
+                        role,
+                        dst_data,
+                        packed_destination,
+                        offset,
+                        packed_offset,
+                        column_alpha,
+                    ) {
+                        result?;
+                        continue;
+                    }
+                }
             }
             match mode {
                 DestinationMode::Axpby(beta) => kernels.axpby_strided_baked(

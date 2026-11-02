@@ -1,4 +1,5 @@
 use super::*;
+use strided_kernel::UpdatePlan;
 
 pub(crate) mod sealed {
     use super::*;
@@ -21,17 +22,21 @@ pub(crate) mod sealed {
     /// on the thread that runs it, and every call passes that list's token,
     /// because a token's dispatch cost depends on the calling thread.
     pub struct LeafGate {
-        cheapest: core::cell::OnceCell<Option<core::num::NonZeroUsize>>,
+        min_elements: core::cell::OnceCell<Option<usize>>,
     }
 
     impl LeafGate {
         pub(crate) fn new() -> Self {
             Self {
-                cheapest: core::cell::OnceCell::new(),
+                min_elements: core::cell::OnceCell::new(),
             }
         }
 
-        fn scan(exec: &crate::host_pool::Exec<'_>) -> Option<core::num::NonZeroUsize> {
+        /// The smallest element count whose copy estimate pays at the
+        /// token's cheapest width, or `None` when no count does. A copy
+        /// estimate is monotone in the element count, so a binary search over
+        /// `pays` at that one width finds it.
+        fn scan(exec: &crate::host_pool::Exec<'_>) -> Option<usize> {
             #[cfg(test)]
             GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
             let mut cheapest = None;
@@ -46,18 +51,42 @@ pub(crate) mod sealed {
                     cheapest = Some(width);
                 }
             }
-            cheapest
+            let cheapest = cheapest?;
+            let class = execution::KernelClass::Copy;
+            let pays = |elements: usize| exec.pays(class.estimate(elements), 1, cheapest);
+            if !pays(usize::MAX) {
+                return None;
+            }
+            let (mut below, mut at) = (0usize, usize::MAX);
+            if pays(0) {
+                return Some(0);
+            }
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if pays(middle) {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            Some(at)
         }
 
         /// Exactly `parallel_width(exec, Copy, elements) > 1`, for the one
-        /// token every call on this gate passes.
+        /// token every call on this gate passes: a block below the paying
+        /// size is rejected without a width search.
+        #[inline]
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
-            let Some(cheapest) = *self.cheapest.get_or_init(|| Self::scan(exec)) else {
+            if exec.is_serial() {
                 return false;
-            };
-            let class = execution::KernelClass::Copy;
-            exec.pays(class.estimate(elements), 1, cheapest)
-                && execution::parallel_width(exec, class, elements).get() > 1
+            }
+            match *self.min_elements.get_or_init(|| Self::scan(exec)) {
+                Some(min) if elements >= min => {
+                    execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
+                        > 1
+                }
+                _ => false,
+            }
         }
     }
 
@@ -69,13 +98,15 @@ pub(crate) mod sealed {
 
     /// Unnameable outside this crate, so its methods are crate-internal.
     ///
-    /// Compiled replay calls these before the public primitive of the same
-    /// block: an adapter that replays plans runs the block's retained plan
-    /// across `exec` when `gate` admits it, and returns `None` otherwise,
-    /// leaving the block to the public primitive's serial walk.
+    /// Compiled replay calls these for an overwrite whose role's plan its
+    /// leaf gate admitted: an adapter that replays plans runs it across
+    /// `exec`; the default returns `None`, leaving the block to the public
+    /// primitive's serial walk.
     pub trait Sealed {
-        /// A Single block's overwrite `dst = scale * op(src)` (`beta` absent
-        /// or zero). An accumulate is never planned.
+        /// A Single block's overwrite `dst = scale * op(src)` by the role's
+        /// admitted `plan`. Replay never plans an accumulate: the plan's
+        /// `alpha * f(x) + beta * y` multiplies `f(x)` by a payload-typed one,
+        /// which is not the exact `y + f(x)` of `transform_strided_baked`.
         ///
         /// Why a hook rather than a branch in `transform_strided_baked`: a
         /// threaded structural scale shares its coefficient across workers,
@@ -86,7 +117,7 @@ pub(crate) mod sealed {
         fn planned_transform<T, C>(
             &mut self,
             _exec: crate::host_pool::Exec<'_>,
-            _gate: &LeafGate,
+            _plan: &UpdatePlan,
             _role: BakedFusedLayout<'_>,
             _dst_data: &mut [T],
             _src_data: &[T],
@@ -94,7 +125,6 @@ pub(crate) mod sealed {
             _src_offset: isize,
             _source_conjugate: bool,
             _scale: TransformScale<T, C>,
-            _beta: Option<T>,
         ) -> Option<Result<(), OperationError>>
         where
             C: Copy + Sync,
@@ -112,21 +142,20 @@ pub(crate) mod sealed {
             None
         }
 
-        /// A recoupling scatter column's overwrite `dst = alpha * packed`
-        /// (`beta` absent or zero), with the identity and zero arms of
-        /// `copy_scale_strided_baked`. An accumulate is never planned.
+        /// A recoupling scatter column's overwrite `dst = alpha * packed` by
+        /// the role's admitted `plan`, with the identity and zero arms of
+        /// `copy_scale_strided_baked`.
         #[allow(clippy::too_many_arguments)]
         fn planned_scatter<T>(
             &mut self,
             _exec: crate::host_pool::Exec<'_>,
-            _gate: &LeafGate,
+            _plan: &UpdatePlan,
             _role: BakedFusedLayout<'_>,
             _dst_data: &mut [T],
             _packed: &[T],
             _dst_offset: isize,
             _packed_offset: isize,
             _alpha: T,
-            _beta: Option<T>,
         ) -> Option<Result<(), OperationError>>
         where
             T: Copy
@@ -466,6 +495,7 @@ impl StridedHostKernelAdapter {
         )
     }
 
+    #[inline]
     #[allow(clippy::too_many_arguments)]
     fn fused_pair_baked_dispatch<T, Apply, ElementOp>(
         &mut self,
@@ -636,7 +666,7 @@ impl sealed::Sealed for StridedHostKernelAdapter {
     fn planned_transform<T, C>(
         &mut self,
         exec: crate::host_pool::Exec<'_>,
-        gate: &sealed::LeafGate,
+        plan: &UpdatePlan,
         role: BakedFusedLayout<'_>,
         dst_data: &mut [T],
         src_data: &[T],
@@ -644,7 +674,6 @@ impl sealed::Sealed for StridedHostKernelAdapter {
         src_offset: isize,
         source_conjugate: bool,
         scale: TransformScale<T, C>,
-        beta: Option<T>,
     ) -> Option<Result<(), OperationError>>
     where
         C: Copy + Sync,
@@ -659,13 +688,6 @@ impl sealed::Sealed for StridedHostKernelAdapter {
             + ConjugateValue
             + RecouplingCoefficientAction<C>,
     {
-        // Why not the plan for an accumulate: its `alpha * f(x) + beta * y`
-        // multiplies `f(x)` by a payload-typed one, which is not the exact
-        // `y + f(x)` of `transform_strided_baked`.
-        if beta.is_some_and(|beta| !beta.is_zero()) {
-            return None;
-        }
-        let plan = threaded_plan(Some(role), &exec, gate)?;
         macro_rules! run {
             ($op:expr) => {
                 planned_overwrite(
@@ -698,22 +720,17 @@ impl sealed::Sealed for StridedHostKernelAdapter {
     fn planned_scatter<T>(
         &mut self,
         exec: crate::host_pool::Exec<'_>,
-        gate: &sealed::LeafGate,
+        plan: &UpdatePlan,
         role: BakedFusedLayout<'_>,
         dst_data: &mut [T],
         packed: &[T],
         dst_offset: isize,
         packed_offset: isize,
         alpha: T,
-        beta: Option<T>,
     ) -> Option<Result<(), OperationError>>
     where
         T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
     {
-        if beta.is_some_and(|beta| !beta.is_zero()) {
-            return None;
-        }
-        let plan = threaded_plan(Some(role), &exec, gate)?;
         macro_rules! run {
             ($op:expr) => {
                 planned_overwrite(
