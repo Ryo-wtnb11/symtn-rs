@@ -1,7 +1,7 @@
-//! Compact LQ and checked-Generic polar write their factors straight into the
-//! output storage: LQ appends each sector's adjoint instead of
-//! zero-filling first, and polar runs its GEMMs into the output regions
-//! instead of per-sector temporaries that are then copied.
+//! Compact LQ and checked-Generic polar build their outputs without
+//! zero-filling them first: LQ moves the first sector's factors in as the
+//! output owner and appends the others, and polar runs its GEMMs into the
+//! output regions instead of per-sector temporaries that are then copied.
 
 use crate::numerics;
 
@@ -145,12 +145,13 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
     lq_cases!(engine, Complex64, &runtime);
 }
 
-// Byte-traffic contract: symtn writes the compact LQ outputs and the adjoint
-// scratch once, so it requests no zeroed storage for them. The only zeroed
-// request left is the dense backend's R factor (Tenferro
-// `faer_linalg::upper_triangle_vec_from_mat`), whose total over sectors is
-// the payload of L: 4872 zeroed bytes for this fixture. The counter observes
-// `alloc_zeroed` (e.g. `vec![0.0; len]`) for f64.
+// Byte-traffic contract: the native provider factors each sector's
+// transpose in place and returns fresh factor vectors (the transposed R and
+// Q of its QR), and symtn aggregates them into the outputs without
+// zero-filling, so neither requests zeroed storage for the outputs. The only
+// zeroed request allowed is the provider's R factor, whose total over
+// sectors is at most the payload of L. The counter observes `alloc_zeroed`
+// (e.g. `vec![0.0; len]`) for f64.
 /// Purpose: compact LQ requests no zeroed storage beyond the dense backend's
 /// R factor.
 #[test]

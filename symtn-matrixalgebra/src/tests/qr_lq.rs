@@ -427,11 +427,11 @@ fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 }
 
 #[test]
-fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch() {
+fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
-    // What: one complex LQ call reconstructs mixed rectangular sectors using bounded adjoint scratch and final regions.
+    // What: one complex LQ call reconstructs mixed rectangular sectors in place, without general pack/scatter.
     let rule = Z2FusionRule;
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(

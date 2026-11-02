@@ -1906,6 +1906,21 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
     let error =
         factorize_all(&mut executor, engine, DenseFactorization::Lq, &[rank_one]).unwrap_err();
     assert_eq!(error, executor.qr(engine, rank_one).unwrap_err());
+    // An empty input whose batch extents overflow the element count is
+    // refused by QR as an outcome, on this executor and the trait default.
+    let overflowing =
+        DenseRead::F64(DenseView::new(&empty, &[0, 0, usize::MAX, 2], &[1, 0, 0, 0], 0).unwrap());
+    for executor in [
+        &mut executor as &mut dyn DenseExecutor,
+        &mut FullOnly(DefaultDenseExecutor::new()),
+    ] {
+        let error =
+            factorize_all(executor, engine, DenseFactorization::Lq, &[overflowing]).unwrap_err();
+        assert!(
+            matches!(error, DenseError::Backend { op: "qr_read", .. }),
+            "{error:?}"
+        );
+    }
 }
 
 #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]

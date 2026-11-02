@@ -212,8 +212,7 @@ where
     ///
     /// Other inputs run one dense QR per sector, with cost
     /// `O(sum_c m_c * n_c * min(m_c, n_c))`. Lazy adjoints are materialized
-    /// only for the operation (LQ is itself the QR of the adjoint, so the
-    /// copy is the one LQ would make). Checked factors use the same provider
+    /// only for the operation. Checked factors use the same provider
     /// instance as `self`.
     /// If any sector fails or the provider rejects an output space, no factors
     /// are returned.

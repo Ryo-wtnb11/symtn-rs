@@ -822,12 +822,7 @@ impl AdjointQrLq {
     pub(crate) fn for_inputs(inputs: &[DenseRead<'_>]) -> Self {
         let largest = inputs
             .iter()
-            .filter_map(|input| {
-                input
-                    .shape()
-                    .iter()
-                    .try_fold(1usize, |count, &extent| count.checked_mul(extent))
-            })
+            .filter_map(|input| checked_count(input.shape()).ok())
             .max()
             .unwrap_or(0);
         Self {
@@ -919,12 +914,17 @@ adjoint_scalar!(Complex64, C64, as_c64_slice, |value| {
     num_complex::Complex::conj(&value)
 });
 
-/// Writes the adjoint of each `m x n` item of the strided `[m, n, b..]`
-/// `view` into `output` as column-major `[n, m, b..]`.
-fn extend_adjoint_items<T: AdjointScalar>(view: DenseView<'_, T>, output: &mut Vec<T>) {
+/// Writes the adjoint of each `m x n` item of the nonempty strided
+/// `[m, n, b..]` `view` into `output` as column-major `[n, m, b..]`.
+fn extend_adjoint_items<T: AdjointScalar>(
+    view: DenseView<'_, T>,
+    output: &mut Vec<T>,
+) -> Result<(), DenseError> {
     let (shape, strides, data) = (view.shape(), view.strides(), view.data());
     let (m, n) = (shape[0], shape[1]);
-    let items = shape[2..].iter().product::<usize>();
+    // A broadcast (zero-stride) view can describe more items than `usize`
+    // counts.
+    let items = checked_count(&shape[2..])?;
     for item in 0..items {
         let mut base = view.offset();
         let mut rest = item;
@@ -937,6 +937,15 @@ fn extend_adjoint_items<T: AdjointScalar>(view: DenseView<'_, T>, output: &mut V
                 .extend((0..n).map(|col| data[base + row * strides[0] + col * strides[1]].conj()));
         }
     }
+    Ok(())
+}
+
+/// The product of `extents`, or [`DenseError::ElementCountOverflow`].
+fn checked_count(extents: &[usize]) -> Result<usize, DenseError> {
+    extents
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or(DenseError::ElementCountOverflow)
 }
 
 /// The adjoint of each column-major `rows x cols` item of `data`, column-major
@@ -963,20 +972,30 @@ fn lq_of_adjoint<T: AdjointScalar>(
     let shape = view.shape();
     let (m, n, batch) = (shape[0], shape[1], &shape[2..]);
     let k = m.min(n);
-    if scratch.capacity() == 0 {
-        scratch.reserve(largest);
-    }
-    scratch.clear();
-    extend_adjoint_items(view, scratch);
-    #[cfg(test)]
-    crate::probe::add(crate::probe::Event::LqAdjointStaging, 1);
     let dims = |a: usize, b: usize| [&[a, b][..], batch].concat();
     let adjoint_shape = dims(n, m);
+    scratch.clear();
+    // An empty input stages nothing; its empty adjoint still goes to `qr`, so
+    // QR owns any refusal of its extents. A nonempty input's element count
+    // and column-major strides must fit `usize`.
+    let empty = shape.contains(&0);
+    if !empty {
+        if scratch.capacity() == 0 {
+            scratch.reserve(largest);
+        }
+        extend_adjoint_items(view, scratch)?;
+        #[cfg(test)]
+        crate::probe::add(crate::probe::Event::LqAdjointStaging, 1);
+    }
     let mut adjoint_strides = Vec::with_capacity(adjoint_shape.len());
     let mut stride = 1usize;
     for &extent in &adjoint_shape {
         adjoint_strides.push(stride);
-        stride = stride.saturating_mul(extent);
+        stride = match stride.checked_mul(extent) {
+            Some(next) => next,
+            None if empty => 0,
+            None => return Err(DenseError::ElementCountOverflow),
+        };
     }
     let adjoint = DenseView::new(scratch, &adjoint_shape, &adjoint_strides, 0)?;
     let outputs = qr(T::read(adjoint))?;

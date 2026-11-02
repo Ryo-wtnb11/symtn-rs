@@ -1300,11 +1300,13 @@ where
         .map(|(l, q)| Lq { l, q })
 }
 
-/// What the QR of each compact-LQ route reads.
+/// What each compact-LQ route reads.
 pub(super) enum LqRegionSource<'a, D> {
-    /// The input payload: the QR reads the adjoint of each source region.
+    /// The input payload: each source region is `X`, factored by the
+    /// executor's LQ (the native provider reads its transpose in place; the
+    /// default and BLAS stage its adjoint for QR).
     Input(&'a [D]),
-    /// A lazy adjoint's parent blocks, already the QR input (#2070).
+    /// A lazy adjoint's parent blocks, factored by QR in place (#2070).
     Parent(AdjointParentMatrices<'a, D>),
 }
 
