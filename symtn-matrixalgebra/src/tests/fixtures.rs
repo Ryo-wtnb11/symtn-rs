@@ -931,3 +931,19 @@ pub(super) fn exp_oracle_tensor<D: FactorScalar>(scale: f64) -> TestTensor<D> {
         (1, 2, exp_oracle_block::<D>(1, 2, scale)),
     ])
 }
+
+/// Two 2 x 2 sectors with distinct, ascending spectra `[1, 2]` and `[3, 4]`.
+pub(super) fn two_sector_hermitian() -> TestTensor<f64> {
+    u1_block_endomorphism(&[
+        (0, 2, vec![1.0, 0.0, 0.0, 2.0]),
+        (1, 2, vec![3.0, 0.0, 0.0, 4.0]),
+    ])
+}
+
+pub(super) fn scope_refusal(op: &'static str) -> DenseError {
+    DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op,
+        message: "scope refused at exit".to_string(),
+    }
+}

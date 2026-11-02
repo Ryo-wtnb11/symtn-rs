@@ -1503,22 +1503,6 @@ fn overflowing_eigh_outputs(order: usize) -> Vec<DenseTensor> {
     outputs
 }
 
-/// Two 2 x 2 sectors with distinct, ascending spectra `[1, 2]` and `[3, 4]`.
-fn two_sector_hermitian() -> TestTensor<f64> {
-    u1_block_endomorphism(&[
-        (0, 2, vec![1.0, 0.0, 0.0, 2.0]),
-        (1, 2, vec![3.0, 0.0, 0.0, 4.0]),
-    ])
-}
-
-fn scope_refusal(op: &'static str) -> DenseError {
-    DenseError::Backend {
-        backend: DenseBackend::Tenferro,
-        op,
-        message: "scope refused at exit".to_string(),
-    }
-}
-
 /// A stateful executor: its first EIGH solve returns a non-finite eigenvalue,
 /// and every linear-algebra scope refuses at exit, telling whether a second
 /// EIGH solve ran inside it. Values-only EIGH reaches the real solver.

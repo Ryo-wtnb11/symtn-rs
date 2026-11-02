@@ -114,6 +114,24 @@ pub(super) fn single_output(
     Ok(tensor)
 }
 
+/// Each sector's id and its column-major `(data, rows, cols)` matrix, in
+/// sector order.
+#[expect(
+    clippy::type_complexity,
+    reason = "the sector ids and the batch's borrowed matrices are parallel lists"
+)]
+pub(super) fn sector_blocks<D>(
+    matrices: &(impl SectorMatrices<D> + ?Sized),
+) -> Result<(Vec<SectorId>, Vec<(&[D], usize, usize)>), OperationError> {
+    (0..matrices.len())
+        .map(|index| {
+            let matrix = matrices.get(index)?;
+            Ok((matrix.sector, (matrix.data, matrix.rows, matrix.cols)))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|pairs| pairs.into_iter().unzip())
+}
+
 /// Column-major `(data, rows, cols)` blocks as dense reads, in order.
 pub(super) fn col_major_reads<'a, D: FactorScalar>(
     blocks: &[(&'a [D], usize, usize)],

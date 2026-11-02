@@ -1082,24 +1082,6 @@ where
     )
 }
 
-/// Each sector's id and its column-major `(data, rows, cols)` matrix, in
-/// sector order.
-#[expect(
-    clippy::type_complexity,
-    reason = "the sector ids and the batch's borrowed matrices are parallel lists"
-)]
-fn sector_blocks<D>(
-    matrices: &(impl SectorMatrices<D> + ?Sized),
-) -> Result<(Vec<SectorId>, Vec<(&[D], usize, usize)>), OperationError> {
-    (0..matrices.len())
-        .map(|index| {
-            let matrix = matrices.get(index)?;
-            Ok((matrix.sector, (matrix.data, matrix.rows, matrix.cols)))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|pairs| pairs.into_iter().unzip())
-}
-
 /// One sector of [`eigh_sectors_staged`] for a prepared caller: the ascending values land in
 /// `values` (length `n`) and the ordered, gauge-fixed eigenvectors
 /// (column-major `n x n`) are returned in the solver's own output buffer for

@@ -94,10 +94,10 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     }
 }
 
-/// The eigh, eigh-values, qr and trace outputs of `t`, as one payload each,
-/// so a width that splits the block scheduler differently shows in any of
-/// them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 4] {
+/// The eigh, eigh-values, svd-values, pinv, qr and trace outputs of `t`, as
+/// one payload each, so a width that splits the block scheduler differently
+/// shows in any of them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 6] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
@@ -123,6 +123,16 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 4
     {
         eigh_vals_out.extend_from_slice(&entry.values);
     }
+    let mut svd_vals_out = Vec::new();
+    for entry in t.svd_vals(engine, &[0, 1], &[2]).unwrap() {
+        svd_vals_out.extend_from_slice(&entry.values);
+    }
+    let pinv_out = t
+        .pinv(engine, &[0, 1], &[2], 1e-12)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     let qr = t.qr_compact(engine, &[0, 1], &[2]).unwrap();
     let mut qr_out = qr.q.dense_data().unwrap().to_vec();
     qr_out.extend_from_slice(qr.r.dense_data().unwrap());
@@ -130,13 +140,15 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 4
     [
         eigh_out,
         eigh_vals_out,
+        svd_vals_out,
+        pinv_out,
         qr_out,
         traced.dense_data().unwrap().to_vec(),
     ]
 }
 
 #[test]
-fn eigh_eigh_vals_qr_and_trace_agree_across_widths() {
+fn factorizations_and_trace_agree_across_widths() {
     let runtime = Runtime::builder().build().unwrap();
     // Unequal blocks, small enough for the debug-build gram eigendecomposition.
     let v = space_with([5, 4, 4, 3]);
@@ -144,7 +156,7 @@ fn eigh_eigh_vals_qr_and_trace_agree_across_widths() {
         .unwrap();
     let serial = other_ops(&mut CpuEngine::serial(), &t);
     let wide = other_ops(&mut engine(4), &t);
-    let names = ["eigh", "eigh_vals", "qr", "trace"];
+    let names = ["eigh", "eigh_vals", "svd_vals", "pinv", "qr", "trace"];
     for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);
     }
