@@ -96,10 +96,12 @@ where
                 exec,
                 &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
                 &|items, dst, dst_start, fused_index, mut exec| {
+                    let gate = LeafGate::new(&exec);
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
                         write_uninit_layout_from_source(
                             exec.reborrow(),
+                            &gate,
                             layouts,
                             dst_layout,
                             src_layout,
@@ -165,10 +167,12 @@ where
                     exec,
                     &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
                     &|groups, dst, dst_start, fused_index, mut exec| {
+                        let gate = LeafGate::new(&exec);
                         for &group in groups {
                             for item in &scatter_columns[scatter_groups[group].columns.clone()] {
                                 write_uninit_layout_from_packed(
                                     exec.reborrow(),
+                                    &gate,
                                     layouts,
                                     item.dst_layout,
                                     dst,
@@ -346,6 +350,7 @@ fn write_uninit_layout_zero<D: Zero + Copy>(
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_from_source<D, C>(
     exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     src_index: usize,
@@ -373,6 +378,7 @@ where
     if scale.is_identity() {
         return write_uninit_layout_mapped(
             exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -387,6 +393,7 @@ where
         let zero = scale.apply(D::zero());
         return write_uninit_layout_mapped(
             exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -402,6 +409,7 @@ where
             let coefficient = &coefficient;
             write_uninit_layout_mapped(
                 exec,
+                gate,
                 layouts,
                 dst_index,
                 src_index,
@@ -418,6 +426,7 @@ where
         }
         TransformScale::Data(scale) => write_uninit_layout_mapped(
             exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -433,6 +442,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_mapped<D, F>(
     exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     src_index: usize,
@@ -448,6 +458,7 @@ where
 {
     write_role_uninit(
         exec,
+        gate,
         layouts.role(dst_index)?,
         dst,
         src,
@@ -463,6 +474,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn write_role_uninit<D, F>(
     exec: Exec<'_>,
+    gate: &LeafGate,
     role: crate::BakedFusedLayout<'_>,
     dst: &mut [MaybeUninit<D>],
     src: &[D],
@@ -475,7 +487,7 @@ where
     D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
     F: Fn(D) -> D + Send + Sync,
 {
-    match threaded_plan(Some(role), &exec) {
+    match threaded_plan(Some(role), &exec, gate) {
         Some(plan) => planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map),
         None => write_fused_uninit(role, dst, src, dst_offset, src_offset, fused_index, map),
     }
@@ -484,6 +496,7 @@ where
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_from_packed<D>(
     exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     dst: &mut [MaybeUninit<D>],
@@ -509,6 +522,7 @@ where
     if alpha.is_one() {
         write_role_uninit(
             exec,
+            gate,
             role,
             dst,
             packed,
@@ -520,6 +534,7 @@ where
     } else {
         write_role_uninit(
             exec,
+            gate,
             role,
             dst,
             packed,

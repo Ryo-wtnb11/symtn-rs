@@ -19,6 +19,7 @@ use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
+use crate::kernel_adapter::sealed::LeafGate;
 use crate::kernel_adapter::{planned_write_uninit, threaded_plan, write_fused_uninit};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::scalar::scale_value;

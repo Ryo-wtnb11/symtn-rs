@@ -1,5 +1,6 @@
+use super::adapter::sealed::LeafGate;
 use super::*;
-use strided_kernel::{execution, RawStridedMut, RawStridedRef, UpdatePlan};
+use strided_kernel::{RawStridedMut, RawStridedRef, UpdatePlan};
 
 /// Inline capacity of [`FusedLayoutScratch`] and the traversal index.
 ///
@@ -200,9 +201,8 @@ pub(super) fn validate_strided_ranks(
 }
 
 /// The compiled plan a leaf replays `baked` with on `exec`: present when the
-/// role carries a plan and strided's own cost rule for a copy of its elements
-/// (`parallel_width`, the rule `UpdatePlan` itself applies) gives `exec` more
-/// than one worker.
+/// role carries a plan and `gate` (Strided's own copy cost rule, the rule
+/// `UpdatePlan` itself applies) gives `exec` more than one worker.
 ///
 /// Why not replay the plan at width one: it then runs the same serial loop
 /// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
@@ -212,11 +212,11 @@ pub(super) fn validate_strided_ranks(
 pub(crate) fn threaded_plan<'a>(
     baked: Option<BakedFusedLayout<'a>>,
     exec: &crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
 ) -> Option<&'a UpdatePlan> {
     let baked = baked?;
     let plan = baked.plan?;
-    let elements = baked.dims.iter().product();
-    (execution::parallel_width(exec, execution::KernelClass::Copy, elements).get() > 1)
+    gate.widens(exec, baked.dims.iter().product())
         .then_some(plan)
 }
 

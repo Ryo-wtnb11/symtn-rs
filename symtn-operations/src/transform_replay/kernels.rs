@@ -58,11 +58,12 @@ where
 }
 
 /// One Single block of compiled replay on the caller's token share: the
-/// adapter's planned overwrite when it widens the block, the strided kernel
-/// otherwise.
+/// adapter's planned overwrite when `gate` (built from that share) widens the
+/// block, the strided kernel otherwise.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -92,6 +93,7 @@ where
 {
     if let Some(result) = kernels.planned_transform(
         exec.reborrow(),
+        gate,
         layouts.role(dst_index)?,
         dst_data,
         src_data,
@@ -396,6 +398,59 @@ where
         T::one(),
         Some(role),
         fused_index,
+    )
+}
+
+/// One recoupling scatter column of compiled replay on the caller's token
+/// share: the adapter's planned overwrite when `gate` (built from that share)
+/// widens the column, [`scatter_column_into_layout`] otherwise.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn scatter_column_on_token<A, T>(
+    mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    layouts: &TreeTransformLayoutTable,
+    entry_index: usize,
+    packed: &[T],
+    packed_offset: usize,
+    dst_data: &mut [T],
+    alpha: T,
+    mode: DestinationMode<T>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<T>,
+    T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
+{
+    if let Some(result) = kernels.planned_scatter(
+        exec.reborrow(),
+        gate,
+        layouts.role(entry_index)?,
+        dst_data,
+        packed,
+        layouts.entry(entry_index).offset,
+        offset_to_isize(packed_offset)?,
+        alpha,
+        match mode {
+            DestinationMode::Axpby(beta) => Some(beta),
+            DestinationMode::Overwrite => None,
+        },
+    ) {
+        return result;
+    }
+    scatter_column_into_layout(
+        exec,
+        kernels,
+        zero_strides,
+        fused_index,
+        layouts,
+        entry_index,
+        packed,
+        packed_offset,
+        dst_data,
+        alpha,
+        mode,
     )
 }
 

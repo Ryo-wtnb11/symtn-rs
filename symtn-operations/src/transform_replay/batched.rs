@@ -144,6 +144,7 @@ where
     // machinery entirely: no pack scratch, no job list, no scatter pass.
     if recoupling_plan.is_empty() {
         return crate::host_pool::with_exec(engine, |mut exec| {
+            let gate = LeafGate::new(&exec);
             for block in task.blocks() {
                 let TreeTransformBlock::Single {
                     dst_layout,
@@ -156,6 +157,7 @@ where
                 let start = profile.as_ref().map(|_| std::time::Instant::now());
                 tree_transform_single_on_token(
                     exec.reborrow(),
+                    &gate,
                     kernels,
                     &mut workspace.zero_strides,
                     Some(workspace.fused_indices.as_mut_slice()),
@@ -192,6 +194,7 @@ where
     // the compile-time recoupling entries, whose order is chosen to form
     // same-shape strided GEMM runs.
     crate::host_pool::with_exec(engine, |mut exec| {
+        let gate = LeafGate::new(&exec);
         for block in task.blocks() {
             let TreeTransformBlock::Single {
                 dst_layout,
@@ -206,6 +209,7 @@ where
             let start = profile.as_ref().map(|_| std::time::Instant::now());
             tree_transform_single_on_token(
                 exec.reborrow(),
+                &gate,
                 kernels,
                 &mut workspace.zero_strides,
                 Some(workspace.fused_indices.as_mut_slice()),
@@ -339,9 +343,11 @@ where
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         crate::host_pool::with_exec(engine, |mut exec| {
+            let gate = LeafGate::new(&exec);
             for dst_index in 0..dst_count {
-                scatter_column_into_layout(
+                scatter_column_on_token(
                     exec.reborrow(),
+                    &gate,
                     kernels,
                     &mut workspace.zero_strides,
                     Some(workspace.fused_indices.as_mut_slice()),
@@ -480,6 +486,7 @@ where
     if threads <= 1 || items.len() == 1 {
         let mut zero_strides = Vec::new();
         let fused_index = &mut fused_indices[..max_fused_rank];
+        let gate = LeafGate::new(&exec);
         for &item in items {
             let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
             let role = layouts.role(dst_layout)?;
@@ -495,6 +502,7 @@ where
             let src_offset = layouts.entry(src_layout).offset;
             if let Some(result) = kernels.planned_transform(
                 exec.reborrow(),
+                &gate,
                 role,
                 dst_data,
                 src_data,
@@ -628,9 +636,29 @@ where
     }
     if threads <= 1 || items.len() == 1 {
         let fused_index = &mut fused_indices[..max_fused_rank];
+        let gate = LeafGate::new(&exec);
         for item in items {
             let role = layouts.role(item.dst_layout)?;
             let offset = layouts.entry(item.dst_layout).offset - dst_start;
+            let packed_offset = offset_to_isize(item.packed_offset - packed_start)?;
+            let column_alpha = alpha.at(layouts.entry(item.dst_layout).offset);
+            if let Some(result) = kernels.planned_scatter(
+                exec.reborrow(),
+                &gate,
+                role,
+                dst_data,
+                packed_destination,
+                offset,
+                packed_offset,
+                column_alpha,
+                match mode {
+                    DestinationMode::Axpby(beta) => Some(beta),
+                    DestinationMode::Overwrite => None,
+                },
+            ) {
+                result?;
+                continue;
+            }
             match mode {
                 DestinationMode::Axpby(beta) => kernels.axpby_strided_baked(
                     exec.reborrow(),
@@ -640,8 +668,8 @@ where
                     role.dst_strides(),
                     role.src_strides(),
                     offset,
-                    offset_to_isize(item.packed_offset - packed_start)?,
-                    alpha.at(layouts.entry(item.dst_layout).offset),
+                    packed_offset,
+                    column_alpha,
                     beta,
                     Some(role),
                     Some(&mut *fused_index),
@@ -654,9 +682,9 @@ where
                     role.dst_strides(),
                     role.src_strides(),
                     offset,
-                    offset_to_isize(item.packed_offset - packed_start)?,
+                    packed_offset,
                     false,
-                    alpha.at(layouts.entry(item.dst_layout).offset),
+                    column_alpha,
                     Some(role),
                     Some(&mut *fused_index),
                 )?,
@@ -1105,11 +1133,13 @@ where
         } else {
             let mut zero_strides = Vec::new();
             crate::host_pool::with_exec(engine, |mut exec| {
+                let gate = LeafGate::new(&exec);
                 for &item in &schedule.singles {
                     let (dst_layout, src_layout, coefficient) =
                         scheduled_single(task.blocks(), item)?;
                     tree_transform_single_on_token(
                         exec.reborrow(),
+                        &gate,
                         kernels,
                         &mut zero_strides,
                         Some(workspace.fused_indices.as_mut_slice()),
@@ -1182,12 +1212,14 @@ where
         } else {
             let mut zero_strides = Vec::new();
             crate::host_pool::with_exec(engine, |mut exec| {
+                let gate = LeafGate::new(&exec);
                 for &group in &workspace.chunk_scatter_groups {
                     for item in
                         &schedule.scatter_columns[schedule.scatter_groups[group].columns.clone()]
                     {
-                        scatter_column_into_layout(
+                        scatter_column_on_token(
                             exec.reborrow(),
+                            &gate,
                             kernels,
                             &mut zero_strides,
                             Some(workspace.fused_indices.as_mut_slice()),
