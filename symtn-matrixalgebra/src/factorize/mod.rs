@@ -16,7 +16,7 @@ use symtn_core::{
 };
 use symtn_dense::{
     arity_mismatch, check_contiguous_output, DenseBackend, DenseDotConfig, DenseError,
-    DenseExecutor, DenseFactorization, DenseOwned, DenseTensor, DenseView, DenseViewMut,
+    DenseExecutor, DenseFactorization, DenseOwned, DenseRead, DenseTensor, DenseView, DenseViewMut,
 };
 
 use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};

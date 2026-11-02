@@ -298,9 +298,13 @@ fn oracle_matches<T: Scalar>(real: DenseDType) {
         .collect();
     for (threads, policy) in policies() {
         let mut engine = engine(threads, policy);
-        let outputs = DefaultDenseExecutor::new()
-            .factorize_batch(&mut engine, DenseFactorization::Svd, &inputs)
-            .unwrap();
+        let outputs = factorize_all(
+            &mut DefaultDenseExecutor::new(),
+            &mut engine,
+            DenseFactorization::Svd,
+            &inputs,
+        )
+        .unwrap();
         assert_eq!(outputs.len(), blocks.len());
         for (block, factors) in blocks.iter().zip(&outputs) {
             assert_eq!(factors[1].dtype(), real, "singular values are real");
@@ -370,12 +374,16 @@ fn factors_are_bitwise_reproducible_for_a_fixed_engine() {
     for (threads, policy) in policies() {
         let mut engine = engine(threads, policy);
         let mut run = || {
-            DefaultDenseExecutor::new()
-                .factorize_batch(&mut engine, DenseFactorization::Svd, &inputs)
-                .unwrap()
-                .iter()
-                .map(|factors| factors.iter().map(bits).collect::<Vec<_>>())
-                .collect::<Vec<_>>()
+            factorize_all(
+                &mut DefaultDenseExecutor::new(),
+                &mut engine,
+                DenseFactorization::Svd,
+                &inputs,
+            )
+            .unwrap()
+            .iter()
+            .map(|factors| factors.iter().map(bits).collect::<Vec<_>>())
+            .collect::<Vec<_>>()
         };
         assert_eq!(run(), run(), "{threads} threads, {policy:?}");
     }
@@ -387,9 +395,13 @@ fn batch_and_per_call_errors(
     inputs: &[DenseRead<'_>],
     failing: usize,
 ) -> (DenseError, DenseError) {
-    let batch = DefaultDenseExecutor::new()
-        .factorize_batch(engine, DenseFactorization::Svd, inputs)
-        .unwrap_err();
+    let batch = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        engine,
+        DenseFactorization::Svd,
+        inputs,
+    )
+    .unwrap_err();
     let per_call = DefaultDenseExecutor::new()
         .svd(engine, inputs[failing])
         .unwrap_err();
@@ -435,6 +447,87 @@ fn lowest_failing_input_reports_the_per_matrix_error() {
     }
 }
 
+/// Every outcome `factorize_batch` delivers to a sink that accepts errors,
+/// with its index, and the batch's own result.
+#[allow(clippy::type_complexity)]
+fn recorded_svd_batch(
+    engine: &mut CpuEngine,
+    inputs: &[DenseRead<'_>],
+) -> (
+    Vec<(usize, Result<Vec<DenseTensor>, DenseError>)>,
+    Result<(), DenseError>,
+) {
+    let mut outcomes = Vec::new();
+    let result = DefaultDenseExecutor::new().factorize_batch(
+        engine,
+        DenseFactorization::Svd,
+        inputs,
+        &mut |index, outcome| {
+            outcomes.push((index, outcome));
+            Ok(())
+        },
+    );
+    (outcomes, result)
+}
+
+/// Purpose: the native batch keeps each admitted input's own outcome and
+/// delivers every one in input order, errors included; a pre-entry refusal
+/// is delivered as the outcome after the admitted prefix and later inputs
+/// are not delivered; an engine that refuses entry is the batch's own error
+/// with nothing delivered.
+#[test]
+fn every_admitted_outcome_and_the_refusal_reach_the_sink_in_order() {
+    let good = vec![1.0_f64, 2.0, 3.0, 4.0];
+    let nan = vec![1.0_f64, f64::NAN, 3.0, 4.0];
+    let ints = vec![1_i32, 2, 3, 4];
+    let square = ([2usize, 2], [1usize, 2]);
+    let ok = DenseRead::F64(col_major(&good, &square));
+    let non_finite = DenseRead::F64(col_major(&nan, &square));
+    let integer = DenseRead::I32(DenseView::new(&ints, &square.0, &square.1, 0).unwrap());
+    let rank_one = DenseRead::F64(DenseView::new(&good, &[4], &[1], 0).unwrap());
+    let per_call = |engine: &mut CpuEngine, input| DefaultDenseExecutor::new().svd(engine, input);
+    for (threads, policy) in policies() {
+        let mut engine = engine(threads, policy);
+        let (outcomes, result) = recorded_svd_batch(&mut engine, &[rank_one, ok, non_finite]);
+        assert_eq!(result, Ok(()));
+        let indices: Vec<_> = outcomes.iter().map(|(index, _)| *index).collect();
+        assert_eq!(indices, [0, 1, 2], "{threads} threads, {policy:?}");
+        assert_eq!(
+            outcomes[0].1.as_ref().unwrap_err(),
+            &per_call(&mut engine, rank_one).unwrap_err()
+        );
+        assert_eq!(outcomes[1].1.as_ref().unwrap().len(), 3);
+        assert_eq!(
+            outcomes[2].1.as_ref().unwrap_err(),
+            &per_call(&mut engine, non_finite).unwrap_err()
+        );
+
+        let (outcomes, result) = recorded_svd_batch(&mut engine, &[ok, non_finite, integer, ok]);
+        assert_eq!(result, Ok(()));
+        let indices: Vec<_> = outcomes.iter().map(|(index, _)| *index).collect();
+        assert_eq!(indices, [0, 1, 2], "{threads} threads, {policy:?}");
+        assert!(outcomes[0].1.is_ok());
+        assert_eq!(
+            outcomes[2].1.as_ref().unwrap_err(),
+            &per_call(&mut engine, integer).unwrap_err()
+        );
+    }
+
+    let mut broken = engine(4, BatchPolicy::new(BatchStrategy::Outer));
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        driver::drive(
+            &mut broken,
+            &PanicsAt(0),
+            &mut [(); 2],
+            &mut LaneScratch::default(),
+        )
+    }));
+    assert!(unwound.is_err() && broken.is_broken());
+    let (outcomes, result) = recorded_svd_batch(&mut broken, &[ok, ok]);
+    assert!(outcomes.is_empty());
+    assert_eq!(result.unwrap_err(), per_call(&mut broken, ok).unwrap_err());
+}
+
 /// Purpose: zero-extent inputs return the per-matrix entry's empty factor
 /// shapes without a provider call failing the batch.
 #[test]
@@ -455,9 +548,13 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
         })
         .collect();
     let mut engine = engine(4, BatchPolicy::new(BatchStrategy::Outer));
-    let batch = DefaultDenseExecutor::new()
-        .factorize_batch(&mut engine, DenseFactorization::Svd, &inputs)
-        .unwrap();
+    let batch = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        &mut engine,
+        DenseFactorization::Svd,
+        &inputs,
+    )
+    .unwrap();
     for (factors, &input) in batch.iter().zip(&inputs) {
         let want = DefaultDenseExecutor::new().svd(&mut engine, input).unwrap();
         let shapes = |f: &[DenseTensor]| f.iter().map(|t| t.shape().to_vec()).collect::<Vec<_>>();

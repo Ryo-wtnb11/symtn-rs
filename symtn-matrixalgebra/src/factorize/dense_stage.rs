@@ -46,6 +46,96 @@ where
     })
 }
 
+/// Runs `op` over `inputs` as one executor batch and hands `stage` each
+/// input's outcome in input order; a `stage` error stops the batch and is
+/// returned.
+///
+/// An overriding executor is outside this crate, so its delivery is checked:
+/// an input delivered twice, out of order or not at all is symtn's typed
+/// arity error, never a dropped or misplaced sector.
+pub(super) fn factorize_batch_staged<E>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    op: DenseFactorization,
+    inputs: &[DenseRead<'_>],
+    mut stage: impl FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor + ?Sized,
+{
+    let mut delivered = 0;
+    let mut failure = None;
+    let batch = dense.factorize_batch(engine, op, inputs, &mut |index, outcome| {
+        let staged = if index != delivered || index >= inputs.len() {
+            Err(OperationError::Dense(arity_mismatch(
+                "factorize_batch",
+                delivered,
+                index,
+            )))
+        } else {
+            delivered += 1;
+            stage(index, outcome)
+        };
+        // The executor only needs to stop; the error that stopped it is
+        // kept here, so the stop signal carries nothing.
+        staged.map_err(|error| {
+            failure = Some(error);
+            DenseError::Unsupported {
+                op: "factorize_batch",
+                message: String::new(),
+            }
+        })
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    batch.map_err(OperationError::Dense)?;
+    if delivered != inputs.len() {
+        return Err(OperationError::Dense(arity_mismatch(
+            "factorize_batch",
+            inputs.len(),
+            delivered,
+        )));
+    }
+    Ok(())
+}
+
+/// The one tensor of a values-only batch outcome, arity checked.
+pub(super) fn single_output(
+    outcome: Result<Vec<DenseTensor>, DenseError>,
+    op: &'static str,
+) -> Result<DenseTensor, OperationError> {
+    let [tensor]: [DenseTensor; 1] = outcome
+        .map_err(OperationError::Dense)?
+        .try_into()
+        .map_err(|outputs: Vec<_>| OperationError::Dense(arity_mismatch(op, 1, outputs.len())))?;
+    Ok(tensor)
+}
+
+/// Column-major `(data, rows, cols)` blocks as dense reads, in order.
+pub(super) fn col_major_reads<'a, D: FactorScalar>(
+    blocks: &[(&'a [D], usize, usize)],
+    layouts: &'a mut Vec<([usize; 2], [usize; 2])>,
+) -> Result<Vec<DenseRead<'a>>, OperationError> {
+    layouts.clear();
+    layouts.extend(
+        blocks
+            .iter()
+            .map(|&(_, rows, cols)| ([rows, cols], [1usize, rows])),
+    );
+    let layouts: &'a [_] = layouts;
+    blocks
+        .iter()
+        .zip(layouts)
+        .map(|(&(data, _, _), (shape, strides))| {
+            DenseView::new(data, shape, strides, 0).map(D::dense_read)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(OperationError::Dense)
+}
+
+/// The solver-first batch: every input's outputs once the whole batch has
+/// succeeded, or the first solver error; the caller checks the outputs after.
 pub(super) fn factorize_col_major_batch<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -56,32 +146,15 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let layouts = blocks
-        .iter()
-        .map(|&(_, rows, cols)| ([rows, cols], [1usize, rows]))
-        .collect::<Vec<_>>();
-    let inputs = blocks
-        .iter()
-        .zip(&layouts)
-        .map(|(&(data, _, _), (shape, strides))| {
-            DenseView::new(data, shape, strides, 0).map(D::dense_read)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(OperationError::Dense)?;
-    let outputs = dense
-        .factorize_batch(engine, op, &inputs)
-        .map_err(OperationError::Dense)?;
-    // An overriding executor is outside this crate: a short batch would
-    // otherwise drop a sector silently or panic in a consumer. Each entry's
-    // factor count is checked by `compact_{qr,svd}_outputs`, with the same
-    // error the per-matrix path reports.
-    if outputs.len() != blocks.len() {
-        return Err(OperationError::Dense(arity_mismatch(
-            "factorize_batch",
-            blocks.len(),
-            outputs.len(),
-        )));
-    }
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(blocks, &mut layouts)?;
+    let mut outputs = Vec::with_capacity(blocks.len());
+    // Each entry's factor count is checked by `compact_{qr,svd}_outputs`,
+    // with the same error the per-matrix path reports.
+    factorize_batch_staged(engine, dense, op, &inputs, |_, outcome| {
+        outputs.push(outcome.map_err(OperationError::Dense)?);
+        Ok(())
+    })?;
     Ok(outputs)
 }
 

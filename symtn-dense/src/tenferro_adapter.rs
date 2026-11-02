@@ -1199,7 +1199,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         }
     }
 
-    // The native provider's SVD and QR run the blocks on the lane driver
+    // The native provider's factorizations run the blocks on the lane driver
     // (`block_kernel::factor`); every other provider runs them one after
     // another (`factorize_batch_serial`).
     #[cfg(not(feature = "provider-inject"))]
@@ -1208,15 +1208,16 @@ impl DenseExecutor for DefaultDenseExecutor {
         engine: &mut dyn Engine,
         op: crate::DenseFactorization,
         inputs: &[DenseRead<'_>],
-    ) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
+        sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
         if inputs.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
         use crate::block_kernel::factor::factorize as batch;
         #[cfg(not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))))]
         use factorize_batch_serial as batch;
-        batch(engine, op, inputs)
+        batch(engine, op, inputs, sink)
     }
 
     fn solve_into(
@@ -2254,10 +2255,8 @@ fn linalg_unavailable(op: &'static str) -> DenseError {
 }
 
 /// A batch of per-matrix factorizations under one engine lock: the
-/// per-matrix calls the per-call entries make, in the same order, plus only
-/// the pure view lowering; output wrapping stays outside it. Outputs land in
-/// one flat vector so the batch adds no per-matrix container beyond the
-/// returned one.
+/// per-matrix calls the per-call entries make, in the same order, each
+/// input's outcome delivered to `sink` before the next input is solved.
 #[cfg(not(any(
     feature = "provider-inject",
     all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
@@ -2266,41 +2265,40 @@ fn factorize_batch_serial(
     engine: &mut dyn Engine,
     op: crate::DenseFactorization,
     inputs: &[DenseRead<'_>],
-) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
+    sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
+) -> Result<(), DenseError> {
     use crate::DenseFactorization;
-    let (arity, error_op) = match op {
-        DenseFactorization::Svd => (3, "svd_read"),
-        DenseFactorization::Qr => (2, "qr_read"),
+    let entry = match op {
+        DenseFactorization::Svd => "svd_read",
+        DenseFactorization::Qr => "qr_read",
+        DenseFactorization::Eigh => "eigh_read",
+        DenseFactorization::EighVals => "eigh_values",
+        DenseFactorization::SvdVals => "svd_values",
     };
-    let mut flat = Vec::with_capacity(arity * inputs.len());
-    with_cpu_linalg(engine, error_op, |exec| {
+    let solve =
+        |exec: &mut dyn Engine, input: DenseRead<'_>| -> Result<Vec<DenseTensor>, DenseError> {
+            let input = TensorRead::from_view(tenferro_view(input)?);
+            let tensors = match op {
+                DenseFactorization::Svd => input.svd_read(exec).map(|(u, s, vt)| vec![u, s, vt]),
+                DenseFactorization::Qr => input.qr_read(exec).map(|(q, r)| vec![q, r]),
+                DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
+                DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
+                DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),
+            }
+            .map_err(|err| tenferro_error(entry, err))?;
+            tensors
+                .into_iter()
+                .map(DenseTensor::from_tenferro)
+                .collect()
+        };
+    with_cpu_linalg(engine, entry, |exec| {
         let mut run = || -> Result<(), DenseError> {
-            for &input in inputs {
-                let input = TensorRead::from_view(tenferro_view(input)?);
-                let backend = |err| tenferro_error(error_op, err);
-                match op {
-                    DenseFactorization::Svd => {
-                        let (u, s, vt) = input.svd_read(&mut *exec).map_err(backend)?;
-                        flat.extend([u, s, vt]);
-                    }
-                    DenseFactorization::Qr => {
-                        let (q, r) = input.qr_read(&mut *exec).map_err(backend)?;
-                        flat.extend([q, r]);
-                    }
-                }
+            for (index, &input) in inputs.iter().enumerate() {
+                sink(index, solve(&mut *exec, input))?;
             }
             Ok(())
         };
         Ok(run())
     })
-    .map_err(|err| tenferro_error(error_op, err))??;
-    let mut flat = flat.into_iter();
-    (0..inputs.len())
-        .map(|_| {
-            flat.by_ref()
-                .take(arity)
-                .map(DenseTensor::from_tenferro)
-                .collect()
-        })
-        .collect()
+    .map_err(|err| tenferro_error(entry, err))?
 }

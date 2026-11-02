@@ -840,10 +840,33 @@ fn adjoint_composition_gives_the_identity_on_the_bond() {
     assert_identity_matrices(&dense_sector_matrices(1, &identity));
 }
 
-/// Returns a batch that violates the `factorize_batch` contract: one input's
-/// entry missing, or one entry missing a factor.
+/// How a forwarded two-input batch reaches the caller.
+#[derive(Clone, Copy, Debug)]
+enum Delivery {
+    /// The second input is never delivered.
+    DropLast,
+    /// The first input's outputs miss a factor.
+    DropFactor,
+    /// The second input fails in the solver.
+    FailLast,
+    /// The first input's outputs miss a factor, then the second fails.
+    DropFactorThenFail,
+    /// The first input is delivered twice.
+    Duplicate,
+    /// The first input is delivered under the second's index.
+    OutOfOrder,
+}
+
 struct MalformedBatch {
-    drop_entry: bool,
+    delivery: Delivery,
+}
+
+fn solver_failure() -> DenseError {
+    DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op: "injected solver",
+        message: "injected failure".to_string(),
+    }
 }
 
 impl Observer for MalformedBatch {
@@ -854,11 +877,26 @@ impl Observer for MalformedBatch {
         );
     }
 
-    fn batch_outputs(&mut self, outputs: &mut Vec<Vec<DenseTensor>>) {
-        if self.drop_entry {
-            outputs.pop();
-        } else {
-            outputs[0].pop();
+    fn batch_outcome(
+        &mut self,
+        index: usize,
+        mut outcome: Result<Vec<DenseTensor>, DenseError>,
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        use Delivery::*;
+        match (self.delivery, index) {
+            (DropLast, 1) => Ok(()),
+            (DropFactor | DropFactorThenFail, 0) => {
+                outcome.as_mut().unwrap().pop();
+                sink(index, outcome)
+            }
+            (FailLast | DropFactorThenFail, 1) => sink(index, Err(solver_failure())),
+            (Duplicate, 0) => {
+                sink(index, outcome)?;
+                sink(index, Err(solver_failure()))
+            }
+            (OutOfOrder, 0) => sink(1, outcome),
+            _ => sink(index, outcome),
         }
     }
 }
@@ -866,31 +904,63 @@ impl Observer for MalformedBatch {
 #[test]
 fn compact_factorizations_reject_a_malformed_executor_batch() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: a batch with a missing input entry, or an entry missing a factor,
-    // is symtn's own typed arity error, never a dropped sector, a panic or a
-    // backend error. A missing factor keeps the per-matrix path's error.
+    // What: the planned compact QR/SVD batch is solver-first: a delivered
+    // solver error is the result even after an earlier malformed factor,
+    // which is checked only once the batch succeeded. A missing,
+    // repeated or misplaced delivery is symtn's own typed arity error,
+    // never a dropped sector, a panic or a backend error; a missing factor
+    // keeps the per-matrix path's error.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let input = bound.as_ref();
-    for (drop_entry, qr_op, svd_op) in [
-        (true, "factorize_batch", "factorize_batch"),
-        (false, "qr_into", "svd_into"),
-    ] {
-        let mut dense = ScriptedExecutor::new(MalformedBatch { drop_entry });
-        let is_arity_error = |error: &OperationError, expected: &str| {
+    let arity = |op| {
+        move |error: &OperationError| {
             matches!(
                 error,
-                OperationError::Dense(DenseError::ShapeMismatch { op, .. }) if *op == expected
+                OperationError::Dense(DenseError::ShapeMismatch { op: actual, .. }) if *actual == op
             )
-        };
+        }
+    };
+    let solver = |error: &OperationError| *error == OperationError::Dense(solver_failure());
+    type Expect = Box<dyn Fn(&OperationError) -> bool>;
+    let cases: [(Delivery, Expect, Expect); 6] = [
+        (
+            Delivery::DropLast,
+            Box::new(arity("factorize_batch")),
+            Box::new(arity("factorize_batch")),
+        ),
+        (
+            Delivery::DropFactor,
+            Box::new(arity("qr_into")),
+            Box::new(arity("svd_into")),
+        ),
+        (Delivery::FailLast, Box::new(solver), Box::new(solver)),
+        (
+            Delivery::DropFactorThenFail,
+            Box::new(solver),
+            Box::new(solver),
+        ),
+        (
+            Delivery::Duplicate,
+            Box::new(arity("factorize_batch")),
+            Box::new(arity("factorize_batch")),
+        ),
+        (
+            Delivery::OutOfOrder,
+            Box::new(arity("factorize_batch")),
+            Box::new(arity("factorize_batch")),
+        ),
+    ];
+    for (delivery, qr_expect, svd_expect) in cases {
+        let mut dense = ScriptedExecutor::new(MalformedBatch { delivery });
         let qr = qr_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
-        assert!(is_arity_error(&qr, qr_op), "qr_compact: {qr:?}");
+        assert!(qr_expect(&qr), "{delivery:?} qr_compact: {qr:?}");
         let svd = svd_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
-        assert!(is_arity_error(&svd, svd_op), "svd_compact: {svd:?}");
+        assert!(svd_expect(&svd), "{delivery:?} svd_compact: {svd:?}");
     }
 }

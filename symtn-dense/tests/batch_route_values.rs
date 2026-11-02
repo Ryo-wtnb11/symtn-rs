@@ -273,7 +273,13 @@ fn factorize_batch_matches_per_call<T: Copy>(
     let engine = &mut CpuEngine::serial();
     for op in [DenseFactorization::Qr, DenseFactorization::Svd] {
         let mut executor = DefaultDenseExecutor::new();
-        let batched = executor.factorize_batch(engine, op, &inputs).unwrap();
+        let mut batched = Vec::new();
+        executor
+            .factorize_batch(engine, op, &inputs, &mut |_, outcome| {
+                batched.push(outcome?);
+                Ok(())
+            })
+            .unwrap();
 
         let mut reference = DefaultDenseExecutor::new();
         let per_call = inputs

@@ -48,6 +48,12 @@ pub enum DenseFactorization {
     Svd,
     /// [`DenseExecutor::qr`].
     Qr,
+    /// [`DenseExecutor::eigh`].
+    Eigh,
+    /// [`DenseExecutor::eigh_vals`], delivered as a one-tensor output.
+    EighVals,
+    /// [`DenseExecutor::svd_vals`], delivered as a one-tensor output.
+    SvdVals,
 }
 
 mod sealed {
@@ -110,28 +116,41 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         body(self.as_dyn_dense_executor(), engine)
     }
 
-    /// Applies `op` to each input and returns exactly one entry per input,
-    /// holding that input's outputs exactly as the per-matrix entry returns
-    /// them; on failure, returns the lowest-indexed failing input's error
-    /// and no outputs.
+    /// Applies `op` to each input and hands `sink` each delivered input's
+    /// outcome, `Ok` holding that input's outputs exactly as the per-matrix
+    /// entry returns them (a values-only entry's tensor as a one-element
+    /// vector).
     ///
-    /// The default issues one per-matrix call per input, in order, and stops
-    /// at the first error. An executor whose per-call entry carries a fixed
-    /// admission cost overrides this to pay it once per batch, not once per
-    /// matrix; one may run the inputs concurrently on the engine's lanes.
+    /// Outcomes reach `sink` in ascending input order, each at most once. An
+    /// `Err` from `sink` stops delivery and is returned. An executor-level
+    /// failure (such as an engine the executor cannot use) is returned
+    /// without calling `sink` further.
+    ///
+    /// The default solves input `i` with the per-matrix entry and calls
+    /// `sink(i, outcome)` before solving input `i + 1`, so an executor using
+    /// it sees the same call sequence as a per-matrix loop that checks each
+    /// output before the next solve. An executor whose per-call entry carries
+    /// a fixed admission cost overrides this to pay it once per batch; one
+    /// may solve the inputs concurrently on the engine's lanes before
+    /// delivering their outcomes in order.
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,
         op: DenseFactorization,
         inputs: &[DenseRead<'_>],
-    ) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
-        inputs
-            .iter()
-            .map(|&input| match op {
+        sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        for (index, &input) in inputs.iter().enumerate() {
+            let outcome = match op {
                 DenseFactorization::Svd => self.svd(engine, input),
                 DenseFactorization::Qr => self.qr(engine, input),
-            })
-            .collect()
+                DenseFactorization::Eigh => self.eigh(engine, input),
+                DenseFactorization::EighVals => self.eigh_vals(engine, input).map(|v| vec![v]),
+                DenseFactorization::SvdVals => self.svd_vals(engine, input).map(|v| vec![v]),
+            };
+            sink(index, outcome)?;
+        }
+        Ok(())
     }
 
     /// Whether this executor supports native full SVD for every [`DenseOwned`]

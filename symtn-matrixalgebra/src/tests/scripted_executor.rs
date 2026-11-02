@@ -17,7 +17,7 @@ use symtn_dense::Engine;
 
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
-    DenseFactorization, DenseOwned, DenseRead, DenseTensor, DenseWrite,
+    DenseFactorization, DenseLinalgScopeBody, DenseOwned, DenseRead, DenseTensor, DenseWrite,
 };
 
 /// One scripted executor entry point.
@@ -150,12 +150,31 @@ pub trait Observer {
     /// Sees the owned outputs of a forwarded or defaulted `svd`, `qr`,
     /// `eigh` or `eig`. Destination, values-only, full-SVD, solve and GEMM
     /// entries have no owned outputs to show; `factorize_batch` has
-    /// [`Observer::batch_outputs`].
+    /// [`Observer::batch_outcome`].
     fn outputs(&mut self, _op: Op, _outputs: &[DenseTensor]) {}
 
-    /// Sees the outputs of a forwarded `factorize_batch`.
-    fn batch_outputs(&mut self, _outputs: &mut Vec<Vec<DenseTensor>>) {}
+    /// Stands between a forwarded `factorize_batch` and its caller's sink:
+    /// sees each delivered outcome and decides what the caller receives.
+    fn batch_outcome(
+        &mut self,
+        index: usize,
+        outcome: Reply,
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        sink(index, outcome)
+    }
+
+    /// Runs after a `with_linalg_scope` body, with the counts so far; an
+    /// error replaces the scope's result, as a backend admission refused at
+    /// scope exit would.
+    fn scope_exit(&mut self, _counts: Counts) -> Result<(), DenseError> {
+        Ok(())
+    }
 }
+
+/// A `factorize_batch` caller's outcome sink.
+pub type BatchSink<'s> =
+    dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError> + 's;
 
 impl Observer for () {}
 
@@ -306,7 +325,67 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
     ) -> Result<(), DenseError> {
         self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
-    // The one provided entry another default body calls (`eig_vals`).
+    // The provided entries other default bodies call (`eig_vals`, and
+    // `factorize_batch` for its values-only variants).
+    fn eig(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eig(engine, input)
+    }
+    fn svd_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        self.0.svd_vals(engine, input)
+    }
+    fn eigh_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        self.0.eigh_vals(engine, input)
+    }
+}
+
+/// Runs a values-only entry's trait default body: [`Defaulted`] without its
+/// values-only forwards, which would route that entry back into itself.
+struct ValuesDefault<'d, 'a, O: Observer>(&'d mut Defaulted<'a, O>);
+
+impl<O: Observer> DenseExecutor for ValuesDefault<'_, '_, O> {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
+    }
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
+    }
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
+    }
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
+    }
     fn eig(
         &mut self,
         engine: &mut dyn Engine,
@@ -471,7 +550,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             Op::SvdVals,
             input,
             |e, engine, i| e.svd_vals(engine, i),
-            |e, engine, i| e.svd_vals(engine, i),
+            |e, engine, i| ValuesDefault(e).svd_vals(engine, i),
         )
     }
 
@@ -485,7 +564,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             Op::EighVals,
             input,
             |e, engine, i| e.eigh_vals(engine, i),
-            |e, engine, i| e.eigh_vals(engine, i),
+            |e, engine, i| ValuesDefault(e).eigh_vals(engine, i),
         )
     }
 
@@ -628,12 +707,28 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
         engine: &mut dyn Engine,
         op: DenseFactorization,
         inputs: &[DenseRead<'_>],
-    ) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
-        let mut outputs = match self.script.enter(Op::FactorizeBatch)? {
-            Action::Forward => self.script.inner.factorize_batch(engine, op, inputs),
-            _ => Defaulted(self).factorize_batch(engine, op, inputs),
-        }?;
-        self.observer.batch_outputs(&mut outputs);
-        Ok(outputs)
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        match self.script.enter(Op::FactorizeBatch)? {
+            Action::Forward => {
+                let observer = &mut self.observer;
+                self.script
+                    .inner
+                    .factorize_batch(engine, op, inputs, &mut |index, outcome| {
+                        observer.batch_outcome(index, outcome, sink)
+                    })
+            }
+            _ => Defaulted(self).factorize_batch(engine, op, inputs, sink),
+        }
+    }
+
+    fn with_linalg_scope(
+        &mut self,
+        engine: &mut dyn Engine,
+        body: &mut DenseLinalgScopeBody<'_>,
+    ) -> Result<(), DenseError> {
+        body(self, engine)?;
+        let counts = self.script.counts;
+        self.observer.scope_exit(counts)
     }
 }
