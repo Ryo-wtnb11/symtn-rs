@@ -1162,19 +1162,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             Err(linalg_unavailable("eig"))
         }
         #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "eig_read", |exec| {
-                TensorRead::from_view(input).eig_read(exec)
-            })
-            .map_err(|err| tenferro_error("eig_read", err))
-            .and_then(|(values, vectors)| {
-                vec![values, vectors]
-                    .into_iter()
-                    .map(DenseTensor::from_tenferro)
-                    .collect()
-            })
-        }
+        eig_read(engine, input)
     }
 
     fn eigh(
@@ -2258,6 +2246,26 @@ fn linalg_unavailable(op: &'static str) -> DenseError {
     }
 }
 
+/// tenferro's general eigendecomposition of one input on the whole engine:
+/// the per-matrix [`DenseExecutor::eig`] entry.
+#[cfg(not(feature = "provider-inject"))]
+pub(crate) fn eig_read(
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    let input = tenferro_view(input)?;
+    with_cpu_linalg(engine, "eig_read", |exec| {
+        TensorRead::from_view(input).eig_read(exec)
+    })
+    .map_err(|err| tenferro_error("eig_read", err))
+    .and_then(|(values, vectors)| {
+        vec![values, vectors]
+            .into_iter()
+            .map(DenseTensor::from_tenferro)
+            .collect()
+    })
+}
+
 /// A batch of per-matrix factorizations under one engine lock: the
 /// per-matrix calls the per-call entries make, in the same order, each
 /// input's outcome delivered to `sink` before the next input is solved.
@@ -2278,6 +2286,8 @@ fn factorize_batch_serial(
         DenseFactorization::Eigh => "eigh_read",
         DenseFactorization::EighVals => "eigh_values",
         DenseFactorization::SvdVals => "svd_values",
+        DenseFactorization::Eig => "eig_read",
+        DenseFactorization::EigVals => "eig_values",
     };
     let solve =
         |exec: &mut dyn Engine, input: DenseRead<'_>| -> Result<Vec<DenseTensor>, DenseError> {
@@ -2288,6 +2298,13 @@ fn factorize_batch_serial(
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
                 DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
                 DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),
+                DenseFactorization::Eig => input.eig_read(exec).map(|(w, v)| vec![w, v]),
+                // The per-matrix `eig_vals` route: a contiguity pre-pass, then
+                // the owned values call.
+                DenseFactorization::EigVals => exec
+                    .to_contiguous_read(input)
+                    .and_then(|owned| owned.eigvals(exec))
+                    .map(|w| vec![w]),
             }
             .map_err(|err| tenferro_error(entry, err))?;
             tensors

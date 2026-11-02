@@ -54,6 +54,10 @@ pub enum DenseFactorization {
     EighVals,
     /// [`DenseExecutor::svd_vals`], delivered as a one-tensor output.
     SvdVals,
+    /// [`DenseExecutor::eig`].
+    Eig,
+    /// [`DenseExecutor::eig_vals`], delivered as a one-tensor output.
+    EigVals,
 }
 
 mod sealed {
@@ -147,6 +151,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::Eigh => self.eigh(engine, input),
                 DenseFactorization::EighVals => self.eigh_vals(engine, input).map(|v| vec![v]),
                 DenseFactorization::SvdVals => self.svd_vals(engine, input).map(|v| vec![v]),
+                DenseFactorization::Eig => self.eig(engine, input),
+                DenseFactorization::EigVals => self.eig_vals(engine, input).map(|v| vec![v]),
             };
             sink(index, outcome)?;
         }
