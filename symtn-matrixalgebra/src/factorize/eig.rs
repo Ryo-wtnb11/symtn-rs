@@ -284,30 +284,34 @@ where
     let v_groups = SectorBlockGroups::new(v_space.space().structure(), FactorSide::Left)?;
     let v_target = v_space.space();
     in_linalg_scope(engine, dense, |dense, engine| {
-        for (position, sector_geometry) in geometry.iter().enumerate() {
-            let matrix = matricizations.get(position)?;
-            let n = matrix.rows;
-            let (sorted_values, vectors) =
-                eigh_sector_stage(engine, dense, matrix.data, n, &mut scratch)?;
-            eigenvalues.push(SectorSpectrum {
-                sector: matrix.sector,
-                values: sorted_values,
-            });
-            #[cfg(test)]
-            crate::probe::eigh_owned_vector(&vectors);
-            scatter_left_sector_blocks(
-                v_target,
-                &mut v_data,
-                sector_geometry,
-                &index,
-                &v_groups,
-                &vectors,
-                n,
-            )?;
-            #[cfg(test)]
-            crate::probe::output_scatter::<D>(crate::probe::CopyOp::Eigh, 1, n * n);
-        }
-        Ok(())
+        let (sectors, blocks) = sector_blocks(matricizations)?;
+        eigh_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            &mut scratch,
+            |position, sorted_values, vectors| {
+                let n = blocks[position].1;
+                eigenvalues.push(SectorSpectrum {
+                    sector: sectors[position],
+                    values: sorted_values,
+                });
+                #[cfg(test)]
+                crate::probe::eigh_owned_vector(&vectors);
+                scatter_left_sector_blocks(
+                    v_target,
+                    &mut v_data,
+                    &geometry[position],
+                    &index,
+                    &v_groups,
+                    &vectors,
+                    n,
+                )?;
+                #[cfg(test)]
+                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Eigh, 1, n * n);
+                Ok(())
+            },
+        )
     })?;
 
     Ok(EighFullDyn {
@@ -345,43 +349,55 @@ where
         .max()
         .unwrap_or(0);
     let mut scratch = EighScratch::for_order(max_n);
-    let mut eigenvalues = Vec::with_capacity(plan.routes.len());
+    // A zero-order sector is not solved; its spectrum stays empty.
+    let mut eigenvalues = plan
+        .routes
+        .iter()
+        .map(|route| SectorSpectrum {
+            sector: route.sector,
+            values: Vec::new(),
+        })
+        .collect::<Vec<_>>();
     let mut regions = vec![None; plan.left_regions.len()];
     let mut next_left_region = 0;
     let mut output = None;
 
     let data = input.data();
     in_linalg_scope(engine, dense, |dense, engine| {
-        for route in plan.routes.iter().copied() {
-            let source = &plan.source_regions[route.source_region];
-            let n = source.rows();
-            if n == 0 {
-                eigenvalues.push(SectorSpectrum {
-                    sector: route.sector,
-                    values: Vec::new(),
-                });
-                continue;
-            }
-            let (sorted_values, vectors) =
-                eigh_sector_stage(engine, dense, &data[source.range()], n, &mut scratch)?;
-            regions[route.left_region.expect("nonzero route has left region")] = Some(vectors);
-            while next_left_region < plan.left_regions.len() {
-                if plan.left_regions[next_left_region].range().is_empty() {
+        let (solved, blocks): (Vec<_>, Vec<_>) = plan
+            .routes
+            .iter()
+            .enumerate()
+            .filter_map(|(position, route)| {
+                let source = &plan.source_regions[route.source_region];
+                let n = source.rows();
+                (n != 0).then(|| (position, (&data[source.range()], n, n)))
+            })
+            .unzip();
+        eigh_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            &mut scratch,
+            |index, sorted_values, vectors| {
+                let position = solved[index];
+                let route = plan.routes[position];
+                regions[route.left_region.expect("nonzero route has left region")] = Some(vectors);
+                while next_left_region < plan.left_regions.len() {
+                    if plan.left_regions[next_left_region].range().is_empty() {
+                        next_left_region += 1;
+                        continue;
+                    }
+                    let Some(region) = regions[next_left_region].take() else {
+                        break;
+                    };
+                    append_owned_factor(&mut output, region, v_len);
                     next_left_region += 1;
-                    continue;
                 }
-                let Some(region) = regions[next_left_region].take() else {
-                    break;
-                };
-                append_owned_factor(&mut output, region, v_len);
-                next_left_region += 1;
-            }
-            eigenvalues.push(SectorSpectrum {
-                sector: route.sector,
-                values: sorted_values,
-            });
-        }
-        Ok(())
+                eigenvalues[position].values = sorted_values;
+                Ok(())
+            },
+        )
     })?;
 
     Ok(EighFullDyn {
@@ -976,7 +992,7 @@ where
     eig_vals_spectra(engine, dense, &matricizations)
 }
 
-/// Reorder scratch for [`eigh_sector_stage`] and [`eigh_sector_into`], sized
+/// Reorder scratch for [`eigh_sectors_staged`] and [`eigh_sector_into`], sized
 /// for the largest sector.
 #[doc(hidden)]
 pub struct EighScratch<D: FactorScalar> {
@@ -1026,35 +1042,65 @@ fn order_eigh_sector<D: FactorScalar>(
     Ok(reordered)
 }
 
-/// Hermitian eigendecomposition of one `n x n` coupled-sector matrix: values
-/// in [`ascending_eigh_order`], eigenvectors reordered to match and
-/// phase-gauged ([`order_eigh_sector`]).
-#[inline]
-fn eigh_sector_stage<E, D>(
+/// Hermitian eigendecompositions of the `n x n` column-major sectors
+/// `blocks` (`(data, n, n)`) as one executor batch: `stage` receives, in
+/// sector order, each sector's values in [`ascending_eigh_order`] and its
+/// eigenvectors reordered to match and phase-gauged ([`order_eigh_sector`]).
+fn eigh_sectors_staged<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
-    matrix: &[D],
-    n: usize,
+    blocks: &[(&[D], usize, usize)],
     scratch: &mut EighScratch<D>,
-) -> Result<(Vec<f64>, Vec<D>), OperationError>
+    mut stage: impl FnMut(usize, Vec<f64>, Vec<D>) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (real_values, mut vectors) = compact_eigh_owned(engine, dense, matrix, n)?;
-    let sorted_values = if order_eigh_sector(&real_values, &mut vectors, n, scratch)? {
-        scratch
-            .order
-            .iter()
-            .map(|&index| real_values[index])
-            .collect()
-    } else {
-        real_values
-    };
-    Ok((sorted_values, vectors))
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(blocks, &mut layouts)?;
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::Eigh,
+        &inputs,
+        |index, outcome| {
+            let n = blocks[index].1;
+            let (values, vectors) = eigh_output_pair(outcome.map_err(OperationError::Dense)?)?;
+            let (real_values, mut vectors) = eigh_pair_owned::<D>(values, vectors, n)?;
+            let sorted_values = if order_eigh_sector(&real_values, &mut vectors, n, scratch)? {
+                scratch
+                    .order
+                    .iter()
+                    .map(|&index| real_values[index])
+                    .collect()
+            } else {
+                real_values
+            };
+            stage(index, sorted_values, vectors)
+        },
+    )
 }
 
-/// [`eigh_sector_stage`] for a prepared caller: the ascending values land in
+/// Each sector's id and its column-major `(data, rows, cols)` matrix, in
+/// sector order.
+#[expect(
+    clippy::type_complexity,
+    reason = "the sector ids and the batch's borrowed matrices are parallel lists"
+)]
+fn sector_blocks<D>(
+    matrices: &(impl SectorMatrices<D> + ?Sized),
+) -> Result<(Vec<SectorId>, Vec<(&[D], usize, usize)>), OperationError> {
+    (0..matrices.len())
+        .map(|index| {
+            let matrix = matrices.get(index)?;
+            Ok((matrix.sector, (matrix.data, matrix.rows, matrix.cols)))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(|pairs| pairs.into_iter().unzip())
+}
+
+/// One sector of [`eigh_sectors_staged`] for a prepared caller: the ascending values land in
 /// `values` (length `n`) and the ordered, gauge-fixed eigenvectors
 /// (column-major `n x n`) are returned in the solver's own output buffer for
 /// the caller to place. Same solver, order and gauge as eager, and no
@@ -1210,26 +1256,29 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let mut eigenvalues = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices.get(index)?;
-        let n = matrix.rows;
-        let shape = [matrix.rows, matrix.cols];
-        let strides = [1usize, matrix.rows];
-        let view =
-            DenseView::new(matrix.data, &shape, &strides, 0).map_err(OperationError::Dense)?;
-        let values_tensor = dense
-            .eigh_vals(engine, D::dense_read(view))
-            .map_err(OperationError::Dense)?;
-        let mut sorted = D::real_spectrum(&values_tensor).map_err(OperationError::Dense)?;
-        sorted.truncate(n);
-        validate_real_eigenvalues(&sorted)?;
-        sort_spectrum(&mut sorted, f64::total_cmp);
-        eigenvalues.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: sorted,
-        });
-    }
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut layouts)?;
+    let mut eigenvalues = Vec::with_capacity(blocks.len());
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::EighVals,
+        &inputs,
+        |index, outcome| {
+            let values_tensor = single_output(outcome, "eigh_vals")?;
+            let n = blocks[index].1;
+            let mut sorted = D::real_spectrum(&values_tensor).map_err(OperationError::Dense)?;
+            sorted.truncate(n);
+            validate_real_eigenvalues(&sorted)?;
+            sort_spectrum(&mut sorted, f64::total_cmp);
+            eigenvalues.push(SectorSpectrum {
+                sector: sectors[index],
+                values: sorted,
+            });
+            Ok(())
+        },
+    )?;
     Ok(eigenvalues)
 }
 
@@ -1280,8 +1329,28 @@ where
     D: FactorScalar,
 {
     let (values, vectors) = compact_eigh_outputs(engine, dense, input, order)?;
+    eigh_pair_owned(values, vectors, order)
+}
+
+/// The owned real values and eigenvectors of one `order x order` solve,
+/// shape checked.
+fn eigh_pair_owned<D: FactorScalar>(
+    values: DenseTensor,
+    vectors: DenseTensor,
+    order: usize,
+) -> Result<(Vec<f64>, Vec<D>), OperationError> {
     let values = compact_real_spectrum_owned::<D>(values, &[order], "eigh_into")?;
     let vectors = compact_factor_output_owned::<D>(vectors, &[order, order], "eigh_into")?;
+    Ok((values, vectors))
+}
+
+/// An eigh entry's `(values, vectors)`, arity checked.
+fn eigh_output_pair(
+    outputs: Vec<DenseTensor>,
+) -> Result<(DenseTensor, DenseTensor), OperationError> {
+    let [values, vectors]: [DenseTensor; 2] = outputs.try_into().map_err(|outputs: Vec<_>| {
+        OperationError::Dense(arity_mismatch("eigh_into", 2, outputs.len()))
+    })?;
     Ok((values, vectors))
 }
 
@@ -1303,10 +1372,7 @@ where
     let outputs = dense
         .eigh(engine, D::dense_read(input))
         .map_err(OperationError::Dense)?;
-    let [values, vectors]: [DenseTensor; 2] = outputs.try_into().map_err(|outputs: Vec<_>| {
-        OperationError::Dense(arity_mismatch("eigh_into", 2, outputs.len()))
-    })?;
-    Ok((values, vectors))
+    eigh_output_pair(outputs)
 }
 
 pub(super) fn scaled_antihermitian_difference<D: FactorScalar, R: HermitianReal>(
@@ -1693,25 +1759,29 @@ where
     let mut eigenvalues = Vec::with_capacity(matrices.len());
     let mut pairs = Vec::with_capacity(matrices.len());
     in_linalg_scope(engine, dense, |dense, engine| {
-        for index in 0..matrices.len() {
-            let matrix = matrices.get(index)?;
-            let n = matrix.rows;
-            let (sorted_values, vectors) =
-                eigh_sector_stage(engine, dense, matrix.data, n, &mut scratch)?;
-            eigenvalues.push(SectorSpectrum {
-                sector: matrix.sector,
-                values: sorted_values,
-            });
-            pairs.push(FactorPair {
-                sector: matrix.sector,
-                kept: n,
-                left: vectors,
-                left_rows: n,
-                right: Vec::new(),
-                right_leading: 0,
-            });
-        }
-        Ok(())
+        let (sectors, blocks) = sector_blocks(&matrices)?;
+        eigh_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            &mut scratch,
+            |index, sorted_values, vectors| {
+                let (sector, n) = (sectors[index], blocks[index].1);
+                eigenvalues.push(SectorSpectrum {
+                    sector,
+                    values: sorted_values,
+                });
+                pairs.push(FactorPair {
+                    sector,
+                    kept: n,
+                    left: vectors,
+                    left_rows: n,
+                    right: Vec::new(),
+                    right_leading: 0,
+                });
+                Ok(())
+            },
+        )
     })
     .map_err(CheckedGenericFactorPlanError::from)?;
     let dimensions = with_input_geometry!(&matrices, |geometry| geometry

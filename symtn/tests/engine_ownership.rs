@@ -94,29 +94,49 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     }
 }
 
-/// The eigh, qr and trace outputs of `t`, as one payload each, so a width
-/// that splits the block scheduler differently shows in any of them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 3] {
+/// The eigh, eigh-values, qr and trace outputs of `t`, as one payload each,
+/// so a width that splits the block scheduler differently shows in any of
+/// them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 4] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
         .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
         .unwrap();
-    // The eigenvectors of a degenerate eigenvalue are a free basis; only the
-    // spectrum is gauge-free.
+    // The eigenvectors of a degenerate eigenvalue are a free basis; the
+    // spectrum and the reconstruction `V D Vᴴ` are gauge-free.
     let mut eigh_out = Vec::new();
     for entry in eigh.d.diagview(engine).unwrap() {
         eigh_out.extend_from_slice(&entry.values);
+    }
+    let reconstructed = eigh
+        .v
+        .compose(engine, &eigh.d)
+        .unwrap()
+        .compose(engine, eigh.v.adjoint_view())
+        .unwrap();
+    eigh_out.extend_from_slice(reconstructed.dense_data().unwrap());
+    let mut eigh_vals_out = Vec::new();
+    for entry in gram
+        .eigh_vals(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .unwrap()
+    {
+        eigh_vals_out.extend_from_slice(&entry.values);
     }
     let qr = t.qr_compact(engine, &[0, 1], &[2]).unwrap();
     let mut qr_out = qr.q.dense_data().unwrap().to_vec();
     qr_out.extend_from_slice(qr.r.dense_data().unwrap());
     let traced = gram.trace_pairs(engine, &[(0, 2)]).unwrap();
-    [eigh_out, qr_out, traced.dense_data().unwrap().to_vec()]
+    [
+        eigh_out,
+        eigh_vals_out,
+        qr_out,
+        traced.dense_data().unwrap().to_vec(),
+    ]
 }
 
 #[test]
-fn eigh_qr_and_trace_agree_across_widths() {
+fn eigh_eigh_vals_qr_and_trace_agree_across_widths() {
     let runtime = Runtime::builder().build().unwrap();
     // Unequal blocks, small enough for the debug-build gram eigendecomposition.
     let v = space_with([5, 4, 4, 3]);
@@ -124,7 +144,8 @@ fn eigh_qr_and_trace_agree_across_widths() {
         .unwrap();
     let serial = other_ops(&mut CpuEngine::serial(), &t);
     let wide = other_ops(&mut engine(4), &t);
-    for ((name, serial), wide) in ["eigh", "qr", "trace"].into_iter().zip(&serial).zip(&wide) {
+    let names = ["eigh", "eigh_vals", "qr", "trace"];
+    for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);
     }
 }

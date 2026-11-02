@@ -1,5 +1,5 @@
 pub(super) use super::scripted_executor::{
-    Action, Call, Observer, Op, Reply, Script, ScriptedExecutor,
+    Action, BatchSink, Call, Counts, Observer, Op, Reply, Script, ScriptedExecutor,
 };
 use super::*;
 

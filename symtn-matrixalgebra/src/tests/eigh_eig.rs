@@ -1481,3 +1481,185 @@ fn eigenvector_gauge_matches_matrixalgebrakit_phase_rule() {
         assert!(pivot.re >= 0.0, "pivot {pivot} negative");
     }
 }
+
+/// A correctly shaped `order x order` f64 EIGH output whose largest
+/// eigenvalue overflows to a non-finite value.
+fn overflowing_eigh_outputs(order: usize) -> Vec<DenseTensor> {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let data = vec![f64::MAX; order * order];
+    let shape = [order, order];
+    let strides = [1, order];
+    let outputs = symtn_dense::DefaultDenseExecutor::new()
+        .eigh(
+            engine,
+            DenseRead::F64(symtn_dense::DenseView::new(&data, &shape, &strides, 0).unwrap()),
+        )
+        .unwrap();
+    assert!(outputs[0]
+        .as_f64_slice()
+        .unwrap()
+        .iter()
+        .any(|value| !value.is_finite()));
+    outputs
+}
+
+/// Two 2 x 2 sectors with distinct, ascending spectra `[1, 2]` and `[3, 4]`.
+fn two_sector_hermitian() -> TestTensor<f64> {
+    u1_block_endomorphism(&[
+        (0, 2, vec![1.0, 0.0, 0.0, 2.0]),
+        (1, 2, vec![3.0, 0.0, 0.0, 4.0]),
+    ])
+}
+
+fn scope_refusal(op: &'static str) -> DenseError {
+    DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op,
+        message: "scope refused at exit".to_string(),
+    }
+}
+
+/// A stateful executor: its first EIGH solve returns a non-finite eigenvalue,
+/// and every linear-algebra scope refuses at exit, telling whether a second
+/// EIGH solve ran inside it. Values-only EIGH reaches the real solver.
+#[derive(Default)]
+struct NonFiniteFirstEighRefusingScope {
+    eigh_calls: usize,
+}
+
+impl Observer for NonFiniteFirstEighRefusingScope {
+    fn script(script: &mut Script) {
+        script.set(Op::EighVals, Action::Forward);
+    }
+
+    fn call(&mut self, call: Call<'_, '_>) -> Option<Reply> {
+        if let Call::Read(Op::Eigh, _) = call {
+            self.eigh_calls += 1;
+            if self.eigh_calls == 1 {
+                return Some(Ok(overflowing_eigh_outputs(2)));
+            }
+        }
+        None
+    }
+
+    fn scope_exit(&mut self, counts: Counts) -> Result<(), DenseError> {
+        Err(scope_refusal(if counts.eigh >= 2 {
+            "scope after sector 1"
+        } else {
+            "scope after sector 0"
+        }))
+    }
+}
+
+#[test]
+fn eigh_full_checks_each_sector_before_the_next_solve_inside_its_scope() {
+    // What: on an executor that keeps the default batch, sector 0's outputs
+    // are checked before sector 1 is solved, all inside the one
+    // linear-algebra scope, whose own refusal takes precedence over the
+    // body's error.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let mut dense = ScriptedExecutor::<NonFiniteFirstEighRefusingScope>::default();
+
+    let error = eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        OperationError::Dense(scope_refusal("scope after sector 0"))
+    );
+}
+
+#[test]
+fn eigh_vals_runs_outside_any_linalg_scope() {
+    // What: values-only EIGH opens no linear-algebra scope, so a scope that
+    // would refuse does not affect it.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let mut dense = ScriptedExecutor::<NonFiniteFirstEighRefusingScope>::default();
+
+    let values = eigh_vals(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+    )
+    .unwrap();
+
+    let mut spectra = values
+        .iter()
+        .map(|entry| entry.values.clone())
+        .collect::<Vec<_>>();
+    spectra.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    for (got, want) in spectra.iter().zip([[1.0, 2.0], [3.0, 4.0]]) {
+        for (got, want) in got.iter().zip(want) {
+            assert!((got - want).abs() <= 1.0e-12, "{got} against {want}");
+        }
+    }
+    assert_eq!(spectra.len(), 2);
+}
+
+/// A forwarded batch whose sector 0 delivers a non-finite eigenvalue and
+/// whose sector 1 delivers `second`.
+struct NonFiniteThen {
+    first: Option<Vec<DenseTensor>>,
+    second: Option<Reply>,
+}
+
+impl Observer for NonFiniteThen {
+    fn script(script: &mut Script) {
+        script.set(Op::FactorizeBatch, Action::Forward);
+    }
+
+    fn batch_outcome(
+        &mut self,
+        index: usize,
+        _: Reply,
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        match index {
+            0 => sink(0, Ok(self.first.take().unwrap())),
+            _ => sink(index, self.second.take().unwrap()),
+        }
+    }
+}
+
+#[test]
+fn eigh_full_reports_the_first_sector_failure_over_later_batch_outcomes() {
+    // What: a batch that solved every sector before delivering reports the
+    // lowest sector's failure, as the per-sector loop does: sector 0's
+    // non-finite eigenvalue, not sector 1's solver error or malformed output.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let solver_failure = DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op: "eigh_read",
+        message: "injected failure".to_string(),
+    };
+    for second in [Err(solver_failure), Ok(f64_eigh_outputs(1))] {
+        let mut dense = ScriptedExecutor::new(NonFiniteThen {
+            first: Some(overflowing_eigh_outputs(2)),
+            second: Some(second),
+        });
+        let error = eigh_full(
+            engine,
+            &mut dense,
+            &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+        )
+        .map(|_| ());
+        assert!(
+            matches!(
+                error,
+                Err(OperationError::Dense(DenseError::NumericalFailure {
+                    backend: DenseBackend::Tenferro,
+                    op: crate::factorize::EIGH_EIGENVALUE_CHECK,
+                    ..
+                }))
+            ),
+            "{error:?}"
+        );
+    }
+}

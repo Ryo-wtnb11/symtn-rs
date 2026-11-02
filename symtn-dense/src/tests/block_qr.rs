@@ -164,9 +164,13 @@ fn oracle_matches<T: Scalar>() {
     let inputs = inputs(&data, &layouts);
     for (threads, policy) in policies() {
         let mut engine = engine(threads, policy);
-        let outputs = DefaultDenseExecutor::new()
-            .factorize_batch(&mut engine, DenseFactorization::Qr, &inputs)
-            .unwrap();
+        let outputs = factorize_all(
+            &mut DefaultDenseExecutor::new(),
+            &mut engine,
+            DenseFactorization::Qr,
+            &inputs,
+        )
+        .unwrap();
         assert_eq!(outputs.len(), blocks.len());
         for (block, factors) in blocks.iter().zip(&outputs) {
             check_block::<T>(block, factors);
@@ -209,9 +213,13 @@ fn factors_match_the_per_matrix_factors() {
     let (data, layouts) = fixture::<Complex64>(&blocks);
     let inputs = inputs(&data, &layouts);
     let mut engine = engine(1, BatchPolicy::default());
-    let batch = DefaultDenseExecutor::new()
-        .factorize_batch(&mut engine, DenseFactorization::Qr, &inputs)
-        .unwrap();
+    let batch = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        &mut engine,
+        DenseFactorization::Qr,
+        &inputs,
+    )
+    .unwrap();
     for ((factors, &input), block) in batch.iter().zip(&inputs).zip(&blocks) {
         let want = DefaultDenseExecutor::new().qr(&mut engine, input).unwrap();
         let scale = block.a.iter().map(|x| x.norm()).fold(1.0, f64::max);
@@ -255,9 +263,13 @@ fn batch_and_per_call_errors(
     inputs: &[DenseRead<'_>],
     failing: usize,
 ) -> (DenseError, DenseError) {
-    let batch = DefaultDenseExecutor::new()
-        .factorize_batch(engine, DenseFactorization::Qr, inputs)
-        .unwrap_err();
+    let batch = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        engine,
+        DenseFactorization::Qr,
+        inputs,
+    )
+    .unwrap_err();
     let per_call = DefaultDenseExecutor::new()
         .qr(engine, inputs[failing])
         .unwrap_err();
@@ -322,9 +334,13 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
         })
         .collect();
     let mut engine = engine(4, BatchPolicy::new(BatchStrategy::Outer));
-    let batch = DefaultDenseExecutor::new()
-        .factorize_batch(&mut engine, DenseFactorization::Qr, &inputs)
-        .unwrap();
+    let batch = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        &mut engine,
+        DenseFactorization::Qr,
+        &inputs,
+    )
+    .unwrap();
     for (factors, &input) in batch.iter().zip(&inputs) {
         let want = DefaultDenseExecutor::new().qr(&mut engine, input).unwrap();
         let shapes = |f: &[DenseTensor]| f.iter().map(|t| t.shape().to_vec()).collect::<Vec<_>>();

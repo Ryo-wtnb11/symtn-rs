@@ -151,12 +151,13 @@ rebuilds its lanes without a query. Each entry is charged its inline key and
 entry, the entry overhead, and its per-block, per-width and per-lane slices;
 with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
-core batches the same way. The native provider's compact SVD and compact QR
-over a tensor's sector blocks run on the same lanes, through the same lane
-driver as the GEMM kernel (inside the engine's guarded linalg entry rather
-than its contraction entry): each block's cost is the provider's work
-estimate (SVD `m n min(m, n)`, QR `m n k - k^3/3` with `k = min(m, n)`, four
-times that for complex scalars) under the engine's work model, and each
+core batches the same way. The native provider's compact SVD, compact QR and
+Hermitian eigendecomposition (full and values-only) over a tensor's sector
+blocks run on the same lanes, through the same lane driver as the GEMM kernel
+(inside the engine's guarded linalg entry rather than its contraction entry):
+each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
+`m n k - k^3/3` with `k = min(m, n)`, EIGH tlinalg's `n^3`, four times that
+for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
 it. Their lanes keep the baseline placement over `L0` lanes, without the
@@ -171,11 +172,18 @@ Re-enabling the search for factorizations requires composing the provider's
 operation-specific grant through a public interface it offers, checking that
 composition against the adopted provider release, and rerunning the full
 lane benchmark matrix. Every block runs up to the first one refused before the engine is entered
-(an unsupported dtype or a malformed view); the error reported is the
-lowest-indexed block's, the one the per-matrix SVD or QR would report, and
-nothing is returned on error. Each block allocates its own provider workspace
-and fresh factors of their logical size, so a factor never inherits a recycled
-buffer's capacity. Eigendecompositions and the other
+(an unsupported dtype or a malformed view), and keeps its own outcome; the
+outcomes, then that refusal, reach the operation in block order, where the
+same per-sector checks as a block-by-block loop run on each, so the error
+reported is the lowest-indexed sector's, the one the per-matrix loop would
+report, and nothing is returned on error. Two costs differ from that loop
+and are accepted: blocks after a failing one are still solved, and a
+provider panic in such a later block unwinds and leaves the engine broken
+where the loop would have returned the earlier error. Each block allocates
+its own provider workspace and fresh factors of their logical size, so a
+factor never inherits a recycled buffer's capacity; a full EIGH holds every
+sector's raw eigenvectors at once before placing them, where the loop held
+one. General eigendecomposition, values-only SVD and the other
 factorizations, and every BLAS factorization, still run block after block on
 the whole engine.
 Callers can still give each GEMM the whole pool with

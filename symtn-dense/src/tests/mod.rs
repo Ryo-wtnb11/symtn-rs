@@ -28,6 +28,22 @@ mod view;
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
+/// Every input's outputs of one `factorize_batch`, or the first delivered
+/// error.
+fn factorize_all(
+    executor: &mut dyn DenseExecutor,
+    engine: &mut dyn Engine,
+    op: DenseFactorization,
+    inputs: &[DenseRead<'_>],
+) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
+    let mut outputs = Vec::with_capacity(inputs.len());
+    executor.factorize_batch(engine, op, inputs, &mut |_, outcome| {
+        outputs.push(outcome?);
+        Ok(())
+    })?;
+    Ok(outputs)
+}
+
 fn assert_f64_close(actual: f64, expected: f64, tol: f64) {
     assert!(
         (actual - expected).abs() <= tol,

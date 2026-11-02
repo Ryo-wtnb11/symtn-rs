@@ -1654,6 +1654,123 @@ fn default_executor_values_only_admits_batches_and_zero_extents() {
     assert_eq!(values.shape(), &[2, 0]);
     assert!(values.as_f64_slice().unwrap().is_empty());
 }
+
+/// The per-matrix entry `factorize_batch` stands for, as a batch outcome.
+fn per_matrix_factorization(
+    executor: &mut DefaultDenseExecutor,
+    engine: &mut CpuEngine,
+    op: DenseFactorization,
+    input: DenseRead<'_>,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    match op {
+        DenseFactorization::Eigh => executor.eigh(engine, input),
+        DenseFactorization::EighVals => executor.eigh_vals(engine, input).map(|v| vec![v]),
+        DenseFactorization::SvdVals => executor.svd_vals(engine, input).map(|v| vec![v]),
+        other => unreachable!("fixture covers the Hermitian and values-only variants: {other:?}"),
+    }
+}
+
+#[cfg(not(feature = "provider-inject"))]
+#[test]
+fn default_executor_eigh_and_values_batches_match_the_per_matrix_entries() {
+    // What: `factorize_batch` for `Eigh`, `EighVals` and `SvdVals` returns
+    // each input's outputs with the per-matrix entry's arity, shapes and
+    // dtypes (real values for a complex Hermitian input), ascending
+    // eigenvalues with `V D Vᴴ = A`, empty and trailing-batch extents
+    // included; it refuses rank below 2, and a non-square Hermitian input
+    // before the zero-extent shortcut, with the per-matrix entry's error.
+    use DenseFactorization::{Eigh, EighVals, SvdVals};
+    let engine = &mut CpuEngine::serial();
+    let mut executor = DefaultDenseExecutor::new();
+    let c = Complex64::new;
+    // [[2, i], [-i, 2]]: eigenvalues 1 and 3.
+    let hermitian = [c(2.0, 0.0), c(0.0, -1.0), c(0.0, 1.0), c(2.0, 0.0)];
+    let diagonal = [5.0_f64, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 2.0];
+    let batch = [3.0_f64, 0.0, 0.0, 1.0, 4.0, 0.0, 0.0, 2.0];
+    let empty: [f64; 0] = [];
+    let inputs = [
+        DenseRead::C64(DenseView::new(&hermitian, &[2, 2], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&diagonal, &[3, 3], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&batch, &[2, 2, 2], &[1, 2, 4], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[0, 0], &[1, 0], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[2, 2, 0], &[1, 2, 4], 0).unwrap()),
+    ];
+    let expected: [(DenseFactorization, [&[f64]; 3]); 3] = [
+        (
+            Eigh,
+            [&[1.0, 3.0], &[-1.0, 2.0, 5.0], &[1.0, 3.0, 2.0, 4.0]],
+        ),
+        (
+            EighVals,
+            [&[1.0, 3.0], &[-1.0, 2.0, 5.0], &[1.0, 3.0, 2.0, 4.0]],
+        ),
+        (
+            SvdVals,
+            [&[3.0, 1.0], &[5.0, 2.0, 1.0], &[3.0, 1.0, 4.0, 2.0]],
+        ),
+    ];
+    for (op, values) in expected {
+        let outputs = factorize_all(&mut executor, engine, op, &inputs).unwrap();
+        assert_eq!(outputs.len(), inputs.len(), "{op:?}");
+        for (got, &input) in outputs.iter().zip(&inputs) {
+            let want = per_matrix_factorization(&mut executor, engine, op, input).unwrap();
+            let layout = |tensors: &[DenseTensor]| {
+                tensors
+                    .iter()
+                    .map(|t| (t.shape().to_vec(), t.dtype()))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(layout(got), layout(&want), "{op:?}");
+        }
+        assert_eq!(
+            outputs[0][0].dtype(),
+            DenseDType::F64,
+            "{op:?}: real values"
+        );
+        for (got, want) in outputs.iter().zip(values) {
+            let got = got[0].as_f64_slice().unwrap();
+            assert_eq!(got.len(), want.len(), "{op:?}");
+            for (got, want) in got.iter().zip(want) {
+                assert_f64_close(*got, *want, 1.0e-12);
+            }
+        }
+        if op == Eigh {
+            // V D Vᴴ = A for the complex Hermitian input.
+            let w = outputs[0][0].as_f64_slice().unwrap();
+            let v = outputs[0][1].as_c64_slice().unwrap();
+            for row in 0..2 {
+                for col in 0..2 {
+                    let sum: Complex64 = (0..2)
+                        .map(|k| v[row + 2 * k] * w[k] * v[col + 2 * k].conj())
+                        .sum();
+                    assert_c64_close(sum, hermitian[row + 2 * col], 1.0e-12);
+                }
+            }
+        }
+    }
+
+    assert!(factorize_all(&mut executor, engine, Eigh, &[])
+        .unwrap()
+        .is_empty());
+    let vector = [1.0_f64, 2.0];
+    let rank_one = DenseRead::F64(DenseView::new(&vector, &[2], &[1], 0).unwrap());
+    let rectangular = [1.0_f64; 6];
+    let wide = DenseRead::F64(DenseView::new(&rectangular, &[2, 3], &[1, 2], 0).unwrap());
+    let wide_empty = DenseRead::F64(DenseView::new(&empty, &[0, 3], &[1, 0], 0).unwrap());
+    for (op, refused) in [
+        (Eigh, rank_one),
+        (EighVals, rank_one),
+        (SvdVals, rank_one),
+        (Eigh, wide),
+        (EighVals, wide),
+        (Eigh, wide_empty),
+        (EighVals, wide_empty),
+    ] {
+        let error = factorize_all(&mut executor, engine, op, &[refused]).unwrap_err();
+        let want = per_matrix_factorization(&mut executor, engine, op, refused).unwrap_err();
+        assert_eq!(error, want, "{op:?}");
+    }
+}
 #[cfg(not(feature = "provider-inject"))]
 #[test]
 fn default_executor_values_only_preserves_rank_and_dtype_rejections() {

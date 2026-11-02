@@ -1,9 +1,11 @@
-//! The native provider's compact factorizations of independent blocks (SVD
-//! and QR): one tlinalg call per block, the blocks spread over the lane
-//! driver's lanes on the caller's engine.
+//! The native provider's compact factorizations of independent blocks (SVD,
+//! QR, Hermitian eigendecomposition and their values-only forms): one tlinalg
+//! call per block, the blocks spread over the lane driver's lanes on the
+//! caller's engine.
 //!
-//! Each block reaches tlinalg exactly as tenferro's per-matrix `svd_read` or
-//! `qr_read` does (same provider, same validation, same error values), but on
+//! Each block reaches tlinalg exactly as tenferro's per-matrix entry
+//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`) does
+//! (same provider, same validation, same error values), but on
 //! its lane's child token instead of the whole engine, so a block's faer
 //! width is the engine's decision within its lane's reserved share. Each
 //! factor is a fresh `Vec` from the provider's `Vec` entry: its length is the
@@ -32,8 +34,12 @@ pub(crate) trait Factor {
     /// The provider op, whose name labels the error payloads.
     const OP: tlinalg::Op;
 
+    /// Whether the provider requires square matrices: tenferro checks this
+    /// after the rank and before the zero-extent shortcut.
+    const SQUARE: bool = false;
+
     /// tlinalg's work estimate for one real `m x n` matrix, in multiply-adds.
-    fn work(m: f64, n: f64) -> f64;
+    fn work(m: usize, n: usize) -> f64;
 
     /// The factors of one input of matrix extents `dims = [m, n]` and batch
     /// dimensions `batch`, from the provider, or empty ones when `raw` is
@@ -54,7 +60,8 @@ impl Factor for Svd {
     const ENTRY: &'static str = "svd_read";
     const OP: tlinalg::Op = tlinalg::Op::Svd;
 
-    fn work(m: f64, n: f64) -> f64 {
+    fn work(m: usize, n: usize) -> f64 {
+        let (m, n) = (m as f64, n as f64);
         m * n * m.min(n)
     }
 
@@ -86,7 +93,8 @@ impl Factor for Qr {
     const ENTRY: &'static str = "qr_read";
     const OP: tlinalg::Op = tlinalg::Op::Qr;
 
-    fn work(m: f64, n: f64) -> f64 {
+    fn work(m: usize, n: usize) -> f64 {
+        let (m, n) = (m as f64, n as f64);
         let k = m.min(n);
         m * n * k - k.powi(3) / 3.0
     }
@@ -110,6 +118,98 @@ impl Factor for Qr {
     }
 }
 
+/// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
+/// (real) and `[n, n, b..]`.
+pub(crate) struct Eigh;
+
+impl Factor for Eigh {
+    const ENTRY: &'static str = "eigh_read";
+    const OP: tlinalg::Op = tlinalg::Op::Eigh;
+    const SQUARE: bool = true;
+
+    fn work(n: usize, _: usize) -> f64 {
+        tlinalg::eigh::estimate_work::<f64>(n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let (mut values, mut vectors) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            tlinalg::eigh::eigh(Self::OP, raw, &mut values, &mut vectors, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![
+            output::<Self, <T as TensorScalar>::Real>(&[n], batch, T::real_values(values))?,
+            output::<Self, T>(&[n, n], batch, vectors)?,
+        ])
+    }
+}
+
+/// Hermitian eigenvalues only: `[values]` of shape `[n, b..]`, real.
+pub(crate) struct EighVals;
+
+impl Factor for EighVals {
+    const ENTRY: &'static str = "eigh_values";
+    const OP: tlinalg::Op = tlinalg::Op::EighValues;
+    const SQUARE: bool = true;
+
+    fn work(n: usize, _: usize) -> f64 {
+        tlinalg::eigh::estimate_work::<f64>(n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let values = match raw {
+            Some(raw) => T::eigh_values(raw, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?,
+            None => Vec::new(),
+        };
+        Ok(vec![output::<Self, <T as TensorScalar>::Real>(
+            &[n],
+            batch,
+            values,
+        )?])
+    }
+}
+
+/// Singular values only: `[S]` of shape `[k, b..]` with `k = min(m, n)`, real.
+pub(crate) struct SvdVals;
+
+impl Factor for SvdVals {
+    const ENTRY: &'static str = "svd_values";
+    const OP: tlinalg::Op = tlinalg::Op::SvdValues;
+
+    fn work(m: usize, n: usize) -> f64 {
+        tlinalg::svd::estimate_work::<f64>(m, n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let s = match raw {
+            Some(raw) => T::svd_values(raw, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?,
+            None => Vec::new(),
+        };
+        Ok(vec![output::<Self, <T as TensorScalar>::Real>(
+            &[m.min(n)],
+            batch,
+            s,
+        )?])
+    }
+}
+
 /// A column-major factor of shape `dims` followed by `batch`.
 fn output<F: Factor, T: TensorScalar>(
     dims: &[usize],
@@ -121,44 +221,74 @@ fn output<F: Factor, T: TensorScalar>(
         .and_then(DenseTensor::from_tenferro)
 }
 
-/// A scalar the provider factors; its singular values are in
+/// A scalar the provider factors; its singular values and eigenvalues are in
 /// [`TensorScalar::Real`].
 pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
-    /// tlinalg returns the singular values in `Self`; tenferro publishes
-    /// their real part.
+    /// tlinalg returns the singular values and eigenvalues of a full
+    /// factorization in `Self`; tenferro publishes their real part.
     fn real_values(values: Vec<Self>) -> Vec<<Self as TensorScalar>::Real>;
+
+    /// tlinalg's Hermitian eigenvalues only, ascending.
+    fn eigh_values(
+        raw: RawStridedRef<'_, Self>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
+
+    /// tlinalg's singular values only, descending.
+    fn svd_values(
+        raw: RawStridedRef<'_, Self>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
 }
 
-impl Scalar for f32 {
-    fn real_values(values: Vec<f32>) -> Vec<f32> {
-        values
-    }
+// Why one impl per concrete scalar: tlinalg's values-only real type is an
+// associated type of a trait it does not export, so it equals
+// `TensorScalar::Real` only once the scalar is concrete.
+macro_rules! scalar {
+    ($ty:ty, |$values:ident| $real:expr) => {
+        impl Scalar for $ty {
+            fn real_values($values: Vec<$ty>) -> Vec<<$ty as TensorScalar>::Real> {
+                $real
+            }
+
+            fn eigh_values(
+                raw: RawStridedRef<'_, $ty>,
+                exec: &mut Exec<'_>,
+            ) -> tlinalg::Result<Vec<<$ty as TensorScalar>::Real>> {
+                let mut values = Vec::new();
+                tlinalg::eigh::eigh_values(tlinalg::Op::EighValues, raw, &mut values, exec)?;
+                Ok(values)
+            }
+
+            fn svd_values(
+                raw: RawStridedRef<'_, $ty>,
+                exec: &mut Exec<'_>,
+            ) -> tlinalg::Result<Vec<<$ty as TensorScalar>::Real>> {
+                let mut values = Vec::new();
+                tlinalg::svd::svd_values(tlinalg::Op::SvdValues, raw, &mut values, exec)?;
+                Ok(values)
+            }
+        }
+    };
 }
 
-impl Scalar for f64 {
-    fn real_values(values: Vec<f64>) -> Vec<f64> {
-        values
-    }
-}
-
-impl Scalar for Complex32 {
-    fn real_values(values: Vec<Complex32>) -> Vec<f32> {
-        values.into_iter().map(|value| value.re).collect()
-    }
-}
-
-impl Scalar for Complex64 {
-    fn real_values(values: Vec<Complex64>) -> Vec<f64> {
-        values.into_iter().map(|value| value.re).collect()
-    }
-}
+scalar!(f32, |values| values);
+scalar!(f64, |values| values);
+scalar!(Complex32, |values| values
+    .into_iter()
+    .map(|value| value.re)
+    .collect());
+scalar!(Complex64, |values| values
+    .into_iter()
+    .map(|value| value.re)
+    .collect());
 
 /// One block: its validated input, its signed strides and, once run, its
-/// factors.
+/// own outcome (factors or that block's error).
 pub(crate) struct Job<'a> {
     input: DenseRead<'a>,
     strides: StrideVec,
-    factors: Option<Vec<DenseTensor>>,
+    outcome: Option<Result<Vec<DenseTensor>, DenseError>>,
 }
 
 /// Factorization `F` of each block on the lane driver.
@@ -174,26 +304,35 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
         work::<F>(job.input)
     }
 
+    // A block's error is its own outcome, not the driver's: the caller
+    // delivers every block's outcome in input order.
     fn run(&self, _: usize, job: &mut Job<'a>, mut exec: Exec<'_>) -> Result<(), DenseError> {
-        job.factors = Some(factor::<F>(job.input, &job.strides, &mut exec)?);
+        job.outcome = Some(factor::<F>(job.input, &job.strides, &mut exec));
         Ok(())
     }
 }
 
-/// Factorization `F` of every input, returning the factors per input
-/// exactly as the per-matrix entry ([`crate::DenseExecutor::svd`] or
-/// [`crate::DenseExecutor::qr`]) returns them, or the error of the
-/// lowest-indexed failing input.
+/// The batch's outcome sink (see [`crate::DenseExecutor::factorize_batch`]).
+pub(crate) type Sink<'s> =
+    dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError> + 's;
+
+/// Factorization `F` of every input, delivering each input's outcome to
+/// `sink` in input order exactly as the per-matrix entry
+/// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`)
+/// returns it.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
 /// input the view and the dtype (before the engine is entered), then rank,
-/// layout and the factorization (inside it). Inputs above the first input
-/// that fails a pre-entry check cannot change the result and are not run.
+/// layout and the factorization (inside it). The first input that fails a
+/// pre-entry check is delivered after every input before it; inputs above it
+/// are not run. A refused engine entry is returned with no outcome
+/// delivered.
 pub(crate) fn factorize_batch<F: Factor>(
     engine: &mut dyn tenferro_tensor::Engine,
     inputs: &[DenseRead<'_>],
-) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
-    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, inputs)).unwrap_or_else(|| {
+    sink: &mut Sink<'_>,
+) -> Result<(), DenseError> {
+    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, inputs, sink)).unwrap_or_else(|| {
         Err(tenferro_error(
             F::ENTRY,
             tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
@@ -206,17 +345,23 @@ pub(crate) fn factorize(
     engine: &mut dyn tenferro_tensor::Engine,
     op: crate::DenseFactorization,
     inputs: &[DenseRead<'_>],
-) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
+    sink: &mut Sink<'_>,
+) -> Result<(), DenseError> {
+    use crate::DenseFactorization as Op;
     match op {
-        crate::DenseFactorization::Svd => factorize_batch::<Svd>(engine, inputs),
-        crate::DenseFactorization::Qr => factorize_batch::<Qr>(engine, inputs),
+        Op::Svd => factorize_batch::<Svd>(engine, inputs, sink),
+        Op::Qr => factorize_batch::<Qr>(engine, inputs, sink),
+        Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
+        Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
+        Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
     }
 }
 
 fn batch_on<F: Factor>(
     cpu: &mut CpuEngine,
     inputs: &[DenseRead<'_>],
-) -> Result<Vec<Vec<DenseTensor>>, DenseError> {
+    sink: &mut Sink<'_>,
+) -> Result<(), DenseError> {
     let mut jobs = Vec::with_capacity(inputs.len());
     let mut refused = None;
     for &input in inputs {
@@ -224,7 +369,7 @@ fn batch_on<F: Factor>(
             Ok(strides) => jobs.push(Job {
                 input,
                 strides,
-                factors: None,
+                outcome: None,
             }),
             Err(error) => {
                 refused = Some(error);
@@ -232,25 +377,26 @@ fn batch_on<F: Factor>(
             }
         }
     }
-    if jobs.is_empty() {
-        return refused.map_or(Ok(Vec::new()), Err);
+    if !jobs.is_empty() {
+        driver::drive(
+            cpu,
+            &Blocks::<F>(PhantomData),
+            &mut jobs,
+            &mut LaneScratch::default(),
+        )?;
     }
-    driver::drive(
-        cpu,
-        &Blocks::<F>(PhantomData),
-        &mut jobs,
-        &mut LaneScratch::default(),
-    )?;
-    if let Some(error) = refused {
-        return Err(error);
+    let admitted = jobs.len();
+    for (index, job) in jobs.into_iter().enumerate() {
+        sink(
+            index,
+            job.outcome
+                .unwrap_or_else(|| unreachable!("the driver runs every admitted job")),
+        )?;
     }
-    Ok(jobs
-        .into_iter()
-        .map(|job| {
-            job.factors
-                .unwrap_or_else(|| unreachable!("every job ran without failing"))
-        })
-        .collect())
+    match refused {
+        Some(error) => sink(admitted, Err(error)),
+        None => Ok(()),
+    }
 }
 
 /// tlinalg's work estimate of `F` per matrix, four times that for a complex
@@ -268,7 +414,7 @@ pub(crate) fn work<F: Factor>(input: DenseRead<'_>) -> f64 {
     };
     let items: f64 = batch.iter().map(|&b| b as f64).product();
     let weight = if complex { 4.0 } else { 1.0 };
-    F::work(*m as f64, *n as f64) * items * weight
+    F::work(*m, *n) * items * weight
 }
 
 /// The checks the per-matrix entry makes before it enters the engine: the
@@ -315,8 +461,9 @@ fn factor<F: Factor>(
     }
 }
 
-/// tenferro's `svd_impl`/`qr_impl` on one input: rank check, the
-/// empty-extent shortcut, then the provider's batched factorization.
+/// tenferro's `svd_impl`/`qr_impl`/`eigh_impl` (and values-only forms) on
+/// one input: rank check, the square check where the provider requires one,
+/// the empty-extent shortcut, then the provider's batched factorization.
 fn factor_typed<F: Factor, T: Scalar>(
     view: DenseView<'_, T>,
     strides: &[isize],
@@ -330,6 +477,12 @@ fn factor_typed<F: Factor, T: Scalar>(
             tenferro_tensor::Error::rank_mismatch(op, 2, shape.len()),
         ));
     };
+    if F::SQUARE && m != n {
+        return Err(tenferro_error(
+            F::ENTRY,
+            tenferro_tensor::Error::shape_mismatch(op, vec![*m], vec![*n]),
+        ));
+    }
     let dims = [*m, *n];
     if shape.contains(&0) {
         return F::factor::<T>(None, dims, batch, exec);
