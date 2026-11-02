@@ -21,9 +21,9 @@
 //! public decisions (for a Packed GEMM plan an optimistic upper bound on its
 //! grid), and the model has no sublinear speedup, so a lower score is a
 //! scheduling estimate, not a promise of a faster run. Without a grant model
-//! (a factorization batch holding an input whose batch product is not one,
-//! including zero, see
-//! `driver::BlockOp::modeled`) the baseline is returned.
+//! (a QR batch, or a factorization batch holding an input whose batch product
+//! is not one, including zero, see `driver::BlockOp::modeled`) the baseline
+//! is returned.
 //!
 //! The search costs `O(J log J + G S + G' sum(W) + L0 J' + P J log L0)`,
 //! counting the provider queries' width scans. Jobs with equal serial times
