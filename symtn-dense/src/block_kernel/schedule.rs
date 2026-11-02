@@ -423,6 +423,26 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
     }
 }
 
+/// Whether an allocation of jobs with serial times `times` on `exec` can
+/// search or reuse a searched allocation: Auto, at least two jobs and at
+/// least two slots (the slot count [`allocate_in`] derives from the total
+/// serial time). Otherwise it returns the baseline, whatever the grant.
+pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration]) -> bool {
+    exec.batch_policy().strategy == BatchStrategy::Auto
+        && exec.budget() >= 2
+        && times.len() >= 2
+        && exec
+            .token_ref()
+            .width_for(
+                times
+                    .iter()
+                    .fold(Duration::ZERO, |sum, &t| sum.saturating_add(t)),
+                1,
+            )
+            .get()
+            >= 2
+}
+
 /// Lane allocation of jobs with serial times `times` (canonical order)
 /// and mean weighted work `mean_work` (multiply-adds; it feeds the
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted
@@ -450,11 +470,11 @@ pub(crate) fn allocate_in(
     cache: &LaneAllocationCache,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
-    // The keys are staged only where a search can run (two or more jobs and
-    // slots), so a serial context retains nothing for them.
+    // The keys are staged only where a search can run, so a serial context
+    // retains nothing for them and reads no grant input.
     let mut keys = std::mem::take(&mut scratch.keys);
     keys.clear();
-    if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
+    if grant.is_some() && searchable(exec, times) {
         keys.extend((0..times.len()).map(key));
     }
     let allocation = allocate_with(
