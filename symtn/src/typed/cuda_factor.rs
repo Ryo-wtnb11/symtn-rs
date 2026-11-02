@@ -105,65 +105,14 @@ pub(crate) fn cuda_download_spectra<D: CudaPayload>(
     symtn_dense::cuda_download_spectra::<D>(cuda, spectra).map_err(dense_err)
 }
 
-/// Writes `factor_rows x kept` slices of `factor * selector` into the target
-/// sector region of a left factor (`codomain <- bond`), one GEMM per
-/// codomain tree so correctness never relies on tree enumeration order
-/// matching between the source and factor spaces.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn assemble_left_factor<D: CudaPayload>(
-    cuda: &mut CudaDenseContext,
-    dst: &mut CudaStorage<D>,
-    target: &CoupledSectorRegion,
-    source: &CoupledSectorRegion,
-    factor: &CudaDenseStorage,
-    k_full: usize,
-    selector: &CudaDenseStorage,
-    selector_offset: usize,
-    kept: usize,
-) -> Result<(), Error> {
-    for target_tree in target.row_trees() {
-        let sub_rows = target_tree.extent()?;
-        if sub_rows == 0 {
-            continue;
-        }
-        let src_row = source
-            .row_trees()
-            .iter()
-            .find(|source_tree| source_tree.tree() == target_tree.tree())
-            .map(|source_tree| source_tree.offset())
-            .ok_or_else(|| internal_layout_error("codomain tree missing in the source sector"))?;
-        cuda_gemm_region_into::<D>(
-            cuda,
-            &mut dst.0,
-            target.range().start + target_tree.offset(),
-            target.rows(),
-            factor,
-            src_row,
-            source.rows(),
-            selector,
-            selector_offset,
-            k_full,
-            sub_rows,
-            k_full,
-            kept,
-            D::ONE,
-            D::ZERO,
-        )
-        .map_err(dense_err)?;
-        #[cfg(test)]
-        probe::hit(probe::Event::CudaAssemblyGemm);
-    }
-    Ok(())
-}
-
 /// Writes `factor * selector` into a left-factor region with one GEMM.
 ///
 /// Only valid on a route the plan proved layout-aligned: the target's
-/// codomain trees tile it exactly as the source's do, so the per-tree GEMMs
-/// of [`assemble_left_factor`] are row slices of this one product.
+/// codomain trees tile it exactly as the source's do.
 ///
-/// The product is exact data movement: each selector column holds a single
-/// unit entry. Why not Tenferro `gather`: at 0.7.1 it reads owned index
+/// Each selector column holds a single unit entry, so the product is
+/// mathematically a column permutation of `factor`; it is still a GEMM, so
+/// the result is not promised to be the source bits. Why not Tenferro `gather`: at 0.7.1 it reads owned index
 /// tensors only, so one index upload per call would need a device slice copy
 /// per route to feed it.
 #[allow(clippy::too_many_arguments)]
@@ -203,61 +152,11 @@ pub(crate) fn assemble_aligned_left_factor<D: CudaPayload>(
     Ok(())
 }
 
-/// Writes `kept x factor_cols` slices of `selector * factor` into the target
-/// sector region of a right factor (`bond <- domain`), one GEMM per domain
-/// tree.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn assemble_right_factor<D: CudaPayload>(
-    cuda: &mut CudaDenseContext,
-    dst: &mut CudaStorage<D>,
-    target: &CoupledSectorRegion,
-    source: &CoupledSectorRegion,
-    selector: &CudaDenseStorage,
-    kept: usize,
-    k_full: usize,
-    factor: &CudaDenseStorage,
-) -> Result<(), Error> {
-    for target_tree in target.col_trees() {
-        let sub_cols = target_tree.extent()?;
-        if sub_cols == 0 {
-            continue;
-        }
-        let src_col = source
-            .col_trees()
-            .iter()
-            .find(|source_tree| source_tree.tree() == target_tree.tree())
-            .map(|source_tree| source_tree.offset())
-            .ok_or_else(|| internal_layout_error("domain tree missing in the source sector"))?;
-        cuda_gemm_region_into::<D>(
-            cuda,
-            &mut dst.0,
-            target.range().start + target.rows() * target_tree.offset(),
-            target.rows(),
-            selector,
-            0,
-            kept,
-            factor,
-            k_full * src_col,
-            k_full,
-            kept,
-            k_full,
-            sub_cols,
-            D::ONE,
-            D::ZERO,
-        )
-        .map_err(dense_err)?;
-        #[cfg(test)]
-        probe::hit(probe::Event::CudaAssemblyGemm);
-    }
-    Ok(())
-}
-
 /// Copies a whole compact device factor into its target sector region.
 ///
 /// Only valid on a route the plan proved layout-aligned: the target region's
 /// tree sequence equals the source's (same trees, extents and offsets), so the
-/// region is exactly the compact factor and the identity-selector GEMM reduces
-/// to one device copy. The per-tree GEMM stays the general assembly path.
+/// region is exactly the compact factor and one device copy places it.
 pub(crate) fn copy_whole_factor<D: CudaPayload>(
     cuda: &mut CudaDenseContext,
     dst: &mut CudaStorage<D>,
@@ -285,49 +184,6 @@ pub(crate) fn copy_whole_factor<D: CudaPayload>(
     .map_err(dense_err)?;
     #[cfg(test)]
     probe::hit(probe::Event::CudaFactorCopy);
-    Ok(())
-}
-
-/// Copies every column of a full `source.rows() x cols` device factor into a
-/// left-factor region, one strided copy per codomain tree: the per-tree
-/// assembly of [`assemble_left_factor`] when its selector is the identity.
-pub(crate) fn copy_left_factor_treewise<D: CudaPayload>(
-    cuda: &mut CudaDenseContext,
-    dst: &mut CudaStorage<D>,
-    target: &CoupledSectorRegion,
-    source: &CoupledSectorRegion,
-    factor: &CudaDenseStorage,
-    cols: usize,
-) -> Result<(), Error> {
-    let region = |rows: usize, leading: usize, offset: usize| {
-        symtn_dense::CudaRegion::new(vec![rows, cols], vec![1, leading], offset).map_err(dense_err)
-    };
-    for target_tree in target.row_trees() {
-        let sub_rows = target_tree.extent()?;
-        if sub_rows == 0 {
-            continue;
-        }
-        let src_row = source
-            .row_trees()
-            .iter()
-            .find(|source_tree| source_tree.tree() == target_tree.tree())
-            .map(|source_tree| source_tree.offset())
-            .ok_or_else(|| internal_layout_error("codomain tree missing in the source sector"))?;
-        symtn_dense::cuda_copy_strided_into::<D>(
-            cuda,
-            factor,
-            &region(sub_rows, source.rows(), src_row)?,
-            &mut dst.0,
-            &region(
-                sub_rows,
-                target.rows(),
-                target.range().start + target_tree.offset(),
-            )?,
-        )
-        .map_err(dense_err)?;
-        #[cfg(test)]
-        probe::hit(probe::Event::CudaFactorCopy);
-    }
     Ok(())
 }
 
@@ -367,31 +223,37 @@ pub(super) fn executed_routes(
     plan.executed_routes()
 }
 
-pub(super) struct TypedCudaQrScratch<D: CudaPayload> {
-    pub(super) left: CudaDenseStorage,
-    pub(super) right: CudaDenseStorage,
-    /// `None` when both assembly routes are layout-aligned and copy instead.
-    pub(super) selector: Option<CudaStorage<D>>,
+/// Owned facade storage is canonical, so every compact factor region
+/// reproduces its source's tree layout and is placed by one whole-factor
+/// copy; any other route is an internal layout error.
+pub(super) fn require_aligned_route(
+    plan: &CompactFactorPlan,
+    route: &CompactFactorRoute,
+) -> Result<(), Error> {
+    if plan.left_preserves_trees(route) && plan.right_preserves_trees(route) {
+        Ok(())
+    } else {
+        Err(internal_layout_error(
+            "a CUDA compact factor region does not reproduce its source tree layout",
+        ))
+    }
 }
 
-impl<D: CudaPayload> TypedCudaQrScratch<D> {
-    pub(super) fn new(
-        left: CudaDenseStorage,
-        right: CudaDenseStorage,
-        selector: Option<CudaStorage<D>>,
-    ) -> Self {
+pub(super) struct TypedCudaQrScratch {
+    pub(super) left: CudaDenseStorage,
+    pub(super) right: CudaDenseStorage,
+}
+
+impl TypedCudaQrScratch {
+    pub(super) fn new(left: CudaDenseStorage, right: CudaDenseStorage) -> Self {
         #[cfg(test)]
         probe::enter(probe::Gauge::CudaQrScratch);
-        Self {
-            left,
-            right,
-            selector,
-        }
+        Self { left, right }
     }
 }
 
 #[cfg(all(test, feature = "cuda"))]
-impl<D: CudaPayload> Drop for TypedCudaQrScratch<D> {
+impl Drop for TypedCudaQrScratch {
     fn drop(&mut self) {
         probe::leave(probe::Gauge::CudaQrScratch);
     }
@@ -400,36 +262,18 @@ impl<D: CudaPayload> Drop for TypedCudaQrScratch<D> {
 pub(super) struct TypedCudaSvdScratch<D: CudaPayload> {
     pub(super) left: CudaDenseStorage,
     pub(super) right: CudaDenseStorage,
-    /// `None` on a layout-aligned side, whose gauged factor is copied.
-    pub(super) left_selector: Option<CudaDenseStorage>,
-    pub(super) right_selector: Option<CudaDenseStorage>,
     payload: std::marker::PhantomData<D>,
 }
 
 impl<D: CudaPayload> TypedCudaSvdScratch<D> {
-    pub(super) fn new(
-        left: CudaDenseStorage,
-        right: CudaDenseStorage,
-        left_selector: Option<CudaDenseStorage>,
-        right_selector: Option<CudaDenseStorage>,
-    ) -> Self {
+    pub(super) fn new(left: CudaDenseStorage, right: CudaDenseStorage) -> Self {
         #[cfg(test)]
         probe::enter(probe::Gauge::CudaSvdScratch);
         Self {
             left,
             right,
-            left_selector,
-            right_selector,
             payload: std::marker::PhantomData,
         }
-    }
-
-    pub(super) fn selector(
-        selector: &Option<CudaDenseStorage>,
-    ) -> Result<&CudaDenseStorage, Error> {
-        selector.as_ref().ok_or_else(|| {
-            internal_layout_error("a non-aligned factor route has no gauge selector")
-        })
     }
 }
 

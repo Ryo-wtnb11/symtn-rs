@@ -35,10 +35,9 @@ use symtn::typed::{
 
 use crate::numerics;
 
-/// Floating terms per compared entry, per family of device gates: an
-/// elementwise combination, a contraction over the fixtures' bond, and a
-/// factorization or its reconstruction over the fixtures' blocks.
-const ELEMENTWISE_TERMS: usize = 4;
+/// Floating terms per compared entry, per family of device gates: a
+/// contraction over the fixtures' bond, and a factorization or its
+/// reconstruction over the fixtures' blocks.
 const CONTRACT_TERMS: usize = 16;
 const FACTOR_TERMS: usize = 64;
 
@@ -400,11 +399,7 @@ fn assert_cuda_svd_result<R>(
 // cannot distinguish a conjugation defect from a transpose.
 // ---------------------------------------------------------------------------
 
-/// Genuinely complex fill: `im` is never zero for any admitted index tuple.
-fn complex_entry(indices: &[usize], seed: f64) -> Complex64 {
-    let ramp = indices.iter().map(|&index| index as f64).sum::<f64>();
-    Complex64::new(ramp + seed, -(ramp + seed + 0.75))
-}
+use crate::engine_suites::algebra::complex_entry;
 
 // ---------------------------------------------------------------------------
 // Complex64 device factorizations

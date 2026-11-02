@@ -789,11 +789,13 @@ mod tests {
     use crate::DynamicFusionMapSpace;
     use num_complex::Complex64;
     use symtn_core::{
-        BlockSpec, BlockStructure, FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg,
-        Z2FusionRule,
+        BlockStructure, FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, Z2FusionRule,
     };
 
-    fn padded_fixture() -> (
+    /// A rectangular Z2 parent, its logical adjoint space and a direct
+    /// payload on that logical space; the parent payload is the canonical
+    /// `[2, 3]` column-major block.
+    fn adjoint_fixture() -> (
         DynamicFusionMapSpace,
         DynamicFusionMapSpace,
         Vec<Complex64>,
@@ -805,31 +807,20 @@ mod tests {
             FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),
             FusionProductSpace::new([SectorLeg::new([(vacuum, 3)], false)]),
         );
-        let canonical =
-            DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
-        let block = canonical.structure().only_block().unwrap();
-        let padded_structure = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![BlockSpec::with_key(block.key().clone(), vec![2, 3], vec![2, 5], 1).unwrap()],
-        )
-        .unwrap();
-        let padded = DynamicFusionMapSpace::try_from_layout(homspace, padded_structure)
-            .unwrap()
-            .try_bind_rule(&rule)
-            .unwrap();
+        let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
         let (logical, _) =
             crate::adjoint::adjoint_dyn(&rule, &canonical, &[Complex64::zero(); 6]).unwrap();
         let direct = (0..6)
             .map(|index| Complex64::new(index as f64 + 1.0, 0.5 - index as f64))
             .collect();
-        let mut parent = vec![Complex64::new(99.0, 99.0); padded.required_len().unwrap()];
+        let mut parent = vec![Complex64::zero(); 6];
         for column in 0..3 {
             for row in 0..2 {
-                parent[1 + 2 * row + 5 * column] =
+                parent[row + 2 * column] =
                     Complex64::new((row + 2 * column) as f64, row as f64 - column as f64);
             }
         }
-        (logical, padded, direct, parent)
+        (logical, canonical, direct, parent)
     }
 
     /// Both Z2 sectors sliced to the same destination range, sorted by id, as
@@ -860,10 +851,9 @@ mod tests {
             .clone()
     }
 
-    fn bind_source(
-        structure: BlockStructure,
-        shapes: &[Vec<usize>],
-    ) -> crate::DynamicFusionMapSpace {
+    /// The canonical single-leg Z2 space whose even and odd blocks have
+    /// `shapes`.
+    fn source_with_shapes(shapes: &[Vec<usize>]) -> crate::DynamicFusionMapSpace {
         let rule = Z2FusionRule;
         let even = SectorId::new(0);
         let odd = SectorId::new(1);
@@ -877,39 +867,13 @@ mod tests {
                 false,
             )]),
         );
-        DynamicFusionMapSpace::try_from_layout(homspace, structure)
-            .unwrap()
-            .try_bind_rule(&rule)
-            .unwrap()
-    }
-
-    fn source_with_shapes(
-        destination: &BlockStructure,
-        shapes: &[Vec<usize>],
-    ) -> crate::DynamicFusionMapSpace {
-        let mut offset = 0;
-        let structure = BlockStructure::from_blocks_with_rank(
-            2,
-            shapes
-                .iter()
-                .enumerate()
-                .map(|(index, shape)| {
-                    let key = destination.block(index).unwrap().key().clone();
-                    let block =
-                        BlockSpec::column_major_with_key(key, shape.clone(), offset).unwrap();
-                    offset = block.storage_end_exclusive().unwrap();
-                    block
-                })
-                .collect(),
-        )
-        .unwrap();
-        bind_source(structure, shapes)
+        DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap()
     }
 
     #[test]
     fn fusion_scatter_adds_nonprefix_rectangles_for_exact_tree_keys() {
         let destination = two_key_destination();
-        let source = source_with_shapes(&destination, &[vec![1, 2], vec![1, 2]]);
+        let source = source_with_shapes(&[vec![1, 2], vec![1, 2]]);
         let mut output = vec![0.0; destination.required_len().unwrap()];
         fusion_scatter_add_assign(
             strided_kernel::Exec::serial(),
@@ -930,7 +894,7 @@ mod tests {
     #[test]
     fn fusion_scatter_preflights_all_shapes_before_mutation() {
         let destination = two_key_destination();
-        let source = source_with_shapes(&destination, &[vec![1, 2], vec![2, 2]]);
+        let source = source_with_shapes(&[vec![1, 2], vec![2, 2]]);
         let mut output = vec![7.0; destination.required_len().unwrap()];
         let before = output.clone();
         assert!(matches!(
@@ -953,7 +917,7 @@ mod tests {
         // A table that names only one of the two Z2 sectors must not let the
         // other block through with an implicit start of 0.
         let destination = two_key_destination();
-        let source = source_with_shapes(&destination, &[vec![1, 2], vec![1, 2]]);
+        let source = source_with_shapes(&[vec![1, 2], vec![1, 2]]);
         let mut output = vec![7.0; destination.required_len().unwrap()];
         let before = output.clone();
         assert!(matches!(
@@ -997,7 +961,7 @@ mod tests {
             (SectorId::new(0), runs(&[0..1, 2..3])),
             (SectorId::new(1), runs(&[0..1, 2..3])),
         ];
-        let restricted = source_with_shapes(&two_key_destination(), &[vec![2, 2], vec![2, 2]]);
+        let restricted = source_with_shapes(&[vec![2, 2], vec![2, 2]]);
         // Column-major 3x2 per sector: block 0 holds 0..6, block 1 6..12.
         let data: Vec<f64> = (0..12).map(f64::from).collect();
         let gathered = oriented_fusion_restrict_owned(
@@ -1027,39 +991,7 @@ mod tests {
 
     /// The full two-sector space, read as a restriction source.
     fn destination_operand() -> crate::DynamicFusionMapSpace {
-        bind_source(two_key_destination(), &[vec![3, 2], vec![3, 2]])
-    }
-
-    #[test]
-    fn fusion_scatter_preflights_stride_overflow_before_mutation() {
-        let canonical = two_key_destination();
-        let first_key = canonical.block(0).unwrap().key().clone();
-        let second_key = canonical.block(1).unwrap().key().clone();
-        let destination = canonical;
-        let source_structure = BlockStructure::from_blocks_with_rank(
-            2,
-            vec![
-                BlockSpec::column_major_with_key(first_key, vec![1, 2], 0).unwrap(),
-                BlockSpec::with_key(second_key, vec![1, 2], vec![usize::MAX, 1], 2).unwrap(),
-            ],
-        )
-        .unwrap();
-        let source = bind_source(source_structure, &[vec![1, 2], vec![1, 2]]);
-        let mut output = vec![11.0; destination.required_len().unwrap()];
-        let before = output.clone();
-        assert!(matches!(
-            fusion_scatter_add_assign(
-                strided_kernel::Exec::serial(),
-                &destination,
-                &mut output,
-                source.structure(),
-                FusionOperand::direct(&source),
-                &[1.0, 2.0, 3.0, 4.0],
-                &[Some(&sliced_both_sectors()[..]), None],
-            ),
-            Err(OperationError::StrideOverflow { value: usize::MAX })
-        ));
-        assert_eq!(output, before);
+        source_with_shapes(&[vec![3, 2], vec![3, 2]])
     }
 
     /// Per block, lazy `add` normalizes one joint layout and walks it
@@ -1106,10 +1038,10 @@ mod tests {
         assert_eq!(take_checked_block_passes(), passes(2));
         assert_eq!(output, data);
 
-        let (logical, padded, _, parent) = padded_fixture();
+        let (logical, parent_space, _, parent) = adjoint_fixture();
         take_checked_block_passes();
         let materialized =
-            crate::adjoint::materialize_adjoint_data_dyn(&padded, &logical, &parent).unwrap();
+            crate::adjoint::materialize_adjoint_data_dyn(&parent_space, &logical, &parent).unwrap();
         assert_eq!(take_checked_block_passes(), passes(1));
         assert_eq!(materialized.len(), 6);
         // Each owned output tiles its storage, so none is zero-filled
@@ -1118,17 +1050,17 @@ mod tests {
     }
 
     #[test]
-    fn oriented_add_and_inner_use_padded_parent_strides_in_both_orders() {
-        let (logical, padded, direct, parent) = padded_fixture();
+    fn oriented_add_and_inner_read_the_adjoint_parent_in_both_orders() {
+        let (logical, parent_space, direct, parent) = adjoint_fixture();
         let direct_operand = FusionOperand::direct(&logical);
-        let adjoint_operand = FusionOperand::adjoint(&padded);
+        let adjoint_operand = FusionOperand::adjoint(&parent_space);
         let alpha = Complex64::new(0.5, -0.25);
         let beta = Complex64::new(-1.0, 0.75);
         let mut expected = vec![Complex64::zero(); 6];
         for column in 0..2 {
             for row in 0..3 {
                 let logical_index = row + 3 * column;
-                let parent_index = 1 + 2 * column + 5 * row;
+                let parent_index = column + 2 * row;
                 expected[logical_index] =
                     alpha * direct[logical_index] + beta * parent[parent_index].conj();
             }
@@ -1167,7 +1099,7 @@ mod tests {
         let expected_inner = (0..6).fold(Complex64::zero(), |sum, logical_index| {
             let row = logical_index % 3;
             let column = logical_index / 3;
-            let parent_index = 1 + 2 * column + 5 * row;
+            let parent_index = column + 2 * row;
             sum + direct[logical_index].conj() * parent[parent_index].conj()
         });
         assert_eq!(
@@ -1234,7 +1166,7 @@ mod tests {
             .map(|logical_index| {
                 let row = logical_index % 3;
                 let column = logical_index / 3;
-                parent[1 + 2 * column + 5 * row].conj()
+                parent[column + 2 * row].conj()
             })
             .collect::<Vec<_>>();
         assert_eq!(output, expected);

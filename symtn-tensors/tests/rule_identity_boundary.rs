@@ -1,13 +1,12 @@
 use std::sync::Arc;
 use symtn_core::{
-    BlockStructure, BraidingStyleKind, CoreError, FusionRule, FusionStyleKind, FusionTreeHomSpace,
+    BraidingStyleKind, CoreError, FusionRule, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
     RuleIdentity, SU2FusionRule, SectorId, SectorVec, U1FusionRule, Z2FusionRule,
 };
 use symtn_tensors::{
-    tensorcontract_fusion_block_specs, BoundDynamicFusionMapSpace, ContractDestinationInit,
-    FusionOperand, TensorContractFusionExecutionContext, TensorContractSpec,
-    TreeTransformRuleCacheKey,
+    BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand,
+    TensorContractFusionExecutionContext, TensorContractSpec, TreeTransformRuleCacheKey,
 };
 use symtn_tensors::{DynamicFusionMapSpace, OperationError};
 
@@ -101,22 +100,6 @@ where
         .unwrap()
 }
 
-fn unbound_scalar_space<R>(rule: &R) -> DynamicFusionMapSpace
-where
-    R: MultiplicityFreeRigidSymbols,
-{
-    let bound = bound_scalar_space(rule);
-    unbound_scalar_space_like(&bound)
-}
-
-fn unbound_scalar_space_like(bound: &DynamicFusionMapSpace) -> DynamicFusionMapSpace {
-    DynamicFusionMapSpace::try_from_layout(
-        bound.homspace().clone(),
-        BlockStructure::clone(bound.structure()),
-    )
-    .unwrap()
-}
-
 /// Binds a typed scalar space to `rule` at the dynamic ingress, the one
 /// place a contraction's provider meets its spaces.
 fn bind<R>(
@@ -170,48 +153,11 @@ where
         .unwrap_err()
 }
 
-fn assert_missing_rule_identity(error: OperationError) {
-    assert!(matches!(
-        error,
-        OperationError::Core(CoreError::MissingFusionRuleIdentity)
-    ));
-}
-
 fn assert_rule_mismatch(error: OperationError) {
     assert!(matches!(
         error,
         OperationError::Core(CoreError::FusionRuleMismatch { .. })
     ));
-}
-
-#[test]
-fn bound_space_rejects_rebinding_to_same_type_with_different_semantics() {
-    let first = SymbolOnlyRule::new(1.0);
-    let second = SymbolOnlyRule::new(-1.0);
-    let space = unbound_scalar_space(&first).try_bind_rule(&first).unwrap();
-
-    assert!(matches!(
-        space.try_bind_rule(&second),
-        Err(CoreError::FusionRuleMismatch { .. })
-    ));
-}
-
-#[test]
-fn fusion_contract_block_specs_rejects_each_unbound_operand() {
-    let rule = Z2FusionRule;
-    let bound = || bound_scalar_space(&rule);
-    let unbound = || unbound_scalar_space(&rule);
-    let axes = TensorContractSpec::with_default_output_order(&[], &[]);
-
-    assert_missing_rule_identity(
-        tensorcontract_fusion_block_specs(&rule, &unbound(), &bound(), &bound(), axes).unwrap_err(),
-    );
-    assert_missing_rule_identity(
-        tensorcontract_fusion_block_specs(&rule, &bound(), &unbound(), &bound(), axes).unwrap_err(),
-    );
-    assert_missing_rule_identity(
-        tensorcontract_fusion_block_specs(&rule, &bound(), &bound(), &unbound(), axes).unwrap_err(),
-    );
 }
 
 #[test]

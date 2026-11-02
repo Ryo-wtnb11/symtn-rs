@@ -7,8 +7,8 @@ use symtn_core::{
     OrientedFusionTreeHomSpace,
 };
 
-use super::metadata::{dispatch_prepare, LayoutKeyBuilder, MetadataOutput, MetadataRequest};
-use super::{tree_transform_operation_axes, DynamicFusionMapSpace, TransformedLayoutProbe};
+use super::metadata::{dispatch_prepare, LayoutKeyBuilder};
+use super::DynamicFusionMapSpace;
 use crate::tree_transform::OrientedBasisOrder;
 use crate::{OperationError, TreeTransformOperation};
 
@@ -184,42 +184,6 @@ impl<'a> FusionOperandLayout<'a> {
     #[inline]
     pub(crate) fn admission(&self) -> &FusionSpaceAdmission {
         self.storage_space().admission()
-    }
-
-    pub(crate) fn transformed_layout_probe<R>(
-        &self,
-        rule: &R,
-        operation: &TreeTransformOperation,
-        primer: LayoutKeyBuilder<R>,
-    ) -> Result<TransformedLayoutProbe, OperationError>
-    where
-        R: MultiplicityFreeFusionRule,
-    {
-        let (codomain_axes, domain_axes) = tree_transform_operation_axes(operation);
-        let homspace = match primer(
-            rule,
-            MetadataRequest::Permute {
-                homspace: self.homspace(),
-                codomain_axes,
-                domain_axes,
-            },
-        )? {
-            MetadataOutput::HomSpace { homspace, .. } => homspace,
-            _ => unreachable!("metadata dispatcher returned a non-HomSpace response"),
-        };
-        // Why not build an oriented BlockStructure: a conjugated source is
-        // borrowed only through the artifact's canonical storage-adjoint
-        // proof, never through this equality, which is only observed for
-        // the direct orientation where the parent structure is authoritative.
-        let (required_len, source_structure_matches) = homspace
-            .coupled_subblock_layout_probe_uncached(rule, self.storage_space().structure())
-            .map_err(OperationError::from_core_preserving_context)?;
-        Ok(TransformedLayoutProbe {
-            nout: codomain_axes.len(),
-            homspace,
-            required_len,
-            source_structure_matches,
-        })
     }
 
     pub(crate) fn transformed_space<R>(

@@ -399,7 +399,7 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 /// dual legs on B's contracted codomain. TensorKit `blas_contract!` copies
 /// one operand to twist it; θ here is the parity of B's coupled sector, so
 /// the Host core carries it as per-job GEMM alpha and copies nothing.
-/// Values against TensorKit's steps: `symtn/tests/typed_contract_host_oracle.rs`.
+/// Values against TensorKit's steps: `symtn/tests/engine_suites/contract.rs`.
 #[test]
 fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {
     let engine = &mut symtn_dense::CpuEngine::serial();

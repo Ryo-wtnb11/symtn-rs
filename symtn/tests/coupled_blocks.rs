@@ -847,7 +847,7 @@ mod cuda {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires a CUDA device"]
     fn device_block_views_address_the_host_block_entries() {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let cuda = &mut crate::common::cuda_engine();
@@ -865,7 +865,7 @@ mod cuda {
 
     #[cfg(feature = "cgc-gen")]
     #[test]
-    #[ignore]
+    #[ignore = "requires a CUDA device"]
     fn checked_generic_su3_device_block_views_address_the_host_block_entries() {
         let rt = Runtime::builder().build().unwrap();
         let [octet, _, _] = super::su3::legs();

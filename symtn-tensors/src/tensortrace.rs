@@ -124,9 +124,7 @@ impl<'a> OrientedTraceSource<'a> {
 /// A compiled fusion-aware trace whose valid terms retain global source order.
 ///
 /// Valid terms and their source accumulation follow global source-block order.
-/// For expert layouts built from an incomplete explicit block structure,
-/// errors between distinct external-sector groups likewise follow the first
-/// source block encountered globally. On the non-`Unique` grouped path
+/// On the non-`Unique` grouped path
 /// (currently `Simple` fusion), one external-sector group is transformed and
 /// lowered atomically at its first member, so a symbol, tree-transform or
 /// split error from a later member of that group can precede an earlier
@@ -1858,42 +1856,6 @@ fn map_checked_generic_trace_structure_error<E>(
             CheckedGenericPlanError::Core(error)
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) fn build_fusion_trace_terms_for_test<R>(
-    rule: &R,
-    dst_structure: &BlockStructure,
-    src_structure: &BlockStructure,
-    axes: TensorTraceAxisSpec<'_>,
-    dst_codomain_rank: usize,
-) -> Result<Vec<TensorTraceFusionStructureTerm<R::Scalar>>, OperationError>
-where
-    R: MultiplicityFreeRigidSymbols,
-    R::Scalar: Clone + Add<Output = R::Scalar> + Mul<Output = R::Scalar> + Zero,
-{
-    let axis_plan = TensorTraceAxisPlan::compile(src_structure.rank(), dst_structure.rank(), axes)?;
-    let homspace = FusionTreeHomSpace::new(
-        symtn_core::FusionProductSpace::new([]),
-        symtn_core::FusionProductSpace::new([]),
-    );
-    let src_structure = Arc::new(src_structure.clone());
-    let src = OrientedTraceSource::new(
-        &homspace,
-        &src_structure,
-        src_structure.rank(),
-        0,
-        FusionTreePairOrientation::Direct,
-    );
-    // Publishes nothing: the helper probes terms, not reuse.
-    build_trace_terms::<MultiplicityFreeAdmissionMode, R>(
-        rule,
-        dst_structure,
-        src,
-        &axis_plan,
-        dst_codomain_rank,
-    )
-    .map(|(terms, _)| terms)
 }
 
 /// What a multiplicity-free compile knows about its destination's selection.

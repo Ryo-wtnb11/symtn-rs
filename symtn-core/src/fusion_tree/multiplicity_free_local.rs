@@ -1067,22 +1067,43 @@ impl PreparedMultiplicityFreeArtin {
         R: MultiplicityFreeFusionSymbols,
         R::Scalar: Clone + Mul<Output = R::Scalar>,
     {
-        let mut out = LocalArtinTerms {
+        let mut terms = SmallVec::new();
+        self.apply_into(rule, tree, &mut terms)?;
+        Ok(terms)
+    }
+
+    /// [`Self::apply`] appending to a caller-owned buffer, so a block move
+    /// reuses one buffer for every basis row.
+    #[inline]
+    pub(super) fn apply_into<R, T>(
+        &self,
+        rule: &R,
+        tree: &MultiplicityFreeTreeLocal,
+        terms: &mut T,
+    ) -> Result<(), CoreError>
+    where
+        R: MultiplicityFreeFusionSymbols,
+        R::Scalar: Clone + Mul<Output = R::Scalar>,
+        T: Extend<(MultiplicityFreeTreeLocal, R::Scalar)>,
+    {
+        artin_surgery(
+            &SimpleK(rule),
+            &self.site,
             tree,
-            terms: SmallVec::new(),
-        };
-        artin_surgery(&SimpleK(rule), &self.site, tree, &mut out)?;
-        Ok(out.terms)
+            &mut LocalArtinTerms { tree, terms },
+        )
     }
 }
 
 /// Multiplicity-free Artin outputs as compact locals.
-struct LocalArtinTerms<'t, S> {
+struct LocalArtinTerms<'t, T> {
     tree: &'t MultiplicityFreeTreeLocal,
-    terms: MultiplicityFreeArtinTerms<S>,
+    terms: &'t mut T,
 }
 
-impl<S> ArtinWriter<S, CoreError> for LocalArtinTerms<'_, S> {
+impl<S, T: Extend<(MultiplicityFreeTreeLocal, S)>> ArtinWriter<S, CoreError>
+    for LocalArtinTerms<'_, T>
+{
     type Slot = MultiplicityFreeTreeLocal;
 
     #[inline(always)]
@@ -1107,7 +1128,7 @@ impl<S> ArtinWriter<S, CoreError> for LocalArtinTerms<'_, S> {
 
     #[inline(always)]
     fn finish(&mut self, local: Self::Slot, coefficient: S) -> Result<(), CoreError> {
-        self.terms.push((local, coefficient));
+        self.terms.extend(std::iter::once((local, coefficient)));
         Ok(())
     }
 }

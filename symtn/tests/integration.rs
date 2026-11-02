@@ -36,6 +36,8 @@ mod stacked_fixtures;
 #[path = "support/table_fixture.rs"]
 mod table_fixture;
 mod engine_ownership;
+#[path = "engine_suites/main.rs"]
+mod engine_suites;
 #[path = "../../tests/support/toy_rules.rs"]
 mod toy_rules;
 mod trace_cases;
@@ -136,10 +138,8 @@ mod truncation_range;
 mod truncation_tie_order;
 mod truncspace;
 mod typed_contract_batch;
-mod typed_contract_host_oracle;
 mod typed_cuda_contract_stages;
 mod typed_cuda_eigh_assembly;
-mod typed_cuda_leg_roles;
 mod typed_cuda_materialize;
 mod typed_cuda_single_precision;
 mod typed_cuda_single_precision_factorizations;
@@ -151,7 +151,6 @@ mod typed_cuda_transform;
 mod typed_cuda_twist;
 mod typed_materialize;
 mod typed_serialization;
-mod typed_trace_host_oracle;
 mod typed_zero_scale;
 mod user_decomp;
 mod zeros_like_all_modes;

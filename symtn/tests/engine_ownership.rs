@@ -12,7 +12,7 @@ use std::sync::{Arc, Barrier};
 
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    ContractSpec, CpuEngine, Direction, Engine, GradedSpace, Pool, Runtime, TensorMap,
+    ContractSpec, CpuEngine, Direction, Engine, GradedSpace, HermitianTol, Pool, Runtime, TensorMap,
 };
 
 use crate::common::ErrorKind as _;
@@ -24,16 +24,20 @@ type U1Su2 = symtn::sector::ProductFusionRule<U1FusionRule, SU2FusionRule>;
 /// real work to split in the recoupling replay, the contraction and the
 /// factorization.
 fn space() -> GradedSpace<U1Su2> {
+    space_with([18, 14, 14, 12])
+}
+
+fn space_with(degeneracies: [usize; 4]) -> GradedSpace<U1Su2> {
     let provider = Arc::new(U1Su2::try_new(U1FusionRule, SU2FusionRule).unwrap());
     let sector =
         |q, twice_spin| product_sector(U1Irrep::new(q), SU2Irrep::from_twice_spin(twice_spin));
     GradedSpace::try_new(
         provider,
         [
-            (sector(0, 0), 18),
-            (sector(1, 1), 14),
-            (sector(-1, 1), 14),
-            (sector(0, 2), 12),
+            (sector(0, 0), degeneracies[0]),
+            (sector(1, 1), degeneracies[1]),
+            (sector(-1, 1), degeneracies[2]),
+            (sector(0, 2), degeneracies[3]),
         ],
     )
     .unwrap()
@@ -87,6 +91,41 @@ fn one_configuration_repeats_its_bits_at_every_width() {
         );
         assert_eq!(bits(&first), bits(&fresh), "width {threads}: fresh engine");
         numerics::assert_slices_close(&format!("width {threads} vs 1"), &first, &serial, 64);
+    }
+}
+
+/// The eigh, qr and trace outputs of `t`, as one payload each, so a width
+/// that splits the block scheduler differently shows in any of them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 3] {
+    let adjoint = t.adjoint(engine).unwrap();
+    let gram = t.compose(engine, &adjoint).unwrap();
+    let eigh = gram
+        .eigh_full(engine, &[0, 1], &[2, 3], HermitianTol::DEFAULT)
+        .unwrap();
+    // The eigenvectors of a degenerate eigenvalue are a free basis; only the
+    // spectrum is gauge-free.
+    let mut eigh_out = Vec::new();
+    for entry in eigh.d.diagview(engine).unwrap() {
+        eigh_out.extend_from_slice(&entry.values);
+    }
+    let qr = t.qr_compact(engine, &[0, 1], &[2]).unwrap();
+    let mut qr_out = qr.q.dense_data().unwrap().to_vec();
+    qr_out.extend_from_slice(qr.r.dense_data().unwrap());
+    let traced = gram.trace_pairs(engine, &[(0, 2)]).unwrap();
+    [eigh_out, qr_out, traced.dense_data().unwrap().to_vec()]
+}
+
+#[test]
+fn eigh_qr_and_trace_agree_across_widths() {
+    let runtime = Runtime::builder().build().unwrap();
+    // Unequal blocks, small enough for the debug-build gram eigendecomposition.
+    let v = space_with([5, 4, 4, 3]);
+    let t = TensorMap::rand_with_seed(&mut CpuEngine::serial(), &runtime, [&v, &v], [&v], 1532)
+        .unwrap();
+    let serial = other_ops(&mut CpuEngine::serial(), &t);
+    let wide = other_ops(&mut engine(4), &t);
+    for ((name, serial), wide) in ["eigh", "qr", "trace"].into_iter().zip(&serial).zip(&wide) {
+        numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);
     }
 }
 

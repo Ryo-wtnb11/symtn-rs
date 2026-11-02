@@ -153,15 +153,6 @@ pub(crate) fn is_rank_one_diagonal_braid(
         && operation.domain_permutation() == [0]
 }
 
-fn offsets_never_decrease(structure: &symtn_core::BlockStructure) -> bool {
-    (1..structure.block_count()).all(|index| {
-        match (structure.block(index - 1), structure.block(index)) {
-            (Ok(previous), Ok(next)) => previous.offset() <= next.offset(),
-            _ => false,
-        }
-    })
-}
-
 /// The non-empty block at `offset` in a structure whose block offsets never
 /// decrease. Empty blocks may share that offset; at most one non-empty block
 /// owns it, because destination storage is injective.
@@ -232,7 +223,6 @@ where
         }
     }
     let mut source_offsets = None;
-    let mut destination_sorted = None;
     let mut seen_source = smallvec::SmallVec::<[bool; 16]>::from_elem(false, sources.block_count());
     let mut seen_destination =
         smallvec::SmallVec::<[bool; 16]>::from_elem(false, destinations.block_count());
@@ -321,17 +311,9 @@ where
         } else {
             // A braid or swap sends sector c to its dual, which sits at
             // another ordinal whenever the sector set is not self-dual, so
-            // this path is common. Canonical structures store blocks in offset
-            // order, where a binary search finds the block without allocating.
-            //
-            // Why decline instead of indexing an unordered (expert) layout:
-            // the typed caller always passes canonical layouts, and the
-            // general dense replay is correct for any layout, so an offset
-            // map here would only add an allocation no caller needs. Why not
-            // a debug assertion: an expert layout is legal input, not a bug.
-            if !*destination_sorted.get_or_insert_with(|| offsets_never_decrease(destinations)) {
-                return None;
-            }
+            // this path is common. The destination is canonical, so its
+            // blocks are in offset order and a binary search finds the block
+            // without allocating.
             nonempty_block_at_sorted_offset(destinations, usize::try_from(dst.offset).ok()?)?
         };
         if std::mem::replace(&mut seen_destination[destination_index], true)
@@ -583,10 +565,6 @@ fn validate_tensor_product_source_structures<E>(
     rhs: &symtn_core::BlockStructure,
 ) -> Result<(), CheckedGenericTensorProductError<E>> {
     validate_tensor_product_source_structure("lhs", lhs)?;
-    #[cfg(test)]
-    if let Some(rhs) = crate::typed::probe::tensor_product_rhs() {
-        return validate_tensor_product_source_structure("rhs", &rhs);
-    }
     validate_tensor_product_source_structure("rhs", rhs)
 }
 
@@ -1015,12 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn checked_tensor_product_rejects_a_later_malformed_key_before_provider_queries() {
-        let provider = Arc::new(CheckedTensorProductSpy {
-            algebra_queries: AtomicUsize::new(0),
-            f_queries: AtomicUsize::new(0),
-        });
-        let (source, data) = checked_tensor_product_source(Arc::clone(&provider));
+    fn tensor_product_source_validator_rejects_a_later_malformed_key() {
         let sector = SectorId::new(0);
         let tree =
             FusionTreeKey::try_new_for_rule(&Z2FusionRule, [sector], sector, [false], [], [])
@@ -1039,14 +1012,11 @@ mod tests {
             1,
         )
         .unwrap();
-        probe::override_tensor_product_rhs(Some(
-            BlockStructure::from_blocks(vec![valid, malformed]).unwrap(),
-        ));
-        provider.reset();
+        let structure = BlockStructure::from_blocks(vec![valid, malformed]).unwrap();
 
         let error =
-            tensorproduct_owned_checked_generic(&source, &data, &source, &data).unwrap_err();
-        probe::override_tensor_product_rhs(None);
+            super::validate_tensor_product_source_structure::<Infallible>("rhs", &structure)
+                .unwrap_err();
 
         assert!(matches!(
             error,
@@ -1055,8 +1025,6 @@ mod tests {
                 actual: 0
             })
         ));
-        assert_eq!(provider.algebra_queries.load(Ordering::Relaxed), 0);
-        assert_eq!(provider.f_queries.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -1359,115 +1327,6 @@ mod tests {
             ]
         );
         assert!(reordered, "the U(1) braid moves a destination ordinal");
-    }
-
-    #[test]
-    fn compact_braid_declines_an_unordered_expert_destination_for_dense_replay() {
-        // What: a destination whose block offsets are not in block order (an
-        // expert layout) leaves the compact route, and the general dense
-        // replay of the same compiled braid still writes each spectrum along
-        // its destination block's diagonal.
-        let provider = Arc::new(symtn_core::U1FusionRule);
-        let sectors = [
-            (symtn_core::U1Irrep::new(-1).sector_id(), 1),
-            (symtn_core::U1Irrep::new(1).sector_id(), 3),
-        ];
-        let leg = SectorLeg::new(sectors, false);
-        let source = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-            Arc::clone(&provider),
-            symtn_core::FusionTreeHomSpace::new(
-                FusionProductSpace::new([leg.clone()]),
-                FusionProductSpace::new([leg]),
-            ),
-        )
-        .unwrap();
-        let operation = TreeTransformOperation::braid([1], [0], [0], [1]);
-        let canonical = source.transformed_multiplicity_free(&operation).unwrap();
-        let canonical_blocks = canonical.space().structure();
-        // The same blocks, stored in reverse block order.
-        let mut offset = canonical_blocks.required_len().unwrap();
-        let blocks = (0..canonical_blocks.block_count())
-            .map(|index| {
-                let block = canonical_blocks.block(index).unwrap();
-                let [rows, columns] = block.shape() else {
-                    unreachable!()
-                };
-                offset -= rows * columns;
-                symtn_core::BlockSpec::with_key(
-                    block.key().clone(),
-                    block.shape().to_vec(),
-                    vec![1, *rows],
-                    offset,
-                )
-                .unwrap()
-            })
-            .collect::<Vec<_>>();
-        let expert_blocks = symtn_core::BlockStructure::from_blocks_with_rank(2, blocks).unwrap();
-        assert!(!super::offsets_never_decrease(&expert_blocks));
-        let expert = symtn_tensors::DynamicFusionMapSpace::try_from_layout(
-            canonical.space().homspace().clone(),
-            expert_blocks,
-        )
-        .unwrap();
-        let sources = source.space().structure();
-        let destinations = expert.structure();
-        let targets = (0..2)
-            .map(|index| {
-                (0..2)
-                    .find(|&target| {
-                        destinations.block(target).unwrap().shape()
-                            == sources.block(index).unwrap().shape()
-                    })
-                    .unwrap()
-            })
-            .collect::<Vec<_>>();
-        let coefficients = [2.0, -0.5];
-        let specs = [0, 1].map(|index| {
-            symtn_operations::TreeTransformBlockSpec::single(
-                targets[index],
-                index,
-                coefficients[index],
-            )
-            .with_source_axes([1, 0])
-        });
-        let compiled = symtn_tensors::TreeTransformStructure::compile_structures(
-            destinations,
-            sources,
-            &specs,
-        )
-        .unwrap();
-        let spectrum = sectors.map(|(sector, n)| SectorSpectrum {
-            sector,
-            values: (0..n).map(|i| 1.0 + i as f64).collect::<Vec<f64>>(),
-        });
-
-        assert!(braid_bond_data::<f64>(source.space(), &expert, &compiled, &spectrum,).is_none());
-
-        let mut source_data = vec![0.0; sources.required_len().unwrap()];
-        let mut expected = vec![0.0; destinations.required_len().unwrap()];
-        for (index, entry) in spectrum.iter().enumerate() {
-            let from = sources.block(index).unwrap();
-            let to = destinations.block(targets[index]).unwrap();
-            for (i, value) in entry.values.iter().enumerate() {
-                source_data[from.offset() + i * (from.strides()[0] + from.strides()[1])] = *value;
-                expected[to.offset() + i * (to.strides()[0] + to.strides()[1])] =
-                    coefficients[index] * value;
-            }
-        }
-        let mut dense = vec![f64::NAN; expected.len()];
-        symtn_operations::tree_transform_structure_overwrite_with_strided_kernel_raw(
-            symtn_operations::host_pool::Exec::serial(),
-            &mut symtn_operations::StridedHostKernelAdapter::default(),
-            &mut symtn_operations::TreeTransformWorkspace::default(),
-            &compiled,
-            destinations,
-            sources,
-            &mut dense,
-            &source_data,
-            1.0,
-        )
-        .unwrap();
-        assert_eq!(dense, expected);
     }
 
     #[test]

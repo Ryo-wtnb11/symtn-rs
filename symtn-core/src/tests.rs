@@ -58,6 +58,18 @@ pub(crate) mod test_support {
 mod support;
 use support::*;
 
+// The one counting allocator of the allocation tests, shared with the
+// integration targets. Its counters are thread-local, so concurrently
+// running unit tests do not see each other's allocations.
+// SAFETY: the allowed `unsafe` is only that file's `GlobalAlloc` impl, which
+// forwards every call unchanged to `System` (see its own SAFETY comment).
+#[path = "../../tests/support/counting_alloc.rs"]
+#[allow(unsafe_code)]
+mod counting_alloc;
+
+#[global_allocator]
+static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+
 mod block_structure;
 mod block_view;
 mod checked_rank1_tree_admission;

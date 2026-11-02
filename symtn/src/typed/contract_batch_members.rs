@@ -3,7 +3,7 @@
 //! NaN-poisoned destinations, against the eager `contract` of each member's
 //! own operands (independently checked against TensorKit's `blas_contract!`
 //! steps and the physical-basis contraction in
-//! `tests/typed_contract_host_oracle.rs`).
+//! `tests/engine_suites/contract.rs`).
 
 use super::*;
 use crate::sector::{U1FusionRule, U1Irrep};

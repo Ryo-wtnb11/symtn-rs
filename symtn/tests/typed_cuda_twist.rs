@@ -6,8 +6,8 @@
 //! transform executor's. It is:
 //!
 //! 1. the value domain of the factor — `±1` for every provider this device
-//!    impl admits — is gated without a device in `typed_transform_host_side.rs`,
-//!    which ordinary CI runs;
+//!    impl admits — and the exact round trip, clone and rejection contracts
+//!    run on both engines in `engine_suites/twist.rs`;
 //! 2. the lowering is gated here, by running the same public call on the Host
 //!    and on the device; the Host side carries its own TensorKit and
 //!    hand-computed oracles (`typed_facade.rs`, `semantic_suite.rs`,
@@ -34,8 +34,6 @@ use symtn::sector::{
 };
 use symtn::typed::{GradedSpace, TensorMap};
 use symtn::typed::{Runtime, TensorScalar};
-
-use crate::legs::u1_leg_2_1_2;
 
 trait Payload: TensorScalar + Copy + PartialEq + std::fmt::Debug {
     fn negated(self) -> Self;
@@ -310,85 +308,6 @@ fn device_twist_matches_the_host_for_product_providers() {
 
 #[test]
 #[ignore = "requires a real CUDA device"]
-fn device_twist_round_trips_bitwise_and_short_circuits() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
-    let runtime = runtime();
-    let leg = fz2_leg(false);
-    let host: TensorMap<_, Complex64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg, &leg], complex_fill)
-            .unwrap();
-    let device = host.to_cuda(cuda).unwrap();
-
-    // twist ∘ inverse twist == id, bitwise: both factors are exactly ±1.
-    let round_trip = device
-        .twist(cuda, &[0, 2, 3], Direction::Forward)
-        .unwrap()
-        .twist(cuda, &[0, 2, 3], Direction::Inverse)
-        .unwrap()
-        .to_host(cuda)
-        .unwrap();
-    assert_eq!(
-        round_trip.dense_data().unwrap(),
-        host.dense_data().unwrap(),
-        "twist round trip is exact"
-    );
-    let twisted = device
-        .twist(cuda, &[0, 2, 3], Direction::Forward)
-        .unwrap()
-        .to_host(cuda)
-        .unwrap();
-    assert_signs_only(
-        host.dense_data().unwrap(),
-        twisted.dense_data().unwrap(),
-        "twist [0, 2, 3]",
-    );
-
-    // An empty leg list is a clone on both sides.
-    let empty = device
-        .twist(cuda, &[], Direction::Forward)
-        .unwrap()
-        .to_host(cuda)
-        .unwrap();
-    assert_eq!(
-        empty.dense_data().unwrap(),
-        host.dense_data().unwrap(),
-        "empty twist is a clone"
-    );
-
-    // A bosonic provider twists by 1 on every block: a clone, never a scale.
-    let u1 = u1_leg_2_1_2();
-    let bosonic: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&u1, &u1], [&u1, &u1], real_fill).unwrap();
-    let bosonic_device = bosonic.to_cuda(cuda).unwrap();
-    for legs in [&[0usize][..], &[1, 3][..]] {
-        assert_eq!(
-            bosonic_device
-                .twist(cuda, legs, Direction::Forward)
-                .unwrap()
-                .to_host(cuda)
-                .unwrap()
-                .dense_data()
-                .unwrap(),
-            bosonic.dense_data().unwrap(),
-            "bosonic twist {legs:?} must be a clone"
-        );
-        assert_eq!(
-            bosonic_device
-                .twist(cuda, legs, Direction::Inverse)
-                .unwrap()
-                .to_host(cuda)
-                .unwrap()
-                .dense_data()
-                .unwrap(),
-            bosonic.dense_data().unwrap(),
-            "bosonic inverse twist {legs:?} must be a clone"
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
 fn device_twist_on_a_lazy_adjoint_matches_the_host() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut crate::common::cuda_engine();
@@ -448,45 +367,4 @@ fn device_twist_on_a_lazy_adjoint_matches_the_host() {
             "adjoint inverse twist {legs:?}"
         );
     }
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn device_twist_handles_a_space_with_no_coupled_sector_and_rejects_a_leg_past_the_rank() {
-    let engine = &mut symtn::typed::CpuEngine::serial();
-    let cuda = &mut crate::common::cuda_engine();
-    let runtime = runtime();
-    // No coupled sector: zero blocks, zero elements. With no block the
-    // identity detection is vacuously true, so this short-circuits to a clone
-    // rather than reaching the zero-length upload — it proves the degenerate
-    // space is handled, not that path.
-    let even =
-        GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::EVEN, 2)]).unwrap();
-    let odd = GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 1)]).unwrap();
-    let empty: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&even], [&odd], real_fill).unwrap();
-    assert!(empty.dense_data().unwrap().is_empty(), "empty fixture");
-    let device = empty.to_cuda(cuda).unwrap();
-    assert!(device
-        .twist(cuda, &[0, 1], Direction::Forward)
-        .unwrap()
-        .to_host(cuda)
-        .unwrap()
-        .dense_data()
-        .unwrap()
-        .is_empty());
-
-    // The range check precedes everything, on both sides, with the Host text.
-    let leg = fz2_leg(false);
-    let host: TensorMap<_, f64> =
-        TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], real_fill).unwrap();
-    let device = host.to_cuda(cuda).unwrap();
-    assert_eq!(
-        device.twist(cuda, &[2], Direction::Forward).unwrap_err(),
-        host.twist(engine, &[2], Direction::Forward).unwrap_err(),
-    );
-    assert_eq!(
-        device.twist(cuda, &[7], Direction::Inverse).unwrap_err(),
-        host.twist(engine, &[7], Direction::Inverse).unwrap_err(),
-    );
 }

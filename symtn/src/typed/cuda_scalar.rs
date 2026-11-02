@@ -79,14 +79,13 @@ where
     /// Host's is (#1344 for `norm`, #1383 for `inner`).
     ///
     /// * **Within one coupled sector** the sum runs on the device inside the
-    ///   backend GEMM, in the dtype of its operands. Tenferro 0.7.1 offers no
+    ///   backend GEMM, in the dtype of its operands. Tenferro 0.9.0 offers no
     ///   widening dot or reduction: `dot_general` dispatches on the one dtype
-    ///   shared by both operands and the destination (tenferro-gpu 0.7.1
-    ///   `src/cubecl/gemm.rs` `dot_general_read_into_accum`), and
-    ///   `DotGeneralAccumulation` carries no compute type; the BLAS-1
-    ///   `vdot_read` is `cublasSdot_v2`/`cublasCdotc_v2` (`src/cubecl/blas1.rs`)
-    ///   and the reduce kernels are generic over one float type
-    ///   (`src/kernels/reduce/launch.rs` `launch_sum_float`). A
+    ///   shared by both operands and the destination (tenferro-gpu 0.9.0
+    ///   `src/cuda/structural.rs` `dot_general_read_into_accum`), and
+    ///   `DotGeneralAccumulation` carries no compute type; `vdot_read` folds
+    ///   the elementwise product with the same reduce kernel, which runs in
+    ///   the payload dtype (`src/cuda/structural.rs` `reduce_axes`). A
     ///   single-precision payload is therefore widened on the device first
     ///   ([`CudaStorage::widened`], Tenferro's `cast`; exact, since every
     ///   `f32` is an `f64`) and reduced in `f64`. That costs one device
@@ -393,11 +392,6 @@ where
             )
             .map_err(dense_err);
         }
-        // A logical block with no parent block reads as zero: only `beta`.
-        for zero in &read.zeros {
-            symtn_dense::cuda_region_scale::<D>(cuda, &mut destination_data.0, zero, beta)
-                .map_err(dense_err)?;
-        }
         let beta = if beta.is_zero() {
             symtn_dense::CudaRegionBeta::Overwrite
         } else if beta == D::from_real(1.0) {
@@ -425,13 +419,11 @@ where
 
 /// A dense CUDA operand read in its logical orientation (#1874): its stored
 /// payload and the (stored region, logical region) moves that cover its
-/// logical layout, read conjugated when `conj`, plus the logical regions
-/// that read as zero.
+/// logical layout, read conjugated when `conj`.
 struct CudaOrientedRead<'a, D: CudaPayload> {
     source: &'a CudaStorage<D>,
     moves: Vec<(symtn_dense::CudaRegion, symtn_dense::CudaRegion)>,
     conj: bool,
-    zeros: Vec<symtn_dense::CudaRegion>,
 }
 
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
@@ -457,7 +449,6 @@ where
                 source,
                 moves: vec![(region.clone(), region)],
                 conj: false,
-                zeros: Vec::new(),
             });
         };
         let TypedData::Dense(source) = view.parent.data.as_ref() else {
@@ -476,7 +467,6 @@ where
             source,
             moves: lowering.copies,
             conj: true,
-            zeros: lowering.zeros,
         })
     }
 }

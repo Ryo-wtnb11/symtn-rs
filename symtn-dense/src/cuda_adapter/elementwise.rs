@@ -600,11 +600,12 @@ pub fn cuda_copy_region_into<D: CudaScalar>(
 }
 /// Widens a single-precision device buffer to its double-precision lane,
 /// `f32 -> f64` or `Complex32 -> Complex64`, with one device cast
-/// (tenferro-gpu 0.7.1 `TensorStructural::cast`, `cubecl/mod.rs:6006`).
+/// (tenferro-gpu 0.9.0 `TensorStructural::cast`, `cuda/structural.rs`).
 ///
-/// Why: Tenferro 0.7.1 has no reduction that accumulates wider than its
-/// operands — the GEMM, `vdot_read` and `norm_squared_read` (cuBLAS
-/// `dot`/`dotc`) and `reduce_sum_squares` all sum in the payload dtype — so a
+/// Why: Tenferro 0.9.0 has no reduction that accumulates wider than its
+/// operands — the GEMM, `vdot_read` and `norm_squared_read` (an elementwise
+/// product folded by the shared reduce kernel) and `reduce_sum_squares` all
+/// sum in the payload dtype — so a
 /// reduction that must accumulate as wide as the Host does widens its
 /// operands once and then runs the ordinary double-precision reduction. Exact: every `f32` is an
 /// `f64`. Costs one device allocation of `capacity * size_of::<W>()` bytes
@@ -681,8 +682,8 @@ pub fn cuda_gather_members<D: CudaScalar>(
         return CudaDenseStorage::upload_members::<D>(ctx, Vec::new(), member_len, selection.len());
     }
     // Why a second, `[L, B]` configuration rather than reshaping the gather
-    // output to flat: Tenferro 0.7.1 has no metadata-only owned reshape
-    // (`CudaBackend::reshape` materializes a copy, `TypedTensor::into_parts`
+    // output to flat: Tenferro 0.9.0 has no metadata-only owned reshape
+    // (`CudaEngine::reshape_read` materializes a copy, `TypedTensor::into_parts`
     // refuses backend storage), so normalizing would add a full copy.
     let (start_stride, config) = match src.tensor.shape() {
         [_] => (

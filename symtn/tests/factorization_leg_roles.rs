@@ -141,7 +141,7 @@ macro_rules! assert_close {
 /// Every operation with rectangular roles `rows <- cols` equals the
 /// composition, and its factors rebuild the permuted tensor.
 macro_rules! check_rectangular {
-    ($engine:ident, $runtime:expr, $t:expr, $rows:expr, $cols:expr, $label:expr) => {{
+    ($engine:ident, $runtime:expr, $t:expr, $rows:expr, $cols:expr, $label:expr, $shared:expr) => {{
         let (t, rows, cols) = (&$t, &$rows[..], &$cols[..]);
         let p = t.permute($engine, rows, cols).unwrap();
         let nout = p.codomain_rank();
@@ -149,12 +149,14 @@ macro_rules! check_rectangular {
         let (ir, ic) = (&ir[..], &ic[..]);
         let tol = 1e-10;
 
-        let Svd { u, s, vh } = t.svd_compact($engine, rows, cols).unwrap();
-        let expected = p.svd_compact($engine, ir, ic).unwrap();
-        assert_same!($engine, u, expected.u, format!("{} svd_compact u", $label));
-        assert_same!($engine, s, expected.s, format!("{} svd_compact s", $label));
-        assert_same!($engine, vh, expected.vh, format!("{} svd_compact vh", $label));
-        assert_close!($engine, u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap(), p, tol, $label);
+        if $shared {
+            let Svd { u, s, vh } = t.svd_compact($engine, rows, cols).unwrap();
+            let expected = p.svd_compact($engine, ir, ic).unwrap();
+            assert_same!($engine, u, expected.u, format!("{} svd_compact u", $label));
+            assert_same!($engine, s, expected.s, format!("{} svd_compact s", $label));
+            assert_same!($engine, vh, expected.vh, format!("{} svd_compact vh", $label));
+            assert_close!($engine, u.compose($engine, &s).unwrap().compose($engine, &vh).unwrap(), p, tol, $label);
+        }
 
         let Svd { u, s, vh } = t.svd_full($engine, rows, cols).unwrap();
         let expected = p.svd_full($engine, ir, ic).unwrap();
@@ -171,17 +173,19 @@ macro_rules! check_rectangular {
         );
 
         for full in [false, true] {
-            let (Qr { q, r }, expected) = if full {
-                (t.qr_full($engine, rows, cols).unwrap(), p.qr_full($engine, ir, ic).unwrap())
-            } else {
-                (
-                    t.qr_compact($engine, rows, cols).unwrap(),
-                    p.qr_compact($engine, ir, ic).unwrap(),
-                )
-            };
-            assert_same!($engine, q, expected.q, format!("{} qr q", $label));
-            assert_same!($engine, r, expected.r, format!("{} qr r", $label));
-            assert_close!($engine, q.compose($engine, &r).unwrap(), p, tol, $label);
+            if full || $shared {
+                let (Qr { q, r }, expected) = if full {
+                    (t.qr_full($engine, rows, cols).unwrap(), p.qr_full($engine, ir, ic).unwrap())
+                } else {
+                    (
+                        t.qr_compact($engine, rows, cols).unwrap(),
+                        p.qr_compact($engine, ir, ic).unwrap(),
+                    )
+                };
+                assert_same!($engine, q, expected.q, format!("{} qr q", $label));
+                assert_same!($engine, r, expected.r, format!("{} qr r", $label));
+                assert_close!($engine, q.compose($engine, &r).unwrap(), p, tol, $label);
+            }
 
             let (Lq { l, q }, expected) = if full {
                 (t.lq_full($engine, rows, cols).unwrap(), p.lq_full($engine, ir, ic).unwrap())
@@ -235,7 +239,7 @@ macro_rules! check_rectangular {
 /// Endomorphism roles: `rows` and `cols` name the same spaces after the
 /// permute, so `eigh`, `eig`, `exp` and `inv` apply.
 macro_rules! check_square {
-    ($engine:ident, $t:expr, $rows:expr, $cols:expr, $label:expr) => {{
+    ($engine:ident, $t:expr, $rows:expr, $cols:expr, $label:expr, $shared:expr) => {{
         let (t, rows, cols) = (&$t, &$rows[..], &$cols[..]);
         let t_adjoint = &t.adjoint($engine).unwrap().materialize($engine).unwrap();
         // A Hermitian input for eigh: h = t + t† in the source split stays
@@ -248,25 +252,27 @@ macro_rules! check_square {
         let (ir, ic): (Vec<usize>, Vec<usize>) = ((0..nout).collect(), (nout..p.rank()).collect());
         let (ir, ic) = (&ir[..], &ic[..]);
 
-        let Eigh { d, v } = h
-            .eigh_full($engine, rows, cols, HermitianTol::DEFAULT)
-            .unwrap();
-        let expected = hp
-            .eigh_full($engine, ir, ic, HermitianTol::DEFAULT)
-            .unwrap();
-        assert_same!($engine, d, expected.d, format!("{} eigh d", $label));
-        assert_same!($engine, v, expected.v, format!("{} eigh v", $label));
-        let v_adjoint = &v.adjoint($engine).unwrap().materialize($engine).unwrap();
-        assert_close!(
-            $engine,
-            v.compose($engine, &d)
-                .unwrap()
-                .compose($engine, v_adjoint)
-                .unwrap(),
-            hp,
-            1e-10,
-            $label
-        );
+        if $shared {
+            let Eigh { d, v } = h
+                .eigh_full($engine, rows, cols, HermitianTol::DEFAULT)
+                .unwrap();
+            let expected = hp
+                .eigh_full($engine, ir, ic, HermitianTol::DEFAULT)
+                .unwrap();
+            assert_same!($engine, d, expected.d, format!("{} eigh d", $label));
+            assert_same!($engine, v, expected.v, format!("{} eigh v", $label));
+            let v_adjoint = &v.adjoint($engine).unwrap().materialize($engine).unwrap();
+            assert_close!(
+                $engine,
+                v.compose($engine, &d)
+                    .unwrap()
+                    .compose($engine, v_adjoint)
+                    .unwrap(),
+                hp,
+                1e-10,
+                $label
+            );
+        }
         assert_eq!(
             h.eigh_vals($engine, rows, cols, HermitianTol::DEFAULT)
                 .unwrap(),
@@ -308,19 +314,22 @@ macro_rules! check_square {
     }};
 }
 
+/// `$shared`: also check `svd_compact`, `qr_compact` and `eigh_full`, which
+/// `engine_suites/leg_roles.rs` checks on every engine for the
+/// multiplicity-free fixtures; the checked Generic fixture has no engine twin.
 macro_rules! check_fixture {
-    ($engine:ident, $runtime:expr, $legs:expr, $d:ty, $seed:expr, $label:expr) => {{
+    ($engine:ident, $runtime:expr, $legs:expr, $d:ty, $seed:expr, $label:expr, $shared:expr) => {{
         let (v, w) = $legs;
         // Rectangular roles cross the codomain/domain boundary and reorder.
         let t: TensorMap<_, $d> =
             TensorMap::rand_with_seed($engine, &$runtime, [&v, &w], [&w, &v], $seed).unwrap();
-        check_rectangular!($engine, $runtime, t, [2, 0], [3, 1], $label);
-        check_rectangular!($engine, $runtime, t, [3], [1, 2, 0], $label);
-        check_rectangular!($engine, $runtime, t, [1, 3, 0], [2], $label);
+        check_rectangular!($engine, $runtime, t, [2, 0], [3, 1], $label, $shared);
+        check_rectangular!($engine, $runtime, t, [3], [1, 2, 0], $label, $shared);
+        check_rectangular!($engine, $runtime, t, [1, 3, 0], [2], $label, $shared);
         // Square roles: swap the two codomain legs and the two domain legs.
         let t: TensorMap<_, $d> =
             TensorMap::rand_with_seed($engine, &$runtime, [&v, &w], [&v, &w], $seed + 1).unwrap();
-        check_square!($engine, t, [1, 0], [3, 2], $label);
+        check_square!($engine, t, [1, 0], [3, 2], $label, $shared);
     }};
 }
 
@@ -329,12 +338,36 @@ fn leg_roles_equal_the_permute_composition() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
-    check_fixture!(engine, runtime, u1_legs(), f64, 1553, "u1 f64");
-    check_fixture!(engine, runtime, u1_legs(), Complex64, 1553, "u1 c64");
-    check_fixture!(engine, runtime, su2_legs(), f64, 1553, "su2 f64");
-    check_fixture!(engine, runtime, su2_legs(), Complex64, 1553, "su2 c64");
-    check_fixture!(engine, runtime, fz2_u1_legs(), f64, 1553, "fz2u1 f64");
-    check_fixture!(engine, runtime, fz2_u1_legs(), Complex64, 1553, "fz2u1 c64");
+    check_fixture!(engine, runtime, u1_legs(), f64, 1553, "u1 f64", false);
+    check_fixture!(engine, runtime, u1_legs(), Complex64, 1553, "u1 c64", false);
+    check_fixture!(engine, runtime, su2_legs(), f64, 1553, "su2 f64", false);
+    check_fixture!(
+        engine,
+        runtime,
+        su2_legs(),
+        Complex64,
+        1553,
+        "su2 c64",
+        false
+    );
+    check_fixture!(
+        engine,
+        runtime,
+        fz2_u1_legs(),
+        f64,
+        1553,
+        "fz2u1 f64",
+        false
+    );
+    check_fixture!(
+        engine,
+        runtime,
+        fz2_u1_legs(),
+        Complex64,
+        1553,
+        "fz2u1 c64",
+        false
+    );
 }
 
 #[cfg(feature = "cgc-gen")]
@@ -358,9 +391,10 @@ fn checked_generic_leg_roles_equal_the_permute_composition() {
         (v.clone(), w.clone()),
         f64,
         1553,
-        "su3 f64"
+        "su3 f64",
+        true
     );
-    check_fixture!(engine, runtime, (v, w), Complex64, 1553, "su3 c64");
+    check_fixture!(engine, runtime, (v, w), Complex64, 1553, "su3 c64", true);
 }
 
 #[test]

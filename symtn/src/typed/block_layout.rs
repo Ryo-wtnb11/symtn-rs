@@ -261,21 +261,16 @@ impl CatCopyPlan {
 }
 
 /// Compiles the shared structure-level copy plan of `catdomain` and
-/// `catcodomain`. An adjoint-oriented layout may decline without publishing a
-/// partial plan; an all-owned pair never declines.
+/// `catcodomain`. Owned facade storage is canonical, so both orientations map
+/// monotonically onto the destination with matching tree order; a mismatch is
+/// an internal layout error.
 pub(crate) fn compile_cat_plan(
     destination: &Arc<BlockStructure>,
     destination_nout: usize,
     operands: [CatOperandLayout<'_>; 2],
     axis: usize,
     side: Side,
-) -> Result<Option<CatCopyPlan>, Error> {
-    if probe::RoutePolicy::current().cat_declines_oriented
-        && (matches!(operands[0].orientation, TensorOrientation::Adjoint)
-            || matches!(operands[1].orientation, TensorOrientation::Adjoint))
-    {
-        return Ok(None);
-    }
+) -> Result<CatCopyPlan, Error> {
     {
         let sources = [operands[0].structure, operands[1].structure];
         let source_blocks = [
@@ -332,20 +327,10 @@ pub(crate) fn compile_cat_plan(
     let source_regions = [&operands[0].regions, &operands[1].regions];
     let oriented = matches!(operands[0].orientation, TensorOrientation::Adjoint)
         || matches!(operands[1].orientation, TensorOrientation::Adjoint);
-    let source_region_indices = if oriented {
-        let (Some(lhs_indices), Some(rhs_indices)) = (
-            cat_source_regions_if_monotone(&destination_regions, source_regions[0]),
-            cat_source_regions_if_monotone(&destination_regions, source_regions[1]),
-        ) else {
-            return Ok(None);
-        };
-        [lhs_indices, rhs_indices]
-    } else {
-        [
-            cat_source_regions(&destination_regions, source_regions[0])?,
-            cat_source_regions(&destination_regions, source_regions[1])?,
-        ]
-    };
+    let source_region_indices = [
+        cat_source_regions(&destination_regions, source_regions[0])?,
+        cat_source_regions(&destination_regions, source_regions[1])?,
+    ];
     if oriented
         && !cat_region_tree_orders_match(
             &destination_regions,
@@ -355,7 +340,9 @@ pub(crate) fn compile_cat_plan(
             side,
         )
     {
-        return Ok(None);
+        return Err(internal_layout_error(
+            "oriented cat source tree order disagrees with the destination",
+        ));
     }
     let mut copies = Vec::with_capacity(source_regions[0].len() + source_regions[1].len());
     for (destination_index, destination) in destination_regions.iter().enumerate() {
@@ -439,11 +426,11 @@ pub(crate) fn compile_cat_plan(
             ));
         }
     }
-    Ok(Some(CatCopyPlan {
+    Ok(CatCopyPlan {
         required_len: destination.required_len()?,
         copies,
         side,
-    }))
+    })
 }
 
 pub(super) fn cat_source_blocks(

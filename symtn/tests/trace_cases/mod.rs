@@ -1,5 +1,5 @@
-//! Partial-trace fixtures and their independent oracles, shared by the Host
-//! pin (`typed_trace_host_oracle.rs`, ungated) and the device gate
+//! Partial-trace fixtures and their independent oracles, shared by the
+//! engine-generic suite (`engine_suites/trace.rs`) and the device parity gate
 //! (`typed_cuda_trace.rs`).
 //!
 //! Two oracles, neither of which passes through the trace engine whose device

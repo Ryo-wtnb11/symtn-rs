@@ -1446,6 +1446,43 @@ mod tests {
         assert_eq!(output.stderr.len(), 131072);
     }
 
+    /// `optimize_sliced` turns the planner's path and sliced indices into a
+    /// `SlicedPlan`; the planner here is a shell stub that prints a fixed
+    /// answer, so only symtn's side of the contract is exercised. For
+    /// `ab,bc,cd->ad` (a=2, b=2, c=8, d=2) with path `[(0,1),(0,1)]` and `c`
+    /// sliced, the plan has 8 slices of `2*2*1 + 2*1*2 = 8` elements each.
+    #[cfg(unix)]
+    #[test]
+    fn optimize_sliced_packages_the_planner_answer() {
+        let ir = test_ir(&[&["a", "b"], &["b", "c"], &["c", "d"]], &["a", "d"]);
+        let infos = vec![
+            DenseTensorInfo::new(vec![2, 2]),
+            DenseTensorInfo::new(vec![2, 8]),
+            DenseTensorInfo::new(vec![8, 2]),
+        ];
+        let cost = DenseCostModel::from_network(&ir, &infos).unwrap();
+        let answer = r#"{"path":[[0,1],[0,1]],"sliced":[{"label":"c","inner":true,"size":8,"project":null}]}"#;
+        let config = CotengraPythonConfig {
+            python: "sh".to_string(),
+            python_args: vec![
+                "-c".to_string(),
+                format!("cat >/dev/null; echo '{answer}'"),
+                "sh".to_string(),
+            ],
+            ..Default::default()
+        };
+
+        let sliced = CotengraPythonOptimizer::new(config)
+            .optimize_sliced(&ir, &cost)
+            .unwrap();
+
+        assert_eq!(sliced.plan().steps().len(), 2);
+        let slice = sliced.slice();
+        assert_eq!(slice.sliced_indices(), &[TemporaryLabel::new("c")]);
+        assert_eq!(slice.nslices(), 8);
+        assert_eq!(slice.total_flops(), 64.0);
+    }
+
     #[test]
     #[ignore = "requires SYMTN_RUN_COTENGRA_PYTHON_TEST and an installed cotengra environment"]
     fn runs_installed_cotengra_when_requested() {

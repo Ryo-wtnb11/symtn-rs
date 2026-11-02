@@ -104,7 +104,8 @@ fn eigh_assembly_gemms_and_uploads_do_not_depend_on_the_tree_count() {
         close(engine, &lhs, &rhs);
     }
     // The same sectors and sizes, so every upload is independent of the tree
-    // count. The selector-free copy counts and the forced selector path are
-    // asserted in-crate (`typed_cuda_eigh_aligned_assembly_matches_the_per_tree_path_bitwise`).
+    // count. The selector-free copy counts and the selector path are asserted
+    // in-crate (`typed_cuda_eigh_ascending_order_assembles_by_one_copy_per_sector`,
+    // `typed_cuda_eigh_selector_assembly_applies_a_non_identity_order`).
     assert_eq!(counts[0], counts[1], "uploads do not depend on the trees");
 }

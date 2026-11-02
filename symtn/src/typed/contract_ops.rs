@@ -283,10 +283,9 @@ where
     /// Host clears its whole core destination instead).
     ///
     /// **Numerics.** Device and Host agree to dtype tolerance, never bitwise:
-    /// the GEMM summation order is cuTENSOR's, a Single-block move rounds as
-    /// `alpha * (c * x)`, and over a non-canonical expert tiling the Host
-    /// packs around its core where the device runs the transform route. Exact
-    /// zeros may differ in sign (Host `-0.0` where the device writes `+0.0`).
+    /// the GEMM summation order is cuTENSOR's and a Single-block move rounds as
+    /// `alpha * (c * x)`. Exact zeros may differ in sign (Host `-0.0` where
+    /// the device writes `+0.0`).
     ///
     /// **Fermionic twist.** The canonical form with a twist uniform per
     /// coupled sector folds it into the GEMM alpha; every other case folds
@@ -901,10 +900,7 @@ where
     ///   Those come back from the expert layer, which owns the rules.
     ///   Checked Generic failures use [`GenericTensorError::Plan`].
     ///
-    /// On CUDA storage the composition plans for the device executor, which
-    /// runs only fully-direct cores, so a non-canonical expert tiling the
-    /// Host packs is [`crate::typed::OperationError::UnsupportedTensorContractScope`]
-    /// there; [`Error::PlacementMismatch`] comes last, as for
+    /// On CUDA storage [`Error::PlacementMismatch`] comes last, as for
     /// [`Self::contract`].
     ///
     /// ```compile_fail

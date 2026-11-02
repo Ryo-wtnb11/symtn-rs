@@ -232,3 +232,339 @@ fn checked_generic_external_axis_leg_keeps_provider_boundary() {
     assert_eq!(dual.sectors(), &[a]);
     assert!(dual.is_dual());
 }
+
+/// `(uncoupled, inner lines, vertices)` ids of each tree of `coupled`.
+fn tree_rows(groups: &[CoupledFusionTrees], coupled: usize) -> Vec<TreeRow> {
+    let ids = |sectors: &[SectorId]| sectors.iter().map(|s| s.id()).collect::<Vec<_>>();
+    groups
+        .iter()
+        .find(|group| group.coupled == SectorId::new(coupled))
+        .expect("coupled sector present")
+        .trees
+        .iter()
+        .map(|tree| {
+            (
+                ids(tree.uncoupled()),
+                ids(tree.innerlines()),
+                tree.vertices().iter().map(|v| v.get()).collect(),
+            )
+        })
+        .collect()
+}
+
+type TreeRow = (Vec<usize>, Vec<usize>, Vec<usize>);
+
+fn product_space(sectors: &[usize], is_dual: &[bool]) -> FusionProductSpace {
+    FusionProductSpace::new(
+        is_dual
+            .iter()
+            .map(|&dual| SectorLeg::new(sectors.iter().map(|&s| (SectorId::new(s), 1)), dual)),
+    )
+}
+
+/// Every producer of a space's trees: infallible, checked and Generic.
+fn all_producer_rows<R>(rule: &R, space: &FusionProductSpace, coupled: usize) -> Vec<TreeRow>
+where
+    R: MultiplicityFreeFusionRule + CheckedFusionAlgebra,
+{
+    let infallible = tree_rows(&fusion_trees_by_coupled_for_space(rule, space), coupled);
+    let checked = tree_rows(
+        &try_fusion_trees_by_coupled_for_space_checked(rule, space).unwrap(),
+        coupled,
+    );
+    let (generic, _) = fusion_trees_by_coupled_for_space_generic(rule, space);
+    assert_eq!(checked, infallible);
+    assert_eq!(tree_rows(&generic, coupled), infallible);
+    infallible
+}
+
+#[test]
+fn fibonacci_three_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // What: within a coupled sector, trees of different uncoupled tuples
+    // interleave by TensorKit's nesting (last leg, then the inner line, then
+    // the front), not grouped by tuple. TensorKit 0.17.1:
+    // V = Vect[FibonacciAnyon](:I=>1, :τ=>1); fusiontrees(V ⊗ V ⊗ V', c),
+    // with ids I = 0, τ = 1 (both orders list I first).
+    let rule = TableRule::fibonacci();
+    let space = product_space(&[0, 1], &[false, false, true]);
+    let expected_vacuum: Vec<TreeRow> = vec![
+        ([0, 0, 0], [0], [1, 1]),
+        ([1, 1, 0], [0], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([1, 1, 1], [1], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    let expected_tau: Vec<TreeRow> = vec![
+        ([1, 0, 0], [1], [1, 1]),
+        ([0, 1, 0], [1], [1, 1]),
+        ([1, 1, 0], [1], [1, 1]),
+        ([0, 0, 1], [0], [1, 1]),
+        ([1, 1, 1], [0], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([1, 1, 1], [1], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 0), expected_vacuum);
+    assert_eq!(all_producer_rows(&rule, &space, 1), expected_tau);
+}
+
+#[test]
+fn su2_three_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // TensorKit 0.17.1, ids = twice spin (both orders ascend in spin):
+    // V = Vect[SU2Irrep](0=>1, 1//2=>1, 1=>1); fusiontrees(V ⊗ V' ⊗ V, c).
+    let rule = SU2FusionRule;
+    let space = product_space(&[0, 1, 2], &[false, true, false]);
+    let expected_half: Vec<TreeRow> = vec![
+        ([1, 0, 0], [1], [1, 1]),
+        ([0, 1, 0], [1], [1, 1]),
+        ([2, 1, 0], [1], [1, 1]),
+        ([1, 2, 0], [1], [1, 1]),
+        ([0, 0, 1], [0], [1, 1]),
+        ([1, 1, 1], [0], [1, 1]),
+        ([2, 2, 1], [0], [1, 1]),
+        ([2, 0, 1], [2], [1, 1]),
+        ([1, 1, 1], [2], [1, 1]),
+        ([0, 2, 1], [2], [1, 1]),
+        ([2, 2, 1], [2], [1, 1]),
+        ([1, 0, 2], [1], [1, 1]),
+        ([0, 1, 2], [1], [1, 1]),
+        ([2, 1, 2], [1], [1, 1]),
+        ([1, 2, 2], [1], [1, 1]),
+        ([2, 1, 2], [3], [1, 1]),
+        ([1, 2, 2], [3], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    let expected_one: Vec<TreeRow> = vec![
+        ([2, 0, 0], [2], [1, 1]),
+        ([1, 1, 0], [2], [1, 1]),
+        ([0, 2, 0], [2], [1, 1]),
+        ([2, 2, 0], [2], [1, 1]),
+        ([1, 0, 1], [1], [1, 1]),
+        ([0, 1, 1], [1], [1, 1]),
+        ([2, 1, 1], [1], [1, 1]),
+        ([1, 2, 1], [1], [1, 1]),
+        ([2, 1, 1], [3], [1, 1]),
+        ([1, 2, 1], [3], [1, 1]),
+        ([0, 0, 2], [0], [1, 1]),
+        ([1, 1, 2], [0], [1, 1]),
+        ([2, 2, 2], [0], [1, 1]),
+        ([2, 0, 2], [2], [1, 1]),
+        ([1, 1, 2], [2], [1, 1]),
+        ([0, 2, 2], [2], [1, 1]),
+        ([2, 2, 2], [2], [1, 1]),
+        ([2, 2, 2], [4], [1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 1), expected_half);
+    assert_eq!(all_producer_rows(&rule, &space, 2), expected_one);
+}
+
+#[test]
+fn su2_four_leg_trees_follow_tensorkit_fusiontrees_order() {
+    // What: two inner lines, each slower than the legs in front of it.
+    // TensorKit 0.17.1, ids = twice spin:
+    // W = Vect[SU2Irrep](1//2=>1, 1=>1); fusiontrees(W ⊗ W ⊗ W' ⊗ W, SU2Irrep(0)).
+    let rule = SU2FusionRule;
+    let space = product_space(&[1, 2], &[false, false, true, false]);
+    let expected: Vec<TreeRow> = vec![
+        ([1, 1, 1, 1], [0, 1], [1, 1, 1]),
+        ([2, 2, 1, 1], [0, 1], [1, 1, 1]),
+        ([1, 1, 1, 1], [2, 1], [1, 1, 1]),
+        ([2, 2, 1, 1], [2, 1], [1, 1, 1]),
+        ([2, 1, 2, 1], [1, 1], [1, 1, 1]),
+        ([1, 2, 2, 1], [1, 1], [1, 1, 1]),
+        ([2, 1, 2, 1], [3, 1], [1, 1, 1]),
+        ([1, 2, 2, 1], [3, 1], [1, 1, 1]),
+        ([2, 1, 1, 2], [1, 2], [1, 1, 1]),
+        ([1, 2, 1, 2], [1, 2], [1, 1, 1]),
+        ([2, 1, 1, 2], [3, 2], [1, 1, 1]),
+        ([1, 2, 1, 2], [3, 2], [1, 1, 1]),
+        ([1, 1, 2, 2], [0, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [0, 2], [1, 1, 1]),
+        ([1, 1, 2, 2], [2, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [2, 2], [1, 1, 1]),
+        ([2, 2, 2, 2], [4, 2], [1, 1, 1]),
+    ]
+    .into_iter()
+    .map(|(u, a, v)| (u.to_vec(), a.to_vec(), v.to_vec()))
+    .collect();
+    assert_eq!(all_producer_rows(&rule, &space, 0), expected);
+}
+
+#[test]
+fn homspace_trees_skip_inverse_products_of_unshared_coupled_sectors() {
+    // What: a HomSpace enumerates only the coupled sectors both sides reach,
+    // so the domain never fuses an unshared sector with a dual leg. Here the
+    // domain also reaches spin 78 (id 156), and 156 ⊗ dual(100) leaves the
+    // compact SU(2) id range (ids = twice spin, at most 254), while the one
+    // shared sector, the vacuum, has a single tree by hand: 0 ⊗ 50 → 50,
+    // 50 ⊗ 50 → 0.
+    let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (100, 1), (100, 1)]);
+
+    let keys = hom.fusion_tree_keys(&SU2FusionRule);
+
+    let rows = keys
+        .iter()
+        .map(|key| {
+            let domain = key.domain_tree();
+            (
+                sector_ids(key.codomain_uncoupled()),
+                sector_ids(domain.uncoupled()),
+                sector_ids(domain.innerlines()),
+                domain
+                    .vertices()
+                    .iter()
+                    .map(|v| v.get())
+                    .collect::<Vec<_>>(),
+                key.coupled().id(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        vec![(vec![0], vec![0, 100, 100], vec![100], vec![1, 1], 0)]
+    );
+}
+
+#[test]
+fn homspace_with_disjoint_coupled_sectors_has_no_trees() {
+    // What: when the sides share no coupled sector (codomain reaches only the
+    // vacuum, the domain only spin 100), no tree is built and no dual-leg
+    // product of the domain's unshared sector (200 ⊗ dual(200), beyond the
+    // compact SU(2) id range) is requested.
+    let hom = FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1), (0, 1), (200, 1)]);
+
+    assert!(hom.fusion_tree_keys(&SU2FusionRule).is_empty());
+}
+
+/// SU(2) that counts every fusion-product query (channels or multiplicity).
+struct FusionQueryCountingSu2 {
+    queries: std::cell::Cell<usize>,
+}
+
+impl FusionQueryCountingSu2 {
+    fn query(&self) {
+        self.queries.set(self.queries.get() + 1);
+    }
+}
+
+impl symtn_sectors::testing::Provider for FusionQueryCountingSu2 {}
+
+impl FusionRule for FusionQueryCountingSu2 {
+    fn rule_identity(&self) -> RuleIdentity {
+        RuleIdentity::of_type::<Self>()
+    }
+
+    fn fusion_style(&self) -> FusionStyleKind {
+        FusionRule::fusion_style(&SU2FusionRule)
+    }
+
+    fn braiding_style(&self) -> BraidingStyleKind {
+        FusionRule::braiding_style(&SU2FusionRule)
+    }
+
+    fn vacuum(&self) -> SectorId {
+        FusionRule::vacuum(&SU2FusionRule)
+    }
+
+    fn dual(&self, sector: SectorId) -> SectorId {
+        FusionRule::dual(&SU2FusionRule, sector)
+    }
+
+    fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
+        self.query();
+        SU2FusionRule.fusion_channels(left, right)
+    }
+
+    fn nsymbol(&self, left: SectorId, right: SectorId, coupled: SectorId) -> usize {
+        self.query();
+        SU2FusionRule.nsymbol(left, right, coupled)
+    }
+}
+
+impl MultiplicityFreeFusionRule for FusionQueryCountingSu2 {}
+
+impl CheckedFusionAlgebra for FusionQueryCountingSu2 {
+    fn try_dual_sector(&self, sector: SectorId) -> Result<SectorId, FusionAlgebraError> {
+        SU2FusionRule.try_dual_sector(sector)
+    }
+
+    fn try_fusion_channels(
+        &self,
+        left: SectorId,
+        right: SectorId,
+    ) -> Result<SectorVec, FusionAlgebraError> {
+        self.query();
+        SU2FusionRule.try_fusion_channels(left, right)
+    }
+
+    fn try_nsymbol(
+        &self,
+        left: SectorId,
+        right: SectorId,
+        coupled: SectorId,
+    ) -> Result<usize, FusionAlgebraError> {
+        self.query();
+        SU2FusionRule.try_nsymbol(left, right, coupled)
+    }
+}
+
+#[test]
+fn a_leg_without_sectors_has_no_trees_and_queries_no_fusion() {
+    // What: a leg with no sectors empties the product space, so every
+    // producer returns no tree without fusing any prefix: here 200 ⊗ 200
+    // would leave the compact SU(2) id range. Rank zero stays the unit
+    // with one vacuum tree.
+    let leg =
+        |sectors: &[usize]| SectorLeg::new(sectors.iter().map(|&s| (SectorId::new(s), 1)), false);
+    let empty = FusionProductSpace::new([leg(&[200]), leg(&[200]), leg(&[])]);
+    let rule = FusionQueryCountingSu2 {
+        queries: std::cell::Cell::new(0),
+    };
+    let tree_count =
+        |groups: &[CoupledFusionTrees]| groups.iter().map(|g| g.trees.len()).sum::<usize>();
+
+    assert_eq!(
+        tree_count(&fusion_trees_by_coupled_for_space(&rule, &empty)),
+        0
+    );
+    assert_eq!(
+        tree_count(&try_fusion_trees_by_coupled_for_space_checked(&rule, &empty).unwrap()),
+        0
+    );
+    assert_eq!(
+        tree_count(&fusion_trees_by_coupled_for_space_generic(&rule, &empty).0),
+        0
+    );
+    assert_eq!(rule.queries.get(), 0);
+
+    let unit = FusionProductSpace::new([]);
+    let vacuum = |groups: Vec<CoupledFusionTrees>| {
+        groups
+            .iter()
+            .map(|g| (g.coupled.id(), g.trees.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        vacuum(fusion_trees_by_coupled_for_space(&rule, &unit)),
+        [(0, 1)]
+    );
+    assert_eq!(
+        vacuum(try_fusion_trees_by_coupled_for_space_checked(&rule, &unit).unwrap()),
+        [(0, 1)]
+    );
+    assert_eq!(
+        vacuum(fusion_trees_by_coupled_for_space_generic(&rule, &unit).0),
+        [(0, 1)]
+    );
+}

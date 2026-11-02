@@ -8,7 +8,7 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     // runs one SVD per stored sector, preserves provider identity, and emits
     // the final logical-adjoint orientation directly.
     let canonical = u1_block_endomorphism(&[(0, 1, vec![0.5_f64]), (1, 1, vec![1.0])]);
-    let tensor = padded_copy(&U1FusionRule, &canonical);
+    let tensor = canonical;
     let provider = Arc::new(U1FusionRule);
     let bound = bound_tensor(Arc::clone(&provider), &tensor);
     let mut dense = ScriptedExecutor::<SvdCallSpy>::default();
@@ -22,8 +22,11 @@ fn pinv_adjoint_parent_uses_one_parent_svd_and_the_shared_global_cutoff() {
     let output: BoundTensorMap<_, _> = typed_from_bound_factor(output).unwrap();
     assert_eq!(scalar_u1_block(output.tensor(), 0), 0.0);
     assert!((scalar_u1_block(output.tensor(), 1) - 1.0).abs() < 1e-12);
-    // The padded input is packed once; no SVD factor is laid out.
-    assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
+    // The canonical input is read in place; no SVD factor is laid out.
+    assert_eq!(
+        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
+        0
+    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 
@@ -49,7 +52,7 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     // What: a successful first sector cannot publish factors or an output when
     // the second sector's SVD fails.
     let canonical = u1_block_endomorphism(&[(0, 1, vec![2.0_f64]), (1, 1, vec![3.0])]);
-    let tensor = padded_copy(&U1FusionRule, &canonical);
+    let tensor = canonical;
     let before = tensor.data().to_vec();
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
     let mut dense = ScriptedExecutor::<FailSecondSvd>::default();
@@ -65,8 +68,11 @@ fn pinv_adjoint_parent_discards_unpublished_factors_on_late_svd_failure() {
     ));
     assert_eq!(dense.counts().of(&[Op::Svd, Op::SvdInto]), 2);
     assert_eq!(tensor.data(), before);
-    // The padded input is packed once; no SVD factor is laid out.
-    assert!(input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes) > 0);
+    // The canonical input is read in place; no SVD factor is laid out.
+    assert_eq!(
+        input_pack_bytes_rec.get(crate::probe::Event::InputPackBytes),
+        0
+    );
     assert_eq!(compact_svd_copy_rec.compact_svd_copy(), Default::default());
 }
 

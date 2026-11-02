@@ -2,11 +2,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, OnceLock};
 
-#[cfg(all(test, feature = "cgc-gen"))]
-use symtn_core::BlockStructure;
 use symtn_core::{
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericStructureError, CoreError,
-    FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace, FusionTreePairKey,
+    FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
     StructurallyValidatedFusionTreeSubset,
 };
@@ -120,24 +118,6 @@ impl<R> fmt::Debug for BoundDynamicFusionMapSpace<R> {
             .field("space", &self.space)
             .field("provider_type", &std::any::type_name::<R>())
             .finish_non_exhaustive()
-    }
-}
-
-#[cfg(all(test, feature = "cgc-gen"))]
-impl<R> BoundDynamicFusionMapSpace<R> {
-    /// The same binding over a caller-restacked layout of the same trees:
-    /// the only way a test obtains a non-canonical checked Generic operand,
-    /// since checked admission always derives the canonical layout.
-    pub(crate) fn with_test_structure(&self, structure: BlockStructure) -> Self {
-        Self {
-            space: DynamicFusionMapSpace {
-                subblock_structure: structure.into_shared(),
-                adjoint: OnceLock::new(),
-                ..self.space.clone()
-            },
-            provider: Arc::clone(&self.provider),
-            layout_build: self.layout_build,
-        }
     }
 }
 
@@ -299,6 +279,10 @@ where
     /// `CheckedGeneric`-bound input space or hand the result the input's
     /// capability, so a caller that only holds the provider could not obtain
     /// the `CheckedGeneric` binding `from_final_homspace_generic_checked` gives.
+    ///
+    /// A `homspace` whose codomain/domain split differs from the one
+    /// `structure` was prepared for is refused with
+    /// [`CoreError::FusionSpaceSplitMismatch`].
     #[doc(hidden)]
     pub fn from_prepared_final_homspace_generic_checked(
         provider: Arc<R>,
@@ -306,9 +290,19 @@ where
         structure: PreparedBlockStructure,
     ) -> Result<Self, CheckedGenericStructureError<R::Error>> {
         Self::validate_checked_generic_style(provider.as_ref())?;
-        Ok(Self::commit_prepared_generic_checked(
-            provider, homspace, structure,
-        ))
+        let (actual_nout, actual_nin) = (homspace.codomain().len(), homspace.domain().len());
+        let bound = Self::commit_prepared_generic_checked(provider, homspace, structure);
+        let (expected_nout, expected_nin) = (bound.space.nout, bound.space.nin);
+        if (expected_nout, expected_nin) != (actual_nout, actual_nin) {
+            return Err(CoreError::FusionSpaceSplitMismatch {
+                expected_nout,
+                expected_nin,
+                actual_nout,
+                actual_nin,
+            }
+            .into());
+        }
+        Ok(bound)
     }
 
     fn commit_prepared_generic_checked(
@@ -481,24 +475,8 @@ where
         Self::from_derived_with_capability(Arc::clone(&source.provider), space, source.layout_build)
     }
 
-    fn bind_subset_with_keys(
-        mut space: DynamicFusionMapSpace,
-        provider: Arc<R>,
-        keys: Vec<FusionTreePairKey>,
-    ) -> Result<Self, OperationError> {
-        debug_assert!(matches!(&space.admission, FusionSpaceAdmission::Subset(_)));
-        validate_bound_space_invariants(&space)?;
-        space.validate_complete_tree_grid(&keys)?;
-        space.admission = FusionSpaceAdmission::Complete(provider.rule_identity());
-        Ok(Self {
-            space,
-            provider,
-            layout_build: LayoutBuildCapability::encoded(),
-        })
-    }
-
-    /// Expert admission boundary for an already-constructed multiplicity-free
-    /// dynamic layout.
+    /// Binds an existing multiplicity-free dynamic layout (a canonical layout
+    /// or an adjoint view of one) to `provider`.
     pub fn bind_multiplicity_free(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -507,19 +485,12 @@ where
         R: MultiplicityFreeFusionRule,
     {
         space.validate_rule(provider.as_ref())?;
-        if matches!(&space.admission, FusionSpaceAdmission::Complete(_)) {
-            return Self::from_derived(provider, space);
-        }
-        let keys = space
-            .homspace()
-            .fusion_tree_keys(provider.as_ref())
-            .to_vec();
-        Self::bind_subset_with_keys(space, provider, keys)
+        Self::from_derived(provider, space)
     }
 
     /// Checked built-in admission using transactional lowered tree metadata.
     ///
-    /// Matching unchecked Subset and Complete stamps are revalidated; publication
+    /// A matching unchecked stamp is revalidated; publication
     /// occurs only after structural, algebraic, and complete-grid proofs pass.
     #[cfg(test)]
     pub(crate) fn bind_multiplicity_free_lowered(
@@ -557,7 +528,7 @@ where
     /// Structural, algebraic, and complete-grid proofs run before any layout
     /// or admission state is published, and the provider only needs to certify
     /// [`CheckedFusionAlgebra`] rather than the sealed built-in lowered codec.
-    /// Matching unchecked Subset and Complete stamps are revalidated.
+    /// A matching unchecked Complete stamp is revalidated.
     pub fn bind_multiplicity_free_checked(
         mut space: DynamicFusionMapSpace,
         provider: Arc<R>,
@@ -981,31 +952,23 @@ where
     /// Creates the zero-copy adjoint lowering/replay view while retaining the
     /// exact provider allocation of the source binding.
     ///
-    /// This preserves the source blocks' offsets and custom strides while
-    /// swapping their logical codomain/domain axes. It is an expert view
-    /// capability used by lazy lowering, not an owned ordinary adjoint output
-    /// layout.
+    /// This preserves the source blocks' offsets and strides while swapping
+    /// their logical codomain/domain axes. It is a view used by lazy lowering,
+    /// not an owned ordinary adjoint output layout.
     pub fn adjoint_view(&self) -> Result<Self, OperationError> {
         let space = self.space.adjoint_view()?;
         Self::from_derived_like(self, space)
     }
 
-    /// Expert admission boundary for an already-constructed
-    /// multiplicity-aware dynamic layout.
+    /// Binds an existing multiplicity-aware dynamic layout (a canonical layout
+    /// or an adjoint view of one) to `provider`.
     pub fn bind_generic(
         space: DynamicFusionMapSpace,
         provider: Arc<R>,
     ) -> Result<Self, OperationError> {
         space.validate_rule(provider.as_ref())?;
         validate_generic_provider_style(provider.as_ref())?;
-        if matches!(&space.admission, FusionSpaceAdmission::Complete(_)) {
-            return Self::from_derived(provider, space);
-        }
-        let keys = space
-            .homspace()
-            .fusion_tree_keys_generic(provider.as_ref())
-            .map_err(OperationError::from_core_preserving_context)?;
-        Self::bind_subset_with_keys(space, provider, keys)
+        Self::from_derived(provider, space)
     }
 
     /// Whether codomain and domain have the same reduced dimension in every

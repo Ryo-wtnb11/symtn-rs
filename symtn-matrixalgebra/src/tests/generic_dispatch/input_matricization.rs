@@ -397,153 +397,6 @@ fn checked_generic_compact_geometry_preserves_complete_multi_tree_identity() {
     assert_compact_factors_reconstruct_input(&input, &lq_factors.l, None, &lq_factors.q);
 }
 
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_compact_factors_keep_padded_reordered_input_pack() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (canonical_space, canonical_data) = generic_factorization_input();
-    let (expert_space, expert_data) =
-        expert_generic_factorization_input(&canonical_space, &canonical_data, true);
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let expert_space = BoundDynamicFusionMapSpace::bind_generic(
-        expert_space.space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let expert = BoundDynamicTensorRef::try_new(&expert_space, &expert_data).unwrap();
-    let canonical_before = canonical_data.clone();
-    let expert_before = expert_data.clone();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let compact_qr_copy_rec = crate::probe::record();
-    let actual_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    assert_compact_factors_reconstruct_input(&expert, &actual_qr.q, None, &actual_qr.r);
-    assert!(compact_qr_copy_rec.compact_qr_copy().input_pack_calls > 0);
-
-    let compact_svd_copy_rec = crate::probe::record();
-    let actual_svd = svd_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    assert_compact_factors_reconstruct_input(
-        &expert,
-        &actual_svd.u,
-        Some(&actual_svd.s),
-        &actual_svd.vh,
-    );
-    assert!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls > 0);
-
-    let compact_lq_copy_rec = crate::probe::record();
-    let checked_inputs_rec = crate::probe::record();
-    let actual_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &expert).unwrap();
-    assert_compact_factors_reconstruct_input(&expert, &actual_lq.l, None, &actual_lq.q);
-    let lq_probe = compact_lq_copy_rec.compact_lq_copy();
-    assert!(lq_probe.input_pack_calls > 0);
-    assert!(lq_probe.adjoint_scratch_fill_calls > 0);
-
-    let start = expert_data.as_ptr() as usize;
-    let end = start + expert_data.len() * std::mem::size_of::<f64>();
-    for observation in checked_inputs_rec.checked_compact_inputs() {
-        assert_eq!(observation.input_pointer, start);
-        assert!(observation.matrix_pointer < start || observation.matrix_pointer >= end);
-    }
-    assert!(canonical_data == canonical_before);
-    assert!(expert_data == expert_before);
-    assert!(Arc::ptr_eq(actual_qr.q.space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(actual_svd.s.space().provider_arc(), &provider));
-    assert!(Arc::ptr_eq(actual_lq.q.space().provider_arc(), &provider));
-}
-
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_compact_interleaved_fallback_keeps_literal_matrix_order() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (canonical, _, canonical_data) = generic_values_endomorphism_input();
-    let (expert_space, expert_data) =
-        interleaved_generic_endomorphism_input(&canonical, &canonical_data);
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let expert_space = BoundDynamicFusionMapSpace::bind_generic(
-        expert_space.space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let expert = BoundDynamicTensorRef::try_new(&expert_space, &expert_data).unwrap();
-    let before = expert_data.clone();
-    let direct = [
-        vec![
-            Complex64::new(3.0, -1.0),
-            Complex64::new(2.0, 0.0),
-            Complex64::new(0.0, 0.0),
-            Complex64::new(1.0, 1.0),
-        ],
-        vec![Complex64::new(2.0, -1.0)],
-    ];
-    let adjoint = [
-        vec![
-            Complex64::new(3.0, 1.0),
-            Complex64::new(0.0, 0.0),
-            Complex64::new(2.0, 0.0),
-            Complex64::new(1.0, -1.0),
-        ],
-        vec![Complex64::new(2.0, 1.0)],
-    ];
-
-    let compact_qr_copy_rec = crate::probe::record();
-    let mut qr = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Qr);
-    let factors = qr_compact_dyn_checked_generic(engine, &mut qr, &expert).unwrap();
-    assert_eq!(
-        qr.observations
-            .iter()
-            .map(|observation| observation.values.clone())
-            .collect::<Vec<_>>(),
-        direct
-    );
-    assert_compact_factors_reconstruct_input(&expert, &factors.q, None, &factors.r);
-    assert!(compact_qr_copy_rec.compact_qr_copy().input_pack_calls > 0);
-
-    let compact_svd_copy_rec = crate::probe::record();
-    let mut svd = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Svd);
-    let factors = svd_compact_dyn_checked_generic(engine, &mut svd, &expert).unwrap();
-    assert_eq!(
-        svd.observations
-            .iter()
-            .map(|observation| observation.values.clone())
-            .collect::<Vec<_>>(),
-        direct
-    );
-    assert_compact_factors_reconstruct_input(&expert, &factors.u, Some(&factors.s), &factors.vh);
-    assert!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls > 0);
-
-    let compact_lq_copy_rec = crate::probe::record();
-    let mut lq = CompactInputSpy::new(crate::probe::CheckedCompactOperation::Lq);
-    let factors = lq_compact_dyn_checked_generic(engine, &mut lq, &expert).unwrap();
-    assert_eq!(
-        lq.observations
-            .iter()
-            .map(|observation| observation.values.clone())
-            .collect::<Vec<_>>(),
-        adjoint
-    );
-    assert_compact_factors_reconstruct_input(&expert, &factors.l, None, &factors.q);
-    let probe = compact_lq_copy_rec.compact_lq_copy();
-    assert!(probe.input_pack_calls > 0);
-    assert!(probe.adjoint_scratch_fill_calls > 0);
-    assert_eq!(expert_data, before);
-}
-
 fn assert_real_spectra_by_sector_close(actual: &[SectorSpectrum], expected: &[SectorSpectrum]) {
     assert_eq!(actual.len(), expected.len());
     for expected in expected {
@@ -685,83 +538,6 @@ fn checked_only_generic_values_borrow_canonical_input_regions() {
     assert_eq!(endomorphism_provider.calls.get(), provider_calls);
     assert_eq!(hermitian, hermitian_before);
     assert_eq!(general, general_before);
-}
-
-#[test]
-#[expect(
-    clippy::arc_with_non_send_sync,
-    reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
-)]
-fn checked_generic_values_keep_padded_reordered_fallback() {
-    let (canonical_space, hermitian, general) = generic_values_endomorphism_input();
-    let (padded_space, padded_hermitian) =
-        padded_reordered_generic_endomorphism_input(&canonical_space, &hermitian);
-    let (_, padded_general) =
-        padded_reordered_generic_endomorphism_input(&canonical_space, &general);
-    let provider = Arc::new(LateGenericSpy {
-        rule: FactorGenericRule,
-        fail_at: usize::MAX,
-        calls: Cell::new(0),
-        identity: FactorGenericRule.rule_identity(),
-    });
-    let canonical_space = BoundDynamicFusionMapSpace::bind_generic(
-        canonical_space.space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    let padded_space = BoundDynamicFusionMapSpace::bind_generic(
-        padded_space.space().clone(),
-        Arc::clone(&provider),
-    )
-    .unwrap();
-    assert!(padded_space
-        .space()
-        .structure()
-        .coupled_sector_regions(2)
-        .unwrap()
-        .is_none());
-    let provider_calls = provider.calls.get();
-    let canonical_general = BoundDynamicTensorRef::try_new(&canonical_space, &general).unwrap();
-    let canonical_hermitian = BoundDynamicTensorRef::try_new(&canonical_space, &hermitian).unwrap();
-    let padded_general_input =
-        BoundDynamicTensorRef::try_new(&padded_space, &padded_general).unwrap();
-    let padded_hermitian_input =
-        BoundDynamicTensorRef::try_new(&padded_space, &padded_hermitian).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let expected_svd = svd_vals_dyn_checked_generic(&mut dense, &canonical_general).unwrap();
-    let expected_eigh = eigh_vals_dyn_checked_generic(&mut dense, &canonical_hermitian).unwrap();
-    let expected_eig = eig_vals_dyn_checked_generic(&mut dense, &canonical_general).unwrap();
-
-    let general_before = padded_general.clone();
-    let hermitian_before = padded_hermitian.clone();
-    let mut spy = ScriptedExecutor::<ValuesInputSpy>::default();
-    let values_fallbacks_rec = crate::probe::record();
-    let actual_svd = svd_vals_dyn_checked_generic(&mut spy, &padded_general_input).unwrap();
-    let actual_eigh = eigh_vals_dyn_checked_generic(&mut spy, &padded_hermitian_input).unwrap();
-    let actual_eig = eig_vals_dyn_checked_generic(&mut spy, &padded_general_input).unwrap();
-    assert_eq!(
-        values_fallbacks_rec.get(crate::probe::Event::ValuesMatricizationFallback),
-        3
-    );
-    assert_real_spectra_by_sector_close(&actual_svd, &expected_svd);
-    assert_real_spectra_by_sector_close(&actual_eigh, &expected_eigh);
-    assert_complex_spectra_by_sector_close(&actual_eig, &expected_eig);
-    assert_eq!(provider.calls.get(), provider_calls);
-    assert_eq!(padded_general, general_before);
-    assert_eq!(padded_hermitian, hermitian_before);
-
-    let general_start = padded_general.as_ptr() as usize;
-    let general_end = general_start + std::mem::size_of_val(padded_general.as_slice());
-    let hermitian_start = padded_hermitian.as_ptr() as usize;
-    let hermitian_end = hermitian_start + std::mem::size_of_val(padded_hermitian.as_slice());
-    for observation in &spy.observations {
-        let (start, end) = if observation.operation == ValuesOperation::Eigh {
-            (hermitian_start, hermitian_end)
-        } else {
-            (general_start, general_end)
-        };
-        assert!(observation.pointer < start || observation.pointer >= end);
-    }
 }
 
 #[test]
@@ -999,12 +775,11 @@ fn values_only_second_sector_failures_publish_no_partial_spectrum() {
 }
 
 #[test]
-fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
+fn values_only_ties_follow_the_published_order() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: equal singular values keep the provider's order, the provider's
     // ascending EIGH spectrum (with a ±2 pair) is published unchanged, and a
-    // conjugate EIG pair is published in (re, im) order, on both the borrowed
-    // and packed sector paths.
+    // conjugate EIG pair is published in (re, im) order.
     let rule = Z2FusionRule;
     let svd_input =
         one_sector_rectangular_matrix(vec![2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0], 3, 3);
@@ -1012,9 +787,6 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
         one_sector_rectangular_matrix(vec![1.0, 0.0, 0.0, 0.0, -2.0, 0.0, 0.0, 0.0, 2.0], 3, 3);
     let eig_input =
         one_sector_rectangular_matrix(vec![0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0], 3, 3);
-    let svd_padded = padded_copy(&rule, &svd_input);
-    let eigh_padded = padded_copy(&rule, &eigh_input);
-    let eig_padded = padded_copy(&rule, &eig_input);
     let shape = [3, 3];
     let strides = [1, 3];
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -1069,22 +841,10 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
         &bound_tensor_ref!(Arc::new(rule), &svd_input),
     )
     .unwrap();
-    let padded_svd = svd_vals(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &svd_padded),
-    )
-    .unwrap();
     let direct_eigh = eigh_vals(
         engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule), &eigh_input),
-    )
-    .unwrap();
-    let padded_eigh = eigh_vals(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &eigh_padded),
     )
     .unwrap();
     let direct_eig = eig_vals(
@@ -1093,19 +853,10 @@ fn values_only_ties_follow_the_published_order_on_direct_and_padded_layouts() {
         &bound_tensor_ref!(Arc::new(rule), &eig_input),
     )
     .unwrap();
-    let padded_eig = eig_vals(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &eig_padded),
-    )
-    .unwrap();
 
     assert_eq!(direct_svd[0].values, raw_svd);
     assert_eq!(direct_eigh[0].values, raw_eigh);
     assert_eq!(direct_eig[0].values, raw_eig);
-    assert_real_spectra_close(&direct_svd, &padded_svd);
-    assert_real_spectra_close(&direct_eigh, &padded_eigh);
-    assert_complex_spectra_close(&direct_eig, &padded_eig);
 }
 
 #[test]

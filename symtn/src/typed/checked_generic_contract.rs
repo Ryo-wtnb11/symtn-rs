@@ -849,6 +849,11 @@ enum TreeOrderSlot {
 /// fastest. SU(N) is the exception: SUNRepresentations iterates a `Dict`
 /// (see `docs/sector_id_compatibility.md`). Within a tree, indices stay in
 /// storage order, which is TensorKit's column-major subblock order.
+///
+/// Storage already uses this nesting; the sort remains for the slots where
+/// storage order is not TensorKit's: external sectors whose `SectorId` order
+/// differs (U(1) ids, dual legs, table object order) and inner lines whose
+/// provider channel order differs (products).
 fn tensorkit_tree_order<E>(
     trees: &[CoupledTreeExtent],
     order_key: &mut impl FnMut(SectorId, bool) -> Result<symtn_core::SectorOrderKey, E>,
