@@ -400,6 +400,48 @@ fn a_provider_without_the_allocator_refuses_before_any_write() {
     );
 }
 
+/// What: a fresh contraction output whose core is a grouped batch is
+/// refused before its payload exists. With charge 1 absent from the
+/// contracted leg, the active outputs (charges 0 and 2, degeneracy 32) sit
+/// around the inactive charge-1 block, which a fresh output takes as a
+/// grouped batch: a warmed refused call allocates nothing of the output
+/// payload's size (`3 d²` values), so the refusal precedes the output's
+/// allocation and zero fill.
+#[test]
+#[cfg_attr(
+    not(any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    )),
+    ignore = "the native provider has the lane allocator; the refusal is a BLAS provider's"
+)]
+fn a_refused_fresh_contraction_allocates_no_output() {
+    let _serial = crate::counting_alloc::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let seed = &mut CpuEngine::serial();
+    let d = 32;
+    let leg = |charges: &[i32]| {
+        GradedSpace::try_new(
+            Arc::new(U1FusionRule),
+            charges.iter().map(|&charge| (U1Irrep::new(charge), d)),
+        )
+        .unwrap()
+    };
+    let (v3, w2) = (leg(&[0, 1, 2]), leg(&[0, 2]));
+    let a = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v3], [&w2], 11).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&w2], [&v3], 12).unwrap();
+    let equal = &mut context(4, EQUAL);
+    assert!(is_refused(a.contract(equal, &b, &SPEC)));
+    let payload = 3 * d * d * std::mem::size_of::<f64>();
+    let (result, allocs) =
+        crate::counting_alloc::measure_matching(payload..=payload, || a.contract(equal, &b, &SPEC));
+    assert!(is_refused(result));
+    assert_eq!(allocs.matched_calls, 0, "{allocs:?}");
+}
+
 /// What: participation is per lowered phase: a general eigendecomposition,
 /// whose dense stage searches no lanes, runs any allocation on its current
 /// split, while a split that needs a Multi-recoupling permute first refuses
