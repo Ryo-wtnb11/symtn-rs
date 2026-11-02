@@ -183,8 +183,8 @@ capped at the width the provider's payback work (`estimate_payback_work`,
 the part of the estimate a team inside the item can pay back) pays for, and
 one thread on a token without a team. The serial times stay the work model's
 estimates, which run low for SVD; no correction is applied, so the choice
-remains a scheduling estimate. A batch holding an input with batch
-dimensions keeps the baseline placement over `L0` lanes, without the search:
+remains a scheduling estimate. A batch holding an input whose batch product
+is not one (including zero) keeps the baseline placement over `L0` lanes, without the search:
 tlinalg runs such an input through its multi-item route (a batch gate, its
 own lanes and a per-item cap), which its public queries do not expose. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view), and keeps its own outcome; the

@@ -598,3 +598,143 @@ fn provider_error(op: tlinalg::Op, error: tlinalg::Error) -> tenferro_tensor::Er
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tcontract_exec::{BatchPolicy, WorkModel};
+    use tenferro_cpu::Pool;
+
+    use super::*;
+
+    /// The SVD kernel's own op with recording-only execution: cost, search
+    /// admission and grant are `Blocks<Svd>`'s, and each block records the
+    /// reserved width of the lane it runs on instead of factoring.
+    struct RecordsWidth<'a>(Blocks<'a, Svd>, Vec<AtomicUsize>);
+
+    impl<'a> BlockOp for RecordsWidth<'a> {
+        type Job = Job<'a>;
+        const ENTRY: Entry = Entry::Linalg;
+        const KIND: OpKind = OpKind::Factorization;
+        const LABEL: &'static str = Svd::ENTRY;
+
+        fn work(&self, index: usize, job: &Job<'a>) -> f64 {
+            self.0.work(index, job)
+        }
+
+        fn modeled(&self, index: usize, job: &Job<'a>) -> bool {
+            self.0.modeled(index, job)
+        }
+
+        fn grant(
+            &self,
+            index: usize,
+            job: &Job<'a>,
+            exec: &Exec<'_>,
+            budget: usize,
+            serial: Duration,
+        ) -> usize {
+            self.0.grant(index, job, exec, budget, serial)
+        }
+
+        fn grant_key(&self, index: usize, job: &Job<'a>) -> GrantKey {
+            self.0.grant_key(index, job)
+        }
+
+        fn run(&self, index: usize, _: &mut Job<'a>, exec: Exec<'_>) -> Result<(), DenseError> {
+            self.1[index].store(exec.budget(), Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// The reserved lane width each real SVD input of `shapes` runs on, on
+    /// `threads` slots of flat 100 ns dispatch at one multiply-add per ns, no
+    /// item overhead and a lane work minimum of `lane_ns`.
+    fn svd_lane_widths(threads: usize, lane_ns: f64, shapes: &[&[usize]]) -> Vec<usize> {
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::flat(Duration::from_nanos(100));
+        let pool = Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(lane_ns);
+        let mut engine =
+            CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
+        let data = vec![0.0_f64; 10000];
+        // Column-major strides: each the product of the extents before it.
+        let strides: Vec<Vec<usize>> = shapes
+            .iter()
+            .map(|shape| {
+                (0..shape.len())
+                    .map(|axis| shape[..axis].iter().product())
+                    .collect()
+            })
+            .collect();
+        let mut jobs: Vec<Job<'_>> = shapes
+            .iter()
+            .zip(&strides)
+            .map(|(&shape, strides)| {
+                let len = shape.iter().product();
+                let input =
+                    DenseRead::F64(DenseView::new(&data[..len], shape, strides, 0).unwrap());
+                Job {
+                    input,
+                    strides: preflight::<Svd>(input).unwrap(),
+                    outcome: None,
+                }
+            })
+            .collect();
+        let op = RecordsWidth(
+            Blocks(PhantomData),
+            shapes.iter().map(|_| 0.into()).collect(),
+        );
+        driver::drive(&mut engine, &op, &mut jobs, &mut LaneScratch::default()).unwrap();
+        op.1.iter().map(|w| w.load(Ordering::Relaxed)).collect()
+    }
+
+    /// Purpose: a factorization batch whose every input is one matrix joins
+    /// the lane search with tlinalg's own width for one SVD item, and a batch
+    /// holding an input whose batch product is not one (including zero) keeps
+    /// the baseline placement. Four slots, flat 100 ns dispatch (a width pays
+    /// from 300 ns), one multiply-add per ns:
+    /// - `80 x 80` and three `4 x 4`: the large SVD's payback work is
+    ///   `80^3 * 6e-4 = 307.2` ns, so it is granted every width; one
+    ///   four-slot lane scores `512000 / 4 + 100 + 3 * 64 = 128292` ns
+    ///   against the baseline's 512000 ns on four one-slot lanes;
+    /// - `79 x 79` instead: payback `79^3 * 6e-4 = 295.8` ns pays at no width
+    ///   (its whole time, 493039 ns, would), so every grant is one, no
+    ///   candidate scores below the baseline's 493039 ns, and the tie keeps
+    ///   the baseline;
+    /// - the first batch with one `4 x 4 x 2` input keeps the baseline.
+    ///
+    /// On six slots with a 10000 ns lane minimum, one `10000 x 1` and 120
+    /// `100 x 1` (payback 6 and 0.06 ns: serial at every width) give `L0 = 2`
+    /// lanes; the baseline and two equal lanes score 11000 ns, the
+    /// reservation's six one-slot lanes 10000 ns but hold more than `L0`
+    /// lanes and are discarded, so the baseline's two three-slot lanes run
+    /// every block.
+    #[test]
+    fn single_matrix_factorizations_join_the_lane_search() {
+        let small: &[usize] = &[4, 4];
+        assert_eq!(
+            svd_lane_widths(4, 0.0, &[&[80, 80], small, small, small]),
+            [4; 4]
+        );
+        assert_eq!(
+            svd_lane_widths(4, 0.0, &[&[79, 79], small, small, small]),
+            [1; 4]
+        );
+        assert_eq!(
+            svd_lane_widths(4, 0.0, &[&[80, 80], small, small, &[4, 4, 2]]),
+            [1; 4]
+        );
+        let mut many: Vec<&[usize]> = vec![&[10000, 1]];
+        many.extend([&[100, 1][..]; 120]);
+        assert_eq!(svd_lane_widths(6, 10000.0, &many), [3; 121]);
+    }
+}
