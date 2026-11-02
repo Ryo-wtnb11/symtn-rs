@@ -447,7 +447,7 @@ where
         }
         // Why the storage body: a lazy-adjoint source aliases its parent.
         destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
-        options.admit(engine)?;
+        options.admit(engine, || false)?;
         <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_into(
             engine,
             options,
@@ -829,7 +829,7 @@ where
         options: ExecOptions,
         operation: TreeTransformOperation,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine)?;
+        options.admit(engine, || false)?;
         if let Some(host) = S::as_host(EXEC, self) {
             if let Some(compact) =
                 compact_arms::transform_rank_one_diagonal(engine, options, host, &operation)?

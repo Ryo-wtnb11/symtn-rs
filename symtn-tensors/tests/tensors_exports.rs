@@ -85,6 +85,7 @@ fn symtn_tensors_exports_exactly_the_pinned_names() {
         // contract
         "execute_storage_contract_members_cuda",
         "execute_storage_contract_resolution_on_cuda",
+        "has_multi_blocks",
         "plan_compose",
         "prepare_tensorcontract_fusion_plan_dyn",
         "tensorcontract_fusion_block_specs",

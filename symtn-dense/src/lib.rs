@@ -60,6 +60,8 @@ mod tests;
 pub use dot::DenseDotConfig;
 pub use dtype::{DenseBackend, DenseDType};
 pub use error::DenseError;
+#[doc(hidden)]
+pub use executor::batch_searches_lanes;
 pub use executor::{
     arity_mismatch, check_contiguous_output, strided_batch_runs, strided_batch_runs_into,
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,

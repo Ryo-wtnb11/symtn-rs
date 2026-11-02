@@ -742,6 +742,42 @@ pub fn strided_batch_runs(jobs: &[DenseGemmBatchJob]) -> Vec<usize> {
     runs
 }
 
+/// Whether a batch of `jobs` (partitioned into `runs`) is one strided
+/// submission: one job, or one affine run of at least two jobs whose
+/// destination step covers a whole block (the O(1) proof that the rank-3
+/// destination is self-disjoint). The executor runs such a batch on the
+/// strided entry, which places no blocks on lanes; an op-bearing run also
+/// needs a layout its views admit.
+pub(crate) fn single_strided_batch(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
+    jobs.len() == 1
+        || runs == [jobs.len()]
+            && jobs.len() >= 2
+            && strided_batch_run_len(jobs, 0) == jobs.len()
+            && jobs[1]
+                .dst_offset
+                .checked_sub(jobs[0].dst_offset)
+                .zip(jobs[0].rows.checked_mul(jobs[0].cols))
+                .is_some_and(|(dst_step, block)| dst_step >= block)
+}
+
+/// Whether the batch of `jobs` in `runs` (with operand ops `ops`) is placed
+/// by the block scheduler's lane search, the phase a [`crate::LaneAllocation`]
+/// selects for: two or more jobs that are not one strided submission (see
+/// [`single_strided_batch`]; an op-bearing run with a zero extent is not
+/// strided). Unstable plumbing for symtn's capability admission, which
+/// decides participation from a plan's batches before any write.
+#[doc(hidden)]
+pub fn batch_searches_lanes(
+    jobs: &[DenseGemmBatchJob],
+    runs: &[usize],
+    ops: [MatrixOp; 2],
+) -> bool {
+    jobs.len() >= 2
+        && !(single_strided_batch(jobs, runs)
+            && (ops == [MatrixOp::Identity; 2]
+                || jobs[0].rows != 0 && jobs[0].contracted != 0 && jobs[0].cols != 0))
+}
+
 /// Writes [`strided_batch_runs`] into caller-owned scratch.
 pub fn strided_batch_runs_into(jobs: &[DenseGemmBatchJob], runs: &mut Vec<usize>) {
     runs.clear();

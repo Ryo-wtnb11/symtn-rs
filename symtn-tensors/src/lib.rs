@@ -49,8 +49,8 @@ pub use contract::{
 };
 #[doc(hidden)]
 pub use contract::{
-    plan_compose, try_compile_storage_contract_core_route, HostContractMembersWorkspace,
-    PlanarContractOrders, StagedContract, StorageContractResolution,
+    has_multi_blocks, plan_compose, try_compile_storage_contract_core_route,
+    HostContractMembersWorkspace, PlanarContractOrders, StagedContract, StorageContractResolution,
 };
 pub use contract::{
     prepare_tensorcontract_fusion_plan_dyn, tensorcontract_fusion_block_specs, FusionContractPlan,

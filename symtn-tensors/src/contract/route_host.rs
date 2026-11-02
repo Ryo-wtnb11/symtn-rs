@@ -1341,3 +1341,63 @@ where
         ContractDestinationInit::Axpby(D::zero()),
     )
 }
+
+impl<C: DenseBlockScalar> StorageContractResolution<C> {
+    /// Whether one replay of this route runs a phase the lane allocation
+    /// selects for: a core GEMM batch the dense executor places by its lane
+    /// search, or a tree transform with Multi recoupling GEMMs (a source or
+    /// output transform). Decided from the plan alone, so admission can
+    /// refuse before any write. Unstable plumbing for symtn's
+    /// lane-allocation admission.
+    #[doc(hidden)]
+    pub fn searches_lanes(&self) -> bool {
+        self.route_searches_lanes(|plan| plan.searches_lanes())
+    }
+
+    /// [`Self::searches_lanes`] of the replay over `members` members, whose
+    /// core runs the member-expanded batches.
+    #[doc(hidden)]
+    pub fn member_searches_lanes(&self, members: usize) -> bool
+    where
+        C: Neg<Output = C>,
+    {
+        self.route_searches_lanes(|plan| StackedDirectReplay::searches_lanes(plan, members))
+    }
+
+    fn route_searches_lanes(
+        &self,
+        core: impl Fn(&Arc<FusionBlockContractPlan<C>>) -> bool,
+    ) -> bool {
+        match &self.route {
+            ContractRoute::Core { plan, .. } => core(plan),
+            ContractRoute::CopyC(copy) => core(&copy.core) || has_multi_blocks(&copy.transform),
+            ContractRoute::DynamicTree(artifact) => {
+                let source = |entry: &DynamicFusionTransformedSourceEntry<C>, borrowed: bool| {
+                    !borrowed
+                        && entry
+                            .transform_structure
+                            .as_ref()
+                            .is_some_and(has_multi_blocks)
+                };
+                core(&artifact.block_plan)
+                    || source(&artifact.lhs_transform, artifact.lhs_borrowed)
+                    || source(&artifact.rhs_transform, artifact.rhs_borrowed)
+                    || artifact
+                        .core_dst
+                        .as_ref()
+                        .is_some_and(|entry| has_multi_blocks(&entry.output_transform_structure))
+            }
+        }
+    }
+}
+
+/// Whether `transform` replays Multi recoupling blocks, the transform phase
+/// whose grouped GEMMs a lane allocation selects for. Unstable plumbing for
+/// symtn's lane-allocation admission.
+#[doc(hidden)]
+pub fn has_multi_blocks<C: Copy>(transform: &TreeTransformStructure<C>) -> bool {
+    transform
+        .blocks()
+        .iter()
+        .any(|block| matches!(block, symtn_operations::TreeTransformBlock::Multi { .. }))
+}

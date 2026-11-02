@@ -215,6 +215,46 @@ fn factorizations_and_trace_agree_across_widths() {
     }
 }
 
+/// What: an erased engine keeps whatever auto-trait bounds its caller
+/// gave it (`Send`, `Sync`, both): each such object is an execution context
+/// for an operation without a lane phase (`norm`) and for one with it
+/// (`permute`'s Multi recoupling), with the plain engine's results.
+#[test]
+fn erased_engines_with_auto_trait_bounds_are_contexts() {
+    let runtime = Runtime::builder().build().unwrap();
+    let t = fixture(&runtime);
+    let reference = &mut CpuEngine::serial();
+    let want = (
+        t.norm(reference, 2.0).unwrap().to_bits(),
+        bits(
+            t.permute(reference, &[2, 0], &[1])
+                .unwrap()
+                .dense_data()
+                .unwrap(),
+        ),
+    );
+    macro_rules! check {
+        ($object:ty) => {{
+            let mut engine = CpuEngine::serial();
+            let engine: &mut $object = &mut engine;
+            let got = (
+                t.norm(engine, 2.0).unwrap().to_bits(),
+                bits(
+                    t.permute(engine, &[2, 0], &[1])
+                        .unwrap()
+                        .dense_data()
+                        .unwrap(),
+                ),
+            );
+            assert_eq!(got, want, stringify!($object));
+        }};
+    }
+    check!(dyn Engine);
+    check!(dyn Engine + Send);
+    check!(dyn Engine + Sync);
+    check!(dyn Engine + Send + Sync);
+}
+
 #[test]
 fn two_engines_on_two_threads_share_one_runtime() {
     let runtime = Runtime::builder().build().unwrap();

@@ -370,8 +370,10 @@ where
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
         self.check_workspace(workspace)?;
-        // Before the lease: a refused allocation keeps the workspace as it was.
-        if let Err(error) = options.admit(engine) {
+        // Before the lease and any upload: a refused allocation keeps the
+        // workspace as it was. Participation is the member replay's.
+        let participates = || self.resolution.member_searches_lanes(lhs.members);
+        if let Err(error) = options.admit(engine, participates) {
             return Err(workspace.output.hide(error));
         }
         // First, so no later error of this call keeps another engine's state.
@@ -447,8 +449,10 @@ where
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         self.check_workspace(workspace)?;
-        // Before the lease: a refused allocation keeps the workspace as it was.
-        if let Err(error) = options.admit(engine) {
+        // Before the lease and any upload: a refused allocation keeps the
+        // workspace as it was. Participation is the member replay's.
+        let participates = || self.resolution.member_searches_lanes(lhs.members);
+        if let Err(error) = options.admit(engine, participates) {
             return Err(workspace.output.hide(error));
         }
         // First, so no later error of this call keeps another engine's state.

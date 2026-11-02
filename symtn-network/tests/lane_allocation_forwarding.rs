@@ -50,11 +50,12 @@ fn is_refused(error: &Error) -> bool {
     )
 }
 
-/// What: `contract!`, its scalar form and `Network::contract` forward a
-/// configured context: after a default call, the other allocation searches
-/// its own lane allocation on the native provider (and is refused on a
-/// provider without the allocator), and the results agree with the
-/// default's.
+/// What: `contract!` and `Network::contract` forward a configured context:
+/// after a default call, the other allocation searches its own lane
+/// allocation on the native provider (and is refused on a provider without
+/// the allocator), and the results agree with the default's. The scalar form
+/// runs on the same context; its contraction has no grouped batch, so it
+/// agrees with the default on every provider.
 #[test]
 fn network_calls_forward_a_configured_context() {
     let _serial = crate::counting_alloc::serial();
@@ -118,10 +119,8 @@ fn network_calls_forward_a_configured_context() {
             assert!(is_refused(&result.unwrap_err()), "{what}");
         }
     }
-    if LANE_ALLOCATOR {
-        let scalar = scalar.unwrap();
-        assert!((scalar - want_scalar).abs() <= 1e-10 * (1.0 + want_scalar.abs()));
-    } else {
-        assert!(is_refused(&scalar.unwrap_err()));
-    }
+    // The full contraction to a scalar has no grouped GEMM batch, so every
+    // provider runs it with the configured context as with the default.
+    let scalar = scalar.unwrap();
+    assert!((scalar - want_scalar).abs() <= 1e-10 * (1.0 + want_scalar.abs()));
 }

@@ -96,6 +96,7 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         "Pool",
         "admit_lane_allocation",
         "arity_mismatch",
+        "batch_searches_lanes",
         "check_contiguous_output",
         "cuda_all_finite",
         "cuda_conj",

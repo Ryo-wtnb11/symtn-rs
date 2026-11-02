@@ -30,6 +30,8 @@ pub use route_cuda::{
     CudaContractMembersWorkspace,
 };
 #[doc(hidden)]
+pub use route_host::has_multi_blocks;
+#[doc(hidden)]
 pub use route_host::HostContractMembersWorkspace;
 mod dynamic_space;
 mod fusion;

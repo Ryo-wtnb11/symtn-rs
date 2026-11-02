@@ -243,9 +243,13 @@ fn a_call_with_nothing_to_search_runs_any_lane_allocation() {
 }
 
 /// What: on a provider without the lane allocator, another allocation is
-/// refused with a typed `Unsupported` before any write: the caller's
+/// refused with a typed `Unsupported` before any write where the call has a
+/// phase the allocation selects for (a grouped GEMM batch): the caller's
 /// destination keeps its bits, an eager and a prepared call alike, and the
-/// prepared workspace serves a valid call afterwards.
+/// prepared workspace serves a valid call afterwards. Phases outside the
+/// selection run as by default: one GEMM, a prepared affine member batch and
+/// a permute without Multi recoupling (one U(1) sector of degeneracy 2,
+/// `A = 2I`, `B = I`, so `A B = 2I`).
 #[test]
 #[cfg_attr(
     not(any(
@@ -263,17 +267,32 @@ fn a_provider_without_the_allocator_refuses_before_any_write() {
     let v = u1_space();
     let a = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&v], 5).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&v], 6).unwrap();
+    // Contracting over a leg without the charges ±3 leaves those destination
+    // blocks to `beta` alone, which the replay scales before its GEMMs: the
+    // refusal must come before that write.
+    let w = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        (-2..=2).map(|charge: i32| {
+            (
+                U1Irrep::new(charge),
+                40 - 8 * charge.unsigned_abs() as usize,
+            )
+        }),
+    )
+    .unwrap();
+    let left = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&w], 7).unwrap();
+    let right = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&w], [&v], 8).unwrap();
     let mut destination =
         TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&v], 9).unwrap();
     let before = bits(destination.dense_data().unwrap());
     let equal = &mut context(4, EQUAL);
-    assert!(is_refused(a.contract_into(
+    assert!(is_refused(left.contract_into(
         equal,
-        &b,
+        &right,
         &SPEC,
         &mut destination,
         1.0,
-        1.0
+        0.5
     )));
     assert_eq!(bits(destination.dense_data().unwrap()), before);
 
@@ -303,6 +322,33 @@ fn a_provider_without_the_allocator_refuses_before_any_write() {
     assert_eq!(members(&target), kept);
     plan.execute_into(default, &lhs, &rhs, &mut target, &mut workspace)
         .unwrap();
+
+    let one = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let mut diagonal = |value: f64| {
+        TensorMap::<_, f64>::from_subblock_fn(seed, &runtime, [&one], [&one], |_, i| {
+            if i[0] == i[1] {
+                value
+            } else {
+                0.0
+            }
+        })
+        .unwrap()
+    };
+    let (a, b) = (diagonal(2.0), diagonal(1.0));
+    let product = a.contract(equal, &b, &SPEC).unwrap();
+    assert_eq!(product.dense_data().unwrap(), [2.0, 0.0, 0.0, 2.0]);
+    assert_eq!(
+        a.permute(equal, &[1], &[0]).unwrap().dense_data().unwrap(),
+        [2.0, 0.0, 0.0, 2.0]
+    );
+    let (lhs, rhs) = (
+        StackedTensorMap::pack(&[&a, &a]).unwrap(),
+        StackedTensorMap::pack(&[&b, &b]).unwrap(),
+    );
+    let plan = ContractPlan::new(equal, &lhs, &rhs, &SPEC).unwrap();
+    let mut workspace = plan.workspace().unwrap();
+    let output = plan.execute(equal, &lhs, &rhs, &mut workspace).unwrap();
+    assert_eq!(members(output), bits(&[2.0, 0.0, 0.0, 2.0].repeat(2)));
 }
 
 /// What: participation is per lowered phase: a general eigendecomposition,

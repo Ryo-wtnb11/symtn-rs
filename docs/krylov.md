@@ -45,4 +45,9 @@ See the [adapter and example](../symtn/src/krylov.rs) and
   values.
 - The final binary must link LAPACK for krylov's small dense problems, via a
   `blas-*` feature or an application-linked provider. Default `cpu-faer`
-  links none; a missing provider is a link error.
+  links none; a missing provider is a link error. Linking one yourself keeps
+  the native dense provider (and its lane allocation) for the tensor
+  operations, for example on macOS
+  `RUSTFLAGS="-l framework=Accelerate" cargo test -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::`,
+  as the macOS nightly job does; a `blas-*` feature selects the BLAS dense
+  provider instead, which refuses a non-default lane allocation.

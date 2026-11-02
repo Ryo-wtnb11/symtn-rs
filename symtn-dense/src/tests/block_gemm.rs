@@ -414,7 +414,7 @@ fn a_forced_policy_refuses_another_lane_allocation_before_any_write() {
         for allocation in [LaneAllocation::Moldable, LaneAllocation::EqualShare] {
             let refused = forced && allocation != LaneAllocation::Moldable;
             let label = format!("{:?} {allocation:?}", policy.strategy);
-            let admitted = crate::admit_lane_allocation(&mut engine, allocation);
+            let admitted = crate::admit_lane_allocation(&mut engine, allocation, true);
             assert_eq!(admitted.is_err(), refused, "{label}: admission");
             let mut out = initial.clone();
             let (result, _) = run_with(

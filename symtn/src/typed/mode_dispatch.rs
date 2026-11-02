@@ -498,6 +498,9 @@ where
                 src_len,
                 &operation,
             )?;
+        options.admit(engine, || {
+            symtn_tensors::has_multi_blocks(staged.structure())
+        })?;
         let data = S::replay_owned(
             engine,
             EXEC,
@@ -540,6 +543,9 @@ where
                 &operation,
                 &destination_space,
             )?;
+        options.admit(engine, || {
+            symtn_tensors::has_multi_blocks(staged.structure())
+        })?;
         let destination_data = destination_storage_mut(destination)?;
         with_transform_into_source(source, &operation, alpha, beta, |input| {
             S::replay_into(
@@ -875,6 +881,7 @@ where
                 staged.plan_beyond_core::<S::Caps>(engine, miss)?
             }
         };
+        options.admit(engine, || resolution.searches_lanes())?;
         S::contract_into(
             engine,
             EXEC,
@@ -949,6 +956,7 @@ where
         symtn_tensors::CoreRoute::Hit(core) => core,
         symtn_tensors::CoreRoute::Miss(miss) => staged.plan_beyond_core::<S::Caps>(engine, miss)?,
     };
+    options.admit(engine, || resolution.searches_lanes())?;
     let data = S::contract_owned(
         engine,
         EXEC,

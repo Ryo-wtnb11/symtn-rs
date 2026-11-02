@@ -156,11 +156,12 @@ fn on_lanes<B: BlockOp>(
             total_work += work;
             cost(B::KIND, work, &model)
         }));
-    // A batch the search would place refuses a selection a forced policy
-    // overrides, before any block runs, rather than silently running the
-    // forced placement.
+    // A batch the search would place (two or more modeled blocks) refuses a
+    // selection a forced policy overrides, before any block runs, rather than
+    // silently running the forced placement.
     if allocation != LaneAllocation::Moldable
         && exec.batch_policy().strategy != tcontract_exec::BatchStrategy::Auto
+        && jobs.len() >= 2
         && jobs
             .iter()
             .enumerate()

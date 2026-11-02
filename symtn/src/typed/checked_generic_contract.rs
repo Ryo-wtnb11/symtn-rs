@@ -643,6 +643,7 @@ where
             (Some(lease), resolution)
         }
     };
+    options.admit(engine, || resolution.searches_lanes())?;
     let data = S::contract_owned(
         engine,
         EXEC,
@@ -734,6 +735,7 @@ where
         symtn_tensors::CoreRoute::Miss(miss) => D::lane(lease.context(options))?
             .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?,
     };
+    options.admit(engine, || resolution.searches_lanes())?;
     S::contract_into(
         engine,
         EXEC,

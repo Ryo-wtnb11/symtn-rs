@@ -99,6 +99,20 @@ fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
     assert_eq!(bits(cuda, &destination), before);
 }
 
+/// The typed refusal of a lane allocation the engine has no allocator for.
+fn lane_allocation_refused<T>(result: Result<T, symtn::typed::Error>) -> bool {
+    matches!(
+        result,
+        Err(symtn::typed::Error::Operation(error)) if matches!(
+            *error,
+            symtn::typed::OperationError::Dense(symtn::expert::DenseError::Unsupported {
+                op: "lane_allocation",
+                ..
+            })
+        )
+    )
+}
+
 #[test]
 #[ignore = "requires a real CUDA device"]
 fn a_lane_allocation_is_refused_on_a_cuda_engine_before_any_device_work() {
@@ -133,16 +147,31 @@ fn a_lane_allocation_is_refused_on_a_cuda_engine_before_any_device_work() {
     let mut target = retained.take_output().unwrap();
 
     let stats = cuda_transfer_stats();
-    assert!(lhs
-        .contract_into(&mut cx, &rhs, &SPEC, &mut destination, 1.0, 1.0)
-        .is_err());
-    assert!(lhs.contract(&mut cx, &rhs, &SPEC).is_err());
-    assert!(lhs.permute(&mut cx, &[1], &[0]).is_err());
-    assert!(lhs.svd_compact(&mut cx, &[0], &[1]).is_err());
-    assert!(plan.execute(&mut cx, &lhs_s, &rhs_s, &mut cold).is_err());
-    assert!(plan
-        .execute_into(&mut cx, &lhs_s, &rhs_s, &mut target, &mut retained)
-        .is_err());
+    assert!(lane_allocation_refused(lhs.contract_into(
+        &mut cx,
+        &rhs,
+        &SPEC,
+        &mut destination,
+        1.0,
+        1.0
+    )));
+    assert!(lane_allocation_refused(lhs.contract(&mut cx, &rhs, &SPEC)));
+    assert!(lane_allocation_refused(lhs.permute(&mut cx, &[1], &[0])));
+    assert!(lane_allocation_refused(lhs.svd_compact(
+        &mut cx,
+        &[0],
+        &[1]
+    )));
+    assert!(lane_allocation_refused(
+        plan.execute(&mut cx, &lhs_s, &rhs_s, &mut cold)
+    ));
+    assert!(lane_allocation_refused(plan.execute_into(
+        &mut cx,
+        &lhs_s,
+        &rhs_s,
+        &mut target,
+        &mut retained
+    )));
     assert_eq!(cuda_transfer_stats(), stats, "nothing reached the device");
     assert_eq!(bits(cx.engine_mut(), &destination), before);
     plan.execute_into(cx.engine_mut(), &lhs_s, &rhs_s, &mut target, &mut retained)

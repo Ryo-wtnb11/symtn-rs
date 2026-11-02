@@ -810,12 +810,14 @@ fn eigsolve_runs_on_the_callers_engine() {
     let twice = 2;
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 3)),
+        (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 8)),
     )
     .unwrap();
+    // Degeneracies large enough that a four-thread engine searches the
+    // lanes of the map's contraction batch.
     let w = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 4)),
+        (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 16)),
     )
     .unwrap();
     let serial: &mut dyn ExecContext = &mut CpuEngine::serial();
@@ -839,9 +841,28 @@ fn eigsolve_runs_on_the_callers_engine() {
             &mut ws,
         )
     };
+    let lane_misses = || {
+        symtn::cache::stats()
+            .into_iter()
+            .find(|info| info.kind() == symtn::cache::StructureCacheKind::LaneAllocations)
+            .unwrap()
+            .misses()
+    };
+    let lane_allocator = !cfg!(any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ));
     let (vals1, vecs1, _) = solve(serial).unwrap();
     let mut wide4 = CpuEngine::new(Pool::builder().threads(4).build().unwrap());
+    symtn::cache::clear();
+    let cold = lane_misses();
     let (vals4, vecs4, info) = solve(&mut wide4).unwrap();
+    if lane_allocator {
+        assert!(lane_misses() > cold, "premise: the map's batches search");
+    }
     assert_eq!(info.converged, want.len(), "{info:?}");
     for (k, (&a, &b)) in vals4.iter().zip(&vals1).enumerate() {
         assert!(
@@ -856,23 +877,23 @@ fn eigsolve_runs_on_the_callers_engine() {
     }
 
     // The map's contraction runs the context's lane allocation: on the
-    // native provider it solves the same spectrum, while a BLAS provider,
-    // which has no lane allocator, refuses it from inside the map.
+    // native provider, with the default's allocations cached, it searches
+    // its own once (a map that dropped the options would hit the default's)
+    // and solves the same spectrum; a BLAS provider, which has no lane
+    // allocator, refuses it from inside the map.
     let mut configured =
         Configured::new(CpuEngine::new(Pool::builder().threads(4).build().unwrap()))
             .with_lane_allocation(LaneAllocation::EqualShare);
-    let lane_allocator = !cfg!(any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ));
+    let before = lane_misses();
     match solve(&mut configured) {
         Ok((vals, _, _)) if lane_allocator => {
+            assert!(lane_misses() > before, "the configured map searched");
             for (&a, &b) in vals.iter().zip(&vals1) {
                 assert!((a - b).abs() < 1e-10, "{a} vs {b}");
             }
+            let repeated = lane_misses();
+            solve(&mut configured).unwrap();
+            assert_eq!(lane_misses(), repeated, "its own allocations hit");
         }
         Err(krylov::Error::Vector(Error::Operation(e))) if !lane_allocator => assert!(
             matches!(

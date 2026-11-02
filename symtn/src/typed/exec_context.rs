@@ -31,15 +31,19 @@ impl ExecOptions {
 /// The selection applies on the native provider's CPU engine under the
 /// engine's `Auto` batch policy, the only configuration that searches lane
 /// allocations. There, a call holding no batch to search (one block, or one
-/// slot) runs as it does by default. A non-default selection is refused with
-/// a typed dense `Unsupported` error before the call writes, uploads or
-/// submits anything when a phase of the call that would search (a
-/// contraction, a tree transform, or an SVD, Hermitian eigen or general
-/// eigenvalue batch) runs on an engine or provider without the allocator (a
-/// CUDA engine, a BLAS provider build) or under a forced batch policy, which
-/// fixes the placement itself. Operations without such a phase (norms, linear
-/// combinations, QR and LQ, solves, general eigendecompositions, the prepared
-/// batched Hermitian eigensolver, transfers) ignore it.
+/// slot) runs as it does by default. Participation is decided per phase from
+/// the call's plan before it writes: a grouped GEMM batch (not one GEMM or one
+/// strided run), Multi recoupling in a tree transform, and an SVD, Hermitian
+/// eigen or general-eigenvalue batch of two or more blocks participate. A
+/// participating phase refuses a non-default selection with a typed dense
+/// `Unsupported` error before the call writes, uploads or submits anything on
+/// a provider without the allocator (a BLAS build) or under a forced batch
+/// policy, which fixes the placement itself; a CUDA engine, which has no
+/// allocator, refuses it for every contraction, transform and compact
+/// factorization. Phases without a search (one GEMM or strided run, a
+/// transform without Multi recoupling, norms, linear combinations, QR and LQ,
+/// solves, general eigendecompositions, the prepared batched Hermitian
+/// eigensolver, transfers) ignore it.
 ///
 /// One complete configuration (provider, engine width, batch policy and work
 /// model, lane allocation and inputs) repeats its bits; results of different
@@ -64,11 +68,26 @@ impl<E: Engine> ExecContext for E {
     }
 }
 
-impl ExecContext for dyn Engine + '_ {
-    fn parts(&mut self) -> (&mut dyn Engine, ExecOptions) {
-        (self, ExecOptions::default())
-    }
+// Why one impl per auto-trait combination: an erased engine that keeps a
+// `Send` or `Sync` bound is a distinct object type, which a call taking
+// `&mut dyn Engine` accepted by unsizing; the generic carrier argument needs
+// each object type to be a context itself.
+macro_rules! erased_engine_context {
+    ($($object:ty),+ $(,)?) => {$(
+        impl ExecContext for $object {
+            fn parts(&mut self) -> (&mut dyn Engine, ExecOptions) {
+                (self, ExecOptions::default())
+            }
+        }
+    )+};
 }
+
+erased_engine_context!(
+    dyn Engine + '_,
+    dyn Engine + Send + '_,
+    dyn Engine + Sync + '_,
+    dyn Engine + Send + Sync + '_,
+);
 
 /// An engine owned together with the [`ExecOptions`] of the calls it runs.
 ///
@@ -146,10 +165,21 @@ impl ExecContext for Invocation<'_> {
 }
 
 impl ExecOptions {
-    /// Admits these options on `engine` for a call with a phase that
-    /// searches lane allocations, before the call has any effect.
-    pub(crate) fn admit(self, engine: &mut dyn Engine) -> Result<(), Error> {
-        symtn_dense::admit_lane_allocation(engine, self.lane_allocation)
+    /// Admits these options on `engine` before the call has any effect: a
+    /// non-default lane allocation needs a CPU engine, and, where the call's
+    /// plan has a phase the allocation selects for (`participates`), the
+    /// native provider under an `Auto` batch policy.
+    /// `participates` is evaluated only for a non-default allocation, so the
+    /// default never pays for deciding participation.
+    pub(crate) fn admit(
+        self,
+        engine: &mut dyn Engine,
+        participates: impl FnOnce() -> bool,
+    ) -> Result<(), Error> {
+        if self.lane_allocation == LaneAllocation::Moldable {
+            return Ok(());
+        }
+        symtn_dense::admit_lane_allocation(engine, self.lane_allocation, participates())
             .map_err(|error| Error::Operation(Box::new(super::OperationError::Dense(error))))
     }
 }
