@@ -165,14 +165,10 @@ jobs:
         run: |
           cargo test --locked -p symtn-dense -p symtn-matrixalgebra --no-default-features --features blas-accelerate --tests
           cargo test --locked -p symtn-dense -p symtn-matrixalgebra --no-default-features --features blas-accelerate --doc
-      # symtn tests under Accelerate (added in #2111) are disabled:
-      # tenferro-linalg 0.7.1 sizes the complex gesdd values-only (jobz='N')
-      # rwork as 5*min(m,n), while Accelerate's LAPACK 3.2.1 needs 7*min(m,n).
-      # The overflow corrupts the heap (random segfaults, quick_cache panics).
-      # Re-enable
-      # `cargo test --locked -p symtn --tests --no-default-features --features blas-accelerate`
-      # once the dependency is bumped. See symtn #2113 and
-      # tensor4all/tenferro-rs#2052.
+      # The facade integration tests under the system BLAS/LAPACK (#2107).
+      - name: Run the symtn tests under Accelerate
+        working-directory: symtn
+        run: cargo test --locked -p symtn --tests --no-default-features --features blas-accelerate
 
   # opt-path (wraps opt-einsum-path) and cotengra-python (shells out to an
   # installed Python `cotengra`) have real code but, unlike the backend rows
