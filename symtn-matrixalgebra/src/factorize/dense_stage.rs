@@ -1,10 +1,12 @@
 use super::*;
 use symtn_dense::Engine;
 
-/// Runs one streaming per-block factorization loop inside a single executor
-/// linear-algebra scope: the backend admits the call once, while the loop
-/// still holds only one block's input and output at a time. Batching through
-/// `factorize_batch` would instead hold every block's factors at once.
+/// Runs `body` once inside a single executor linear-algebra scope, so the
+/// backend admits the body's dense calls once. The scope's own error takes
+/// precedence over the body's error, which is returned otherwise. The body
+/// decides the working set: a per-block loop streams one block's factors at
+/// a time, while a `factorize_batch` inside it may retain every block's
+/// factors until they are delivered.
 #[doc(hidden)]
 pub fn in_linalg_scope<E, T>(
     engine: &mut dyn Engine,

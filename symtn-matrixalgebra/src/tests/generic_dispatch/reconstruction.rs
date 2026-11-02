@@ -847,8 +847,8 @@ enum Delivery {
     DropLast,
     /// The first input's outputs miss a factor.
     DropFactor,
-    /// The second input fails in the solver.
-    FailLast,
+    /// The first input fails in the solver; delivery stops there.
+    FailFirst,
     /// The first input's outputs miss a factor, then the second fails.
     DropFactorThenFail,
     /// The first input is delivered twice.
@@ -890,7 +890,7 @@ impl Observer for MalformedBatch {
                 outcome.as_mut().unwrap().pop();
                 sink(index, outcome)
             }
-            (FailLast | DropFactorThenFail, 1) => sink(index, Err(solver_failure())),
+            (FailFirst, 0) | (DropFactorThenFail, 1) => sink(index, Err(solver_failure())),
             (Duplicate, 0) => {
                 sink(index, outcome)?;
                 sink(index, Err(solver_failure()))
@@ -935,7 +935,7 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
             Box::new(arity("qr_into")),
             Box::new(arity("svd_into")),
         ),
-        (Delivery::FailLast, Box::new(solver), Box::new(solver)),
+        (Delivery::FailFirst, Box::new(solver), Box::new(solver)),
         (
             Delivery::DropFactorThenFail,
             Box::new(solver),

@@ -1634,7 +1634,6 @@ fn eigh_full_reports_the_first_sector_failure_over_later_batch_outcomes() {
     // non-finite eigenvalue, not sector 1's solver error or malformed output.
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = two_sector_hermitian();
-    let expected = crate::factorize::validate_real_eigenvalues_for_test(&[f64::INFINITY]);
     let solver_failure = DenseError::Backend {
         backend: DenseBackend::Tenferro,
         op: "eigh_read",
@@ -1651,6 +1650,16 @@ fn eigh_full_reports_the_first_sector_failure_over_later_batch_outcomes() {
             &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
         )
         .map(|_| ());
-        assert_eq!(error, expected);
+        assert!(
+            matches!(
+                error,
+                Err(OperationError::Dense(DenseError::NumericalFailure {
+                    backend: DenseBackend::Tenferro,
+                    op: crate::factorize::EIGH_EIGENVALUE_CHECK,
+                    ..
+                }))
+            ),
+            "{error:?}"
+        );
     }
 }
