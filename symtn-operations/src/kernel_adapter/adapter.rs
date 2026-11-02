@@ -1,7 +1,50 @@
 use super::*;
 
 pub(crate) mod sealed {
-    pub trait Sealed {}
+    use super::*;
+
+    /// Unnameable outside this crate, so its method is crate-internal.
+    pub trait Sealed {
+        /// A Single block's overwrite `dst = scale * op(src)` over its
+        /// compiled role by the role's plan, when this adapter replays plans
+        /// and [`threaded_plan`] widens the role on `exec`; `None` leaves the
+        /// block to [`HostKernelAdapter::transform_strided_baked`]. An
+        /// accumulate (`beta` neither absent nor zero) is never planned.
+        ///
+        /// Why not inside `transform_strided_baked`: a threaded structural
+        /// scale shares its coefficient across workers, which needs
+        /// `C: Sync`, and that method also serves fusion pack and scatter,
+        /// whose coefficient type carries no such bound and whose layouts
+        /// carry no plan.
+        #[allow(clippy::too_many_arguments)]
+        fn planned_transform<T, C>(
+            &mut self,
+            _exec: crate::host_pool::Exec<'_>,
+            _role: BakedFusedLayout<'_>,
+            _dst_data: &mut [T],
+            _src_data: &[T],
+            _dst_offset: isize,
+            _src_offset: isize,
+            _source_conjugate: bool,
+            _scale: TransformScale<T, C>,
+            _beta: Option<T>,
+        ) -> Option<Result<(), OperationError>>
+        where
+            C: Copy + Sync,
+            T: Copy
+                + Send
+                + Sync
+                + Add<T, Output = T>
+                + Mul<T, Output = T>
+                + PartialEq
+                + Zero
+                + One
+                + ConjugateValue
+                + RecouplingCoefficientAction<C>,
+        {
+            None
+        }
+    }
 }
 
 /// Backend-neutral low-level kernel adapter for host-slice replay.
@@ -24,6 +67,13 @@ pub(crate) mod sealed {
 /// zero fills pass the one-sided normalized view of the destination block.
 /// Every primitive is elementwise without reduction, so an adapter that
 /// iterates the views it receives produces the same values.
+///
+/// Token contract: `exec` is the caller's share of the engine token. The
+/// copy, add and axpby primitives run an overwrite (no `beta`, or a zero
+/// `beta`) over a compiled role that retains a Strided plan through that plan
+/// across `exec` when Strided's own copy cost rule widens it; every other
+/// call is one serial walk. `transform_strided_baked` is always one walk:
+/// compiled replay widens its Single blocks the same way before calling it.
 ///
 /// Bounds contract: the `*_baked` methods validate only ranks. The caller
 /// guarantees that every offset reachable through the views (or through
@@ -373,6 +423,47 @@ impl StridedHostKernelAdapter {
         }
     }
 
+    /// `dst = op(src)` over one role: its compiled plan across `exec` when
+    /// [`threaded_plan`] admits one, the baked walk otherwise.
+    #[allow(clippy::too_many_arguments)]
+    fn overwrite_baked_dispatch<T, ElementOp>(
+        &mut self,
+        exec: crate::host_pool::Exec<'_>,
+        index: Option<&mut [usize]>,
+        baked: Option<BakedFusedLayout<'_>>,
+        dst_data: &mut [T],
+        src_data: &[T],
+        shape: &[usize],
+        dst_strides: &[isize],
+        src_strides: &[isize],
+        dst_offset: isize,
+        src_offset: isize,
+        op: ElementOp,
+    ) -> Result<(), OperationError>
+    where
+        T: Copy + Send + Sync + Add<Output = T> + Mul<Output = T> + Zero + One + PartialEq,
+        ElementOp: Fn(T) -> T + Send + Sync,
+    {
+        if let (Some(layout), Some(plan)) = (baked, threaded_plan(baked, &exec)) {
+            return planned_overwrite(
+                plan, layout, dst_data, src_data, dst_offset, src_offset, exec, op,
+            );
+        }
+        self.fused_pair_baked_dispatch(
+            index,
+            baked,
+            dst_data,
+            src_data,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            |dst: &mut T, value| *dst = value,
+            op,
+        )
+    }
+
     /// The structural-coefficient element op, chosen once per block.
     ///
     /// The three source forms are TensorKit's: no scale at all for `One()`, a
@@ -487,7 +578,68 @@ impl StridedHostKernelAdapter {
     }
 }
 
-impl sealed::Sealed for StridedHostKernelAdapter {}
+impl sealed::Sealed for StridedHostKernelAdapter {
+    #[allow(clippy::too_many_arguments)]
+    fn planned_transform<T, C>(
+        &mut self,
+        exec: crate::host_pool::Exec<'_>,
+        role: BakedFusedLayout<'_>,
+        dst_data: &mut [T],
+        src_data: &[T],
+        dst_offset: isize,
+        src_offset: isize,
+        source_conjugate: bool,
+        scale: TransformScale<T, C>,
+        beta: Option<T>,
+    ) -> Option<Result<(), OperationError>>
+    where
+        C: Copy + Sync,
+        T: Copy
+            + Send
+            + Sync
+            + Add<T, Output = T>
+            + Mul<T, Output = T>
+            + PartialEq
+            + Zero
+            + One
+            + ConjugateValue
+            + RecouplingCoefficientAction<C>,
+    {
+        // Why not the plan for an accumulate: its `alpha * f(x) + beta * y`
+        // multiplies `f(x)` by a payload-typed one, which is not the exact
+        // `y + f(x)` of `transform_strided_baked`.
+        if beta.is_some_and(|beta| !beta.is_zero()) {
+            return None;
+        }
+        let plan = threaded_plan(Some(role), &exec)?;
+        macro_rules! run {
+            ($op:expr) => {
+                planned_overwrite(
+                    plan, role, dst_data, src_data, dst_offset, src_offset, exec, $op,
+                )
+            };
+        }
+        // The element ops of `transform_strided_baked_impl`, arm for arm.
+        Some(if scale.is_identity() {
+            run!(move |value: T| value.maybe_conj(source_conjugate))
+        } else if scale.is_zero() {
+            let zero = scale.apply(T::zero());
+            run!(move |_: T| zero)
+        } else {
+            match scale {
+                TransformScale::Structural(coefficient) => {
+                    let coefficient = &coefficient;
+                    run!(move |value: T| value
+                        .maybe_conj(source_conjugate)
+                        .scale_by_coefficient(*coefficient))
+                }
+                TransformScale::Data(alpha) => {
+                    run!(move |value: T| alpha * value.maybe_conj(source_conjugate))
+                }
+            }
+        })
+    }
+}
 
 impl<T> HostKernelAdapter<T> for StridedHostKernelAdapter
 where
@@ -520,28 +672,37 @@ where
     ) -> Result<(), OperationError> {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         if beta.is_zero() || beta.is_one() {
-            let assign = beta.is_zero();
             macro_rules! run {
                 ($op:expr) => {
-                    self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        move |dst: &mut T, value| {
-                            if assign {
-                                *dst = value;
-                            } else {
-                                *dst = *dst + value;
-                            }
-                        },
-                        $op,
-                    )
+                    if beta.is_zero() {
+                        self.overwrite_baked_dispatch(
+                            exec,
+                            index,
+                            baked,
+                            dst_data,
+                            src_data,
+                            shape,
+                            dst_strides,
+                            src_strides,
+                            dst_offset,
+                            src_offset,
+                            $op,
+                        )
+                    } else {
+                        self.fused_pair_baked_dispatch(
+                            index,
+                            baked,
+                            dst_data,
+                            src_data,
+                            shape,
+                            dst_strides,
+                            src_strides,
+                            dst_offset,
+                            src_offset,
+                            |dst: &mut T, value| *dst = *dst + value,
+                            $op,
+                        )
+                    }
                 };
             }
             // Why the identity and zero arms: see `copy_scale_strided_baked`.
@@ -589,28 +750,37 @@ where
     ) -> Result<(), OperationError> {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         if beta.is_zero() || beta.is_one() {
-            let assign = beta.is_zero();
             macro_rules! run {
                 ($op:expr) => {
-                    self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        move |dst: &mut T, value| {
-                            if assign {
-                                *dst = value;
-                            } else {
-                                *dst = *dst + value;
-                            }
-                        },
-                        $op,
-                    )
+                    if beta.is_zero() {
+                        self.overwrite_baked_dispatch(
+                            exec,
+                            index,
+                            baked,
+                            dst_data,
+                            src_data,
+                            shape,
+                            dst_strides,
+                            src_strides,
+                            dst_offset,
+                            src_offset,
+                            $op,
+                        )
+                    } else {
+                        self.fused_pair_baked_dispatch(
+                            index,
+                            baked,
+                            dst_data,
+                            src_data,
+                            shape,
+                            dst_strides,
+                            src_strides,
+                            dst_offset,
+                            src_offset,
+                            |dst: &mut T, value| *dst = *dst + value,
+                            $op,
+                        )
+                    }
                 };
             }
             // Why the identity and zero arms: see `copy_scale_strided_baked`.
@@ -639,7 +809,7 @@ where
 
     fn copy_scale_strided_baked(
         &mut self,
-        _exec: crate::host_pool::Exec<'_>,
+        exec: crate::host_pool::Exec<'_>,
         dst_data: &mut [T],
         src_data: &[T],
         shape: &[usize],
@@ -655,7 +825,8 @@ where
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         macro_rules! run {
             ($op:expr) => {
-                self.fused_pair_baked_dispatch(
+                self.overwrite_baked_dispatch(
+                    exec,
                     index,
                     baked,
                     dst_data,
@@ -665,7 +836,6 @@ where
                     src_strides,
                     dst_offset,
                     src_offset,
-                    |dst: &mut T, value| *dst = value,
                     $op,
                 )
             };

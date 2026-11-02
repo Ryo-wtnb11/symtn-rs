@@ -388,9 +388,11 @@ where
     expected
 }
 
-/// Runs both replay modes with `threads` workers in a pool of exactly that
-/// size and returns `(axpby, overwrite)`. A fresh workspace sizes its
-/// fused-index scratch per worker, so its length shows the driver used.
+/// Runs both replay modes with `threads` replay workers and returns
+/// `(axpby, overwrite)`. A fresh workspace sizes its fused-index scratch per
+/// worker, so its length shows the driver used. The pool has two workers per
+/// replay worker and declares free dispatch, so every block an overwrite
+/// visits is widened onto its compiled plan.
 fn replay_recoupling_fixture<D>(
     threads: usize,
     src: &[D],
@@ -405,7 +407,7 @@ where
     let (dst_structure, src_structure, replay) = recoupling_fixture();
     let fused_rank = replay.layouts().max_fused_rank();
     assert!(fused_rank > 0);
-    let mut pool = crate::host_pool::test_pool(threads);
+    let mut pool = crate::host_pool::eager_test_pool(2 * threads);
     pool.install(|engine| {
         let mut axpby = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();

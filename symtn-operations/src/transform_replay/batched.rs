@@ -84,18 +84,15 @@ pub fn tree_transform_searches_lanes<C: Copy>(
         })
 }
 
-/// Runs a replay phase split over `threads` workers with the operation's
-/// engine token. A serial phase runs on a serial token, but the engine is
-/// still admitted first: a broken or CUDA engine never reaches Host payload.
+/// Runs a replay phase with the operation's whole engine token, however
+/// many workers the phase splits its items over: an unsplit phase still
+/// hands its leaves the full token, whose own cost rule decides whether one
+/// large block's move fans out. A broken or CUDA engine never reaches Host
+/// payload.
 pub(super) fn replay_region<R>(
     engine: &mut dyn Engine,
-    threads: usize,
     op: impl FnOnce(Exec<'_>) -> R,
 ) -> Result<R, OperationError> {
-    if threads <= 1 {
-        crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, |_| ())?;
-        return Ok(op(Exec::serial()));
-    }
     crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, op)
 }
 
@@ -137,7 +134,7 @@ where
     A: HostKernelAdapter<D>,
     E: DenseExecutor,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
-    C: Copy,
+    C: Copy + Sync,
 {
     let layouts = task.layouts();
     let recoupling_plan = task.recoupling_plan();
@@ -157,7 +154,7 @@ where
                     unreachable!("checked above: no Multi blocks");
                 };
                 let start = profile.as_ref().map(|_| std::time::Instant::now());
-                tree_transform_single_with_strided_kernel(
+                tree_transform_single_on_token(
                     exec.reborrow(),
                     kernels,
                     &mut workspace.zero_strides,
@@ -207,7 +204,7 @@ where
             // Timestamps only under profiling: the per-block clock reads are
             // measurable against microsecond replays.
             let start = profile.as_ref().map(|_| std::time::Instant::now());
-            tree_transform_single_with_strided_kernel(
+            tree_transform_single_on_token(
                 exec.reborrow(),
                 kernels,
                 &mut workspace.zero_strides,
@@ -490,6 +487,26 @@ where
                 alpha.at(layouts.entry(dst_layout).offset),
                 coefficients[coefficient],
             );
+            let beta = match mode {
+                DestinationMode::Axpby(beta) => Some(beta),
+                DestinationMode::Overwrite => None,
+            };
+            let dst_offset = layouts.entry(dst_layout).offset - dst_start;
+            let src_offset = layouts.entry(src_layout).offset;
+            if let Some(result) = kernels.planned_transform(
+                exec.reborrow(),
+                role,
+                dst_data,
+                src_data,
+                dst_offset,
+                src_offset,
+                storage_conjugate,
+                scale,
+                beta,
+            ) {
+                result?;
+                continue;
+            }
             kernels.transform_strided_baked(
                 exec.reborrow(),
                 &mut zero_strides,
@@ -498,14 +515,11 @@ where
                 role.dims(),
                 role.dst_strides(),
                 role.src_strides(),
-                layouts.entry(dst_layout).offset - dst_start,
-                layouts.entry(src_layout).offset,
+                dst_offset,
+                src_offset,
                 storage_conjugate,
                 scale,
-                match mode {
-                    DestinationMode::Axpby(beta) => Some(beta),
-                    DestinationMode::Overwrite => None,
-                },
+                beta,
                 Some(role),
                 Some(&mut *fused_index),
             )?;
@@ -719,7 +733,7 @@ pub(super) fn replay_scatter_groups<A, D, C>(
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
     threads: usize,
-    exec: Exec<'_>,
+    mut exec: Exec<'_>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -745,7 +759,7 @@ where
                 alpha,
                 mode,
                 1,
-                Exec::serial(),
+                exec.reborrow(),
             )?;
         }
         return Ok(());
@@ -930,7 +944,7 @@ where
     packed
         .source_mut()
         .overwrite_with_columns(source_end - source_start, |writer| {
-            replay_region(engine, threads, |exec| {
+            replay_region(engine, |exec| {
                 replay_pack_columns(
                     fused_indices.as_mut_slice(),
                     max_fused_rank,
@@ -1012,7 +1026,8 @@ where
 ///
 /// Parallel copy scheduling forks the operation's engine token recursively
 /// (`replay_join`), capped by the configured worker count. Replay descriptors and safe split
-/// boundaries are compiled into the structure.
+/// boundaries are compiled into the structure. Each block keeps its worker's
+/// token share, which an overwrite may spend on the block's compiled plan.
 ///
 /// Per-task traversal indices are disjoint slices of one workspace arena, split
 /// by the same worker budget as the data. Kernel-adapter clones therefore carry
@@ -1068,7 +1083,7 @@ where
     {
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if schedule.singles_slice_disjoint {
-            replay_region(engine, threads, |exec| {
+            replay_region(engine, |exec| {
                 replay_single_blocks(
                     kernels.clone(),
                     workspace.fused_indices.as_mut_slice(),
@@ -1093,7 +1108,7 @@ where
                 for &item in &schedule.singles {
                     let (dst_layout, src_layout, coefficient) =
                         scheduled_single(task.blocks(), item)?;
-                    tree_transform_single_with_strided_kernel(
+                    tree_transform_single_on_token(
                         exec.reborrow(),
                         kernels,
                         &mut zero_strides,
@@ -1145,7 +1160,7 @@ where
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         if scatter_slice_disjoint {
-            replay_region(engine, threads, |exec| {
+            replay_region(engine, |exec| {
                 replay_scatter_groups(
                     kernels.clone(),
                     workspace.fused_indices.as_mut_slice(),

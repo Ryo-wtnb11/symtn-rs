@@ -1,7 +1,5 @@
 use core::mem::MaybeUninit;
-#[cfg(any(test, feature = "testing"))]
-use core::ops::Add;
-use core::ops::Mul;
+use core::ops::{Add, Mul};
 use std::sync::{Arc, Weak};
 
 #[cfg(not(test))]
@@ -21,7 +19,7 @@ use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
-use crate::kernel_adapter::write_fused_uninit;
+use crate::kernel_adapter::{planned_write_uninit, threaded_plan, write_fused_uninit};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::scalar::scale_value;
 use crate::storage_scratch::TreeTransformScratchBuffers;

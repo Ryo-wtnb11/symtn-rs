@@ -57,6 +57,72 @@ where
     Ok(())
 }
 
+/// One Single block of compiled replay on the caller's token share: the
+/// adapter's planned overwrite when it widens the block, the strided kernel
+/// otherwise.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn tree_transform_single_on_token<A, D, C>(
+    mut exec: crate::host_pool::Exec<'_>,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    layouts: &TreeTransformLayoutTable,
+    dst_index: usize,
+    src_index: usize,
+    coefficient: C,
+    source_conjugate: bool,
+    dst_data: &mut [D],
+    src_data: &[D],
+    alpha: D,
+    mode: DestinationMode<D>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<D>,
+    D: Copy
+        + Send
+        + Sync
+        + Add<D, Output = D>
+        + Mul<D, Output = D>
+        + PartialEq
+        + Zero
+        + One
+        + ConjugateValue
+        + RecouplingCoefficientAction<C>,
+    C: Copy + Sync,
+{
+    if let Some(result) = kernels.planned_transform(
+        exec.reborrow(),
+        layouts.role(dst_index)?,
+        dst_data,
+        src_data,
+        layouts.entry(dst_index).offset,
+        layouts.entry(src_index).offset,
+        source_conjugate,
+        TransformScale::new(alpha, coefficient),
+        match mode {
+            DestinationMode::Axpby(beta) => Some(beta),
+            DestinationMode::Overwrite => None,
+        },
+    ) {
+        return result;
+    }
+    tree_transform_single_with_strided_kernel(
+        exec,
+        kernels,
+        zero_strides,
+        fused_index,
+        layouts,
+        dst_index,
+        src_index,
+        coefficient,
+        source_conjugate,
+        dst_data,
+        src_data,
+        alpha,
+        mode,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_with_strided_kernel<A, D, C>(
     exec: crate::host_pool::Exec<'_>,
@@ -655,6 +721,69 @@ mod allocation_replay_tests {
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
         let mut pool = crate::host_pool::test_pool(3);
+
+        let mut replay = |engine: &mut dyn Engine| {
+            dst.fill(f64::NAN);
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut kernels,
+                &mut dense,
+                &mut workspace,
+                &structure,
+                &block_structure,
+                &block_structure,
+                &mut dst,
+                &src,
+                1.0,
+                &[],
+                3,
+            )
+            .unwrap();
+        };
+
+        pool.install(&mut replay);
+        let (_, allocations) = allocation_oracle::with_session(|| {
+            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
+        });
+        assert_eq!(allocations, 0);
+        assert_eq!(dst, expected);
+    }
+
+    #[test]
+    fn warm_wide_overwrite_of_a_rank_nine_single_has_no_owned_allocations() {
+        // What: a Single whose permutation leaves nine unfusable axes,
+        // above Strided's inline fused rank, replays warm without an
+        // allocation on an engine wide enough to widen it, and matches the
+        // index oracle `dst(c) = -1.5 * src(reversed c)`.
+        const RANK: usize = 9;
+        let shape = [2; RANK];
+        let block_structure =
+            Arc::new(BlockStructure::packed_column_major(RANK, vec![shape.to_vec()]).unwrap());
+        let structure = TreeTransformStructure::compile_structures(
+            &block_structure,
+            &block_structure,
+            &[TreeTransformBlockSpec::single(0, 0, -1.5).with_source_axes((0..RANK).rev())],
+        )
+        .unwrap();
+        assert_eq!(structure.layouts().max_fused_rank(), RANK);
+
+        let elements = 1 << RANK;
+        let src = (0..elements)
+            .map(|value| value as f64 + 0.25)
+            .collect::<Vec<_>>();
+        let expected = (0..elements)
+            .map(|dst_linear| {
+                let src_linear = (0..RANK).fold(0usize, |offset, axis| {
+                    offset + ((dst_linear >> axis) & 1) * (1 << (RANK - 1 - axis))
+                });
+                -1.5 * src[src_linear]
+            })
+            .collect::<Vec<_>>();
+        let mut dst = vec![f64::NAN; elements];
+        let mut kernels = StridedHostKernelAdapter::default();
+        let mut dense = NoAllocDenseExecutor;
+        let mut workspace = TreeTransformWorkspace::default();
+        let mut pool = crate::host_pool::eager_test_pool(3);
 
         let mut replay = |engine: &mut dyn Engine| {
             dst.fill(f64::NAN);
