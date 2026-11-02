@@ -3,6 +3,38 @@
 use super::*;
 
 #[test]
+fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // The adjoint view of a square endomorphism has the input's hom space but
+    // transposed strides: an admitted, noncanonical output layout.
+    let source = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(Z2FusionRule), &source);
+    let output = bound.space().adjoint_view().unwrap();
+    assert_eq!(output.space().homspace(), bound.space().space().homspace());
+    assert_ne!(
+        output.space().structure(),
+        bound.space().space().structure()
+    );
+    let called = Cell::new(false);
+    let result = map_square_sectors_dyn_into(
+        engine,
+        &mut ScriptedExecutor::new(RejectExecutorCalls),
+        &bound.as_ref().dynamic(),
+        output,
+        |_| -> Result<(), OperationError> {
+            called.set(true);
+            unreachable!("layout rejection precedes kernel initialization")
+        },
+        |_, _, _, _, _, _| unreachable!("layout rejection precedes dense work"),
+    );
+    assert!(matches!(
+        result,
+        Err(OperationError::UnsupportedTensorContractScope { .. })
+    ));
+    assert!(!called.get());
+}
+
+#[test]
 fn generic_exp_direct_reuses_the_exact_input_provider_and_layout() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let provider = Arc::new(FactorGenericRule);

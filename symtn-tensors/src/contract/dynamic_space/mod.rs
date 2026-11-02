@@ -34,6 +34,7 @@ pub(crate) use operand::FusionOperandLayout;
 use super::fusion::FusionContractPlan;
 use super::structure::TensorContractAxisPlan;
 
+#[cfg(test)]
 pub(crate) struct TransformedLayoutProbe {
     pub(crate) nout: usize,
     pub(crate) homspace: FusionTreeHomSpace,
@@ -213,13 +214,15 @@ impl PreparedCheckedGenericDynamicSpace {
         self.structure.commit_with_complete_homspace()
     }
 
+    /// The committed HomSpace is the one authority for the split: the
+    /// preparation's complete HomSpace when it carries one.
     pub(crate) fn commit(self) -> DynamicFusionMapSpace {
         let (canonical_homspace, subblock_structure) =
             self.structure.commit_with_complete_homspace();
         let homspace = canonical_homspace.unwrap_or(self.homspace);
         DynamicFusionMapSpace {
-            nout: self.nout,
-            nin: self.nin,
+            nout: homspace.codomain().len(),
+            nin: homspace.domain().len(),
             homspace: Arc::new(homspace),
             subblock_structure,
             admission: FusionSpaceAdmission::Complete(self.identity),
@@ -457,6 +460,7 @@ impl DynamicFusionMapSpace {
         Ok(destination)
     }
 
+    #[cfg(test)]
     pub(crate) fn transformed_layout_probe<R>(
         &self,
         rule: &R,

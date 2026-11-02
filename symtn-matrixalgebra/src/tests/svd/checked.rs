@@ -930,3 +930,47 @@ fn elementwise_compact_admission_allocates_nothing_and_queries_no_provider() {
         assert_eq!((calls, bytes, queries), (0, 0, 0), "{name}");
     }
 }
+
+#[test]
+fn elementwise_compact_admission_takes_unsorted_spectra_through_the_region_admission() {
+    // What: the elementwise admission of a caller-supplied spectrum does not
+    // depend on the order of its sector list: sector order [1, 0] on a
+    // canonical U(1) bond is admitted through the region admission, and
+    // misuse is still refused.
+    type Mf = symtn_core::MultiplicityFreeAdmissionMode;
+    let leg = SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 3)], false);
+    let bond = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::new(U1FusionRule),
+        FusionTreeHomSpace::new(
+            FusionProductSpace::new([leg.clone()]),
+            FusionProductSpace::new([leg]),
+        ),
+    )
+    .unwrap();
+    let unsorted = [
+        SectorSpectrum {
+            sector: SectorId::new(1),
+            values: vec![3.0, 4.0, -5.0],
+        },
+        SectorSpectrum {
+            sector: SectorId::new(0),
+            values: vec![1.0, -2.0],
+        },
+    ];
+    admit_compact_diagonal::<Mf, _, _>(&bond, &unsorted).unwrap();
+
+    let mut short = unsorted.to_vec();
+    short[0].values.pop();
+    let mut duplicate = unsorted.to_vec();
+    duplicate[1].sector = duplicate[0].sector;
+    for (malformed, reason) in [
+        (&short[..], "length"),
+        (&duplicate[..], "twice"),
+        (&unsorted[..1], "sector count"),
+    ] {
+        assert!(matches!(
+            admit_compact_diagonal::<Mf, _, _>(&bond, malformed),
+            Err(OperationError::InvalidArgument { message }) if message.contains(reason)
+        ));
+    }
+}

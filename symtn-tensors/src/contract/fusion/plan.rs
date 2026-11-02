@@ -7,9 +7,11 @@ use smallvec::SmallVec;
 use crate::{DenseBlockScalar, OperationError, TreeTransformOperation, TreeTransformOperationKind};
 use symtn_operations::{AxisVec, OutputAxisOrder, TensorContractSpec, TensorContractSpecOwned};
 
+#[cfg(test)]
+use super::super::dynamic_space::TransformedLayoutProbe;
 use super::super::dynamic_space::{
     encoded_layout_primer, BoundDynamicFusionMapSpace, DynamicFusionMapSpace, FusionOperand,
-    FusionOperandLayout, LayoutKeyBuilder, MetadataOutput, MetadataRequest, TransformedLayoutProbe,
+    FusionOperandLayout, LayoutKeyBuilder, MetadataOutput, MetadataRequest,
 };
 use super::super::structure::TensorContractAxisPlan;
 
@@ -157,9 +159,9 @@ impl FusionContractCandidateFacts {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug)]
 struct ScoredFusionContractCandidate {
-    plan: FusionContractPlan,
     facts: FusionContractCandidateFacts,
 }
 
@@ -686,23 +688,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    prepare_tensorcontract_fusion_plan_from_operands(
-        rule,
-        dst,
-        lhs,
-        rhs,
-        axes,
-        |rule, source: &FusionOperandLayout<'_>, operation, primer| {
-            source.transformed_layout_probe(
-                rule,
-                operation,
-                primer.ok_or(OperationError::InvalidArgument {
-                    message: "prelowered plan requires a layout primer",
-                })?,
-            )
-        },
-        primer,
-    )
+    prepare_tensorcontract_fusion_plan_from_operands(rule, dst, lhs, rhs, axes, primer)
 }
 
 /// Prepare a plan with an explicitly paired contraction-axis ordering.
@@ -858,7 +844,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
 {
-    select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations(
+    select_tensorcontract_fusion_plan_with_orientations(
         rule,
         dst,
         lhs,
@@ -866,7 +852,6 @@ where
         axes,
         lhs_source_conjugate,
         rhs_source_conjugate,
-        encoded_layout_probe::<R>,
         None,
         orientations,
     )
@@ -1006,6 +991,7 @@ impl ContractPlanSource for FusionOperandLayout<'_> {
     }
 }
 
+#[cfg(test)]
 fn encoded_layout_probe<R>(
     rule: &R,
     space: &DynamicFusionMapSpace,
@@ -1019,8 +1005,11 @@ where
     space.transformed_layout_probe(rule, operation)
 }
 
+/// Why refuse rather than probe: every producer admits a Complete layout
+/// (canonical, or the adjoint view of one), so the structural scorer is
+/// exact and a non-Complete stamp is a broken invariant.
 #[allow(clippy::too_many_arguments)]
-fn select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations<R, S, P>(
+fn select_tensorcontract_fusion_plan_with_orientations<R, S>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
     lhs: &S,
@@ -1028,7 +1017,6 @@ fn select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations<R, 
     axes: TensorContractSpec<'_>,
     lhs_source_conjugate: bool,
     rhs_source_conjugate: bool,
-    probe: P,
     primer: Option<LayoutKeyBuilder<R>>,
     orientations: &[FusionContractOrientation],
 ) -> Result<FusionContractPlan, OperationError>
@@ -1036,18 +1024,16 @@ where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
     S: ContractPlanSource,
-    P: for<'a> Fn(
-            &'a R,
-            &'a S,
-            &'a TreeTransformOperation,
-            Option<LayoutKeyBuilder<R>>,
-        ) -> Result<TransformedLayoutProbe, OperationError>
-        + Copy,
 {
     validate_tensorcontract_fusion_plan_inputs(rule, dst, lhs, rhs, axes, primer)?;
     let complete = matches!(dst.admission(), FusionSpaceAdmission::Complete(_))
         && matches!(lhs.admission(), FusionSpaceAdmission::Complete(_))
         && matches!(rhs.admission(), FusionSpaceAdmission::Complete(_));
+    if !complete {
+        return Err(OperationError::StructureMismatch {
+            tensor: "complete fusion layout",
+        });
+    }
     let canonical = |space: &DynamicFusionMapSpace| {
         super::super::dynamic::storage_layout_is_canonical(rule, space)
     };
@@ -1066,64 +1052,32 @@ where
             rhs_source_conjugate,
         )?
         .orient(orientation);
-        if complete {
-            let facts = score_complete_fusion_contract_candidate(
-                |homspace, axes| source_contract_homspace_requires_twist(rule, homspace, axes),
-                &layouts,
-                dst,
-                lhs,
-                rhs,
-                candidate.clone(),
-                &shape,
-            )?;
-            Ok((SelectedPlan::Candidate(shape), facts))
-        } else {
-            let scored = score_fusion_contract_candidate(
-                rule,
-                dst,
-                lhs,
-                rhs,
-                candidate.clone(),
-                shape.materialize(),
-                probe,
-                primer,
-            )?;
-            Ok((SelectedPlan::Materialized(scored.plan), scored.facts))
-        }
+        let facts = score_complete_fusion_contract_candidate(
+            |homspace, axes| source_contract_homspace_requires_twist(rule, homspace, axes),
+            &layouts,
+            dst,
+            lhs,
+            rhs,
+            candidate.clone(),
+            &shape,
+        )?;
+        Ok((shape, facts))
     })
-    .map(|(best, _)| match best {
-        SelectedPlan::Candidate(shape) => shape.materialize(),
-        SelectedPlan::Materialized(plan) => plan,
-    })
-}
-
-/// The winner of a candidate selection: probing scorers already built the
-/// plan to probe its transformed layouts; Complete scoring never did.
-enum SelectedPlan {
-    Candidate(CandidatePlan),
-    Materialized(FusionContractPlan),
+    .map(|(best, _)| best.materialize())
 }
 
 #[allow(clippy::too_many_arguments)]
-fn prepare_tensorcontract_fusion_plan_from_operands<R, P>(
+fn prepare_tensorcontract_fusion_plan_from_operands<R>(
     rule: &R,
     dst: &DynamicFusionMapSpace,
     lhs: &FusionOperandLayout<'_>,
     rhs: &FusionOperandLayout<'_>,
     axes: TensorContractSpec<'_>,
-    probe: P,
     primer: LayoutKeyBuilder<R>,
 ) -> Result<FusionContractPlan, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
     R::Scalar: DenseBlockScalar,
-    P: for<'a> Fn(
-            &'a R,
-            &'a FusionOperandLayout<'_>,
-            &'a TreeTransformOperation,
-            Option<LayoutKeyBuilder<R>>,
-        ) -> Result<TransformedLayoutProbe, OperationError>
-        + Copy,
 {
     dst.validate_rule(rule)?;
     if axes.lhs_conjugate() != lhs.storage_conjugate()
@@ -1138,7 +1092,7 @@ where
         axes.rhs_contracting_axes(),
         axes.output_permutation(),
     );
-    select_tensorcontract_fusion_plan_from_spaces_with_probe_and_orientations(
+    select_tensorcontract_fusion_plan_with_orientations(
         rule,
         dst,
         lhs,
@@ -1146,7 +1100,6 @@ where
         logical_axes,
         lhs.storage_conjugate(),
         rhs.storage_conjugate(),
-        probe,
         Some(primer),
         &CACHED_ORIENTATIONS,
     )
@@ -1174,6 +1127,7 @@ where
 // that count and must not gain an overflow/error from an unused route.
 #[derive(Clone, Copy)]
 enum CandidateRequiredLen<'a> {
+    #[cfg(test)]
     Known(usize),
     Space(&'a DynamicFusionMapSpace),
 }
@@ -1181,6 +1135,7 @@ enum CandidateRequiredLen<'a> {
 impl CandidateRequiredLen<'_> {
     fn get(&self) -> Result<usize, OperationError> {
         match self {
+            #[cfg(test)]
             Self::Known(len) => Ok(*len),
             Self::Space(space) => space
                 .required_len()
@@ -1243,6 +1198,7 @@ struct CandidateRoute {
 }
 
 impl CandidateRoute {
+    #[cfg(test)]
     fn of_plan(plan: &FusionContractPlan) -> Self {
         Self {
             orientation: plan.orientation(),
@@ -1359,8 +1315,7 @@ impl<'a, E> CanonicalLayouts<'a, E> {
 /// (tensoroperations.jl L378) minimized over `_contract_candidates` (L360).
 /// This is the complete-admission scorer of the real selector
 /// (`score_complete_fusion_contract_candidate`), run without building a
-/// plan; `None` when an admission is not Complete, where the selector would
-/// probe transformed layouts instead.
+/// plan; `None` when an admission is not Complete.
 pub(crate) fn min_dynamic_tree_materialized_elements<E>(
     twist: impl Fn(&FusionTreeHomSpace, &[usize]) -> Result<bool, E>,
     canonical: &dyn Fn(&DynamicFusionMapSpace) -> Result<bool, E>,
@@ -1521,6 +1476,7 @@ where
     )?)
 }
 
+#[cfg(test)]
 #[expect(
     clippy::too_many_arguments,
     reason = "candidate scoring keeps rule, three spaces, axis order, plan, probe, and optional primer independently meaningful"
@@ -1596,7 +1552,7 @@ where
             output_required_len: CandidateRequiredLen::Space(dst),
         },
     )?;
-    Ok(ScoredFusionContractCandidate { plan, facts })
+    Ok(ScoredFusionContractCandidate { facts })
 }
 
 fn validate_tensorcontract_fusion_plan_inputs<R, S>(

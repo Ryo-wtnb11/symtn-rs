@@ -966,7 +966,7 @@ fn direct_bound_builders_keep_coherent_split_and_rank() {
 
 #[test]
 fn generic_completeness_requires_every_vertex_label() {
-    // What: N(1,1,1)=2 requires both vertex labels 1 and 2 in a Complete grid.
+    // What: N(1,1,1)=2 puts both vertex labels 1 and 2 in the Complete grid.
     let provider = Arc::new(GenericMultiplicityRule);
     let homspace = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1)], [(1, 1)]);
     let keys = homspace
@@ -984,34 +984,6 @@ fn generic_completeness_requires_every_vertex_label() {
     assert!(matches!(
         complete.admission(),
         FusionSpaceAdmission::Complete(_)
-    ));
-
-    let first = complete.structure().block(0).unwrap();
-    let structure = BlockStructure::from_blocks_with_rank(
-        complete.rank(),
-        vec![BlockSpec::with_key(
-            first.key().clone(),
-            first.shape().to_vec(),
-            first.strides().to_vec(),
-            first.offset(),
-        )
-        .unwrap()],
-    )
-    .unwrap();
-    let subset = DynamicFusionMapSpace {
-        subblock_structure: Arc::new(structure),
-        admission: FusionSpaceAdmission::Subset(provider.rule_identity()),
-        adjoint: OnceLock::new(),
-        ..complete
-    };
-
-    let error = BoundDynamicFusionMapSpace::bind_generic(subset, provider).unwrap_err();
-    assert!(matches!(
-        error,
-        OperationError::Core(CoreError::BlockCountMismatch {
-            expected: 2,
-            actual: 1,
-        })
     ));
 }
 

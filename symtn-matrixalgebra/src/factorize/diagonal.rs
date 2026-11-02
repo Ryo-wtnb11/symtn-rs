@@ -111,9 +111,8 @@ where
 /// sector, so a count match plus a match per block covers every entry
 /// exactly once.
 ///
-/// An unsorted spectrum takes the region admission: compact QR/LQ/polar
-/// keep the input space and emit their phase and magnitude spectra in region
-/// order ([`diagonal_phase_magnitude_spectra`]).
+/// An unsorted spectrum takes the region admission: the caller supplies the
+/// sector list, and its order carries no meaning.
 #[doc(hidden)]
 pub fn admit_compact_diagonal<M, R, D>(
     space: &BoundDynamicFusionMapSpace<R>,

@@ -153,15 +153,6 @@ pub(crate) fn is_rank_one_diagonal_braid(
         && operation.domain_permutation() == [0]
 }
 
-fn offsets_never_decrease(structure: &symtn_core::BlockStructure) -> bool {
-    (1..structure.block_count()).all(|index| {
-        match (structure.block(index - 1), structure.block(index)) {
-            (Ok(previous), Ok(next)) => previous.offset() <= next.offset(),
-            _ => false,
-        }
-    })
-}
-
 /// The non-empty block at `offset` in a structure whose block offsets never
 /// decrease. Empty blocks may share that offset; at most one non-empty block
 /// owns it, because destination storage is injective.
@@ -232,7 +223,6 @@ where
         }
     }
     let mut source_offsets = None;
-    let mut destination_sorted = None;
     let mut seen_source = smallvec::SmallVec::<[bool; 16]>::from_elem(false, sources.block_count());
     let mut seen_destination =
         smallvec::SmallVec::<[bool; 16]>::from_elem(false, destinations.block_count());
@@ -321,16 +311,9 @@ where
         } else {
             // A braid or swap sends sector c to its dual, which sits at
             // another ordinal whenever the sector set is not self-dual, so
-            // this path is common. Canonical structures store blocks in offset
-            // order, where a binary search finds the block without allocating.
-            //
-            // Why decline instead of indexing an unordered layout: every
-            // destination is canonical, and the general dense replay is
-            // correct for any layout, so an offset map here would only add an
-            // allocation no caller needs.
-            if !*destination_sorted.get_or_insert_with(|| offsets_never_decrease(destinations)) {
-                return None;
-            }
+            // this path is common. The destination is canonical, so its
+            // blocks are in offset order and a binary search finds the block
+            // without allocating.
             nonempty_block_at_sorted_offset(destinations, usize::try_from(dst.offset).ok()?)?
         };
         if std::mem::replace(&mut seen_destination[destination_index], true)

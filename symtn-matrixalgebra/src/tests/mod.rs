@@ -17,8 +17,8 @@ use symtn_tensors::{
 };
 
 use crate::factorize::{
-    pinv_cutoff, typed_from_bound_factor, validate_inverse_region_routes_for_test, BoundTensorMap,
-    TestTensor,
+    map_square_sectors_dyn_into, pinv_cutoff, typed_from_bound_factor,
+    validate_inverse_region_routes_for_test, BoundTensorMap, TestTensor,
 };
 use crate::test_numerics::numerics;
 use crate::*;

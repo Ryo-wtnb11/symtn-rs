@@ -139,6 +139,66 @@ fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
 }
 
 #[test]
+fn tensorcontract_fusion_output_recoupling_uses_su2_coefficients() {
+    // What: swapping the middle legs of the four-spin-half invariant maps the
+    // source tree with inner lines (0, 1/2) onto both output trees with the
+    // SU(2) coefficients 1/2 and sqrt(3)/2 (hand values), and contraction
+    // with a scalar applies them.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let rule = SU2FusionRule;
+    let homspace = FusionTreeHomSpace::from_sector_ids([(1, 1), (1, 1), (1, 1), (1, 1)], []);
+    let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
+    let scalar = DynamicFusionMapSpace::from_final_homspace(
+        &rule,
+        FusionTreeHomSpace::from_sector_ids([], []),
+    )
+    .unwrap();
+    let block_with_inner = |inner: usize| {
+        (0..space.structure().block_count())
+            .find(|&index| {
+                expect_tree_key(space.structure().block(index).unwrap().key())
+                    .codomain_tree()
+                    .innerlines()
+                    == [SectorId::new(inner), SectorId::new(1)]
+            })
+            .unwrap()
+    };
+    let (source, recoupled) = (block_with_inner(0), block_with_inner(2));
+    let offset = |block: usize| space.structure().block(block).unwrap().offset();
+    let (source_at, recoupled_at) = (offset(source), offset(recoupled));
+    let mut lhs_data = vec![0.0; space.required_len().unwrap()];
+    lhs_data[source_at] = 10.0;
+    let mut dst_data = vec![0.0; space.required_len().unwrap()];
+    dst_data[source_at] = 1.0;
+    dst_data[recoupled_at] = 2.0;
+    let lhs = TestTensor::<f64>::from_vec_with_fusion_space(lhs_data, space.clone()).unwrap();
+    let rhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![5.0], scalar).unwrap();
+    let mut dst = TestTensor::<f64>::from_vec_with_fusion_space(dst_data, space).unwrap();
+    let axes = TensorContractSpec::new(&[], &[], OutputAxisOrder::from_axes(&[0, 2, 1, 3]));
+
+    let specs = tensorcontract_fusion_block_specs(
+        &rule,
+        dst.fusion_space().unwrap(),
+        lhs.fusion_space().unwrap(),
+        rhs.fusion_space().unwrap(),
+        axes,
+    )
+    .unwrap();
+    for (destination, coefficient) in [(source, 0.5), (recoupled, 0.866_025_403_784_438_6)] {
+        let spec = specs
+            .iter()
+            .find(|spec| spec.lhs_block() == source && spec.dst_block() == destination)
+            .unwrap();
+        assert!((spec.coefficient() - coefficient).abs() < 1.0e-12);
+    }
+
+    fusion_contract_into(engine, &rule, &mut dst, &lhs, &rhs, axes, 2.0, 3.0).unwrap();
+
+    assert!((dst.data()[source_at] - 53.0).abs() < 1.0e-12);
+    assert!((dst.data()[recoupled_at] - 92.602_540_378_443_86).abs() < 1.0e-12);
+}
+
+#[test]
 fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = SU2FusionRule;

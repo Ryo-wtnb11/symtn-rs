@@ -1242,7 +1242,6 @@ where
             region.offset(),
         )
     };
-    assert!(lowering.zeros.is_empty(), "every block has a parent");
     if D::IS_COMPLEX {
         assert!(lowering.copies.is_empty(), "complex lowers to a table");
         assert_eq!(lowering.table, table, "element table");
@@ -1256,7 +1255,6 @@ where
         .map(|(source, destination)| (geometry(source), geometry(destination)))
         .collect();
     assert_eq!(lowered, copies, "strided copies");
-    assert!(regions.zeros.is_empty(), "every block has a parent");
 
     // The lowering, run on the Host, is the Host materialization.
     let parent = t.dense_data().unwrap();

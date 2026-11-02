@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use symtn_core::{
     CheckedFusionAlgebra, CheckedGenericFusion, CheckedGenericStructureError, CoreError,
-    FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace, FusionTreePairKey,
+    FusionRule, FusionSpaceAdmission, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeRigidSymbols, PreparedBlockStructure, RuleIdentity,
     StructurallyValidatedFusionTreeSubset,
 };
@@ -279,6 +279,10 @@ where
     /// `CheckedGeneric`-bound input space or hand the result the input's
     /// capability, so a caller that only holds the provider could not obtain
     /// the `CheckedGeneric` binding `from_final_homspace_generic_checked` gives.
+    ///
+    /// A `homspace` whose codomain/domain split differs from the one
+    /// `structure` was prepared for is refused with
+    /// [`CoreError::FusionSpaceSplitMismatch`].
     #[doc(hidden)]
     pub fn from_prepared_final_homspace_generic_checked(
         provider: Arc<R>,
@@ -286,9 +290,19 @@ where
         structure: PreparedBlockStructure,
     ) -> Result<Self, CheckedGenericStructureError<R::Error>> {
         Self::validate_checked_generic_style(provider.as_ref())?;
-        Ok(Self::commit_prepared_generic_checked(
-            provider, homspace, structure,
-        ))
+        let (actual_nout, actual_nin) = (homspace.codomain().len(), homspace.domain().len());
+        let bound = Self::commit_prepared_generic_checked(provider, homspace, structure);
+        let (expected_nout, expected_nin) = (bound.space.nout, bound.space.nin);
+        if (expected_nout, expected_nin) != (actual_nout, actual_nin) {
+            return Err(CoreError::FusionSpaceSplitMismatch {
+                expected_nout,
+                expected_nin,
+                actual_nout,
+                actual_nin,
+            }
+            .into());
+        }
+        Ok(bound)
     }
 
     fn commit_prepared_generic_checked(
@@ -461,22 +475,6 @@ where
         Self::from_derived_with_capability(Arc::clone(&source.provider), space, source.layout_build)
     }
 
-    fn bind_subset_with_keys(
-        mut space: DynamicFusionMapSpace,
-        provider: Arc<R>,
-        keys: Vec<FusionTreePairKey>,
-    ) -> Result<Self, OperationError> {
-        debug_assert!(matches!(&space.admission, FusionSpaceAdmission::Subset(_)));
-        validate_bound_space_invariants(&space)?;
-        space.validate_complete_tree_grid(&keys)?;
-        space.admission = FusionSpaceAdmission::Complete(provider.rule_identity());
-        Ok(Self {
-            space,
-            provider,
-            layout_build: LayoutBuildCapability::encoded(),
-        })
-    }
-
     /// Binds an existing multiplicity-free dynamic layout (a canonical layout
     /// or an adjoint view of one) to `provider`.
     pub fn bind_multiplicity_free(
@@ -487,19 +485,12 @@ where
         R: MultiplicityFreeFusionRule,
     {
         space.validate_rule(provider.as_ref())?;
-        if matches!(&space.admission, FusionSpaceAdmission::Complete(_)) {
-            return Self::from_derived(provider, space);
-        }
-        let keys = space
-            .homspace()
-            .fusion_tree_keys(provider.as_ref())
-            .to_vec();
-        Self::bind_subset_with_keys(space, provider, keys)
+        Self::from_derived(provider, space)
     }
 
     /// Checked built-in admission using transactional lowered tree metadata.
     ///
-    /// Matching unchecked Subset and Complete stamps are revalidated; publication
+    /// A matching unchecked stamp is revalidated; publication
     /// occurs only after structural, algebraic, and complete-grid proofs pass.
     #[cfg(test)]
     pub(crate) fn bind_multiplicity_free_lowered(
@@ -977,14 +968,7 @@ where
     ) -> Result<Self, OperationError> {
         space.validate_rule(provider.as_ref())?;
         validate_generic_provider_style(provider.as_ref())?;
-        if matches!(&space.admission, FusionSpaceAdmission::Complete(_)) {
-            return Self::from_derived(provider, space);
-        }
-        let keys = space
-            .homspace()
-            .fusion_tree_keys_generic(provider.as_ref())
-            .map_err(OperationError::from_core_preserving_context)?;
-        Self::bind_subset_with_keys(space, provider, keys)
+        Self::from_derived(provider, space)
     }
 
     /// Whether codomain and domain have the same reduced dimension in every
