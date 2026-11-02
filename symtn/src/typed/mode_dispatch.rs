@@ -498,8 +498,12 @@ where
                 src_len,
                 &operation,
             )?;
-        options.admit(engine, || {
-            symtn_tensors::has_multi_blocks(staged.structure())
+        options.admit(engine, |engine| {
+            symtn_operations::transform_replay::tree_transform_searches_lanes(
+                engine,
+                staged.structure(),
+                1,
+            )
         })?;
         let data = S::replay_owned(
             engine,
@@ -543,8 +547,12 @@ where
                 &operation,
                 &destination_space,
             )?;
-        options.admit(engine, || {
-            symtn_tensors::has_multi_blocks(staged.structure())
+        options.admit(engine, |engine| {
+            symtn_operations::transform_replay::tree_transform_searches_lanes(
+                engine,
+                staged.structure(),
+                1,
+            )
         })?;
         let destination_data = destination_storage_mut(destination)?;
         with_transform_into_source(source, &operation, alpha, beta, |input| {
@@ -881,7 +889,7 @@ where
                 staged.plan_beyond_core::<S::Caps>(engine, miss)?
             }
         };
-        options.admit(engine, || resolution.searches_lanes())?;
+        options.admit(engine, |engine| resolution.searches_lanes(engine, false))?;
         S::contract_into(
             engine,
             EXEC,
@@ -956,7 +964,7 @@ where
         symtn_tensors::CoreRoute::Hit(core) => core,
         symtn_tensors::CoreRoute::Miss(miss) => staged.plan_beyond_core::<S::Caps>(engine, miss)?,
     };
-    options.admit(engine, || resolution.searches_lanes())?;
+    options.admit(engine, |engine| resolution.searches_lanes(engine, true))?;
     let data = S::contract_owned(
         engine,
         EXEC,

@@ -1484,7 +1484,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         #[cfg(feature = "cpu-blas-core")]
         {
             if self.lane_allocation != crate::LaneAllocation::Moldable
-                && crate::batch_searches_lanes(jobs, runs, [lhs_op, rhs_op])
+                && crate::batch_searches_lanes(jobs, runs, [lhs_op, rhs_op], false)
             {
                 return Err(lane_allocation_unsupported(
                     "the BLAS provider's grouped GEMM route has no lane allocator",

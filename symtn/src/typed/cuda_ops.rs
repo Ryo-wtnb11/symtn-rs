@@ -629,7 +629,7 @@ where
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Svd<TensorMap<R, D, Self>>, Error> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         t.svd_compact_matrix(engine)
     }
 
@@ -640,7 +640,7 @@ where
         t: &TensorMap<R, D, Self>,
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<TensorMap<R, D, Self>>, Error> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         t.eigh_full_matrix(engine, hermitian_tol)
     }
 

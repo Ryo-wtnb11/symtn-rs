@@ -369,7 +369,7 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         // The one check the expert layer cannot make: it never sees the two
@@ -506,7 +506,7 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime)
@@ -696,7 +696,7 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime) {
@@ -768,7 +768,7 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime)
@@ -1042,7 +1042,7 @@ where
         options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, || false)?;
+        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         // Runtime first, exactly as `contract`: crossing runtimes is a

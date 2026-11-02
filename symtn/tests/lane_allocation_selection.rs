@@ -349,6 +349,55 @@ fn a_provider_without_the_allocator_refuses_before_any_write() {
     let mut workspace = plan.workspace().unwrap();
     let output = plan.execute(equal, &lhs, &rhs, &mut workspace).unwrap();
     assert_eq!(members(output), bits(&[2.0, 0.0, 0.0, 2.0].repeat(2)));
+
+    // Participation follows the destination form: with charge 1 absent from
+    // the contracted leg, the two active 2×2 outputs (charges 0 and 2) sit 8
+    // apart around the inactive charge-1 block. Into an initialized
+    // destination that is one strided call; into a fresh output it is a
+    // grouped batch, refused before the output's zero fill.
+    let leg = |charges: &[i32]| {
+        GradedSpace::try_new(
+            Arc::new(U1FusionRule),
+            charges.iter().map(|&charge| (U1Irrep::new(charge), 2)),
+        )
+        .unwrap()
+    };
+    let (v3, w2) = (leg(&[0, 1, 2]), leg(&[0, 2]));
+    let a = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v3], [&w2], 11).unwrap();
+    let b = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&w2], [&v3], 12).unwrap();
+    assert!(is_refused(a.contract(equal, &b, &SPEC)));
+    let mut fresh_start =
+        |_| TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v3], [&v3], 13).unwrap();
+    let (mut configured, mut reference) = (fresh_start(()), fresh_start(()));
+    a.contract_into(equal, &b, &SPEC, &mut configured, 1.0, 0.5)
+        .unwrap();
+    a.contract_into(default, &b, &SPEC, &mut reference, 1.0, 0.5)
+        .unwrap();
+    assert_eq!(
+        bits(configured.dense_data().unwrap()),
+        bits(reference.dense_data().unwrap())
+    );
+
+    // A Multi recoupling transform whose replay submits each Multi block
+    // alone (spin 1/2, degeneracy 1) runs as by default.
+    let half =
+        GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(1), 1)]).unwrap();
+    let t = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&half, &half], [&half, &half], 14)
+        .unwrap();
+    assert_eq!(
+        bits(
+            t.permute(equal, &[0, 2], &[1, 3])
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        ),
+        bits(
+            t.permute(default, &[0, 2], &[1, 3])
+                .unwrap()
+                .dense_data()
+                .unwrap()
+        )
+    );
 }
 
 /// What: participation is per lowered phase: a general eigendecomposition,

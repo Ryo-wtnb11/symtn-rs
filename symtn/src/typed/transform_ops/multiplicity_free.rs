@@ -87,7 +87,9 @@ where
         });
     }
     if let (Some(structure), Some((_, body, data))) = (exact_layout_hit, direct) {
-        options.admit(engine, || symtn_tensors::has_multi_blocks(&structure))?;
+        options.admit(engine, |engine| {
+            symtn_operations::transform_replay::tree_transform_searches_lanes(engine, &structure, 1)
+        })?;
         let destination_structure = Arc::clone(destination.logical_space().space().structure());
         let nout = destination.codomain_rank();
         let replay = TreeReplay::new::<MultiplicityFreeTreeLane>(
@@ -123,8 +125,12 @@ where
             &operation,
             &destination_space,
         )?;
-    options.admit(engine, || {
-        symtn_tensors::has_multi_blocks(staged.structure())
+    options.admit(engine, |engine| {
+        symtn_operations::transform_replay::tree_transform_searches_lanes(
+            engine,
+            staged.structure(),
+            1,
+        )
     })?;
     let destination_data = destination_storage_mut(destination)?;
     with_transform_into_source(source, &operation, alpha, beta, |input| {
@@ -193,8 +199,12 @@ where
             src_len,
             &operation,
         )?;
-    options.admit(engine, || {
-        symtn_tensors::has_multi_blocks(staged.structure())
+    options.admit(engine, |engine| {
+        symtn_operations::transform_replay::tree_transform_searches_lanes(
+            engine,
+            staged.structure(),
+            1,
+        )
     })?;
     let data = S::replay_owned(
         engine,

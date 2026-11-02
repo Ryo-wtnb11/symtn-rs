@@ -241,17 +241,22 @@ separate.
 
 A call's `LaneAllocation` (from its `ExecContext`; `Moldable` unless a
 `Configured` context selects another) applies to every phase of the call
-that searches a block placement: a grouped GEMM batch of a contraction
-(two or more blocks that are not one strided submission, fresh or
-initialized destination), the Multi recoupling GEMMs of a tree transform,
-and an SVD, values-only SVD, Hermitian eigen (full and values-only) or
-general-eigenvalue batch of two or more blocks. It is applied on every
+that searches a block placement, judged on the batch the executor will
+actually receive: a grouped GEMM batch of a contraction (two or more blocks
+that are not one strided submission: into an initialized destination, one
+self-disjoint affine run; into a fresh owned output, one gapless affine run),
+a grouped recoupling GEMM batch of a tree transform (the parallel replay
+submits the Multi blocks in chunks of its worker count, a member replay all
+members' blocks at once; a serial replay submits each Multi block alone, which
+does not search), and an SVD, values-only SVD, Hermitian eigen (full and
+values-only) or general-eigenvalue batch of two or more blocks. It is applied on every
 call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
 workspace or a network's pooled workspace kept from an earlier call; a
 workspace never keeps an earlier call's allocation. Other phases run as
 with the default: a single GEMM and an admitted affine strided GEMM run
-(which do not search), transforms without Multi recoupling (unique fusion,
-compact diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
+(which do not search), transforms that submit no grouped recoupling batch
+(unique fusion, a serial replay, one Multi block per chunk, compact
+diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
 the full general eigendecomposition, the prepared batched `EighFullPlan`,
 and operations without dense blocks (norms, linear combinations,
 transfers).
@@ -259,8 +264,9 @@ transfers).
 The default lane allocation adds no restriction. Another allocation needs
 the native provider's CPU engine under the `Auto` batch policy, the only
 configuration that searches. On a CPU engine, participation is decided per
-phase from the call's plan (its GEMM batches and transform blocks) before
-the call writes a destination, and a participating phase is refused with
+phase from the call's plan (its GEMM batches, the destination form its core
+writes, and the recoupling batches its transforms submit at the engine's
+replay width) before the call writes a destination, and a participating phase is refused with
 `OperationError::Dense(DenseError::Unsupported { op: "lane_allocation", .. })`
 when the build links a BLAS provider (which has no lane allocator for its
 grouped GEMM and factorization routes) or when the engine's batch policy is
@@ -272,8 +278,8 @@ allocator and no Host fallback: a contraction, transform, prepared plan or
 compact SVD/eigh call with another allocation is refused before any upload
 or submission. On the native provider under `Auto`, a call that has nothing
 to search (one block, or one thread) runs as with the default. A
-factorization whose leg roles need a Multi-recoupling permute first is
-refused for that permute even when its own dense stage ignores the
+factorization whose leg roles need a permute with a grouped recoupling batch
+first is refused for that permute even when its own dense stage ignores the
 allocation.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.

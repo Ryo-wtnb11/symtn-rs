@@ -32,16 +32,20 @@ impl ExecOptions {
 /// engine's `Auto` batch policy, the only configuration that searches lane
 /// allocations. There, a call holding no batch to search (one block, or one
 /// slot) runs as it does by default. Participation is decided per phase from
-/// the call's plan before it writes: a grouped GEMM batch (not one GEMM or one
-/// strided run), Multi recoupling in a tree transform, and an SVD, Hermitian
-/// eigen or general-eigenvalue batch of two or more blocks participate. A
+/// the call's plan before it writes, judged on the batches the executor will
+/// receive: a grouped GEMM batch (not one GEMM or one strided run for the
+/// destination form the core writes), a grouped recoupling batch of a tree
+/// transform (a serial replay submits each Multi block alone), and an SVD,
+/// Hermitian eigen or general-eigenvalue batch of two or more blocks
+/// participate. A
 /// participating phase refuses a non-default selection with a typed dense
 /// `Unsupported` error before the call writes, uploads or submits anything on
 /// a provider without the allocator (a BLAS build) or under a forced batch
 /// policy, which fixes the placement itself; a CUDA engine, which has no
 /// allocator, refuses it for every contraction, transform and compact
 /// factorization. Phases without a search (one GEMM or strided run, a
-/// transform without Multi recoupling, norms, linear combinations, QR and LQ,
+/// transform without a grouped recoupling batch, norms, linear combinations,
+/// QR and LQ,
 /// solves, general eigendecompositions, the prepared batched Hermitian
 /// eigensolver, transfers) ignore it.
 ///
@@ -174,12 +178,13 @@ impl ExecOptions {
     pub(crate) fn admit(
         self,
         engine: &mut dyn Engine,
-        participates: impl FnOnce() -> bool,
+        participates: impl FnOnce(&mut dyn Engine) -> bool,
     ) -> Result<(), Error> {
         if self.lane_allocation == LaneAllocation::Moldable {
             return Ok(());
         }
-        symtn_dense::admit_lane_allocation(engine, self.lane_allocation, participates())
+        let participates = participates(&mut *engine);
+        symtn_dense::admit_lane_allocation(engine, self.lane_allocation, participates)
             .map_err(|error| Error::Operation(Box::new(super::OperationError::Dense(error))))
     }
 }

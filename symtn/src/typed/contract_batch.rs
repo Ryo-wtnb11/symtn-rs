@@ -372,7 +372,8 @@ where
         self.check_workspace(workspace)?;
         // Before the lease and any upload: a refused allocation keeps the
         // workspace as it was. Participation is the member replay's.
-        let participates = || self.resolution.member_searches_lanes(lhs.members);
+        let participates =
+            |engine: &mut dyn Engine| self.resolution.member_searches_lanes(engine, lhs.members);
         if let Err(error) = options.admit(engine, participates) {
             return Err(workspace.output.hide(error));
         }
@@ -451,7 +452,8 @@ where
         self.check_workspace(workspace)?;
         // Before the lease and any upload: a refused allocation keeps the
         // workspace as it was. Participation is the member replay's.
-        let participates = || self.resolution.member_searches_lanes(lhs.members);
+        let participates =
+            |engine: &mut dyn Engine| self.resolution.member_searches_lanes(engine, lhs.members);
         if let Err(error) = options.admit(engine, participates) {
             return Err(workspace.output.hide(error));
         }
