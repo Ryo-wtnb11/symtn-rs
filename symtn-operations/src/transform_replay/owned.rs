@@ -128,6 +128,7 @@ where
             }
         }
         let chunk_size = threads.max(1);
+        reserve_multi_chunk_scratch(workspace, recoupling_plan.jobs(), chunk_size)?;
         let mut pack_cursor = 0;
         for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
             let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(

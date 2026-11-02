@@ -750,6 +750,47 @@ where
     right
 }
 
+/// Sizes the chunk scratch once for the largest chunk of `jobs`, so the
+/// chunks [`replay_multi_chunk`] then visits never grow it.
+///
+/// Why not let each chunk grow its scratch: chunks are visited in GEMM-run
+/// order, not by size, so growth reallocates once per larger chunk and a warm
+/// call's allocation count would scale with the block count.
+pub(super) fn reserve_multi_chunk_scratch<D: Copy + Zero>(
+    workspace: &mut TreeTransformWorkspace<D>,
+    jobs: &[DenseGemmBatchJob],
+    chunk_size: usize,
+) -> Result<(), OperationError> {
+    let span = |start: usize, end: Option<usize>| {
+        end.and_then(|end| end.checked_sub(start))
+            .ok_or(OperationError::ElementCountOverflow)
+    };
+    let (mut source_len, mut destination_len) = (0usize, 0usize);
+    for chunk in jobs.chunks(chunk_size) {
+        let (first, last) = (&chunk[0], &chunk[chunk.len() - 1]);
+        let source_end = last
+            .rows
+            .checked_mul(last.contracted)
+            .and_then(|len| last.lhs_offset.checked_add(len));
+        let destination_end = last
+            .rows
+            .checked_mul(last.cols)
+            .and_then(|len| last.dst_offset.checked_add(len));
+        source_len = source_len.max(span(first.lhs_offset, source_end)?);
+        destination_len = destination_len.max(span(first.dst_offset, destination_end)?);
+    }
+    workspace.packed.source_mut().reserve_overwrite(source_len);
+    workspace.prepare_packed_destination(destination_len, D::zero());
+    let chunk_len = chunk_size.min(jobs.len());
+    workspace.chunk_jobs.clear();
+    workspace.chunk_jobs.reserve(chunk_len);
+    workspace.chunk_runs.clear();
+    workspace.chunk_runs.reserve(chunk_len);
+    workspace.chunk_scatter_groups.clear();
+    workspace.chunk_scatter_groups.reserve(chunk_len);
+    Ok(())
+}
+
 /// One concurrency-bounded chunk of Multi jobs up to and including its grouped
 /// GEMM: rebases the jobs onto chunk scratch, packs the chunk's source columns
 /// (in parallel when `threads > 1`), runs the GEMM into
@@ -1026,6 +1067,7 @@ where
     // per concurrently executing fusion block. The existing replay-thread
     // budget is also the natural bound for a grouped dense submission.
     let chunk_size = threads.max(1);
+    reserve_multi_chunk_scratch(workspace, recoupling_plan.jobs(), chunk_size)?;
     let mut pack_cursor = 0;
     for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
         let scattered_column_count = chunk.iter().map(|job| job.cols).sum::<usize>();
