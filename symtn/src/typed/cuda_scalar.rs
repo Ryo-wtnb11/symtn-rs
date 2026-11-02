@@ -79,14 +79,13 @@ where
     /// Host's is (#1344 for `norm`, #1383 for `inner`).
     ///
     /// * **Within one coupled sector** the sum runs on the device inside the
-    ///   backend GEMM, in the dtype of its operands. Tenferro 0.7.1 offers no
+    ///   backend GEMM, in the dtype of its operands. Tenferro 0.9.0 offers no
     ///   widening dot or reduction: `dot_general` dispatches on the one dtype
-    ///   shared by both operands and the destination (tenferro-gpu 0.7.1
-    ///   `src/cubecl/gemm.rs` `dot_general_read_into_accum`), and
-    ///   `DotGeneralAccumulation` carries no compute type; the BLAS-1
-    ///   `vdot_read` is `cublasSdot_v2`/`cublasCdotc_v2` (`src/cubecl/blas1.rs`)
-    ///   and the reduce kernels are generic over one float type
-    ///   (`src/kernels/reduce/launch.rs` `launch_sum_float`). A
+    ///   shared by both operands and the destination (tenferro-gpu 0.9.0
+    ///   `src/cuda/structural.rs` `dot_general_read_into_accum`), and
+    ///   `DotGeneralAccumulation` carries no compute type; `vdot_read` folds
+    ///   the elementwise product with the same reduce kernel, which runs in
+    ///   the payload dtype (`src/cuda/structural.rs` `reduce_axes`). A
     ///   single-precision payload is therefore widened on the device first
     ///   ([`CudaStorage::widened`], Tenferro's `cast`; exact, since every
     ///   `f32` is an `f64`) and reduced in `f64`. That costs one device

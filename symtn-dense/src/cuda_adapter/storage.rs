@@ -16,7 +16,7 @@ impl CudaDenseStorage {
     /// Uploads borrowed host data as a flat device buffer.
     ///
     /// Tenferro uploads an owned host tensor (`upload_tensor`, tenferro-gpu
-    /// `cubecl/memory.rs:31`), so borrowed data costs exactly one host copy
+    /// `cuda/transfer.rs`), so borrowed data costs exactly one host copy
     /// here: the payload is duplicated into the host tensor that is then
     /// staged to the device. That copy is required by the backend contract,
     /// not by symtn. A caller that already owns its buffer — a zero buffer, a
