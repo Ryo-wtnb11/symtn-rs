@@ -238,8 +238,11 @@ blocks interleave) share an atom, and a component is the set of atoms its
 blocks write, a Multi block's columns always together, so one component can
 own several separated atoms. An overwrite first runs each wide component
 (one whose largest planned block Strided's own rule, `parallel_width` for a
-copy of its elements, would widen on the whole token) alone on the whole
-token, one after another; only the remaining narrow components split. Each
+copy of its elements, would give every worker of the whole token) alone on
+the whole token, one after another; every other component splits and widens
+within the share its lane is granted. A chunk of recoupling scatter whose
+moved elements Strided's rule would give one worker runs inline on the
+token instead of splitting. Each
 split hands the left `⌊w/2⌋` of `w` workers
 the components whose destination elements are closest to that fraction of
 the total, never dividing a component, and runs that side on the same
@@ -249,8 +252,8 @@ lists its narrow ones: O(atoms + chunk groups) metadata that an eager call's
 call-local workspace allocates once per call and a reused workspace keeps
 (and reports in its retained bytes); a serial or one-component phase, and a
 Single phase of one tier, allocates none. Whether a component is wide is one
-comparison against the smallest widening element count, which the replay
-finds once per token shape. Inside the replay each Single block
+comparison against the smallest element count Strided's rule gives every
+worker, which the replay finds once per token shape. Inside the replay each Single block
 and scatter column keeps the token share of the worker that visits it, the
 whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained

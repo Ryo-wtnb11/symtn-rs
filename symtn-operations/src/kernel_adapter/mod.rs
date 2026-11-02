@@ -44,21 +44,31 @@ mod tests {
                 pool.with_exec(|exec| {
                     let gate = sealed::LeafGate::new(usize::MAX);
                     let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
-                    // The first widened count, by bisection on Strided's own
-                    // answer, so the sweep also covers its exact boundary.
-                    let mut around = Vec::new();
-                    if widens(usize::MAX >> 8) {
-                        let (mut below, mut at) = (0usize, usize::MAX >> 8);
-                        while at - below > 1 {
-                            let middle = below + (at - below) / 2;
-                            if widens(middle) {
-                                at = middle;
-                            } else {
-                                below = middle;
+                    let saturates = |n| {
+                        parallel_width(&exec, KernelClass::Copy, n).get() == exec.budget().get()
+                    };
+                    // The first widened and the first saturating count, by
+                    // bisection on Strided's own answer, so the sweep also
+                    // covers both exact boundaries.
+                    let first = |holds: &dyn Fn(usize) -> bool| {
+                        holds(usize::MAX >> 8).then(|| {
+                            let (mut below, mut at) = (0usize, usize::MAX >> 8);
+                            while at - below > 1 {
+                                let middle = below + (at - below) / 2;
+                                if holds(middle) {
+                                    at = middle;
+                                } else {
+                                    below = middle;
+                                }
                             }
-                        }
+                            at
+                        })
+                    };
+                    let mut around = Vec::new();
+                    for at in [first(&widens), first(&saturates)].into_iter().flatten() {
                         around.extend(at.saturating_sub(64)..at + 64);
                     }
+                    around.sort_unstable();
                     // A gate bounded by the largest planned role is exact up
                     // to that bound; bound it just past the boundary.
                     let bound = around.last().copied().unwrap_or(4096);
@@ -70,6 +80,11 @@ mod tests {
                             gate.widens(&exec, n),
                             widens,
                             "threads {threads}, elements {n}"
+                        );
+                        assert_eq!(
+                            gate.saturates(&exec, n),
+                            threads > 1 && saturates(n),
+                            "saturates, threads {threads}, elements {n}"
                         );
                         if n <= bound {
                             assert_eq!(

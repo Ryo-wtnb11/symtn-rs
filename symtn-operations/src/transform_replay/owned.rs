@@ -205,28 +205,18 @@ where
                             }
                             Ok(())
                         };
-                        replay_region(engine, |mut exec| {
-                            run_wide_units(
-                                chunk_units,
-                                slots,
-                                &mut fused_indices[..max_fused_rank],
-                                threads,
-                                &mut exec,
-                                &gate,
-                                true,
-                                &leaf,
-                            )?;
-                            split_join_components(
+                        replay_region(engine, |exec| {
+                            scatter_chunk_components(
                                 chunk_units,
                                 &schedule.component_slots,
                                 slots,
-                                0,
                                 fused_indices.as_mut_slice(),
                                 max_fused_rank,
                                 threads,
                                 exec,
-                                Some(&gate),
+                                &gate,
                                 layouts.max_planned_elements(),
+                                true,
                                 &leaf,
                             )
                         })??

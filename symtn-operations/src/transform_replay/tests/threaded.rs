@@ -1063,38 +1063,67 @@ fn narrow_single_scratch_is_charged_by_capacity() {
 }
 
 #[test]
-fn a_wide_multi_component_runs_on_the_whole_token_between_split_narrow_ones() {
+fn only_components_that_use_every_worker_run_on_the_whole_token() {
     use crate::kernel_adapter::observed::ObservedKernels;
-    // What: in a threaded overwrite whose middle Multi component's columns
-    // widen on the whole token, those columns run on all three workers,
-    // the two narrow components around it split one and two workers, and
-    // every block holds `U * source`.
-    const LARGE: usize = 1 << 20;
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    // What: in a threaded overwrite on eight workers, a Single or Multi
+    // component whose blocks Strided would give all eight workers runs alone
+    // on the whole token, while a smaller widening component and two tiny
+    // ones of the same phase split the token and each runs on its lane's
+    // share; every block holds its oracle value. The moldable size is the first count Strided widens at
+    // all, so the expectation for it follows Strided's own answer.
+    const THREADS: usize = 8;
+    const LARGE: usize = 1 << 21;
+    let mut pool = crate::host_pool::test_pool(THREADS);
+    let (moldable, moldable_saturates) = pool.with_exec(|exec| {
+        let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
+        assert_eq!(width(LARGE), THREADS);
+        let (mut below, mut at) = (0usize, LARGE);
+        while at - below > 1 {
+            let middle = below + (at - below) / 2;
+            if width(middle) > 1 {
+                at = middle;
+            } else {
+                below = middle;
+            }
+        }
+        (at, width(at) == THREADS)
+    });
     let structure = Arc::new(
-        BlockStructure::packed_column_major(1, [2, 2, LARGE, LARGE, 2, 2].map(|len| vec![len]))
-            .unwrap(),
+        BlockStructure::packed_column_major(
+            1,
+            [
+                2, 2, moldable, moldable, LARGE, LARGE, 2, 2, 2, moldable, LARGE, 2,
+            ]
+            .map(|len| vec![len]),
+        )
+        .unwrap(),
     );
     let matrix = [2.0, -1.0, 0.5, 3.0];
     let transform = TreeTransformStructure::compile_structures(
         &structure,
         &structure,
-        &[0, 2, 4].map(|first| {
-            TreeTransformBlockSpec::multi(
-                vec![first, first + 1],
-                vec![first, first + 1],
-                matrix.to_vec(),
-            )
-        }),
+        &[0, 2, 4, 6]
+            .map(|first| {
+                TreeTransformBlockSpec::multi(
+                    vec![first, first + 1],
+                    vec![first, first + 1],
+                    matrix.to_vec(),
+                )
+            })
+            .into_iter()
+            .chain((8..12).map(|block| TreeTransformBlockSpec::single(block, block, 1.5)))
+            .collect::<Vec<_>>(),
     )
     .unwrap();
-    assert_eq!(transform.parallel_schedule().scatter_component_count(), 3);
+    assert_eq!(transform.parallel_schedule().scatter_component_count(), 4);
     let len = structure.required_len().unwrap();
     let source = (0..len)
         .map(|value| (value % 97) as f64 - 48.0)
         .collect::<Vec<_>>();
     let mut expected = vec![0.0; len];
     let mut start = 0;
-    for block_len in [2, LARGE, 2] {
+    for block_len in [2, moldable, LARGE, 2] {
         for element in 0..block_len {
             let (a, b) = (source[start + element], source[start + block_len + element]);
             expected[start + element] = matrix[0] * a + matrix[1] * b;
@@ -1102,32 +1131,97 @@ fn a_wide_multi_component_runs_on_the_whole_token_between_split_narrow_ones() {
         }
         start += 2 * block_len;
     }
+    for at in start..len {
+        expected[at] = 1.5 * source[at];
+    }
     let mut kernels = ObservedKernels::recording();
     let budgets = std::sync::Arc::clone(&kernels.copy_budgets);
     let mut destination = vec![f64::NAN; len];
-    crate::host_pool::test_pool(3)
-        .install(|engine| {
-            tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                engine,
-                &mut kernels,
-                &mut DefaultDenseExecutor::new(),
-                &mut TreeTransformWorkspace::default(),
-                &transform,
-                &structure,
-                &structure,
-                &mut destination,
-                &source,
-                1.0,
-                &[],
-                3,
-            )
-        })
-        .unwrap();
+    pool.install(|engine| {
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut kernels,
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &structure,
+            &structure,
+            &mut destination,
+            &source,
+            1.0,
+            &[],
+            THREADS,
+        )
+    })
+    .unwrap();
     assert!(destination == expected);
-    let mut budgets = budgets.lock().unwrap().clone();
-    budgets.sort_unstable();
-    assert_eq!(
-        budgets,
-        [(2, 1), (2, 1), (2, 2), (2, 2), (LARGE, 3), (LARGE, 3)]
-    );
+    let budgets = budgets.lock().unwrap().clone();
+    assert_eq!(budgets.len(), 12);
+    for (elements, budget) in budgets {
+        let whole = elements == LARGE || (elements == moldable && moldable_saturates);
+        assert_eq!(budget == THREADS, whole, "{elements} elements on {budget}");
+    }
+}
+
+#[test]
+fn chunks_too_small_to_pay_a_worker_scatter_without_forking() {
+    // What: a threaded Multi replay whose every chunk moves too few elements
+    // for Strided's rule to give a second worker scatters each chunk inline,
+    // so the number of scatter forks does not grow with the chunk count;
+    // the output still holds `U * source`.
+    let matrix = [2.0, -1.0, 0.5, 3.0];
+    let splits = |groups: usize| {
+        let structure =
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![2]; 2 * groups]).unwrap());
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &(0..groups)
+                .map(|group| {
+                    let blocks = vec![2 * group, 2 * group + 1];
+                    TreeTransformBlockSpec::multi(blocks.clone(), blocks, matrix.to_vec())
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let source = (0..4 * groups)
+            .map(|value| value as f64)
+            .collect::<Vec<_>>();
+        let expected = source
+            .chunks(4)
+            .flat_map(|block| {
+                let (a, b) = ([block[0], block[1]], [block[2], block[3]]);
+                [
+                    matrix[0] * a[0] + matrix[1] * b[0],
+                    matrix[0] * a[1] + matrix[1] * b[1],
+                    matrix[2] * a[0] + matrix[3] * b[0],
+                    matrix[2] * a[1] + matrix[3] * b[1],
+                ]
+            })
+            .collect::<Vec<_>>();
+        let mut destination = vec![f64::NAN; 4 * groups];
+        let before = SCATTER_SPLITS.with(|splits| splits.get());
+        crate::host_pool::test_pool(2)
+            .install(|engine| {
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut destination,
+                    &source,
+                    1.0,
+                    &[],
+                    2,
+                )
+            })
+            .unwrap();
+        assert_eq!(destination, expected);
+        SCATTER_SPLITS.with(|splits| splits.get()) - before
+    };
+    // Two workers chunk two groups at a time: 2 and 6 chunks.
+    assert_eq!(splits(4), splits(12));
 }

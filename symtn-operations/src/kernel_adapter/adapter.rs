@@ -32,7 +32,10 @@ pub(crate) mod sealed {
     struct GateScan {
         budget: core::num::NonZeroUsize,
         team: bool,
+        /// The smallest count that widens past one worker.
         min_elements: Option<usize>,
+        /// The smallest count that widens to the whole budget.
+        min_full: Option<usize>,
     }
 
     impl LeafGate {
@@ -58,7 +61,7 @@ pub(crate) mod sealed {
         /// only if the cheapest dispatch cost pays, so the first count that
         /// pays there bounds the search from below in O(budget + log bound),
         /// and the bisection above it asks Strided O(log bound) times.
-        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
+        fn scan_widen(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
             #[cfg(test)]
             GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
             let mut cheapest = None;
@@ -114,9 +117,51 @@ pub(crate) mod sealed {
             Some(at)
         }
 
-        /// Exactly `parallel_width(exec, Copy, elements) > 1` for
-        /// `elements <= bound`, in O(1) once the token shape's threshold is
-        /// known.
+        /// The smallest element count up to `bound` at which Strided's
+        /// `parallel_width` for a copy is the whole budget, at or above the
+        /// widening count `from`; `None` when `bound` does not saturate.
+        ///
+        /// Why a bisection is exact: `parallel_width` picks the width `k`
+        /// minimising `D(k) + estimate / k` among the widths that pay. As the
+        /// estimate grows, a wider width's objective falls faster than a
+        /// narrower one's (slope `1 / k`), so once the whole budget `B` beats
+        /// every paying narrower width it keeps beating it; a width that only
+        /// starts paying later has `D(k) > D(B)` (paying is monotone in the
+        /// cost, and `B` already pays), so its objective
+        /// `D(k) + estimate / k` exceeds `D(B) + estimate / B` for good.
+        /// `parallel_width == B` is therefore monotone in the element count.
+        fn scan_full(
+            exec: &crate::host_pool::Exec<'_>,
+            bound: usize,
+            from: usize,
+        ) -> Option<usize> {
+            let budget = exec.budget().get();
+            let full = |elements: usize| {
+                #[cfg(test)]
+                WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
+                execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
+                    == budget
+            };
+            if !full(bound) {
+                return None;
+            }
+            if full(from) {
+                return Some(from);
+            }
+            let (mut below, mut at) = (from, bound);
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if full(middle) {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            Some(at)
+        }
+
+        /// The token shape's widening and saturating counts, scanned once per
+        /// shape.
         ///
         /// Why the memo is keyed by budget and team authority: one gate
         /// serves every unsplit block list of a call on the calling thread,
@@ -124,25 +169,56 @@ pub(crate) mod sealed {
         /// what can still differ between its tokens; the calling thread fixes
         /// the remaining dispatch kind. The gate is not `Sync`, so a forked
         /// worker builds its own.
+        fn thresholds(&self, exec: &crate::host_pool::Exec<'_>) -> GateScan {
+            let (budget, team) = (exec.budget(), exec.carries_team());
+            match self.memo.get() {
+                Some(scan) if scan.budget == budget && scan.team == team => scan,
+                _ => {
+                    let min_elements = Self::scan_widen(exec, self.bound);
+                    let min_full =
+                        min_elements.and_then(|from| Self::scan_full(exec, self.bound, from));
+                    let scan = GateScan {
+                        budget,
+                        team,
+                        min_elements,
+                        min_full,
+                    };
+                    self.memo.set(Some(scan));
+                    scan
+                }
+            }
+        }
+
+        /// Exactly `parallel_width(exec, Copy, elements) > 1`, in O(1) once
+        /// the token shape's threshold is known (a count past `bound` that
+        /// the threshold cannot decide asks Strided directly).
         #[inline]
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
             if exec.is_serial() {
                 return false;
             }
-            let (budget, team) = (exec.budget(), exec.carries_team());
-            let min_elements = match self.memo.get() {
-                Some(scan) if scan.budget == budget && scan.team == team => scan.min_elements,
-                _ => {
-                    let min_elements = Self::scan(exec, self.bound);
-                    self.memo.set(Some(GateScan {
-                        budget,
-                        team,
-                        min_elements,
-                    }));
-                    min_elements
+            match self.thresholds(exec).min_elements {
+                Some(min) => elements >= min,
+                None if elements > self.bound => {
+                    #[cfg(test)]
+                    WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
+                    execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
+                        > 1
                 }
-            };
-            min_elements.is_some_and(|min| elements >= min)
+                None => false,
+            }
+        }
+
+        /// Exactly `parallel_width(exec, Copy, elements) == budget` for
+        /// `elements <= bound`, in O(1) once the token shape's thresholds are
+        /// known: whether a copy of `elements` uses the whole token.
+        #[inline]
+        pub(crate) fn saturates(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
+            !exec.is_serial()
+                && self
+                    .thresholds(exec)
+                    .min_full
+                    .is_some_and(|min| elements >= min)
         }
     }
 

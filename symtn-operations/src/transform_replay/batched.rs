@@ -628,18 +628,20 @@ pub(super) struct NarrowAtom {
 }
 
 /// The Single phase of a threaded replay over its ownership atoms, in two
-/// tiers by Strided's own widening rule (`gate`, on the phase's whole token
-/// `exec`): an atom whose largest planned Single would widen on that token
-/// is wide and runs alone on the whole token, one after another, as an
-/// unsplit list runs its blocks; the remaining narrow atoms then split over
-/// `threads` lanes by moved elements ([`split_join_parts`]). Without a wide
-/// atom (or for an accumulating `widen = false` replay, which never runs a
-/// plan) every atom splits; without a narrow one nothing does. `leaf` writes
-/// one list of Singles into `dst` from absolute offset `dst_start`.
+/// tiers by Strided's own width rule (`gate`, on the phase's whole token
+/// `exec`): an atom whose largest planned Single would use every worker of
+/// that token (`parallel_width` equal to its budget) is wide and runs alone
+/// on the whole token, one after another, as an unsplit list runs its
+/// blocks; every other atom is moldable and splits over `threads` lanes by
+/// moved elements ([`split_join_parts`]), each widening within the token
+/// share its lane is granted. Without a wide atom (or for an accumulating
+/// `widen = false` replay, which never runs a plan) every atom splits;
+/// without a moldable one nothing does. `leaf` writes one list of Singles
+/// into `dst` from absolute offset `dst_start`.
 ///
-/// Why two tiers: a few large components split between lanes run each on a
-/// fraction of the token that one of them alone would use whole, while many
-/// small ones only gain from running side by side. `narrow` is the narrow
+/// Why only saturating components run alone: a component that would use the
+/// whole token loses nothing by having it, while one that would use fewer
+/// workers leaves the rest idle unless it shares the token with others. `narrow` is the narrow
 /// list's scratch (O(atoms), workspace-retained and charged), used only when
 /// both tiers are present; classification asks the gate's O(1) threshold
 /// once per atom.
@@ -670,7 +672,7 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
     let parts = schedule.single_component_count();
     let atom_items = |atom: usize| &items[atoms[atom].item as usize..atoms[atom + 1].item as usize];
     let lo = |part: usize| atoms[part].lo;
-    if !(widen && threads > 1 && parts > 1 && gate.widens(&exec, schedule.widest_single)) {
+    if !(widen && threads > 1 && parts > 1 && gate.saturates(&exec, schedule.widest_single)) {
         return split_join_parts(
             0..parts,
             &lo,
@@ -699,7 +701,7 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
     narrow.clear();
     let mut weight = 0usize;
     for atom in 0..parts {
-        if gate.widens(&exec, atoms[atom].widest) {
+        if gate.saturates(&exec, atoms[atom].widest) {
             leaf(
                 atom_items(atom),
                 dst,
@@ -781,7 +783,7 @@ impl ScatterUnit {
 
 /// The wide tier of a chunk's component scatter (see
 /// [`replay_single_phase`]): runs every unit whose largest planned column
-/// would widen on the whole token `exec` alone on that token, one after
+/// would use every worker of the whole token `exec` alone on that token, one after
 /// another, then leaves only the narrow units in `units` (component order
 /// kept, weights re-summed, sentinel restored) for [`split_join_components`].
 /// An accumulating replay (`widen = false`), a serial width or a single unit
@@ -812,7 +814,7 @@ pub(super) fn run_wide_units<T>(
     };
     let mut any_wide = false;
     for unit in 0..units.len() {
-        if gate.widens(exec, units[unit].widest) {
+        if gate.saturates(exec, units[unit].widest) {
             any_wide = true;
             leaf(
                 &units[unit..unit + 1],
@@ -825,7 +827,7 @@ pub(super) fn run_wide_units<T>(
         }
     }
     if any_wide {
-        units.retain(|unit| !gate.widens(exec, unit.widest));
+        units.retain(|unit| !gate.saturates(exec, unit.widest));
         let mut weight = 0usize;
         for unit in units.iter_mut() {
             unit.weight_before = weight;
@@ -909,6 +911,86 @@ pub(super) fn atom_start(
     item: &TreeTransformScatterReplay,
 ) -> Result<isize, OperationError> {
     Ok(layouts.entry(item.dst_layout).offset - offset_to_isize(item.local_base)?)
+}
+
+/// One chunk's scatter over its ownership components (`units`, with their
+/// sentinel) on the phase's whole token `exec`. When Strided's own rule
+/// gives the chunk's moved elements a single worker (`gate.widens` on their
+/// total), the units run inline on the token, as an unsplit list does;
+/// otherwise the saturating units run alone ([`run_wide_units`]) and the
+/// rest split ([`split_join_components`]).
+///
+/// Why per chunk and not once per phase: a chunk's packed destination exists
+/// only between its GEMM and the next chunk's, so a split cannot outlive it;
+/// the inline rule keeps a call of small chunks from paying a fork each.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn scatter_chunk_components<T: Send + Sync>(
+    units: &mut Vec<ScatterUnit>,
+    component_slots: &[u32],
+    slots: &mut [&mut [T]],
+    fused_indices: &mut [usize],
+    max_fused_rank: usize,
+    threads: usize,
+    mut exec: Exec<'_>,
+    gate: &LeafGate,
+    gate_bound: usize,
+    widen: bool,
+    leaf: &(impl Fn(
+        &[ScatterUnit],
+        &mut [&mut [T]],
+        usize,
+        &mut [usize],
+        Exec<'_>,
+        &LeafGate,
+    ) -> Result<(), OperationError>
+          + Sync),
+) -> Result<(), OperationError> {
+    let parts = units.len().saturating_sub(1);
+    if parts == 0 {
+        return Ok(());
+    }
+    let total = units[parts].weight_before;
+    if threads <= 1 || parts == 1 || !gate.widens(&exec, total) {
+        return leaf(
+            &units[..parts],
+            slots,
+            0,
+            &mut fused_indices[..max_fused_rank],
+            exec,
+            gate,
+        );
+    }
+    #[cfg(test)]
+    SCATTER_SPLITS.with(|splits| splits.set(splits.get() + 1));
+    run_wide_units(
+        units,
+        slots,
+        &mut fused_indices[..max_fused_rank],
+        threads,
+        &mut exec,
+        gate,
+        widen,
+        leaf,
+    )?;
+    split_join_components(
+        units,
+        component_slots,
+        slots,
+        0,
+        fused_indices,
+        max_fused_rank,
+        threads,
+        exec,
+        Some(gate),
+        gate_bound,
+        leaf,
+    )
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Chunk scatters this thread split between lanes (test observation).
+    pub(super) static SCATTER_SPLITS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
 }
 
 /// Recursive `replay_join` over one chunk's scatter `units` (ending with a
@@ -1258,7 +1340,9 @@ where
 ///   into one atom, and owners sharing an atom form one component, which a
 ///   lane replays whole; a phase with one component stays serial. An
 ///   overwrite first runs its wide components (whose largest planned block
-///   widens on the whole token) alone on that token, then splits the rest.
+///   would use every worker of the whole token) alone on that token, then
+///   splits the rest; a chunk whose moved elements Strided would give one
+///   worker scatters inline.
 ///   Components are balanced by the destination elements they move.
 /// - Each chunk is one serial grouped GEMM call between its pack and scatter
 ///   phases. The dense executor owns its own parallelism, so no nesting arises.
@@ -1488,28 +1572,18 @@ where
                         }
                         Ok(())
                     };
-                    replay_region(engine, |mut exec| {
-                        run_wide_units(
-                            chunk_units,
-                            slots,
-                            &mut fused_indices[..max_fused_rank],
-                            threads,
-                            &mut exec,
-                            &gate,
-                            mode.overwrites(),
-                            &leaf,
-                        )?;
-                        split_join_components(
+                    replay_region(engine, |exec| {
+                        scatter_chunk_components(
                             chunk_units,
                             &schedule.component_slots,
                             slots,
-                            0,
                             fused_indices.as_mut_slice(),
                             max_fused_rank,
                             threads,
                             exec,
-                            Some(&gate),
+                            &gate,
                             layouts.max_planned_elements(),
+                            mode.overwrites(),
                             &leaf,
                         )
                     })??;
