@@ -326,7 +326,7 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
         self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
     // The provided entries other default bodies call (`eig_vals`, and
-    // `factorize_batch` for its values-only variants).
+    // `factorize_batch` for its general and values-only variants).
     fn eig(
         &mut self,
         engine: &mut dyn Engine,
@@ -347,6 +347,13 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
         input: DenseRead<'_>,
     ) -> Result<DenseTensor, DenseError> {
         self.0.eigh_vals(engine, input)
+    }
+    fn eig_vals(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<DenseTensor, DenseError> {
+        self.0.eig_vals(engine, input)
     }
 }
 
@@ -578,7 +585,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
             Op::EigVals,
             input,
             |e, engine, i| e.eig_vals(engine, i),
-            |e, engine, i| e.eig_vals(engine, i),
+            |e, engine, i| ValuesDefault(e).eig_vals(engine, i),
         )
     }
 

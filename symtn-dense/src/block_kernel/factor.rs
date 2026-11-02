@@ -1,16 +1,16 @@
 //! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, Hermitian eigendecomposition and their values-only forms): one tlinalg
-//! call per block, the blocks spread over the lane driver's lanes on the
-//! caller's engine.
+//! QR, Hermitian eigendecomposition, their values-only forms and general
+//! eigenvalues): one tlinalg call per block, the blocks spread over the lane
+//! driver's lanes on the caller's engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
-//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`) does
-//! (same provider, same validation, same error values), but on
-//! its lane's child token instead of the whole engine, so a block's faer
-//! width is the engine's decision within its lane's reserved share. Each
-//! factor is a fresh `Vec` from the provider's `Vec` entry: its length is the
-//! factor's logical size and it carries no recycled-buffer history (its
-//! capacity is the provider's reservation, not necessarily the length).
+//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
+//! `eigvals`) does (same provider, same validation, same error values), but
+//! on its lane's child token instead of the whole engine, so a block's faer
+//! width is the engine's decision within its lane's reserved share. Each factor is a fresh `Vec`
+//! from the provider's `Vec` entry: its length is the factor's logical size
+//! and it carries no recycled-buffer history (its capacity is the provider's
+//! reservation, not necessarily the length).
 
 use std::marker::PhantomData;
 
@@ -210,6 +210,34 @@ impl Factor for SvdVals {
     }
 }
 
+/// General eigenvalues only: `[values]` of shape `[n, b..]` in the input's
+/// complex counterpart.
+pub(crate) struct EigVals;
+
+impl Factor for EigVals {
+    const ENTRY: &'static str = "eig_values";
+    const OP: tlinalg::Op = tlinalg::Op::EigValues;
+    const SQUARE: bool = true;
+
+    fn work(n: usize, _: usize) -> f64 {
+        tlinalg::eig::estimate_work::<f64>(n)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut values = Vec::new();
+        if let Some(raw) = raw {
+            T::eig_values(raw, &mut values, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![output::<Self, T::EigScalar>(&[n], batch, values)?])
+    }
+}
+
 /// A column-major factor of shape `dims` followed by `batch`.
 fn output<F: Factor, T: TensorScalar>(
     dims: &[usize],
@@ -239,14 +267,27 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
         raw: RawStridedRef<'_, Self>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
+
+    /// The complex counterpart, in which the general eigenvalues are
+    /// published.
+    type EigScalar: TensorScalar;
+
+    /// tlinalg's general eigenvalues only, in its order.
+    fn eig_values(
+        raw: RawStridedRef<'_, Self>,
+        values: &mut Vec<Self::EigScalar>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()>;
 }
 
 // Why one impl per concrete scalar: tlinalg's values-only real type is an
 // associated type of a trait it does not export, so it equals
 // `TensorScalar::Real` only once the scalar is concrete.
 macro_rules! scalar {
-    ($ty:ty, |$values:ident| $real:expr) => {
+    ($ty:ty, $complex:ty, |$values:ident| $real:expr) => {
         impl Scalar for $ty {
+            type EigScalar = $complex;
+
             fn real_values($values: Vec<$ty>) -> Vec<<$ty as TensorScalar>::Real> {
                 $real
             }
@@ -268,17 +309,25 @@ macro_rules! scalar {
                 tlinalg::svd::svd_values(tlinalg::Op::SvdValues, raw, &mut values, exec)?;
                 Ok(values)
             }
+
+            fn eig_values(
+                raw: RawStridedRef<'_, $ty>,
+                values: &mut Vec<$complex>,
+                exec: &mut Exec<'_>,
+            ) -> tlinalg::Result<()> {
+                tlinalg::eig::eig_values(tlinalg::Op::EigValues, raw, values, exec)
+            }
         }
     };
 }
 
-scalar!(f32, |values| values);
-scalar!(f64, |values| values);
-scalar!(Complex32, |values| values
+scalar!(f32, Complex32, |values| values);
+scalar!(f64, Complex64, |values| values);
+scalar!(Complex32, Complex32, |values| values
     .into_iter()
     .map(|value| value.re)
     .collect());
-scalar!(Complex64, |values| values
+scalar!(Complex64, Complex64, |values| values
     .into_iter()
     .map(|value| value.re)
     .collect());
@@ -318,7 +367,8 @@ pub(crate) type Sink<'s> =
 
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
-/// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`)
+/// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
+/// `eig_vals`)
 /// returns it.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
@@ -354,6 +404,15 @@ pub(crate) fn factorize(
         Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
         Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
         Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
+        // Why not on the lanes: tenferro's eig publishes unit-norm
+        // eigenvectors through a normalization it does not export
+        // (tensor4all/tenferro-rs#2387), and symtn does not duplicate it, so
+        // each input takes the per-matrix route on the whole engine and is
+        // delivered before the next is solved.
+        Op::Eig => inputs.iter().enumerate().try_for_each(|(index, &input)| {
+            sink(index, crate::tenferro_adapter::eig_read(engine, input))
+        }),
+        Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
     }
 }
 
@@ -461,7 +520,7 @@ fn factor<F: Factor>(
     }
 }
 
-/// tenferro's `svd_impl`/`qr_impl`/`eigh_impl` (and values-only forms) on
+/// tenferro's `svd_impl`/`qr_impl`/`eigh_impl`/`eig_impl` (values-only forms) on
 /// one input: rank check, the square check where the provider requires one,
 /// the empty-extent shortcut, then the provider's batched factorization.
 fn factor_typed<F: Factor, T: Scalar>(
