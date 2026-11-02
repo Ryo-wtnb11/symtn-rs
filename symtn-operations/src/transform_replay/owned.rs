@@ -9,6 +9,8 @@ use super::*;
 /// the same schedule rule as the initialised replay
 /// (`effective_tree_transform_threads`), so the writer runs under the parallel
 /// schedule whenever the initialised path would, and serially otherwise.
+/// Either way each block keeps the engine-token share of the worker that
+/// writes it, so one large block can still widen its own move.
 ///
 /// `profile` accumulates the same phases as the initialised profiled replay
 /// (benches and tests only; production callers pass `None`).
@@ -55,6 +57,9 @@ where
     let threads = effective_tree_transform_threads(engine, schedule, threads);
     let layouts = structure.layouts();
     let max_fused_rank = layouts.max_fused_rank();
+    // One gate for every unsplit block list on the calling thread; forked
+    // leaves build their own.
+    let gate = LeafGate::new(layouts.max_planned_elements());
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
@@ -83,7 +88,7 @@ where
             1
         };
         let start = profile.as_ref().map(|_| std::time::Instant::now());
-        replay_region(engine, singles_threads, |exec| {
+        replay_region(engine, |exec| {
             split_join_uninit(
                 &schedule.singles,
                 dst_data,
@@ -93,10 +98,14 @@ where
                 singles_threads,
                 exec,
                 &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
-                &|items, dst, dst_start, fused_index| {
+                Some(&gate),
+                layouts.max_planned_elements(),
+                &|items, dst, dst_start, fused_index, mut exec, gate| {
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
                         write_uninit_layout_from_source(
+                            exec.reborrow(),
+                            gate,
                             layouts,
                             dst_layout,
                             src_layout,
@@ -151,7 +160,7 @@ where
             // `replay_scatter_groups` does; columns inside a group stay serial.
             let scatter_threads = if scatter_slice_disjoint { threads } else { 1 };
             let start = profile.as_ref().map(|_| std::time::Instant::now());
-            replay_region(engine, scatter_threads, |exec| {
+            replay_region(engine, |exec| {
                 split_join_uninit(
                     &workspace.chunk_scatter_groups,
                     dst_data,
@@ -161,10 +170,14 @@ where
                     scatter_threads,
                     exec,
                     &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
-                    &|groups, dst, dst_start, fused_index| {
+                    Some(&gate),
+                    layouts.max_planned_elements(),
+                    &|groups, dst, dst_start, fused_index, mut exec, gate| {
                         for &group in groups {
                             for item in &scatter_columns[scatter_groups[group].columns.clone()] {
                                 write_uninit_layout_from_packed(
+                                    exec.reborrow(),
+                                    gate,
                                     layouts,
                                     item.dst_layout,
                                     dst,
@@ -199,7 +212,8 @@ where
 /// are sorted by destination offset and `dst_lo(item)` is the absolute start
 /// of each item's destination range; `leaf` writes `items` into `dst`, whose
 /// first element is absolute offset `dst_start`, using one worker's traversal
-/// scratch.
+/// scratch and that worker's share of `exec`. An unsplit list (`threads` of
+/// one) keeps the whole of `exec` for the blocks it visits in turn.
 ///
 /// No `unsafe` is needed here: `split_at_mut` at `dst_lo(items[middle])`
 /// yields two non-overlapping `&mut [MaybeUninit<D>]`, which the compiler
@@ -221,7 +235,16 @@ fn split_join_uninit<I, D>(
     threads: usize,
     exec: Exec<'_>,
     dst_lo: &(impl Fn(&I) -> Result<isize, OperationError> + Sync),
-    leaf: &(impl Fn(&[I], &mut [MaybeUninit<D>], isize, &mut [usize]) -> Result<(), OperationError>
+    gate: Option<&LeafGate>,
+    gate_bound: usize,
+    leaf: &(impl Fn(
+        &[I],
+        &mut [MaybeUninit<D>],
+        isize,
+        &mut [usize],
+        Exec<'_>,
+        &LeafGate,
+    ) -> Result<(), OperationError>
           + Sync),
 ) -> Result<(), OperationError>
 where
@@ -232,7 +255,22 @@ where
         return Ok(());
     }
     if threads <= 1 || items.len() == 1 {
-        return leaf(items, dst, dst_start, &mut fused_indices[..max_fused_rank]);
+        let own_gate;
+        let gate = match gate {
+            Some(gate) => gate,
+            None => {
+                own_gate = LeafGate::new(gate_bound);
+                &own_gate
+            }
+        };
+        return leaf(
+            items,
+            dst,
+            dst_start,
+            &mut fused_indices[..max_fused_rank],
+            exec,
+            gate,
+        );
     }
 
     let middle = parallel_split(items.len(), threads);
@@ -257,6 +295,8 @@ where
                 left_threads,
                 exec,
                 dst_lo,
+                None,
+                gate_bound,
                 leaf,
             )
         },
@@ -270,6 +310,8 @@ where
                 right_threads,
                 exec,
                 dst_lo,
+                None,
+                gate_bound,
                 leaf,
             )
         },
@@ -328,6 +370,8 @@ fn write_uninit_layout_zero<D: Zero + Copy>(
 /// replay rebases them.
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_from_source<D, C>(
+    exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     src_index: usize,
@@ -340,18 +384,22 @@ fn write_uninit_layout_from_source<D, C>(
 ) -> Result<(), OperationError>
 where
     D: Copy
+        + Send
+        + Sync
         + Mul<D, Output = D>
         + Zero
         + One
         + PartialEq
         + ConjugateValue
         + RecouplingCoefficientAction<C>,
-    C: Copy,
+    C: Copy + Sync,
 {
     // The element op is chosen once per block, with the structural coefficient
     // still in its own type; see `TransformScale`.
     if scale.is_identity() {
         return write_uninit_layout_mapped(
+            exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -365,6 +413,8 @@ where
     if scale.is_zero() {
         let zero = scale.apply(D::zero());
         return write_uninit_layout_mapped(
+            exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -376,21 +426,28 @@ where
         );
     }
     match scale {
-        TransformScale::Structural(coefficient) => write_uninit_layout_mapped(
-            layouts,
-            dst_index,
-            src_index,
-            dst,
-            dst_start,
-            src,
-            fused_index,
-            move |value: D| {
-                value
-                    .maybe_conj(conjugate)
-                    .scale_by_coefficient(coefficient)
-            },
-        ),
+        TransformScale::Structural(coefficient) => {
+            let coefficient = &coefficient;
+            write_uninit_layout_mapped(
+                exec,
+                gate,
+                layouts,
+                dst_index,
+                src_index,
+                dst,
+                dst_start,
+                src,
+                fused_index,
+                move |value: D| {
+                    value
+                        .maybe_conj(conjugate)
+                        .scale_by_coefficient(*coefficient)
+                },
+            )
+        }
         TransformScale::Data(scale) => write_uninit_layout_mapped(
+            exec,
+            gate,
             layouts,
             dst_index,
             src_index,
@@ -405,6 +462,8 @@ where
 
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_mapped<D, F>(
+    exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     src_index: usize,
@@ -415,11 +474,14 @@ fn write_uninit_layout_mapped<D, F>(
     map: F,
 ) -> Result<(), OperationError>
 where
-    D: Copy,
-    F: Fn(D) -> D,
+    D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
+    F: Fn(D) -> D + Send + Sync,
 {
-    write_fused_uninit(
+    write_role_uninit(
+        exec,
+        gate,
         layouts.role(dst_index)?,
+        layouts.entry(dst_index).element_count,
         dst,
         src,
         layouts.entry(dst_index).offset - dst_start,
@@ -429,8 +491,35 @@ where
     )
 }
 
+/// Writes one role into uninitialized memory: its compiled plan across
+/// `exec` when [`admitted_plan`] admits one, the baked walk otherwise.
+#[allow(clippy::too_many_arguments)]
+fn write_role_uninit<D, F>(
+    exec: Exec<'_>,
+    gate: &LeafGate,
+    role: crate::BakedFusedLayout<'_>,
+    elements: usize,
+    dst: &mut [MaybeUninit<D>],
+    src: &[D],
+    dst_offset: isize,
+    src_offset: isize,
+    fused_index: &mut [usize],
+    map: F,
+) -> Result<(), OperationError>
+where
+    D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
+    F: Fn(D) -> D + Send + Sync,
+{
+    match admitted_plan(role, elements, &exec, gate) {
+        Some(plan) => planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map),
+        None => write_fused_uninit(role, dst, src, dst_offset, src_offset, fused_index, map),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_from_packed<D>(
+    exec: Exec<'_>,
+    gate: &LeafGate,
     layouts: &TreeTransformLayoutTable,
     dst_index: usize,
     dst: &mut [MaybeUninit<D>],
@@ -441,7 +530,7 @@ fn write_uninit_layout_from_packed<D>(
     fused_index: &mut [usize],
 ) -> Result<(), OperationError>
 where
-    D: Copy + Mul<D, Output = D> + Zero + One + PartialEq,
+    D: Copy + Send + Sync + Mul<D, Output = D> + Zero + One + PartialEq,
 {
     // Why the identity arm: `1 * (inf + 0i)` is `inf + NaN i`, so the scatter
     // must copy rather than multiply when the caller's alpha is one. A zero
@@ -451,11 +540,15 @@ where
     // fused walk over `packed` starting at `packed_offset` reproduces the
     // column-major gather `packed[packed_offset + linear]`.
     let role = layouts.role(dst_index)?;
+    let elements = layouts.entry(dst_index).element_count;
     let dst_offset = layouts.entry(dst_index).offset - dst_start;
     let src_offset = offset_to_isize(packed_offset)?;
     if alpha.is_one() {
-        write_fused_uninit(
+        write_role_uninit(
+            exec,
+            gate,
             role,
+            elements,
             dst,
             packed,
             dst_offset,
@@ -464,8 +557,11 @@ where
             |v| v,
         )
     } else {
-        write_fused_uninit(
+        write_role_uninit(
+            exec,
+            gate,
             role,
+            elements,
             dst,
             packed,
             dst_offset,
@@ -490,6 +586,17 @@ mod owned_overwrite_tests {
     };
 
     fn canonical_structure(offset: usize) -> Arc<BlockStructure> {
+        canonical_block(offset, 2, 3)
+    }
+
+    /// Rows x cols elements of the planned-leaf fixtures: 24 keeps Strided's
+    /// copy estimate nonzero on every host class (at least 0.09 ns per
+    /// element), so the role retains a plan for a wide engine to widen.
+    const PLANNED_ROWS: usize = 4;
+    const PLANNED_COLS: usize = 6;
+    const PLANNED_LEN: usize = PLANNED_ROWS * PLANNED_COLS;
+
+    fn canonical_block(offset: usize, rows: usize, cols: usize) -> Arc<BlockStructure> {
         let key = BlockKey::from(
             FusionTreePairKey::try_pair_from_sector_ids(
                 [1],
@@ -507,7 +614,7 @@ mod owned_overwrite_tests {
         Arc::new(
             BlockStructure::from_blocks_with_rank(
                 2,
-                vec![BlockSpec::with_key(key, vec![2, 3], vec![1, 2], offset).unwrap()],
+                vec![BlockSpec::with_key(key, vec![rows, cols], vec![1, rows], offset).unwrap()],
             )
             .unwrap(),
         )
@@ -515,73 +622,139 @@ mod owned_overwrite_tests {
 
     #[test]
     fn owned_writer_matches_initialized_oracle_for_real_and_complex() {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        // What: canonical serial owned replay writes every physical value and
-        // is byte-for-byte equal to the initialized overwrite oracle.
-        let structure = canonical_structure(0);
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &[TreeTransformBlockSpec::single(0, 0, -2.0)],
-        )
-        .unwrap();
+        // What: canonical owned replay writes every physical value and is
+        // byte-for-byte equal to the initialized overwrite oracle; at
+        // `alpha = 1` both scale a complex payload by the real structural
+        // coefficient componentwise, so `±inf`, NaN and `-0` components keep
+        // exactly the bits of `(-2 * re, -2 * im)`. The second engine declares
+        // free dispatch, so the block's move is widened onto its compiled plan.
+        for mut engine in [
+            symtn_dense::CpuEngine::serial(),
+            crate::host_pool::eager_test_engine(2),
+        ] {
+            let engine = &mut engine;
+            let structure = canonical_block(0, PLANNED_ROWS, PLANNED_COLS);
+            let transform = TreeTransformStructure::compile_structures(
+                &structure,
+                &structure,
+                &[TreeTransformBlockSpec::single(0, 0, -2.0)],
+            )
+            .unwrap();
+            // Precondition: the Single role retains its plan on every host.
+            assert_eq!(transform.layouts().retained_plan_count(), 1);
+            let real_src = (1..=PLANNED_LEN).map(|v| v as f64).collect::<Vec<_>>();
 
-        let mut expected = vec![f64::NAN; 6];
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            &mut expected,
-            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            3.0,
-            &[],
-            1,
-        )
-        .unwrap();
-        let actual = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            1,
-            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-            3.0,
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(actual, expected);
+            let mut expected = vec![f64::NAN; PLANNED_LEN];
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut expected,
+                &real_src,
+                3.0,
+                &[],
+                1,
+            )
+            .unwrap();
+            let actual = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                1,
+                &real_src,
+                3.0,
+                1,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(actual, expected);
 
-        let complex_src = (1..=6)
-            .map(|value| Complex64::new(value as f64, -(value as f64)))
-            .collect::<Vec<_>>();
-        let complex = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            1,
-            &complex_src,
-            Complex64::new(3.0, 1.0),
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-        let scale = Complex64::new(3.0, 1.0) * -2.0;
-        assert_eq!(
-            complex,
-            complex_src.iter().map(|&v| scale * v).collect::<Vec<_>>()
-        );
+            let complex_src = (1..=PLANNED_LEN)
+                .map(|value| Complex64::new(value as f64, -(value as f64)))
+                .collect::<Vec<_>>();
+            let complex = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                1,
+                &complex_src,
+                Complex64::new(3.0, 1.0),
+                1,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let scale = Complex64::new(3.0, 1.0) * -2.0;
+            assert_eq!(
+                complex,
+                complex_src.iter().map(|&v| scale * v).collect::<Vec<_>>()
+            );
+
+            let nan = f64::from_bits(0x7ff8_0000_0000_1398);
+            let non_finite = [
+                Complex64::new(f64::INFINITY, 0.0),
+                Complex64::new(-0.0, 1.0),
+                Complex64::new(nan, -0.0),
+                Complex64::new(1.5, f64::NEG_INFINITY),
+                Complex64::new(0.0, -0.0),
+                Complex64::new(-3.0, 0.5),
+            ]
+            .repeat(PLANNED_LEN / 6);
+            let bits = |values: &[Complex64]| {
+                values
+                    .iter()
+                    .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                    .collect::<Vec<_>>()
+            };
+            let componentwise = non_finite
+                .iter()
+                .map(|v| Complex64::new(-2.0 * v.re, -2.0 * v.im))
+                .collect::<Vec<_>>();
+            let owned = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                1,
+                &non_finite,
+                Complex64::new(1.0, 0.0),
+                1,
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            let mut initialized = vec![Complex64::new(f64::NAN, f64::NAN); PLANNED_LEN];
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut initialized,
+                &non_finite,
+                Complex64::new(1.0, 0.0),
+                &[],
+                1,
+            )
+            .unwrap();
+            assert_eq!(bits(&owned), bits(&componentwise));
+            assert_eq!(bits(&initialized), bits(&componentwise));
+        }
     }
 
     #[test]
@@ -638,24 +811,101 @@ mod owned_overwrite_tests {
     }
 
     #[test]
-    fn owned_writer_zero_scales_write_zeros_over_non_finite_sources() {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        // What: the uninitialized writer follows VectorInterface's
-        // `scale(x, 0) = zero(x) * 0` for a zero caller alpha and for
-        // a zero structural coefficient in a Single block, and for a zero
-        // alpha in a Multi scatter whose recoupling GEMM saw `inf`: every
-        // output is `0.0`, as TensorKit's `permute!(tdst, tsrc, p, 0, 0)`
-        // (and `scale(Inf, 0.0) == 0.0`) gives.
-        let non_finite = [f64::INFINITY, f64::NAN, f64::NEG_INFINITY, 1.0, -0.0, 2.0];
-        let structure = canonical_structure(0);
-        for (alpha, coefficient) in [(0.0, -2.0), (1.0, 0.0), (3.0, 0.0)] {
+    fn zero_scales_write_zeros_over_non_finite_sources() {
+        // What: the uninitialized writer and the initialized overwrite follow
+        // VectorInterface's `scale(x, 0) = zero(x) * 0` for a zero caller
+        // alpha and for a zero structural coefficient in a Single block, and
+        // for a zero alpha in a Multi scatter whose recoupling GEMM saw
+        // `inf`: every output is `0.0`, as TensorKit's
+        // `permute!(tdst, tsrc, p, 0, 0)` (and `scale(Inf, 0.0) == 0.0`)
+        // gives. The second engine declares free dispatch, so every block's
+        // move is widened onto its compiled plan.
+        for mut engine in [
+            symtn_dense::CpuEngine::serial(),
+            crate::host_pool::eager_test_engine(2),
+        ] {
+            let engine = &mut engine;
+            let non_finite = [f64::INFINITY, f64::NAN, f64::NEG_INFINITY, 1.0, -0.0, 2.0]
+                .repeat(PLANNED_LEN / 6);
+            let structure = canonical_block(0, PLANNED_ROWS, PLANNED_COLS);
+            for (alpha, coefficient) in [(0.0, -2.0), (1.0, 0.0), (3.0, 0.0)] {
+                let transform = TreeTransformStructure::compile_structures(
+                    &structure,
+                    &structure,
+                    &[TreeTransformBlockSpec::single(0, 0, coefficient)],
+                )
+                .unwrap();
+                // Precondition: the Single role retains its plan on every host.
+                assert_eq!(transform.layouts().retained_plan_count(), 1);
+                let owned = try_tree_transform_structure_overwrite_owned_raw(
+                    engine,
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    1,
+                    &non_finite,
+                    alpha,
+                    1,
+                    None,
+                )
+                .unwrap()
+                .unwrap();
+                let mut initialized = vec![f64::NAN; non_finite.len()];
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut initialized,
+                    &non_finite,
+                    alpha,
+                    &[],
+                    1,
+                )
+                .unwrap();
+                for actual in [owned, initialized] {
+                    assert!(
+                        actual.iter().all(|&value| value == 0.0),
+                        "alpha {alpha}, coefficient {coefficient}: {actual:?}"
+                    );
+                }
+            }
+
+            // Scatter columns of `PLANNED_LEN` elements, so the wide engine
+            // plans them too.
+            let space = FusionTreeHomSpace::new(
+                FusionProductSpace::new([z2_leg(PLANNED_ROWS, PLANNED_ROWS)]),
+                FusionProductSpace::new([z2_leg(PLANNED_COLS, PLANNED_COLS)]),
+            )
+            .coupled_subblock_structure(
+                &Z2FusionRule,
+                1,
+                [
+                    vec![PLANNED_ROWS, PLANNED_COLS],
+                    vec![PLANNED_ROWS, PLANNED_COLS],
+                ],
+            )
+            .unwrap();
+            let structure = Arc::clone(&space);
             let transform = TreeTransformStructure::compile_structures(
                 &structure,
                 &structure,
-                &[TreeTransformBlockSpec::single(0, 0, coefficient)],
+                &[TreeTransformBlockSpec::multi(
+                    vec![0, 1],
+                    vec![0, 1],
+                    vec![2.0, 3.0, 5.0, 7.0],
+                )],
             )
             .unwrap();
-            let actual = try_tree_transform_structure_overwrite_owned_raw(
+            // Precondition: both scatter columns retain their plans.
+            assert_eq!(transform.layouts().retained_plan_count(), 2);
+            let source = [f64::INFINITY, f64::NEG_INFINITY, f64::NAN].repeat(2 * PLANNED_LEN / 3);
+            let owned = try_tree_transform_structure_overwrite_owned_raw(
                 engine,
                 &mut DefaultDenseExecutor::new(),
                 &mut TreeTransformWorkspace::default(),
@@ -663,52 +913,32 @@ mod owned_overwrite_tests {
                 &structure,
                 &structure,
                 1,
-                &non_finite,
-                alpha,
+                &source,
+                0.0,
                 1,
                 None,
             )
             .unwrap()
             .unwrap();
-            assert!(
-                actual.iter().all(|&value| value == 0.0),
-                "alpha {alpha}, coefficient {coefficient}: {actual:?}"
-            );
+            let mut initialized = vec![f64::NAN; source.len()];
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut initialized,
+                &source,
+                0.0,
+                &[],
+                1,
+            )
+            .unwrap();
+            assert_eq!(owned, [0.0; 2 * PLANNED_LEN]);
+            assert_eq!(initialized, [0.0; 2 * PLANNED_LEN]);
         }
-
-        let space = FusionTreeHomSpace::new(
-            FusionProductSpace::new([z2_leg(1, 1)]),
-            FusionProductSpace::new([z2_leg(1, 1)]),
-        )
-        .coupled_subblock_structure(&Z2FusionRule, 1, [vec![1, 1], vec![1, 1]])
-        .unwrap();
-        let structure = Arc::clone(&space);
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &[TreeTransformBlockSpec::multi(
-                vec![0, 1],
-                vec![0, 1],
-                vec![2.0, 3.0, 5.0, 7.0],
-            )],
-        )
-        .unwrap();
-        let actual = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            1,
-            &[f64::INFINITY, f64::NEG_INFINITY],
-            0.0,
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(actual, [0.0, 0.0]);
     }
 
     #[test]

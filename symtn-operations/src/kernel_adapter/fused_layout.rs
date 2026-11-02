@@ -1,4 +1,6 @@
+use super::adapter::sealed::LeafGate;
 use super::*;
+use strided_kernel::{RawStridedMut, RawStridedRef, UpdatePlan};
 
 /// Inline capacity of [`FusedLayoutScratch`] and the traversal index.
 ///
@@ -84,6 +86,9 @@ pub struct BakedFusedLayout<'a> {
     pub dims: &'a [usize],
     pub dst_strides: &'a [isize],
     pub src_strides: &'a [isize],
+    /// Strided's compiled replay of exactly this layout, retained by the
+    /// layout table for the roles a threaded leaf may replay.
+    pub(crate) plan: Option<&'a UpdatePlan>,
 }
 
 impl<'a> BakedFusedLayout<'a> {
@@ -115,6 +120,7 @@ impl<'a> BakedFusedLayout<'a> {
                 dims,
                 dst_strides,
                 src_strides,
+                plan: None,
             });
         }
         if dims == [1] && dst_strides == [0] && src_strides == [0] {
@@ -122,6 +128,7 @@ impl<'a> BakedFusedLayout<'a> {
                 dims,
                 dst_strides,
                 src_strides,
+                plan: None,
             });
         }
         if dims.iter().any(|&dim| dim <= 1) {
@@ -134,6 +141,7 @@ impl<'a> BakedFusedLayout<'a> {
             dims,
             dst_strides,
             src_strides,
+            plan: None,
         })
     }
 
@@ -142,13 +150,16 @@ impl<'a> BakedFusedLayout<'a> {
         dims: &'a [usize],
         dst_strides: &'a [isize],
         src_strides: &'a [isize],
+        plan: Option<&'a UpdatePlan>,
     ) -> Self {
         // Why not revalidate here: the compiler validates these exact arena
-        // slices before publishing the immutable layout table.
+        // slices, and compiles `plan` from them, before publishing the
+        // immutable layout table.
         Self {
             dims,
             dst_strides,
             src_strides,
+            plan,
         }
     }
 
@@ -187,6 +198,77 @@ pub(super) fn validate_strided_ranks(
         });
     }
     Ok(())
+}
+
+/// The compiled plan a leaf replays `role` (of `elements` elements) with on
+/// `exec`: present when the role carries a plan and `gate` (Strided's own
+/// copy cost rule, the rule `UpdatePlan` itself applies) gives `exec` more
+/// than one worker. Callers ask only for overwrites.
+///
+/// Why not replay the plan at width one: it then runs the same serial loop
+/// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
+/// strided's spilled replay allocates a cursor per worker range, while the
+/// baked walk reuses the replay workspace's index.
+#[inline]
+pub(crate) fn admitted_plan<'a>(
+    role: BakedFusedLayout<'a>,
+    elements: usize,
+    exec: &crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
+) -> Option<&'a UpdatePlan> {
+    let plan = role.plan?;
+    gate.widens(exec, elements).then_some(plan)
+}
+
+/// `dst = op(src)` over `baked` by its compiled `plan` on `exec`. The plan's
+/// alpha is one and its beta zero, so the destination is never read and
+/// `op` is the whole element action, exactly as in the baked walk.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn planned_overwrite<T, F>(
+    plan: &UpdatePlan,
+    baked: BakedFusedLayout<'_>,
+    dst: &mut [T],
+    src: &[T],
+    dst_offset: isize,
+    src_offset: isize,
+    exec: crate::host_pool::Exec<'_>,
+    op: F,
+) -> Result<(), OperationError>
+where
+    T: Copy + Send + Sync + Add<Output = T> + Mul<Output = T> + Zero + One + PartialEq,
+    F: Fn(T) -> T + Send + Sync,
+{
+    let source = RawStridedRef::new(src, baked.dims, baked.src_strides, src_offset)
+        .map_err(crate::strided::error)?;
+    let mut destination = RawStridedMut::new(dst, baked.dims, baked.dst_strides, dst_offset)
+        .map_err(crate::strided::error)?;
+    plan.execute(&mut destination, &source, T::one(), T::zero(), op, exec)
+        .map_err(crate::strided::error)
+}
+
+/// [`planned_overwrite`] into uninitialized memory: every element `baked`
+/// addresses is written once, with alpha one so `op` is the whole action.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn planned_write_uninit<T, F>(
+    plan: &UpdatePlan,
+    baked: BakedFusedLayout<'_>,
+    dst: &mut [core::mem::MaybeUninit<T>],
+    src: &[T],
+    dst_offset: isize,
+    src_offset: isize,
+    exec: crate::host_pool::Exec<'_>,
+    op: F,
+) -> Result<(), OperationError>
+where
+    T: Copy + Send + Sync + Mul<Output = T> + One + PartialEq,
+    F: Fn(T) -> T + Send + Sync,
+{
+    let source = RawStridedRef::new(src, baked.dims, baked.src_strides, src_offset)
+        .map_err(crate::strided::error)?;
+    let mut destination = RawStridedMut::new(dst, baked.dims, baked.dst_strides, dst_offset)
+        .map_err(crate::strided::error)?;
+    plan.execute_uninit(&mut destination, &source, T::one(), op, exec)
+        .map_err(crate::strided::error)
 }
 
 pub(crate) fn normalize_fused_layout(
@@ -471,6 +553,7 @@ where
     }
 }
 
+#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn fused_pair_baked_with_index<T, Apply, ElementOp>(
     layout: &mut FusedLayoutScratch,

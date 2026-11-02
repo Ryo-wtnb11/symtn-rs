@@ -57,6 +57,84 @@ where
     Ok(())
 }
 
+/// One Single block of compiled replay on the caller's token share: the
+/// adapter's planned overwrite when `gate` (built from that share) widens the
+/// block, the strided kernel otherwise.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn tree_transform_single_on_token<A, D, C>(
+    mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    layouts: &TreeTransformLayoutTable,
+    dst_index: usize,
+    src_index: usize,
+    coefficient: C,
+    source_conjugate: bool,
+    dst_data: &mut [D],
+    src_data: &[D],
+    alpha: D,
+    mode: DestinationMode<D>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<D>,
+    D: Copy
+        + Send
+        + Sync
+        + Add<D, Output = D>
+        + Mul<D, Output = D>
+        + PartialEq
+        + Zero
+        + One
+        + ConjugateValue
+        + RecouplingCoefficientAction<C>,
+    C: Copy + Sync,
+{
+    let role = layouts.role(dst_index)?;
+    let dst = layouts.entry(dst_index);
+    let src_offset = layouts.entry(src_index).offset;
+    let scale = TransformScale::new(alpha, coefficient);
+    if mode.overwrites() {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+            if let Some(result) = kernels.planned_transform(
+                exec.reborrow(),
+                plan,
+                role,
+                dst_data,
+                src_data,
+                dst.offset,
+                src_offset,
+                source_conjugate,
+                scale,
+            ) {
+                return result;
+            }
+        }
+    }
+    kernels.transform_strided_baked(
+        exec,
+        zero_strides,
+        dst_data,
+        src_data,
+        role.dims(),
+        role.dst_strides(),
+        role.src_strides(),
+        dst.offset,
+        src_offset,
+        source_conjugate,
+        scale,
+        match mode {
+            DestinationMode::Axpby(beta) => Some(beta),
+            DestinationMode::Overwrite => None,
+        },
+        Some(role),
+        fused_index,
+    )
+}
+
+#[cfg(any(test, feature = "testing"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_with_strided_kernel<A, D, C>(
     exec: crate::host_pool::Exec<'_>,
@@ -333,6 +411,64 @@ where
     )
 }
 
+/// One recoupling scatter column of compiled replay on the caller's token
+/// share: the adapter's planned overwrite when `gate` (built from that share)
+/// widens the column, the strided scatter otherwise.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+pub(super) fn scatter_column_on_token<A, T>(
+    mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    layouts: &TreeTransformLayoutTable,
+    entry_index: usize,
+    packed: &[T],
+    packed_offset: usize,
+    dst_data: &mut [T],
+    alpha: T,
+    mode: DestinationMode<T>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<T>,
+    T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
+{
+    let role = layouts.role(entry_index)?;
+    let dst = layouts.entry(entry_index);
+    let packed_offset = offset_to_isize(packed_offset)?;
+    if mode.overwrites() {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+            if let Some(result) = kernels.planned_scatter(
+                exec.reborrow(),
+                plan,
+                role,
+                dst_data,
+                packed,
+                dst.offset,
+                packed_offset,
+                alpha,
+            ) {
+                return result;
+            }
+        }
+    }
+    scatter_role(
+        exec,
+        kernels,
+        zero_strides,
+        fused_index,
+        role,
+        dst.offset,
+        packed,
+        packed_offset,
+        dst_data,
+        alpha,
+        mode,
+    )
+}
+
+#[cfg(any(test, feature = "testing"))]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_into_layout<A, T>(
     exec: crate::host_pool::Exec<'_>,
@@ -352,8 +488,41 @@ where
     T: Copy,
 {
     let role = layouts.role(entry_index)?;
-    let offset = layouts.entry(entry_index).offset;
-    let packed_offset = offset_to_isize(packed_offset)?;
+    scatter_role(
+        exec,
+        kernels,
+        zero_strides,
+        fused_index,
+        role,
+        layouts.entry(entry_index).offset,
+        packed,
+        offset_to_isize(packed_offset)?,
+        dst_data,
+        alpha,
+        mode,
+    )
+}
+
+/// A scatter column's strided kernel over its resolved role and offsets.
+#[inline]
+#[allow(clippy::too_many_arguments)]
+fn scatter_role<A, T>(
+    exec: crate::host_pool::Exec<'_>,
+    kernels: &mut A,
+    zero_strides: &mut Vec<isize>,
+    fused_index: Option<&mut [usize]>,
+    role: crate::BakedFusedLayout<'_>,
+    offset: isize,
+    packed: &[T],
+    packed_offset: isize,
+    dst_data: &mut [T],
+    alpha: T,
+    mode: DestinationMode<T>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<T>,
+    T: Copy,
+{
     match mode {
         DestinationMode::Axpby(beta) => {
             zero_strides.clear();
@@ -655,6 +824,69 @@ mod allocation_replay_tests {
         let mut dense = NoAllocDenseExecutor;
         let mut workspace = TreeTransformWorkspace::default();
         let mut pool = crate::host_pool::test_pool(3);
+
+        let mut replay = |engine: &mut dyn Engine| {
+            dst.fill(f64::NAN);
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut kernels,
+                &mut dense,
+                &mut workspace,
+                &structure,
+                &block_structure,
+                &block_structure,
+                &mut dst,
+                &src,
+                1.0,
+                &[],
+                3,
+            )
+            .unwrap();
+        };
+
+        pool.install(&mut replay);
+        let (_, allocations) = allocation_oracle::with_session(|| {
+            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
+        });
+        assert_eq!(allocations, 0);
+        assert_eq!(dst, expected);
+    }
+
+    #[test]
+    fn warm_wide_overwrite_of_a_rank_nine_single_has_no_owned_allocations() {
+        // What: a Single whose permutation leaves nine unfusable axes,
+        // above Strided's inline fused rank, replays warm without an
+        // allocation on an engine wide enough to widen it, and matches the
+        // index oracle `dst(c) = -1.5 * src(reversed c)`.
+        const RANK: usize = 9;
+        let shape = [2; RANK];
+        let block_structure =
+            Arc::new(BlockStructure::packed_column_major(RANK, vec![shape.to_vec()]).unwrap());
+        let structure = TreeTransformStructure::compile_structures(
+            &block_structure,
+            &block_structure,
+            &[TreeTransformBlockSpec::single(0, 0, -1.5).with_source_axes((0..RANK).rev())],
+        )
+        .unwrap();
+        assert_eq!(structure.layouts().max_fused_rank(), RANK);
+
+        let elements = 1 << RANK;
+        let src = (0..elements)
+            .map(|value| value as f64 + 0.25)
+            .collect::<Vec<_>>();
+        let expected = (0..elements)
+            .map(|dst_linear| {
+                let src_linear = (0..RANK).fold(0usize, |offset, axis| {
+                    offset + ((dst_linear >> axis) & 1) * (1 << (RANK - 1 - axis))
+                });
+                -1.5 * src[src_linear]
+            })
+            .collect::<Vec<_>>();
+        let mut dst = vec![f64::NAN; elements];
+        let mut kernels = StridedHostKernelAdapter::default();
+        let mut dense = NoAllocDenseExecutor;
+        let mut workspace = TreeTransformWorkspace::default();
+        let mut pool = crate::host_pool::eager_test_pool(3);
 
         let mut replay = |engine: &mut dyn Engine| {
             dst.fill(f64::NAN);
