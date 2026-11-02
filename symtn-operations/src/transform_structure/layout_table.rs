@@ -154,28 +154,6 @@ impl TreeTransformLayoutTable {
         }
     }
 
-    /// Lowest physical index a Single block's or a scatter column's
-    /// destination writes, from its compiled role. Normalization only drops
-    /// extent-1 axes, reorders, and fuses same-sign spans, so this equals the
-    /// raw layout's `layout_index_range` low end, which compilation already
-    /// computed without overflow. O(f), read only at threaded split points.
-    pub(crate) fn destination_lo(&self, entry_index: usize) -> Result<isize, OperationError> {
-        let role = self.role(entry_index)?;
-        let mut lo = self.entries[entry_index].offset;
-        for (&extent, &stride) in role.dims().iter().zip(role.dst_strides()) {
-            if stride < 0 {
-                let span = isize::try_from(extent.saturating_sub(1))
-                    .ok()
-                    .and_then(|extent| extent.checked_mul(stride))
-                    .ok_or(OperationError::ElementCountOverflow)?;
-                lo = lo
-                    .checked_add(span)
-                    .ok_or(OperationError::ElementCountOverflow)?;
-            }
-        }
-        Ok(lo)
-    }
-
     pub(super) fn diagnostics(
         &self,
         blocks: &[TreeTransformBlock],

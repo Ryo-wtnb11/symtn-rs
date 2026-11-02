@@ -27,8 +27,8 @@ use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
 use crate::transform_structure::{
-    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterGroupReplay,
-    TreeTransformScatterReplay,
+    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterReplay,
+    TreeTransformSingleAtom,
 };
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
@@ -324,6 +324,10 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
+    chunk_units: Vec<ScatterUnit>,
+    // Capacity of the per-call atom slice list of component-owned scatter
+    // (`take_atom_slices`); always empty between calls.
+    atom_slices: Vec<&'static [u8]>,
     // The calling lane's fused index, one entry per fused axis; inline up to
     // eight, the rank metadata width, so a fresh per-call workspace allocates
     // none. Forked lanes below that rank keep their own (`LaneIndex`).
@@ -347,6 +351,8 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
+            chunk_units: Vec::new(),
+            atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
@@ -384,7 +390,21 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.member_ranges.capacity(),
             std::mem::size_of::<(usize, usize)>(),
-        )
+        ) + bytes(
+            self.chunk_units.capacity(),
+            std::mem::size_of::<ScatterUnit>(),
+        ) + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
+    }
+
+    /// The kept atom-slice capacity, emptied, for slices of `T` borrowed
+    /// for one replay.
+    fn take_atom_slices<'a, U>(&mut self) -> Vec<&'a mut [U]> {
+        recycle(std::mem::take(&mut self.atom_slices))
+    }
+
+    /// Returns [`Self::take_atom_slices`]'s capacity.
+    fn keep_atom_slices<U>(&mut self, slices: Vec<&mut [U]>) {
+        self.atom_slices = recycle(slices);
     }
 
     /// Coefficient packs this workspace has converted: a warm replay of the
@@ -458,6 +478,18 @@ impl<T> HostTreeTransformWorkspace<T> {
         }
         Ok(())
     }
+}
+
+/// `vec`'s allocation, emptied, for elements of another lifetime or type of
+/// the same layout.
+///
+/// Why not a transmute: replay forbids unsafe code. std collects a mapped
+/// `vec::IntoIter` in place when the layouts match; that is an optimization,
+/// not a documented guarantee, so the warm replay allocation tests pin it (a
+/// regression would reallocate, never misbehave).
+fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
+    vec.clear();
+    vec.into_iter().map(|_| unreachable!("emptied")).collect()
 }
 
 /// Sizes one pack buffer to `len` zero-initialised elements.

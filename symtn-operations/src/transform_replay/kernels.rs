@@ -59,7 +59,8 @@ where
 
 /// One Single block of compiled replay on the caller's token share: the
 /// adapter's planned overwrite when `gate` (built from that share) widens the
-/// block, the strided kernel otherwise.
+/// block, the strided kernel otherwise. `dst_data` may be a part of the
+/// destination starting at absolute offset `dst_start`.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
@@ -74,6 +75,7 @@ pub(super) fn tree_transform_single_on_token<A, D, C>(
     coefficient: C,
     source_conjugate: bool,
     dst_data: &mut [D],
+    dst_start: isize,
     src_data: &[D],
     alpha: D,
     mode: DestinationMode<D>,
@@ -94,6 +96,7 @@ where
 {
     let role = layouts.role(dst_index)?;
     let dst = layouts.entry(dst_index);
+    let dst_offset = dst.offset - dst_start;
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
     if mode.overwrites() {
@@ -104,7 +107,7 @@ where
                 role,
                 dst_data,
                 src_data,
-                dst.offset,
+                dst_offset,
                 src_offset,
                 source_conjugate,
                 scale,
@@ -121,7 +124,7 @@ where
         role.dims(),
         role.dst_strides(),
         role.src_strides(),
-        dst.offset,
+        dst_offset,
         src_offset,
         source_conjugate,
         scale,
@@ -413,7 +416,8 @@ where
 
 /// One recoupling scatter column of compiled replay on the caller's token
 /// share: the adapter's planned overwrite when `gate` (built from that share)
-/// widens the column, the strided scatter otherwise.
+/// widens the column, the strided scatter otherwise. `dst_data` may be a part
+/// of the destination starting at absolute offset `dst_start`.
 #[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
@@ -427,6 +431,7 @@ pub(super) fn scatter_column_on_token<A, T>(
     packed: &[T],
     packed_offset: usize,
     dst_data: &mut [T],
+    dst_start: isize,
     alpha: T,
     mode: DestinationMode<T>,
 ) -> Result<(), OperationError>
@@ -436,6 +441,7 @@ where
 {
     let role = layouts.role(entry_index)?;
     let dst = layouts.entry(entry_index);
+    let dst_offset = dst.offset - dst_start;
     let packed_offset = offset_to_isize(packed_offset)?;
     if mode.overwrites() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
@@ -445,7 +451,7 @@ where
                 role,
                 dst_data,
                 packed,
-                dst.offset,
+                dst_offset,
                 packed_offset,
                 alpha,
             ) {
@@ -459,7 +465,7 @@ where
         zero_strides,
         fused_index,
         role,
-        dst.offset,
+        dst_offset,
         packed,
         packed_offset,
         dst_data,
@@ -849,6 +855,53 @@ mod allocation_replay_tests {
             pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
         });
         assert_eq!(allocations, 0);
+        assert_eq!(dst, expected);
+    }
+
+    #[test]
+    fn warm_component_replay_has_no_owned_allocations() {
+        // What: once a workspace has replayed a structure whose Multi groups
+        // own disconnected atoms, a threaded replay splits the destination
+        // into those atoms again without allocating.
+        let (structure, transform) = super::super::tests::su2_interleaved_fixture();
+        assert!(transform.parallel_schedule().scatter_component_count() > 1);
+        let src = (1..=60).map(f64::from).collect::<Vec<_>>();
+        let expected = super::super::tests::su2_oracle(&src, 1.0);
+        let mut dst = vec![f64::NAN; 60];
+        let mut kernels = StridedHostKernelAdapter::default();
+        let mut dense = NoAllocDenseExecutor;
+        let mut workspace = TreeTransformWorkspace::default();
+        let mut pool = crate::host_pool::test_pool(3);
+
+        let mut replay = |engine: &mut dyn Engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut kernels,
+                &mut dense,
+                &mut workspace,
+                &transform,
+                &structure,
+                &structure,
+                &mut dst,
+                &src,
+                1.0,
+                &[],
+                3,
+            )
+            .unwrap();
+        };
+
+        pool.install(&mut replay);
+        let (joins, allocations) = allocation_oracle::with_session(|| {
+            pool.install(|engine| {
+                allocation_oracle::with_measurement(|| {
+                    replay(engine);
+                    allocation_oracle::join_entries()
+                })
+            })
+        });
+        assert_eq!(allocations, 0);
+        assert!(joins > 0);
         assert_eq!(dst, expected);
     }
 

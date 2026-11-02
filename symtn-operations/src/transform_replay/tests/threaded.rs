@@ -93,7 +93,7 @@ fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
         ],
     )
     .unwrap();
-    assert!(!structure.parallel_schedule().singles_slice_disjoint);
+    assert_eq!(structure.parallel_schedule().single_component_count(), 1);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -211,7 +211,7 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
     )
     .unwrap();
     assert_eq!(transform.parallel_schedule().scatter_groups.len(), 1);
-    assert!(!transform.parallel_schedule().scatter_groups[0].slice_disjoint);
+    assert_eq!(transform.parallel_schedule().scatter_component_count(), 1);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -680,4 +680,262 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
     });
     assert_eq!(owned, Some(source));
     assert_eq!(owned_scans, 1);
+}
+
+#[test]
+fn ownership_components_own_disconnected_atoms_exclusively() {
+    // What: overlapping destination intervals merge into address-ordered
+    // atoms, and a Multi group owns every atom its columns write, however
+    // far apart: each group's two blocks give two atoms with other groups'
+    // atoms between them, every atom has one slot inside its own component's
+    // slot range, and every column lies inside its atom.
+    let (_, transform) = su2_interleaved_fixture();
+    let schedule = transform.parallel_schedule();
+
+    // Singles: (0, 0) [4, 9] and (1, 0) [6, 11] share one atom.
+    let single_atoms = schedule
+        .single_atoms
+        .iter()
+        .map(|atom| (atom.lo, atom.item, atom.weight_before))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        single_atoms,
+        [
+            (4, 0, 0),
+            (12, 2, 8),
+            (22, 3, 12),
+            (28, 4, 16),
+            (38, 5, 20),
+            (44, 6, 24),
+            (50, 7, 28),
+        ]
+    );
+
+    let atoms = schedule
+        .scatter_atoms
+        .iter()
+        .map(|atom| (atom.lo, atom.len))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        atoms,
+        [
+            (0, 4),
+            (14, 6),
+            (20, 6),
+            (30, 6),
+            (36, 6),
+            (46, 6),
+            (52, 4),
+            (56, 4)
+        ]
+    );
+    let mut slots = schedule
+        .scatter_atoms
+        .iter()
+        .map(|atom| atom.slot)
+        .collect::<Vec<_>>();
+    slots.sort_unstable();
+    assert_eq!(slots, (0..8).collect::<Vec<u32>>());
+    assert_eq!(schedule.scatter_component_count(), 4);
+
+    let layouts = transform.layouts();
+    let mut components = Vec::new();
+    for group in &schedule.scatter_groups {
+        let slot_range = schedule.component_slots[group.component as usize]
+            ..schedule.component_slots[group.component as usize + 1];
+        let mut owned = Vec::new();
+        for column in &schedule.scatter_columns[group.columns.clone()] {
+            assert!(slot_range.contains(&column.slot));
+            let atom = schedule
+                .scatter_atoms
+                .iter()
+                .find(|atom| atom.slot == column.slot)
+                .unwrap();
+            let offset = layouts.entry(column.dst_layout).offset;
+            assert_eq!(offset - atom.lo, column.local_base as isize);
+            let [.., last] = su2_addresses(offset as usize);
+            assert!(last < atom.lo as usize + atom.len);
+            owned.push((offset, atom.lo));
+        }
+        owned.sort_unstable();
+        assert_eq!(slot_range.len(), owned.len());
+        components.push((group.component, owned));
+    }
+    components.sort_unstable();
+    let expected = SU2_MULTIS
+        .iter()
+        .map(|(offsets, _)| offsets.map(|offset| offset as isize))
+        .map(|[left, right]| {
+            let atom = |offset: isize| atoms.iter().rfind(|&&(lo, _)| lo <= offset).unwrap().0;
+            vec![(left, atom(left)), (right, atom(right))]
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        components,
+        expected
+            .into_iter()
+            .enumerate()
+            .map(|(component, owned)| (component as u32, owned))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn component_replay_matches_the_block_oracle_at_odd_and_even_widths() {
+    // What: on interleaved canonical blocks whose Multi groups own
+    // disconnected atoms, threaded replay over ownership components writes
+    // exactly the per-block oracle for the initialised overwrite, the
+    // initialised axpby and the owned writer, at an odd and an even width.
+    let (structure, transform) = su2_interleaved_fixture();
+    let source = (1..=60)
+        .map(|value| f64::from(value) * 0.25)
+        .collect::<Vec<_>>();
+    let initial = (1..=60).map(|value| -f64::from(value)).collect::<Vec<_>>();
+    let alpha = 1.5;
+    let expected = su2_oracle(&source, alpha);
+    let axpby = expected
+        .iter()
+        .zip(&initial)
+        .map(|(value, old)| value + 0.5 * old)
+        .collect::<Vec<_>>();
+    for threads in [3, 4] {
+        let mut pool = crate::host_pool::test_pool(threads);
+        assert!(
+            pool.install(|engine| {
+                effective_tree_transform_threads(engine, transform.parallel_schedule(), threads)
+            }) == threads
+        );
+        let mut overwritten = vec![f64::NAN; 60];
+        let mut accumulated = initial.clone();
+        let owned = pool.install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut overwritten,
+                &source,
+                alpha,
+                &[],
+                threads,
+            )
+            .unwrap();
+            tree_transform_structure_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut accumulated,
+                &source,
+                alpha,
+                0.5,
+                threads,
+            )
+            .unwrap();
+            try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                2,
+                &source,
+                alpha,
+                threads,
+                None,
+            )
+            .unwrap()
+        });
+        assert_eq!(overwritten, expected);
+        assert_eq!(accumulated, axpby);
+        assert_eq!(owned, Some(expected.clone()));
+    }
+}
+
+#[test]
+fn multi_groups_sharing_an_atom_replay_as_one_component() {
+    // What: two Multi groups whose interleaved blocks share one atom own it
+    // together, apart from a third group's separate atom, and threaded
+    // replay writes the independent physical-output oracle.
+    let src_structure = Arc::new(
+        BlockStructure::packed_column_major(1, [vec![2], vec![2], vec![2], vec![2]]).unwrap(),
+    );
+    let dst_structure = Arc::new(custom_structure(vec![
+        block(0, 2, 3, 0),
+        block(1, 2, 3, 1),
+        block(2, 2, 3, 2),
+        block(3, 2, 1, 6),
+    ]));
+    let transform = TreeTransformStructure::compile_structures(
+        &dst_structure,
+        &src_structure,
+        &[
+            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, 2.0]),
+            TreeTransformBlockSpec::multi(vec![1, 2], vec![2], vec![3.0, -1.0]),
+            TreeTransformBlockSpec::multi(vec![3], vec![3, 0], vec![0.5, 1.0]),
+        ],
+    )
+    .unwrap();
+    assert_eq!(transform.parallel_schedule().scatter_component_count(), 2);
+    let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+    let mut destination = [f64::NAN; 8];
+    crate::host_pool::test_pool(4)
+        .install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst_structure,
+                &src_structure,
+                &mut destination,
+                &source,
+                1.0,
+                &[],
+                4,
+            )
+        })
+        .unwrap();
+    assert_eq!(destination, [7.0, 15.0, -5.0, 10.0, 18.0, -6.0, 4.5, 6.0]);
+}
+
+#[test]
+fn component_splits_balance_moved_elements_not_component_count() {
+    // What: a split gives the left `threads / 2` lanes the legal component
+    // boundary whose moved elements are closest to that fraction of the
+    // total; ties go to the earlier boundary and a component is never
+    // divided.
+    let split = |weights: &[usize], threads: usize| {
+        let before = std::iter::once(0)
+            .chain(weights.iter().scan(0, |sum, &weight| {
+                *sum += weight;
+                Some(*sum)
+            }))
+            .collect::<Vec<_>>();
+        balanced_boundary(weights.len(), threads, |part| before[part])
+    };
+    // Odd width: one of three lanes targets a third of 9 elements, which
+    // the first three components hold; a count split would take two.
+    assert_eq!(split(&[1, 1, 1, 6], 3), 3);
+    // One heavy component goes left whole rather than past the target.
+    assert_eq!(split(&[10, 1, 1], 2), 1);
+    assert_eq!(split(&[1, 1, 10], 2), 2);
+    // 1 and 3 are equally far from half of 4: the earlier boundary.
+    assert_eq!(split(&[1, 2, 1], 2), 1);
+    // The fixture's Single atoms at three lanes: 8 of 28 elements is the
+    // closest left share to a third.
+    let (_, transform) = su2_interleaved_fixture();
+    let atoms = &transform.parallel_schedule().single_atoms;
+    assert_eq!(
+        balanced_boundary(atoms.len() - 1, 3, |part| atoms[part].weight_before),
+        1
+    );
 }

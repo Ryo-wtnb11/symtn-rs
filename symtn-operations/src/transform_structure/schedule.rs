@@ -20,14 +20,43 @@ pub(crate) struct TreeTransformPackReplay {
 pub(crate) struct TreeTransformScatterReplay {
     pub dst_layout: usize,
     pub packed_offset: usize,
-    pub dst_lo: isize,
-    pub dst_hi: isize,
+    /// Position of this column's ownership atom in the component-grouped
+    /// atom order (`TreeTransformParallelSchedule::scatter_atoms[..].slot`).
+    pub slot: u32,
+    /// The destination layout offset relative to its atom's first element.
+    pub local_base: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformScatterGroupReplay {
     pub columns: Range<usize>,
-    pub slice_disjoint: bool,
+    /// The ownership component of this Multi group's scatter columns.
+    pub component: u32,
+}
+
+/// One maximal run of overlapping Single destination intervals, in address
+/// order. A Single owns one interval, so each such atom is one ownership
+/// component. The list ends with a sentinel whose `item` is the item count
+/// and whose `weight_before` is the total.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeTransformSingleAtom {
+    /// First index into `TreeTransformParallelSchedule::singles`.
+    pub item: u32,
+    /// First destination element of the atom.
+    pub lo: isize,
+    /// Destination elements written by every earlier atom.
+    pub weight_before: usize,
+}
+
+/// One maximal run of overlapping Multi scatter-column destination
+/// intervals, in address order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeTransformScatterAtom {
+    pub lo: isize,
+    pub len: usize,
+    /// Position in the component-grouped order: the atoms of component `c`
+    /// occupy `component_slots[c]..component_slots[c + 1]`.
+    pub slot: u32,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -35,17 +64,36 @@ pub(crate) struct TreeTransformParallelSchedule {
     /// Indices of the non-empty Single blocks, ordered by destination start.
     /// Why indices rather than copied descriptors: the layout entries,
     /// coefficient and destination range are all read from the block and its
-    /// compiled role, so a per-Single copy would duplicate retained state;
-    /// threaded replay recomputes a destination start only at its split
-    /// points.
+    /// compiled role, so a per-Single copy would duplicate retained state.
     pub singles: Vec<u32>,
+    /// Ownership atoms of `singles`, plus the sentinel (empty when there are
+    /// no Singles).
+    pub single_atoms: Vec<TreeTransformSingleAtom>,
     pub pack_columns: Vec<TreeTransformPackReplay>,
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
+    /// Ownership atoms of the scatter columns, in address order.
+    pub scatter_atoms: Vec<TreeTransformScatterAtom>,
+    /// Slot range starts of each scatter component, plus the end (empty when
+    /// there are no scatter columns).
+    pub component_slots: Vec<u32>,
     pub single_block_count: usize,
     pub packed_column_count: usize,
     pub scattered_column_count: usize,
-    pub singles_slice_disjoint: bool,
+}
+
+impl TreeTransformParallelSchedule {
+    /// Ownership components of the Single blocks: one per atom.
+    #[inline]
+    pub fn single_component_count(&self) -> usize {
+        self.single_atoms.len().saturating_sub(1)
+    }
+
+    /// Ownership components of the Multi scatter columns.
+    #[inline]
+    pub fn scatter_component_count(&self) -> usize {
+        self.component_slots.len().saturating_sub(1)
+    }
 }
 
 impl TreeTransformRecouplingPlan {
@@ -96,8 +144,8 @@ pub(super) fn compile_parallel_schedule(
         .count();
     let mut packed_column_count = 0usize;
     let mut scattered_column_count = 0usize;
-    // Destination ranges are needed only to order the schedule and prove it
-    // slice-disjoint, so they stay in this compile-time list.
+    // Destination ranges are needed only to order the schedule and form its
+    // atoms, so they stay in this compile-time list.
     let mut ranges = Vec::with_capacity(single_block_count);
     for (block_index, block) in blocks.iter().enumerate() {
         let TreeTransformBlock::Single { dst_layout, .. } = *block else {
@@ -108,20 +156,47 @@ pub(super) fn compile_parallel_schedule(
         };
         let block_index =
             u32::try_from(block_index).map_err(|_| OperationError::ElementCountOverflow)?;
-        ranges.push((dst_lo, dst_hi, block_index));
+        let weight = layouts.entry(dst_layout).element_count;
+        ranges.push((dst_lo, dst_hi, block_index, weight));
     }
     // Why the order is the base order: compilation rejects aliased
     // destinations and drops empty ones, so no two keys tie.
-    ranges.sort_unstable_by_key(|&(dst_lo, _, _)| dst_lo);
-    let singles_slice_disjoint =
-        destination_ranges_are_slice_disjoint(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
+    ranges.sort_unstable_by_key(|&(dst_lo, ..)| dst_lo);
     let mut singles = Vec::with_capacity(ranges.len());
-    singles.extend(ranges.iter().map(|&(_, _, block_index)| block_index));
+    let mut single_atoms = Vec::new();
+    let mut atom_hi: Option<isize> = None;
+    let mut weight_before = 0usize;
+    for &(dst_lo, dst_hi, block_index, weight) in &ranges {
+        if atom_hi.is_none_or(|hi| dst_lo > hi) {
+            single_atoms.push(TreeTransformSingleAtom {
+                item: checked_u32(singles.len())?,
+                lo: dst_lo,
+                weight_before,
+            });
+        }
+        atom_hi = Some(atom_hi.map_or(dst_hi, |hi| hi.max(dst_hi)));
+        weight_before = weight_before
+            .checked_add(weight)
+            .ok_or(OperationError::ElementCountOverflow)?;
+        singles.push(block_index);
+    }
+    if let Some(hi) = atom_hi {
+        single_atoms.push(TreeTransformSingleAtom {
+            item: checked_u32(singles.len())?,
+            lo: hi
+                .checked_add(1)
+                .ok_or(OperationError::ElementCountOverflow)?,
+            weight_before,
+        });
+    }
+    single_atoms.shrink_to_fit();
     drop(ranges);
 
     let mut pack_columns = Vec::new();
     let mut scatter_columns = Vec::new();
     let mut scatter_groups = Vec::new();
+    // `(dst_lo, dst_hi)` of each scatter column, for the atom sweep.
+    let mut scatter_ranges = Vec::new();
     for (block_index, job) in recoupling_plan.entries() {
         let TreeTransformBlock::Multi {
             dst_layout_start,
@@ -146,7 +221,7 @@ pub(super) fn compile_parallel_schedule(
         if element_count == 0 {
             scatter_groups.push(TreeTransformScatterGroupReplay {
                 columns: group_start..group_start,
-                slice_disjoint: true,
+                component: 0,
             });
             continue;
         }
@@ -170,7 +245,7 @@ pub(super) fn compile_parallel_schedule(
         }
         for dst_index in 0..dst_count {
             let dst_layout = dst_layout_start + dst_index;
-            let Some((dst_lo, dst_hi)) = layout_index_range(layouts, dst_layout)? else {
+            let Some(range) = layout_index_range(layouts, dst_layout)? else {
                 continue;
             };
             let packed_offset = job
@@ -184,18 +259,14 @@ pub(super) fn compile_parallel_schedule(
             scatter_columns.push(TreeTransformScatterReplay {
                 dst_layout,
                 packed_offset,
-                dst_lo,
-                dst_hi,
+                slot: 0,
+                local_base: 0,
             });
+            scatter_ranges.push(range);
         }
-        scatter_columns[group_start..].sort_unstable_by_key(|item| item.dst_lo);
         scatter_groups.push(TreeTransformScatterGroupReplay {
             columns: group_start..scatter_columns.len(),
-            slice_disjoint: destination_ranges_are_slice_disjoint(
-                scatter_columns[group_start..]
-                    .iter()
-                    .map(|item| (item.dst_lo, item.dst_hi)),
-            ),
+            component: 0,
         });
     }
     pack_columns.sort_unstable_by_key(|item| item.packed_offset);
@@ -213,27 +284,143 @@ pub(super) fn compile_parallel_schedule(
         });
     }
 
+    let (scatter_atoms, component_slots) = compile_scatter_components(
+        layouts,
+        &scatter_ranges,
+        &mut scatter_columns,
+        &mut scatter_groups,
+    )?;
+
     Ok(TreeTransformParallelSchedule {
-        singles_slice_disjoint,
-        single_block_count,
-        packed_column_count,
-        scattered_column_count,
         singles,
+        single_atoms,
         pack_columns,
         scatter_columns,
         scatter_groups,
+        scatter_atoms,
+        component_slots,
+        single_block_count,
+        packed_column_count,
+        scattered_column_count,
     })
 }
 
-fn destination_ranges_are_slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
-    let mut previous_hi = None;
-    for (lo, hi) in ranges {
-        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
-            return false;
-        }
-        previous_hi = Some(hi);
+fn checked_u32(value: usize) -> Result<u32, OperationError> {
+    u32::try_from(value).map_err(|_| OperationError::ElementCountOverflow)
+}
+
+/// Ownership components of the Multi scatter columns: merges overlapping
+/// destination intervals (`ranges[i]` of `columns[i]`) into address-ordered
+/// atoms, unions the Multi groups that write into one atom, and numbers the
+/// components by their first atom. Records each column's atom slot and local
+/// base and each group's component. O(I log I) for I columns: one sort, one
+/// sweep and a union-find; no element enumeration and no pairwise tests.
+///
+/// Why components rather than one bounding slice per group: canonical
+/// coupled-sector blocks interleave, so a group's columns can lie in
+/// disconnected atoms with other groups' atoms in between; only the atoms
+/// themselves are exclusive slices.
+fn compile_scatter_components(
+    layouts: &RawLayoutTable,
+    ranges: &[(isize, isize)],
+    columns: &mut [TreeTransformScatterReplay],
+    groups: &mut [TreeTransformScatterGroupReplay],
+) -> Result<(Vec<TreeTransformScatterAtom>, Vec<u32>), OperationError> {
+    if columns.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
     }
-    true
+    let mut column_group = vec![0u32; columns.len()];
+    for (group, replay) in groups.iter().enumerate() {
+        column_group[replay.columns.clone()].fill(checked_u32(group)?);
+    }
+    let mut order = (0..checked_u32(columns.len())?).collect::<Vec<u32>>();
+    order.sort_unstable_by_key(|&column| ranges[column as usize].0);
+
+    // Sweep: each column's atom, the atom bounds with one owning group, and
+    // the union of every group writing into the same atom.
+    let mut parent = (0..checked_u32(groups.len())?).collect::<Vec<u32>>();
+    let mut column_atom = vec![0u32; columns.len()];
+    let mut bounds: Vec<(isize, isize, u32)> = Vec::new();
+    for &column in &order {
+        let (lo, hi) = ranges[column as usize];
+        let group = column_group[column as usize];
+        match bounds.last_mut() {
+            Some((_, atom_hi, owner)) if lo <= *atom_hi => {
+                *atom_hi = (*atom_hi).max(hi);
+                union(&mut parent, *owner, group);
+            }
+            _ => bounds.push((lo, hi, group)),
+        }
+        column_atom[column as usize] = checked_u32(bounds.len() - 1)?;
+    }
+    drop(order);
+
+    // Components numbered by first atom; atoms grouped by component, each
+    // component's atoms kept in address order.
+    let mut component_of_root = vec![u32::MAX; groups.len()];
+    let mut atom_component = Vec::with_capacity(bounds.len());
+    let mut component_count = 0u32;
+    for &(_, _, owner) in &bounds {
+        let root = find(&mut parent, owner) as usize;
+        if component_of_root[root] == u32::MAX {
+            component_of_root[root] = component_count;
+            component_count += 1;
+        }
+        atom_component.push(component_of_root[root]);
+    }
+    let mut component_slots = vec![0u32; component_count as usize + 1];
+    for &component in &atom_component {
+        component_slots[component as usize + 1] += 1;
+    }
+    for component in 0..component_count as usize {
+        component_slots[component + 1] += component_slots[component];
+    }
+    let mut next_slot = component_slots.clone();
+    let mut atoms = Vec::with_capacity(bounds.len());
+    for (&(lo, hi, _), &component) in bounds.iter().zip(&atom_component) {
+        let slot = next_slot[component as usize];
+        next_slot[component as usize] += 1;
+        let len = usize::try_from(hi - lo)
+            .ok()
+            .and_then(|span| span.checked_add(1))
+            .ok_or(OperationError::ElementCountOverflow)?;
+        atoms.push(TreeTransformScatterAtom { lo, len, slot });
+    }
+
+    for (column, &atom) in columns.iter_mut().zip(&column_atom) {
+        let atom = atoms[atom as usize];
+        column.slot = atom.slot;
+        column.local_base = layouts
+            .entry(column.dst_layout)
+            .offset
+            .checked_sub(atom.lo)
+            .and_then(|base| usize::try_from(base).ok())
+            .ok_or(OperationError::ElementCountOverflow)?;
+    }
+    for (group, replay) in groups.iter_mut().enumerate() {
+        if !replay.columns.is_empty() {
+            replay.component = component_of_root[find(&mut parent, checked_u32(group)?) as usize];
+        }
+    }
+    Ok((atoms, component_slots))
+}
+
+/// Union-find root with path halving.
+fn find(parent: &mut [u32], mut node: u32) -> u32 {
+    while parent[node as usize] != node {
+        let grandparent = parent[parent[node as usize] as usize];
+        parent[node as usize] = grandparent;
+        node = grandparent;
+    }
+    node
+}
+
+/// Joins two union-find sets under the smaller root.
+fn union(parent: &mut [u32], left: u32, right: u32) {
+    let (left, right) = (find(parent, left), find(parent, right));
+    if left != right {
+        parent[left.max(right) as usize] = left.min(right);
+    }
 }
 
 pub(super) fn layout_index_range(

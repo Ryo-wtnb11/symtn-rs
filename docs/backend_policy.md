@@ -230,10 +230,17 @@ the vendor library. A backend-free Host region
 placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
 destination length against the pool's dispatch cost) admits the parallel
-section. A serial engine never forks. Inside a tree-transform replay, each
-Single block and recoupling scatter column keeps the token share of the
-worker that visits it, the whole token when the replay cannot split its
-blocks (one block, or blocks whose destination ranges interleave). An
+section. A serial engine never forks. A tree-transform replay, initialized
+or owned, splits its Single blocks and, after each chunk's GEMM, its
+recoupling scatter columns over ownership components compiled with the
+transform: blocks whose destination ranges overlap (canonical coupled-sector
+blocks interleave) share an atom, and a component is the set of atoms its
+blocks write, a Multi block's columns always together, so one component can
+own several separated atoms. Each split hands the left `⌊w/2⌋` of `w` workers
+the components whose destination elements are closest to that fraction of
+the total, never dividing a component. Inside the replay each Single block
+and scatter column keeps the token share of the worker that visits it, the
+whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained
 Strided plan when Strided's own rule (`execution::parallel_width` for a copy
 of its elements) gives the share more than one worker. Accumulating updates
