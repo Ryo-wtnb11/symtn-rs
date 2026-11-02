@@ -464,6 +464,7 @@ fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
                         Ok::<(), ()>(())
                     },
                 )
+                .unwrap()
                 .unwrap();
                 let per_job: Vec<usize> = seen.into_iter().map(|s| s.into_inner()).collect();
                 let lanes: Vec<usize> = allocation.lanes.iter().map(|l| l.budget).collect();
