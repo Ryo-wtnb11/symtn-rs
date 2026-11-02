@@ -13,6 +13,7 @@
 //! reservation, not necessarily the length).
 
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
@@ -21,6 +22,7 @@ use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
+use super::schedule::{self, GrantKey};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
 use crate::{DenseError, DenseRead, DenseTensor, DenseView};
@@ -38,8 +40,14 @@ pub(crate) trait Factor {
     /// after the rank and before the zero-extent shortcut.
     const SQUARE: bool = false;
 
-    /// tlinalg's work estimate for one real `m x n` matrix, in multiply-adds.
-    fn work(m: usize, n: usize) -> f64;
+    /// Whether a batch of single-matrix inputs joins the lane search with
+    /// [`grant`]; otherwise its batches keep the baseline placement.
+    const SEARCHED: bool = true;
+
+    /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
+    /// weighted multiply-adds: its total work and the part a team inside the
+    /// item can pay back (`estimate_work`, `estimate_payback_work`).
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2];
 
     /// The factors of one input of matrix extents `dims = [m, n]` and batch
     /// dimensions `batch`, from the provider, or empty ones when `raw` is
@@ -60,9 +68,9 @@ impl Factor for Svd {
     const ENTRY: &'static str = "svd_read";
     const OP: tlinalg::Op = tlinalg::Op::Svd;
 
-    fn work(m: usize, n: usize) -> f64 {
-        let (m, n) = (m as f64, n as f64);
-        m * n * m.min(n)
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::svd::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -92,11 +100,18 @@ pub(crate) struct Qr;
 impl Factor for Qr {
     const ENTRY: &'static str = "qr_read";
     const OP: tlinalg::Op = tlinalg::Op::Qr;
+    // Why not searched: the item model credits a granted width with a linear
+    // speedup, and QR's payback share lets the search hand few large QR blocks
+    // wide lanes that faer's QR does not use (tlinalg's own measured `s(8)`:
+    // about 1.03 at 192 x 192, 2.16 at 512 x 512). On lg the searched
+    // placement ran 1.14-1.44x slower than the baseline on few-sector batches
+    // of 192-1024 blocks at 16 and 48 threads. Searching QR needs the
+    // provider's time-at-width estimates (tensor4all/tlinalg-rs#88).
+    const SEARCHED: bool = false;
 
-    fn work(m: usize, n: usize) -> f64 {
-        let (m, n) = (m as f64, n as f64);
-        let k = m.min(n);
-        m * n * k - k.powi(3) / 3.0
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::qr::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -127,8 +142,9 @@ impl Factor for Eigh {
     const OP: tlinalg::Op = tlinalg::Op::Eigh;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eigh::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eigh::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(
@@ -157,8 +173,9 @@ impl Factor for EighVals {
     const OP: tlinalg::Op = tlinalg::Op::EighValues;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eigh::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eigh::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(
@@ -187,8 +204,9 @@ impl Factor for SvdVals {
     const ENTRY: &'static str = "svd_values";
     const OP: tlinalg::Op = tlinalg::Op::SvdValues;
 
-    fn work(m: usize, n: usize) -> f64 {
-        tlinalg::svd::estimate_work::<f64>(m, n)
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::svd::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -219,8 +237,9 @@ impl Factor for EigVals {
     const OP: tlinalg::Op = tlinalg::Op::EigValues;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eig::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eig::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(
@@ -353,6 +372,18 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
         work::<F>(job.input)
     }
 
+    fn modeled(&self, _: usize, job: &Job<'a>) -> bool {
+        F::SEARCHED && single_item::<F>(job.input).is_some()
+    }
+
+    fn grant(&self, _: usize, job: &Job<'a>, exec: &Exec<'_>, budget: usize, _: Duration) -> usize {
+        single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item))
+    }
+
+    fn grant_key(&self, _: usize, job: &Job<'a>) -> GrantKey {
+        single_item::<F>(job.input).map_or([0; 2], |item| item.map(f64::to_bits))
+    }
+
     // A block's error is its own outcome, not the driver's: the caller
     // delivers every block's outcome in input order.
     fn run(&self, _: usize, job: &mut Job<'a>, mut exec: Exec<'_>) -> Result<(), DenseError> {
@@ -458,22 +489,58 @@ fn batch_on<F: Factor>(
     }
 }
 
-/// tlinalg's work estimate of `F` per matrix, four times that for a complex
-/// scalar, over every batch item.
+/// tlinalg's per-item estimates of `F` for `input`'s scalar (see
+/// [`Factor::estimates`]) and its batch product, or `None` for an input the
+/// provider refuses (rank or dtype).
+fn item_estimates<F: Factor>(input: DenseRead<'_>) -> Option<([f64; 2], f64)> {
+    // Direct generic calls, not a function pointer: the estimates inline, and
+    // `work`, which reads only the total, need not evaluate the payback.
+    fn of<F: Factor, T: tlinalg::FaerScalar>(shape: &[usize]) -> Option<([f64; 2], f64)> {
+        let [m, n, batch @ ..] = shape else {
+            return None;
+        };
+        let items = batch.iter().map(|&b| b as f64).product();
+        Some((F::estimates::<T>(*m, *n), items))
+    }
+    match input {
+        DenseRead::F32(view) => of::<F, f32>(view.shape()),
+        DenseRead::F64(view) => of::<F, f64>(view.shape()),
+        DenseRead::C32(view) => of::<F, Complex32>(view.shape()),
+        DenseRead::C64(view) => of::<F, Complex64>(view.shape()),
+        _ => None,
+    }
+}
+
+/// tlinalg's work estimate of `F` over every batch item of `input`, in
+/// weighted multiply-adds (four per complex multiply-add).
 pub(crate) fn work<F: Factor>(input: DenseRead<'_>) -> f64 {
-    let (shape, complex) = match input {
-        DenseRead::F32(view) => (view.shape(), false),
-        DenseRead::F64(view) => (view.shape(), false),
-        DenseRead::C32(view) => (view.shape(), true),
-        DenseRead::C64(view) => (view.shape(), true),
-        _ => return 0.0,
-    };
-    let [m, n, batch @ ..] = shape else {
-        return 0.0;
-    };
-    let items: f64 = batch.iter().map(|&b| b as f64).product();
-    let weight = if complex { 4.0 } else { 1.0 };
-    F::work(*m, *n) * items * weight
+    item_estimates::<F>(input).map_or(0.0, |([total, _], items)| total * items)
+}
+
+/// tlinalg's (total, payback) estimates of `F` for `input` when its batch
+/// product is one, the only inputs whose provider width [`grant`] composes.
+///
+/// Why not a batched input: tlinalg's route for several items first gates the
+/// whole batch, then splits it into lanes and caps each item at
+/// `ceil(budget / lanes)` (`batch::decide`), a decision its public queries do
+/// not expose; a batch holding such an input keeps the baseline placement.
+pub(crate) fn single_item<F: Factor>(input: DenseRead<'_>) -> Option<[f64; 2]> {
+    item_estimates::<F>(input).and_then(|(item, items)| (items == 1.0).then_some(item))
+}
+
+/// The width tlinalg gives one item of `estimates = [total, payback]`
+/// weighted multiply-adds on a lane of `budget` slots of `exec` under Auto:
+/// `batch::decide` for a batch of one takes the batch decision's item width
+/// (`width_for` over the total's time, one section) and caps it at the width
+/// the payback work's time pays for, both under the engine's work model; a
+/// token without a team runs the item serially.
+pub(crate) fn grant(exec: &Exec<'_>, budget: usize, [total, payback]: [f64; 2]) -> usize {
+    if !exec.token_ref().carries_team() {
+        return 1;
+    }
+    let model = &exec.batch_policy().model;
+    let width = |work| exec.width_for_within(budget, schedule::work_model_ns(model, work), 1);
+    width(total).min(width(payback))
 }
 
 /// The checks the per-matrix entry makes before it enters the engine: the
@@ -606,5 +673,154 @@ fn provider_error(op: tlinalg::Op, error: tlinalg::Error) -> tenferro_tensor::Er
         other => tenferro_tensor::Error::Internal(format!(
             "{op}: unmapped linalg provider error {other:?}"
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tcontract_exec::{BatchPolicy, WorkModel};
+    use tenferro_cpu::Pool;
+
+    use super::*;
+
+    /// Factorization `F`'s own op with recording-only execution: cost,
+    /// search admission and grant are `Blocks<F>`'s, and each block records
+    /// the reserved width of the lane it runs on instead of factoring.
+    struct RecordsWidth<'a, F>(Blocks<'a, F>, Vec<AtomicUsize>);
+
+    impl<'a, F: Factor> BlockOp for RecordsWidth<'a, F> {
+        type Job = Job<'a>;
+        const ENTRY: Entry = Entry::Linalg;
+        const KIND: OpKind = OpKind::Factorization;
+        const LABEL: &'static str = F::ENTRY;
+
+        fn work(&self, index: usize, job: &Job<'a>) -> f64 {
+            self.0.work(index, job)
+        }
+
+        fn modeled(&self, index: usize, job: &Job<'a>) -> bool {
+            self.0.modeled(index, job)
+        }
+
+        fn grant(
+            &self,
+            index: usize,
+            job: &Job<'a>,
+            exec: &Exec<'_>,
+            budget: usize,
+            serial: Duration,
+        ) -> usize {
+            self.0.grant(index, job, exec, budget, serial)
+        }
+
+        fn grant_key(&self, index: usize, job: &Job<'a>) -> GrantKey {
+            self.0.grant_key(index, job)
+        }
+
+        fn run(&self, index: usize, _: &mut Job<'a>, exec: Exec<'_>) -> Result<(), DenseError> {
+            self.1[index].store(exec.budget(), Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    /// The reserved lane width each real input of `shapes` runs on under
+    /// factorization `F`, on `threads` slots of flat 100 ns dispatch at one
+    /// multiply-add per ns, no item overhead and a lane work minimum of
+    /// `lane_ns`.
+    fn lane_widths<F: Factor>(threads: usize, lane_ns: f64, shapes: &[&[usize]]) -> Vec<usize> {
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::flat(Duration::from_nanos(100));
+        let pool = Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(lane_ns);
+        let mut engine =
+            CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
+        let data = vec![0.0_f64; 10000];
+        // Column-major strides: each the product of the extents before it.
+        let strides: Vec<Vec<usize>> = shapes
+            .iter()
+            .map(|shape| {
+                (0..shape.len())
+                    .map(|axis| shape[..axis].iter().product())
+                    .collect()
+            })
+            .collect();
+        let mut jobs: Vec<Job<'_>> = shapes
+            .iter()
+            .zip(&strides)
+            .map(|(&shape, strides)| {
+                let len = shape.iter().product();
+                let input =
+                    DenseRead::F64(DenseView::new(&data[..len], shape, strides, 0).unwrap());
+                Job {
+                    input,
+                    strides: preflight::<F>(input).unwrap(),
+                    outcome: None,
+                }
+            })
+            .collect();
+        let op = RecordsWidth::<F>(
+            Blocks(PhantomData),
+            shapes.iter().map(|_| 0.into()).collect(),
+        );
+        driver::drive(&mut engine, &op, &mut jobs, &mut LaneScratch::default()).unwrap();
+        op.1.iter().map(|w| w.load(Ordering::Relaxed)).collect()
+    }
+
+    /// Purpose: a factorization batch whose every input is one matrix joins
+    /// the lane search with tlinalg's own width for one SVD item, while a QR
+    /// batch and a batch holding an input whose batch product is not one
+    /// (including zero) keep the baseline placement. Four slots, flat 100 ns dispatch (a width pays
+    /// from 300 ns), one multiply-add per ns:
+    /// - `80 x 80` and three `4 x 4`: the large SVD's payback work is
+    ///   `80^3 * 6e-4 = 307.2` ns, so it is granted every width; one
+    ///   four-slot lane scores `512000 / 4 + 100 + 3 * 64 = 128292` ns
+    ///   against the baseline's 512000 ns on four one-slot lanes;
+    /// - `79 x 79` instead: payback `79^3 * 6e-4 = 295.8` ns pays at no width
+    ///   (its whole time, 493039 ns, would), so every grant is one, no
+    ///   candidate scores below the baseline's 493039 ns, and the tie keeps
+    ///   the baseline;
+    /// - the first batch with one `4 x 4 x 2` input keeps the baseline.
+    ///
+    /// On six slots with a 10000 ns lane minimum, one `10000 x 1` and 120
+    /// `100 x 1` (payback 6 and 0.06 ns: serial at every width) give `L0 = 2`
+    /// lanes; the baseline and two equal lanes score 11000 ns, the
+    /// reservation's six one-slot lanes 10000 ns but hold more than `L0`
+    /// lanes and are discarded, so the baseline's two three-slot lanes run
+    /// every block.
+    ///
+    /// QR keeps the baseline even where its grant would widen: the first
+    /// batch's `80 x 80` QR has payback `(80^3 - 80^3 / 3) * 1e-2 = 3413` ns,
+    /// enough for every width, yet runs on the baseline's four one-slot lanes.
+    #[test]
+    fn single_matrix_factorizations_join_the_lane_search() {
+        let small: &[usize] = &[4, 4];
+        assert_eq!(
+            lane_widths::<Svd>(4, 0.0, &[&[80, 80], small, small, small]),
+            [4; 4]
+        );
+        assert_eq!(
+            lane_widths::<Svd>(4, 0.0, &[&[79, 79], small, small, small]),
+            [1; 4]
+        );
+        assert_eq!(
+            lane_widths::<Svd>(4, 0.0, &[&[80, 80], small, small, &[4, 4, 2]]),
+            [1; 4]
+        );
+        let mut many: Vec<&[usize]> = vec![&[10000, 1]];
+        many.extend([&[100, 1][..]; 120]);
+        assert_eq!(lane_widths::<Svd>(6, 10000.0, &many), [3; 121]);
+        assert_eq!(
+            lane_widths::<Qr>(4, 0.0, &[&[80, 80], small, small, small]),
+            [1; 4]
+        );
     }
 }

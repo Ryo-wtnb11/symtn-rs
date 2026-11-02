@@ -147,7 +147,8 @@ the provider's public decisions (for a packed GEMM plan an optimistic upper
 bound on its grid), and the model has no sublinear speedup, so the choice is
 a scheduling estimate, not a promise of a faster run. The search queries the
 provider width of each group of blocks with the same estimated time and the
-same grant inputs (for GEMM, the plan's algorithm and the work) once, at the
+same grant inputs (for GEMM, the plan's algorithm and the work; for a
+factorization, its total and payback work) once, at the
 full thread count; only the groups the provider widens there are queried
 again, once per distinct share width during the sweep (rebuilding the winning
 placement may repeat up to two widths), since a block the provider keeps
@@ -158,8 +159,9 @@ it evaluates: every width up to the thread count for the (fewer than
 thread-count) blocks above the mean load, and the reserved lanes' widths for
 the others. Each searched allocation is kept in the process-global structure
 cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
-function of (the engine's budget, work model, team and dispatch cost at every
-width, the mean work, and each block's serial time and grant inputs), so a
+function of (the kernel's kind, GEMM or factorization, which fixes the grant;
+the engine's budget, work model, team and dispatch cost at every width, the
+mean work, and each block's serial time and grant inputs), so a
 batch already searched, on any executor including an eager call's fresh one,
 rebuilds its lanes without a query. Each entry is charged its inline key and
 entry, the entry overhead, and its per-block, per-width and per-lane slices;
@@ -175,18 +177,22 @@ each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
 for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
-it. Their lanes keep the baseline placement over `L0` lanes, without the
-model search: the provider's current width estimate for one SVD is about ten
-times below its run time (QR about two), so the model would credit one wide
-lane with a speedup the factorization does not deliver and put batches of
-large blocks on too few lanes. The upstream change in progress
-(tensor4all/tlinalg-rs#89) caps the width inside the provider's own
-per-operation decision rather than correcting a generic estimate, so a
-release containing it does not by itself make the model usable here.
-Re-enabling the search for factorizations requires composing the provider's
-operation-specific grant through a public interface it offers, checking that
-composition against the adopted provider release, and rerunning the full
-lane benchmark matrix. Every block runs up to the first one refused before the engine is entered
+it. A batch whose every input is one matrix (batch product one) takes the
+same search, except for QR, with each block's granted width composed as tlinalg decides it
+for one item under `Auto`: the engine's cost rule over the total work's time,
+capped at the width the provider's payback work (`estimate_payback_work`,
+the part of the estimate a team inside the item can pay back; for general
+eigenvalues it is the whole estimate, so the cap is inert) pays for, and one
+thread on a token without a team. The serial times stay the work model's
+estimates, which run low for SVD; no correction is applied, so the choice
+remains a scheduling estimate. QR batches keep the baseline placement over
+`L0` lanes, without the search: the model credits a granted width with a
+linear speedup that faer's QR does not deliver at the widths QR's payback
+share admits, and on few large QR blocks the searched placement ran slower
+than the baseline. A batch holding an input whose batch product is not one
+(including zero) keeps the baseline placement as well: tlinalg runs such an
+input through its multi-item route (a batch gate, its own lanes and a
+per-item cap), which its public queries do not expose. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view), and keeps its own outcome; the
 outcomes, then that refusal, reach the operation in block order, where the
 same per-sector checks as a block-by-block loop run on each, so the error

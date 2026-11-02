@@ -8,6 +8,7 @@
 use super::*;
 use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKind};
 use crate::block_kernel::{factor, schedule};
+use std::time::Duration;
 use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 pub(super) use super::numerics;
@@ -636,79 +637,6 @@ fn lane_minimum_is_checked_against_work_not_time() {
     assert_eq!(a.decision.lanes, 2);
 }
 
-/// A factorization kernel whose block `j` has work `self.0[j]` and records
-/// the width of the context it runs on.
-struct RecordsWidth(Vec<f64>, Vec<std::sync::atomic::AtomicUsize>);
-
-impl BlockOp for RecordsWidth {
-    type Job = ();
-    const ENTRY: Entry = Entry::Linalg;
-    const KIND: OpKind = OpKind::Factorization;
-    const LABEL: &'static str = "svd_read";
-
-    fn work(&self, index: usize, _: &()) -> f64 {
-        self.0[index]
-    }
-
-    fn run(&self, index: usize, _: &mut (), exec: Exec<'_>) -> Result<(), DenseError> {
-        self.1[index].store(exec.budget(), std::sync::atomic::Ordering::Relaxed);
-        Ok(())
-    }
-}
-
-/// Purpose: a factorization batch keeps main's placement under Auto, because
-/// its provider's width estimate is not yet trusted, even where the model
-/// would narrow it. One 40000 ns block and three 100 ns ones on four slots
-/// (flat 100 ns dispatch, one multiply-add per ns): the model prefers one
-/// lane of four slots, while main gives every block its own one-slot lane.
-#[test]
-fn factorization_batches_keep_the_baseline_placement() {
-    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
-    let row = WidthCosts::flat(std::time::Duration::from_nanos(100));
-    let pool = Pool::builder()
-        .threads(4)
-        .dispatch_costs(DispatchCosts::new(row, row, row))
-        .build()
-        .unwrap();
-    let model = WorkModel::default()
-        .with_muladds_per_ns(1.0)
-        .with_item_overhead_ns(0.0);
-    let mut engine =
-        CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
-    let work = vec![40000.0, 100.0, 100.0, 100.0];
-    let modeled = engine
-        .with_linalg_pool(|exec, _| {
-            let exec: &Exec<'_> = exec;
-            let times: Vec<_> = work
-                .iter()
-                .map(|&w| cost(OpKind::Factorization, w, &model))
-                .collect();
-            let grant =
-                |_, t: std::time::Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1);
-            Ok(schedule::allocate_in(
-                exec,
-                &times,
-                |_| [0; 2],
-                10075.0,
-                &mut schedule::AllocationScratch::default(),
-                &schedule::LaneAllocationCache::new(
-                    symtn_core::StructureCacheKind::LaneAllocations,
-                    0,
-                ),
-                Some(grant),
-            ))
-        })
-        .unwrap();
-    assert_eq!(budgets(&modeled), [4]);
-    let op = RecordsWidth(work, (0..4).map(|_| 0.into()).collect());
-    driver::drive(&mut engine, &op, &mut [(); 4], &mut LaneScratch::default()).unwrap();
-    let widths: Vec<usize> =
-        op.1.iter()
-            .map(|w| w.load(std::sync::atomic::Ordering::Relaxed))
-            .collect();
-    assert_eq!(widths, [1, 1, 1, 1]);
-}
-
 /// A linalg-entry kernel whose block `self.0` panics.
 pub(super) struct PanicsAt(pub(super) usize);
 
@@ -720,6 +648,14 @@ impl BlockOp for PanicsAt {
 
     fn work(&self, _: usize, _: &()) -> f64 {
         1.0
+    }
+
+    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> usize {
+        1
+    }
+
+    fn grant_key(&self, _: usize, _: &()) -> schedule::GrantKey {
+        [0; 2]
     }
 
     fn run(&self, index: usize, _: &mut (), _: Exec<'_>) -> Result<(), DenseError> {

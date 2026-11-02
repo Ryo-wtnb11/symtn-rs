@@ -23,14 +23,15 @@ pub(crate) enum Entry {
     Linalg,
 }
 
-/// The dependency whose own model turns a block's work into time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The dependency whose own model turns a block's work into time, and the
+/// family of its grant: the lane-allocation cache keys it, so two kinds never
+/// share an allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
     Gemm,
     /// The engine's `WorkModel`, from which tlinalg makes its own width
-    /// decision for a factorization. Its batches keep the scheduler's
-    /// baseline placement (see `on_lanes`).
+    /// decision for a factorization (see `factor::grant`).
     Factorization,
 }
 
@@ -63,36 +64,30 @@ pub(crate) trait BlockOp: Sync {
     /// The block's weighted multiply-adds, as its provider estimates them.
     fn work(&self, index: usize, job: &Self::Job) -> f64;
 
+    /// Whether [`grant`](Self::grant) models block `index`'s provider
+    /// width. A batch holding a block it does not model keeps the baseline
+    /// placement, without the search.
+    fn modeled(&self, _: usize, _: &Self::Job) -> bool {
+        true
+    }
+
     /// The width block `index`'s provider takes on a lane of `budget`
     /// reserved slots of `exec`, for a block of serial time `serial`: the
     /// scheduler's model of that provider's own width decision, composed from
-    /// the provider's public decisions. This default is the single decision a
-    /// per-matrix factorization makes (`width_for` over the work model's time
-    /// with one section); a block with extra batch dimensions takes the
-    /// provider's multi-item route, for which it is an approximation. The
-    /// driver does not consult it for factorizations yet (see `on_lanes`).
-    ///
-    /// Why the result is an estimate even where the composition matches the
-    /// provider: `serial` is integer nanoseconds and the provider re-normalizes
-    /// it from its own floating estimate, so near a payoff boundary of an
-    /// extreme estimate the two may round to different sides.
+    /// the provider's public decisions. Consulted only for a batch whose
+    /// every block is [`modeled`](Self::modeled).
     fn grant(
         &self,
-        _: usize,
-        _: &Self::Job,
+        index: usize,
+        job: &Self::Job,
         exec: &Exec<'_>,
         budget: usize,
         serial: Duration,
-    ) -> usize {
-        exec.width_for_within(budget, serial.as_nanos() as f64, 1)
-    }
+    ) -> usize;
 
     /// What block `index`'s [`grant`](Self::grant) depends on besides its
-    /// serial time and the context (see [`GrantKey`]). The default grant
-    /// reads nothing else.
-    fn grant_key(&self, _: usize, _: &Self::Job) -> GrantKey {
-        [0; 2]
-    }
+    /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
+    fn grant_key(&self, index: usize, job: &Self::Job) -> GrantKey;
 
     /// Runs block `index` on its lane's execution context.
     fn run(&self, index: usize, job: &mut Self::Job, exec: Exec<'_>) -> Result<(), DenseError>;
@@ -158,24 +153,20 @@ fn on_lanes<B: BlockOp>(
         }));
     let mean_work = total_work / jobs.len().max(1) as f64;
     let shared: &Exec<'_> = exec;
-    // Why a factorization keeps the baseline placement: its grant comes from
-    // tlinalg 0.8.0's width rule, whose serial SVD estimate is about ten times
-    // low (and QR's about two), so the model credits a wide lane with a
-    // speedup the provider does not deliver and narrows batches of large
-    // blocks onto too few lanes. The upstream change in progress
-    // (tensor4all/tlinalg-rs#89) caps the width inside the provider's own
-    // per-operation decision (`payback_share` in `batch::decide`), not a
-    // generic estimate, so adopting it is not enough: re-enabling needs the
-    // provider's operation-specific grant composed through a public
-    // interface, checked against the adopted release, and the lg lane matrix
-    // rerun.
-    let grant = (B::KIND == OpKind::Gemm).then_some(|j: usize, serial: Duration, budget: usize| {
+    // Admission is read only where the allocation can search, so a serial or
+    // forced allocation computes no grant input for its blocks.
+    let modeled = schedule::searchable(shared, &scratch.times, mean_work)
+        && jobs
+            .iter()
+            .enumerate()
+            .all(|(index, job)| op.modeled(index, job));
+    let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
         op.grant(j, &jobs[j], shared, budget, serial)
     });
     let allocation = schedule::allocate_in(
         shared,
         &scratch.times,
-        |j| op.grant_key(j, &jobs[j]),
+        (B::KIND, |j| op.grant_key(j, &jobs[j])),
         mean_work,
         &mut scratch.allocation,
         schedule::lane_allocations(),

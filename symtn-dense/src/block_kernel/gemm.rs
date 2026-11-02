@@ -219,6 +219,11 @@ pub(crate) fn work<T: Scalar>(job: &DenseGemmBatchJob) -> f64 {
 /// grid. Faer's item work and its one section match this crate's `work` and
 /// `1` by value, not by an upstream contract; they are re-checked on each
 /// tcontract release. A forced strategy never reaches the scheduler's model.
+///
+/// Why the result is an estimate even where the composition matches the
+/// plan: `serial` is integer nanoseconds and the plan re-normalizes it from
+/// its own floating estimate, so near a payoff boundary of an extreme
+/// estimate the two may round to different sides.
 pub(crate) fn grant<T: Scalar>(
     plan: &Plan<T>,
     work: f64,
