@@ -56,6 +56,16 @@ where
     /// selected twist values have been staged successfully.
     pub fn twist(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.twist_impl(engine, legs, direction)
+    }
+
+    fn twist_impl(
+        &self,
         engine: &mut dyn Engine,
         legs: &[usize],
         direction: Direction,
@@ -260,6 +270,16 @@ where
     /// Checked-Generic admission and pivotal failures retain their typed
     /// [`GenericTensorError`] variants.
     pub fn flip(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        legs: &[usize],
+        direction: Direction,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.flip_impl(engine, legs, direction)
+    }
+
+    fn flip_impl(
         &self,
         engine: &mut dyn Engine,
         legs: &[usize],

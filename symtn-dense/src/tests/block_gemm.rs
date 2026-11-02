@@ -128,7 +128,36 @@ fn run<T: Scalar>(
     alpha: Complex64,
     beta: Complex64,
 ) -> (Result<(), DenseError>, usize) {
+    run_with(
+        engine,
+        LaneAllocation::Moldable,
+        jobs,
+        base,
+        out,
+        lhs,
+        rhs,
+        ops,
+        alpha,
+        beta,
+    )
+}
+
+/// [`run`] on an executor set to `allocation`.
+#[allow(clippy::too_many_arguments)]
+fn run_with<T: Scalar>(
+    engine: &mut CpuEngine,
+    allocation: LaneAllocation,
+    jobs: &[DenseGemmBatchJob],
+    base: [usize; 3],
+    out: &mut [T],
+    lhs: &[T],
+    rhs: &[T],
+    ops: [MatrixOp; 2],
+    alpha: Complex64,
+    beta: Complex64,
+) -> (Result<(), DenseError>, usize) {
     let mut executor = DefaultDenseExecutor::new();
+    executor.set_lane_allocation(allocation);
     let shapes = [
         out.len() - base[0],
         lhs.len() - base[1],
@@ -357,6 +386,82 @@ fn complex_adjoint_conjugates_and_transposes() {
                 (found - want).norm() <= 1e-12,
                 "{name}: {out:?} vs {want:?}"
             );
+        }
+    }
+}
+
+/// Purpose: a forced batch policy fixes the placement, so another lane
+/// allocation is refused with a typed `Unsupported`, by the admission and by
+/// the executor, before any write; under `Auto` both allocations are
+/// admitted and write the oracle's values.
+#[test]
+fn a_forced_policy_refuses_another_lane_allocation_before_any_write() {
+    let (jobs, _) = mixed_jobs();
+    let len = |f: fn(&DenseGemmBatchJob) -> usize| jobs.iter().map(f).max().unwrap() + 1;
+    let lhs: Vec<f64> = (0..len(|j| j.lhs_offset + j.rows * j.contracted))
+        .map(|i| value(i, 0.5).re)
+        .collect();
+    let rhs: Vec<f64> = (0..len(|j| j.rhs_offset + j.contracted * j.cols))
+        .map(|i| value(i, 7.0).re)
+        .collect();
+    let initial = vec![-5.0; len(|j| j.dst_offset + j.rows * j.cols)];
+    let pool = || crate::Pool::builder().threads(4).build().unwrap();
+    for (policy, forced) in [
+        (BatchPolicy::default(), false),
+        (BatchPolicy::new(BatchStrategy::Inner), true),
+    ] {
+        let mut engine = CpuEngine::new(pool()).with_batch_policy(policy);
+        for allocation in [LaneAllocation::Moldable, LaneAllocation::EqualShare] {
+            let refused = forced && allocation != LaneAllocation::Moldable;
+            let label = format!("{:?} {allocation:?}", policy.strategy);
+            let admitted = crate::admit_lane_allocation(&mut engine, allocation);
+            assert_eq!(admitted.is_err(), refused, "{label}: admission");
+            let mut out = initial.clone();
+            let (result, _) = run_with(
+                &mut engine,
+                allocation,
+                &jobs,
+                [0; 3],
+                &mut out,
+                &lhs,
+                &rhs,
+                [MatrixOp::Identity; 2],
+                c64(1.0, 0.0),
+                c64(0.0, 0.0),
+            );
+            if refused {
+                for error in [result.unwrap_err(), admitted.unwrap_err()] {
+                    assert!(
+                        matches!(
+                            error,
+                            DenseError::Unsupported {
+                                op: "lane_allocation",
+                                ..
+                            }
+                        ),
+                        "{label}: {error:?}"
+                    );
+                }
+                assert_eq!(out, initial, "{label}: no write");
+            } else {
+                result.unwrap();
+                let want = oracle(
+                    &jobs,
+                    [0; 3],
+                    &initial.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
+                    &lhs.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
+                    &rhs.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
+                    [MatrixOp::Identity; 2],
+                    c64(1.0, 0.0),
+                    c64(0.0, 0.0),
+                );
+                for (found, want) in out.iter().zip(&want) {
+                    assert!(
+                        (found - want.re).abs() <= 1e-12 * (1.0 + want.norm()),
+                        "{label}"
+                    );
+                }
+            }
         }
     }
 }

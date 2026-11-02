@@ -151,6 +151,8 @@ where
 #[doc(hidden)]
 pub struct TreeReplay<'a, D, C> {
     pub(in crate::typed) lease: crate::runtime::ContextLease,
+    // The call's options, applied to the lease's lanes on replay.
+    options: ExecOptions,
     owned: OwnedReplay<D, C>,
     into: IntoReplay<D, C>,
     pub(in crate::typed) structure: &'a symtn_tensors::TreeTransformStructure<C>,
@@ -168,7 +170,7 @@ where
 {
     /// A replay of `structure` on lane `L`, `destination <- source`.
     pub(in crate::typed) fn new<L: HostTreeLane<D, C>>(
-        lease: crate::runtime::ContextLease,
+        (lease, options): (crate::runtime::ContextLease, ExecOptions),
         structure: &'a symtn_tensors::TreeTransformStructure<C>,
         destination: &'a Arc<BlockStructure>,
         source: &'a Arc<BlockStructure>,
@@ -176,6 +178,7 @@ where
     ) -> Self {
         Self {
             lease,
+            options,
             owned: host_owned_replay::<L, D, C>,
             into: host_into_replay::<L, D, C>,
             structure,
@@ -187,7 +190,7 @@ where
 
     /// The replay of a staged transform on lane `L`.
     pub(in crate::typed) fn staged<L: HostTreeLane<D, C>, R, T>(
-        lease: crate::runtime::ContextLease,
+        lease: (crate::runtime::ContextLease, ExecOptions),
         staged: &'a symtn_tensors::StagedTreeTransform<'_, R, T, C>,
     ) -> Self {
         Self::new::<L>(
@@ -313,6 +316,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
             .materialized_dense_data();
         let TreeReplay {
             mut lease,
+            options,
             owned,
             structure,
             destination,
@@ -322,7 +326,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
         } = replay;
         owned(
             engine,
-            lease.context(),
+            lease.context(options),
             structure,
             destination,
             source,
@@ -343,6 +347,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
     ) -> Result<(), TransformExecError> {
         let TreeReplay {
             mut lease,
+            options,
             into,
             structure,
             destination: destination_structure,
@@ -365,7 +370,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
         };
         into(
             engine,
-            lease.context(),
+            lease.context(options),
             structure,
             destination_structure,
             source_structure,

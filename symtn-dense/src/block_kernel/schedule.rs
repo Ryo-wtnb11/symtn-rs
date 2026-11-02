@@ -14,7 +14,9 @@
 //! from L0 down to one, and a large-job reservation on uneven lanes (see
 //! `Moldable::place`; discarded when more than L0 of its lanes hold jobs)
 //! under one model, and keeps the lowest score; ties keep the baseline, then
-//! the equal shares. A job's modeled time in a lane is its serial time when its provider
+//! the equal shares. The reservation is a candidate only under the default
+//! [`LaneAllocation::Moldable`]; [`LaneAllocation::EqualShare`] scores the
+//! baseline and the equal shares alone. A job's modeled time in a lane is its serial time when its provider
 //! would run it on one thread there, otherwise its share of that time over
 //! the provider's granted width plus the token's dispatch cost at that width.
 //! The granted width is itself an estimate composed from the provider's
@@ -60,6 +62,7 @@ use tcontract_exec::{BatchDecision, BatchQuery, BatchStrategy, Exec, WorkModel};
 
 use super::driver::OpKind;
 use super::gemm::ENTRY_OVERHEAD_BYTES;
+use crate::LaneAllocation;
 
 /// One lane: its reserved slot budget and its jobs in ascending canonical
 /// order.
@@ -177,12 +180,14 @@ pub(crate) type GrantKey = [u64; 2];
 /// which fixes the grant function: every GEMM block op grants through
 /// `gemm::grant` (keys: the plan's algorithm and the work) and every
 /// factorization through `factor::grant` (keys: the item's total and payback
-/// work), so equal keys of different kinds never share an allocation.
+/// work), so equal keys of different kinds never share an allocation, and
+/// the selected [`LaneAllocation`], which fixes the candidates scored.
 /// Floats are keyed by their bits, so equality is reflexive and a
 /// differently signed zero only searches again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LaneAllocationKey {
     family: OpKind,
+    selector: LaneAllocation,
     budget: usize,
     model: [u64; 5],
     mean_work: u64,
@@ -196,6 +201,7 @@ pub(crate) struct LaneAllocationKey {
 /// costs from the token instead of staging them, so a hit allocates nothing.
 struct LaneAllocationQuery<'a, 'e> {
     family: OpKind,
+    selector: LaneAllocation,
     exec: &'a Exec<'e>,
     times: &'a [Duration],
     keys: &'a [GrantKey],
@@ -224,7 +230,7 @@ fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a
 #[allow(clippy::too_many_arguments)]
 fn hash_key<H: Hasher>(
     state: &mut H,
-    family: OpKind,
+    (family, selector): (OpKind, LaneAllocation),
     budget: usize,
     model: [u64; 5],
     mean_work: u64,
@@ -233,7 +239,7 @@ fn hash_key<H: Hasher>(
     times: &[Duration],
     keys: &[GrantKey],
 ) {
-    (family, budget, model, mean_work, team).hash(state);
+    (family, selector, budget, model, mean_work, team).hash(state);
     state.write_usize(costs.0);
     costs.1.for_each(|cost| cost.hash(state));
     times.hash(state);
@@ -244,7 +250,7 @@ impl Hash for LaneAllocationKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         hash_key(
             state,
-            self.family,
+            (self.family, self.selector),
             self.budget,
             self.model,
             self.mean_work,
@@ -268,6 +274,7 @@ impl LaneAllocationQuery<'_, '_> {
     fn to_key(&self) -> LaneAllocationKey {
         LaneAllocationKey {
             family: self.family,
+            selector: self.selector,
             budget: self.exec.budget(),
             model: self.model(),
             mean_work: self.mean_work.to_bits(),
@@ -284,7 +291,7 @@ impl Hash for LaneAllocationQuery<'_, '_> {
         let budget = self.exec.budget();
         hash_key(
             state,
-            self.family,
+            (self.family, self.selector),
             budget,
             self.model(),
             self.mean_work.to_bits(),
@@ -299,6 +306,7 @@ impl Hash for LaneAllocationQuery<'_, '_> {
 impl StructureCacheEquivalent<LaneAllocationKey> for LaneAllocationQuery<'_, '_> {
     fn equivalent(&self, key: &LaneAllocationKey) -> bool {
         key.family == self.family
+            && key.selector == self.selector
             && key.budget == self.exec.budget()
             && key.model == self.model()
             && key.mean_work == self.mean_work.to_bits()
@@ -403,7 +411,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
     allocate_in(
         exec,
         times,
-        (OpKind::Gemm, |_| [0; 2]),
+        (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 2]),
         mean_work,
         &mut AllocationScratch::default(),
         &LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0),
@@ -456,7 +464,9 @@ pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration], mean_work: f64) ->
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
 /// `w` reserved slots, `key(j)` its other inputs (see [`GrantKey`]) and
 /// `family` the op kind whose grant function `grant` is;
-/// Auto scores its candidates with it (see the module documentation), and
+/// Auto scores the candidates `selector` admits with it (under
+/// [`LaneAllocation::EqualShare`], the baseline and the equal shares only,
+/// without the large-job reservation) (see the module documentation), and
 /// takes a searched allocation from `cache` when one was computed from the
 /// same inputs (see [`LaneAllocationKey`]), offering each new search for
 /// admission. Without a grant, and under a forced strategy, the baseline
@@ -469,7 +479,7 @@ pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration], mean_work: f64) ->
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
-    (family, key): (OpKind, impl Fn(usize) -> GrantKey),
+    (family, selector, key): (OpKind, LaneAllocation, impl Fn(usize) -> GrantKey),
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
@@ -485,7 +495,7 @@ pub(crate) fn allocate_in(
     let allocation = allocate_with(
         exec,
         times,
-        (family, &keys),
+        (family, selector, &keys),
         mean_work,
         scratch,
         cache,
@@ -498,7 +508,7 @@ pub(crate) fn allocate_in(
 fn allocate_with(
     exec: &Exec<'_>,
     times: &[Duration],
-    (family, keys): (OpKind, &[GrantKey]),
+    (family, selector, keys): (OpKind, LaneAllocation, &[GrantKey]),
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
@@ -513,6 +523,7 @@ fn allocate_with(
         && !keys.is_empty())
     .then_some(LaneAllocationQuery {
         family,
+        selector,
         exec,
         times,
         keys,
@@ -620,28 +631,30 @@ fn allocate_with(
                 best = (score, Some(count));
             }
         }
-        let mut moldable = std::mem::take(&mut scratch.moldable);
-        let candidate = std::mem::take(&mut moldable.lanes);
-        let provider = |r: usize, width: usize| grant(r, times[r], width);
-        let item_of = |serial: Duration, width: usize| item_time(exec, serial, width);
-        let (candidate, score) = moldable.place(
-            (slots, lanes),
-            &order,
-            times,
-            &columns,
-            (&item_of, &provider),
-            candidate,
-            &mut scratch.spare,
-        );
-        // Ties keep the baseline and the equal shares.
-        let wins = score.is_some_and(|score| score < best.0);
-        moldable.lanes = if wins {
-            best.1 = None;
-            std::mem::replace(&mut assigned, candidate)
-        } else {
-            candidate
-        };
-        scratch.moldable = moldable;
+        if selector == LaneAllocation::Moldable {
+            let mut moldable = std::mem::take(&mut scratch.moldable);
+            let candidate = std::mem::take(&mut moldable.lanes);
+            let provider = |r: usize, width: usize| grant(r, times[r], width);
+            let item_of = |serial: Duration, width: usize| item_time(exec, serial, width);
+            let (candidate, score) = moldable.place(
+                (slots, lanes),
+                &order,
+                times,
+                &columns,
+                (&item_of, &provider),
+                candidate,
+                &mut scratch.spare,
+            );
+            // Ties keep the baseline and the equal shares.
+            let wins = score.is_some_and(|score| score < best.0);
+            moldable.lanes = if wins {
+                best.1 = None;
+                std::mem::replace(&mut assigned, candidate)
+            } else {
+                candidate
+            };
+            scratch.moldable = moldable;
+        }
         if let Some(count) = best.1 {
             columns.prepare((slots, count), &fill);
             let item = |j: usize, width: usize| columns.get(j, width);
@@ -1595,7 +1608,7 @@ mod tests {
                 let a = allocate_in(
                     exec,
                     &t,
-                    (OpKind::Gemm, |_| [0; 2]),
+                    (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 2]),
                     1e6,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -1640,13 +1653,23 @@ mod tests {
     /// The allocation under the factorization grant (one width decision on
     /// the job's time), as the driver's default `BlockOp::grant` makes it.
     fn chosen(engine: &mut CpuEngine, times: &[Duration], mean_work: f64) -> Allocation {
+        chosen_with(engine, times, mean_work, LaneAllocation::Moldable)
+    }
+
+    /// [`chosen`] under the lane allocation `selector`.
+    fn chosen_with(
+        engine: &mut CpuEngine,
+        times: &[Duration],
+        mean_work: f64,
+        selector: LaneAllocation,
+    ) -> Allocation {
         engine
             .with_contraction_exec(|exec, _, _| {
                 let exec: &Exec<'_> = exec;
                 Ok(allocate_in(
                     exec,
                     times,
-                    (OpKind::Gemm, |_| [0; 2]),
+                    (OpKind::Gemm, selector, |_| [0; 2]),
                     mean_work,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -1838,6 +1861,13 @@ mod tests {
         /// `cap` and the reservation; ties keep the baseline, then the larger
         /// count, then the equal shares.
         pub(super) fn choose(t: &[u64], slots: usize, cap: usize, d: u64) -> (u64, Lanes) {
+            or_moldable(choose_equal(t, slots, cap, d), t, slots, cap, d)
+        }
+
+        /// The lowest score over the baseline and every equal-share count up
+        /// to `cap`, without the reservation; ties keep the baseline, then
+        /// the larger count.
+        pub(super) fn choose_equal(t: &[u64], slots: usize, cap: usize, d: u64) -> (u64, Lanes) {
             let mut best = baseline(t, slots, cap, d);
             for count in (1..=cap).rev() {
                 let candidate = equal(t, slots, count, d);
@@ -1845,7 +1875,7 @@ mod tests {
                     best = candidate;
                 }
             }
-            or_moldable(best, t, slots, cap, d)
+            best
         }
 
         /// [`choose`] that skips a count whose bound
@@ -1907,6 +1937,26 @@ mod tests {
         assert_eq!(oracle::baseline(&t, 4, 4, 100).0, 40000);
         assert_eq!(lanes(&a), [(4, vec![0, 1, 2, 3])]);
         assert_eq!(oracle::equal(&t, 4, 1, 100).0, 10000 + 100 + 300);
+    }
+
+    /// Purpose: the selected lane allocation is the one evaluated. On four
+    /// slots (flat 100 ns dispatch), blocks of 100, 100, 1000 and 2000 ns
+    /// score lowest with the large-block reservation, which only
+    /// `Moldable` places; `EqualShare` keeps the best equal-share placement.
+    #[test]
+    fn selected_lane_allocation_is_the_one_evaluated() {
+        let t = [100, 100, 1000, 2000];
+        let moldable = oracle::choose(&t, 4, 4, 100);
+        let equal = oracle::choose_equal(&t, 4, 4, 100);
+        assert!(moldable.0 < equal.0);
+        for (selector, expected) in [
+            (LaneAllocation::Moldable, moldable.1),
+            (LaneAllocation::EqualShare, equal.1),
+        ] {
+            let mut engine = flat(4, BatchPolicy::default(), 100);
+            let a = chosen_with(&mut engine, &nanos(&t), 1e9, selector);
+            assert_eq!(lanes(&a), expected, "{selector:?}");
+        }
     }
 
     /// Purpose: main's allocation is kept unchanged when no equal-share
@@ -1972,7 +2022,7 @@ mod tests {
                     let a = allocate_in(
                         exec,
                         t,
-                        (OpKind::Gemm, |j| keys[j]),
+                        (OpKind::Gemm, LaneAllocation::Moldable, |j| keys[j]),
                         10075.0,
                         &mut scratch,
                         &cache,
@@ -2025,7 +2075,7 @@ mod tests {
                     Ok(allocate_in(
                         exec,
                         t,
-                        (OpKind::Gemm, |j| keys[j]),
+                        (OpKind::Gemm, LaneAllocation::Moldable, |j| keys[j]),
                         1e9,
                         &mut AllocationScratch::default(),
                         &uncached(),
@@ -2055,7 +2105,8 @@ mod tests {
     /// from the cache without a grant query and equals the searched one;
     /// changing any one input it depends on (a serial time, a grant key, the
     /// op kind, a factorization's total or payback work, the mean work, the
-    /// work model, the dispatch costs, the budget, the token's team) searches
+    /// work model, the dispatch costs, the budget, the token's team, the
+    /// selected lane allocation) searches
     /// again; after a clear, and on a disabled cache
     /// at every call, it searches and finds the cached allocation.
     #[test]
@@ -2070,6 +2121,7 @@ mod tests {
         let mut scratch = AllocationScratch::default();
         let queries = std::cell::Cell::new(0);
         let family = std::cell::Cell::new(OpKind::Gemm);
+        let selector = std::cell::Cell::new(LaneAllocation::Moldable);
         // Runs one allocation of `family`'s kind on `exec` and returns its
         // lanes and whether it queried a grant.
         let mut run = |exec: &Exec<'_>, t: &[Duration], keys: &[GrantKey], mean: f64| {
@@ -2081,7 +2133,7 @@ mod tests {
             let a = allocate_in(
                 exec,
                 t,
-                (family.get(), |j| keys[j]),
+                (family.get(), selector.get(), |j| keys[j]),
                 mean,
                 &mut scratch,
                 &cache,
@@ -2129,6 +2181,12 @@ mod tests {
         other_total[1][0] = 100.5_f64.to_bits();
         assert!(on(&mut base, &t, &other_total, 10075.0).1);
         family.set(OpKind::Gemm);
+        // The other lane allocation searches once, then hits its own entry.
+        selector.set(LaneAllocation::EqualShare);
+        let (equal, searched) = on(&mut base, &t, &keys, 10075.0);
+        assert!(searched);
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (equal, false));
+        selector.set(LaneAllocation::Moldable);
         // The base entry survived the other keys' admissions.
         assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
 
@@ -2181,7 +2239,7 @@ mod tests {
                     let cached = allocate_in(
                         exec,
                         &t,
-                        (OpKind::Gemm, |j| keys[j]),
+                        (OpKind::Gemm, LaneAllocation::Moldable, |j| keys[j]),
                         10075.0,
                         &mut scratch,
                         &bounded,
@@ -2190,7 +2248,7 @@ mod tests {
                     let rejected = allocate_in(
                         exec,
                         &t,
-                        (OpKind::Gemm, |j| keys[j]),
+                        (OpKind::Gemm, LaneAllocation::Moldable, |j| keys[j]),
                         10075.0,
                         &mut scratch,
                         &tiny,
@@ -2233,7 +2291,7 @@ mod tests {
                 Ok(allocate_in(
                     exec,
                     &t,
-                    (OpKind::Gemm, key),
+                    (OpKind::Gemm, LaneAllocation::Moldable, key),
                     1e9,
                     &mut AllocationScratch::default(),
                     &uncached(),

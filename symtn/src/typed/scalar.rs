@@ -554,6 +554,14 @@ where
     /// ```
     pub fn to_physical_dense(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+    ) -> Result<PhysicalDense<D>, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
+        let (engine, _) = cx.parts();
+        self.to_physical_dense_impl(engine)
+    }
+
+    fn to_physical_dense_impl(
+        &self,
         engine: &mut dyn Engine,
     ) -> Result<PhysicalDense<D>, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
         symtn_operations::host_pool::region(
@@ -591,6 +599,15 @@ where
     /// validation and provider queries finish before the returned tensor is
     /// constructed.
     pub fn project_physical_dense(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        physical: &PhysicalDense<D>,
+    ) -> Result<Self, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
+        let (engine, _) = cx.parts();
+        self.project_physical_dense_impl(engine, physical)
+    }
+
+    fn project_physical_dense_impl(
         &self,
         engine: &mut dyn Engine,
         physical: &PhysicalDense<D>,

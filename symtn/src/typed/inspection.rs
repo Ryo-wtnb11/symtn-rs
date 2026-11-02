@@ -81,7 +81,12 @@ where
     /// [`Error::Operation`] only if an engine-internal layout invariant is
     /// broken. On CUDA also [`Error::PlacementMismatch`] for a payload of
     /// another device or engine, and CUDA backend errors.
-    pub fn materialize(&self, engine: &mut dyn Engine) -> Result<Self, Error> {
+    pub fn materialize(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<Self, Error> {
+        let (engine, _) = cx.parts();
+        self.materialize_impl(engine)
+    }
+
+    fn materialize_impl(&self, engine: &mut dyn Engine) -> Result<Self, Error> {
         fn dense<D, S>(data: &TypedData<D, S>) -> Result<&S, Error> {
             match data {
                 TypedData::Dense(storage) => Ok(storage),
@@ -182,14 +187,18 @@ where
     /// Infallible for the reason [`TypedTensorBody::materialized_dense_data`]
     /// is: the diagonal fill is total on a bond space this module built from
     /// that same spectrum.
-    pub(super) fn shareable_dense_payload(&self, engine: &mut dyn Engine) -> Arc<TypedData<D>> {
+    pub(super) fn shareable_dense_payload(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+    ) -> Arc<TypedData<D>> {
         if let Some(body) = self.owned_body() {
             if matches!(body.data.as_ref(), TypedData::Dense(_)) {
                 return Arc::clone(&body.data);
             }
         }
         let materialized = self
-            .materialize(engine)
+            .materialize(&mut Invocation::new(engine, options))
             .expect("a pre-admitted typed tensor must materialize");
         Arc::clone(
             &materialized
@@ -205,9 +214,10 @@ where
     pub(super) fn materialized_tensor_uncached(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
     ) -> Result<Self, Error> {
         match &self.repr {
-            TypedTensorRepr::Adjoint(_) => self.materialize(engine),
+            TypedTensorRepr::Adjoint(_) => self.materialize(&mut Invocation::new(engine, options)),
             TypedTensorRepr::Owned(_) => Ok(self.clone()),
         }
     }
@@ -319,6 +329,19 @@ where
     /// degeneracy. All validation precedes checked layout admission, and the
     /// supplied dual flag is preserved.
     pub fn diagonal<I>(
+        cx: &mut (impl ExecContext + ?Sized),
+        runtime: &Runtime,
+        bond: &GradedSpace<R>,
+        spectra: I,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        I: IntoIterator<Item = SectorSpectrum<R::Sector, D>>,
+    {
+        let (engine, _) = cx.parts();
+        Self::diagonal_impl(engine, runtime, bond, spectra)
+    }
+
+    fn diagonal_impl<I>(
         engine: &mut dyn Engine,
         runtime: &Runtime,
         bond: &GradedSpace<R>,
@@ -466,6 +489,14 @@ where
     /// step where a decode failure surfaces, before `find_truncated`.
     pub fn diagview(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+    ) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.diagview_impl(engine)
+    }
+
+    fn diagview_impl(
+        &self,
         engine: &mut dyn Engine,
     ) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
         admit_host_engine(engine)?;
@@ -578,7 +609,12 @@ where
     /// non-finite tolerances are rejected before every shortcut.
     ///
     /// Scale `tol` to the payload dtype, as [`FactorizationScalar`] describes.
-    pub(crate) fn is_diagonal(&self, engine: &mut dyn Engine, tol: f64) -> Result<bool, Error> {
+    pub(crate) fn is_diagonal(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+        tol: f64,
+    ) -> Result<bool, Error> {
         if !tol.is_finite() || tol < 0.0 {
             return Err(Error::InvalidArgument(
                 "diagonal tolerance must be finite and nonnegative".into(),
@@ -590,7 +626,7 @@ where
         if self.rank() != 2 || self.codomain_rank() != 1 || self.domain_rank() != 1 {
             return Ok(false);
         }
-        let materialized = self.materialized_tensor_uncached(engine)?;
+        let materialized = self.materialized_tensor_uncached(engine, options)?;
         let data_payload = materialized
             .owned_body()
             .expect("uncached materialization is owned")

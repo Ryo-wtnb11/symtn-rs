@@ -21,8 +21,8 @@ use num_complex::{Complex32, Complex64};
 use symtn::krylov::{self, Lanczos, Vector, Which, Workspace};
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    BlockFusionTrees, ContractSpec, CpuEngine, Engine, Error, GradedSpace, OperationError, Pool,
-    Runtime, SectorSpectrum, TensorMap, TensorScalar,
+    BlockFusionTrees, Configured, ContractSpec, CpuEngine, Error, ExecContext, GradedSpace,
+    LaneAllocation, OperationError, Pool, Runtime, SectorSpectrum, TensorMap, TensorScalar,
 };
 use symtn_sectors::{TableRule, TableSector};
 
@@ -118,7 +118,7 @@ fn wide<D: Numeric>(v: &[D]) -> Vec<Complex64> {
 /// against their physical dense expansions.
 macro_rules! vector_contract {
     ($engine:ident, $what:expr, $rt:expr, $legs:expr, $d:ty, $a:expr, $b:expr) => {{
-        let engine: &mut dyn Engine = &mut *$engine;
+        let engine: &mut dyn ExecContext = &mut *$engine;
         let (v, w) = $legs;
         let what = $what;
         let x = filled!(engine, $rt, [&v, &w], [&v], $d, 1);
@@ -190,7 +190,7 @@ macro_rules! vector_contract {
 fn vector_operations_match_the_dense_expansion() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let (a, b) = (0.75, -2.5);
     let (ca, cb) = (Complex64::new(0.5, -2.0), Complex64::new(-1.5, 0.25));
     vector_contract!(engine, "u1 f64", &rt, u1_legs(), f64, a, b);
@@ -208,7 +208,7 @@ fn vector_operations_match_the_dense_expansion() {
 fn lazy_and_compact_receivers_are_refused_by_similar() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let (v, _) = su2_legs();
     let x = filled!(engine, &rt, [&v], [&v], Complex64, 4);
     let lazy = x.adjoint(engine).unwrap();
@@ -255,13 +255,13 @@ fn lazy_and_compact_receivers_are_refused_by_similar() {
 fn krylov_reports_operation_errors_as_vector_errors() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let (v, w) = u1_legs();
     let b = filled!(engine, &rt, [&v, &w], [&v], f64, 5);
     let x0 = filled!(engine, &rt, [&v], [&v], f64, 6);
     let mut ws = Workspace::with_capacity(engine, &b, 5).unwrap();
     let mut op =
-        |engine: &mut (dyn Engine + 'static),
+        |engine: &mut (dyn ExecContext + 'static),
          x: &TensorMap<U1FusionRule, f64>,
          y: &mut TensorMap<U1FusionRule, f64>| x.axpby_into(engine, y, 2.0, 0.0);
     let result = krylov::linsolve(
@@ -295,7 +295,7 @@ fn heisenberg_eigenvalues(twice: usize) -> Vec<f64> {
 
 /// `S·S` on `V ⊗ V <- V ⊗ V`, SU(2): `λ_c` on coupled spin `c`.
 fn su2_heisenberg<D: Sample>(
-    engine: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
     rt: &Runtime,
     v: &GradedSpace<SU2FusionRule>,
     twice: usize,
@@ -320,7 +320,7 @@ fn su2_heisenberg<D: Sample>(
 
 /// `S·S` on `V ⊗ V <- V ⊗ V`, U(1) with charge `2m`: `Sz⊗Sz + (S+⊗S- + S-⊗S+)/2`.
 fn u1_heisenberg<D: Sample>(
-    engine: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
     rt: &Runtime,
     v: &GradedSpace<U1FusionRule>,
     twice: usize,
@@ -367,9 +367,9 @@ const APPLY: ContractSpec<'static> = ContractSpec {
 /// eigen-residuals and the eigenvector norms in the dense expansion.
 macro_rules! eigsolve_case {
     ($engine:expr, $what:expr, $rt:expr, $h:expr, $x0:expr, $want:expr, $alg:expr, $tol:expr) => {{
-        let engine: &mut dyn Engine = $engine;
+        let engine: &mut dyn ExecContext = $engine;
         let (h, x0, want): (_, _, Vec<f64>) = (&$h, &$x0, $want);
-        let mut op = |engine: &mut (dyn Engine + 'static), x: &_, y: &mut _| {
+        let mut op = |engine: &mut (dyn ExecContext + 'static), x: &_, y: &mut _| {
             h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
         };
         let (alg, tol): (Lanczos, f64) = ($alg, $tol);
@@ -414,7 +414,7 @@ fn eigsolve_in_single_precision() {
     // SU(2) spin 1: [-2, -1, 1], to single precision (Lanczos tolerance
     // above the f32 rounding of the residual).
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let v =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(2), 2)]).unwrap();
     let w = GradedSpace::try_new(
@@ -445,7 +445,7 @@ fn eigsolve_in_single_precision() {
 fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     for twice in [1usize, 2] {
         let want = heisenberg_eigenvalues(twice);
         // SU(2): spin `s` with degeneracy 2, and W carrying every total spin.
@@ -527,10 +527,10 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
 /// distinct eigenvalues `λ` of `H`, compared with `exponentiate`.
 macro_rules! exponentiate_case {
     ($engine:expr, $what:expr, $h:expr, $x:expr, $t:expr, $lambda:expr) => {{
-        let engine: &mut dyn Engine = $engine;
+        let engine: &mut dyn ExecContext = $engine;
         let (h, x, lambda): (_, _, Vec<f64>) = (&$h, &$x, $lambda);
         let t = $t;
-        let mut op = |engine: &mut (dyn Engine + 'static), x: &_, y: &mut _| {
+        let mut op = |engine: &mut (dyn ExecContext + 'static), x: &_, y: &mut _| {
             h.contract_into(engine, x, &APPLY, y, Sample::real(1.0), Sample::real(0.0))
         };
         let alg = Lanczos::new(10, 100, 1e-13);
@@ -590,7 +590,7 @@ fn symtn_get<R, D: Numeric + TensorScalar>(
 fn exponentiate_matches_the_block_exponential() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     for twice in [1usize, 2] {
         let lambda = heisenberg_eigenvalues(twice);
         let v = GradedSpace::try_new(
@@ -661,7 +661,7 @@ fn exponentiate_matches_the_block_exponential() {
 fn fibonacci_vectors_carry_the_golden_ratio_weight() {
     let _serial = crate::counting_alloc::serial();
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let rule = Arc::new(TableRule::fibonacci());
     let (one, tau) = (TableSector::new(1), TableSector::new(2));
     let t = GradedSpace::try_new(Arc::clone(&rule), [(tau, 1)]).unwrap();
@@ -701,7 +701,7 @@ fn fibonacci_vectors_carry_the_golden_ratio_weight() {
             Complex64::new(if *trees.coupled() == one { -1.0 } else { 0.0 }, 0.0)
         })
         .unwrap();
-    let mut op = |engine: &mut (dyn Engine + 'static),
+    let mut op = |engine: &mut (dyn ExecContext + 'static),
                   x: &TensorMap<TableRule, Complex64>,
                   y: &mut TensorMap<TableRule, Complex64>| {
         h.compose(engine, x)?.axpby_into(
@@ -728,7 +728,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     // A random Hermitian H with many distinct eigenvalues, so Lanczos
     // restarts; the map writes in place (`contract_into`).
     let rt = Runtime::builder().build().unwrap();
-    let engine: &mut dyn Engine = &mut CpuEngine::serial();
+    let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [(-1, 4), (0, 3), (1, 4)].map(|(q, n)| (U1Irrep::new(q), n)),
@@ -747,7 +747,7 @@ fn warm_eigsolve_allocates_only_its_results() {
     let howmany = 2;
     let alg = Lanczos::new(12, 20, 1e-12);
     let mut ws = Workspace::with_capacity(engine, &x0, 12).unwrap();
-    let mut op = |engine: &mut (dyn Engine + 'static),
+    let mut op = |engine: &mut (dyn ExecContext + 'static),
                   x: &TensorMap<U1FusionRule, f64>,
                   y: &mut TensorMap<U1FusionRule, f64>| {
         h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
@@ -798,9 +798,11 @@ fn warm_eigsolve_allocates_only_its_results() {
     );
 }
 
-/// The solver runs on the caller's engine: a width-4 engine finds the
-/// width-1 spectrum and eigenvectors, and a broken engine fails the solve
-/// with the typed Host-region error of every other Host value operation.
+/// The solver runs on the caller's execution context: a width-4 engine
+/// finds the width-1 spectrum and eigenvectors, a configured context's lane
+/// allocation reaches the map's contraction, and a broken engine fails the
+/// solve with the typed Host-region error of every other Host value
+/// operation.
 #[test]
 fn eigsolve_runs_on_the_callers_engine() {
     let _serial = crate::counting_alloc::serial();
@@ -816,12 +818,12 @@ fn eigsolve_runs_on_the_callers_engine() {
         (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 4)),
     )
     .unwrap();
-    let serial: &mut dyn Engine = &mut CpuEngine::serial();
+    let serial: &mut dyn ExecContext = &mut CpuEngine::serial();
     let h = u1_heisenberg::<f64>(serial, &rt, &v, twice);
     let x0 = filled!(serial, &rt, [&v, &v], [&w], f64, 14);
     let want = heisenberg_eigenvalues(twice);
-    let solve = |engine: &mut (dyn Engine + 'static)| {
-        let mut op = |engine: &mut (dyn Engine + 'static),
+    let solve = |engine: &mut (dyn ExecContext + 'static)| {
+        let mut op = |engine: &mut (dyn ExecContext + 'static),
                       x: &TensorMap<U1FusionRule, f64>,
                       y: &mut TensorMap<U1FusionRule, f64>| {
             h.contract_into(engine, x, &APPLY, y, 1.0, 0.0)
@@ -851,6 +853,38 @@ fn eigsolve_runs_on_the_callers_engine() {
     for (x4, x1) in vecs4.iter().zip(&vecs1) {
         let overlap = x1.inner(serial, x4).unwrap();
         assert!((overlap.abs() - 1.0).abs() < 1e-10, "overlap {overlap}");
+    }
+
+    // The map's contraction runs the context's lane allocation: on the
+    // native provider it solves the same spectrum, while a BLAS provider,
+    // which has no lane allocator, refuses it from inside the map.
+    let mut configured =
+        Configured::new(CpuEngine::new(Pool::builder().threads(4).build().unwrap()))
+            .with_lane_allocation(LaneAllocation::EqualShare);
+    let lane_allocator = !cfg!(any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ));
+    match solve(&mut configured) {
+        Ok((vals, _, _)) if lane_allocator => {
+            for (&a, &b) in vals.iter().zip(&vals1) {
+                assert!((a - b).abs() < 1e-10, "{a} vs {b}");
+            }
+        }
+        Err(krylov::Error::Vector(Error::Operation(e))) if !lane_allocator => assert!(
+            matches!(
+                *e,
+                OperationError::Dense(symtn::expert::DenseError::Unsupported {
+                    op: "lane_allocation",
+                    ..
+                })
+            ),
+            "{e:?}"
+        ),
+        other => panic!("{:?}", other.map(|_| ())),
     }
 
     let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

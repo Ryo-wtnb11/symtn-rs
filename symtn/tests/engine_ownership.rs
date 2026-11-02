@@ -1,6 +1,7 @@
 //! The caller's engine owns every resource an operation runs on.
 //!
-//! - One configuration (engine width, inputs) gives identical bits on every
+//! - One configuration (engine width, lane allocation, inputs) gives
+//!   identical bits on every
 //!   repetition, at widths 1, 4 and 8; across widths the results agree to
 //!   the numerical tolerance only.
 //! - Two engines on two threads, sharing one Runtime and its tensors, run at
@@ -12,7 +13,8 @@ use std::sync::{Arc, Barrier};
 
 use symtn::sector::{product_sector, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep};
 use symtn::typed::{
-    ContractSpec, CpuEngine, Direction, Engine, GradedSpace, HermitianTol, Pool, Runtime, TensorMap,
+    Configured, ContractSpec, CpuEngine, Direction, Engine, ExecContext, GradedSpace, HermitianTol,
+    LaneAllocation, Pool, Runtime, TensorMap,
 };
 
 use crate::common::ErrorKind as _;
@@ -52,7 +54,7 @@ fn engine(threads: usize) -> CpuEngine {
 }
 
 /// A permute, a contraction and a compact SVD of `t`, as one payload.
-fn workload(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> Vec<f64> {
+fn workload(engine: &mut dyn ExecContext, t: &TensorMap<U1Su2, f64>) -> Vec<f64> {
     let permuted = t.permute(engine, &[2, 0], &[1]).unwrap();
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
@@ -63,6 +65,26 @@ fn workload(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> Vec<f64> {
         out.extend_from_slice(&entry.values);
     }
     out
+}
+
+/// The lane allocations this build can select: a BLAS provider has no lane
+/// allocator, so it runs only the default.
+fn allocations() -> &'static [LaneAllocation] {
+    if cfg!(any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    )) {
+        &[LaneAllocation::Moldable]
+    } else {
+        &[LaneAllocation::Moldable, LaneAllocation::EqualShare]
+    }
+}
+
+fn configured(threads: usize, allocation: LaneAllocation) -> Configured<CpuEngine> {
+    Configured::new(engine(threads)).with_lane_allocation(allocation)
 }
 
 fn bits(values: &[f64]) -> Vec<u64> {
@@ -79,18 +101,18 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     let runtime = Runtime::builder().build().unwrap();
     let t = fixture(&runtime);
     let serial = workload(&mut CpuEngine::serial(), &t);
-    for threads in [1, 4, 8] {
-        let mut engine = engine(threads);
+    for (threads, &allocation) in [1, 4, 8]
+        .into_iter()
+        .flat_map(|threads| allocations().iter().map(move |a| (threads, a)))
+    {
+        let what = format!("width {threads}, {allocation:?}");
+        let mut engine = configured(threads, allocation);
         let first = workload(&mut engine, &t);
         let second = workload(&mut engine, &t);
-        let fresh = workload(&mut self::engine(threads), &t);
-        assert_eq!(
-            bits(&first),
-            bits(&second),
-            "width {threads}: repeated call"
-        );
-        assert_eq!(bits(&first), bits(&fresh), "width {threads}: fresh engine");
-        numerics::assert_slices_close(&format!("width {threads} vs 1"), &first, &serial, 64);
+        let fresh = workload(&mut configured(threads, allocation), &t);
+        assert_eq!(bits(&first), bits(&second), "{what}: repeated call");
+        assert_eq!(bits(&first), bits(&fresh), "{what}: fresh engine");
+        numerics::assert_slices_close(&format!("{what} vs 1"), &first, &serial, 64);
     }
 }
 
@@ -197,22 +219,29 @@ fn factorizations_and_trace_agree_across_widths() {
 fn two_engines_on_two_threads_share_one_runtime() {
     let runtime = Runtime::builder().build().unwrap();
     let t = fixture(&runtime);
-    let alone = workload(&mut engine(4), &t);
+    // One engine per thread; where the build can select another lane
+    // allocation, the second engine selects it, so the shared Runtime must
+    // not carry one engine's options into the other's calls.
+    let selected = [allocations()[0], *allocations().last().unwrap()];
+    let alone = selected.map(|allocation| workload(&mut configured(4, allocation), &t));
     let start = Barrier::new(2);
     let results: Vec<Vec<f64>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = (0..2)
-            .map(|_| {
-                scope.spawn(|| {
-                    let mut engine = engine(4);
+        let handles: Vec<_> = selected
+            .into_iter()
+            .map(|allocation| {
+                let start = &start;
+                let t = &t;
+                scope.spawn(move || {
+                    let mut engine = configured(4, allocation);
                     start.wait();
-                    workload(&mut engine, &t)
+                    workload(&mut engine, t)
                 })
             })
             .collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
-    for result in &results {
-        assert_eq!(bits(result), bits(&alone));
+    for (result, alone) in results.iter().zip(&alone) {
+        assert_eq!(bits(result), bits(alone));
     }
 }
 

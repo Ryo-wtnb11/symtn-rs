@@ -1,5 +1,5 @@
 use super::*;
-use symtn::typed::Engine;
+use symtn::typed::ExecContext;
 
 mod network_operand_sealed {
     pub trait Sealed {}
@@ -14,7 +14,7 @@ pub trait NetworkOperand: network_operand_sealed::Sealed + Sized {
 
     #[doc(hidden)]
     fn contract_network(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         network: &Network,
         tensors: &[&Self],
     ) -> Result<Self, Self::Error>;
@@ -57,7 +57,16 @@ impl Network {
     /// returns it, or [`Error`] for device operands.
     pub fn contract<T: NetworkOperand>(
         &self,
-        engine: &mut dyn Engine,
+        cx: &mut (impl ExecContext + ?Sized),
+        tensors: &[&T],
+    ) -> Result<T, T::Error> {
+        let (engine, options) = cx.parts();
+        self.contract_impl(&mut crate::Borrowed { engine, options }, tensors)
+    }
+
+    fn contract_impl<T: NetworkOperand>(
+        &self,
+        engine: &mut dyn ExecContext,
         tensors: &[&T],
     ) -> Result<T, T::Error> {
         T::contract_network(engine, self, tensors)
@@ -116,7 +125,7 @@ where
     D: TensorScalar,
 {
     fn admit_operands(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>>;
@@ -129,7 +138,7 @@ where
     D: TensorScalar + Send + Sync + 'static,
 {
     fn admit_operands(
-        _engine: &mut dyn Engine,
+        _engine: &mut dyn ExecContext,
         tensors: &[&TensorMap<R, D>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>> {
@@ -150,7 +159,7 @@ where
     D: CudaPayload,
 {
     fn admit_operands(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), Error> {
@@ -181,7 +190,7 @@ where
     type Error = FacadeError<R>;
 
     fn contract_network(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         network: &Network,
         tensors: &[&Self],
     ) -> Result<Self, Self::Error> {

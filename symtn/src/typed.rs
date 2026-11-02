@@ -277,8 +277,9 @@ pub use symtn_core::{
     FusionTreePairKey, MultiplicityIndex, OpaqueBlockKey,
 };
 /// The caller-owned execution resources every numerical operation takes as
-/// its first argument (`engine: &mut dyn Engine`): tenferro's engine trait,
-/// its CPU engine and the CPU engine's thread pool.
+/// its first argument (any [`ExecContext`]; an engine is one with the default
+/// [`ExecOptions`]): tenferro's engine trait, its CPU engine and the CPU
+/// engine's thread pool.
 ///
 /// How grouped dense GEMMs (the recoupling and contraction batches) use a
 /// pooled `CpuEngine`'s threads is the engine's batch policy, an engine-owned
@@ -288,8 +289,9 @@ pub use symtn_core::{
 /// estimated serial time and a lane count of at most the engine's batch
 /// decision, chosen by a provider-derived cost estimate; each lane reserves a
 /// share of those threads (equal shares, or a wider lane for each dominant
-/// block), so a batch of a few large blocks gives each lane several threads
-/// (or runs on one lane of all of them). A caller can still give each GEMM the whole pool:
+/// block, as the call's [`LaneAllocation`] admits), so a batch of a few large
+/// blocks gives each lane several threads (or runs on one lane of all of
+/// them). A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
@@ -297,6 +299,9 @@ pub use symtn_core::{
 /// are outside the engine's lanes); forcing `Inner` there runs the GEMMs on
 /// the native kernels instead of the vendor library.
 pub use symtn_dense::{CpuEngine, Engine, Pool};
+mod exec_context;
+pub(crate) use exec_context::Invocation;
+pub use exec_context::{Configured, ExecContext, ExecOptions, LaneAllocation};
 /// The caller-owned CUDA engine every device operation borrows, and the
 /// device id it opens on.
 ///

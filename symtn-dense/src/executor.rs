@@ -40,6 +40,24 @@ pub enum DenseOwned {
     C64(Vec<Complex64>),
 }
 
+/// How the block scheduler places a batch of independent dense blocks on an
+/// engine's lanes when the engine's batch policy is `Auto`.
+///
+/// Every variant is legal and deterministic for one complete configuration
+/// (provider, engine width, batch policy and work model, inputs); different
+/// variants may place the blocks differently and so round differently.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum LaneAllocation {
+    /// The lowest modeled time among the equal-share placements and a
+    /// large-block reservation on uneven lanes.
+    #[default]
+    Moldable,
+    /// The lowest modeled time among the equal-share placements only: every
+    /// lane reserves an equal share of the slots.
+    EqualShare,
+}
+
 /// The per-matrix factorization a [`DenseExecutor::factorize_batch`] issues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

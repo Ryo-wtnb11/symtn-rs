@@ -25,6 +25,7 @@ use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::schedule::{self, GrantKey};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
+use crate::LaneAllocation;
 use crate::{DenseError, DenseRead, DenseTensor, DenseView};
 
 /// One compact factorization the provider runs per block. The shared code
@@ -410,31 +411,35 @@ pub(crate) type Sink<'s> =
 /// delivered.
 pub(crate) fn factorize_batch<F: Factor>(
     engine: &mut dyn tenferro_tensor::Engine,
+    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
-    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, inputs, sink)).unwrap_or_else(|| {
-        Err(tenferro_error(
-            F::ENTRY,
-            tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
-        ))
-    })
+    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, allocation, inputs, sink)).unwrap_or_else(
+        || {
+            Err(tenferro_error(
+                F::ENTRY,
+                tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
+            ))
+        },
+    )
 }
 
 /// [`factorize_batch`] of the factorization `op` names.
 pub(crate) fn factorize(
     engine: &mut dyn tenferro_tensor::Engine,
     op: crate::DenseFactorization,
+    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
     use crate::DenseFactorization as Op;
     match op {
-        Op::Svd => factorize_batch::<Svd>(engine, inputs, sink),
-        Op::Qr => factorize_batch::<Qr>(engine, inputs, sink),
-        Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
-        Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
-        Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
+        Op::Svd => factorize_batch::<Svd>(engine, allocation, inputs, sink),
+        Op::Qr => factorize_batch::<Qr>(engine, allocation, inputs, sink),
+        Op::Eigh => factorize_batch::<Eigh>(engine, allocation, inputs, sink),
+        Op::EighVals => factorize_batch::<EighVals>(engine, allocation, inputs, sink),
+        Op::SvdVals => factorize_batch::<SvdVals>(engine, allocation, inputs, sink),
         // Why not on the lanes: tenferro's eig publishes unit-norm
         // eigenvectors through a normalization it does not export
         // (tensor4all/tenferro-rs#2387), and symtn does not duplicate it, so
@@ -443,12 +448,13 @@ pub(crate) fn factorize(
         Op::Eig => inputs.iter().enumerate().try_for_each(|(index, &input)| {
             sink(index, crate::tenferro_adapter::eig_read(engine, input))
         }),
-        Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
+        Op::EigVals => factorize_batch::<EigVals>(engine, allocation, inputs, sink),
     }
 }
 
 fn batch_on<F: Factor>(
     cpu: &mut CpuEngine,
+    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
@@ -473,6 +479,7 @@ fn batch_on<F: Factor>(
             &Blocks::<F>(PhantomData),
             &mut jobs,
             &mut LaneScratch::default(),
+            allocation,
         )?;
     }
     let admitted = jobs.len();
@@ -771,7 +778,14 @@ mod tests {
             Blocks(PhantomData),
             shapes.iter().map(|_| 0.into()).collect(),
         );
-        driver::drive(&mut engine, &op, &mut jobs, &mut LaneScratch::default()).unwrap();
+        driver::drive(
+            &mut engine,
+            &op,
+            &mut jobs,
+            &mut LaneScratch::default(),
+            LaneAllocation::Moldable,
+        )
+        .unwrap();
         op.1.iter().map(|w| w.load(Ordering::Relaxed)).collect()
     }
 

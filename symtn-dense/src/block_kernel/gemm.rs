@@ -27,6 +27,7 @@ use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::schedule::GrantKey;
 use crate::fresh::{split_fresh_segments, FreshParts};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
+use crate::LaneAllocation;
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -516,6 +517,7 @@ pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
+    allocation: LaneAllocation,
     output: &mut DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -582,7 +584,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         beta,
         source,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
     *kept_slots = recycle(slots);
     plans.clear();
     result
@@ -634,6 +636,7 @@ fn index_plans<T: Scalar>(
 pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
+    allocation: LaneAllocation,
     parts: FreshParts<'_, 'a, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -664,7 +667,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         alpha,
         destination: PhantomData,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
     if result.is_ok() {
         for (j, (_, _, written)) in slots.iter_mut().enumerate() {
             (parts.written)(j, std::mem::take(written));

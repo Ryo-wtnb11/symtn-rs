@@ -1,5 +1,5 @@
 use super::*;
-use symtn::typed::Engine;
+use symtn::typed::ExecContext;
 
 mod mode_sealed {
     pub trait Sealed {}
@@ -41,12 +41,12 @@ where
 
     /// Lowers a `conj`-marked operand to its adjoint on this storage.
     fn adjoint_operand(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>;
 
     fn contract_step(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         destination: &mut Option<TensorMap<R, D, S>>,
@@ -56,7 +56,7 @@ where
     /// Reorients the operand of a zero-step schedule (a relabel), the one
     /// result no contraction step writes in its output orientation.
     fn permute_final(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D, S>,
         codomain: &[usize],
         domain: &[usize],
@@ -109,7 +109,7 @@ impl<T> StepOutput<T> {
 /// through `contract_into` (`beta = 0`), otherwise the step returns the eager
 /// result.
 fn host_contract_step<R, D, S>(
-    engine: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     destination: &mut Option<TensorMap<R, D, S>>,
@@ -175,14 +175,14 @@ where
     }
 
     fn adjoint_operand(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, Error> {
         tensor.adjoint(engine)
     }
 
     fn contract_step(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         destination: &mut Option<TensorMap<R, D, S>>,
@@ -192,7 +192,7 @@ where
     }
 
     fn permute_final(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D, S>,
         codomain: &[usize],
         domain: &[usize],
@@ -227,14 +227,14 @@ where
     }
 
     fn adjoint_operand(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D>,
     ) -> Result<TensorMap<R, D>, FacadeError<R>> {
         tensor.adjoint(engine)
     }
 
     fn contract_step(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         lhs: &TensorMap<R, D>,
         rhs: &TensorMap<R, D>,
         destination: &mut Option<TensorMap<R, D>>,
@@ -244,7 +244,7 @@ where
     }
 
     fn permute_final(
-        engine: &mut dyn Engine,
+        engine: &mut dyn ExecContext,
         tensor: &TensorMap<R, D>,
         codomain: &[usize],
         domain: &[usize],

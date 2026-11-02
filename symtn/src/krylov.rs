@@ -5,18 +5,20 @@
 //! [`TensorMap`] implements. Every krylov solver then runs directly on
 //! tensors. For `eigsolve`, `exponentiate`, `linsolve` and the Arnoldi
 //! solvers a linear map is any closure
-//! `FnMut(&mut dyn Engine, &TensorMap<R, D>, &mut TensorMap<R, D>) -> Result<(), FacadeError<R>>`;
+//! `FnMut(&mut (dyn ExecContext + 'static), &TensorMap<R, D>, &mut TensorMap<R, D>) -> Result<(), FacadeError<R>>`;
 //! `svdsolve` also needs the adjoint, so its map is a type of your own
 //! implementing [`AdjointMap`].
 //!
-//! # The context is the caller's engine
+//! # The context is the caller's execution context
 //!
-//! [`Vector::Context`] is [`dyn Engine`](crate::typed::Engine), the same
-//! engine every other symtn operation takes. The caller passes
-//! `&mut engine` to each solver and workspace constructor; krylov forwards
-//! that one borrow to every vector operation and to the linear map, which
-//! therefore receives the engine as its first argument instead of capturing
-//! it. symtn creates and stores no engine of its own: the solver runs on the
+//! [`Vector::Context`] is [`dyn ExecContext`](crate::typed::ExecContext), the
+//! execution context every other symtn operation takes: a plain engine, or a
+//! [`Configured`](crate::typed::Configured) engine with execution options.
+//! The caller passes `&mut engine` (or `&mut configured`) to each solver and
+//! workspace constructor; krylov forwards that one borrow to every vector
+//! operation and to the linear map, which therefore receives the context as
+//! its first argument instead of capturing it, and runs the operations it
+//! composes with the caller's options. symtn creates and stores no engine of its own: the solver runs on the
 //! caller's threads, and an engine that cannot run Host operations (a CUDA
 //! engine, a broken pool) is refused with the same typed error as any other
 //! Host value operation, as `krylov::Error::Vector`.
@@ -59,9 +61,9 @@
 //!
 //! use symtn::krylov::{self, Lanczos, Which, Workspace};
 //! use symtn::sector::{U1FusionRule, U1Irrep};
-//! use symtn::typed::{Engine, GradedSpace, Runtime, TensorMap};
+//! use symtn::typed::{ExecContext, GradedSpace, Runtime, TensorMap};
 //!
-//! let engine: &mut dyn Engine = &mut symtn::typed::CpuEngine::serial();
+//! let engine: &mut dyn ExecContext = &mut symtn::typed::CpuEngine::serial();
 //! let rt = Runtime::builder().build()?;
 //! let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
 //! // H = diag(1, 2, 3) on charge 0 and diag(1, 2) on charge 1.
@@ -69,7 +71,7 @@
 //!     if i[0] == i[1] { (i[0] + 1) as f64 } else { 0.0 }
 //! })?;
 //! let x0 = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v], [], 1)?;
-//! let mut op = |engine: &mut (dyn Engine + 'static),
+//! let mut op = |engine: &mut (dyn ExecContext + 'static),
 //!               x: &TensorMap<U1FusionRule, f64>,
 //!               y: &mut TensorMap<U1FusionRule, f64>| {
 //!     h.compose(engine, x)?.axpby_into(engine, y, 1.0, 0.0)
@@ -96,8 +98,8 @@ use num_complex::{Complex32, Complex64};
 use crate::sector::TypedSectorAdmission;
 // `Error` is not imported: it would shadow the re-exported `krylov::Error`.
 use crate::typed::{
-    ElementwiseExec, Engine, FacadeError, FactorScalar, ReduceExec, TensorMap, TypedAdjointSpace,
-    TypedSpaceModeDispatch, TypedTensorModeDispatch,
+    ElementwiseExec, ExecContext, FacadeError, FactorScalar, ReduceExec, TensorMap,
+    TypedAdjointSpace, TypedSpaceModeDispatch, TypedTensorModeDispatch,
 };
 
 // One impl per payload dtype: krylov's `Real<D>` comes from a sealed trait,
@@ -112,7 +114,7 @@ macro_rules! host_vector {
         {
             type Scalar = $d;
             type Error = FacadeError<R>;
-            type Context = dyn Engine;
+            type Context = dyn ExecContext;
 
             fn similar(&self, engine: &mut Self::Context) -> Result<Self, Self::Error> {
                 if !self.is_owned_dense() {
