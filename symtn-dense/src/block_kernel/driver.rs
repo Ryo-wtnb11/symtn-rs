@@ -155,7 +155,7 @@ fn on_lanes<B: BlockOp>(
     let shared: &Exec<'_> = exec;
     // Admission is read only where the allocation can search, so a serial or
     // forced allocation computes no grant input for its blocks.
-    let modeled = schedule::searchable(shared, &scratch.times)
+    let modeled = schedule::searchable(shared, &scratch.times, mean_work)
         && jobs
             .iter()
             .enumerate()
