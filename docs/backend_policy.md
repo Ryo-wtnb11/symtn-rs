@@ -151,9 +151,9 @@ rebuilds its lanes without a query. Each entry is charged its inline key and
 entry, the entry overhead, and its per-block, per-width and per-lane slices;
 with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
-core batches the same way. The native provider's compact SVD, compact QR and
-Hermitian eigendecomposition (full and values-only) over a tensor's sector
-blocks run on the same lanes, through the same lane driver as the GEMM kernel
+core batches the same way. The native provider's compact SVD, values-only
+SVD, the pseudo-inverse's SVD, compact QR and Hermitian eigendecomposition
+(full and values-only) over a tensor's sector blocks run on the same lanes, through the same lane driver as the GEMM kernel
 (inside the engine's guarded linalg entry rather than its contraction entry):
 each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
 `m n k - k^3/3` with `k = min(m, n)`, EIGH tlinalg's `n^3`, four times that
@@ -181,11 +181,11 @@ and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Each block allocates
 its own provider workspace and fresh factors of their logical size, so a
-factor never inherits a recycled buffer's capacity; a full EIGH holds every
-sector's raw eigenvectors at once before placing them, where the loop held
-one. General eigendecomposition, values-only SVD and the other
-factorizations, and every BLAS factorization, still run block after block on
-the whole engine.
+factor never inherits a recycled buffer's capacity; a full EIGH, and a
+compact SVD over packed or Checked Generic sector matrices, holds every
+sector's raw factors at once before placing them, where the loop held one.
+General eigendecomposition and the other factorizations, and every BLAS
+factorization, still run block after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`

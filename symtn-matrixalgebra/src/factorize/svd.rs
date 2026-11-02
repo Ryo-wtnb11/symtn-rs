@@ -356,8 +356,8 @@ where
     svd_vals_spectra(engine, dense, &matricizations)
 }
 
-/// Singular values of every coupled-sector matrix through the no-vector SVD,
-/// truncated to the sector rank.
+/// Singular values of every coupled-sector matrix through one no-vector SVD
+/// batch, truncated to the sector rank.
 pub(super) fn svd_vals_spectra<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -367,24 +367,27 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let mut singular_values = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices.get(index)?;
-        let rank = matrix.rows.min(matrix.cols);
-        let input_shape = [matrix.rows, matrix.cols];
-        let input_strides = [1usize, matrix.rows];
-        let input = DenseView::new(matrix.data, &input_shape, &input_strides, 0)
-            .map_err(OperationError::Dense)?;
-        let s_tensor = dense
-            .svd_vals(engine, D::dense_read(input))
-            .map_err(OperationError::Dense)?;
-        let mut s = D::real_spectrum(&s_tensor).map_err(OperationError::Dense)?;
-        s.truncate(rank);
-        singular_values.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: s,
-        });
-    }
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut layouts)?;
+    let mut singular_values = Vec::with_capacity(blocks.len());
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::SvdVals,
+        &inputs,
+        |index, outcome| {
+            let s_tensor = single_output(outcome, "svd_vals")?;
+            let (_, rows, cols) = blocks[index];
+            let mut s = D::real_spectrum(&s_tensor).map_err(OperationError::Dense)?;
+            s.truncate(rows.min(cols));
+            singular_values.push(SectorSpectrum {
+                sector: sectors[index],
+                values: s,
+            });
+            Ok(())
+        },
+    )?;
     Ok(singular_values)
 }
 
@@ -737,22 +740,110 @@ where
             vt: Vec::new(),
         });
     }
-    let (mut u, singular_values, mut vt) = compact_svd_owned(engine, dense, matrix, rows, cols)?;
+    let (u, singular_values, vt) = compact_svd_owned(engine, dense, matrix, rows, cols)?;
+    Ok(gauged_compact_svd_stage(
+        rows,
+        cols,
+        (u, singular_values, vt),
+        Some(gauge),
+        observe,
+    ))
+}
+
+/// One solved sector's stage in `gauge` (`None` keeps the solver's gauge);
+/// `observe` sees the gauged `u` and `vt`.
+fn gauged_compact_svd_stage<D: FactorScalar>(
+    rows: usize,
+    cols: usize,
+    (mut u, singular_values, mut vt): (Vec<D>, Vec<f64>, Vec<D>),
+    gauge: Option<CompactSvdGauge>,
+    observe: impl FnOnce(&[D], &[D]),
+) -> CompactSvdNumericalStage<D> {
+    let rank = rows.min(cols);
     match gauge {
-        CompactSvdGauge::Left => svd_compact_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank),
-        CompactSvdGauge::AdjointLeft => {
+        Some(CompactSvdGauge::Left) => {
+            svd_compact_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank)
+        }
+        Some(CompactSvdGauge::AdjointLeft) => {
             svd_compact_adjoint_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank)
         }
+        None => {}
     }
     observe(&u, &vt);
-    Ok(CompactSvdNumericalStage {
+    CompactSvdNumericalStage {
         rows,
         cols,
         rank,
         u,
         singular_values,
         vt,
-    })
+    }
+}
+
+/// Compact SVDs of the column-major sectors `blocks` (`(data, rows, cols)`)
+/// as one executor batch: `stage` receives every sector in sector order,
+/// each solved sector gauged as [`gauged_compact_svd_stage`] does and a
+/// zero-rank sector as an empty stage that makes no dense call. Each
+/// zero-rank sector is staged as soon as every sector before it has been,
+/// so a per-matrix executor sees the same call sequence as a sector loop.
+pub(super) fn compact_svd_sectors_staged<E, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    blocks: &[(&[D], usize, usize)],
+    gauge: Option<CompactSvdGauge>,
+    mut observe: impl FnMut(&[D], &[D]),
+    mut stage: impl FnMut(usize, CompactSvdNumericalStage<D>) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor + ?Sized,
+    D: FactorScalar,
+{
+    let is_empty = |position: usize| blocks[position].1.min(blocks[position].2) == 0;
+    let empty = |position: usize| CompactSvdNumericalStage {
+        rows: blocks[position].1,
+        cols: blocks[position].2,
+        rank: 0,
+        u: Vec::new(),
+        singular_values: Vec::new(),
+        vt: Vec::new(),
+    };
+    let (solved, solved_blocks): (Vec<_>, Vec<_>) = blocks
+        .iter()
+        .enumerate()
+        .filter(|&(position, _)| !is_empty(position))
+        .map(|(position, &block)| (position, block))
+        .unzip();
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
+    let mut next = 0;
+    while next < blocks.len() && is_empty(next) {
+        stage(next, empty(next))?;
+        next += 1;
+    }
+    if inputs.is_empty() {
+        return Ok(());
+    }
+    factorize_batch_staged(
+        engine,
+        dense,
+        DenseFactorization::Svd,
+        &inputs,
+        |index, outcome| {
+            let position = solved[index];
+            let (_, rows, cols) = blocks[position];
+            let factors = compact_svd_outputs(outcome.map_err(OperationError::Dense)?, rows, cols)?;
+            stage(
+                position,
+                gauged_compact_svd_stage(rows, cols, factors, gauge, &mut observe),
+            )?;
+            next = position + 1;
+            while next < blocks.len() && is_empty(next) {
+                stage(next, empty(next))?;
+                next += 1;
+            }
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]
@@ -874,78 +965,82 @@ where
     let u_groups = SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?;
     let vt_groups = SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?;
     let (u_target, vt_target) = (left_space.space(), right_space.space());
+    let blocks = matricizations
+        .iter()
+        .map(|matrix| (&matrix.data[..], matrix.rows, matrix.cols))
+        .collect::<Vec<_>>();
     in_linalg_scope(engine, dense, |dense, engine| {
-        for matrix in &matricizations {
-            let CompactSvdNumericalStage {
-                rank,
-                u,
-                singular_values: values,
-                vt,
-                ..
-            } = compact_svd_stage(
-                engine,
-                dense,
-                &matrix.data,
-                matrix.rows,
-                matrix.cols,
-                gauge,
-                |_u, _vt| {
-                    #[cfg(test)]
-                    crate::probe::mf_svd_fallback(_u, _vt);
-                },
-            )?;
-            singular_values.push(SectorSpectrum {
-                sector: matrix.sector,
-                values,
-            });
-            match gauge {
-                CompactSvdGauge::Left => scatter_left_sector_blocks(
-                    u_target,
-                    &mut u_data,
-                    matrix,
-                    &index,
-                    &u_groups,
-                    &u,
-                    matrix.rows,
-                )?,
-                CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
-                    u_target,
-                    &mut u_data,
-                    matrix,
-                    &index,
-                    &u_groups,
-                    &vt,
+        compact_svd_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            Some(gauge),
+            |_u, _vt| {
+                #[cfg(test)]
+                crate::probe::mf_svd_fallback(_u, _vt);
+            },
+            |position, stage| {
+                let matrix = &matricizations[position];
+                let CompactSvdNumericalStage {
                     rank,
-                    FactorSide::Left,
-                )?,
-            }
-            #[cfg(test)]
-            crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, matrix.rows * rank);
-            match gauge {
-                CompactSvdGauge::Left => scatter_right_sector_blocks(
-                    vt_target,
-                    &mut vt_data,
-                    matrix,
-                    &index,
-                    &vt_groups,
-                    &vt,
-                    rank,
-                )?,
-                CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
-                    vt_target,
-                    &mut vt_data,
-                    matrix,
-                    &index,
-                    &vt_groups,
-                    &u,
-                    matrix.rows,
-                    FactorSide::Right,
-                )?,
-            }
-            #[cfg(test)]
-            crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, rank * matrix.cols);
-        }
-        Ok(())
+                    u,
+                    singular_values: values,
+                    vt,
+                    ..
+                } = stage;
+                singular_values.push(SectorSpectrum {
+                    sector: matrix.sector,
+                    values,
+                });
+                match gauge {
+                    CompactSvdGauge::Left => scatter_left_sector_blocks(
+                        u_target,
+                        &mut u_data,
+                        matrix,
+                        &index,
+                        &u_groups,
+                        &u,
+                        matrix.rows,
+                    )?,
+                    CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
+                        u_target,
+                        &mut u_data,
+                        matrix,
+                        &index,
+                        &u_groups,
+                        &vt,
+                        rank,
+                        FactorSide::Left,
+                    )?,
+                }
+                #[cfg(test)]
+                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, matrix.rows * rank);
+                match gauge {
+                    CompactSvdGauge::Left => scatter_right_sector_blocks(
+                        vt_target,
+                        &mut vt_data,
+                        matrix,
+                        &index,
+                        &vt_groups,
+                        &vt,
+                        rank,
+                    )?,
+                    CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
+                        vt_target,
+                        &mut vt_data,
+                        matrix,
+                        &index,
+                        &vt_groups,
+                        &u,
+                        matrix.rows,
+                        FactorSide::Right,
+                    )?,
+                }
+                #[cfg(test)]
+                crate::probe::output_scatter::<D>(crate::probe::CopyOp::Svd, 1, rank * matrix.cols);
+                Ok(())
+            },
+        )
     })?;
 
     let (u_nout, u_nin) = (u_target.nout(), u_target.nin());
@@ -2260,66 +2355,65 @@ where
     #[cfg(test)]
     let data = input.data();
     in_linalg_scope(engine, dense, |dense, engine| {
-        for index in 0..matrices.len() {
-            let matrix = matrices.get(index)?;
-            #[cfg(test)]
+        let (sectors, blocks) = sector_blocks(&matrices)?;
+        #[cfg(test)]
+        for &(matrix, _, _) in &blocks {
             crate::probe::checked_compact_input(
                 crate::probe::CheckedCompactOperation::Svd,
                 data,
-                matrix.data,
+                matrix,
                 None,
             );
-            let CompactSvdNumericalStage {
-                rows,
-                cols,
-                rank,
-                mut u,
-                singular_values: values,
-                mut vt,
-            } = compact_svd_stage(
-                engine,
-                dense,
-                matrix.data,
-                matrix.rows,
-                matrix.cols,
-                gauge,
-                |_u, _vt| {
-                    #[cfg(test)]
-                    if matches!(gauge, CompactSvdGauge::Left) {
-                        crate::probe::checked_svd_stage(_u, _vt);
-                    }
-                },
-            )?;
-            singular_values.push(SectorSpectrum {
-                sector: matrix.sector,
-                values,
-            });
-            pairs.push(match placement {
-                FactorPlacement::Direct => FactorPair {
-                    sector: matrix.sector,
-                    kept: rank,
-                    left: u,
-                    left_rows: rows,
-                    right: vt,
-                    right_leading: rank,
-                },
-                // `A^H = V S U^H`: the adjoint's left factor is `vt^H`.
-                FactorPlacement::Adjoint => {
-                    ranks.insert(matrix.sector, rank);
-                    adjoint_col_major_in_place(&mut vt, rank, cols);
-                    adjoint_col_major_in_place(&mut u, rows, rank);
-                    FactorPair {
-                        sector: matrix.sector,
-                        kept: rank,
-                        left: vt,
-                        left_rows: cols,
-                        right: u,
-                        right_leading: rank,
-                    }
-                }
-            });
         }
-        Ok(())
+        compact_svd_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            Some(gauge),
+            |_u, _vt| {
+                #[cfg(test)]
+                if matches!(gauge, CompactSvdGauge::Left) {
+                    crate::probe::checked_svd_stage(_u, _vt);
+                }
+            },
+            |index, stage| {
+                let sector = sectors[index];
+                let CompactSvdNumericalStage {
+                    rows,
+                    cols,
+                    rank,
+                    mut u,
+                    singular_values: values,
+                    mut vt,
+                } = stage;
+                singular_values.push(SectorSpectrum { sector, values });
+                pairs.push(match placement {
+                    FactorPlacement::Direct => FactorPair {
+                        sector,
+                        kept: rank,
+                        left: u,
+                        left_rows: rows,
+                        right: vt,
+                        right_leading: rank,
+                    },
+                    // `A^H = V S U^H`: the adjoint's left factor is `vt^H`.
+                    FactorPlacement::Adjoint => {
+                        ranks.insert(sector, rank);
+                        adjoint_col_major_in_place(&mut vt, rank, cols);
+                        adjoint_col_major_in_place(&mut u, rows, rank);
+                        FactorPair {
+                            sector,
+                            kept: rank,
+                            left: vt,
+                            left_rows: cols,
+                            right: u,
+                            right_leading: rank,
+                        }
+                    }
+                });
+                Ok(())
+            },
+        )
     })
     .map_err(CheckedGenericFactorPlanError::from)?;
     if matches!(placement, FactorPlacement::Direct) {
