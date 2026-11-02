@@ -1,47 +1,35 @@
 use super::*;
 
+/// Canonical Z2 spaces whose contraction leaves the destination's odd block
+/// inactive: `lhs: {e,o} <- {e}`, `rhs: {e} <- {e,o}`, `dst: {e,o} <- {e,o}`.
+/// The contracted leg carries only the even sector, so no term reaches the
+/// odd coupled sector, which beta alone scales.
+fn inactive_odd_spaces() -> (
+    DynamicFusionMapSpace,
+    DynamicFusionMapSpace,
+    DynamicFusionMapSpace,
+) {
+    let rule = Z2FusionRule;
+    let even = SectorId::new(0);
+    let odd = SectorId::new(1);
+    let both = || FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]);
+    let even_only = || FusionProductSpace::new([SectorLeg::new([(even, 1)], false)]);
+    let space = |codomain, domain| {
+        DynamicFusionMapSpace::from_final_homspace(&rule, FusionTreeHomSpace::new(codomain, domain))
+            .unwrap()
+    };
+    (
+        space(both(), even_only()),
+        space(even_only(), both()),
+        space(both(), both()),
+    )
+}
+
 #[test]
 fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Z2FusionRule;
-    let even = SectorId::new(0);
-    let odd = SectorId::new(1);
-    let leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg()]),
-        FusionProductSpace::new([leg()]),
-    );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let key_for_sector = |sector| {
-        keys.iter()
-            .find(|key| key.codomain_tree().coupled() == sector)
-            .cloned()
-            .expect("Z2 one-leg homspace contains requested sector")
-    };
-    let even_key = key_for_sector(even);
-    let odd_key = key_for_sector(odd);
-
-    let lhs_space = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        packed_fixture_structure(2, [(even_key.clone(), vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        packed_fixture_structure(2, [(even_key.clone(), vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let dst_space = DynamicFusionMapSpace::try_from_layout(
-        homspace,
-        packed_fixture_structure(2, [(even_key, vec![1, 1]), (odd_key, vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
+    let (lhs_space, rhs_space, dst_space) = inactive_odd_spaces();
 
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], lhs_space).unwrap();
     let rhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![5.0], rhs_space).unwrap();
@@ -74,60 +62,30 @@ fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
         beta,
     )
     .unwrap();
-    // What: an irregular packed Core plan replays the active block and scales
-    // the inactive one by beta.
+    // What: the Core plan replays the active block and scales the inactive
+    // one by beta.
     assert!(context.last_resolution_is_core());
     assert_eq!(dst.data(), &[50.0, 60.0]);
 }
 
 #[test]
-fn self_dual_conjugate_sparse_source_scales_inactive_block_like_eager_adjoint_oracle() {
+fn self_dual_conjugate_source_scales_inactive_block_like_eager_adjoint_oracle() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let rule = Z2FusionRule;
     let even = SectorId::new(0);
-    let odd = SectorId::new(1);
-    let leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg()]),
-        FusionProductSpace::new([leg()]),
-    );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let key_for_sector = |sector| {
-        keys.iter()
-            .find(|key| key.codomain_tree().coupled() == sector)
-            .cloned()
-            .expect("Z2 one-leg homspace contains requested sector")
-    };
-    let even_key = key_for_sector(even);
-    let odd_key = key_for_sector(odd);
-    // What: the eager planner consumes a sparse physical subset
-    // of the broad Z2 HomSpace, while the eager-adjoint oracle uses its
-    // equivalent canonical even-only source.
+    // What: the conjugated canonical source carries only the even sector on
+    // its contracted leg, while the eager-adjoint oracle uses the equivalent
+    // even-only source.
     let source_leg = || SectorLeg::new([(even, 1)], false);
     let source_homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([source_leg()]),
         FusionProductSpace::new([source_leg()]),
     );
-    let source_space = || {
-        DynamicFusionMapSpace::try_from_layout(
-            homspace.clone(),
-            packed_fixture_structure(2, [(even_key.clone(), vec![1, 1])]).unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap()
-    };
-    let dst_space = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        packed_fixture_structure(2, [(even_key.clone(), vec![1, 1]), (odd_key, vec![1, 1])])
-            .unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
+    let (_, conjugated_space, dst_space) = inactive_odd_spaces();
+    let source_space = || conjugated_space.clone();
     let lhs_space = source_space();
     let rhs_space = source_space();
     let oracle_source_space =
@@ -244,44 +202,7 @@ fn assert_fusion_block_scatter_beta_dtype<T>(
     T: DenseBlockScalar + DenseRecouplingScalar + RecouplingCoefficientAction<f64> + Debug,
 {
     let rule = Z2FusionRule;
-    let even = SectorId::new(0);
-    let odd = SectorId::new(1);
-    let leg = || SectorLeg::new([(even, 1), (odd, 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg()]),
-        FusionProductSpace::new([leg()]),
-    );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let key_for_sector = |sector| {
-        keys.iter()
-            .find(|key| key.codomain_tree().coupled() == sector)
-            .cloned()
-            .expect("Z2 one-leg homspace contains requested sector")
-    };
-    let even_key = key_for_sector(even);
-    let odd_key = key_for_sector(odd);
-
-    let lhs_space = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        packed_fixture_structure(2, [(even_key.clone(), vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let rhs_space = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        packed_fixture_structure(2, [(even_key.clone(), vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let dst_space = DynamicFusionMapSpace::try_from_layout(
-        homspace,
-        packed_fixture_structure(2, [(even_key, vec![1, 1]), (odd_key, vec![1, 1])]).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
+    let (lhs_space, rhs_space, dst_space) = inactive_odd_spaces();
 
     let lhs = TestTensor::<T>::from_vec_with_fusion_space(vec![lhs_value], lhs_space).unwrap();
     let rhs = TestTensor::<T>::from_vec_with_fusion_space(vec![rhs_value], rhs_space).unwrap();

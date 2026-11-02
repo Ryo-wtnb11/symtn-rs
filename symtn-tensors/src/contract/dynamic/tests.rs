@@ -201,23 +201,7 @@ fn direct_prelowered_source_reuses_ordinary_transform_entry() {
         FusionProductSpace::new([codomain]),
         FusionProductSpace::new([domain]),
     );
-    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
-    let reversed_keys = (0..canonical.structure().block_count())
-        .rev()
-        .map(|index| canonical.structure().block(index).unwrap().key().clone())
-        .collect::<Vec<_>>();
-    let reordered = DynamicFusionMapSpace::try_from_layout(
-        homspace,
-        crate::tests::packed_fixture_structure(
-            2,
-            reversed_keys.into_iter().map(|key| (key, vec![1, 1])),
-        )
-        .unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let source = reordered;
+    let source = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
     let layout = super::super::dynamic_space::FusionOperand::direct(&source)
         .prepare(
             &rule,
@@ -424,8 +408,6 @@ fn borrowable_core_layout_accepts_equal_structure_across_intern_reset() {
             FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),
         )
         .unwrap()
-        .try_bind_rule(&rule)
-        .unwrap()
     };
     let source = build();
     let source_structure = Arc::clone(source.structure());
@@ -454,8 +436,6 @@ fn borrowable_core_layout_defers_homspace_identity_until_after_cheap_gates() {
         &rule,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),
     )
-    .unwrap()
-    .try_bind_rule(&rule)
     .unwrap();
     let source = layout;
     let source_structure = Arc::clone(source.structure());

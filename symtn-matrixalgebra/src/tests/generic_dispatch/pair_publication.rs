@@ -23,106 +23,35 @@ fn one_sector_generic_factorization_input(
     (space, data)
 }
 
-fn assert_generic_factor_close<R>(
-    actual: &BoundDynFactor<R, f64>,
-    expected: &BoundDynFactor<R, f64>,
-) {
-    assert_eq!(
-        actual.space().space().homspace(),
-        expected.space().space().homspace()
-    );
-    assert_eq!(actual.data().len(), expected.data().len());
-    for (&actual, &expected) in actual.data().iter().zip(expected.data()) {
-        assert!((actual - expected).abs() < 1.0e-12);
-    }
-}
-
 #[test]
 fn provider_neutral_generic_factorizations_keep_the_strided_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: the adjoint view, a strided noncanonical source, factorizes on
+    // the packed path with the source's provider; its singular values are
+    // the parent's, and every compact factor pair reconstructs it.
     let (canonical_space, canonical_data) = generic_factorization_input();
-    let (padded_space, padded_data) =
-        padded_generic_factorization_input(&canonical_space, &canonical_data);
     let (provider, canonical_space) = bind_checked_layout(&canonical_space);
-    let (_, padded_space) = bind_checked_layout(&padded_space);
+    let view_space = canonical_space.adjoint_view().unwrap();
     let canonical = BoundDynamicTensorRef::try_new(&canonical_space, &canonical_data).unwrap();
-    let padded = BoundDynamicTensorRef::try_new(&padded_space, &padded_data).unwrap();
+    let view = BoundDynamicTensorRef::try_new(&view_space, &canonical_data).unwrap();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let canonical_values = svd_vals_dyn_checked_generic(&mut dense, &canonical).unwrap();
     assert!(!canonical_values.is_empty());
-    let padded_values = svd_vals_dyn_checked_generic(&mut dense, &padded).unwrap();
-    assert_real_spectra_close(&padded_values, &canonical_values);
+    let view_values = svd_vals_dyn_checked_generic(&mut dense, &view).unwrap();
+    assert_real_spectra_close(&view_values, &canonical_values);
 
-    let canonical_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &canonical)
-            .unwrap();
-    let padded_svd =
-        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
-    assert_generic_factor_close(&padded_svd.0, &canonical_svd.0);
-    assert_generic_factor_close(&padded_svd.1, &canonical_svd.1);
-    assert_real_spectra_close(&padded_svd.2, &canonical_svd.2);
-    assert!(Arc::ptr_eq(
-        canonical_svd.0.space().provider_arc(),
-        &provider
-    ));
-    assert!(Arc::ptr_eq(
-        canonical_svd.1.space().provider_arc(),
-        &provider
-    ));
+    let svd =
+        svd_compact_factors_with_spectrum_dyn_checked_generic(engine, &mut dense, &view).unwrap();
+    let s = generic_diagonal_factor(&svd.0, &svd.2);
+    assert_compact_factors_reconstruct_input(&view, &svd.0, Some(&s), &svd.1);
+    assert!(Arc::ptr_eq(svd.0.space().provider_arc(), &provider));
+    assert!(Arc::ptr_eq(svd.1.space().provider_arc(), &provider));
 
-    let canonical_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &canonical).unwrap();
-    let padded_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
-    assert_generic_factor_close(&padded_qr.q, &canonical_qr.q);
-    assert_generic_factor_close(&padded_qr.r, &canonical_qr.r);
-
-    let canonical_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &canonical).unwrap();
-    let padded_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
-    assert_generic_factor_close(&padded_lq.l, &canonical_lq.l);
-    assert_generic_factor_close(&padded_lq.q, &canonical_lq.q);
-}
-
-#[test]
-fn generic_pair_publication_keeps_reordered_tree_scatter_fallback() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let (canonical_space, canonical_data) = generic_factorization_input();
-    let (reordered_space, reordered_data) =
-        expert_generic_factorization_input(&canonical_space, &canonical_data, true);
-    let (_, reordered_space) = bind_checked_layout(&reordered_space);
-    let reordered = BoundDynamicTensorRef::try_new(&reordered_space, &reordered_data).unwrap();
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-
-    let generic_pair_rec = crate::probe::record();
-    let actual_qr = qr_compact_dyn_checked_generic(engine, &mut dense, &reordered).unwrap();
-    assert!(!actual_qr.q.data().is_empty());
-    assert!(!actual_qr.r.data().is_empty());
-    let probe = generic_pair_rec.generic_pair_publication();
-    assert_eq!(
-        (probe.canonical_publications, probe.fallback_publications),
-        (0, 1)
-    );
-    assert!(probe.left_scattered_elements > 0);
-    assert!(probe.right_scattered_elements > 0);
-    assert_eq!(
-        probe.left_scattered_elements + probe.right_scattered_elements,
-        actual_qr.q.data().len() + actual_qr.r.data().len()
-    );
-
-    let generic_pair_rec = crate::probe::record();
-    let actual_lq = lq_compact_dyn_checked_generic(engine, &mut dense, &reordered).unwrap();
-    assert!(!actual_lq.l.data().is_empty());
-    assert!(!actual_lq.q.data().is_empty());
-    let probe = generic_pair_rec.generic_pair_publication();
-    assert_eq!(
-        (probe.canonical_publications, probe.fallback_publications),
-        (0, 1)
-    );
-    assert!(probe.left_scattered_elements > 0);
-    assert!(probe.right_scattered_elements > 0);
-    assert_eq!(
-        probe.left_scattered_elements + probe.right_scattered_elements,
-        actual_lq.l.data().len() + actual_lq.q.data().len()
-    );
+    let qr = qr_compact_dyn_checked_generic(engine, &mut dense, &view).unwrap();
+    assert_compact_factors_reconstruct_input(&view, &qr.q, None, &qr.r);
+    let lq = lq_compact_dyn_checked_generic(engine, &mut dense, &view).unwrap();
+    assert_compact_factors_reconstruct_input(&view, &lq.l, None, &lq.q);
 }
 
 #[test]
@@ -221,9 +150,8 @@ fn assert_pair_reconstructs_checked_literal<R, D>(
 fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (source, data) = one_sector_generic_factorization_input();
-    let (padded_space, padded_data) = padded_generic_factorization_input(&source, &data);
-    let (_, padded_space) = bind_checked_layout(&padded_space);
-    let padded = BoundDynamicTensorRef::try_new(&padded_space, &padded_data).unwrap();
+    let (_, bound_space) = bind_checked_layout(&source);
+    let bound = BoundDynamicTensorRef::try_new(&bound_space, &data).unwrap();
     let provider = Arc::new(LateGenericSpy {
         rule: FactorGenericRule,
         fail_at: usize::MAX,
@@ -238,9 +166,9 @@ fn staged_generic_pair_callers_publish_canonical_owned_payloads() {
 
     let mut compact_calls = 0;
     let mut full_calls = 0;
-    qr_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    qr_compact_dyn_checked_generic(engine, &mut dense, &bound).unwrap();
     compact_calls += 1;
-    lq_compact_dyn_checked_generic(engine, &mut dense, &padded).unwrap();
+    lq_compact_dyn_checked_generic(engine, &mut dense, &bound).unwrap();
     compact_calls += 1;
     qr_compact_dyn_checked_generic(engine, &mut dense, &checked_input).unwrap();
     compact_calls += 1;

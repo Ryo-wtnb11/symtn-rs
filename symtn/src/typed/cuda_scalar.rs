@@ -393,11 +393,6 @@ where
             )
             .map_err(dense_err);
         }
-        // A logical block with no parent block reads as zero: only `beta`.
-        for zero in &read.zeros {
-            symtn_dense::cuda_region_scale::<D>(cuda, &mut destination_data.0, zero, beta)
-                .map_err(dense_err)?;
-        }
         let beta = if beta.is_zero() {
             symtn_dense::CudaRegionBeta::Overwrite
         } else if beta == D::from_real(1.0) {
@@ -425,13 +420,11 @@ where
 
 /// A dense CUDA operand read in its logical orientation (#1874): its stored
 /// payload and the (stored region, logical region) moves that cover its
-/// logical layout, read conjugated when `conj`, plus the logical regions
-/// that read as zero.
+/// logical layout, read conjugated when `conj`.
 struct CudaOrientedRead<'a, D: CudaPayload> {
     source: &'a CudaStorage<D>,
     moves: Vec<(symtn_dense::CudaRegion, symtn_dense::CudaRegion)>,
     conj: bool,
-    zeros: Vec<symtn_dense::CudaRegion>,
 }
 
 impl<R, D> TensorMap<R, D, CudaStorage<D>>
@@ -457,7 +450,6 @@ where
                 source,
                 moves: vec![(region.clone(), region)],
                 conj: false,
-                zeros: Vec::new(),
             });
         };
         let TypedData::Dense(source) = view.parent.data.as_ref() else {
@@ -476,7 +468,6 @@ where
             source,
             moves: lowering.copies,
             conj: true,
-            zeros: lowering.zeros,
         })
     }
 }

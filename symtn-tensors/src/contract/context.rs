@@ -922,7 +922,7 @@ where
     ///
     /// Host eager and the device plan the same route (#1858); the one
     /// executor difference: owned core geometry over a non-canonical storage
-    /// layout (an expert tiling, #1517) is a core with pack/scatter on the
+    /// layout (an adjoint view) is a core with pack/scatter on the
     /// Host (`IRREGULAR_CORE`) and this artifact on the device.
     ///
     /// A fermionic contraction twist travels in the artifact, both as the

@@ -366,14 +366,10 @@ fn tensorcontract_fusion_product_non_core_form_absorbs_explicit_transform() {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (rule, src_space, dst_space, _) = fz2_u1_su2_tree_pair_fixture();
-    let rhs_hom = FusionTreeHomSpace::from_sector_ids([], []);
-    let scalar_key = BlockKey::from(rhs_hom.fusion_tree_keys(&rule)[0].clone());
-    let rhs_space = DynamicFusionMapSpace::try_from_layout(
-        rhs_hom,
-        packed_fixture_structure(0, [(scalar_key, vec![])]).unwrap(),
+    let rhs_space = DynamicFusionMapSpace::from_final_homspace(
+        &rule,
+        FusionTreeHomSpace::from_sector_ids([], []),
     )
-    .unwrap()
-    .try_bind_rule(&rule)
     .unwrap();
     let lhs_core_hom = src_space
         .homspace()

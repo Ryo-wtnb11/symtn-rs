@@ -200,3 +200,40 @@ fn typed_factor_axis_sum_overflow_is_exact_without_storage_materialization() {
 
     assert_eq!(error, CoreError::ElementCountOverflow);
 }
+
+#[test]
+fn prepared_generic_root_refuses_a_homspace_split_other_than_the_preparation() {
+    // What: a structure prepared for `x ⊗ x <- x ⊗ x` paired with a supplied
+    // `x <- x ⊗ x ⊗ x` hom space of the same rank is refused at admission
+    // instead of publishing a binding whose split disagrees with its hom space.
+    let (canonical, _, _) = generic_values_endomorphism_input();
+    let (provider, _) = bind_checked_layout(&canonical);
+    let prepared = canonical
+        .space()
+        .homspace()
+        .prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked(provider.as_ref())
+        .unwrap();
+    let leg = SectorLeg::new([(SectorId::new(1), 1)], false);
+    let other_split = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg.clone()]),
+        FusionProductSpace::new([leg.clone(), leg.clone(), leg]),
+    );
+
+    let error = BoundDynamicFusionMapSpace::from_prepared_final_homspace_generic_checked(
+        provider,
+        other_split,
+        prepared,
+    )
+    .err()
+    .unwrap();
+
+    assert!(matches!(
+        error,
+        symtn_core::CheckedGenericStructureError::Core(CoreError::FusionSpaceSplitMismatch {
+            expected_nout: 2,
+            expected_nin: 2,
+            actual_nout: 1,
+            actual_nin: 3,
+        })
+    ));
+}

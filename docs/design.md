@@ -59,8 +59,8 @@ direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
 `CompactFactorPlan` as the per-call, placement-neutral authority for bond
 spaces, factor layouts and sector routes. For sector matrix shape `(m, n)`,
 the compact bond has `min(m, n)` degeneracy; zero-rank routes are skipped.
-Host direct output requires matching tree order; other layouts scatter by
-tree identity. Checked Generic QR builds factors through its own checked
+Host direct output requires matching tree order; a packed input (the
+zero-copy adjoint view of a canonical layout) scatters by tree identity. Checked Generic QR builds factors through its own checked
 staging path.
 
 This is the output-initialization/per-block split of TensorKit

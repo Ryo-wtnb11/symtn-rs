@@ -1,7 +1,7 @@
 use super::*;
 
-/// The storage half of expert-layout admission (the rank-free
-/// `DynamicFusionMapSpace::try_from_layout` runs it for non-canonical layouts).
+/// The storage half of caller-layout admission (transform-structure
+/// compilation runs it for a non-canonical destination layout).
 fn expert_layout_storage(rank: usize, blocks: Vec<BlockSpec>) -> Result<(), CoreError> {
     // Storage-only fixtures use opaque ordinals deliberately: categorical
     // key and shape admission is covered independently by subset validation.

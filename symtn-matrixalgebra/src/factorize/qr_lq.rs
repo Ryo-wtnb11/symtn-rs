@@ -1202,16 +1202,18 @@ where
     let right_space = input_space.rebind_validated(&plan.right_layout)?;
     let left_len = plan.left_layout.required_len()?;
     let right_len = plan.right_layout.required_len()?;
-    // Every output element is written once by the final adjoints. When the
-    // nonzero routes visit both factor regions in storage order, append them
-    // to empty buffers instead of zero-filling first; otherwise overwrite a
-    // zeroed buffer region by region.
-    let append = lq_routes_append_in_storage_order(plan, left_len, right_len);
-    let (mut left_data, mut right_data) = if append {
-        (Vec::with_capacity(left_len), Vec::with_capacity(right_len))
-    } else {
-        (vec![D::zero(); left_len], vec![D::zero(); right_len])
-    };
+    // Every output element is written once by the final adjoints, appended
+    // route by route. A direct-region source (canonical, or the adjoint view
+    // of one) lists its regions in ascending coupled sector, as the fresh
+    // factor layouts do, so its routes always visit both factors in storage
+    // order; anything else is a broken layout invariant.
+    if !lq_routes_append_in_storage_order(plan, left_len, right_len) {
+        return Err(OperationError::InvalidArgument {
+            message: "internal compact LQ invariant violated (factor routes out of storage order); please report this",
+        });
+    }
+    let (mut left_data, mut right_data) =
+        (Vec::with_capacity(left_len), Vec::with_capacity(right_len));
 
     let max_adjoint_len = match reader {
         LqRegionSource::Input(_) => plan
@@ -1232,10 +1234,6 @@ where
                 continue;
             }
             let source = &plan.source_regions[route.source_region];
-            let left =
-                &plan.left_regions[route.left_region.expect("nonzero route has left region")];
-            let right =
-                &plan.right_regions[route.right_region.expect("nonzero route has right region")];
             let qr_input = match &reader {
                 LqRegionSource::Input(data) => {
                     let source_data = &data[source.range()];
@@ -1264,23 +1262,8 @@ where
                 route.rank,
                 source.rows(),
             );
-            if append {
-                extend_adjoint_col_major(&mut left_data, &r_prime, route.rank, source.rows());
-                extend_adjoint_col_major(&mut right_data, &q_prime, source.cols(), route.rank);
-            } else {
-                adjoint_col_major_into(
-                    &r_prime,
-                    route.rank,
-                    source.rows(),
-                    &mut left_data[left.range()],
-                );
-                adjoint_col_major_into(
-                    &q_prime,
-                    source.cols(),
-                    route.rank,
-                    &mut right_data[right.range()],
-                );
-            }
+            extend_adjoint_col_major(&mut left_data, &r_prime, route.rank, source.rows());
+            extend_adjoint_col_major(&mut right_data, &q_prime, source.cols(), route.rank);
             #[cfg(test)]
             crate::probe::lq_final_adjoint_copy::<D>(r_prime.len());
             #[cfg(test)]
@@ -1288,26 +1271,10 @@ where
         }
         Ok(())
     })?;
-    #[cfg(test)]
-    crate::probe::lq_output_prefill::<D>(if append { 0 } else { left_len + right_len });
 
     let left = BoundDynFactor::from_bound(left_space, left_data, space.nout(), 1)?;
     let right = BoundDynFactor::from_bound(right_space, right_data, 1, space.nin())?;
     Ok((left, right))
-}
-
-/// [`lq_routes_append_in_storage_order`] after replacing the plan's routes.
-#[cfg(test)]
-pub(crate) fn lq_routes_append_with_routes_for_test(
-    plan: &mut CompactFactorPlan,
-    routes: Vec<CompactFactorRoute>,
-) -> Result<bool, OperationError> {
-    plan.routes = routes;
-    Ok(lq_routes_append_in_storage_order(
-        plan,
-        plan.left_layout.required_len()?,
-        plan.right_layout.required_len()?,
-    ))
 }
 
 /// Whether the nonzero routes of `plan` reach the left and right factor

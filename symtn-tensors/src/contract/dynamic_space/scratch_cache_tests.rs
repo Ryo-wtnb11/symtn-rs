@@ -531,37 +531,6 @@ fn bound_space_rejects_wrong_and_missing_identity_before_provider_enumeration() 
 }
 
 #[test]
-fn bound_space_requires_the_complete_tree_grid() {
-    let complete = z2_matrix_space();
-    let first = complete.structure().block(0).unwrap();
-    let incomplete_structure = BlockStructure::from_blocks_with_rank(
-        complete.rank(),
-        vec![BlockSpec::with_key(
-            first.key().clone(),
-            first.shape().to_vec(),
-            first.strides().to_vec(),
-            first.offset(),
-        )
-        .unwrap()],
-    )
-    .unwrap();
-    let incomplete = DynamicFusionMapSpace {
-        subblock_structure: Arc::new(incomplete_structure),
-        admission: FusionSpaceAdmission::Subset(Z2FusionRule.rule_identity()),
-        adjoint: OnceLock::new(),
-        ..complete
-    };
-
-    let error =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(incomplete, Arc::new(Z2FusionRule))
-            .unwrap_err();
-    assert!(matches!(
-        error,
-        OperationError::Core(CoreError::BlockCountMismatch { .. })
-    ));
-}
-
-#[test]
 fn binding_mode_mismatch_is_rejected_by_provider_style() {
     let space = z2_matrix_space();
     let multiplicity_free =

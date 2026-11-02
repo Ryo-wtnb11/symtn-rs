@@ -122,14 +122,6 @@ impl<D> TestTensor<D> {
         }
         Ok(())
     }
-
-    pub(crate) fn block_by_key(
-        &self,
-        key: &BlockKey,
-    ) -> Result<symtn_core::BlockView<'_, D>, CoreError> {
-        let block = self.structure().block_by_key(key)?;
-        symtn_core::BlockView::new(&self.data, block.shape(), block.strides(), block.offset())
-    }
 }
 
 #[cfg(test)]

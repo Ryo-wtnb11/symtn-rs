@@ -123,7 +123,7 @@ pub(crate) use tensortrace::{tensortrace_fusion_dyn_into, tensortrace_fusion_dyn
 pub(crate) use tensortrace::{
     tensortrace_fusion_dyn_into_checked, tensortrace_fusion_dyn_owned_checked,
     tensortrace_fusion_dyn_structure_into_raw, tensortrace_fusion_dyn_structure_owned,
-    tensortrace_multiplicity_free_in, TensorTraceFusionStructureTerm, TensorTraceStage,
+    tensortrace_multiplicity_free_in, TensorTraceStage,
 };
 pub use tree_context::{StagedTreeTransform, StructureOutcome, TreeTransformExecutionContext};
 #[doc(hidden)]

@@ -519,7 +519,7 @@ pub const EIGH_NOT_HERMITIAN: &str = "eigh requires Hermitian coupled-sector blo
 pub const EIGH_NOT_SQUARE: &str = "eigh requires square coupled-sector matrices";
 
 /// An operation defined only on endomorphisms. The one owner of its
-/// endomorphism and row/column stacking refusal texts, for every storage.
+/// endomorphism refusal and stacking-invariant texts, for every storage.
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EndomorphismFamily {
@@ -539,21 +539,16 @@ impl EndomorphismFamily {
         }
     }
 
+    /// Why an internal error, not a refusal: an endomorphism's canonical
+    /// layout, and the adjoint view of one, stack row and column trees
+    /// identically, so a mismatch is a broken layout invariant.
     const fn stacking(self) -> &'static str {
         match self {
-            Self::EighFull => {
-                "eigh_full requires identical endomorphism row/column fusion-tree stacking"
-            }
-            Self::EighVals => {
-                "eigh_vals requires identical endomorphism row/column fusion-tree stacking"
-            }
-            Self::EigFull => {
-                "eig_full requires identical endomorphism row/column fusion-tree stacking"
-            }
-            Self::EigVals => {
-                "eig_vals requires identical endomorphism row/column fusion-tree stacking"
-            }
-            Self::Exp => "exp requires identical endomorphism row/column fusion-tree stacking",
+            Self::EighFull => "internal eigh_full layout invariant violated (row/column tree stacking differs); please report this",
+            Self::EighVals => "internal eigh_vals layout invariant violated (row/column tree stacking differs); please report this",
+            Self::EigFull => "internal eig_full layout invariant violated (row/column tree stacking differs); please report this",
+            Self::EigVals => "internal eig_vals layout invariant violated (row/column tree stacking differs); please report this",
+            Self::Exp => "internal exp layout invariant violated (row/column tree stacking differs); please report this",
         }
     }
 
@@ -626,7 +621,7 @@ pub(super) fn validate_endomorphism_tree_stacking<M: SectorGeometry>(
     if endomorphism_tree_stacking_is_identical(matrices) {
         Ok(())
     } else {
-        Err(OperationError::UnsupportedTensorContractScope {
+        Err(OperationError::InvalidArgument {
             message: family.stacking(),
         })
     }

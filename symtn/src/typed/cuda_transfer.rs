@@ -213,12 +213,8 @@ where
         ensure_cuda_owns(cuda, "materialize", &[&source.0])?;
         let output = match adjoint {
             None => source.gather_members(cuda, required_len, 1, &[0])?,
-            Some(CudaAdjointLowering {
-                copies,
-                table,
-                zeros,
-            }) => {
-                let mut output = if D::IS_COMPLEX {
+            Some(CudaAdjointLowering { copies, table }) => {
+                if D::IS_COMPLEX {
                     source.gather_elements(cuda, &table)?.conj(cuda)?
                 } else {
                     let mut output = source.gather_members(cuda, required_len, 1, &[0])?;
@@ -233,12 +229,7 @@ where
                         .map_err(dense_err)?;
                     }
                     output
-                };
-                for zero in &zeros {
-                    symtn_dense::cuda_region_zero::<D>(cuda, &mut output.0, zero)
-                        .map_err(dense_err)?;
                 }
-                output
             }
         };
         drop(lease);
@@ -248,8 +239,9 @@ where
 
 /// The device lowering of an [`symtn_tensors::AdjointBlockMap`], on the Host
 /// before the lease: the strided copies, or with `table` the element table,
-/// that transpose the parent (the caller conjugates), and the regions of
-/// blocks that read as zero. `materialize` takes the table for a complex
+/// that transpose the parent (the caller conjugates). Every adjoint block has
+/// a parent block: an admitted adjoint layout is the canonical adjoint of its
+/// parent, which holds every swapped tree pair. `materialize` takes the table for a complex
 /// payload (one gather and one `conj`); the elementwise kernels take the
 /// copies at every dtype and conjugate in the strided read itself (#1874).
 pub(super) struct CudaAdjointLowering {
@@ -257,7 +249,6 @@ pub(super) struct CudaAdjointLowering {
     pub(super) copies: Vec<(symtn_dense::CudaRegion, symtn_dense::CudaRegion)>,
     /// The parent element of each output element, with `table`.
     pub(super) table: Vec<usize>,
-    pub(super) zeros: Vec<symtn_dense::CudaRegion>,
 }
 
 pub(super) fn cuda_adjoint_lowering(
@@ -278,9 +269,8 @@ pub(super) fn cuda_adjoint_lowering(
     let structure = space.structure();
     let mut copies = Vec::new();
     // Per block: (shape, destination strides and offset, source strides and
-    // offset, or `None` for a block that reads as zero).
+    // offset).
     let mut walks = Vec::new();
-    let mut zeros = Vec::new();
     let mut covered = 0usize;
     for index in 0..structure.block_count() {
         let block = structure.block(index)?;
@@ -288,11 +278,9 @@ pub(super) fn cuda_adjoint_lowering(
         covered += shape.iter().product::<usize>();
         let destination = region(shape.to_vec(), block.strides().to_vec(), block.offset())?;
         let Some(source) = map.source(block)? else {
-            zeros.push(destination);
-            if table {
-                walks.push((shape, block.strides(), block.offset(), None));
-            }
-            continue;
+            return Err(internal_layout_error(
+                "an adjoint block has no parent block",
+            ));
         };
         let source_strides = (0..shape.len())
             .map(|axis| source.stride(axis))
@@ -302,7 +290,7 @@ pub(super) fn cuda_adjoint_lowering(
                 shape,
                 block.strides(),
                 block.offset(),
-                Some((source_strides, source.offset())),
+                (source_strides, source.offset()),
             ));
         } else {
             copies.push((
@@ -341,17 +329,16 @@ pub(super) fn cuda_adjoint_lowering(
     Ok(CudaAdjointLowering {
         copies,
         table: elements,
-        zeros,
     })
 }
 
 /// Calls `visit(destination, source)` for every element of one block, first
-/// axis fastest; a `None` source (a block that reads as zero) visits `0`.
+/// axis fastest.
 fn for_each_block_element(
     shape: &[usize],
     strides: &[usize],
     offset: usize,
-    source: &Option<(Vec<usize>, usize)>,
+    (source_strides, source_offset): &(Vec<usize>, usize),
     mut visit: impl FnMut(usize, usize),
 ) {
     let mut position = vec![0usize; shape.len()];
@@ -363,10 +350,10 @@ fn for_each_block_element(
             .sum::<usize>()
     };
     for _ in 0..shape.iter().product::<usize>() {
-        let src = source
-            .as_ref()
-            .map_or(0, |(strides, base)| at(&position, strides, *base));
-        visit(at(&position, strides, offset), src);
+        visit(
+            at(&position, strides, offset),
+            at(&position, source_strides, *source_offset),
+        );
         for (axis, extent) in shape.iter().enumerate() {
             position[axis] += 1;
             if position[axis] < *extent {

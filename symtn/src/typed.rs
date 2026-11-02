@@ -347,8 +347,6 @@ pub use batched::{
     StackedTensorMap, StructureSignature,
 };
 
-#[cfg(test)]
-mod contract_stacking_tests;
 mod serialization;
 #[cfg(test)]
 mod spectrum_match_tests;

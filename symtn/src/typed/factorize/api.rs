@@ -403,8 +403,7 @@ where
     /// returns [`Error::Operation`]. Layout failures retain [`Error::Core`],
     /// and multiplicity-free algebra failures retain [`Error::FusionAlgebra`]
     /// where applicable. For checked Generic, the original layout or provider
-    /// error is available as the source. It also validates identical full
-    /// row/column fusion-tree stacking. Factors are returned only after every
+    /// error is available as the source. Factors are returned only after every
     /// sector succeeds; otherwise the method returns an error and no factors.
     /// The direct compact path sorts in `O(Σ_c k_c log k_c)` time and writes
     /// `O(Σ_c k_c²)` eigenvector elements; the general dense route costs

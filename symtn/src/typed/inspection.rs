@@ -74,8 +74,7 @@ where
     /// (`8 * rank(buffer) * required_len` bytes, with a buffer rank of 1 or
     /// 2), and a second payload-sized allocation for the conjugation, live
     /// together with the gathered buffer. The transfer counters also charge
-    /// each index upload as a device allocation. Blocks without a fusion-tree
-    /// key read as zero and are zeroed with `cuda_region_zero`.
+    /// each index upload as a device allocation.
     ///
     /// # Errors
     ///

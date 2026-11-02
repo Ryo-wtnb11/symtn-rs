@@ -2,9 +2,8 @@ use super::*;
 
 use symtn_core::Placement;
 use symtn_core::{
-    BlockStructure, BraidingStyleKind, CoreError, FusionProductSpace, FusionStyleKind,
-    FusionTreePairKey, MultiplicityIndex, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorLeg,
-    SectorVec, TensorStorage, U1FusionRule, U1Irrep, Z2FusionRule,
+    BlockStructure, BraidingStyleKind, FusionProductSpace, FusionStyleKind, SectorLeg, SectorVec,
+    TensorStorage, Z2FusionRule,
 };
 
 use crate::probe::{self, Event};
@@ -56,200 +55,6 @@ impl StorageGemm<f64, OpaqueStorage<f64>, OpaqueStorage<f64>, OpaqueStorage<f64>
         }
         Ok(())
     }
-}
-
-#[test]
-fn incomplete_su2_grid_is_nonborrowed_and_keeps_sparse_group_clear() {
-    // What: a legal SU2 structure missing off-diagonal tree pairs is
-    // charged as RHS materialization and its packed matrix remains marked
-    // for clearing before replay.
-    let rule = SU2FusionRule;
-    let scalar = DynamicFusionMapSpace::from_final_homspace(
-        &rule,
-        FusionTreeHomSpace::from_sector_ids([], []),
-    )
-    .unwrap();
-    let homspace = FusionTreeHomSpace::from_sector_ids(
-        [(1, 1), (1, 1), (1, 1), (1, 1)],
-        [(1, 1), (1, 1), (1, 1), (1, 1)],
-    );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let diagonal_keys = keys
-        .iter()
-        .filter(|key| key.codomain_tree() == key.domain_tree())
-        .cloned()
-        .collect::<Vec<_>>();
-    assert_eq!(keys.len(), 14);
-    assert_eq!(diagonal_keys.len(), 6);
-    let sparse = DynamicFusionMapSpace::try_from_layout(
-        homspace.clone(),
-        crate::tests::packed_fixture_structure(
-            8,
-            diagonal_keys
-                .into_iter()
-                .map(|key| (BlockKey::from(key), vec![1; 8])),
-        )
-        .unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let complete = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
-
-    let facts = crate::contract::prepare_tensorcontract_fusion_candidate_facts_dyn_raw(
-        &rule,
-        &complete,
-        &scalar,
-        &sparse,
-        TensorContractSpec::new(&[], &[], symtn_operations::OutputAxisOrder::identity()),
-    )
-    .unwrap();
-    assert_eq!(facts.len(), 2);
-    assert_eq!(facts[0].lhs_materialized_elements(), 0);
-    assert!(!facts[0].rhs_exact_identity_borrowable());
-    assert_eq!(facts[0].rhs_materialized_elements(), 14);
-    assert_eq!(facts[0].output_materialized_elements(), 14);
-
-    let layout = FusionBlockMatrixLayout::compile(&sparse)
-        .unwrap()
-        .finish_all(|group| group.finish(&rule, &sparse));
-    assert_eq!(layout.groups.len(), 3);
-    assert_eq!(
-        layout
-            .groups
-            .iter()
-            .filter(|group| group.needs_clear)
-            .count(),
-        2
-    );
-    for group in &layout.groups {
-        assert_eq!(
-            group.needs_clear,
-            group.subblocks.len() != group.rows * group.cols
-        );
-    }
-
-    // What: the actual incomplete SU2 grid passes the executable plan's
-    // packed-matrix geometry proof, not only the layout builder's count.
-    let mut active = HashSet::new();
-    let groups = layout
-        .groups
-        .iter()
-        .cloned()
-        .map(|group| {
-            active.extend(group.block_indices.iter().copied());
-            FusionBlockContractGroupPlan::new(group.clone(), group.clone(), group)
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    FusionBlockContractPlan::from_parts(
-        Arc::clone(sparse.structure()),
-        Arc::clone(sparse.structure()),
-        Arc::clone(sparse.structure()),
-        fusion_scale_block_layouts_excluding(sparse.structure(), &active).unwrap(),
-        groups,
-    )
-    .unwrap();
-}
-
-fn assert_missing_input_group_scales_destination<R>(rule: &R, coupled: [SectorId; 2])
-where
-    R: MultiplicityFreeRigidSymbols<Scalar = f64>,
-{
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let codomain = SectorLeg::new(coupled.map(|sector| (sector, 1)), false);
-    let domain = SectorLeg::new(coupled.map(|sector| (sector, 1)), false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([codomain]),
-        FusionProductSpace::new([domain]),
-    );
-    let keys = homspace.fusion_tree_keys(rule);
-    assert_eq!(keys.len(), 2);
-    let full_order = vec![keys[1].clone(), keys[0].clone()];
-    let make_space = |keys: Vec<FusionTreePairKey>| {
-        DynamicFusionMapSpace::try_from_layout(
-            homspace.clone(),
-            crate::tests::packed_fixture_structure(
-                2,
-                keys.into_iter().map(|key| (key, vec![1, 1])),
-            )
-            .unwrap(),
-        )
-        .unwrap()
-        .try_bind_rule(rule)
-        .unwrap()
-    };
-    let lhs = make_space(full_order.clone());
-    let rhs = make_space(vec![keys[0].clone()]);
-    let dst_groups = full_order.len();
-    let dst = make_space(full_order);
-
-    let layout_rec = probe::record();
-    let plan = compile_fusion_block_contract_plan(
-        rule,
-        &dst,
-        &lhs,
-        &rhs,
-        TensorContractSpec::with_default_output_order(&[1], &[0]),
-    )
-    .unwrap();
-    // What: each destination group performs one LHS and one RHS lookup;
-    // ordinary joins never build or query a prelowered block locator.
-    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), 2 * dst_groups);
-
-    let mut output = vec![11.0, 7.0];
-    let mut dense = DenseTreeTransformOperations::default();
-    let mut dense_workspace = TensorContractWorkspace::default();
-    let mut fusion_workspace = FusionBlockContractWorkspace::<f64>::default();
-    plan.execute_raw(
-        engine,
-        &mut crate::StridedHostKernelAdapter::default(),
-        &mut BackendRank2Gemm::<_, _, f64>::new(&mut dense, &mut dense_workspace),
-        &mut fusion_workspace,
-        dst.structure(),
-        &mut output,
-        lhs.structure(),
-        &[3.0, 2.0],
-        rhs.structure(),
-        &[5.0],
-        2.0,
-        3.0,
-    )
-    .unwrap();
-
-    // What: the missing RHS group is structural zero and receives beta
-    // exactly once while the matched group applies alpha and beta.
-    assert_eq!(output, vec![33.0, 41.0]);
-}
-
-#[test]
-fn destination_order_join_preserves_structural_zero_for_builtin_rules() {
-    assert_missing_input_group_scales_destination(
-        &U1FusionRule,
-        [U1Irrep::new(-1).sector_id(), U1Irrep::new(1).sector_id()],
-    );
-    assert_missing_input_group_scales_destination(
-        &SU2FusionRule,
-        [
-            SU2Irrep::from_twice_spin(0).sector_id(),
-            SU2Irrep::from_twice_spin(1).sector_id(),
-        ],
-    );
-    type U1Su2Rule = ProductFusionRule<U1FusionRule, SU2FusionRule>;
-    let product = U1Su2Rule::try_new(U1FusionRule, SU2FusionRule).unwrap();
-    assert_missing_input_group_scales_destination(
-        &product,
-        [
-            product.encode_component_ids(
-                U1Irrep::new(0).sector_id(),
-                SU2Irrep::from_twice_spin(0).sector_id(),
-            ),
-            product.encode_component_ids(
-                U1Irrep::new(1).sector_id(),
-                SU2Irrep::from_twice_spin(1).sector_id(),
-            ),
-        ],
-    );
 }
 
 #[test]
@@ -349,92 +154,6 @@ impl FusionRule for LayoutToyGenericRule {
             usize::from(self.fusion_channels(left, right).contains(&coupled))
         }
     }
-}
-
-fn toy_vertex_tree(coupled: usize, vertex: usize) -> FusionTreeKey {
-    FusionTreeKey::try_new_for_rule(
-        &LayoutToyGenericRule,
-        [SectorId::new(coupled); 2],
-        SectorId::new(coupled),
-        [false; 2],
-        [],
-        [MultiplicityIndex::new(vertex).unwrap()],
-    )
-    .unwrap()
-}
-
-#[test]
-fn generic_layout_keeps_interleaved_cartesian_vertex_order() {
-    let vacuum = FusionTreePairKey::pair(toy_vertex_tree(0, 1), toy_vertex_tree(0, 1));
-    let pair = |row_vertex, col_vertex| {
-        FusionTreePairKey::pair(
-            toy_vertex_tree(1, row_vertex),
-            toy_vertex_tree(1, col_vertex),
-        )
-    };
-    let ordered = vec![
-        pair(2, 2),
-        vacuum.clone(),
-        pair(1, 1),
-        pair(1, 2),
-        pair(2, 1),
-    ];
-    let duplicate = crate::tests::packed_fixture_structure(
-        4,
-        [ordered[0].clone(), ordered[0].clone()]
-            .into_iter()
-            .map(|key| (key, vec![1; 4])),
-    )
-    .unwrap_err();
-    // What: an exact duplicate tree pair remains a typed construction error.
-    assert!(matches!(duplicate, CoreError::DuplicateBlockKey { .. }));
-
-    let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
-    let space = DynamicFusionMapSpace::try_from_layout(
-        FusionTreeHomSpace::new(
-            FusionProductSpace::new([leg(), leg()]),
-            FusionProductSpace::new([leg(), leg()]),
-        ),
-        crate::tests::packed_fixture_structure(4, ordered.into_iter().map(|key| (key, vec![1; 4])))
-            .unwrap(),
-    )
-    .unwrap();
-    let dynamic = space;
-    let mut layout = FusionBlockMatrixLayout::compile(&dynamic).unwrap();
-    let finished = layout
-        .clone()
-        .finish_all(|group| group.finish_generic::<f64>(dynamic.structure(), dynamic.nout()));
-
-    // What: first destination occurrence fixes group order, while distinct
-    // row/column vertex labels retain their full Cartesian block set.
-    assert_eq!(
-        finished
-            .groups
-            .iter()
-            .map(|group| group.coupled)
-            .collect::<Vec<_>>(),
-        vec![SectorId::new(1), SectorId::new(0)]
-    );
-    let multiplicity = &finished.groups[0];
-    assert_eq!(multiplicity.block_indices, vec![0, 2, 3, 4]);
-    assert_eq!((multiplicity.rows, multiplicity.cols), (2, 2));
-    assert_eq!(
-        multiplicity
-            .subblocks
-            .iter()
-            .map(|subblock| subblock.matrix_offset)
-            .collect::<Vec<_>>(),
-        vec![0, 3, 1, 2]
-    );
-    assert!(!multiplicity.needs_clear);
-
-    let layout_rec = probe::record();
-    let queried = [(1, true), (0, true), (9, false)];
-    for (sector, present) in queried {
-        assert_eq!(layout.take_group(SectorId::new(sector)).is_some(), present);
-    }
-    // What: finalized coupled-sector hits and misses use one indexed probe each.
-    assert_eq!(layout_rec.get(Event::FusionLayoutLookup), queried.len());
 }
 
 #[test]
@@ -623,303 +342,6 @@ fn z2_adjoint_mapping_spaces() -> (DynamicFusionMapSpace, DynamicFusionMapSpace)
     (logical, storage)
 }
 
-#[test]
-fn nonselfdual_u1_adjoint_projects_logical_order_to_parent_blocks() {
-    let rule = U1FusionRule;
-    let charges = [-1, 0, 1].map(|charge| U1Irrep::new(charge).sector_id());
-    let codomain = SectorLeg::new(charges.map(|sector| (sector, 1)), false);
-    let domain = SectorLeg::new(charges.map(|sector| (rule.dual(sector), 1)), false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([codomain]),
-        FusionProductSpace::new([domain]),
-    );
-    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
-    let reversed_keys = (0..canonical.structure().block_count())
-        .rev()
-        .map(|index| canonical.structure().block(index).unwrap().key().clone())
-        .collect::<Vec<_>>();
-    let reordered = DynamicFusionMapSpace::try_from_layout(
-        homspace,
-        crate::tests::packed_fixture_structure(
-            2,
-            reversed_keys.into_iter().map(|key| (key, vec![1, 1])),
-        )
-        .unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    let storage = reordered.clone();
-    let operand = crate::FusionOperand::adjoint(&storage)
-        .prepare(
-            &rule,
-            super::super::dynamic_space::encoded_layout_primer::<U1FusionRule>,
-        )
-        .unwrap();
-    let mapped = FusionBlockMatrixLayout::compile_operand(&operand)
-        .unwrap()
-        .finish_all(|group| group.finish_operand(&rule, &operand, MatrixOp::Adjoint))
-        .groups
-        .iter()
-        .flat_map(|group| group.block_indices.iter().copied())
-        .collect::<Vec<_>>();
-
-    // What: canonical non-self-dual adjoint keys address the reordered
-    // parent blocks directly, without a materialized logical structure.
-    assert_eq!(mapped, vec![2, 1, 0]);
-}
-
-/// A Z2 `V ⊗ V ← V ⊗ V` space in canonical block order, and the same space
-/// with the fusion-tree blocks of every coupled sector stored in reverse: a
-/// non-canonical tiling of the same coupled-sector matrices.
-fn z2_reordered_rank4() -> (DynamicFusionMapSpace, DynamicFusionMapSpace) {
-    let rule = Z2FusionRule;
-    let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
-    let homspace = FusionTreeHomSpace::new(
-        FusionProductSpace::new([leg(), leg()]),
-        FusionProductSpace::new([leg(), leg()]),
-    );
-    let keys = homspace.fusion_tree_keys(&rule);
-    let shapes = vec![vec![1; 4]; keys.len()];
-    let canonical = DynamicFusionMapSpace::from_final_homspace(&rule, homspace.clone()).unwrap();
-    let mut reordered = keys.iter().cloned().zip(shapes).collect::<Vec<_>>();
-    let mut start = 0usize;
-    while start < reordered.len() {
-        let coupled = reordered[start].0.codomain_tree().coupled();
-        let end = start
-            + reordered[start..]
-                .iter()
-                .take_while(|(key, _)| key.codomain_tree().coupled() == coupled)
-                .count();
-        reordered[start..end].reverse();
-        start = end;
-    }
-    let storage = DynamicFusionMapSpace::try_from_layout(
-        homspace,
-        BlockStructure::coupled_sector_matrix_with_keys(&rule, 2, 4, reordered).unwrap(),
-    )
-    .unwrap()
-    .try_bind_rule(&rule)
-    .unwrap();
-    (canonical, storage)
-}
-
-#[test]
-fn direct_operand_keeps_noncanonical_parent_tree_order() {
-    let rule = Z2FusionRule;
-    let (canonical, storage) = z2_reordered_rank4();
-    let canonical_regions = canonical
-        .structure()
-        .coupled_sector_regions(canonical.nout())
-        .unwrap()
-        .unwrap();
-    let storage_regions = storage
-        .structure()
-        .coupled_sector_regions(storage.nout())
-        .unwrap()
-        .unwrap();
-    assert!(canonical_regions
-        .iter()
-        .zip(storage_regions.iter())
-        .all(|(lhs, rhs)| (lhs.rows(), lhs.cols()) == (rhs.rows(), rhs.cols())));
-    assert!(
-        canonical_regions
-            .iter()
-            .zip(storage_regions.iter())
-            .any(|(lhs, rhs)| lhs.row_trees() != rhs.row_trees()
-                || lhs.col_trees() != rhs.col_trees())
-    );
-
-    let operand = crate::FusionOperand::direct(&storage)
-        .prepare(
-            &rule,
-            super::super::dynamic_space::encoded_layout_primer::<Z2FusionRule>,
-        )
-        .unwrap();
-
-    // What: Direct orientation keeps the tensor-owned block order and
-    // introduces no canonical projection beside the parent structure.
-    assert!(operand.is_direct());
-    for index in 0..storage.structure().block_count() {
-        assert_eq!(operand.storage_index(index).unwrap(), index);
-        assert_eq!(
-            BlockKey::from(operand.logical_key(index).unwrap().clone()),
-            storage.structure().block(index).unwrap().key().clone()
-        );
-    }
-}
-
-#[test]
-fn a_non_canonical_composition_misses_the_direct_core_with_the_unchanged_message() {
-    // What: composition plans the canonical core only (TensorKit `mul!` has
-    // no transform route). A non-canonical tiling has no fully-direct core,
-    // so a direct-core executor gets today's composition `Unsupported`
-    // message, while an executor with an irregular core packs it.
-    let (canonical, storage) = z2_reordered_rank4();
-    let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
-    let dst = crate::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        std::sync::Arc::new(Z2FusionRule),
-        FusionTreeHomSpace::new(
-            FusionProductSpace::new([leg(), leg()]),
-            FusionProductSpace::new([leg(), leg()]),
-        ),
-    )
-    .unwrap();
-    let canonical_operand = crate::FusionOperand::direct(&canonical);
-    let resolution = crate::plan_compose::<crate::DirectCoreExecutor, _>(
-        &dst,
-        canonical_operand,
-        canonical_operand,
-    )
-    .unwrap();
-    assert!(matches!(resolution.direct_core(), Some((_, false))));
-    let error = crate::plan_compose::<crate::DirectCoreExecutor, _>(
-        &dst,
-        crate::FusionOperand::direct(&storage),
-        canonical_operand,
-    )
-    .err()
-    .unwrap();
-    assert!(
-        matches!(
-            error,
-            OperationError::UnsupportedTensorContractScope {
-                message: "storage-direct composition supports only canonical fully-direct oriented operands"
-            }
-        ),
-        "{error:?}"
-    );
-    let irregular = crate::plan_compose::<crate::HostEagerExecutor, _>(
-        &dst,
-        crate::FusionOperand::direct(&storage),
-        canonical_operand,
-    )
-    .unwrap();
-    let (core, swapped) = irregular.direct_core().unwrap();
-    assert!(!swapped && !core.is_fully_direct());
-}
-
-/// A lazy adjoint `P'` whose own tree transform is the identity, on
-/// the DynamicTree route (the rhs `U` is permuted), is borrowed into the core
-/// GEMM with an adjoint op when its parent tiles canonical coupled-sector
-/// matrices, and copied when the parent stores them reordered. The copied
-/// reordered parent is the reference the borrowed canonical one must match
-/// (the same tensor, block for block).
-#[test]
-fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = std::sync::Arc::new(Z2FusionRule);
-    let (canonical, reordered) = z2_reordered_rank4();
-    let bind = |space| {
-        crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            space,
-            std::sync::Arc::clone(&rule),
-        )
-        .unwrap()
-    };
-    let (canonical, reordered) = (bind(canonical), bind(reordered));
-    let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 3)], false);
-    let rhs = crate::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        std::sync::Arc::clone(&rule),
-        FusionTreeHomSpace::new(
-            FusionProductSpace::new([
-                SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false),
-                leg(),
-                SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false),
-            ]),
-            FusionProductSpace::new([]),
-        ),
-    )
-    .unwrap();
-    // `P'`'s domain (its parent's codomain) against `U`'s legs 0 and 2.
-    let (lhs_axes, rhs_axes) = ([2, 3], [0, 2]);
-    let dst = crate::BoundDynamicFusionMapSpace::contracted_multiplicity_free_partitioned(
-        &canonical.adjoint_view().unwrap(),
-        &rhs,
-        &lhs_axes,
-        &rhs_axes,
-        symtn_operations::OutputAxisOrder::identity(),
-        2,
-    )
-    .unwrap();
-    let axes = symtn_operations::TensorContractSpec::new_with_conjugation(
-        &lhs_axes,
-        &rhs_axes,
-        symtn_operations::OutputAxisOrder::identity(),
-        true,
-        false,
-    );
-    // One element per block (unit degeneracies), valued by its key.
-    let value_of = |key: &symtn_core::BlockKey| {
-        let index = (0..canonical.space().structure().block_count())
-            .find(|&index| canonical.space().structure().block(index).unwrap().key() == key)
-            .unwrap();
-        index as f64 * 0.75 - 2.0
-    };
-    let parent_data = |space: &DynamicFusionMapSpace| {
-        let structure = space.structure();
-        let mut data = vec![0.0; space.required_len().unwrap()];
-        for index in 0..structure.block_count() {
-            let block = structure.block(index).unwrap();
-            data[block.offset()] = value_of(block.key());
-        }
-        data
-    };
-    let rhs_data: Vec<f64> = (0..rhs.space().required_len().unwrap())
-        .map(|i| 1.0 - i as f64 * 0.125)
-        .collect();
-    let mut run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
-        let mut context =
-            crate::TensorContractFusionExecutionContext::<f64, crate::RuleIdentity>::default();
-        let lhs = crate::FusionOperand::adjoint(parent.space());
-        let resolution = context
-            .compile_storage_contract_resolution(
-                engine,
-                &dst,
-                lhs,
-                crate::FusionOperand::direct(rhs.space()),
-                axes,
-            )
-            .unwrap();
-        let super::super::resolution::ContractRoute::DynamicTree(artifact) = &resolution.route
-        else {
-            panic!("the permuted rhs selects DynamicTree");
-        };
-        assert!(!artifact.test_has_core_dst());
-        let borrowed = artifact.borrowed_sources();
-        let mut out = vec![0.0; dst.space().required_len().unwrap()];
-        context
-            .tensorcontract_prelowered_into(
-                engine,
-                &dst,
-                &mut out,
-                lhs,
-                &parent_data(parent.space()),
-                crate::FusionOperand::direct(rhs.space()),
-                &rhs_data,
-                axes,
-                1.0,
-                crate::ContractDestinationInit::Axpby(0.0),
-            )
-            .unwrap();
-        (borrowed, out)
-    };
-    let (borrowed, got) = run(&canonical);
-    let (copied, want) = run(&reordered);
-    // What: the canonical parent is read in place; the reordered one, whose
-    // coupled-sector trees the GEMM cannot address with one adjoint op, is
-    // still copied (not packed), and both give the same tensor.
-    assert_eq!(borrowed, (true, false));
-    assert_eq!(copied, (false, false));
-    assert!(want.iter().any(|&value| value != 0.0));
-    for (got, want) in got.iter().zip(&want) {
-        assert!(
-            (got - want).abs() <= 1e-12 * (1.0 + want.abs()),
-            "{got} vs {want}"
-        );
-    }
-}
-
 /// The DynamicTree scorer charges a borrowable identity adjoint
 /// nothing, as TensorKit `cfaa073e` `contract_memcost` does through
 /// `has_shared_permute(::AdjointTensorMap)`. `A = P'` (8 elements) contracts
@@ -927,22 +349,20 @@ fn an_identity_adjoint_source_is_borrowed_only_over_canonical_regions() {
 /// (6 elements). TensorKit's candidates: m1 keeps `A`'s order (`A` free,
 /// `U` permuted: cost |U| = 6), m2 keeps `U`'s (`A` permuted: cost |P| = 8),
 /// the reversed orders also permute the output; m1 wins. The same holds for
-/// `P` itself read directly (`P[2, 3]·U[1, 0]`). Over a parent in another
-/// block order the executor copies either side, so the scorer must charge it.
+/// `P` itself read directly (`P[2, 3]·U[1, 0]`).
 #[test]
-fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
+fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = std::sync::Arc::new(Z2FusionRule);
-    let (canonical, reordered) = z2_reordered_rank4();
-    let bind = |space| {
-        crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
-            space,
-            std::sync::Arc::clone(&rule),
-        )
-        .unwrap()
-    };
-    let (canonical, reordered) = (bind(canonical), bind(reordered));
     let unit = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
+    let canonical = crate::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        std::sync::Arc::clone(&rule),
+        FusionTreeHomSpace::new(
+            FusionProductSpace::new([unit(), unit()]),
+            FusionProductSpace::new([unit(), unit()]),
+        ),
+    )
+    .unwrap();
     let rhs = crate::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&rule),
         FusionTreeHomSpace::new(
@@ -979,80 +399,33 @@ fn an_identity_side_is_free_in_selection_only_over_canonical_layouts() {
             adjoint,
             false,
         );
-        let value_of = |key: &symtn_core::BlockKey| {
-            let index = (0..canonical.space().structure().block_count())
-                .find(|&index| canonical.space().structure().block(index).unwrap().key() == key)
-                .unwrap();
-            index as f64 * 0.75 - 2.0
+        let lhs = if adjoint {
+            crate::FusionOperand::adjoint(canonical.space())
+        } else {
+            crate::FusionOperand::direct(canonical.space())
         };
-        let parent_data = |space: &DynamicFusionMapSpace| {
-            let structure = space.structure();
-            let mut data = vec![0.0; space.required_len().unwrap()];
-            for index in 0..structure.block_count() {
-                let block = structure.block(index).unwrap();
-                data[block.offset()] = value_of(block.key());
-            }
-            data
+        let mut context =
+            crate::TensorContractFusionExecutionContext::<f64, crate::RuleIdentity>::default();
+        let resolution = context
+            .compile_storage_contract_resolution(
+                engine,
+                &dst,
+                lhs,
+                crate::FusionOperand::direct(rhs.space()),
+                axes,
+            )
+            .unwrap();
+        let super::super::resolution::ContractRoute::DynamicTree(artifact) = &resolution.route
+        else {
+            panic!("no candidate is zero-copy, so the route is DynamicTree");
         };
-        let rhs_data: Vec<f64> = (0..rhs.space().required_len().unwrap())
-            .map(|i| 1.0 - i as f64 * 0.375)
-            .collect();
-        let mut run = |parent: &crate::BoundDynamicFusionMapSpace<Z2FusionRule>| {
-            let mut context =
-                crate::TensorContractFusionExecutionContext::<f64, crate::RuleIdentity>::default();
-            let lhs = if adjoint {
-                crate::FusionOperand::adjoint(parent.space())
-            } else {
-                crate::FusionOperand::direct(parent.space())
-            };
-            let resolution = context
-                .compile_storage_contract_resolution(
-                    engine,
-                    &dst,
-                    lhs,
-                    crate::FusionOperand::direct(rhs.space()),
-                    axes,
-                )
-                .unwrap();
-            let super::super::resolution::ContractRoute::DynamicTree(artifact) = &resolution.route
-            else {
-                panic!("no candidate is zero-copy, so the route is DynamicTree");
-            };
-            let borrowed = artifact.borrowed_sources();
-            let mut out = vec![0.0; dst.space().required_len().unwrap()];
-            context
-                .tensorcontract_prelowered_into(
-                    engine,
-                    &dst,
-                    &mut out,
-                    lhs,
-                    &parent_data(parent.space()),
-                    crate::FusionOperand::direct(rhs.space()),
-                    &rhs_data,
-                    axes,
-                    1.0,
-                    crate::ContractDestinationInit::Axpby(0.0),
-                )
-                .unwrap();
-            (borrowed, out)
-        };
-        let (selected, got) = run(&canonical);
-        let (expert, want) = run(&reordered);
-        // What: over the canonical parent the scorer takes m1, and the artifact
-        // reads `P` in place while copying `U`. The reordered parent (Complete,
-        // another block order) fails the executor's layout test (the
-        // storage-adjoint proof, or the direct core-layout match), so the scorer
-        // charges it and takes m2 (copy |P| = 8, borrow `U`) rather than m1,
-        // which would then copy both (14). Both routes give the same tensor.
-        assert_eq!(selected, (true, false), "adjoint {adjoint}");
-        assert_eq!(expert, (false, true), "adjoint {adjoint}");
-        assert!(want.iter().any(|&value| value != 0.0));
-        for (got, want) in got.iter().zip(&want) {
-            assert!(
-                (got - want).abs() <= 1e-12 * (1.0 + want.abs()),
-                "{got} vs {want}"
-            );
-        }
+        // What: the scorer takes m1, and the artifact reads `P` in place while
+        // copying `U`.
+        assert_eq!(
+            artifact.borrowed_sources(),
+            (true, false),
+            "adjoint {adjoint}"
+        );
     }
 }
 

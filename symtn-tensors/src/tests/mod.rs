@@ -2007,8 +2007,6 @@ mod contract_dense;
 
 mod contract_fusion;
 
-mod subset_cross_operations;
-
 mod tensortrace;
 
 mod tensorkit_scaling;
