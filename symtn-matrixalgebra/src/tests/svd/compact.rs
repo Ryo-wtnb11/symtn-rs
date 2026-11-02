@@ -1243,3 +1243,126 @@ fn noncanonical_mf_svd_and_eigh_scatter_each_output_block_once() {
     );
     assert!(probe.left_grouped + probe.left_visits < 4 * b_v);
 }
+
+/// Runs the unplanned compact SVD (the adjoint view of the two-sector
+/// fixture has no direct region plan) and `pinv` on `dense`, returning each
+/// result.
+fn svd_and_pinv_outcomes<O: Observer>(
+    mut dense: impl FnMut() -> ScriptedExecutor<O>,
+) -> [Result<(), OperationError>; 2] {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let adjoint_space = bound.space().adjoint_view().unwrap();
+    let adjoint = BoundDynamicTensorRef::try_new(&adjoint_space, bound.data()).unwrap();
+    [
+        svd_compact_dyn(engine, &mut dense(), &adjoint).map(|_| ()),
+        pinv(engine, &mut dense(), &bound.as_ref(), 1e-12).map(|_| ()),
+    ]
+}
+
+/// A stateful executor: its first SVD solve returns one output instead of
+/// three, and every linear-algebra scope refuses at exit, telling whether a
+/// second SVD solve ran inside it.
+#[derive(Default)]
+struct MalformedFirstSvdRefusingScope {
+    svd_calls: usize,
+}
+
+impl Observer for MalformedFirstSvdRefusingScope {
+    fn call(&mut self, call: Call<'_, '_>) -> Option<Reply> {
+        if let Call::Read(Op::Svd, _) = call {
+            self.svd_calls += 1;
+            if self.svd_calls == 1 {
+                return Some(Ok(vec![f64_svd_outputs(2, 2).remove(0)]));
+            }
+        }
+        None
+    }
+
+    fn scope_exit(&mut self, counts: Counts) -> Result<(), DenseError> {
+        Err(scope_refusal(if counts.svd >= 2 {
+            "scope after sector 1"
+        } else {
+            "scope after sector 0"
+        }))
+    }
+}
+
+#[test]
+fn compact_svd_and_pinv_check_each_sector_before_the_next_solve_inside_their_scope() {
+    // What: on an executor that keeps the default batch, sector 0's SVD
+    // outputs are checked before sector 1 is solved, inside the operation's
+    // one linear-algebra scope, whose own refusal takes precedence over the
+    // body's error.
+    for outcome in
+        svd_and_pinv_outcomes(ScriptedExecutor::<MalformedFirstSvdRefusingScope>::default)
+    {
+        assert_eq!(
+            outcome,
+            Err(OperationError::Dense(scope_refusal("scope after sector 0")))
+        );
+    }
+}
+
+/// A forwarded batch whose sector 0 delivers one SVD output instead of three
+/// and whose sector 1 delivers `second`.
+struct MalformedThen {
+    second: Option<Reply>,
+}
+
+impl Observer for MalformedThen {
+    fn script(script: &mut Script) {
+        script.set(Op::FactorizeBatch, Action::Forward);
+    }
+
+    fn batch_outcome(
+        &mut self,
+        index: usize,
+        _: Reply,
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        match index {
+            0 => sink(0, Ok(vec![f64_svd_outputs(2, 2).remove(0)])),
+            _ => sink(index, self.second.take().unwrap()),
+        }
+    }
+}
+
+#[test]
+fn compact_svd_and_pinv_report_the_first_sector_failure_over_later_batch_outcomes() {
+    // What: a batch that solved every sector before delivering reports the
+    // lowest sector's failure, as the per-sector loop does: sector 0's
+    // one-output arity error, not sector 1's solver error or its two-output
+    // arity error.
+    let second = |solver_error: bool| -> Reply {
+        if solver_error {
+            Err(DenseError::Backend {
+                backend: DenseBackend::Tenferro,
+                op: "svd_read",
+                message: "injected failure".to_string(),
+            })
+        } else {
+            let mut outputs = f64_svd_outputs(2, 2);
+            outputs.pop();
+            Ok(outputs)
+        }
+    };
+    for solver_error in [true, false] {
+        let outcomes = svd_and_pinv_outcomes(|| {
+            ScriptedExecutor::new(MalformedThen {
+                second: Some(second(solver_error)),
+            })
+        });
+        for outcome in outcomes {
+            assert_eq!(
+                outcome,
+                Err(OperationError::Dense(DenseError::ShapeMismatch {
+                    op: "svd_into",
+                    expected: vec![3],
+                    actual: vec![1],
+                }))
+            );
+        }
+    }
+}

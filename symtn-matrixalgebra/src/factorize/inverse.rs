@@ -353,26 +353,20 @@ where
     // One scope spans both passes: the staged SVDs (the cutoff is global) and
     // the per-sector reconstruction GEMMs.
     in_linalg_scope(engine, dense, |dense, engine| {
-        let mut staged = Vec::with_capacity(matrices.len());
-        for index in 0..matrices.len() {
-            let matrix = matrices.get(index)?;
-            let (rows, cols) = (matrix.rows, matrix.cols);
-            let rank = rows.min(cols);
-            // Why no SVD gauge: the pseudo-inverse is gauge invariant.
-            let (u, singular_values, vt) = if rank == 0 {
-                (Vec::new(), Vec::new(), Vec::new())
-            } else {
-                compact_svd_owned(engine, dense, matrix.data, rows, cols)?
-            };
-            staged.push(CompactSvdNumericalStage {
-                rows,
-                cols,
-                rank,
-                u,
-                singular_values,
-                vt,
-            });
-        }
+        let (_, blocks) = sector_blocks(&matrices)?;
+        let mut staged = Vec::with_capacity(blocks.len());
+        // Why no SVD gauge: the pseudo-inverse is gauge invariant.
+        compact_svd_sectors_staged(
+            engine,
+            dense,
+            &blocks,
+            None,
+            |_, _| {},
+            |_, stage| {
+                staged.push(stage);
+                Ok(())
+            },
+        )?;
         let cutoff = pinv_cutoff(
             staged
                 .iter()
