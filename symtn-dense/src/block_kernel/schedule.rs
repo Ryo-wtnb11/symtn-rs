@@ -1,5 +1,6 @@
 //! The block kernels' shared scheduler: J independent dense jobs in canonical
-//! order on one engine's execution context, split into equal-share lanes.
+//! order on one engine's execution context, split into lanes that each
+//! reserve a nonzero share of the context's slots (summing to at most S).
 //!
 //! Every resource number comes from the caller's `Exec`: the slot count S
 //! from the token's `width_for` (Auto) or the policy's `BatchDecision`
@@ -8,10 +9,12 @@
 //! timed.
 //!
 //! Under Auto, given a grant model, the scheduler scores the baseline
-//! placement (L0 lanes, largest job first on the lane of least accumulated
-//! serial time) and an equal-share placement for every lane count from L0
-//! down to one under one model, and keeps the lowest score, the baseline on
-//! ties. A job's modeled time in a lane is its serial time when its provider
+//! placement (L0 equal-share lanes, largest job first on the lane of least
+//! accumulated serial time), an equal-share placement for every lane count
+//! from L0 down to one, and a large-job reservation on uneven lanes (see
+//! `Moldable::place`; discarded when more than L0 of its lanes hold jobs)
+//! under one model, and keeps the lowest score; ties keep the baseline, then
+//! the equal shares. A job's modeled time in a lane is its serial time when its provider
 //! would run it on one thread there, otherwise its share of that time over
 //! the provider's granted width plus the token's dispatch cost at that width.
 //! The granted width is itself an estimate composed from the provider's
@@ -33,9 +36,15 @@
 //! in the process-global [`StructureCacheKind::LaneAllocations`] cache, so a
 //! call whose inputs were all searched before, on any executor, rebuilds it
 //! in `O(J + P)` without a query.
+//!
+//! The reservation adds, for the fewer than S jobs above the mean load, one
+//! query per width up to S (`O(S^3)` with the width scans), an
+//! `O(S^2 log S)` sort and binary search of its targets, and one placement
+//! of `O(J (R + log S))` steps for its R < S reserved lanes, querying each
+//! widened (time, key) group once per reserved width it evaluates.
 
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -62,7 +71,8 @@ pub(crate) struct Lane {
 pub(crate) struct Allocation {
     /// The caller's budget P.
     pub(crate) budget: usize,
-    /// The slots S the lanes share (`S <= P`).
+    /// The slots S the lanes reserve from (`S <= P`); their budgets sum to at
+    /// most S, and a slot no lane reserves stays idle.
     pub(crate) slots: usize,
     pub(crate) decision: BatchDecision,
     pub(crate) lanes: Vec<Lane>,
@@ -107,6 +117,7 @@ pub(crate) struct AllocationScratch {
     narrow: Vec<Reverse<(Duration, usize, usize)>>,
     columns: Columns,
     keys: Vec<GrantKey>,
+    moldable: Moldable,
 }
 
 impl AllocationScratch {
@@ -138,6 +149,7 @@ impl AllocationScratch {
             )
             .saturating_add(self.columns.retained_bytes())
             .saturating_add(self.keys.capacity().saturating_mul(size_of::<GrantKey>()))
+            .saturating_add(self.moldable.retained_bytes())
     }
 }
 
@@ -400,7 +412,7 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
     }
 }
 
-/// Equal-split allocation of jobs with serial times `times` (canonical order)
+/// Lane allocation of jobs with serial times `times` (canonical order)
 /// and mean weighted work `mean_work` (multiply-adds; it feeds the
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted
 /// twice), with its tables drawn from `scratch`.
@@ -562,6 +574,41 @@ fn allocate_with(
                 best = (score, Some(count));
             }
         }
+        let mut moldable = std::mem::take(&mut scratch.moldable);
+        let candidate = std::mem::take(&mut moldable.lanes);
+        // Queried once per (time, key) group and width, as the sweep is.
+        let grants = std::cell::RefCell::new(std::mem::take(&mut moldable.grants));
+        grants.borrow_mut().clear();
+        let (widens, rep) = (&columns.widens, &columns.rep);
+        let granted = |j: usize, width: usize| {
+            if !widens[j] {
+                return 1;
+            }
+            let r = rep[j];
+            *grants
+                .borrow_mut()
+                .entry((r, width))
+                .or_insert_with(|| grant(r, times[r], width))
+        };
+        let item = |j: usize, width: usize| item_time(exec, times[j], granted(j, width));
+        let (candidate, score) = moldable.place(
+            (slots, lanes),
+            &order,
+            times,
+            (&item, &granted),
+            candidate,
+            &mut scratch.spare,
+        );
+        moldable.grants = grants.into_inner();
+        // Ties keep the baseline and the equal shares.
+        let wins = score.is_some_and(|score| score < best.0);
+        moldable.lanes = if wins {
+            best.1 = None;
+            std::mem::replace(&mut assigned, candidate)
+        } else {
+            candidate
+        };
+        scratch.moldable = moldable;
         if let Some(count) = best.1 {
             columns.prepare((slots, count), &fill);
             let item = |j: usize, width: usize| columns.get(j, width);
@@ -598,11 +645,10 @@ fn allocate_with(
     }
     scratch.order = order;
     scratch.load = load;
-    debug_assert!(assigned
-        .iter()
-        .enumerate()
-        .all(|(k, lane)| lane.budget
-            == slots / assigned.len() + usize::from(k < slots % assigned.len())));
+    debug_assert!(
+        assigned.iter().all(|lane| lane.budget > 0)
+            && assigned.iter().map(|lane| lane.budget).sum::<usize>() <= slots
+    );
     Allocation {
         budget,
         slots,
@@ -779,6 +825,222 @@ impl Columns {
     }
 }
 
+/// Candidate M, large-job reservation: its target search tables and its
+/// lanes, kept for reuse.
+#[derive(Debug, Default)]
+struct Moldable {
+    /// Row `i` holds the item time of the `i`-th largest job at every width
+    /// `1..=S`, for the jobs above the mean load only.
+    table: Vec<Duration>,
+    targets: Vec<Duration>,
+    /// Each reserved lane's load and job count.
+    wide: Vec<(Duration, usize)>,
+    /// The width-one lanes, by `(load, jobs, lane)`.
+    thin: Vec<Reverse<(Duration, usize, usize)>>,
+    lanes: Vec<Lane>,
+    /// Each queried grant, by (representative job, width).
+    grants: HashMap<(usize, usize), usize>,
+}
+
+/// `n` nanoseconds as a duration, saturating.
+fn from_nanos(n: u128) -> Duration {
+    Duration::new(
+        u64::try_from(n / 1_000_000_000).unwrap_or(u64::MAX),
+        (n % 1_000_000_000) as u32,
+    )
+}
+
+impl Moldable {
+    /// Places the jobs, `order` largest first, on lanes of uneven widths
+    /// over `slots`, and returns the lanes with the modeled makespan, or no
+    /// score when more than `cap` lanes hold jobs (the batch decision's lane
+    /// count, which the candidate must not exceed). `item(j, w)` is job `j`'s
+    /// modeled time on a lane of `w` slots and `grant(j, w)` its provider's
+    /// width there; `lanes` is empty on entry.
+    ///
+    /// 1. The target's lower bound is `LB = max(ceil(sum t / S), max_j
+    ///    min_w item(j, w))`. Only jobs above the mean load can raise the
+    ///    second term, and fewer than S jobs are above it.
+    /// 2. For a target `T >= LB`, each job with `t_j > T` needs the least
+    ///    width `p_j(T)` with `item(j, p_j(T)) <= T`; the others take one
+    ///    slot. `T` passes when the needed widths sum to at most S, which is
+    ///    monotone in `T`, so a binary search over `LB` and the item times
+    ///    at least `LB` finds the least passing target (the largest job's
+    ///    serial time, if above `LB`, passes with no reservation).
+    /// 3. Each job above the target gets a lane of its width, the remaining
+    ///    slots become one-slot lanes, and every other job, largest first,
+    ///    goes to the lane minimising `(load + item, jobs, lane)`.
+    /// 4. Empty one-slot lanes are dropped, and their slots widen the
+    ///    reserved lanes, largest job first, while that job's grant still
+    ///    grows. Any slot left stays idle.
+    ///
+    /// The score is the completed placement's, not the target: a passing
+    /// target does not prove that the tail fits under it.
+    fn place(
+        &mut self,
+        (slots, cap): (usize, usize),
+        order: &[usize],
+        times: &[Duration],
+        (item, grant): (
+            &impl Fn(usize, usize) -> Duration,
+            &impl Fn(usize, usize) -> usize,
+        ),
+        mut lanes: Vec<Lane>,
+        spare: &mut Vec<Lane>,
+    ) -> (Vec<Lane>, Option<Duration>) {
+        let total = times
+            .iter()
+            .fold(0u128, |sum, t| sum.saturating_add(t.as_nanos()));
+        let mean = total.div_ceil(slots as u128);
+        let heavy = order
+            .iter()
+            .take_while(|&&j| times[j].as_nanos() > mean)
+            .count();
+        self.table.clear();
+        for &j in &order[..heavy] {
+            self.table.extend((1..=slots).map(|width| item(j, width)));
+        }
+        let table = &self.table;
+        let row = |i: usize| &table[i * slots..(i + 1) * slots];
+        let bound = (0..heavy)
+            .filter_map(|i| row(i).iter().min())
+            .fold(from_nanos(mean), |bound, &least| bound.max(least));
+        let large = order[..heavy]
+            .iter()
+            .take_while(|&&j| times[j] > bound)
+            .count();
+        self.targets.clear();
+        self.targets.push(bound);
+        for i in 0..large {
+            self.targets.extend(row(i).iter().filter(|&&t| t >= bound));
+        }
+        self.targets.sort_unstable();
+        self.targets.dedup();
+        // Every target is at least each large job's least item time.
+        let need = |i: usize, target: Duration| {
+            1 + row(i)
+                .iter()
+                .position(|&t| t <= target)
+                .unwrap_or(slots - 1)
+        };
+        let reserved = |target: Duration| {
+            order[..large]
+                .iter()
+                .take_while(|&&j| times[j] > target)
+                .count()
+        };
+        let passes = |target: Duration| {
+            (0..reserved(target))
+                .map(|i| need(i, target))
+                .fold(0usize, usize::saturating_add)
+                <= slots
+        };
+        let target = self.targets[self.targets.partition_point(|&t| !passes(t))];
+        let reserved = reserved(target);
+        let used: usize = (0..reserved).map(|i| need(i, target)).sum();
+
+        let count = reserved + (slots - used);
+        lanes = lanes_from(lanes, spare, count);
+        self.wide.clear();
+        for (i, (lane, &j)) in lanes.iter_mut().zip(order).take(reserved).enumerate() {
+            let width = need(i, target);
+            lane.budget = width;
+            lane.jobs.push(j);
+            self.wide.push((row(i)[width - 1], 1));
+        }
+        let mut thin = BinaryHeap::from(std::mem::take(&mut self.thin));
+        thin.clear();
+        for (k, lane) in lanes.iter_mut().enumerate().skip(reserved) {
+            lane.budget = 1;
+            thin.push(Reverse((Duration::ZERO, 0, k)));
+        }
+        for &j in &order[reserved..] {
+            let mut best = thin
+                .peek()
+                .map(|&Reverse((load, jobs, k))| (load.saturating_add(item(j, 1)), jobs, k));
+            for (k, &(load, jobs)) in self.wide.iter().enumerate() {
+                let key = (load.saturating_add(item(j, lanes[k].budget)), jobs, k);
+                best = Some(best.map_or(key, |best| best.min(key)));
+            }
+            let Some((load, jobs, k)) = best else {
+                unreachable!("a target passes with at least one lane")
+            };
+            if k < reserved {
+                self.wide[k] = (load, jobs + 1);
+            } else {
+                thin.pop();
+                thin.push(Reverse((load, jobs + 1, k)));
+            }
+            lanes[k].jobs.push(j);
+        }
+        let mut idle = thin
+            .iter()
+            .filter(|Reverse((_, jobs, _))| *jobs == 0)
+            .count();
+        let mut score = thin
+            .iter()
+            .map(|&Reverse((load, _, _))| load)
+            .max()
+            .unwrap_or(Duration::ZERO);
+        self.thin = thin.into_vec();
+        if count - idle > cap {
+            return (lanes, None);
+        }
+        for (lane, &j) in lanes.iter_mut().zip(order).take(reserved) {
+            while idle > 0 && grant(j, lane.budget + 1) > grant(j, lane.budget) {
+                lane.budget += 1;
+                idle -= 1;
+            }
+            let load = lane.jobs.iter().fold(Duration::ZERO, |sum, &j| {
+                sum.saturating_add(item(j, lane.budget))
+            });
+            score = score.max(load);
+        }
+        let mut kept = 0;
+        for k in 0..lanes.len() {
+            if !lanes[k].jobs.is_empty() {
+                lanes.swap(kept, k);
+                lanes[kept].jobs.sort_unstable();
+                kept += 1;
+            }
+        }
+        spare.extend(lanes.drain(kept..));
+        (lanes, Some(score))
+    }
+
+    fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        self.table
+            .capacity()
+            .saturating_add(self.targets.capacity())
+            .saturating_mul(size_of::<Duration>())
+            .saturating_add(
+                self.wide
+                    .capacity()
+                    .saturating_mul(size_of::<(Duration, usize)>()),
+            )
+            .saturating_add(
+                self.thin
+                    .capacity()
+                    .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
+            )
+            .saturating_add(
+                self.grants
+                    .capacity()
+                    .saturating_mul(size_of::<((usize, usize), usize)>()),
+            )
+            .saturating_add(
+                self.lanes
+                    .iter()
+                    .map(|lane| lane.jobs.capacity().saturating_mul(size_of::<usize>()))
+                    .fold(
+                        self.lanes.capacity().saturating_mul(size_of::<Lane>()),
+                        usize::saturating_add,
+                    ),
+            )
+    }
+}
+
 /// The modeled makespan of the equal-share placement over `count` lanes of
 /// `slots`: lane `k` reserves `slots / count + [k < slots % count]`, the jobs
 /// in `order` seed one lane each (the largest on the widest), and every later
@@ -855,9 +1117,15 @@ fn equal_shares(
 ///
 /// Every job runs even after another fails, so each job below the returned
 /// index has completed. Lane `k` gets a child token of exactly
-/// `allocation.lanes[k].budget` slots (threadteam's even `fork` share over S)
-/// with the caller's workspace and policy. A panicking job unwinds after the
-/// lanes join; the engine's guarded entry then marks itself broken.
+/// `allocation.lanes[k].budget` slots (one threadteam `fork_sized` over S;
+/// slots no lane reserves stay idle for the call) with the caller's workspace
+/// and policy. A panicking job unwinds after the lanes join; the engine's
+/// guarded entry then marks itself broken.
+///
+/// The outer error is threadteam's refusal of the lane budgets, before any
+/// job ran. An allocation's budgets are nonzero and sum to at most S by
+/// construction, so it is unreachable; it is still returned, never replaced
+/// by an equal split.
 ///
 /// Why per-job state is lent by lane rather than behind a lock per job: a
 /// lock per job costs an allocation per job on platforms whose mutex is
@@ -867,15 +1135,13 @@ pub(crate) fn run<S: Send, E: Send>(
     allocation: &Allocation,
     states: &mut [S],
     job: impl Fn(usize, &mut S, Exec<'_>) -> Result<(), E> + Sync,
-) -> Result<(), (usize, E)> {
+) -> Result<Result<(), (usize, E)>, tenferro_cpu::threadteam::Error> {
     let lanes = &allocation.lanes;
     if lanes.is_empty() {
-        return Ok(());
+        return Ok(Ok(()));
     }
     let policy = *exec.batch_policy();
     let workspace = exec.workspace();
-    let slots = NonZeroUsize::new(allocation.slots).unwrap_or(NonZeroUsize::MIN);
-    let token = exec.limit(slots).into_token();
     // A lane's jobs ascend, so its first failure is its lowest one.
     let run_lane = |token: tenferro_cpu::threadteam::Exec<'_>,
                     jobs: &mut dyn Iterator<Item = (usize, &mut S)>| {
@@ -890,10 +1156,17 @@ pub(crate) fn run<S: Send, E: Send>(
     };
     if let [lane] = lanes.as_slice() {
         debug_assert_eq!(lane.jobs.len(), states.len());
-        return run_lane(token, &mut states.iter_mut().enumerate()).map_or(Ok(()), Err);
+        let width =
+            NonZeroUsize::new(lane.budget).ok_or(tenferro_cpu::threadteam::Error::ZeroBudget)?;
+        let token = exec.limit(width).into_token();
+        return Ok(run_lane(token, &mut states.iter_mut().enumerate()).map_or(Ok(()), Err));
     }
+    let slots = NonZeroUsize::new(allocation.slots).unwrap_or(NonZeroUsize::MIN);
+    let token = exec.limit(slots).into_token();
     let mut lane_of = vec![0; states.len()];
+    let mut shares = Vec::with_capacity(lanes.len());
     for (k, lane) in lanes.iter().enumerate() {
+        shares.push(lane.budget);
         for &j in &lane.jobs {
             lane_of[j] = k;
         }
@@ -909,16 +1182,16 @@ pub(crate) fn run<S: Send, E: Send>(
         .into_iter()
         .map(|part| Mutex::new((part, None)))
         .collect();
-    token.fork(lanes.len(), |k, token| {
+    token.fork_sized(&shares, |k, token| {
         let mut part = parts[k].lock().unwrap_or_else(PoisonError::into_inner);
         let (jobs, failure) = &mut *part;
         *failure = run_lane(token, &mut jobs.iter_mut().map(|(j, s)| (*j, &mut **s)));
-    });
-    parts
+    })?;
+    Ok(parts
         .into_iter()
         .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner).1)
         .min_by_key(|&(j, _)| j)
-        .map_or(Ok(()), Err)
+        .map_or(Ok(()), Err))
 }
 
 #[cfg(test)]
@@ -1011,7 +1284,7 @@ mod tests {
                 Ok::<(), ()>(())
             }))
         });
-        assert_eq!(result.unwrap(), Ok(()));
+        assert_eq!(result.unwrap(), Ok(Ok(())));
         assert_eq!(calls.into_inner(), 0);
     }
 
@@ -1092,7 +1365,7 @@ mod tests {
                 ))
             })
             .unwrap();
-        assert_eq!(result, Err((2, Injected::Numeric(2))));
+        assert_eq!(result, Ok(Err((2, Injected::Numeric(2)))));
         assert!(ran.iter().all(|r| r.load(Ordering::Relaxed) == 1));
     }
 
@@ -1122,9 +1395,13 @@ mod tests {
         assert!(engine.with_contraction_exec(|_, _, _| Ok(())).is_err());
     }
 
-    /// Every policy, budget and job count: lanes conserve S <= P with shares
-    /// differing by at most one, every job is placed and run once on a token of
-    /// its lane's reserved budget, and the allocation is reproducible.
+    /// Every policy, budget and job count: lane budgets are nonzero and sum to
+    /// at most S <= P, every job is placed and run once on a token of its
+    /// lane's reserved budget, and the allocation is reproducible. Uneven
+    /// budgets run as reserved: on four slots (flat 100 ns dispatch, a job
+    /// taking its whole lane from 300 ns) jobs of 100, 100, 1000 and 2000 ns
+    /// reserve three slots for the largest and one for the 1000 ns job, and
+    /// the jobs see three and one slot, not an even two and two.
     #[test]
     fn allocation_is_total_legal_and_deterministic() {
         let mut seed = 0x2545_f491_4f6c_dd1d_u64;
@@ -1164,7 +1441,7 @@ mod tests {
                                     seen[j].fetch_add(1, Ordering::Relaxed);
                                     Ok::<(), ()>(())
                                 });
-                            assert_eq!(result, Ok(()));
+                            assert_eq!(result, Ok(Ok(())));
                             assert!(seen.iter().all(|s| s.load(Ordering::Relaxed) == 1));
                             Ok(())
                         })
@@ -1172,6 +1449,31 @@ mod tests {
                 }
             }
         }
+
+        let t = nanos(&[100, 100, 1000, 2000]);
+        flat(4, BatchPolicy::default(), 100)
+            .with_contraction_exec(|exec, _, _| {
+                let a = allocate_in(
+                    exec,
+                    &t,
+                    |_| [0; 2],
+                    1e6,
+                    &mut AllocationScratch::default(),
+                    &uncached(),
+                    Some(|_, t: Duration, w| if t.as_nanos() >= 300 { w } else { 1 }),
+                );
+                assert_eq!(lanes(&a), [(3, vec![0, 1, 3]), (1, vec![2])]);
+                let seen: Vec<AtomicUsize> = (0..4).map(|_| AtomicUsize::new(0)).collect();
+                let result = run(exec.reborrow(), &a, &mut [(); 4], |j, _, child| {
+                    seen[j].store(child.budget(), Ordering::Relaxed);
+                    Ok::<(), ()>(())
+                });
+                assert_eq!(result, Ok(Ok(())));
+                let seen: Vec<usize> = seen.into_iter().map(AtomicUsize::into_inner).collect();
+                assert_eq!(seen, [3, 3, 1, 3]);
+                Ok(())
+            })
+            .unwrap();
     }
 
     /// An engine of `threads` whose dispatch cost is `rows` (anchors at 2, 4
@@ -1305,8 +1607,97 @@ mod tests {
             finish(widths, jobs, t, d)
         }
 
-        /// The lowest score over the baseline and every equal-share count up
-        /// to `cap`; ties keep the baseline, then the larger count.
+        /// The width a job's provider takes on a lane of `w` slots.
+        fn grant(t: u64, w: usize, d: u64) -> usize {
+            if w >= 2 && t >= 3 * d {
+                w
+            } else {
+                1
+            }
+        }
+
+        /// Large-job reservation: the least target T, from `LB = max(ceil(
+        /// sum t / S), max_j min_w item)` and the item times above it, at
+        /// which the jobs above T fit their least widths reaching T into S;
+        /// those jobs take lanes of those widths, the rest of S one-slot
+        /// lanes; the other jobs go, largest first, to the least `(load +
+        /// item, jobs, lane)`; empty one-slot lanes then widen the reserved
+        /// lanes, largest job first, while the grant grows.
+        pub(super) fn moldable(t: &[u64], slots: usize, d: u64) -> (u64, Lanes) {
+            let items = |j: usize| (1..=slots).map(move |w| item(t[j], w, d));
+            let lb = (0..t.len())
+                .map(|j| items(j).min().unwrap())
+                .fold(t.iter().sum::<u64>().div_ceil(slots as u64), u64::max);
+            let mut targets = vec![lb];
+            for j in (0..t.len()).filter(|&j| t[j] > lb) {
+                targets.extend(items(j).filter(|&x| x >= lb));
+            }
+            targets.sort();
+            let need = |j: usize, target: u64| (1..=slots).find(|&w| item(t[j], w, d) <= target);
+            let above = |target: u64| order(t).into_iter().filter(move |&j| t[j] > target);
+            let target = targets
+                .into_iter()
+                .find(|&target| {
+                    above(target)
+                        .map(|j| need(j, target).unwrap())
+                        .sum::<usize>()
+                        <= slots
+                })
+                .unwrap();
+            let big: Vec<usize> = above(target).collect();
+            let mut widths: Vec<usize> = big.iter().map(|&j| need(j, target).unwrap()).collect();
+            let used: usize = widths.iter().sum();
+            widths.resize(big.len() + slots - used, 1);
+            let mut load: Vec<u64> = big
+                .iter()
+                .zip(&widths)
+                .map(|(&j, &w)| item(t[j], w, d))
+                .collect();
+            load.resize(widths.len(), 0);
+            let mut jobs: Vec<Vec<usize>> = big.iter().map(|&j| vec![j]).collect();
+            jobs.resize(widths.len(), Vec::new());
+            for j in order(t).into_iter().skip(big.len()) {
+                let k = (0..widths.len())
+                    .min_by_key(|&k| (load[k] + item(t[j], widths[k], d), jobs[k].len(), k))
+                    .unwrap();
+                load[k] += item(t[j], widths[k], d);
+                jobs[k].push(j);
+            }
+            let mut idle = jobs.iter().filter(|js| js.is_empty()).count();
+            for (k, &j) in big.iter().enumerate() {
+                while idle > 0 && grant(t[j], widths[k] + 1, d) > grant(t[j], widths[k], d) {
+                    widths[k] += 1;
+                    idle -= 1;
+                }
+            }
+            let (widths, jobs) = widths
+                .into_iter()
+                .zip(jobs)
+                .filter(|(_, js)| !js.is_empty())
+                .unzip();
+            finish(widths, jobs, t, d)
+        }
+
+        /// `best`, or the reservation when it scores strictly lower on at
+        /// most `cap` lanes and `cap` allows fan-out.
+        fn or_moldable(
+            best: (u64, Lanes),
+            t: &[u64],
+            slots: usize,
+            cap: usize,
+            d: u64,
+        ) -> (u64, Lanes) {
+            let m = moldable(t, slots, d);
+            if cap > 1 && m.1.len() <= cap && m.0 < best.0 {
+                m
+            } else {
+                best
+            }
+        }
+
+        /// The lowest score over the baseline, every equal-share count up to
+        /// `cap` and the reservation; ties keep the baseline, then the larger
+        /// count, then the equal shares.
         pub(super) fn choose(t: &[u64], slots: usize, cap: usize, d: u64) -> (u64, Lanes) {
             let mut best = baseline(t, slots, cap, d);
             for count in (1..=cap).rev() {
@@ -1315,7 +1706,7 @@ mod tests {
                     best = candidate;
                 }
             }
-            best
+            or_moldable(best, t, slots, cap, d)
         }
 
         /// [`choose`] that skips a count whose bound
@@ -1344,7 +1735,7 @@ mod tests {
                     best = candidate;
                 }
             }
-            best
+            or_moldable(best, t, slots, cap, d)
         }
     }
 
@@ -1682,11 +2073,25 @@ mod tests {
     }
 
     /// Purpose: under the model, Auto's choice is the lowest score over
-    /// main's allocation and every equal-share lane count up to the batch
-    /// decision (so never above main's), and it is legal: no empty lane,
-    /// shares summing to S, at most the decision's lanes. Includes the case
-    /// a pruning bound would miss (S = 3: two lanes score 11100 ns against
-    /// 11364 and 12100), mixed and all-zero times and non-divisible S.
+    /// main's allocation, every equal-share lane count up to the batch
+    /// decision and the large-job reservation on at most that many lanes
+    /// (so never above main's), and it is legal: no empty lane, nonzero
+    /// shares summing to at most S, at most the decision's lanes. Includes
+    /// the case a pruning bound would miss (S = 3: two lanes score 11100 ns
+    /// against 11364 and 12100), mixed and all-zero times, non-divisible S,
+    /// and the reservation's cases on flat 100 ns dispatch:
+    /// - it wins: on S = 4, jobs of 100, 100, 1000 and 2000 ns score at
+    ///   best 1100 ns on equal shares; the target 1000 ns reserves three
+    ///   slots for the 2000 ns job (`2000 / 3 + 100 = 766`), the 1000 ns job
+    ///   takes the one-slot lane, and the lanes score 1000 ns;
+    /// - its target is not its score: on S = 4, jobs of 10000, 10000, 4000
+    ///   and 1000 ns pass the target `ceil(25000 / 4) = 6250` with two
+    ///   two-slot lanes (5100 ns each), but the 4000 ns job lifts one to
+    ///   7200 ns, and one four-slot lane (6650 ns) is kept;
+    /// - it exceeds the decision's lanes: on S = 6 with a 10000 ns lane work
+    ///   minimum, one 10000 ns job and 120 of 100 ns give two lanes; the
+    ///   reservation's four lanes (3900 ns) are discarded, and two equal
+    ///   lanes (7733 ns) beat main's 11000 ns.
     #[test]
     fn allocation_dominates_main_under_model() {
         let d = 100;
@@ -1706,6 +2111,48 @@ mod tests {
             oracle::choose_pruned(&pruned, 3, 3, d, &mut placed),
             oracle::choose(&pruned, 3, 3, d)
         );
+
+        let flat4 = || flat(4, BatchPolicy::default(), d);
+        let wins = [100, 100, 1000, 2000];
+        assert_eq!(
+            [1, 2, 3, 4].map(|l| oracle::equal(&wins, 4, l, d).0),
+            [1150, 1100, 1100, 2000]
+        );
+        let reserved = (1000, vec![(3, vec![0, 1, 3]), (1, vec![2])]);
+        assert_eq!(oracle::moldable(&wins, 4, d), reserved);
+        assert_eq!(oracle::choose(&wins, 4, 4, d), reserved);
+        assert_eq!(lanes(&chosen(&mut flat4(), &nanos(&wins), 1e9)), reserved.1);
+
+        let tail = [10000, 10000, 4000, 1000];
+        assert_eq!(
+            oracle::moldable(&tail, 4, d),
+            (7200, vec![(2, vec![0, 2]), (2, vec![1, 3])])
+        );
+        let one = oracle::equal(&tail, 4, 1, d);
+        assert_eq!(one.0, 6650);
+        assert_eq!(oracle::choose(&tail, 4, 4, d), one);
+        assert_eq!(lanes(&chosen(&mut flat4(), &nanos(&tail), 1e9)), one.1);
+
+        let mut many = vec![10000];
+        many.extend([100; 120]);
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(10000.0);
+        let mean = many.iter().sum::<u64>() as f64 / many.len() as f64;
+        let a = chosen(
+            &mut flat(6, BatchPolicy::default().with_model(model), d),
+            &nanos(&many),
+            mean,
+        );
+        assert_eq!((a.slots, a.decision.lanes), (6, 2));
+        let discarded = oracle::moldable(&many, 6, d);
+        assert_eq!((discarded.0, discarded.1.len()), (3900, 4));
+        assert_eq!(oracle::baseline(&many, 6, 2, d).0, 11000);
+        let two = oracle::equal(&many, 6, 2, d);
+        assert_eq!(two.0, 7733);
+        assert_eq!(oracle::choose(&many, 6, 2, d), two);
+        assert_eq!(lanes(&a), two.1);
 
         let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
         let mut next = |n: u64| {
@@ -1801,9 +2248,8 @@ mod tests {
         }
         let l = a.lanes.len();
         assert!(l >= 1 && l <= a.slots.min(jobs) && a.slots <= p);
-        assert_eq!(a.lanes.iter().map(|x| x.budget).sum::<usize>(), a.slots);
-        assert!(a.lanes.windows(2).all(|w| w[0].budget >= w[1].budget));
-        assert!(a.lanes[0].budget - a.lanes[l - 1].budget <= 1);
+        assert!(a.lanes.iter().all(|x| x.budget > 0));
+        assert!(a.lanes.iter().map(|x| x.budget).sum::<usize>() <= a.slots);
         let mut all: Vec<usize> = a.lanes.iter().flat_map(|x| x.jobs.clone()).collect();
         assert!(a.lanes.iter().all(|x| !x.jobs.is_empty()));
         assert!(a

@@ -122,13 +122,24 @@ provider's block GEMM kernel (recoupling, block-wise contraction) takes its
 thread count from the engine's cost rule over the batch's estimated serial
 time (Tenferro's own per-flop model), and its lane count is at most the
 engine's batch decision, so the work model's fan-out limits are never
-exceeded. The lanes share all of those threads in equal shares: a batch of a
-few large blocks gives each lane several threads, and a batch of many small
-blocks runs one thread per lane. The kernel scores the baseline placement
-(blocks largest first on the lane of least accumulated serial time, over
-`L0 = min(threads, blocks, decision lanes)` lanes) and an equal-share
-placement for every lane count from `L0` down to one under one model, and
-keeps the lowest score, the baseline on ties. The model charges a block its
+exceeded. Each lane reserves a nonzero share of those threads, the shares
+summing to at most the thread count, and each block runs on a context of
+exactly its lane's share; a thread no lane reserves stays idle for the call.
+A batch of a few large blocks gives each lane several threads, and a batch
+of many small blocks runs one thread per lane. The kernel scores the
+baseline placement (equal shares over `L0 = min(threads, blocks, decision
+lanes)` lanes, blocks largest first on the lane of least accumulated serial
+time), an equal-share placement for every lane count from `L0` down to one,
+and a large-block reservation under one model, and keeps the lowest score;
+ties keep the baseline, then the equal shares. The reservation finds the
+least target time at which the blocks above it, each on the narrowest lane
+that brings it under the target, fit in the thread count; it gives each such
+block that lane, makes the remaining threads one-thread lanes, places the
+other blocks largest first on the lane where they finish earliest, then
+widens the reserved lanes with the threads of unused one-thread lanes while
+the provider's width still grows. It is discarded when more than `L0` of its
+lanes hold blocks, and it is scored as placed, since a block below the
+target can still finish above it. The model charges a block its
 serial time where the provider would run it on one thread in that lane,
 otherwise its time over the provider's granted width plus the engine's
 dispatch cost at that width. The granted width is an estimate composed from
@@ -142,7 +153,10 @@ again, once per distinct share width during the sweep (rebuilding the winning
 placement may repeat up to two widths), since a block the provider keeps
 serial at the full count stays serial at every narrower share; a lane count
 whose proved lower bound on its score is not below the best score so far is
-not placed. Each searched allocation is kept in the process-global structure
+not placed. The reservation queries each such group at most once per width
+it evaluates: every width up to the thread count for the (fewer than
+thread-count) blocks above the mean load, and the reserved lanes' widths for
+the others. Each searched allocation is kept in the process-global structure
 cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
 function of (the engine's budget, work model, team and dispatch cost at every
 width, the mean work, and each block's serial time and grant inputs), so a
