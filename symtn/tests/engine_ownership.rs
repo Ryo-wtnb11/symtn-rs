@@ -94,10 +94,10 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     }
 }
 
-/// The eigh, eigh-values, svd-values, pinv, qr, trace and general eig
+/// The eigh, eigh-values, svd-values, pinv, qr, trace, general eig and lq
 /// outputs of `t`, as one payload each, so a width that splits the block
 /// scheduler differently shows in any of them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7] {
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 8] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
@@ -159,6 +159,15 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7
             .iter()
             .flat_map(|value| [value.re, value.im]),
     );
+    // LQ's factors are unique only for a nonsingular leading triangular
+    // factor; the reconstruction `L Q` is gauge-free.
+    let lq = t.lq_compact(engine, &[0], &[1, 2]).unwrap();
+    let lq_out =
+        lq.l.compose(engine, &lq.q)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec();
     [
         eigh_out,
         eigh_vals_out,
@@ -167,6 +176,7 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7
         qr_out,
         traced.dense_data().unwrap().to_vec(),
         eig_out,
+        lq_out,
     ]
 }
 
@@ -187,6 +197,7 @@ fn factorizations_and_trace_agree_across_widths() {
         "qr",
         "trace",
         "eig",
+        "lq",
     ];
     for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);

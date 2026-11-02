@@ -24,9 +24,11 @@ pub(crate) enum Event {
     /// The native block GEMM kernel prepared one geometry's `tcontract::Plan`
     /// (a geometry-plan cache miss).
     GemmPlanBuild,
+    /// The LQ default wrote one input's adjoint into its scratch.
+    LqAdjointStaging,
 }
 
-const EVENTS: usize = Event::GemmPlanBuild as usize + 1;
+const EVENTS: usize = Event::LqAdjointStaging as usize + 1;
 
 #[derive(Default)]
 struct Probe {

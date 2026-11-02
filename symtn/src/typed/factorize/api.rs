@@ -566,8 +566,15 @@ where
     /// are compact, including on a dual `V`.
     /// Checked factors use the source provider instance, and a failure returns
     /// no factors. A lazy adjoint `A^H` is not materialized: the QR
-    /// `A = Q R` of its parent, read in place, gives `l = R^H` and `q = Q^H`
-    /// in the gauge LQ of the materialized adjoint has.
+    /// `A = Q R` of its parent, read in place, gives `l = R^H` and `q = Q^H`.
+    ///
+    /// The factors are unique (to rounding) when each sector's leading
+    /// `k_c x k_c` block of `l` is nonsingular; full row rank with
+    /// `m_c <= n_c` suffices, full column rank with `m_c > n_c` does not.
+    /// Then a lazy adjoint's factors equal those of LQ of the materialized
+    /// adjoint, and every provider returns the same factors. Otherwise any
+    /// two routes (lazy or materialized, one provider or another) return
+    /// valid LQ factors that may differ.
     ///
     /// ```
     /// use std::sync::Arc;

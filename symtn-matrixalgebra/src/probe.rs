@@ -85,12 +85,6 @@ events! {
         input_pack_bytes: LqInputPackBytes,
         output_scatter_calls: LqOutputScatterCalls,
         output_scatter_bytes: LqOutputScatterBytes,
-        scratch_buffer_count: LqScratchBuffers,
-        scratch_capacity_bytes: LqScratchCapacityBytes,
-        adjoint_scratch_fill_calls: LqAdjointFillCalls,
-        adjoint_scratch_fill_bytes: LqAdjointFillBytes,
-        final_adjoint_copy_calls: LqFinalAdjointCopyCalls,
-        final_adjoint_copy_bytes: LqFinalAdjointCopyBytes,
     }
     /// Copies of Hermitian eigendecomposition.
     EighCopyProbe => eigh_copy {
@@ -179,7 +173,6 @@ pub(crate) struct CheckedCompactInputObservation {
     pub operation: CheckedCompactOperation,
     pub input_pointer: usize,
     pub matrix_pointer: usize,
-    pub adjoint_pointer: Option<usize>,
     pub elements: usize,
 }
 
@@ -370,33 +363,16 @@ pub(crate) fn owned_output(op: CopyOp, owner_reused: bool) {
     add(reused, usize::from(owner_reused));
 }
 
-pub(crate) fn lq_scratch<D>(elements: usize) {
-    hit(Event::LqScratchBuffers);
-    add(Event::LqScratchCapacityBytes, bytes::<D>(elements));
-}
-
-pub(crate) fn lq_adjoint_fill<D>(elements: usize) {
-    hit(Event::LqAdjointFillCalls);
-    add(Event::LqAdjointFillBytes, bytes::<D>(elements));
-}
-
-pub(crate) fn lq_final_adjoint_copy<D>(elements: usize) {
-    hit(Event::LqFinalAdjointCopyCalls);
-    add(Event::LqFinalAdjointCopyBytes, bytes::<D>(elements));
-}
-
 pub(crate) fn checked_compact_input<D>(
     operation: CheckedCompactOperation,
     input: &[D],
     matrix: &[D],
-    adjoint: Option<&[D]>,
 ) {
     observe(Observation::CheckedCompactInput(
         CheckedCompactInputObservation {
             operation,
             input_pointer: input.as_ptr() as usize,
             matrix_pointer: matrix.as_ptr() as usize,
-            adjoint_pointer: adjoint.map(|data| data.as_ptr() as usize),
             elements: matrix.len(),
         },
     ));

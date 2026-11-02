@@ -63,15 +63,15 @@ fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
 }
 
 #[test]
-fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
+fn compact_lq_canonical_layout_avoids_pack_and_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: canonical compact LQ avoids general pack/scatter while accounting for its three reusable scratch buffers and required adjoint copies.
+    // What: canonical compact LQ reads and writes the sector regions in place, without general pack/scatter.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_lq_copy_rec = crate::probe::record();
-    let Lq { l: left, q: right } = lq_compact(
+    lq_compact(
         engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
@@ -83,18 +83,6 @@ fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_calls, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
-    assert!(probe.scratch_capacity_bytes > 0);
-    assert!(probe.adjoint_scratch_fill_calls > 0);
-    assert_eq!(
-        probe.adjoint_scratch_fill_bytes,
-        std::mem::size_of_val(tensor.data())
-    );
-    assert!(probe.final_adjoint_copy_calls > 0);
-    assert_eq!(
-        probe.final_adjoint_copy_bytes,
-        (left.data().len() + right.data().len()) * std::mem::size_of::<f64>()
-    );
 }
 
 #[test]
@@ -127,7 +115,7 @@ fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
 #[test]
 fn compact_lq_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence without direct-region scratch accounting.
+    // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -141,9 +129,6 @@ fn compact_lq_noncanonical_layout_uses_copy_fallback() {
 
     assert!(probe.input_pack_bytes > 0);
     assert!(probe.output_scatter_bytes > 0);
-    assert_eq!(probe.scratch_buffer_count, 0);
-    assert_eq!(probe.adjoint_scratch_fill_bytes, 0);
-    assert_eq!(probe.final_adjoint_copy_bytes, 0);
 }
 
 #[test]
@@ -349,7 +334,6 @@ fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
     let rank = rows.min(cols);
     if rank == 0 {
         assert!(left.space().space().homspace().domain().legs()[0]
@@ -367,8 +351,6 @@ fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
             assert!((reconstructed - tensor.data()[row + rows * col]).abs() < 1e-10);
         }
     }
-    assert_eq!(probe.adjoint_scratch_fill_calls, usize::from(rank > 0));
-    assert_eq!(probe.final_adjoint_copy_calls, usize::from(rank > 0) * 2);
 }
 
 #[test]
@@ -474,9 +456,6 @@ fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch(
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
-    assert!(probe.adjoint_scratch_fill_bytes > 0);
-    assert!(probe.final_adjoint_copy_bytes > 0);
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -631,7 +610,6 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
 }
 
 fn bound_factor_matrices<R>(
@@ -1212,9 +1190,9 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
 
 #[test]
 fn checked_compact_lq_adds_no_per_sector_allocation_over_the_multiplicity_free_route() {
-    // What: checked compact LQ, eager and lazy adjoint, adjoints every sector
-    // through one scratch and writes each final adjoint once into the buffers
-    // it publishes, as the multiplicity-free route does. Its
+    // What: checked compact LQ, eager and lazy adjoint, runs the same
+    // executor batch and places each sector's final factors once into the
+    // buffers it publishes, as the multiplicity-free route does. Its
     // allocation excess over that route is then the per-call checked
     // staging alone, so it must not grow with the coupled-sector count.
     fn check<D: FactorScalar>() {

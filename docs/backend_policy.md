@@ -168,24 +168,24 @@ entry, the entry overhead, and its per-block, per-width and per-lane slices;
 with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR, Hermitian eigendecomposition
-(full and values-only) and general eigenvalues over a tensor's sector blocks
-run on the same lanes, through the same lane driver as the GEMM kernel
+SVD, the pseudo-inverse's SVD, compact QR and LQ, Hermitian
+eigendecomposition (full and values-only) and general eigenvalues over a
+tensor's sector blocks run on the same lanes, through the same lane driver as the GEMM kernel
 (inside the engine's guarded linalg entry rather than its contraction entry):
 each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
-`m n k - k^3/3` with `k = min(m, n)`, EIGH and EIG values tlinalg's `n^3`, four times that
+`m n k - k^3/3` with `k = min(m, n)`, LQ that of its transpose's QR, EIGH and EIG values tlinalg's `n^3`, four times that
 for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
 it. A batch whose every input is one matrix (batch product one) takes the
-same search, except for QR, with each block's granted width composed as tlinalg decides it
+same search, except for QR and LQ, with each block's granted width composed as tlinalg decides it
 for one item under `Auto`: the engine's cost rule over the total work's time,
 capped at the width the provider's payback work (`estimate_payback_work`,
 the part of the estimate a team inside the item can pay back; for general
 eigenvalues it is the whole estimate, so the cap is inert) pays for, and one
 thread on a token without a team. The serial times stay the work model's
 estimates, which run low for SVD; no correction is applied, so the choice
-remains a scheduling estimate. QR batches keep the baseline placement over
+remains a scheduling estimate. QR and LQ batches keep the baseline placement over
 `L0` lanes, without the search: the model credits a granted width with a
 linear speedup that faer's QR does not deliver at the widths QR's payback
 share admits, and on few large QR blocks the searched placement ran slower
@@ -205,6 +205,16 @@ its own provider workspace and fresh factors of their logical size, so a
 factor never inherits a recycled buffer's capacity; a full EIGH, and a
 compact SVD over packed or Checked Generic sector matrices, holds every
 sector's raw factors at once before placing them, where the loop held one.
+Compact LQ of `X` reads each block's transpose in place (a strided view,
+no adjoint copy), factors `X^T = Q' R'` and returns `L = R'^T`,
+`Q = Q'^T`; the positive-diagonal gauge is applied per sector as the
+outcomes are delivered. An executor without this route (the trait default
+and every BLAS provider) writes each block's adjoint into one scratch sized
+for the largest block and factors it with QR, as before. LQ of a lazy
+adjoint `A^H` runs the parent blocks `A` through the QR batch and adjoints
+the factors. The positive-diagonal LQ is unique only when a sector's
+leading `k x k` triangular factor is nonsingular; otherwise the routes
+return valid but possibly different factors.
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not

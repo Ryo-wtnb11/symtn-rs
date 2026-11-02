@@ -1,5 +1,5 @@
 //! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, Hermitian eigendecomposition, their values-only forms and general
+//! QR, LQ, Hermitian eigendecomposition, their values-only forms and general
 //! eigenvalues): one tlinalg call per block, the blocks spread over the lane
 //! driver's lanes on the caller's engine.
 //!
@@ -19,7 +19,7 @@ use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
-use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
+use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::schedule::{self, GrantKey};
@@ -43,6 +43,10 @@ pub(crate) trait Factor {
     /// Whether a batch of single-matrix inputs joins the lane search with
     /// [`grant`]; otherwise its batches keep the baseline placement.
     const SEARCHED: bool = true;
+
+    /// Whether the provider reads each item's transpose (the first two
+    /// extents and strides swapped, no copy) instead of the item itself.
+    const TRANSPOSED: bool = false;
 
     /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
     /// weighted multiply-adds: its total work and the part a team inside the
@@ -131,6 +135,61 @@ impl Factor for Qr {
             output::<Self, T>(&[k, n], batch, r)?,
         ])
     }
+}
+
+/// Compact LQ: `[L, Q]` of shapes `[m, k, b..]`, `[k, n, b..]` with
+/// `k = min(m, n)`, from the provider's QR of the transposed read:
+/// `X^T = Q' R'` gives `X = R'^T Q'^T`, so `L = R'^T` and `Q = Q'^T`, each
+/// transposed inside the job. No adjoint of `X` is staged.
+///
+/// Why the transpose, not the adjoint, of `X`: a strided read can swap axes
+/// but not conjugate, and `Q'^T` has orthonormal rows like `Q'^H`
+/// (`Q'^T conj(Q') = conj(Q'^H Q') = I`).
+pub(crate) struct Lq;
+
+impl Factor for Lq {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: it is the QR of the transpose (see `Qr::SEARCHED`).
+    const SEARCHED: bool = false;
+    const TRANSPOSED: bool = true;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        Qr::estimates::<T>(n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let k = m.min(n);
+        let (mut q, mut r) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            tlinalg::qr::qr(Self::OP, raw, &mut q, &mut r, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![
+            output::<Self, T>(&[m, k], batch, transpose_items(&r, k, m))?,
+            output::<Self, T>(&[k, n], batch, transpose_items(&q, n, k))?,
+        ])
+    }
+}
+
+/// The transpose of each column-major `rows x cols` item of `data`,
+/// column-major `cols x rows` per item.
+fn transpose_items<T: Copy>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
+    let mut transpose = Vec::with_capacity(data.len());
+    if rows * cols == 0 {
+        return transpose;
+    }
+    for item in data.chunks_exact(rows * cols) {
+        for row in 0..rows {
+            transpose.extend((0..cols).map(|col| item[row + rows * col]));
+        }
+    }
+    transpose
 }
 
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
@@ -399,8 +458,8 @@ pub(crate) type Sink<'s> =
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
 /// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
-/// `eig_vals`)
-/// returns it.
+/// `eig_vals`) returns it; LQ, which has no per-matrix entry, reports the
+/// QR entry's errors.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
 /// input the view and the dtype (before the engine is entered), then rank,
@@ -444,6 +503,7 @@ pub(crate) fn factorize(
             sink(index, crate::tenferro_adapter::eig_read(engine, input))
         }),
         Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
+        Op::Lq => factorize_batch::<Lq>(engine, inputs, sink),
     }
 }
 
@@ -618,6 +678,18 @@ fn factor_typed<F: Factor, T: Scalar>(
     let offset = isize::try_from(view.offset()).map_err(|_| DenseError::OffsetOverflow {
         value: view.offset(),
     })?;
+    let (transposed_shape, transposed_strides);
+    let (shape, strides): (&[usize], &[isize]) = if F::TRANSPOSED {
+        let mut swapped: ShapeVec = shape.iter().copied().collect();
+        swapped.swap(0, 1);
+        transposed_shape = swapped;
+        let mut swapped: StrideVec = strides.iter().copied().collect();
+        swapped.swap(0, 1);
+        transposed_strides = swapped;
+        (&transposed_shape, &transposed_strides)
+    } else {
+        (shape, strides)
+    };
     let raw = RawStridedRef::new(view.data(), shape, strides, offset).map_err(|err| {
         tenferro_error(
             F::ENTRY,
