@@ -57,7 +57,7 @@ jobs:
       # native block kernels and their lane-allocation search. Push/PR CI
       # runs krylov on OpenBLAS, which has no lane allocator.
       - name: Run krylov tests on the native provider
-        run: cargo test --locked -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::
+        run: "cargo test --locked -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::"
         working-directory: symtn
         env:
           RUSTFLAGS: -l framework=Accelerate
