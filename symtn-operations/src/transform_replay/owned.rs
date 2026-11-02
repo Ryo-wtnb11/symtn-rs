@@ -57,6 +57,9 @@ where
     let threads = effective_tree_transform_threads(engine, schedule, threads);
     let layouts = structure.layouts();
     let max_fused_rank = layouts.max_fused_rank();
+    // One gate for every unsplit block list on the calling thread; forked
+    // leaves build their own.
+    let gate = LeafGate::new(layouts.max_planned_elements());
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
@@ -95,13 +98,14 @@ where
                 singles_threads,
                 exec,
                 &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
-                &|items, dst, dst_start, fused_index, mut exec| {
-                    let gate = LeafGate::new();
+                Some(&gate),
+                layouts.max_planned_elements(),
+                &|items, dst, dst_start, fused_index, mut exec, gate| {
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
                         write_uninit_layout_from_source(
                             exec.reborrow(),
-                            &gate,
+                            gate,
                             layouts,
                             dst_layout,
                             src_layout,
@@ -166,13 +170,14 @@ where
                     scatter_threads,
                     exec,
                     &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
-                    &|groups, dst, dst_start, fused_index, mut exec| {
-                        let gate = LeafGate::new();
+                    Some(&gate),
+                    layouts.max_planned_elements(),
+                    &|groups, dst, dst_start, fused_index, mut exec, gate| {
                         for &group in groups {
                             for item in &scatter_columns[scatter_groups[group].columns.clone()] {
                                 write_uninit_layout_from_packed(
                                     exec.reborrow(),
-                                    &gate,
+                                    gate,
                                     layouts,
                                     item.dst_layout,
                                     dst,
@@ -230,12 +235,15 @@ fn split_join_uninit<I, D>(
     threads: usize,
     exec: Exec<'_>,
     dst_lo: &(impl Fn(&I) -> Result<isize, OperationError> + Sync),
+    gate: Option<&LeafGate>,
+    gate_bound: usize,
     leaf: &(impl Fn(
         &[I],
         &mut [MaybeUninit<D>],
         isize,
         &mut [usize],
         Exec<'_>,
+        &LeafGate,
     ) -> Result<(), OperationError>
           + Sync),
 ) -> Result<(), OperationError>
@@ -247,12 +255,21 @@ where
         return Ok(());
     }
     if threads <= 1 || items.len() == 1 {
+        let own_gate;
+        let gate = match gate {
+            Some(gate) => gate,
+            None => {
+                own_gate = LeafGate::new(gate_bound);
+                &own_gate
+            }
+        };
         return leaf(
             items,
             dst,
             dst_start,
             &mut fused_indices[..max_fused_rank],
             exec,
+            gate,
         );
     }
 
@@ -278,6 +295,8 @@ where
                 left_threads,
                 exec,
                 dst_lo,
+                None,
+                gate_bound,
                 leaf,
             )
         },
@@ -291,6 +310,8 @@ where
                 right_threads,
                 exec,
                 dst_lo,
+                None,
+                gate_bound,
                 leaf,
             )
         },

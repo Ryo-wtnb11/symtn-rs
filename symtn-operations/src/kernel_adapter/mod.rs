@@ -42,7 +42,7 @@ mod tests {
                 crate::host_pool::eager_test_pool(threads),
             ] {
                 pool.with_exec(|exec| {
-                    let gate = sealed::LeafGate::new();
+                    let gate = sealed::LeafGate::new(usize::MAX);
                     let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
                     // The first widened count, by bisection on Strided's own
                     // answer, so the sweep also covers its exact boundary.
@@ -59,6 +59,10 @@ mod tests {
                         }
                         around.extend(at.saturating_sub(64)..at + 64);
                     }
+                    // A gate bounded by the largest planned role is exact up
+                    // to that bound; bound it just past the boundary.
+                    let bound = around.last().copied().unwrap_or(4096);
+                    let bounded = sealed::LeafGate::new(bound);
                     let mut seen = [false; 2];
                     for &n in elements.iter().chain(&around) {
                         let widens = widens(n);
@@ -67,6 +71,13 @@ mod tests {
                             widens,
                             "threads {threads}, elements {n}"
                         );
+                        if n <= bound {
+                            assert_eq!(
+                                bounded.widens(&exec, n),
+                                widens,
+                                "bounded, threads {threads}, elements {n}"
+                            );
+                        }
                         seen[usize::from(widens)] = true;
                     }
                     // The sweep crosses the threshold on every wide token.

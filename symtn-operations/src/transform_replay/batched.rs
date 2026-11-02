@@ -137,6 +137,9 @@ where
     C: Copy + Sync,
 {
     let layouts = task.layouts();
+    // One gate for every block list this call visits on the calling
+    // thread; forked leaves build their own.
+    let gate = LeafGate::new(layouts.max_planned_elements());
     let recoupling_plan = task.recoupling_plan();
     workspace.prepare_fused_indices(1, layouts.max_fused_rank())?;
 
@@ -144,7 +147,6 @@ where
     // machinery entirely: no pack scratch, no job list, no scatter pass.
     if recoupling_plan.is_empty() {
         return crate::host_pool::with_exec(engine, |mut exec| {
-            let gate = LeafGate::new();
             for block in task.blocks() {
                 let TreeTransformBlock::Single {
                     dst_layout,
@@ -194,7 +196,6 @@ where
     // the compile-time recoupling entries, whose order is chosen to form
     // same-shape strided GEMM runs.
     crate::host_pool::with_exec(engine, |mut exec| {
-        let gate = LeafGate::new();
         for block in task.blocks() {
             let TreeTransformBlock::Single {
                 dst_layout,
@@ -343,7 +344,6 @@ where
 
         let start = profile.as_ref().map(|_| std::time::Instant::now());
         crate::host_pool::with_exec(engine, |mut exec| {
-            let gate = LeafGate::new();
             for dst_index in 0..dst_count {
                 scatter_column_on_token(
                     exec.reborrow(),
@@ -486,7 +486,7 @@ where
     if threads <= 1 || items.len() == 1 {
         let mut zero_strides = Vec::new();
         let fused_index = &mut fused_indices[..max_fused_rank];
-        let gate = LeafGate::new();
+        let gate = LeafGate::new(layouts.max_planned_elements());
         for &item in items {
             let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
             let role = layouts.role(dst_layout)?;
@@ -626,6 +626,7 @@ fn replay_scatter_columns<A, D, C>(
     mode: DestinationMode<D>,
     threads: usize,
     mut exec: Exec<'_>,
+    gate: Option<&LeafGate>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -637,7 +638,14 @@ where
     }
     if threads <= 1 || items.len() == 1 {
         let fused_index = &mut fused_indices[..max_fused_rank];
-        let gate = LeafGate::new();
+        let own_gate;
+        let gate = match gate {
+            Some(gate) => gate,
+            None => {
+                own_gate = LeafGate::new(layouts.max_planned_elements());
+                &own_gate
+            }
+        };
         for item in items {
             let role = layouts.role(item.dst_layout)?;
             let dst = layouts.entry(item.dst_layout);
@@ -645,7 +653,7 @@ where
             let packed_offset = offset_to_isize(item.packed_offset - packed_start)?;
             let column_alpha = alpha.at(dst.offset);
             if mode.overwrites() {
-                if let Some(plan) = admitted_plan(role, dst.element_count, &exec, &gate) {
+                if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
                     if let Some(result) = kernels.planned_scatter(
                         exec.reborrow(),
                         plan,
@@ -723,6 +731,7 @@ where
                 mode,
                 left_threads,
                 exec,
+                None,
             )
         },
         |exec| {
@@ -740,6 +749,7 @@ where
                 mode,
                 right_threads,
                 exec,
+                None,
             )
         },
     );
@@ -774,6 +784,7 @@ where
         return Ok(());
     }
     if threads <= 1 || groups.len() == 1 {
+        let gate = LeafGate::new(layouts.max_planned_elements());
         for &group in groups {
             let columns = scatter_groups[group].columns.clone();
             replay_scatter_columns(
@@ -790,6 +801,7 @@ where
                 mode,
                 1,
                 exec.reborrow(),
+                Some(&gate),
             )?;
         }
         return Ok(());
@@ -1089,6 +1101,9 @@ where
     C: Copy + Sync,
 {
     let layouts = task.layouts();
+    // One gate for every block list this call visits on the calling
+    // thread; forked leaves build their own.
+    let gate = LeafGate::new(layouts.max_planned_elements());
     let recoupling_plan = task.recoupling_plan();
     let max_fused_rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
@@ -1135,7 +1150,6 @@ where
         } else {
             let mut zero_strides = Vec::new();
             crate::host_pool::with_exec(engine, |mut exec| {
-                let gate = LeafGate::new();
                 for &item in &schedule.singles {
                     let (dst_layout, src_layout, coefficient) =
                         scheduled_single(task.blocks(), item)?;
@@ -1214,7 +1228,6 @@ where
         } else {
             let mut zero_strides = Vec::new();
             crate::host_pool::with_exec(engine, |mut exec| {
-                let gate = LeafGate::new();
                 for &group in &workspace.chunk_scatter_groups {
                     for item in
                         &schedule.scatter_columns[schedule.scatter_groups[group].columns.clone()]

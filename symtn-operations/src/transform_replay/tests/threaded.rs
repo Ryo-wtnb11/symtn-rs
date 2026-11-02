@@ -503,9 +503,10 @@ fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
 }
 
 /// What: the leaf gate's dispatch-cost scan runs only when an overwrite of a
-/// role with a retained plan reaches admission, once per block list: a list
-/// of planless roles and an accumulating list scan nothing, an overwrite list
-/// of planned roles scans exactly once on a wide engine.
+/// role with a retained plan reaches admission, once per call on one token:
+/// planless and accumulating calls scan nothing, and an overwrite of planned
+/// roles scans exactly once on a wide engine, however many block lists (one
+/// Single list, one scatter list per Multi block) the call visits.
 #[test]
 fn leaf_gate_scans_only_for_planned_overwrites() {
     use crate::kernel_adapter::sealed::GATE_SCANS;
@@ -609,4 +610,74 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
     let overwritten = source.iter().map(|&v| 2.0 * v).collect::<Vec<_>>();
     assert_eq!(destination, overwritten);
     assert_eq!(overwrite_scans, 1);
+
+    // Eight Multi groups of planned `BLOCK`-element scatter columns: the
+    // serial initialized replay and the owned writer each visit one scatter
+    // list per group and scan once.
+    // A canonical U(1) layout (sixteen charges, one `ROWS x COLS` block each),
+    // so the owned writer also admits it.
+    let leg = |degeneracy: usize| {
+        symtn_core::SectorLeg::new(
+            (0..16).map(|charge| (symtn_core::U1Irrep::new(charge), degeneracy)),
+            false,
+        )
+    };
+    let groups = symtn_core::FusionTreeHomSpace::new(
+        symtn_core::FusionProductSpace::new([leg(ROWS)]),
+        symtn_core::FusionProductSpace::new([leg(COLS)]),
+    )
+    .coupled_subblock_structure_from_leg_degeneracies(&symtn_core::U1FusionRule)
+    .unwrap();
+    assert_eq!(groups.block_count(), 16);
+    let specs = (0..8)
+        .map(|g| {
+            TreeTransformBlockSpec::multi(
+                vec![2 * g, 2 * g + 1],
+                vec![2 * g, 2 * g + 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )
+        })
+        .collect::<Vec<_>>();
+    let multi = TreeTransformStructure::compile_structures(&groups, &groups, &specs).unwrap();
+    assert_eq!(multi.layouts().retained_plan_count(), 16);
+    let source = (1..=16 * BLOCK as u32).map(f64::from).collect::<Vec<_>>();
+    let mut destination = vec![f64::NAN; source.len()];
+    let initialized_scans = scans(&mut |engine| {
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &multi,
+            &groups,
+            &groups,
+            &mut destination,
+            &source,
+            1.0,
+            &[],
+            1,
+        )
+        .unwrap();
+    });
+    assert_eq!(destination, source);
+    assert_eq!(initialized_scans, 1);
+    let mut owned = None;
+    let owned_scans = scans(&mut |engine| {
+        owned = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &multi,
+            &groups,
+            &groups,
+            1,
+            &source,
+            1.0,
+            1,
+            None,
+        )
+        .unwrap();
+    });
+    assert_eq!(owned, Some(source));
+    assert_eq!(owned_scans, 1);
 }

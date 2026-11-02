@@ -5,8 +5,8 @@ pub(crate) mod sealed {
     use super::*;
     use strided_kernel::execution;
 
-    /// The cheapest-dispatch width of one token, found at most once per list
-    /// of blocks a leaf visits on that token.
+    /// The smallest paying element count of one token shape, found at most
+    /// once per call and token shape on one thread.
     ///
     /// Why: Strided's `parallel_width` scans every width up to the budget on each
     /// call, so asking it for every small block of a serial replay costs
@@ -16,27 +16,40 @@ pub(crate) mod sealed {
     /// not: one `pays` query against that width rejects a block in O(1), and only
     /// blocks it admits pay for the full width search.
     ///
-    /// Why lazy: the O(budget) scan runs only when an overwrite of a role with
-    /// a retained plan reaches admission, so a list of planless or
-    /// accumulating blocks pays nothing. A gate lives inside its list's leaf,
-    /// on the thread that runs it, and every call passes that list's token,
-    /// because a token's dispatch cost depends on the calling thread.
+    /// Why lazy: the O(budget + log bound) scan runs only when an overwrite of
+    /// a role with a retained plan reaches admission, so a call of planless or
+    /// accumulating blocks pays nothing. A gate lives on the thread that runs
+    /// its blocks, because a token's dispatch cost depends on the calling
+    /// thread: one per call for the calling thread's unsplit lists, one per
+    /// forked leaf otherwise.
     pub struct LeafGate {
-        min_elements: core::cell::OnceCell<Option<usize>>,
+        /// The largest element count any planned role this gate admits has.
+        bound: usize,
+        /// The last scan, keyed by the token shape it was taken on.
+        memo: core::cell::Cell<Option<GateScan>>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct GateScan {
+        budget: core::num::NonZeroUsize,
+        team: bool,
+        min_elements: Option<usize>,
     }
 
     impl LeafGate {
-        pub(crate) fn new() -> Self {
+        /// A gate for roles of at most `bound` elements.
+        pub(crate) fn new(bound: usize) -> Self {
             Self {
-                min_elements: core::cell::OnceCell::new(),
+                bound,
+                memo: core::cell::Cell::new(None),
             }
         }
 
-        /// The smallest element count whose copy estimate pays at the
-        /// token's cheapest width, or `None` when no count does. A copy
+        /// The smallest element count up to `bound` whose copy estimate pays
+        /// at the token's cheapest width, or `None` when none does. A copy
         /// estimate is monotone in the element count, so a binary search over
-        /// `pays` at that one width finds it.
-        fn scan(exec: &crate::host_pool::Exec<'_>) -> Option<usize> {
+        /// `pays` at that one width finds it in O(log bound).
+        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
             #[cfg(test)]
             GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
             let mut cheapest = None;
@@ -54,13 +67,13 @@ pub(crate) mod sealed {
             let cheapest = cheapest?;
             let class = execution::KernelClass::Copy;
             let pays = |elements: usize| exec.pays(class.estimate(elements), 1, cheapest);
-            if !pays(usize::MAX) {
+            if !pays(bound) {
                 return None;
             }
-            let (mut below, mut at) = (0usize, usize::MAX);
             if pays(0) {
                 return Some(0);
             }
+            let (mut below, mut at) = (0usize, bound);
             while at - below > 1 {
                 let middle = below + (at - below) / 2;
                 if pays(middle) {
@@ -72,15 +85,35 @@ pub(crate) mod sealed {
             Some(at)
         }
 
-        /// Exactly `parallel_width(exec, Copy, elements) > 1`, for the one
-        /// token every call on this gate passes: a block below the paying
-        /// size is rejected without a width search.
+        /// Exactly `parallel_width(exec, Copy, elements) > 1` for
+        /// `elements <= bound`: a block below the paying size is rejected
+        /// without a width search.
+        ///
+        /// Why the memo is keyed by budget and team authority: one gate
+        /// serves every unsplit block list of a call on the calling thread,
+        /// whose tokens all come from one engine, so those two fields are
+        /// what can still differ between its tokens; the calling thread fixes
+        /// the remaining dispatch kind. The gate is not `Sync`, so a forked
+        /// worker builds its own.
         #[inline]
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
             if exec.is_serial() {
                 return false;
             }
-            match *self.min_elements.get_or_init(|| Self::scan(exec)) {
+            let (budget, team) = (exec.budget(), exec.carries_team());
+            let min_elements = match self.memo.get() {
+                Some(scan) if scan.budget == budget && scan.team == team => scan.min_elements,
+                _ => {
+                    let min_elements = Self::scan(exec, self.bound);
+                    self.memo.set(Some(GateScan {
+                        budget,
+                        team,
+                        min_elements,
+                    }));
+                    min_elements
+                }
+            };
+            match min_elements {
                 Some(min) if elements >= min => {
                     execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
                         > 1
