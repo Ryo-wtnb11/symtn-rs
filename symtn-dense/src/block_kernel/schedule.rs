@@ -1,17 +1,53 @@
 //! The block kernels' shared scheduler: J independent dense jobs in canonical
 //! order on one engine's execution context, split into equal-share lanes.
 //!
-//! Every resource number comes from the caller's `Exec`: the slot count from
-//! the token's `width_for` (Auto) or the policy's `BatchDecision` (forced), the
-//! lane count from `batch_decision`. Nothing here is calibrated or timed.
+//! Every resource number comes from the caller's `Exec`: the slot count S
+//! from the token's `width_for` (Auto) or the policy's `BatchDecision`
+//! (forced); a forced policy's lane count is its decision's, and Auto's is at
+//! most `L0 = min(S, J, batch_decision.lanes)`. Nothing here is calibrated or
+//! timed.
+//!
+//! Under Auto, given a grant model, the scheduler scores the baseline
+//! placement (L0 lanes, largest job first on the lane of least accumulated
+//! serial time) and an equal-share placement for every lane count from L0
+//! down to one under one model, and keeps the lowest score, the baseline on
+//! ties. A job's modeled time in a lane is its serial time when its provider
+//! would run it on one thread there, otherwise its share of that time over
+//! the provider's granted width plus the token's dispatch cost at that width.
+//! The granted width is itself an estimate composed from the provider's
+//! public decisions (for a Packed GEMM plan an optimistic upper bound on its
+//! grid), and the model has no sublinear speedup, so a lower score is a
+//! scheduling estimate, not a promise of a faster run. Without a grant model
+//! (the factorizations, see `driver::on_lanes`) the baseline is returned.
+//!
+//! The search costs `O(J log J + G S + G' sum(W) + L0 J' + P J log L0)`,
+//! counting the provider queries' width scans. Jobs with equal serial times
+//! and grant keys share their grants, so only one of each of the G distinct
+//! (time, key) groups is queried: once at the full S, and, for the G' groups
+//! widened there, once per distinct equal-share width during the sweep (W,
+//! with `sum(W) <= 2 S H(L0) + L0`; rebuilding the winner may repeat up to
+//! two widths). A proved lower bound costs `O(J')` per lane count for the J'
+//! widened jobs, the others entering it as one precomputed sum and maximum,
+//! and only the `P <= L0` counts whose bound is below the best score so far
+//! are placed, with one heap per width class. A searched allocation is kept
+//! in the process-global [`StructureCacheKind::LaneAllocations`] cache, so a
+//! call whose inputs were all searched before, on any executor, rebuilds it
+//! in `O(J + P)` without a query.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
+use symtn_core::{
+    ErasedStructureCacheControl, StructureCache, StructureCacheEquivalent, StructureCacheInfo,
+    StructureCacheKind,
+};
 use tcontract_exec::{BatchDecision, BatchQuery, BatchStrategy, Exec, WorkModel};
+
+use super::gemm::ENTRY_OVERHEAD_BYTES;
 
 /// One lane: its reserved slot budget and its jobs in ascending canonical
 /// order.
@@ -62,8 +98,15 @@ pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
 #[derive(Debug, Default)]
 pub(crate) struct AllocationScratch {
     lanes: Vec<Lane>,
+    /// Lanes an allocation with fewer lanes set aside, kept so that a later
+    /// allocation of more lanes (a baseline the search then narrows, every
+    /// warm call) reuses their job capacity instead of allocating it again.
+    spare: Vec<Lane>,
     order: Vec<usize>,
     load: Vec<Reverse<(Duration, usize, usize)>>,
+    narrow: Vec<Reverse<(Duration, usize, usize)>>,
+    columns: Columns,
+    keys: Vec<GrantKey>,
 }
 
 impl AllocationScratch {
@@ -77,58 +120,369 @@ impl AllocationScratch {
         use std::mem::size_of;
         self.lanes
             .iter()
+            .chain(&self.spare)
             .map(|lane| lane.jobs.capacity().saturating_mul(size_of::<usize>()))
             .fold(
-                self.lanes.capacity().saturating_mul(size_of::<Lane>()),
+                self.lanes
+                    .capacity()
+                    .saturating_add(self.spare.capacity())
+                    .saturating_mul(size_of::<Lane>()),
                 usize::saturating_add,
             )
             .saturating_add(self.order.capacity().saturating_mul(size_of::<usize>()))
             .saturating_add(
                 self.load
                     .capacity()
+                    .saturating_add(self.narrow.capacity())
                     .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
             )
+            .saturating_add(self.columns.retained_bytes())
+            .saturating_add(self.keys.capacity().saturating_mul(size_of::<GrantKey>()))
     }
 }
 
-/// `count` empty lanes, reusing `pool`'s lane and job capacity.
-fn lanes_from(mut pool: Vec<Lane>, count: usize) -> Vec<Lane> {
-    pool.truncate(count);
-    pool.resize_with(count, || Lane {
-        budget: 0,
-        jobs: Vec::new(),
-    });
+/// What a job's grant depends on besides its serial time and the execution
+/// context: jobs with equal keys and equal serial times get equal grants at
+/// every width. Every op that reaches the process-global
+/// [`lane_allocations`] cache must give different grant inputs different
+/// keys.
+pub(crate) type GrantKey = [u64; 2];
+
+/// Everything a searched allocation is a function of, as the
+/// [`StructureCacheKind::LaneAllocations`] cache keys it.
+///
+/// Why the key is complete: a searched allocation is a function of the
+/// context's budget P, its work model (the strategy is Auto, the only one
+/// that searches), the mean work (the batch decision), the token's dispatch
+/// cost at every width `2..=P` (the slot count, the batch decision, every
+/// grant and every item time read only those), whether the token carries a
+/// team (the Faer grant's item parallelism), the jobs' serial times in
+/// canonical order (the slot count, the order, the placements and the
+/// scores) and their grant keys (every other grant input). The grant
+/// function itself is not keyed: the process-global cache is reached only
+/// through `driver::on_lanes`, which searches only GEMM blocks, and every
+/// GEMM block op grants through `gemm::grant`, whose other inputs its keys
+/// carry. Floats are keyed by their bits, so equality is reflexive and a
+/// differently signed zero only searches again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaneAllocationKey {
+    budget: usize,
+    model: [u64; 5],
+    mean_work: u64,
+    team: bool,
+    costs: Box<[Duration]>,
+    times: Box<[Duration]>,
+    keys: Box<[GrantKey]>,
+}
+
+/// One call's [`LaneAllocationKey`], borrowed: a lookup reads the dispatch
+/// costs from the token instead of staging them, so a hit allocates nothing.
+struct LaneAllocationQuery<'a, 'e> {
+    exec: &'a Exec<'e>,
+    times: &'a [Duration],
+    keys: &'a [GrantKey],
+    mean_work: f64,
+}
+
+/// The work model's fields, by bits.
+fn model_bits(model: &WorkModel) -> [u64; 5] {
+    [
+        model.item_overhead_ns.to_bits(),
+        model.muladds_per_ns.to_bits(),
+        model.min_work_per_lane_ns.to_bits(),
+        model.min_items as u64,
+        model.min_items_per_lane as u64,
+    ]
+}
+
+/// The token's dispatch cost at every width `2..=budget`.
+fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a {
+    (2..=exec.budget())
+        .filter_map(NonZeroUsize::new)
+        .map(|width| exec.token_ref().dispatch_cost(width))
+}
+
+/// The one hash of a key and of its borrowed query, field by field.
+#[allow(clippy::too_many_arguments)]
+fn hash_key<H: Hasher>(
+    state: &mut H,
+    budget: usize,
+    model: [u64; 5],
+    mean_work: u64,
+    team: bool,
+    costs: (usize, impl Iterator<Item = Duration>),
+    times: &[Duration],
+    keys: &[GrantKey],
+) {
+    (budget, model, mean_work, team).hash(state);
+    state.write_usize(costs.0);
+    costs.1.for_each(|cost| cost.hash(state));
+    times.hash(state);
+    keys.hash(state);
+}
+
+impl Hash for LaneAllocationKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_key(
+            state,
+            self.budget,
+            self.model,
+            self.mean_work,
+            self.team,
+            (self.costs.len(), self.costs.iter().copied()),
+            &self.times,
+            &self.keys,
+        );
+    }
+}
+
+impl LaneAllocationQuery<'_, '_> {
+    fn model(&self) -> [u64; 5] {
+        model_bits(&self.exec.batch_policy().model)
+    }
+
+    fn team(&self) -> bool {
+        self.exec.token_ref().carries_team()
+    }
+
+    fn to_key(&self) -> LaneAllocationKey {
+        LaneAllocationKey {
+            budget: self.exec.budget(),
+            model: self.model(),
+            mean_work: self.mean_work.to_bits(),
+            team: self.team(),
+            costs: dispatch_costs(self.exec).collect(),
+            times: self.times.into(),
+            keys: self.keys.into(),
+        }
+    }
+}
+
+impl Hash for LaneAllocationQuery<'_, '_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let budget = self.exec.budget();
+        hash_key(
+            state,
+            budget,
+            self.model(),
+            self.mean_work.to_bits(),
+            self.team(),
+            (budget.saturating_sub(1), dispatch_costs(self.exec)),
+            self.times,
+            self.keys,
+        );
+    }
+}
+
+impl StructureCacheEquivalent<LaneAllocationKey> for LaneAllocationQuery<'_, '_> {
+    fn equivalent(&self, key: &LaneAllocationKey) -> bool {
+        key.budget == self.exec.budget()
+            && key.model == self.model()
+            && key.mean_work == self.mean_work.to_bits()
+            && key.team == self.team()
+            && *key.times == *self.times
+            && *key.keys == *self.keys
+            && key.costs.len() + 1 == key.budget
+            && key.costs.iter().copied().eq(dispatch_costs(self.exec))
+    }
+}
+
+/// A searched allocation, immutable: the slot count, the batch decision,
+/// each lane's budget and the end of its jobs in `jobs`.
+#[derive(Debug)]
+pub(crate) struct LaneAllocationEntry {
+    slots: usize,
+    decision: BatchDecision,
+    lanes: Box<[(usize, usize)]>,
+    jobs: Box<[usize]>,
+}
+
+pub(crate) type LaneAllocationCache = StructureCache<LaneAllocationKey, LaneAllocationEntry>;
+
+/// The bytes charged for one cached allocation: the inline key and entry,
+/// the entry overhead, and its boxed slices (`P - 1` costs, J times, keys
+/// and job indices, one pair per lane). Saturates.
+fn charge(key: &LaneAllocationKey, entry: &LaneAllocationEntry) -> u64 {
+    use std::mem::size_of;
+    [
+        size_of::<LaneAllocationKey>(),
+        size_of::<LaneAllocationEntry>(),
+        ENTRY_OVERHEAD_BYTES,
+        key.costs.len().saturating_mul(size_of::<Duration>()),
+        key.times.len().saturating_mul(size_of::<Duration>()),
+        key.keys.len().saturating_mul(size_of::<GrantKey>()),
+        entry
+            .lanes
+            .len()
+            .saturating_mul(size_of::<(usize, usize)>()),
+        entry.jobs.len().saturating_mul(size_of::<usize>()),
+    ]
+    .into_iter()
+    .fold(0, |total: u64, bytes| total.saturating_add(bytes as u64))
+}
+
+struct LaneAllocationsControl;
+
+impl ErasedStructureCacheControl for LaneAllocationsControl {
+    fn info(&self) -> StructureCacheInfo {
+        lane_allocations().info()
+    }
+
+    fn clear(&self) {
+        ErasedStructureCacheControl::clear(lane_allocations())
+    }
+
+    fn set_byte_budget(&self, bytes: u64) {
+        ErasedStructureCacheControl::set_byte_budget(lane_allocations(), bytes)
+    }
+}
+
+/// The process-global lane-allocation cache, registered with `symtn-core`'s
+/// structure-cache registry on first use.
+pub(crate) fn lane_allocations() -> &'static LaneAllocationCache {
+    static CACHE: OnceLock<LaneAllocationCache> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        // Refused only if another crate claimed the slot first. Then
+        // `symtn::cache::clear` cannot reach this cache, so it admits
+        // nothing: every batch searches per call, with identical results.
+        let budget = symtn_core::register_structure_cache(
+            StructureCacheKind::LaneAllocations,
+            &LaneAllocationsControl,
+        )
+        .unwrap_or(0);
+        StructureCache::new(StructureCacheKind::LaneAllocations, budget)
+    })
+}
+
+/// `count` empty lanes, reusing `pool`'s lane and job capacity; lanes beyond
+/// `count` move to `spare`, and missing ones come from it first.
+fn lanes_from(mut pool: Vec<Lane>, spare: &mut Vec<Lane>, count: usize) -> Vec<Lane> {
+    while pool.len() > count {
+        spare.extend(pool.pop());
+    }
+    pool.reserve(count.saturating_sub(pool.len()));
+    while pool.len() < count {
+        pool.push(spare.pop().unwrap_or(Lane {
+            budget: 0,
+            jobs: Vec::new(),
+        }));
+    }
     for lane in &mut pool {
         lane.jobs.clear();
     }
     pool
 }
 
-/// Equal-split allocation of jobs with serial times `times` (canonical order)
-/// and mean weighted work `mean_work` (multiply-adds; it feeds the
-/// `BatchQuery`, while `times` feed `width_for`, so neither is converted twice).
+/// [`allocate_in`] with every job's grant serial, where no equal-share
+/// candidate can beat the baseline placement on jobs of equal time.
 #[cfg(test)]
 pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> Allocation {
-    allocate_in(exec, times, mean_work, &mut AllocationScratch::default())
+    allocate_in(
+        exec,
+        times,
+        |_| [0; 2],
+        mean_work,
+        &mut AllocationScratch::default(),
+        &LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0),
+        Some(|_, _, _| 1),
+    )
 }
 
-/// [`allocate`] with its tables drawn from `scratch`.
+/// A job's modeled time in a lane where its provider grants it `width`
+/// slots: its serial time `serial` when the grant is one slot, otherwise
+/// `serial / width` plus the token's dispatch cost at that width, in integer
+/// nanoseconds.
+pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Duration {
+    match NonZeroUsize::new(width).filter(|w| w.get() > 1) {
+        None => serial,
+        Some(w) => (serial / u32::try_from(w.get()).unwrap_or(u32::MAX))
+            .saturating_add(exec.token_ref().dispatch_cost(w)),
+    }
+}
+
+/// Equal-split allocation of jobs with serial times `times` (canonical order)
+/// and mean weighted work `mean_work` (multiply-adds; it feeds the
+/// `BatchQuery`, while `times` feed `width_for`, so neither is converted
+/// twice), with its tables drawn from `scratch`.
+///
+/// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
+/// `w` reserved slots, and `key(j)` its other inputs (see [`GrantKey`]);
+/// Auto scores its candidates with it (see the module documentation), and
+/// takes a searched allocation from `cache` when one was computed from the
+/// same inputs (see [`LaneAllocationKey`]), offering each new search for
+/// admission. Without a grant, and under a forced strategy, the baseline
+/// placement is returned and no candidate is scored; `key` is then not
+/// called.
+///
+/// Why a lookup and a publish rather than the cache's single-flight build:
+/// that build takes an owned key, which a hit would have to stage. Racing
+/// misses of one key each search, and the losers count as duplicate builds.
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
+    key: impl Fn(usize) -> GrantKey,
     mean_work: f64,
     scratch: &mut AllocationScratch,
+    cache: &LaneAllocationCache,
+    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+) -> Allocation {
+    // The keys are staged only where a search can run (two or more jobs and
+    // slots), so a serial context retains nothing for them.
+    let mut keys = std::mem::take(&mut scratch.keys);
+    keys.clear();
+    if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
+        keys.extend((0..times.len()).map(key));
+    }
+    let allocation = allocate_with(exec, times, &keys, mean_work, scratch, cache, grant);
+    scratch.keys = keys;
+    allocation
+}
+
+fn allocate_with(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    keys: &[GrantKey],
+    mean_work: f64,
+    scratch: &mut AllocationScratch,
+    cache: &LaneAllocationCache,
+    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
-    let decision = exec.batch_decision(&BatchQuery::new(jobs, mean_work));
     let pool = std::mem::take(&mut scratch.lanes);
+    // The keys are staged only where a search can run.
+    let query = (grant.is_some()
+        && exec.batch_policy().strategy == BatchStrategy::Auto
+        && !keys.is_empty())
+    .then_some(LaneAllocationQuery {
+        exec,
+        times,
+        keys,
+        mean_work,
+    });
+    let epoch = symtn_core::core_reset_epoch();
+    if let Some(entry) = query.as_ref().and_then(|query| cache.get(query)) {
+        let mut lanes = lanes_from(pool, &mut scratch.spare, entry.lanes.len());
+        let mut start = 0;
+        for (lane, &(budget, end)) in lanes.iter_mut().zip(&entry.lanes) {
+            lane.budget = budget;
+            lane.jobs.extend_from_slice(&entry.jobs[start..end]);
+            start = end;
+        }
+        return Allocation {
+            budget,
+            slots: entry.slots,
+            decision: entry.decision,
+            lanes,
+        };
+    }
+    let decision = exec.batch_decision(&BatchQuery::new(jobs, mean_work));
     if jobs == 0 {
         return Allocation {
             budget,
             slots: 0,
             decision,
-            lanes: lanes_from(pool, 0),
+            lanes: lanes_from(pool, &mut scratch.spare, 0),
         };
     }
     let (slots, lanes) = if exec.batch_policy().strategy == BatchStrategy::Auto {
@@ -144,7 +498,7 @@ pub(crate) fn allocate_in(
         )
     };
     let lanes = lanes.max(1);
-    let mut assigned = lanes_from(pool, lanes);
+    let mut assigned = lanes_from(pool, &mut scratch.spare, lanes);
     if lanes == 1 {
         assigned[0].budget = slots;
         assigned[0].jobs.extend(0..jobs);
@@ -172,18 +526,328 @@ pub(crate) fn allocate_in(
             load.push(Reverse((sum.saturating_add(times[j]), count + 1, k)));
         }
     }
-    scratch.order = order;
-    scratch.load = load.into_vec();
+    let mut load = load.into_vec();
     for (k, lane) in assigned.iter_mut().enumerate() {
         lane.jobs.sort_unstable();
         lane.budget = slots / lanes + usize::from(k < slots % lanes);
     }
+    if let (BatchStrategy::Auto, Some(grant)) = (exec.batch_policy().strategy, grant) {
+        let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
+        let mut columns = std::mem::take(&mut scratch.columns);
+        let mut narrow = std::mem::take(&mut scratch.narrow);
+        columns.begin(times, keys, |j| grant(j, times[j], slots) > 1);
+        columns.prepare((slots, lanes), &fill);
+        let baseline = assigned
+            .iter()
+            .map(|lane| {
+                lane.jobs.iter().fold(Duration::ZERO, |sum, &j| {
+                    sum.saturating_add(columns.get(j, lane.budget))
+                })
+            })
+            .max()
+            .unwrap_or(Duration::ZERO);
+        let mut best = (baseline, None);
+        // Ties keep the baseline, then the larger lane count. Shares only
+        // widen as the count falls, so each width's column is filled once.
+        for count in (1..=lanes).rev() {
+            columns.prepare((slots, count), &fill);
+            // A candidate that cannot score strictly lower is not placed:
+            // the choice is the one the full sweep makes.
+            if columns.lower_bound((slots, count)) >= best.0.as_nanos() {
+                continue;
+            }
+            let item = |j: usize, width: usize| columns.get(j, width);
+            let score = equal_shares(slots, count, &order, &item, &mut load, &mut narrow, None);
+            if score < best.0 {
+                best = (score, Some(count));
+            }
+        }
+        if let Some(count) = best.1 {
+            columns.prepare((slots, count), &fill);
+            let item = |j: usize, width: usize| columns.get(j, width);
+            assigned = lanes_from(assigned, &mut scratch.spare, count);
+            equal_shares(
+                slots,
+                count,
+                &order,
+                &item,
+                &mut load,
+                &mut narrow,
+                Some(&mut assigned),
+            );
+        }
+        scratch.columns = columns;
+        scratch.narrow = narrow;
+        if let Some(query) = query {
+            let key = query.to_key();
+            let mut ends = Vec::with_capacity(assigned.len());
+            let mut placed = Vec::with_capacity(jobs);
+            for lane in &assigned {
+                placed.extend_from_slice(&lane.jobs);
+                ends.push((lane.budget, placed.len()));
+            }
+            let entry = LaneAllocationEntry {
+                slots,
+                decision,
+                lanes: ends.into(),
+                jobs: placed.into(),
+            };
+            let bytes = charge(&key, &entry);
+            cache.publish(&key, Arc::new(entry), bytes, epoch);
+        }
+    }
+    scratch.order = order;
+    scratch.load = load;
+    debug_assert!(assigned
+        .iter()
+        .enumerate()
+        .all(|(k, lane)| lane.budget
+            == slots / assigned.len() + usize::from(k < slots % assigned.len())));
     Allocation {
         budget,
         slots,
         decision,
         lanes: assigned,
     }
+}
+
+/// Every job's modeled item time at two lane widths, so a width the
+/// candidates share is granted once per job, not once per candidate. Jobs
+/// whose provider stays serial at the full slot count are queried once and
+/// never again.
+#[derive(Debug, Default)]
+struct Columns {
+    /// The width of each column; zero (no lane has it) when unfilled.
+    width: [usize; 2],
+    items: [Vec<Duration>; 2],
+    /// The jobs the provider widens at the full slot count, ascending.
+    widened: Vec<usize>,
+    /// Each job's representative: the lowest job with its serial time and
+    /// grant key, whose grants it shares at every width.
+    rep: Vec<usize>,
+    /// Jobs ordered by serial time, grant key and index, to find `rep`.
+    by_key: Vec<usize>,
+    /// Whether each job is widened at the full slot count.
+    widens: Vec<bool>,
+    /// The sum and the largest of the other jobs' serial times, in ns.
+    serial_total: u128,
+    serial_largest: u128,
+}
+
+impl Columns {
+    /// Starts an allocation of jobs with serial times `times` and grant keys
+    /// `keys`: both columns hold every job's serial time, each job's
+    /// representative is the lowest job with its serial time and key (whose
+    /// grants it shares at every width, so only representatives are
+    /// queried), and `widens(j)` (the provider's grant at the full slot
+    /// count S is above one), asked of representatives only, splits the jobs.
+    ///
+    /// Why a job serial at S is serial at every share `w <= S`: each step of
+    /// a grant is a released width rule that starts at width one and moves
+    /// only to a width `k` in `2..=b` that both pays and strictly lowers its
+    /// objective, where the payoff and the objective at `k` depend on the
+    /// token's dispatch cost at `k` alone, not on the ceiling `b`
+    /// (threadteam `width_for_by`, reached through `Exec::width_for_within`
+    /// and `batch_decision_within`). A ceiling below `b` scans a prefix of
+    /// the same candidates, so if none qualifies under `b` none qualifies
+    /// under it either; and when the minimum under `b` sits at `q <= b'`
+    /// it is also the minimum under `b'`, so a step's result never grows
+    /// as its ceiling falls. The factorization grant is one such step. The
+    /// GEMM grant's second step runs within the first step's result, which
+    /// is thus at most its value at S: a Faer plan's one-item decision is
+    /// its inner width rule or one thread (`faer_auto`, one item, no lanes),
+    /// and a Packed plan's is its narrowed width (`packed_auto`, one item,
+    /// no lanes), both width rules within that smaller ceiling. Hence a
+    /// grant of one at S is one at every share, and such a job's item time is
+    /// its serial time at every candidate width.
+    fn begin(&mut self, times: &[Duration], keys: &[GrantKey], widens: impl Fn(usize) -> bool) {
+        self.width = [0; 2];
+        for column in &mut self.items {
+            column.clear();
+            column.extend_from_slice(times);
+        }
+        self.by_key.clear();
+        self.by_key.extend(0..times.len());
+        self.by_key
+            .sort_unstable_by_key(|&j| (times[j], keys[j], j));
+        self.rep.clear();
+        self.rep.resize(times.len(), 0);
+        let mut first = None;
+        for &j in &self.by_key {
+            let start = match first {
+                Some(f) if times[f] == times[j] && keys[f] == keys[j] => f,
+                _ => j,
+            };
+            first = Some(start);
+            self.rep[j] = start;
+        }
+        self.widened.clear();
+        self.widens.clear();
+        (self.serial_total, self.serial_largest) = (0, 0);
+        for (j, t) in times.iter().enumerate() {
+            let rep = self.rep[j];
+            let wide = if rep == j {
+                widens(j)
+            } else {
+                self.widens[rep]
+            };
+            self.widens.push(wide);
+            if wide {
+                self.widened.push(j);
+            } else {
+                self.serial_total = self.serial_total.saturating_add(t.as_nanos());
+                self.serial_largest = self.serial_largest.max(t.as_nanos());
+            }
+        }
+    }
+
+    /// Keeps the columns of the widths of `count` equal shares of `slots`
+    /// (`count <= slots`) and fills a missing one's widened jobs with
+    /// `fill(job, width)`; the other jobs keep their serial time.
+    fn prepare(
+        &mut self,
+        (slots, count): (usize, usize),
+        fill: &impl Fn(usize, usize) -> Duration,
+    ) {
+        let narrow = slots / count;
+        let widths = [narrow, narrow + 1];
+        let widths = &widths[..1 + usize::from(slots % count != 0)];
+        for &width in widths {
+            if self.width.contains(&width) {
+                continue;
+            }
+            let slot = usize::from(widths.contains(&self.width[0]));
+            self.width[slot] = width;
+            for &j in &self.widened {
+                let rep = self.rep[j];
+                self.items[slot][j] = if rep == j {
+                    fill(j, width)
+                } else {
+                    self.items[slot][rep]
+                };
+            }
+        }
+    }
+
+    /// A lower bound, in nanoseconds, on the score of the equal-share
+    /// placement over `count` lanes of `slots` whose widths' columns are
+    /// prepared: `max(max_j m_j, ceil(sum_j m_j / count))`, where `m_j` is
+    /// job `j`'s smaller item time over the two share widths.
+    ///
+    /// Proof. Every job runs on exactly one lane, whose width is one of the
+    /// two shares, so its item time there is at least `m_j` (the minimum,
+    /// because the item time need not fall as the width grows). A lane's load
+    /// is the sum of its jobs' item times, so the largest load is at least
+    /// any one job's `m_j`, and at least the mean load, which is at least
+    /// `sum_j m_j / count`; a load is whole nanoseconds, hence the ceiling.
+    /// The placement saturates its loads at `Duration::MAX`, so its score is
+    /// at least `min(bound, Duration::MAX)`; any score it is compared with
+    /// is at most `Duration::MAX`, so `bound >= score` still proves the
+    /// candidate cannot score strictly lower.
+    /// The serial jobs' part is their precomputed sum and maximum, so the
+    /// bound costs one step per widened job.
+    fn lower_bound(&self, (slots, count): (usize, usize)) -> u128 {
+        let narrow = slots / count;
+        let wide = narrow + usize::from(slots % count != 0);
+        let (mut largest, mut total) = (self.serial_largest, self.serial_total);
+        for &job in &self.widened {
+            let m = self.get(job, narrow).min(self.get(job, wide)).as_nanos();
+            largest = largest.max(m);
+            total = total.saturating_add(m);
+        }
+        largest.max(total.div_ceil(count as u128))
+    }
+
+    fn get(&self, job: usize, width: usize) -> Duration {
+        debug_assert!(self.width.contains(&width));
+        self.items[usize::from(self.width[0] != width)][job]
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.items
+            .iter()
+            .map(|column| column.capacity())
+            .fold(0, usize::saturating_add)
+            .saturating_mul(std::mem::size_of::<Duration>())
+            .saturating_add(
+                (self.widened.capacity())
+                    .saturating_add(self.rep.capacity())
+                    .saturating_add(self.by_key.capacity())
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            )
+            .saturating_add(self.widens.capacity())
+    }
+}
+
+/// The modeled makespan of the equal-share placement over `count` lanes of
+/// `slots`: lane `k` reserves `slots / count + [k < slots % count]`, the jobs
+/// in `order` seed one lane each (the largest on the widest), and every later
+/// job goes to the lane minimising `(load + item, jobs, lane)`. With `record`,
+/// the placement is written into its (empty) lanes, jobs ascending.
+///
+/// Lanes of one width share each job's item time, so each width class keeps
+/// one heap ordered by `(load, jobs, lane)` and a job compares the two tops.
+fn equal_shares(
+    slots: usize,
+    count: usize,
+    order: &[usize],
+    item: &impl Fn(usize, usize) -> Duration,
+    wide_heap: &mut Vec<Reverse<(Duration, usize, usize)>>,
+    narrow_heap: &mut Vec<Reverse<(Duration, usize, usize)>>,
+    mut record: Option<&mut Vec<Lane>>,
+) -> Duration {
+    let (narrow, wide_lanes) = (slots / count, slots % count);
+    let width = |k: usize| narrow + usize::from(k < wide_lanes);
+    let mut wide = BinaryHeap::from(std::mem::take(wide_heap));
+    let mut thin = BinaryHeap::from(std::mem::take(narrow_heap));
+    wide.clear();
+    thin.clear();
+    for (k, &j) in order.iter().take(count).enumerate() {
+        let entry = Reverse((item(j, width(k)), 1, k));
+        if k < wide_lanes {
+            wide.push(entry);
+        } else {
+            thin.push(entry);
+        }
+        if let Some(lanes) = record.as_deref_mut() {
+            lanes[k].jobs.push(j);
+        }
+    }
+    for &j in order.iter().skip(count) {
+        let wide_key = wide
+            .peek()
+            .map(|&Reverse((load, jobs, k))| (load.saturating_add(item(j, narrow + 1)), jobs, k));
+        let thin_key = thin
+            .peek()
+            .map(|&Reverse((load, jobs, k))| (load.saturating_add(item(j, narrow)), jobs, k));
+        let (heap, key) = match (wide_key, thin_key) {
+            (Some(a), Some(b)) if a <= b => (&mut wide, a),
+            (Some(a), None) => (&mut wide, a),
+            (_, Some(b)) => (&mut thin, b),
+            (None, None) => unreachable!("count >= 1 seeds a lane"),
+        };
+        heap.pop();
+        let (load, jobs, k) = key;
+        heap.push(Reverse((load, jobs + 1, k)));
+        if let Some(lanes) = record.as_deref_mut() {
+            lanes[k].jobs.push(j);
+        }
+    }
+    if let Some(lanes) = record {
+        for (k, lane) in lanes.iter_mut().enumerate() {
+            lane.jobs.sort_unstable();
+            lane.budget = width(k);
+        }
+    }
+    let score = wide
+        .iter()
+        .chain(thin.iter())
+        .map(|&Reverse((load, _, _))| load)
+        .max()
+        .unwrap_or(Duration::ZERO);
+    *wide_heap = wide.into_vec();
+    *narrow_heap = thin.into_vec();
+    score
 }
 
 /// Run every job of `allocation` on `exec` with exclusive access to its own
@@ -508,6 +1172,625 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An engine of `threads` whose dispatch cost is `rows` (anchors at 2, 4
+    /// and 6, extrapolated above) for every dispatch kind.
+    fn engine_with_costs(threads: usize, policy: BatchPolicy, rows: [u64; 3]) -> CpuEngine {
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::new(rows.map(Duration::from_nanos));
+        let pool = Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        CpuEngine::new(pool).with_batch_policy(policy)
+    }
+
+    /// A flat dispatch cost `d` ns at every width up to six.
+    fn flat(threads: usize, policy: BatchPolicy, d: u64) -> CpuEngine {
+        engine_with_costs(threads, policy, [d; 3])
+    }
+
+    fn nanos(t: &[u64]) -> Vec<Duration> {
+        t.iter().map(|&t| Duration::from_nanos(t)).collect()
+    }
+
+    /// The allocation under the factorization grant (one width decision on
+    /// the job's time), as the driver's default `BlockOp::grant` makes it.
+    fn chosen(engine: &mut CpuEngine, times: &[Duration], mean_work: f64) -> Allocation {
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                Ok(allocate_in(
+                    exec,
+                    times,
+                    |_| [0; 2],
+                    mean_work,
+                    &mut AllocationScratch::default(),
+                    &uncached(),
+                    Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1)),
+                ))
+            })
+            .unwrap()
+    }
+
+    fn lanes(a: &Allocation) -> Vec<(usize, Vec<usize>)> {
+        a.lanes.iter().map(|l| (l.budget, l.jobs.clone())).collect()
+    }
+
+    /// A lane-allocation cache of its own, so a test sees no other test's
+    /// entries; a budget of zero admits nothing.
+    fn cache(budget: u64) -> LaneAllocationCache {
+        LaneAllocationCache::new(StructureCacheKind::LaneAllocations, budget)
+    }
+
+    fn uncached() -> LaneAllocationCache {
+        cache(0)
+    }
+
+    /// A test-local model of the scheduler for a flat dispatch cost `d` and
+    /// times that are either below the payoff `3 d` or at least `4 d`: a job
+    /// takes its whole lane when it pays, else one slot.
+    mod oracle {
+        pub(super) type Lanes = Vec<(usize, Vec<usize>)>;
+
+        fn item(t: u64, w: usize, d: u64) -> u64 {
+            if w >= 2 && t >= 3 * d {
+                t / w as u64 + d
+            } else {
+                t
+            }
+        }
+
+        fn shares(slots: usize, count: usize) -> Vec<usize> {
+            (0..count)
+                .map(|k| slots / count + usize::from(k < slots % count))
+                .collect()
+        }
+
+        fn order(t: &[u64]) -> Vec<usize> {
+            let mut order: Vec<usize> = (0..t.len()).collect();
+            order.sort_by_key(|&j| (std::cmp::Reverse(t[j]), j));
+            order
+        }
+
+        fn finish(
+            widths: Vec<usize>,
+            mut jobs: Vec<Vec<usize>>,
+            t: &[u64],
+            d: u64,
+        ) -> (u64, Lanes) {
+            let score = widths
+                .iter()
+                .zip(&jobs)
+                .map(|(&w, js)| js.iter().map(|&j| item(t[j], w, d)).sum::<u64>())
+                .max()
+                .unwrap();
+            jobs.iter_mut().for_each(|js| js.sort());
+            (score, widths.into_iter().zip(jobs).collect())
+        }
+
+        /// Main's placement: least accumulated serial time, then fewest
+        /// jobs, then lowest lane.
+        pub(super) fn baseline(t: &[u64], slots: usize, count: usize, d: u64) -> (u64, Lanes) {
+            let widths = shares(slots, count);
+            let (mut serial, mut jobs) = (vec![0u64; count], vec![Vec::new(); count]);
+            for j in order(t) {
+                let k = (0..count)
+                    .min_by_key(|&k| (serial[k], jobs[k].len(), k))
+                    .unwrap();
+                serial[k] += t[j];
+                jobs[k].push(j);
+            }
+            finish(widths, jobs, t, d)
+        }
+
+        /// Equal shares: the first `count` jobs seed one lane each, then the
+        /// least `(load + item, jobs, lane)`.
+        pub(super) fn equal(t: &[u64], slots: usize, count: usize, d: u64) -> (u64, Lanes) {
+            let widths = shares(slots, count);
+            let (mut load, mut jobs) = (vec![0u64; count], vec![Vec::new(); count]);
+            for (i, j) in order(t).into_iter().enumerate() {
+                let k = if i < count {
+                    i
+                } else {
+                    (0..count)
+                        .min_by_key(|&k| (load[k] + item(t[j], widths[k], d), jobs[k].len(), k))
+                        .unwrap()
+                };
+                load[k] += item(t[j], widths[k], d);
+                jobs[k].push(j);
+            }
+            finish(widths, jobs, t, d)
+        }
+
+        /// The lowest score over the baseline and every equal-share count up
+        /// to `cap`; ties keep the baseline, then the larger count.
+        pub(super) fn choose(t: &[u64], slots: usize, cap: usize, d: u64) -> (u64, Lanes) {
+            let mut best = baseline(t, slots, cap, d);
+            for count in (1..=cap).rev() {
+                let candidate = equal(t, slots, count, d);
+                if candidate.0 < best.0 {
+                    best = candidate;
+                }
+            }
+            best
+        }
+
+        /// [`choose`] that skips a count whose bound
+        /// `max(max_j m_j, ceil(sum_j m_j / count))`, `m_j` the job's least
+        /// item time over the count's share widths, is not below the best
+        /// score so far; `placed` counts the placements it does make.
+        pub(super) fn choose_pruned(
+            t: &[u64],
+            slots: usize,
+            cap: usize,
+            d: u64,
+            placed: &mut usize,
+        ) -> (u64, Lanes) {
+            let mut best = baseline(t, slots, cap, d);
+            for count in (1..=cap).rev() {
+                let widths = shares(slots, count);
+                let least = |j: usize| widths.iter().map(|&w| item(t[j], w, d)).min().unwrap();
+                let total: u64 = (0..t.len()).map(least).sum();
+                let largest = (0..t.len()).map(least).max().unwrap();
+                if largest.max(total.div_ceil(count as u64)) >= best.0 {
+                    continue;
+                }
+                *placed += 1;
+                let candidate = equal(t, slots, count, d);
+                if candidate.0 < best.0 {
+                    best = candidate;
+                }
+            }
+            best
+        }
+    }
+
+    /// Purpose: a lane width at which the provider stays serial charges the
+    /// job its serial time, not a share plus a dispatch cost. With dispatch
+    /// costs 3000/2000/1400 ns at widths 2/4/6, a 5000 ns job does not pay at
+    /// width 2 (it needs 9000 ns) but pays at width 6.
+    #[test]
+    fn item_time_follows_provider_serial_decision() {
+        let mut engine = engine_with_costs(6, BatchPolicy::default(), [3000, 2000, 1400]);
+        let t = Duration::from_nanos(5000);
+        let (two, six) = engine
+            .with_contraction_exec(|exec, _, _| {
+                let at = |w| item_time(exec, t, exec.width_for_within(w, 5000.0, 1));
+                Ok((at(2), at(6)))
+            })
+            .unwrap();
+        assert_eq!(two, t);
+        assert_eq!(six, Duration::from_nanos(5000 / 6 + 1400));
+    }
+
+    /// Purpose: Auto takes fewer, wider lanes when one block dominates. On
+    /// four slots (flat 100 ns dispatch) a 40000 ns block and three 100 ns
+    /// blocks score 40000 ns on main's four lanes, 10400 ns on one lane.
+    #[test]
+    fn auto_beats_main_when_one_block_dominates() {
+        let t = [40000, 100, 100, 100];
+        let a = chosen(&mut flat(4, BatchPolicy::default(), 100), &nanos(&t), 1e9);
+        assert_eq!((a.slots, a.decision.lanes), (4, 4));
+        assert_eq!(oracle::baseline(&t, 4, 4, 100).0, 40000);
+        assert_eq!(lanes(&a), [(4, vec![0, 1, 2, 3])]);
+        assert_eq!(oracle::equal(&t, 4, 1, 100).0, 10000 + 100 + 300);
+    }
+
+    /// Purpose: main's allocation is kept unchanged when no equal-share
+    /// placement scores strictly lower: on a tie (serial jobs, mixed zero
+    /// times) and when main's placement scores lowest (S = 4 with a
+    /// caller-set lane work minimum giving two lanes: 16850 ns against
+    /// 16900 ns for two equal lanes and 17225 ns for one).
+    #[test]
+    fn auto_keeps_main_allocation_on_tie() {
+        let tie = [200, 200, 0, 0];
+        let a = chosen(&mut flat(4, BatchPolicy::default(), 100), &nanos(&tie), 1e9);
+        assert_eq!(a.slots, 4);
+        assert_eq!(lanes(&a), oracle::baseline(&tie, 4, 4, 100).1);
+        assert!(a.lanes.iter().all(|l| l.jobs.len() == 1));
+
+        let t = [15600, 2000, 6000, 6900, 13100, 15500, 4300, 2300];
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(30000.0);
+        let policy = BatchPolicy::default().with_model(model);
+        let mean = t.iter().sum::<u64>() as f64 / t.len() as f64;
+        let a = chosen(&mut flat(4, policy, 100), &nanos(&t), mean);
+        assert_eq!((a.slots, a.decision.lanes), (4, 2));
+        assert_eq!(oracle::baseline(&t, 4, 2, 100).0, 16850);
+        assert_eq!(oracle::equal(&t, 4, 2, 100).0, 16900);
+        assert_eq!(oracle::equal(&t, 4, 1, 100).0, 17225);
+        assert_eq!(lanes(&a), [(2, vec![0, 2, 3, 6]), (2, vec![1, 4, 5, 7])]);
+    }
+
+    /// Purpose: a cached allocation is rebuilt into the scratch's kept lane
+    /// tables, so a warm hit allocates and frees nothing even where the
+    /// search narrowed main's four lanes to one (a 40000 ns block and three
+    /// 100 ns ones on four slots, flat 100 ns dispatch). Two batches
+    /// alternate, so each hit replaces the other's lanes.
+    #[test]
+    fn warm_cached_fewer_lane_allocation_allocates_nothing() {
+        use crate::tests::counting_alloc;
+        let batches = [
+            nanos(&[40000, 100, 100, 100]),
+            nanos(&[40000, 100, 100, 101]),
+        ];
+        let keys = [[0; 2]; 4];
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+        let cache = cache(1 << 20);
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let mut scratch = AllocationScratch::default();
+                let queries = std::cell::Cell::new(0);
+                let mut call = |t: &[Duration]| {
+                    let grant = |_, t: Duration, w| {
+                        queries.set(queries.get() + 1);
+                        exec.width_for_within(w, t.as_nanos() as f64, 1)
+                    };
+                    let a = allocate_in(
+                        exec,
+                        t,
+                        |j| keys[j],
+                        10075.0,
+                        &mut scratch,
+                        &cache,
+                        Some(grant),
+                    );
+                    let chosen = (a.decision.lanes, a.lanes.len());
+                    scratch.keep(a);
+                    chosen
+                };
+                for t in &batches {
+                    assert_eq!(call(t), (4, 1));
+                }
+                for t in batches.iter().chain(&batches) {
+                    queries.set(0);
+                    let (chosen, allocs) = counting_alloc::measure(|| call(t));
+                    assert_eq!(chosen, (4, 1));
+                    assert_eq!(queries.get(), 0, "the call hit");
+                    assert_eq!((allocs.calls, allocs.frees), (0, 0));
+                }
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Purpose: jobs with equal serial times and grant keys share every
+    /// grant, so only one of them is queried, without changing the choice.
+    /// Nine jobs in three groups of three (flat 100 ns dispatch, six slots)
+    /// cost a third of the queries of the same jobs with distinct keys and
+    /// get the same lanes; 200 serial blocks are queried once per distinct
+    /// serial time.
+    #[test]
+    fn equal_grant_inputs_are_queried_once() {
+        let queries = std::cell::Cell::new(0);
+        let run = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey]| {
+            queries.set(0);
+            let a = engine
+                .with_contraction_exec(|exec, _, _| {
+                    let exec: &Exec<'_> = exec;
+                    let grant = |_, t: Duration, w| {
+                        queries.set(queries.get() + 1);
+                        exec.width_for_within(w, t.as_nanos() as f64, 1)
+                    };
+                    Ok(allocate_in(
+                        exec,
+                        t,
+                        |j| keys[j],
+                        1e9,
+                        &mut AllocationScratch::default(),
+                        &uncached(),
+                        Some(grant),
+                    ))
+                })
+                .unwrap();
+            (lanes(&a), queries.get())
+        };
+        let mut engine = flat(6, BatchPolicy::default(), 100);
+        let t = nanos(&[9000, 9000, 9000, 4000, 4000, 4000, 100, 100, 100]);
+        let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0]).collect();
+        let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0]).collect();
+        let (shared, few) = run(&mut engine, &t, &grouped);
+        let (separate, all) = run(&mut engine, &t, &distinct);
+        assert_eq!(shared, separate);
+        assert!(few > 0);
+        assert_eq!(all, 3 * few);
+
+        let tiny: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
+        let times: std::collections::BTreeSet<u64> = tiny.iter().copied().collect();
+        let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 2]; 200]);
+        assert_eq!(count, times.len());
+    }
+
+    /// Purpose: a repeated allocation with every input unchanged is taken
+    /// from the cache without a grant query and equals the searched one;
+    /// changing any one input it depends on (a serial time, a grant key, the
+    /// mean work, the work model, the dispatch costs, the budget, the
+    /// token's team) searches again; after a clear, and on a disabled cache
+    /// at every call, it searches and finds the cached allocation.
+    #[test]
+    fn unchanged_inputs_hit_and_any_change_searches() {
+        let t = nanos(&[40000, 100, 100, 100]);
+        let keys = [[0; 2]; 4];
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let policy = BatchPolicy::default().with_model(model);
+        let cache = cache(1 << 20);
+        let mut scratch = AllocationScratch::default();
+        let queries = std::cell::Cell::new(0);
+        // Runs one allocation on `exec` and returns its lanes and whether
+        // it queried a grant.
+        let mut run = |exec: &Exec<'_>, t: &[Duration], keys: &[GrantKey], mean: f64| {
+            queries.set(0);
+            let grant = |_, t: Duration, w| {
+                queries.set(queries.get() + 1);
+                exec.width_for_within(w, t.as_nanos() as f64, 1)
+            };
+            let a = allocate_in(
+                exec,
+                t,
+                |j| keys[j],
+                mean,
+                &mut scratch,
+                &cache,
+                Some(grant),
+            );
+            let result = (lanes(&a), queries.get() > 0);
+            scratch.keep(a);
+            result
+        };
+        let mut on = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey], mean: f64| {
+            engine
+                .with_contraction_exec(|exec, _, _| Ok(run(exec, t, keys, mean)))
+                .unwrap()
+        };
+        let mut base = flat(4, policy, 100);
+        let (first, searched) = on(&mut base, &t, &keys, 10075.0);
+        assert!(searched);
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+        let mut other_time = t.clone();
+        other_time[3] = Duration::from_nanos(101);
+        assert!(on(&mut base, &other_time, &keys, 10075.0).1);
+        let mut other_key = keys;
+        other_key[2] = [1, 0];
+        assert!(on(&mut base, &t, &other_key, 10075.0).1);
+        assert!(on(&mut base, &t, &keys, 10076.0).1);
+        let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
+        assert!(on(&mut flat(4, other_model, 100), &t, &keys, 10075.0).1);
+        assert!(on(&mut flat(4, policy, 101), &t, &keys, 10075.0).1);
+        assert!(on(&mut flat(5, policy, 100), &t, &keys, 10075.0).1);
+        // The base entry survived the other keys' admissions.
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+        ErasedStructureCacheControl::clear(&cache);
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+        ErasedStructureCacheControl::set_byte_budget(&cache, 0);
+        for _ in 0..2 {
+            assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+        }
+        ErasedStructureCacheControl::set_byte_budget(&cache, 1 << 20);
+
+        // The same pool and dispatch costs, through a plain token without
+        // the engine's team.
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::new([Duration::from_nanos(100); 3]);
+        let pool = Pool::builder()
+            .threads(4)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let borrowed = tcontract_exec::Pool::borrow(&pool);
+        let plain = Exec::new(&borrowed, 4).unwrap().with_batch_policy(policy);
+        assert!(!plain.token_ref().carries_team());
+        assert!(run(&plain, &t, &keys, 10075.0).1);
+    }
+
+    /// Purpose: the cache's retained bytes stay within its budget. Distinct
+    /// batches beyond what a small budget holds evict older entries, and an
+    /// entry above the largest admissible size is rejected, with the same
+    /// allocation as a search.
+    #[test]
+    fn admission_respects_the_byte_budget() {
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+        let keys = [[0; 2]; 4];
+        let bounded = cache(4096);
+        let tiny = cache(64);
+        engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let grant =
+                    Some(|_, t: Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1));
+                let batches = 100..164;
+                for last in batches.clone() {
+                    let t = nanos(&[40000, 100, 100, last]);
+                    let mut scratch = AllocationScratch::default();
+                    let cached = allocate_in(
+                        exec,
+                        &t,
+                        |j| keys[j],
+                        10075.0,
+                        &mut scratch,
+                        &bounded,
+                        grant,
+                    );
+                    let rejected =
+                        allocate_in(exec, &t, |j| keys[j], 10075.0, &mut scratch, &tiny, grant);
+                    assert_eq!(cached, rejected);
+                    let info = bounded.info();
+                    assert!(info.charged_bytes() <= info.byte_budget(), "{info:?}");
+                }
+                assert!(bounded.info().evictions() > 0);
+                let info = tiny.info();
+                assert_eq!(
+                    (info.entries(), info.rejections()),
+                    (0, batches.end - batches.start)
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Purpose: a caller's `min_items` above the job count forbids fan-out,
+    /// and Auto then keeps main's single lane over every slot, even where two
+    /// equal lanes would score lower.
+    #[test]
+    fn caller_min_items_keeps_one_lane() {
+        let t = [8200, 6500, 2800, 5600, 9500];
+        let policy = BatchPolicy::default().with_model(WorkModel::default().with_min_items(6));
+        let a = chosen(&mut flat(3, policy, 100), &nanos(&t), 1e9);
+        assert_eq!(a.decision.lanes, 1);
+        assert_eq!(lanes(&a), [(3, vec![0, 1, 2, 3, 4])]);
+    }
+
+    /// Purpose: one thread, one job, and many tiny blocks reproduce main's
+    /// allocation.
+    #[test]
+    fn serial_cases_reproduce_main() {
+        let t = [8200, 6500, 2800];
+        let a = chosen(&mut flat(1, BatchPolicy::default(), 100), &nanos(&t), 1e9);
+        assert_eq!(lanes(&a), [(1, vec![0, 1, 2])]);
+        let a = chosen(
+            &mut flat(4, BatchPolicy::default(), 100),
+            &nanos(&[9000]),
+            1e9,
+        );
+        assert_eq!(lanes(&a), [(4, vec![0])]);
+        let tiny = [100; 200];
+        let a = chosen(
+            &mut flat(6, BatchPolicy::default(), 100),
+            &nanos(&tiny),
+            1e9,
+        );
+        assert_eq!(
+            lanes(&a),
+            oracle::baseline(&tiny, a.slots, a.slots.min(200).min(a.decision.lanes), 100).1
+        );
+    }
+
+    /// Purpose: under the model, Auto's choice is the lowest score over
+    /// main's allocation and every equal-share lane count up to the batch
+    /// decision (so never above main's), and it is legal: no empty lane,
+    /// shares summing to S, at most the decision's lanes. Includes the case
+    /// a pruning bound would miss (S = 3: two lanes score 11100 ns against
+    /// 11364 and 12100), mixed and all-zero times and non-divisible S.
+    #[test]
+    fn allocation_dominates_main_under_model() {
+        let d = 100;
+        let pruned = [8200, 6500, 2800, 5600, 9500];
+        let a = chosen(
+            &mut flat(3, BatchPolicy::default(), d),
+            &nanos(&pruned),
+            1e9,
+        );
+        assert_eq!(
+            [1, 2, 3].map(|l| oracle::equal(&pruned, 3, l, d).0),
+            [11364, 11100, 12100]
+        );
+        assert_eq!(lanes(&a), [(2, vec![1, 3, 4]), (1, vec![0, 2])]);
+        let mut placed = 0;
+        assert_eq!(
+            oracle::choose_pruned(&pruned, 3, 3, d, &mut placed),
+            oracle::choose(&pruned, 3, 3, d)
+        );
+
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        let lane_minimum = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(20000.0);
+        for p in 2..=6 {
+            for policy in [
+                BatchPolicy::default(),
+                BatchPolicy::default().with_model(lane_minimum),
+            ] {
+                let mut engine = flat(p, policy, d);
+                for jobs in 1..=12 {
+                    for _ in 0..4 {
+                        // Below the payoff (0..250) or paying (400..20000).
+                        let t: Vec<u64> = (0..jobs)
+                            .map(|_| match next(4) {
+                                0 => 0,
+                                1 => next(250),
+                                _ => 400 + next(19600),
+                            })
+                            .collect();
+                        let mean = t.iter().sum::<u64>() as f64 / jobs as f64;
+                        let a = chosen(&mut engine, &nanos(&t), mean);
+                        let cap = a.slots.min(jobs).min(a.decision.lanes).max(1);
+                        let (score, want) = oracle::choose(&t, a.slots, cap, d);
+                        let mut placed = 0;
+                        assert_eq!(
+                            oracle::choose_pruned(&t, a.slots, cap, d, &mut placed),
+                            (score, want.clone())
+                        );
+                        assert!(score <= oracle::baseline(&t, a.slots, cap, d).0);
+                        assert_eq!(lanes(&a), want, "p {p} times {t:?}");
+                        assert!(a.lanes.len() <= cap);
+                        check(&a, p, jobs);
+                    }
+                }
+                let zeros = vec![0; 5];
+                let a = chosen(&mut engine, &nanos(&zeros), 0.0);
+                check(&a, p, 5);
+            }
+        }
+    }
+
+    /// Purpose: a job the provider widens only at some shares is still
+    /// scored at each share while the serial jobs keep their serial time.
+    /// With dispatch costs 3000/2000/1400 ns at widths 2/4/6, a 5000 ns job
+    /// pays only from five slots up: one six-slot lane scores
+    /// `5000 / 6 + 1400 + 5 * 100 = 2733` ns, every narrower share 5000 ns.
+    #[test]
+    fn widened_and_serial_jobs_mix() {
+        let t = [5000, 100, 100, 100, 100, 100];
+        let mut engine = engine_with_costs(6, BatchPolicy::default(), [3000, 2000, 1400]);
+        let a = chosen(&mut engine, &nanos(&t), 1e9);
+        assert_eq!((a.slots, a.decision.lanes), (6, 6));
+        assert_eq!(lanes(&a), [(6, vec![0, 1, 2, 3, 4, 5])]);
+    }
+
+    /// Purpose: on many blocks no provider would widen (200 blocks below the
+    /// payoff, six slots, flat 100 ns dispatch) Auto returns main's
+    /// allocation, and neither the single full-width query that settles
+    /// every serial block nor the lower bound that skips placing hopeless
+    /// lane counts changes the choice: production equals the plain
+    /// simulator, which agrees with the pruned one while that places fewer
+    /// than every count.
+    #[test]
+    fn pruning_keeps_main_on_many_tiny_blocks() {
+        let d = 100;
+        let t: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
+        let a = chosen(&mut flat(6, BatchPolicy::default(), d), &nanos(&t), 1e9);
+        let cap = a.slots.min(t.len()).min(a.decision.lanes);
+        assert_eq!((a.slots, cap), (6, 6));
+        let (_, main) = oracle::baseline(&t, a.slots, cap, d);
+        assert_eq!(lanes(&a), main);
+        let mut placed = 0;
+        let pruned = oracle::choose_pruned(&t, a.slots, cap, d, &mut placed);
+        assert_eq!(pruned, oracle::choose(&t, a.slots, cap, d));
+        assert_eq!(pruned.1, main);
+        assert!(placed < cap, "placed {placed} of {cap}");
     }
 
     fn check(a: &Allocation, p: usize, jobs: usize) {

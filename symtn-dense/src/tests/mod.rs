@@ -9,6 +9,9 @@ mod block_gemm;
 mod block_qr;
 #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
 mod block_svd;
+#[allow(unsafe_code)]
+#[path = "../../../tests/support/counting_alloc.rs"]
+pub(crate) mod counting_alloc;
 mod dot;
 mod executor;
 #[cfg(all(
@@ -21,6 +24,9 @@ mod fresh;
 mod numerics;
 mod tensor;
 mod view;
+
+#[global_allocator]
+static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 fn assert_f64_close(actual: f64, expected: f64, tol: f64) {
     assert!(

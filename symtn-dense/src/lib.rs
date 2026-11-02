@@ -1,4 +1,7 @@
-#![forbid(unsafe_code)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+// Tests only: the counting allocator in `tests::counting_alloc` is the one
+// exemption; `forbid` could not be relaxed for it.
+#![cfg_attr(test, deny(unsafe_code))]
 
 //! Dense block execution boundary for symtn.
 //!

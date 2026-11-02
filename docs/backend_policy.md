@@ -120,10 +120,36 @@ Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
 provider's block GEMM kernel (recoupling, block-wise contraction) takes its
 thread count from the engine's cost rule over the batch's estimated serial
-time (Tenferro's own per-flop model), and its lane count from the engine's
-batch decision. The lanes share all of those threads: a batch of a few large
-blocks gives each lane several threads, and a batch of many small blocks runs
-one thread per lane. Blocks are placed largest first on the least-loaded lane; prepared
+time (Tenferro's own per-flop model), and its lane count is at most the
+engine's batch decision, so the work model's fan-out limits are never
+exceeded. The lanes share all of those threads in equal shares: a batch of a
+few large blocks gives each lane several threads, and a batch of many small
+blocks runs one thread per lane. The kernel scores the baseline placement
+(blocks largest first on the lane of least accumulated serial time, over
+`L0 = min(threads, blocks, decision lanes)` lanes) and an equal-share
+placement for every lane count from `L0` down to one under one model, and
+keeps the lowest score, the baseline on ties. The model charges a block its
+serial time where the provider would run it on one thread in that lane,
+otherwise its time over the provider's granted width plus the engine's
+dispatch cost at that width. The granted width is an estimate composed from
+the provider's public decisions (for a packed GEMM plan an optimistic upper
+bound on its grid), and the model has no sublinear speedup, so the choice is
+a scheduling estimate, not a promise of a faster run. The search queries the
+provider width of each group of blocks with the same estimated time and the
+same grant inputs (for GEMM, the plan's algorithm and the work) once, at the
+full thread count; only the groups the provider widens there are queried
+again, once per distinct share width during the sweep (rebuilding the winning
+placement may repeat up to two widths), since a block the provider keeps
+serial at the full count stays serial at every narrower share; a lane count
+whose proved lower bound on its score is not below the best score so far is
+not placed. Each searched allocation is kept in the process-global structure
+cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
+function of (the engine's budget, work model, team and dispatch cost at every
+width, the mean work, and each block's serial time and grant inputs), so a
+batch already searched, on any executor including an eager call's fresh one,
+rebuilds its lanes without a query. Each entry is charged its inline key and
+entry, the entry overhead, and its per-block, per-width and per-lane slices;
+with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD and compact QR
 over a tensor's sector blocks run on the same lanes, through the same lane
@@ -133,7 +159,18 @@ estimate (SVD `m n min(m, n)`, QR `m n k - k^3/3` with `k = min(m, n)`, four
 times that for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
-it. Every block runs up to the first one refused before the engine is entered
+it. Their lanes keep the baseline placement over `L0` lanes, without the
+model search: the provider's current width estimate for one SVD is about ten
+times below its run time (QR about two), so the model would credit one wide
+lane with a speedup the factorization does not deliver and put batches of
+large blocks on too few lanes. The upstream change in progress
+(tensor4all/tlinalg-rs#89) caps the width inside the provider's own
+per-operation decision rather than correcting a generic estimate, so a
+release containing it does not by itself make the model usable here.
+Re-enabling the search for factorizations requires composing the provider's
+operation-specific grant through a public interface it offers, checking that
+composition against the adopted provider release, and rerunning the full
+lane benchmark matrix. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view); the error reported is the
 lowest-indexed block's, the one the per-matrix SVD or QR would report, and
 nothing is returned on error. Each block allocates its own provider workspace
