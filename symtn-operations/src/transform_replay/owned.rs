@@ -545,6 +545,17 @@ mod owned_overwrite_tests {
     };
 
     fn canonical_structure(offset: usize) -> Arc<BlockStructure> {
+        canonical_block(offset, 2, 3)
+    }
+
+    /// Rows x cols elements of the planned-leaf fixtures: 24 keeps Strided's
+    /// copy estimate nonzero on every host class (at least 0.09 ns per
+    /// element), so the role retains a plan for a wide engine to widen.
+    const PLANNED_ROWS: usize = 4;
+    const PLANNED_COLS: usize = 6;
+    const PLANNED_LEN: usize = PLANNED_ROWS * PLANNED_COLS;
+
+    fn canonical_block(offset: usize, rows: usize, cols: usize) -> Arc<BlockStructure> {
         let key = BlockKey::from(
             FusionTreePairKey::try_pair_from_sector_ids(
                 [1],
@@ -562,7 +573,7 @@ mod owned_overwrite_tests {
         Arc::new(
             BlockStructure::from_blocks_with_rank(
                 2,
-                vec![BlockSpec::with_key(key, vec![2, 3], vec![1, 2], offset).unwrap()],
+                vec![BlockSpec::with_key(key, vec![rows, cols], vec![1, rows], offset).unwrap()],
             )
             .unwrap(),
         )
@@ -581,15 +592,18 @@ mod owned_overwrite_tests {
             crate::host_pool::eager_test_engine(2),
         ] {
             let engine = &mut engine;
-            let structure = canonical_structure(0);
+            let structure = canonical_block(0, PLANNED_ROWS, PLANNED_COLS);
             let transform = TreeTransformStructure::compile_structures(
                 &structure,
                 &structure,
                 &[TreeTransformBlockSpec::single(0, 0, -2.0)],
             )
             .unwrap();
+            // Precondition: the Single role retains its plan on every host.
+            assert_eq!(transform.layouts().retained_plan_count(), 1);
+            let real_src = (1..=PLANNED_LEN).map(|v| v as f64).collect::<Vec<_>>();
 
-            let mut expected = vec![f64::NAN; 6];
+            let mut expected = vec![f64::NAN; PLANNED_LEN];
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
@@ -599,7 +613,7 @@ mod owned_overwrite_tests {
                 &structure,
                 &structure,
                 &mut expected,
-                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                &real_src,
                 3.0,
                 &[],
                 1,
@@ -613,7 +627,7 @@ mod owned_overwrite_tests {
                 &structure,
                 &structure,
                 1,
-                &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                &real_src,
                 3.0,
                 1,
                 None,
@@ -622,7 +636,7 @@ mod owned_overwrite_tests {
             .unwrap();
             assert_eq!(actual, expected);
 
-            let complex_src = (1..=6)
+            let complex_src = (1..=PLANNED_LEN)
                 .map(|value| Complex64::new(value as f64, -(value as f64)))
                 .collect::<Vec<_>>();
             let complex = try_tree_transform_structure_overwrite_owned_raw(
@@ -654,7 +668,8 @@ mod owned_overwrite_tests {
                 Complex64::new(1.5, f64::NEG_INFINITY),
                 Complex64::new(0.0, -0.0),
                 Complex64::new(-3.0, 0.5),
-            ];
+            ]
+            .repeat(PLANNED_LEN / 6);
             let bits = |values: &[Complex64]| {
                 values
                     .iter()
@@ -680,7 +695,7 @@ mod owned_overwrite_tests {
             )
             .unwrap()
             .unwrap();
-            let mut initialized = vec![Complex64::new(f64::NAN, f64::NAN); 6];
+            let mut initialized = vec![Complex64::new(f64::NAN, f64::NAN); PLANNED_LEN];
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
@@ -769,8 +784,9 @@ mod owned_overwrite_tests {
             crate::host_pool::eager_test_engine(2),
         ] {
             let engine = &mut engine;
-            let non_finite = [f64::INFINITY, f64::NAN, f64::NEG_INFINITY, 1.0, -0.0, 2.0];
-            let structure = canonical_structure(0);
+            let non_finite = [f64::INFINITY, f64::NAN, f64::NEG_INFINITY, 1.0, -0.0, 2.0]
+                .repeat(PLANNED_LEN / 6);
+            let structure = canonical_block(0, PLANNED_ROWS, PLANNED_COLS);
             for (alpha, coefficient) in [(0.0, -2.0), (1.0, 0.0), (3.0, 0.0)] {
                 let transform = TreeTransformStructure::compile_structures(
                     &structure,
@@ -778,6 +794,8 @@ mod owned_overwrite_tests {
                     &[TreeTransformBlockSpec::single(0, 0, coefficient)],
                 )
                 .unwrap();
+                // Precondition: the Single role retains its plan on every host.
+                assert_eq!(transform.layouts().retained_plan_count(), 1);
                 let owned = try_tree_transform_structure_overwrite_owned_raw(
                     engine,
                     &mut DefaultDenseExecutor::new(),
@@ -817,11 +835,20 @@ mod owned_overwrite_tests {
                 }
             }
 
+            // Scatter columns of `PLANNED_LEN` elements, so the wide engine
+            // plans them too.
             let space = FusionTreeHomSpace::new(
-                FusionProductSpace::new([z2_leg(1, 1)]),
-                FusionProductSpace::new([z2_leg(1, 1)]),
+                FusionProductSpace::new([z2_leg(PLANNED_ROWS, PLANNED_ROWS)]),
+                FusionProductSpace::new([z2_leg(PLANNED_COLS, PLANNED_COLS)]),
             )
-            .coupled_subblock_structure(&Z2FusionRule, 1, [vec![1, 1], vec![1, 1]])
+            .coupled_subblock_structure(
+                &Z2FusionRule,
+                1,
+                [
+                    vec![PLANNED_ROWS, PLANNED_COLS],
+                    vec![PLANNED_ROWS, PLANNED_COLS],
+                ],
+            )
             .unwrap();
             let structure = Arc::clone(&space);
             let transform = TreeTransformStructure::compile_structures(
@@ -834,7 +861,9 @@ mod owned_overwrite_tests {
                 )],
             )
             .unwrap();
-            let source = [f64::INFINITY, f64::NEG_INFINITY];
+            // Precondition: both scatter columns retain their plans.
+            assert_eq!(transform.layouts().retained_plan_count(), 2);
+            let source = [f64::INFINITY, f64::NEG_INFINITY, f64::NAN].repeat(2 * PLANNED_LEN / 3);
             let owned = try_tree_transform_structure_overwrite_owned_raw(
                 engine,
                 &mut DefaultDenseExecutor::new(),
@@ -850,7 +879,7 @@ mod owned_overwrite_tests {
             )
             .unwrap()
             .unwrap();
-            let mut initialized = vec![f64::NAN; 2];
+            let mut initialized = vec![f64::NAN; source.len()];
             tree_transform_structure_overwrite_with_structural_recoupling_raw(
                 engine,
                 &mut StridedHostKernelAdapter::default(),
@@ -866,8 +895,8 @@ mod owned_overwrite_tests {
                 1,
             )
             .unwrap();
-            assert_eq!(owned, [0.0, 0.0]);
-            assert_eq!(initialized, [0.0, 0.0]);
+            assert_eq!(owned, [0.0; 2 * PLANNED_LEN]);
+            assert_eq!(initialized, [0.0; 2 * PLANNED_LEN]);
         }
     }
 

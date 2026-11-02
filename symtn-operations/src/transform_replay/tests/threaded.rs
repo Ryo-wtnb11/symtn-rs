@@ -340,16 +340,24 @@ const RECOUPLING_TERMS: [&[(usize, f64)]; 6] = [
     &[],
 ];
 
-/// Six 3x2 source blocks, six 2x3 destination blocks: two Singles, two
-/// Multi groups and an inactive destination, so threaded replay has two
-/// runnable Singles and four pack columns.
+/// Destination block shape `[ROWS, COLS]`; source blocks are its transpose.
+/// 24 elements per block keeps Strided's copy estimate nonzero on every host
+/// class (at least 0.09 ns per element), so each overwrite role retains a
+/// plan for the wide pool to widen.
+const ROWS: usize = 4;
+const COLS: usize = 6;
+const BLOCK: usize = ROWS * COLS;
+
+/// Six COLSxROWS source blocks, six ROWSxCOLS destination blocks: two
+/// Singles, two Multi groups and an inactive destination, so threaded replay
+/// has two runnable Singles and four pack columns.
 fn recoupling_fixture() -> (
     Arc<BlockStructure>,
     Arc<BlockStructure>,
     TreeTransformStructure<f64>,
 ) {
-    let src = Arc::new(BlockStructure::packed_column_major(2, vec![vec![3, 2]; 6]).unwrap());
-    let dst = Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 3]; 6]).unwrap());
+    let src = Arc::new(BlockStructure::packed_column_major(2, vec![vec![COLS, ROWS]; 6]).unwrap());
+    let dst = Arc::new(BlockStructure::packed_column_major(2, vec![vec![ROWS, COLS]; 6]).unwrap());
     let replay = TreeTransformStructure::compile_structures(
         &dst,
         &src,
@@ -367,19 +375,19 @@ fn recoupling_fixture() -> (
 }
 
 /// Explicit-index oracle for [`recoupling_fixture`]: column-major blocks of
-/// six elements, `dst_d(i, j) = alpha * sum c * src_s(j, i) + beta * dst_d(i, j)`
+/// `BLOCK` elements, `dst_d(i, j) = alpha * sum c * src_s(j, i) + beta * dst_d(i, j)`
 /// (`beta = None` is overwrite).
 fn recoupling_expected<D>(src: &[D], dst: &[D], alpha: D, beta: Option<D>) -> Vec<D>
 where
     D: Copy + num_traits::Zero + std::ops::Mul<Output = D> + From<f64>,
 {
-    let mut expected = vec![D::zero(); 36];
+    let mut expected = vec![D::zero(); 6 * BLOCK];
     for (d, terms) in RECOUPLING_TERMS.iter().enumerate() {
-        for i in 0..2 {
-            for j in 0..3 {
-                let at = 6 * d + i + 2 * j;
+        for i in 0..ROWS {
+            for j in 0..COLS {
+                let at = BLOCK * d + i + ROWS * j;
                 let sum = terms.iter().fold(D::zero(), |sum, &(s, c)| {
-                    sum + D::from(c) * src[6 * s + j + 3 * i]
+                    sum + D::from(c) * src[BLOCK * s + j + COLS * i]
                 });
                 expected[at] = alpha * sum + beta.map_or(D::zero(), |beta| beta * dst[at]);
             }
@@ -407,6 +415,9 @@ where
     let (dst_structure, src_structure, replay) = recoupling_fixture();
     let fused_rank = replay.layouts().max_fused_rank();
     assert!(fused_rank > 0);
+    // Precondition: both Single roles and the three scatter columns retain a
+    // plan, so a wide pool reaches the planned leaf on every host class.
+    assert_eq!(replay.layouts().retained_plan_count(), 5);
     let mut pool = crate::host_pool::eager_test_pool(2 * threads);
     pool.install(|engine| {
         let mut axpby = dst.to_vec();
@@ -460,9 +471,10 @@ where
 /// destination never read) modes. All values are dyadic, so equality is exact.
 #[test]
 fn threaded_non_identity_recoupling_matches_explicit_index_oracle() {
-    let src = (1..=36).map(f64::from).collect::<Vec<_>>();
-    let dst = (101..=136).map(f64::from).collect::<Vec<_>>();
-    let nan_dst = vec![f64::NAN; 36];
+    let len = 6 * BLOCK as u32;
+    let src = (1..=len).map(f64::from).collect::<Vec<_>>();
+    let dst = (101..=100 + len).map(f64::from).collect::<Vec<_>>();
+    let nan_dst = vec![f64::NAN; src.len()];
     for threads in [1, 2] {
         let [axpby, _] = replay_recoupling_fixture(threads, &src, &dst, 0.5, -0.25);
         assert_eq!(axpby, recoupling_expected(&src, &dst, 0.5, Some(-0.25)));
@@ -474,10 +486,11 @@ fn threaded_non_identity_recoupling_matches_explicit_index_oracle() {
 #[test]
 fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
     use num_complex::Complex64;
-    let src = (1..=36)
-        .map(|k| Complex64::new(f64::from(k), f64::from(37 - k)))
+    let len = 6 * BLOCK as u32;
+    let src = (1..=len)
+        .map(|k| Complex64::new(f64::from(k), f64::from(len + 1 - k)))
         .collect::<Vec<_>>();
-    let dst = (1..=36)
+    let dst = (1..=len)
         .map(|k| Complex64::new(-f64::from(k), 0.5 * f64::from(k)))
         .collect::<Vec<_>>();
     let alpha = Complex64::new(0.5, -1.25);

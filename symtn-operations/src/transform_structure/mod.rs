@@ -485,6 +485,7 @@ pub enum TreeTransformBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strided_kernel::execution::KernelClass;
     use symtn_core::{BlockKey, BlockSpec};
 
     /// Independent hand normalization of a two-sided role: drop extent-1
@@ -617,8 +618,14 @@ mod tests {
         assert_eq!(layouts.fused_dims.capacity(), 4);
         assert_eq!(layouts.fused_dst_strides.capacity(), 4);
         assert_eq!(layouts.entries.capacity(), 5);
-        // Both Single roles are planned; the inactive role is not.
-        assert_eq!(layouts.plans.capacity(), 2);
+        // Both four-element Single roles are planned unless Strided estimates
+        // their copy at zero time; the inactive role never is.
+        let planned = if KernelClass::Copy.estimate(4).is_zero() {
+            0
+        } else {
+            2
+        };
+        assert_eq!(layouts.plans.capacity(), planned);
         assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
@@ -641,6 +648,25 @@ mod tests {
             .plans
             .reserve_exact(1);
         assert!(compiled.charged_payload_bytes() > charged);
+
+        // Tiny interleaved roles, whose copy Strided estimates at zero time,
+        // retain no plan: `B` two-element blocks at stride `B` and offset `b`.
+        const B: usize = 128;
+        assert!(KernelClass::Copy.estimate(2).is_zero());
+        let interleaved = BlockStructure::from_blocks_with_rank(
+            1,
+            (0..B)
+                .map(|b| BlockSpec::with_key(BlockKey::ordinal(b), vec![2], vec![B], b).unwrap())
+                .collect(),
+        )
+        .unwrap();
+        let packed = BlockStructure::packed_column_major(1, vec![vec![2]; B]).unwrap();
+        let specs = (0..B)
+            .map(|b| TreeTransformBlockSpec::single(b, b, 1.0_f64))
+            .collect::<Vec<_>>();
+        let tiny =
+            TreeTransformStructure::compile_structures(&interleaved, &packed, &specs).unwrap();
+        assert_eq!(tiny.layouts().plans.capacity(), 0);
     }
 
     #[test]

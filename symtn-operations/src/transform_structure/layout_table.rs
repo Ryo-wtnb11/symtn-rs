@@ -44,7 +44,8 @@ pub(super) struct RoleSlot {
 /// compilation, where every structural proof runs on it.
 ///
 /// Every role a Single block or a Multi scatter writes, up to Strided's
-/// inline fused rank (`RAW_FUSED_RANK_LIMIT`), also retains Strided's compiled
+/// inline fused rank (`RAW_FUSED_RANK_LIMIT`) and with a nonzero Strided copy
+/// estimate, also retains Strided's compiled
 /// replay of that normalized layout (a fixed inline size per role), so a leaf
 /// that a wide token widens replays it without planning. TensorKit has no
 /// counterpart: Strided.jl plans each `tensoradd!` on every call. Pack roles
@@ -87,6 +88,13 @@ impl TreeTransformLayoutTable {
 
     pub(crate) fn max_fused_rank(&self) -> usize {
         self.max_fused_rank
+    }
+
+    /// Roles that retain a compiled plan; tests use it to prove a fixture
+    /// reaches the planned leaf on every host class.
+    #[cfg(test)]
+    pub(crate) fn retained_plan_count(&self) -> usize {
+        self.plans.len()
     }
 
     fn slot_range(&self, entry_index: usize) -> Option<Range<usize>> {
@@ -378,10 +386,18 @@ impl RoleKind {
     }
 
     /// Whether the role retains a compiled plan: a destination write (Single
-    /// or scatter) within Strided's inline fused rank.
+    /// or scatter) within Strided's inline fused rank whose copy Strided
+    /// estimates above zero time.
+    ///
+    /// Why not plan a zero-estimate role: Strided's width rule can never
+    /// widen it on any token, so its plan would only cost retained bytes and
+    /// a width search per replay.
     fn is_planned(self, fused: &FusedLayoutScratch) -> bool {
         matches!(self, Self::Single { .. } | Self::Scatter)
             && fused.dims().len() <= strided_kernel::RAW_FUSED_RANK_LIMIT
+            && !strided_kernel::execution::KernelClass::Copy
+                .estimate(fused.dims().iter().product())
+                .is_zero()
     }
 }
 
