@@ -141,7 +141,6 @@ fn on_lanes<B: BlockOp>(
 ) -> tenferro_tensor::Result<Result<(), (usize, DenseError)>> {
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
-    let mut modeled = true;
     scratch.times.clear();
     // One `extend` reserves from the job iterator's size hint up front, as
     // the former per-kernel cost staging did, instead of growing by pushes.
@@ -150,11 +149,17 @@ fn on_lanes<B: BlockOp>(
         .extend(jobs.iter().enumerate().map(|(index, job)| {
             let work = op.work(index, job);
             total_work += work;
-            modeled &= op.modeled(index, job);
             cost(B::KIND, work, &model)
         }));
     let mean_work = total_work / jobs.len().max(1) as f64;
     let shared: &Exec<'_> = exec;
+    // Admission is read only where the allocation can search, so a serial or
+    // forced allocation computes no grant input for its blocks.
+    let modeled = schedule::searchable(shared, &scratch.times, mean_work)
+        && jobs
+            .iter()
+            .enumerate()
+            .all(|(index, job)| op.modeled(index, job));
     let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
         op.grant(j, &jobs[j], shared, budget, serial)
     });

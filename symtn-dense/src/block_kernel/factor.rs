@@ -493,17 +493,22 @@ fn batch_on<F: Factor>(
 /// [`Factor::estimates`]) and its batch product, or `None` for an input the
 /// provider refuses (rank or dtype).
 fn item_estimates<F: Factor>(input: DenseRead<'_>) -> Option<([f64; 2], f64)> {
-    let (shape, estimates): (_, fn(usize, usize) -> [f64; 2]) = match input {
-        DenseRead::F32(view) => (view.shape(), F::estimates::<f32>),
-        DenseRead::F64(view) => (view.shape(), F::estimates::<f64>),
-        DenseRead::C32(view) => (view.shape(), F::estimates::<Complex32>),
-        DenseRead::C64(view) => (view.shape(), F::estimates::<Complex64>),
-        _ => return None,
-    };
-    let [m, n, batch @ ..] = shape else {
-        return None;
-    };
-    Some((estimates(*m, *n), batch.iter().map(|&b| b as f64).product()))
+    // Direct generic calls, not a function pointer: the estimates inline, and
+    // `work`, which reads only the total, need not evaluate the payback.
+    fn of<F: Factor, T: tlinalg::FaerScalar>(shape: &[usize]) -> Option<([f64; 2], f64)> {
+        let [m, n, batch @ ..] = shape else {
+            return None;
+        };
+        let items = batch.iter().map(|&b| b as f64).product();
+        Some((F::estimates::<T>(*m, *n), items))
+    }
+    match input {
+        DenseRead::F32(view) => of::<F, f32>(view.shape()),
+        DenseRead::F64(view) => of::<F, f64>(view.shape()),
+        DenseRead::C32(view) => of::<F, Complex32>(view.shape()),
+        DenseRead::C64(view) => of::<F, Complex64>(view.shape()),
+        _ => None,
+    }
 }
 
 /// tlinalg's work estimate of `F` over every batch item of `input`, in

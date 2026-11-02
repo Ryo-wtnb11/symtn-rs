@@ -423,6 +423,31 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
     }
 }
 
+/// Whether an allocation of jobs with serial times `times` and mean work
+/// `mean_work` on `exec` can search or reuse a searched allocation: Auto, at
+/// least two jobs, a batch decision of at least two lanes and at least two
+/// slots (the lane cap and slot count [`allocate_in`] derives). Otherwise it
+/// returns the baseline, whatever the grant.
+pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> bool {
+    exec.batch_policy().strategy == BatchStrategy::Auto
+        && exec.budget() >= 2
+        && times.len() >= 2
+        && exec
+            .batch_decision(&BatchQuery::new(times.len(), mean_work))
+            .lanes
+            >= 2
+        && exec
+            .token_ref()
+            .width_for(
+                times
+                    .iter()
+                    .fold(Duration::ZERO, |sum, &t| sum.saturating_add(t)),
+                1,
+            )
+            .get()
+            >= 2
+}
+
 /// Lane allocation of jobs with serial times `times` (canonical order)
 /// and mean weighted work `mean_work` (multiply-adds; it feeds the
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted
@@ -450,11 +475,11 @@ pub(crate) fn allocate_in(
     cache: &LaneAllocationCache,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
-    // The keys are staged only where a search can run (two or more jobs and
-    // slots), so a serial context retains nothing for them.
+    // The keys are staged only where a search can run, so a serial context
+    // retains nothing for them and reads no grant input.
     let mut keys = std::mem::take(&mut scratch.keys);
     keys.clear();
-    if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
+    if grant.is_some() && searchable(exec, times, mean_work) {
         keys.extend((0..times.len()).map(key));
     }
     let allocation = allocate_with(
@@ -2188,14 +2213,37 @@ mod tests {
 
     /// Purpose: a caller's `min_items` above the job count forbids fan-out,
     /// and Auto then keeps main's single lane over every slot, even where two
-    /// equal lanes would score lower.
+    /// equal lanes would score lower, without reading a grant or a grant key.
     #[test]
     fn caller_min_items_keeps_one_lane() {
-        let t = [8200, 6500, 2800, 5600, 9500];
+        let t = nanos(&[8200, 6500, 2800, 5600, 9500]);
         let policy = BatchPolicy::default().with_model(WorkModel::default().with_min_items(6));
-        let a = chosen(&mut flat(3, policy, 100), &nanos(&t), 1e9);
+        let (keys, grants) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+        let a = flat(3, policy, 100)
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let key = |_| {
+                    keys.set(keys.get() + 1);
+                    [0; 2]
+                };
+                let grant = |_, t: Duration, w| {
+                    grants.set(grants.get() + 1);
+                    exec.width_for_within(w, t.as_nanos() as f64, 1)
+                };
+                Ok(allocate_in(
+                    exec,
+                    &t,
+                    (OpKind::Gemm, key),
+                    1e9,
+                    &mut AllocationScratch::default(),
+                    &uncached(),
+                    Some(grant),
+                ))
+            })
+            .unwrap();
         assert_eq!(a.decision.lanes, 1);
         assert_eq!(lanes(&a), [(3, vec![0, 1, 2, 3, 4])]);
+        assert_eq!((keys.get(), grants.get()), (0, 0));
     }
 
     /// Purpose: one thread, one job, and many tiny blocks reproduce main's
