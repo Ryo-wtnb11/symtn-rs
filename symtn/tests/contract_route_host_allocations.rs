@@ -15,8 +15,9 @@
 //!
 //! Exact counts are printed, not pinned: they move with platform and
 //! dependency internals. The blocks stay small enough that the dense
-//! provider's GEMM needs no packing buffer of its own (faer allocates one
-//! per large GEMM, which no workspace of symtn can own).
+//! provider's GEMM needs no packing buffer of its own: on targets without
+//! AVX2, tcontract's faer route allocates one per large GEMM, which no
+//! workspace of symtn can own.
 
 use std::sync::Arc;
 
