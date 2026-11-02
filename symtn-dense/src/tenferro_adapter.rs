@@ -1158,19 +1158,7 @@ impl DenseExecutor for DefaultDenseExecutor {
             Err(linalg_unavailable("eig"))
         }
         #[cfg(not(feature = "provider-inject"))]
-        {
-            let input = tenferro_view(input)?;
-            with_cpu_linalg(engine, "eig_read", |exec| {
-                TensorRead::from_view(input).eig_read(exec)
-            })
-            .map_err(|err| tenferro_error("eig_read", err))
-            .and_then(|(values, vectors)| {
-                vec![values, vectors]
-                    .into_iter()
-                    .map(DenseTensor::from_tenferro)
-                    .collect()
-            })
-        }
+        eig_read(engine, input)
     }
 
     fn eigh(
@@ -2252,6 +2240,26 @@ fn linalg_unavailable(op: &'static str) -> DenseError {
         op,
         message: "provider-inject does not route factorizations or solves; they are unsupported in this configuration".to_string(),
     }
+}
+
+/// tenferro's general eigendecomposition of one input on the whole engine:
+/// the per-matrix [`DenseExecutor::eig`] entry.
+#[cfg(not(feature = "provider-inject"))]
+pub(crate) fn eig_read(
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    let input = tenferro_view(input)?;
+    with_cpu_linalg(engine, "eig_read", |exec| {
+        TensorRead::from_view(input).eig_read(exec)
+    })
+    .map_err(|err| tenferro_error("eig_read", err))
+    .and_then(|(values, vectors)| {
+        vec![values, vectors]
+            .into_iter()
+            .map(DenseTensor::from_tenferro)
+            .collect()
+    })
 }
 
 /// A batch of per-matrix factorizations under one engine lock: the

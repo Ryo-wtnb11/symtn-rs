@@ -152,12 +152,12 @@ entry, the entry overhead, and its per-block, per-width and per-lane slices;
 with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR, and Hermitian and general
-eigendecomposition (full and values-only) over a tensor's sector blocks run
-on the same lanes, through the same lane driver as the GEMM kernel
+SVD, the pseudo-inverse's SVD, compact QR, Hermitian eigendecomposition
+(full and values-only) and general eigenvalues over a tensor's sector blocks
+run on the same lanes, through the same lane driver as the GEMM kernel
 (inside the engine's guarded linalg entry rather than its contraction entry):
 each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
-`m n k - k^3/3` with `k = min(m, n)`, EIGH and EIG tlinalg's `n^3`, four times that
+`m n k - k^3/3` with `k = min(m, n)`, EIGH and EIG values tlinalg's `n^3`, four times that
 for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
@@ -182,11 +182,15 @@ and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Each block allocates
 its own provider workspace and fresh factors of their logical size, so a
-factor never inherits a recycled buffer's capacity; a full EIGH or EIG, and
-a compact SVD over packed or Checked Generic sector matrices, holds every
+factor never inherits a recycled buffer's capacity; a full EIGH, and a
+compact SVD over packed or Checked Generic sector matrices, holds every
 sector's raw factors at once before placing them, where the loop held one.
-The other factorizations, and every BLAS factorization, still run block
-after block on the whole engine.
+The full general eigendecomposition goes through the same batch but solves
+each sector with Tenferro's per-matrix entry on the whole engine, checking
+it before the next solve: its unit-norm eigenvector normalization is not
+exported for a lane to reuse (tensor4all/tenferro-rs#2387). The other
+factorizations, and every BLAS factorization, still run block after block on
+the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`

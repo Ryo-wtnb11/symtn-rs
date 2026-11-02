@@ -52,8 +52,7 @@ Host batches are the exception: every compact SVD and compact QR batch
 (direct-region, matricized and Checked Generic inputs, all of which submit
 their sector matrices as one batch), values-only SVD, the SVD stage of the
 pseudo-inverse, every Hermitian eigendecomposition (full and values-only,
-over all three input routes) and every general eigendecomposition (full and
-values-only). For these, symtn's block kernel spreads the blocks over the engine's lanes inside
+over all three input routes) and values-only general eigendecomposition. For these, symtn's block kernel spreads the blocks over the engine's lanes inside
 the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
 per block;
 see [backend policy](backend_policy.md#parallel-execution). The multiplicity-free Host
