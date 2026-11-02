@@ -349,6 +349,7 @@ impl<T: Copy> TreeTransformStructure<T> {
             &layouts,
             &recoupling_plan,
             dst_structure.block_count(),
+            dst_structure.storage_tiling_proven(),
             dst_structure.required_len()?,
         )?;
         // Every structural proof above read the raw table; the retained

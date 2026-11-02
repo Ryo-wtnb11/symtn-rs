@@ -1116,11 +1116,11 @@ where
     /// DynamicTree output) runs its core into scratch, then the transform
     /// writes every destination element once into an uninitialized payload
     /// ([`DenseTreeTransformOperations::try_tree_transform_structure_overwrite_owned_raw`])
-    /// when the destination proves exact overwrite coverage: every block,
-    /// inactive ones included, one contiguous interval, the blocks tiling the
-    /// payload, and the coupled-sector regions tiling it. Otherwise (for
-    /// example a coupled sector with several codomain trees, whose blocks are
-    /// strided) the transform overwrites an allocator-zeroed payload.
+    /// when the destination proves exact overwrite coverage: its blocks,
+    /// inactive ones included, reach every payload element exactly once
+    /// (interleaved canonical blocks included), and the coupled-sector regions
+    /// tile the payload. Otherwise (for example a padded layout) the
+    /// transform overwrites an allocator-zeroed payload.
     ///
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.

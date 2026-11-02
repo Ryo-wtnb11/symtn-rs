@@ -1033,8 +1033,7 @@ where
                 **output = data;
                 return Ok(());
             }
-            // No overwrite proof (a block that is not one contiguous
-            // interval, padding, non-tiling coupled regions): the
+            // No overwrite proof (padding, non-tiling coupled regions): the
             // transform overwrites an allocator-zeroed payload, which
             // covers what no block writes.
             #[cfg(test)]

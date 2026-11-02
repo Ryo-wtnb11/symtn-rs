@@ -369,12 +369,16 @@ pub(super) fn tree_transform_block_weight(
     }
 }
 
+/// `Some(required_len)` when writing every active destination and every
+/// inactive zero writer once initializes `0..required_len` exactly; `None`
+/// for padding and other holes. O(B·rank) in destination block metadata.
 pub(super) fn compile_physical_overwrite_coverage(
     blocks: &[TreeTransformBlock],
     inactive_dst_layouts: &[usize],
     layouts: &RawLayoutTable,
     recoupling_plan: &TreeTransformRecouplingPlan,
     destination_block_count: usize,
+    destination_tiling_proven: bool,
     required_len: usize,
 ) -> Result<Option<usize>, OperationError> {
     let multi_count = blocks
@@ -413,65 +417,44 @@ pub(super) fn compile_physical_overwrite_coverage(
         return Ok(None);
     }
 
-    let mut intervals = Vec::with_capacity(covered_layout_count);
+    if destination_tiling_proven {
+        return Ok(Some(required_len));
+    }
+
+    // Why not require each block to be one contiguous interval: canonical
+    // blocks of a coupled sector with several codomain trees interleave
+    // their columns. compile_shared_structures has already rejected aliased
+    // destination layouts and duplicate block owners, so the written offsets
+    // are distinct; with every one inside 0..required_len, a total equal to
+    // required_len proves exact cover from block metadata alone.
+    let mut covered_len = 0usize;
     let mut record_layout = |layout_index: usize| -> Result<bool, OperationError> {
-        let layout = layouts.entry(layout_index);
         let Some((lo, hi)) = layout_index_range(layouts, layout_index)? else {
             return Ok(true);
         };
-        let Ok(start) = usize::try_from(lo) else {
-            return Ok(false);
-        };
-        let Ok(hi) = usize::try_from(hi) else {
-            return Ok(false);
-        };
-        let Some(end) = hi.checked_add(1) else {
-            return Ok(false);
-        };
-        if end > required_len || end - start != layout.element_count {
-            return Ok(false);
+        let in_bounds = lo >= 0 && usize::try_from(hi).is_ok_and(|hi| hi < required_len);
+        if in_bounds {
+            covered_len = covered_len
+                .checked_add(layouts.entry(layout_index).element_count)
+                .ok_or(OperationError::ElementCountOverflow)?;
         }
-        intervals.push((start, end));
-        Ok(true)
+        Ok(in_bounds)
     };
-    for block in blocks {
-        match *block {
-            TreeTransformBlock::Single { dst_layout, .. } => {
-                if !record_layout(dst_layout)? {
-                    return Ok(None);
-                }
-            }
-            TreeTransformBlock::Multi {
-                dst_layout_start,
-                dst_count,
-                ..
-            } => {
-                for layout in dst_layout_start..dst_layout_start + dst_count {
-                    if !record_layout(layout)? {
-                        return Ok(None);
-                    }
-                }
-            }
-        }
-    }
-    for &layout in inactive_dst_layouts {
+    let active_layouts = blocks.iter().flat_map(|block| match *block {
+        TreeTransformBlock::Single { dst_layout, .. } => dst_layout..dst_layout + 1,
+        TreeTransformBlock::Multi {
+            dst_layout_start,
+            dst_count,
+            ..
+        } => dst_layout_start..dst_layout_start + dst_count,
+    });
+    for layout in active_layouts.chain(inactive_dst_layouts.iter().copied()) {
         if !record_layout(layout)? {
             return Ok(None);
         }
     }
-    intervals.sort_unstable_by_key(|&(start, _)| start);
-    let mut next = 0usize;
-    for (start, end) in intervals {
-        if start != next {
-            return Ok(None);
-        }
-        next = end;
-    }
 
-    // Why not enumerate physical scalar offsets: compile_shared_structures has
-    // already rejected aliased destination layouts and duplicate block owners.
-    // Contiguous layout intervals prove exact cover using only block metadata;
     // PhysicalOverwriteProof additionally requires canonical coupled-sector
-    // regions to partition the same 0..required_len range before unsafe replay.
-    Ok((next == required_len).then_some(required_len))
+    // regions to partition the same 0..required_len range before owned replay.
+    Ok((covered_len == required_len).then_some(required_len))
 }
