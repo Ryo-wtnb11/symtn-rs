@@ -225,8 +225,9 @@ impl Factor for EigVals {
     const OP: tlinalg::Op = tlinalg::Op::EigValues;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eig::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eig::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(

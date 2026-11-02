@@ -181,8 +181,9 @@ it. A batch whose every input is one matrix (batch product one) takes the
 same search, with each block's granted width composed as tlinalg decides it
 for one item under `Auto`: the engine's cost rule over the total work's time,
 capped at the width the provider's payback work (`estimate_payback_work`,
-the part of the estimate a team inside the item can pay back) pays for, and
-one thread on a token without a team. The serial times stay the work model's
+the part of the estimate a team inside the item can pay back; for general
+eigenvalues it is the whole estimate, so the cap is inert) pays for, and one
+thread on a token without a team. The serial times stay the work model's
 estimates, which run low for SVD; no correction is applied, so the choice
 remains a scheduling estimate. A batch holding an input whose batch product
 is not one (including zero) keeps the baseline placement over `L0` lanes, without the search:
