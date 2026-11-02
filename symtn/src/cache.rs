@@ -27,9 +27,10 @@
 //!   effective strides, conjugation), [`StructureCacheKind::GemmPlans`], on
 //!   the native CPU provider. TensorKit has no counterpart: it calls BLAS
 //!   `mul!` per block, which keeps no plan;
-//! - searched lane allocations of block GEMM batches per schedule input
-//!   (budget, batch policy, mean work, team, dispatch costs, per-block
-//!   serial times and grant inputs), [`StructureCacheKind::LaneAllocations`],
+//! - searched lane allocations of block GEMM and single-matrix
+//!   factorization batches per schedule input (kernel kind, budget, batch
+//!   policy, mean work, team, dispatch costs, per-block serial times and
+//!   grant inputs), [`StructureCacheKind::LaneAllocations`],
 //!   on the native CPU provider, so a repeated batch on a fresh executor
 //!   skips the lane search. Neither TensorKit nor QSpace has a model-based
 //!   lane search or a cache of its result.

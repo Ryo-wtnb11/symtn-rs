@@ -53,9 +53,9 @@ pub enum StructureCacheKind {
     /// strides, conjugation), shared by every Runtime and engine of the
     /// process. No TensorKit analogue: TensorKit calls BLAS `mul!` per block.
     GemmPlans,
-    /// Searched lane allocations of block batches per schedule input (budget,
-    /// batch policy, mean work, team, dispatch costs, per-block serial times
-    /// and grant inputs), shared by every Runtime and engine of the process.
+    /// Searched lane allocations of block batches per schedule input (kernel
+    /// kind, budget, batch policy, mean work, team, dispatch costs, per-block
+    /// serial times and grant inputs), shared by every Runtime and engine of the process.
     /// No TensorKit or QSpace analogue: neither has a model-based lane search
     /// or a cache of its result.
     LaneAllocations,

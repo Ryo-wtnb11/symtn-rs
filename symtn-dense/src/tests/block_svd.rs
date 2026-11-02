@@ -3,11 +3,13 @@
 //! width and batch policy (degenerate singular values compared as subspace
 //! projectors); determinism for a fixed engine; errors identical to the
 //! per-matrix entry, lowest input first; the engine-derived reserved lane
-//! widths; and a lane panic breaking the engine.
+//! widths and which batches the lane search admits; and a lane panic
+//! breaking the engine.
 
 use super::*;
 use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKind};
 use crate::block_kernel::{factor, schedule};
+use std::time::Duration;
 use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 pub(super) use super::numerics;
@@ -636,18 +638,32 @@ fn lane_minimum_is_checked_against_work_not_time() {
     assert_eq!(a.decision.lanes, 2);
 }
 
-/// A factorization kernel whose block `j` has work `self.0[j]` and records
-/// the width of the context it runs on.
-struct RecordsWidth(Vec<f64>, Vec<std::sync::atomic::AtomicUsize>);
+/// An SVD kernel over `self.0` that runs no factorization: its cost, search
+/// admission and grant are the SVD kernel's, and each block records the
+/// reserved width of the lane it runs on.
+struct RecordsWidth<'a>(Vec<DenseRead<'a>>, Vec<std::sync::atomic::AtomicUsize>);
 
-impl BlockOp for RecordsWidth {
+impl BlockOp for RecordsWidth<'_> {
     type Job = ();
     const ENTRY: Entry = Entry::Linalg;
     const KIND: OpKind = OpKind::Factorization;
     const LABEL: &'static str = "svd_read";
 
     fn work(&self, index: usize, _: &()) -> f64 {
-        self.0[index]
+        factor::work::<factor::Svd>(self.0[index])
+    }
+
+    fn modeled(&self, index: usize, _: &()) -> bool {
+        factor::single_item::<factor::Svd>(self.0[index]).is_some()
+    }
+
+    fn grant(&self, index: usize, _: &(), exec: &Exec<'_>, budget: usize, _: Duration) -> usize {
+        factor::single_item::<factor::Svd>(self.0[index])
+            .map_or(1, |item| factor::grant(exec, budget, item))
+    }
+
+    fn grant_key(&self, index: usize, _: &()) -> schedule::GrantKey {
+        factor::single_item::<factor::Svd>(self.0[index]).map_or([0; 2], |w| w.map(f64::to_bits))
     }
 
     fn run(&self, index: usize, _: &mut (), exec: Exec<'_>) -> Result<(), DenseError> {
@@ -656,57 +672,85 @@ impl BlockOp for RecordsWidth {
     }
 }
 
-/// Purpose: a factorization batch keeps main's placement under Auto, because
-/// its provider's width estimate is not yet trusted, even where the model
-/// would narrow it. One 40000 ns block and three 100 ns ones on four slots
-/// (flat 100 ns dispatch, one multiply-add per ns): the model prefers one
-/// lane of four slots, while main gives every block its own one-slot lane.
-#[test]
-fn factorization_batches_keep_the_baseline_placement() {
+/// The reserved lane width each real SVD input of `shapes` runs on, on
+/// `threads` slots of flat 100 ns dispatch at one multiply-add per ns, no
+/// item overhead and a lane work minimum of `lane_ns`.
+fn svd_lane_widths(threads: usize, lane_ns: f64, shapes: &[&[usize]]) -> Vec<usize> {
     use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
-    let row = WidthCosts::flat(std::time::Duration::from_nanos(100));
+    let row = WidthCosts::flat(Duration::from_nanos(100));
     let pool = Pool::builder()
-        .threads(4)
+        .threads(threads)
         .dispatch_costs(DispatchCosts::new(row, row, row))
         .build()
         .unwrap();
     let model = WorkModel::default()
         .with_muladds_per_ns(1.0)
-        .with_item_overhead_ns(0.0);
+        .with_item_overhead_ns(0.0)
+        .with_min_work_per_lane_ns(lane_ns);
     let mut engine =
         CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
-    let work = vec![40000.0, 100.0, 100.0, 100.0];
-    let modeled = engine
-        .with_linalg_pool(|exec, _| {
-            let exec: &Exec<'_> = exec;
-            let times: Vec<_> = work
-                .iter()
-                .map(|&w| cost(OpKind::Factorization, w, &model))
-                .collect();
-            let grant =
-                |_, t: std::time::Duration, w| exec.width_for_within(w, t.as_nanos() as f64, 1);
-            Ok(schedule::allocate_in(
-                exec,
-                &times,
-                |_| [0; 2],
-                10075.0,
-                &mut schedule::AllocationScratch::default(),
-                &schedule::LaneAllocationCache::new(
-                    symtn_core::StructureCacheKind::LaneAllocations,
-                    0,
-                ),
-                Some(grant),
-            ))
+    let data = vec![0.0_f64; 10000];
+    // Column-major strides: each the product of the extents before it.
+    let strides: Vec<Vec<usize>> = shapes
+        .iter()
+        .map(|shape| {
+            (0..shape.len())
+                .map(|axis| shape[..axis].iter().product())
+                .collect()
         })
-        .unwrap();
-    assert_eq!(budgets(&modeled), [4]);
-    let op = RecordsWidth(work, (0..4).map(|_| 0.into()).collect());
-    driver::drive(&mut engine, &op, &mut [(); 4], &mut LaneScratch::default()).unwrap();
-    let widths: Vec<usize> =
-        op.1.iter()
-            .map(|w| w.load(std::sync::atomic::Ordering::Relaxed))
-            .collect();
-    assert_eq!(widths, [1, 1, 1, 1]);
+        .collect();
+    let inputs = shapes
+        .iter()
+        .zip(&strides)
+        .map(|(&shape, strides)| {
+            let len = shape.iter().product();
+            DenseRead::F64(DenseView::new(&data[..len], shape, strides, 0).unwrap())
+        })
+        .collect();
+    let op = RecordsWidth(inputs, shapes.iter().map(|_| 0.into()).collect());
+    let mut jobs = vec![(); shapes.len()];
+    driver::drive(&mut engine, &op, &mut jobs, &mut LaneScratch::default()).unwrap();
+    op.1.iter()
+        .map(|w| w.load(std::sync::atomic::Ordering::Relaxed))
+        .collect()
+}
+
+/// Purpose: a factorization batch whose every input is one matrix joins the
+/// lane search with tlinalg's own width for one SVD item, and a batch holding
+/// an input with a batch dimension keeps the baseline placement. Four slots,
+/// flat 100 ns dispatch (a width pays from 300 ns), one multiply-add per ns:
+/// - `80 x 80` and three `4 x 4`: the large SVD's payback work is
+///   `80^3 * 6e-4 = 307.2` ns, so it is granted every width; one four-slot
+///   lane scores `512000 / 4 + 100 + 3 * 64 = 128292` ns against the
+///   baseline's 512000 ns on four one-slot lanes;
+/// - `79 x 79` instead: payback `79^3 * 6e-4 = 295.8` ns pays at no width
+///   (its whole time, 493039 ns, would), so every candidate scores 493039 ns
+///   and the tie keeps the baseline;
+/// - the first batch with one `4 x 4 x 2` input keeps the baseline.
+///
+/// On six slots with a 10000 ns lane minimum, one `10000 x 1` and 120
+/// `100 x 1` (payback 6 and 0.06 ns: serial at every width) give `L0 = 2`
+/// lanes; the baseline and two equal lanes score 11000 ns, the reservation's
+/// six one-slot lanes 10000 ns but hold more than `L0` lanes and are
+/// discarded, so the baseline's two three-slot lanes run every block.
+#[test]
+fn single_matrix_factorizations_join_the_lane_search() {
+    let small: &[usize] = &[4, 4];
+    assert_eq!(
+        svd_lane_widths(4, 0.0, &[&[80, 80], small, small, small]),
+        [4; 4]
+    );
+    assert_eq!(
+        svd_lane_widths(4, 0.0, &[&[79, 79], small, small, small]),
+        [1; 4]
+    );
+    assert_eq!(
+        svd_lane_widths(4, 0.0, &[&[80, 80], small, small, &[4, 4, 2]]),
+        [1; 4]
+    );
+    let mut many: Vec<&[usize]> = vec![&[10000, 1]];
+    many.extend([&[100, 1][..]; 120]);
+    assert_eq!(svd_lane_widths(6, 10000.0, &many), [3; 121]);
 }
 
 /// A linalg-entry kernel whose block `self.0` panics.
@@ -720,6 +764,14 @@ impl BlockOp for PanicsAt {
 
     fn work(&self, _: usize, _: &()) -> f64 {
         1.0
+    }
+
+    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> usize {
+        1
+    }
+
+    fn grant_key(&self, _: usize, _: &()) -> schedule::GrantKey {
+        [0; 2]
     }
 
     fn run(&self, index: usize, _: &mut (), _: Exec<'_>) -> Result<(), DenseError> {

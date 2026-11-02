@@ -13,6 +13,7 @@
 //! capacity is the provider's reservation, not necessarily the length).
 
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
@@ -21,6 +22,7 @@ use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
+use super::schedule::{self, GrantKey};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
 use crate::{DenseError, DenseRead, DenseTensor, DenseView};
@@ -38,8 +40,10 @@ pub(crate) trait Factor {
     /// after the rank and before the zero-extent shortcut.
     const SQUARE: bool = false;
 
-    /// tlinalg's work estimate for one real `m x n` matrix, in multiply-adds.
-    fn work(m: usize, n: usize) -> f64;
+    /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
+    /// weighted multiply-adds: its total work and the part a team inside the
+    /// item can pay back (`estimate_work`, `estimate_payback_work`).
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2];
 
     /// The factors of one input of matrix extents `dims = [m, n]` and batch
     /// dimensions `batch`, from the provider, or empty ones when `raw` is
@@ -60,9 +64,9 @@ impl Factor for Svd {
     const ENTRY: &'static str = "svd_read";
     const OP: tlinalg::Op = tlinalg::Op::Svd;
 
-    fn work(m: usize, n: usize) -> f64 {
-        let (m, n) = (m as f64, n as f64);
-        m * n * m.min(n)
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::svd::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -93,10 +97,9 @@ impl Factor for Qr {
     const ENTRY: &'static str = "qr_read";
     const OP: tlinalg::Op = tlinalg::Op::Qr;
 
-    fn work(m: usize, n: usize) -> f64 {
-        let (m, n) = (m as f64, n as f64);
-        let k = m.min(n);
-        m * n * k - k.powi(3) / 3.0
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::qr::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -127,8 +130,9 @@ impl Factor for Eigh {
     const OP: tlinalg::Op = tlinalg::Op::Eigh;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eigh::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eigh::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(
@@ -157,8 +161,9 @@ impl Factor for EighVals {
     const OP: tlinalg::Op = tlinalg::Op::EighValues;
     const SQUARE: bool = true;
 
-    fn work(n: usize, _: usize) -> f64 {
-        tlinalg::eigh::estimate_work::<f64>(n)
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::eigh::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(n), estimate_payback_work::<T>(n)]
     }
 
     fn factor<T: Scalar>(
@@ -187,8 +192,9 @@ impl Factor for SvdVals {
     const ENTRY: &'static str = "svd_values";
     const OP: tlinalg::Op = tlinalg::Op::SvdValues;
 
-    fn work(m: usize, n: usize) -> f64 {
-        tlinalg::svd::estimate_work::<f64>(m, n)
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        use tlinalg::svd::{estimate_payback_work, estimate_work};
+        [estimate_work::<T>(m, n), estimate_payback_work::<T>(m, n)]
     }
 
     fn factor<T: Scalar>(
@@ -304,6 +310,18 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
         work::<F>(job.input)
     }
 
+    fn modeled(&self, _: usize, job: &Job<'a>) -> bool {
+        single_item::<F>(job.input).is_some()
+    }
+
+    fn grant(&self, _: usize, job: &Job<'a>, exec: &Exec<'_>, budget: usize, _: Duration) -> usize {
+        single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item))
+    }
+
+    fn grant_key(&self, _: usize, job: &Job<'a>) -> GrantKey {
+        single_item::<F>(job.input).map_or([0; 2], |item| item.map(f64::to_bits))
+    }
+
     // A block's error is its own outcome, not the driver's: the caller
     // delivers every block's outcome in input order.
     fn run(&self, _: usize, job: &mut Job<'a>, mut exec: Exec<'_>) -> Result<(), DenseError> {
@@ -399,22 +417,53 @@ fn batch_on<F: Factor>(
     }
 }
 
-/// tlinalg's work estimate of `F` per matrix, four times that for a complex
-/// scalar, over every batch item.
-pub(crate) fn work<F: Factor>(input: DenseRead<'_>) -> f64 {
-    let (shape, complex) = match input {
-        DenseRead::F32(view) => (view.shape(), false),
-        DenseRead::F64(view) => (view.shape(), false),
-        DenseRead::C32(view) => (view.shape(), true),
-        DenseRead::C64(view) => (view.shape(), true),
-        _ => return 0.0,
+/// tlinalg's per-item estimates of `F` for `input`'s scalar (see
+/// [`Factor::estimates`]) and its batch product, or `None` for an input the
+/// provider refuses (rank or dtype).
+fn item_estimates<F: Factor>(input: DenseRead<'_>) -> Option<([f64; 2], f64)> {
+    let (shape, estimates): (_, fn(usize, usize) -> [f64; 2]) = match input {
+        DenseRead::F32(view) => (view.shape(), F::estimates::<f32>),
+        DenseRead::F64(view) => (view.shape(), F::estimates::<f64>),
+        DenseRead::C32(view) => (view.shape(), F::estimates::<Complex32>),
+        DenseRead::C64(view) => (view.shape(), F::estimates::<Complex64>),
+        _ => return None,
     };
     let [m, n, batch @ ..] = shape else {
-        return 0.0;
+        return None;
     };
-    let items: f64 = batch.iter().map(|&b| b as f64).product();
-    let weight = if complex { 4.0 } else { 1.0 };
-    F::work(*m, *n) * items * weight
+    Some((estimates(*m, *n), batch.iter().map(|&b| b as f64).product()))
+}
+
+/// tlinalg's work estimate of `F` over every batch item of `input`, in
+/// weighted multiply-adds (four per complex multiply-add).
+pub(crate) fn work<F: Factor>(input: DenseRead<'_>) -> f64 {
+    item_estimates::<F>(input).map_or(0.0, |([total, _], items)| total * items)
+}
+
+/// tlinalg's (total, payback) estimates of `F` for `input` when its batch
+/// product is one, the only inputs whose provider width [`grant`] composes.
+///
+/// Why not a batched input: tlinalg's route for several items first gates the
+/// whole batch, then splits it into lanes and caps each item at
+/// `ceil(budget / lanes)` (`batch::decide`), a decision its public queries do
+/// not expose; a batch holding such an input keeps the baseline placement.
+pub(crate) fn single_item<F: Factor>(input: DenseRead<'_>) -> Option<[f64; 2]> {
+    item_estimates::<F>(input).and_then(|(item, items)| (items == 1.0).then_some(item))
+}
+
+/// The width tlinalg gives one item of `estimates = [total, payback]`
+/// weighted multiply-adds on a lane of `budget` slots of `exec` under Auto:
+/// `batch::decide` for a batch of one takes the batch decision's item width
+/// (`width_for` over the total's time, one section) and caps it at the width
+/// the payback work's time pays for, both under the engine's work model; a
+/// token without a team runs the item serially.
+pub(crate) fn grant(exec: &Exec<'_>, budget: usize, [total, payback]: [f64; 2]) -> usize {
+    if !exec.token_ref().carries_team() {
+        return 1;
+    }
+    let model = &exec.batch_policy().model;
+    let width = |work| exec.width_for_within(budget, schedule::work_model_ns(model, work), 1);
+    width(total).min(width(payback))
 }
 
 /// The checks the per-matrix entry makes before it enters the engine: the

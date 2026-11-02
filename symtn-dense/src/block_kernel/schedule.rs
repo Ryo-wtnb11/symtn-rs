@@ -21,7 +21,8 @@
 //! public decisions (for a Packed GEMM plan an optimistic upper bound on its
 //! grid), and the model has no sublinear speedup, so a lower score is a
 //! scheduling estimate, not a promise of a faster run. Without a grant model
-//! (the factorizations, see `driver::on_lanes`) the baseline is returned.
+//! (a factorization batch holding an input with batch dimensions, see
+//! `driver::BlockOp::modeled`) the baseline is returned.
 //!
 //! The search costs `O(J log J + G S + G' sum(W) + L0 J' + P J log L0)`,
 //! counting the provider queries' width scans. Jobs with equal serial times
@@ -56,6 +57,7 @@ use symtn_core::{
 };
 use tcontract_exec::{BatchDecision, BatchQuery, BatchStrategy, Exec, WorkModel};
 
+use super::driver::OpKind;
 use super::gemm::ENTRY_OVERHEAD_BYTES;
 
 /// One lane: its reserved slot budget and its jobs in ascending canonical
@@ -153,11 +155,11 @@ impl AllocationScratch {
     }
 }
 
-/// What a job's grant depends on besides its serial time and the execution
-/// context: jobs with equal keys and equal serial times get equal grants at
-/// every width. Every op that reaches the process-global
-/// [`lane_allocations`] cache must give different grant inputs different
-/// keys.
+/// What a job's grant depends on besides its serial time, the execution
+/// context and its op's [`OpKind`]: jobs with equal keys and equal serial
+/// times get equal grants at every width. Every op of one kind that reaches
+/// the process-global [`lane_allocations`] cache must give different grant
+/// inputs different keys.
 pub(crate) type GrantKey = [u64; 2];
 
 /// Everything a searched allocation is a function of, as the
@@ -170,14 +172,16 @@ pub(crate) type GrantKey = [u64; 2];
 /// grant and every item time read only those), whether the token carries a
 /// team (the Faer grant's item parallelism), the jobs' serial times in
 /// canonical order (the slot count, the order, the placements and the
-/// scores) and their grant keys (every other grant input). The grant
-/// function itself is not keyed: the process-global cache is reached only
-/// through `driver::on_lanes`, which searches only GEMM blocks, and every
-/// GEMM block op grants through `gemm::grant`, whose other inputs its keys
-/// carry. Floats are keyed by their bits, so equality is reflexive and a
+/// scores), their grant keys (every other grant input) and the op kind,
+/// which fixes the grant function: every GEMM block op grants through
+/// `gemm::grant` (keys: the plan's algorithm and the work) and every
+/// factorization through `factor::grant` (keys: the item's total and payback
+/// work), so equal keys of different kinds never share an allocation.
+/// Floats are keyed by their bits, so equality is reflexive and a
 /// differently signed zero only searches again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LaneAllocationKey {
+    family: OpKind,
     budget: usize,
     model: [u64; 5],
     mean_work: u64,
@@ -190,6 +194,7 @@ pub(crate) struct LaneAllocationKey {
 /// One call's [`LaneAllocationKey`], borrowed: a lookup reads the dispatch
 /// costs from the token instead of staging them, so a hit allocates nothing.
 struct LaneAllocationQuery<'a, 'e> {
+    family: OpKind,
     exec: &'a Exec<'e>,
     times: &'a [Duration],
     keys: &'a [GrantKey],
@@ -218,6 +223,7 @@ fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a
 #[allow(clippy::too_many_arguments)]
 fn hash_key<H: Hasher>(
     state: &mut H,
+    family: OpKind,
     budget: usize,
     model: [u64; 5],
     mean_work: u64,
@@ -226,7 +232,7 @@ fn hash_key<H: Hasher>(
     times: &[Duration],
     keys: &[GrantKey],
 ) {
-    (budget, model, mean_work, team).hash(state);
+    (family, budget, model, mean_work, team).hash(state);
     state.write_usize(costs.0);
     costs.1.for_each(|cost| cost.hash(state));
     times.hash(state);
@@ -237,6 +243,7 @@ impl Hash for LaneAllocationKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         hash_key(
             state,
+            self.family,
             self.budget,
             self.model,
             self.mean_work,
@@ -259,6 +266,7 @@ impl LaneAllocationQuery<'_, '_> {
 
     fn to_key(&self) -> LaneAllocationKey {
         LaneAllocationKey {
+            family: self.family,
             budget: self.exec.budget(),
             model: self.model(),
             mean_work: self.mean_work.to_bits(),
@@ -275,6 +283,7 @@ impl Hash for LaneAllocationQuery<'_, '_> {
         let budget = self.exec.budget();
         hash_key(
             state,
+            self.family,
             budget,
             self.model(),
             self.mean_work.to_bits(),
@@ -288,7 +297,8 @@ impl Hash for LaneAllocationQuery<'_, '_> {
 
 impl StructureCacheEquivalent<LaneAllocationKey> for LaneAllocationQuery<'_, '_> {
     fn equivalent(&self, key: &LaneAllocationKey) -> bool {
-        key.budget == self.exec.budget()
+        key.family == self.family
+            && key.budget == self.exec.budget()
             && key.model == self.model()
             && key.mean_work == self.mean_work.to_bits()
             && key.team == self.team()
@@ -392,7 +402,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
     allocate_in(
         exec,
         times,
-        |_| [0; 2],
+        (OpKind::Gemm, |_| [0; 2]),
         mean_work,
         &mut AllocationScratch::default(),
         &LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0),
@@ -418,7 +428,8 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
 /// twice), with its tables drawn from `scratch`.
 ///
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
-/// `w` reserved slots, and `key(j)` its other inputs (see [`GrantKey`]);
+/// `w` reserved slots, `key(j)` its other inputs (see [`GrantKey`]) and
+/// `family` the op kind whose grant function `grant` is;
 /// Auto scores its candidates with it (see the module documentation), and
 /// takes a searched allocation from `cache` when one was computed from the
 /// same inputs (see [`LaneAllocationKey`]), offering each new search for
@@ -432,7 +443,7 @@ pub(crate) fn item_time(exec: &Exec<'_>, serial: Duration, width: usize) -> Dura
 pub(crate) fn allocate_in(
     exec: &Exec<'_>,
     times: &[Duration],
-    key: impl Fn(usize) -> GrantKey,
+    (family, key): (OpKind, impl Fn(usize) -> GrantKey),
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
@@ -445,7 +456,15 @@ pub(crate) fn allocate_in(
     if grant.is_some() && exec.budget() >= 2 && times.len() >= 2 {
         keys.extend((0..times.len()).map(key));
     }
-    let allocation = allocate_with(exec, times, &keys, mean_work, scratch, cache, grant);
+    let allocation = allocate_with(
+        exec,
+        times,
+        (family, &keys),
+        mean_work,
+        scratch,
+        cache,
+        grant,
+    );
     scratch.keys = keys;
     allocation
 }
@@ -453,7 +472,7 @@ pub(crate) fn allocate_in(
 fn allocate_with(
     exec: &Exec<'_>,
     times: &[Duration],
-    keys: &[GrantKey],
+    (family, keys): (OpKind, &[GrantKey]),
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
@@ -467,6 +486,7 @@ fn allocate_with(
         && exec.batch_policy().strategy == BatchStrategy::Auto
         && !keys.is_empty())
     .then_some(LaneAllocationQuery {
+        family,
         exec,
         times,
         keys,
@@ -1549,7 +1569,7 @@ mod tests {
                 let a = allocate_in(
                     exec,
                     &t,
-                    |_| [0; 2],
+                    (OpKind::Gemm, |_| [0; 2]),
                     1e6,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -1600,7 +1620,7 @@ mod tests {
                 Ok(allocate_in(
                     exec,
                     times,
-                    |_| [0; 2],
+                    (OpKind::Gemm, |_| [0; 2]),
                     mean_work,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -1926,7 +1946,7 @@ mod tests {
                     let a = allocate_in(
                         exec,
                         t,
-                        |j| keys[j],
+                        (OpKind::Gemm, |j| keys[j]),
                         10075.0,
                         &mut scratch,
                         &cache,
@@ -1979,7 +1999,7 @@ mod tests {
                     Ok(allocate_in(
                         exec,
                         t,
-                        |j| keys[j],
+                        (OpKind::Gemm, |j| keys[j]),
                         1e9,
                         &mut AllocationScratch::default(),
                         &uncached(),
@@ -2008,8 +2028,9 @@ mod tests {
     /// Purpose: a repeated allocation with every input unchanged is taken
     /// from the cache without a grant query and equals the searched one;
     /// changing any one input it depends on (a serial time, a grant key, the
-    /// mean work, the work model, the dispatch costs, the budget, the
-    /// token's team) searches again; after a clear, and on a disabled cache
+    /// op kind, a factorization's total or payback work, the mean work, the
+    /// work model, the dispatch costs, the budget, the token's team) searches
+    /// again; after a clear, and on a disabled cache
     /// at every call, it searches and finds the cached allocation.
     #[test]
     fn unchanged_inputs_hit_and_any_change_searches() {
@@ -2022,8 +2043,9 @@ mod tests {
         let cache = cache(1 << 20);
         let mut scratch = AllocationScratch::default();
         let queries = std::cell::Cell::new(0);
-        // Runs one allocation on `exec` and returns its lanes and whether
-        // it queried a grant.
+        let family = std::cell::Cell::new(OpKind::Gemm);
+        // Runs one allocation of `family`'s kind on `exec` and returns its
+        // lanes and whether it queried a grant.
         let mut run = |exec: &Exec<'_>, t: &[Duration], keys: &[GrantKey], mean: f64| {
             queries.set(0);
             let grant = |_, t: Duration, w| {
@@ -2033,7 +2055,7 @@ mod tests {
             let a = allocate_in(
                 exec,
                 t,
-                |j| keys[j],
+                (family.get(), |j| keys[j]),
                 mean,
                 &mut scratch,
                 &cache,
@@ -2064,6 +2086,23 @@ mod tests {
         assert!(on(&mut flat(4, other_model, 100), &t, &keys, 10075.0).1);
         assert!(on(&mut flat(4, policy, 101), &t, &keys, 10075.0).1);
         assert!(on(&mut flat(5, policy, 100), &t, &keys, 10075.0).1);
+        // The same keys under the factorizations' grant, then their per-job
+        // total and payback work bits.
+        family.set(OpKind::Factorization);
+        assert!(on(&mut base, &t, &keys, 10075.0).1);
+        let work: Vec<GrantKey> = [40000.0_f64, 100.0, 100.0, 100.0]
+            .iter()
+            .map(|&w| [w.to_bits(), (w * 6e-4).to_bits()])
+            .collect();
+        assert!(on(&mut base, &t, &work, 10075.0).1);
+        assert!(!on(&mut base, &t, &work, 10075.0).1);
+        let mut other_payback = work.clone();
+        other_payback[1][1] = 0.07_f64.to_bits();
+        assert!(on(&mut base, &t, &other_payback, 10075.0).1);
+        let mut other_total = work.clone();
+        other_total[1][0] = 100.5_f64.to_bits();
+        assert!(on(&mut base, &t, &other_total, 10075.0).1);
+        family.set(OpKind::Gemm);
         // The base entry survived the other keys' admissions.
         assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
 
@@ -2116,14 +2155,21 @@ mod tests {
                     let cached = allocate_in(
                         exec,
                         &t,
-                        |j| keys[j],
+                        (OpKind::Gemm, |j| keys[j]),
                         10075.0,
                         &mut scratch,
                         &bounded,
                         grant,
                     );
-                    let rejected =
-                        allocate_in(exec, &t, |j| keys[j], 10075.0, &mut scratch, &tiny, grant);
+                    let rejected = allocate_in(
+                        exec,
+                        &t,
+                        (OpKind::Gemm, |j| keys[j]),
+                        10075.0,
+                        &mut scratch,
+                        &tiny,
+                        grant,
+                    );
                     assert_eq!(cached, rejected);
                     let info = bounded.info();
                     assert!(info.charged_bytes() <= info.byte_budget(), "{info:?}");
@@ -2193,9 +2239,11 @@ mod tests {
     ///   two-slot lanes (5100 ns each), but the 4000 ns job lifts one to
     ///   7200 ns, and one four-slot lane (6650 ns) is kept;
     /// - it exceeds the decision's lanes: on S = 6 with a 10000 ns lane work
-    ///   minimum, one 10000 ns job and 120 of 100 ns give two lanes; the
+    ///   minimum, one 10000 ns job and 120 of 100 ns give two lanes; under
+    ///   this synthetic grant (a paying job takes its whole lane) the
     ///   reservation's four lanes (3900 ns) are discarded, and two equal
-    ///   lanes (7733 ns) beat main's 11000 ns.
+    ///   lanes (7733 ns) beat main's 11000 ns. (Under the real SVD grant
+    ///   every one of these jobs is serial; see `block_svd`.)
     #[test]
     fn allocation_dominates_main_under_model() {
         let d = 100;
