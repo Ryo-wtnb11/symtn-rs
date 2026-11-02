@@ -129,9 +129,9 @@ pub(crate) fn drive<B: BlockOp>(
 ) -> Result<(), DenseError> {
     let entered = match B::ENTRY {
         Entry::Contraction => {
-            cpu.with_contraction_exec(|exec, _, _| Ok(on_lanes(exec, op, jobs, scratch)))
+            cpu.with_contraction_exec(|exec, _, _| on_lanes(exec, op, jobs, scratch))
         }
-        Entry::Linalg => cpu.with_linalg_pool(|exec, _| Ok(on_lanes(exec, op, jobs, scratch))),
+        Entry::Linalg => cpu.with_linalg_pool(|exec, _| on_lanes(exec, op, jobs, scratch)),
     };
     entered
         .map_err(|err| tenferro_error(B::LABEL, err))?
@@ -143,7 +143,7 @@ fn on_lanes<B: BlockOp>(
     op: &B,
     jobs: &mut [B::Job],
     scratch: &mut LaneScratch,
-) -> Result<(), (usize, DenseError)> {
+) -> tenferro_tensor::Result<Result<(), (usize, DenseError)>> {
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
     scratch.times.clear();
@@ -185,5 +185,7 @@ fn on_lanes<B: BlockOp>(
         op.run(index, job, exec)
     });
     scratch.allocation.keep(allocation);
-    result
+    // A refused lane split is the engine's typed failure under this kernel's
+    // label, like a refused entry.
+    result.map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
 }

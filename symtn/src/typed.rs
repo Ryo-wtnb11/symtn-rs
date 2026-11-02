@@ -286,9 +286,10 @@ pub use symtn_core::{
 /// (`CpuBatchStrategy::Auto`) runs a batch on symtn's block GEMM kernel,
 /// which takes the batch's thread count from the engine's cost rule over its
 /// estimated serial time and a lane count of at most the engine's batch
-/// decision, chosen by a provider-derived cost estimate; the lanes share those
-/// threads in equal shares, so a batch of a few large blocks gives each lane
-/// several threads (or runs on one lane of all of them). A caller can still give each GEMM the whole pool:
+/// decision, chosen by a provider-derived cost estimate; each lane reserves a
+/// share of those threads (equal shares, or a wider lane for each dominant
+/// block), so a batch of a few large blocks gives each lane several threads
+/// (or runs on one lane of all of them). A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
