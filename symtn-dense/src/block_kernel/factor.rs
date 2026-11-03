@@ -240,7 +240,13 @@ impl Factor for QrFull {
         if m <= n {
             return Qr::factor::<T>(raw, [m, n], batch, exec);
         }
-        let items = batch.iter().product::<usize>();
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, m], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
         let mut r = vec![T::ZERO; checked_len(&[m, n, items])?];
         let mut q = vec![T::ZERO; checked_len(&[m, m, items])?];
         match raw {
@@ -281,8 +287,14 @@ impl Factor for QrNull {
         batch: &[usize],
         exec: &mut Exec<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        let items = batch.iter().product::<usize>();
         let null = m - m.min(n);
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, null], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
         let mut basis = vec![T::ZERO; checked_len(&[m, null, items])?];
         match raw {
             Some(raw) if null > 0 => {
@@ -956,12 +968,7 @@ pub(crate) trait FactorInto: Factor {
 
     /// Writes the outputs of an input with a zero extent, whose solve is
     /// skipped; most factorizations have nothing to write.
-    fn empty_into<T: Scalar>(
-        _dims: [usize; 2],
-        _batch: usize,
-        _outputs: &mut [Option<DenseWrite<'_>>; 3],
-    ) {
-    }
+    fn empty_into<T: Scalar>(_dims: [usize; 2], _outputs: &mut [Option<DenseWrite<'_>>; 3]) {}
 
     /// Solves one input into `outputs` (validated destinations of `T`).
     #[allow(clippy::too_many_arguments)]
@@ -1112,11 +1119,7 @@ impl FactorInto for QrFull {
     }
 
     // `[m, 0]`: `Q = I_m`, `R` empty.
-    fn empty_into<T: Scalar>(
-        [m, _]: [usize; 2],
-        _: usize,
-        outputs: &mut [Option<DenseWrite<'_>>; 3],
-    ) {
+    fn empty_into<T: Scalar>([m, _]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
         identity_columns(slot::<T>(&mut outputs[0]), m, m, 0);
     }
 
@@ -1188,11 +1191,7 @@ impl FactorInto for QrNull {
     }
 
     // `[m, 0]`: every direction is null, `N = I_m`.
-    fn empty_into<T: Scalar>(
-        [m, n]: [usize; 2],
-        _: usize,
-        outputs: &mut [Option<DenseWrite<'_>>; 3],
-    ) {
+    fn empty_into<T: Scalar>([m, n]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
         let null = m - m.min(n);
         identity_columns(slot::<T>(&mut outputs[0]), m, null, m - null);
     }
@@ -1630,11 +1629,12 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
             tenferro_tensor::Error::shape_mismatch(op, vec![*m], vec![*n]),
         ));
     }
-    let items = batch.iter().product::<usize>();
     if shape.contains(&0) {
-        F::empty_into::<T>([*m, *n], items, &mut dest.outputs);
+        F::empty_into::<T>([*m, *n], &mut dest.outputs);
         return Ok(());
     }
+    // A nonempty view's element count fits, so its batch product does.
+    let items = batch.iter().product::<usize>();
     with_provider_read::<F, T, _>(view, strides, |raw| {
         if let Some(error) = sizing {
             return Err(error);

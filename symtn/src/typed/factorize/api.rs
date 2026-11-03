@@ -800,9 +800,10 @@ where
     /// applies the Householder reflectors of `self` to the identity,
     /// `O(m_c n_c² + m_c² n_c)`, while other providers complete the square
     /// `q` with one economy QR of `[A_c | I]`, `O(m_c²(n_c + m_c))`. The
-    /// columns of `q` past `min(m_c, n_c)` are an orthonormal basis of the
-    /// complement of `r`'s range, which may differ by provider. Source
-    /// packing and owned factor publication are additional costs. An owned Host compact diagonal
+    /// first `k = min(m_c, n_c)` columns of `q` span a superspace of
+    /// `range(A_c)`; the columns past them span the orthogonal complement of
+    /// those first `k`, in an orthonormal basis that may differ by provider.
+    /// Source packing and owned factor publication are additional costs. An owned Host compact diagonal
     /// uses `W = V` and two compact factors under the boundary documented by
     /// [`Self::qr_compact`].
     /// See [`Self::qr_compact`] for the

@@ -1907,19 +1907,64 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
         factorize_all(&mut executor, engine, DenseFactorization::Lq, &[rank_one]).unwrap_err();
     assert_eq!(error, executor.qr(engine, rank_one).unwrap_err());
     // An empty input whose batch extents overflow the element count is
-    // refused by QR as an outcome, on this executor and the trait default.
+    // refused as an outcome by the output metadata (QR's for LQ and full QR),
+    // on this executor and the trait default, without a panic.
     let overflowing =
         DenseRead::F64(DenseView::new(&empty, &[0, 0, usize::MAX, 2], &[1, 0, 0, 0], 0).unwrap());
     for executor in [
         &mut executor as &mut dyn DenseExecutor,
         &mut FullOnly(DefaultDenseExecutor::new()),
     ] {
-        let error =
-            factorize_all(executor, engine, DenseFactorization::Lq, &[overflowing]).unwrap_err();
-        assert!(
-            matches!(error, DenseError::Backend { op: "qr_read", .. }),
-            "{error:?}"
+        for op in [
+            DenseFactorization::Lq,
+            DenseFactorization::QrFull,
+            DenseFactorization::QrNull,
+        ] {
+            let error = factorize_all(executor, engine, op, &[overflowing]).unwrap_err();
+            assert!(
+                matches!(error, DenseError::Backend { .. }),
+                "{op:?}: {error:?}"
+            );
+        }
+    }
+    // Into empty destinations of the same shape, the native destination
+    // batch takes the empty shortcut before any batch count and delivers an
+    // empty result; a provider on the owned route delivers the owned
+    // refusal as a typed solver failure. Nothing panics and the engine stays
+    // usable.
+    for op in [
+        DenseFactorization::Qr,
+        DenseFactorization::QrFull,
+        DenseFactorization::QrNull,
+    ] {
+        let mut storage: [[f64; 0]; 2] = [[], []];
+        let [first, second] = &mut storage;
+        let (shape, strides) = ([0, 0, usize::MAX, 2], [1, 0, 0, 0]);
+        let write = |data| DenseWrite::F64(DenseViewMut::new(data, &shape, &strides, 0).unwrap());
+        let outputs = match op {
+            DenseFactorization::QrNull => [Some(write(first)), None, None],
+            _ => [Some(write(first)), Some(write(second)), None],
+        };
+        let mut dests = [FactorDest::new(outputs, FactorPlacement::AsComputed)];
+        let mut delivered = Vec::new();
+        let result = executor.factorize_batch_into(
+            engine,
+            op,
+            &[overflowing],
+            &mut dests,
+            &mut |index, _, outcome| {
+                delivered.push((index, outcome));
+                Ok(())
+            },
         );
+        assert_eq!(result, Ok(()), "{op:?}");
+        let native = cfg!(all(feature = "cpu-faer", not(feature = "cpu-blas-core")));
+        match &delivered[..] {
+            [(0, Ok(()))] if native => {}
+            [(0, Err(FactorFailure::Solver(DenseError::Backend { .. })))] if !native => {}
+            other => panic!("{op:?}: {other:?}"),
+        }
+        assert!(!engine.is_broken(), "{op:?}");
     }
 
     // Full QR and the QR null basis have no per-matrix entry either: on the
