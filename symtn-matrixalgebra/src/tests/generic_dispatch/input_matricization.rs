@@ -226,7 +226,6 @@ fn assert_compact_input_observations<D: FactorScalar>(
         match operation {
             crate::probe::CheckedCompactOperation::Qr
             | crate::probe::CheckedCompactOperation::Svd => {
-                assert_eq!(lowering.adjoint_pointer, None);
                 assert_eq!(dense.pointer, source_pointer);
                 assert_eq!(dense.shape, [region.rows(), region.cols()]);
                 assert_eq!(dense.strides, [1, region.rows()]);
@@ -239,7 +238,6 @@ fn assert_compact_input_observations<D: FactorScalar>(
                 );
             }
             crate::probe::CheckedCompactOperation::Lq => {
-                assert_eq!(lowering.adjoint_pointer, Some(dense.pointer));
                 assert_ne!(dense.pointer, source_pointer);
                 assert_eq!(dense.shape, [region.cols(), region.rows()]);
                 assert_eq!(dense.strides, [1, region.cols()]);
@@ -311,13 +309,7 @@ fn assert_checked_compact_input_borrowing<D: FactorScalar>(
         &data,
         &regions,
     );
-    let probe = compact_lq_copy_rec.compact_lq_copy();
-    assert_eq!(probe.input_pack_calls, 0);
-    assert_eq!(probe.adjoint_scratch_fill_calls, regions.len());
-    assert_eq!(
-        probe.adjoint_scratch_fill_bytes,
-        data.len() * std::mem::size_of::<D>()
-    );
+    assert_eq!(compact_lq_copy_rec.compact_lq_copy().input_pack_calls, 0);
     assert!(data == before);
 }
 

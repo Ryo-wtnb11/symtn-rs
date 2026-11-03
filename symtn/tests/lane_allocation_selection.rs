@@ -442,10 +442,11 @@ fn a_refused_fresh_contraction_allocates_no_output() {
     assert_eq!(allocs.matched_calls, 0, "{allocs:?}");
 }
 
-/// What: participation is per lowered phase: a general eigendecomposition,
-/// whose dense stage searches no lanes, runs any allocation on its current
-/// split, while a split that needs a Multi-recoupling permute first refuses
-/// the allocation the provider cannot honor.
+/// What: participation is per lowered phase: a general eigendecomposition
+/// and a compact LQ (baseline placement), whose dense stages search no
+/// lanes, run any allocation on their current split, while a split that
+/// needs a Multi-recoupling permute first refuses the allocation the
+/// provider cannot honor.
 #[test]
 #[cfg_attr(
     not(any(
@@ -464,5 +465,6 @@ fn a_leg_role_permute_carries_the_lane_allocation() {
     let t = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&w, &w], [&w, &w], 3).unwrap();
     let equal = &mut context(4, EQUAL);
     t.eig_full(equal, &[0, 1], &[2, 3]).unwrap();
+    t.lq_compact(equal, &[0, 1], &[2, 3]).unwrap();
     assert!(is_refused(t.eig_full(equal, &[0, 2], &[1, 3])));
 }

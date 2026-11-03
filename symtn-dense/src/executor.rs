@@ -77,6 +77,12 @@ pub enum DenseFactorization {
     Eig,
     /// [`DenseExecutor::eig_vals`], delivered as a one-tensor output.
     EigVals,
+    /// Compact LQ `X = L Q`: `[L, Q]` of shapes `[m, k, b..]` and
+    /// `[k, n, b..]` with `k = min(m, n)`, `Q` with orthonormal rows, in the
+    /// provider's gauge. It has no per-matrix entry; the default factors
+    /// each input's adjoint with [`DenseExecutor::qr`] (`X^H = Q' R'`) and
+    /// returns `[R'^H, Q'^H]`.
+    Lq,
 }
 
 mod sealed {
@@ -149,7 +155,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// failure (such as an engine the executor cannot use) is returned
     /// without calling `sink` further.
     ///
-    /// The default solves input `i` with the per-matrix entry and calls
+    /// The default solves input `i` with the per-matrix entry (for
+    /// [`DenseFactorization::Lq`], [`Self::qr`] of the input's adjoint,
+    /// written into one scratch sized for the largest input) and calls
     /// `sink(i, outcome)` before solving input `i + 1`, so an executor using
     /// it sees the same call sequence as a per-matrix loop that checks each
     /// output before the next solve. An executor whose per-call entry carries
@@ -163,6 +171,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         inputs: &[DenseRead<'_>],
         sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
+        let mut lq = AdjointQrLq::for_inputs(inputs);
         for (index, &input) in inputs.iter().enumerate() {
             let outcome = match op {
                 DenseFactorization::Svd => self.svd(engine, input),
@@ -172,14 +181,15 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::SvdVals => self.svd_vals(engine, input).map(|v| vec![v]),
                 DenseFactorization::Eig => self.eig(engine, input),
                 DenseFactorization::EigVals => self.eig_vals(engine, input).map(|v| vec![v]),
+                DenseFactorization::Lq => lq.factor(input, |adjoint| self.qr(engine, adjoint)),
             };
             sink(index, outcome)?;
         }
         Ok(())
     }
 
-    /// [`Self::factorize_batch`] of the compact QR, compact SVD or Hermitian
-    /// eigendecomposition `op` with each input's outputs written into its
+    /// [`Self::factorize_batch`] of the compact QR, compact LQ, compact SVD or
+    /// Hermitian eigendecomposition `op` with each input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
     /// shapes, dtypes and [`crate::FactorPlacement`]); any other `op` is
     /// [`DenseError::Unsupported`].
@@ -903,4 +913,219 @@ where
         )?;
     }
     Ok(())
+}
+
+/// [`DenseFactorization::Lq`] through the QR of each input's adjoint: `X^H`
+/// (column-major `[n, m, b..]`) is written into one scratch sized for the
+/// largest input of the batch, `qr` factors it as `X^H = Q' R'`, and the
+/// outcome is `[L, Q] = [R'^H, Q'^H]`, the outputs checked against the
+/// adjoint's shapes before they are adjointed. The executor default and
+/// providers without a transposed-read LQ use it.
+pub(crate) struct AdjointQrLq {
+    largest: usize,
+    scratch: AdjointScratch,
+}
+
+#[derive(Default)]
+struct AdjointScratch {
+    f32: Vec<f32>,
+    f64: Vec<f64>,
+    c32: Vec<Complex32>,
+    c64: Vec<Complex64>,
+}
+
+impl AdjointQrLq {
+    /// Allocates nothing until an input is staged.
+    pub(crate) fn for_inputs(inputs: &[DenseRead<'_>]) -> Self {
+        let largest = inputs
+            .iter()
+            .filter_map(|input| checked_count(input.shape()).ok())
+            .max()
+            .unwrap_or(0);
+        Self {
+            largest,
+            scratch: AdjointScratch::default(),
+        }
+    }
+
+    /// The LQ of one input through `qr` of its adjoint. An input the staging
+    /// cannot read (rank below 2, or a dtype without a conjugate) goes to
+    /// `qr` unchanged, so it is refused with `qr`'s own error.
+    pub(crate) fn factor(
+        &mut self,
+        input: DenseRead<'_>,
+        qr: impl FnOnce(DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let largest = self.largest;
+        let scratch = &mut self.scratch;
+        match input {
+            DenseRead::F32(view) if view.shape().len() >= 2 => {
+                lq_of_adjoint(view, &mut scratch.f32, largest, qr)
+            }
+            DenseRead::F64(view) if view.shape().len() >= 2 => {
+                lq_of_adjoint(view, &mut scratch.f64, largest, qr)
+            }
+            DenseRead::C32(view) if view.shape().len() >= 2 => {
+                lq_of_adjoint(view, &mut scratch.c32, largest, qr)
+            }
+            DenseRead::C64(view) if view.shape().len() >= 2 => {
+                lq_of_adjoint(view, &mut scratch.c64, largest, qr)
+            }
+            other => {
+                qr(other)?;
+                Err(DenseError::Unsupported {
+                    op: "lq",
+                    message: format!(
+                        "LQ input of dtype {:?} and rank {}",
+                        other.dtype(),
+                        other.shape().len()
+                    ),
+                })
+            }
+        }
+    }
+}
+
+/// A scalar the LQ default stages: its conjugate, and its typed reads.
+trait AdjointScalar: Copy {
+    fn conj(self) -> Self;
+    fn read(view: DenseView<'_, Self>) -> DenseRead<'_>;
+    fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
+    fn tensor(
+        like: &DenseTensor,
+        shape: Vec<usize>,
+        data: Vec<Self>,
+    ) -> Result<DenseTensor, DenseError>;
+}
+
+macro_rules! adjoint_scalar {
+    ($ty:ty, $variant:ident, $slice:ident, |$value:ident| $conj:expr) => {
+        impl AdjointScalar for $ty {
+            fn conj(self) -> Self {
+                let $value = self;
+                $conj
+            }
+            fn read(view: DenseView<'_, Self>) -> DenseRead<'_> {
+                DenseRead::$variant(view)
+            }
+            fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+                tensor.$slice()
+            }
+            fn tensor(
+                like: &DenseTensor,
+                shape: Vec<usize>,
+                data: Vec<Self>,
+            ) -> Result<DenseTensor, DenseError> {
+                DenseTensor::host_col_major_like(like, shape, data)
+            }
+        }
+    };
+}
+
+adjoint_scalar!(f32, F32, as_f32_slice, |value| value);
+adjoint_scalar!(f64, F64, as_f64_slice, |value| value);
+adjoint_scalar!(Complex32, C32, as_c32_slice, |value| {
+    num_complex::Complex::conj(&value)
+});
+adjoint_scalar!(Complex64, C64, as_c64_slice, |value| {
+    num_complex::Complex::conj(&value)
+});
+
+/// Writes the adjoint of each `m x n` item of the nonempty strided
+/// `[m, n, b..]` `view` into `output` as column-major `[n, m, b..]`.
+fn extend_adjoint_items<T: AdjointScalar>(
+    view: DenseView<'_, T>,
+    output: &mut Vec<T>,
+) -> Result<(), DenseError> {
+    let (shape, strides, data) = (view.shape(), view.strides(), view.data());
+    let (m, n) = (shape[0], shape[1]);
+    // A broadcast (zero-stride) view can describe more items than `usize`
+    // counts.
+    let items = checked_count(&shape[2..])?;
+    for item in 0..items {
+        let mut base = view.offset();
+        let mut rest = item;
+        for (&extent, &stride) in shape[2..].iter().zip(&strides[2..]) {
+            base += rest % extent * stride;
+            rest /= extent;
+        }
+        for row in 0..m {
+            output
+                .extend((0..n).map(|col| data[base + row * strides[0] + col * strides[1]].conj()));
+        }
+    }
+    Ok(())
+}
+
+/// The product of `extents`, or [`DenseError::ElementCountOverflow`].
+fn checked_count(extents: &[usize]) -> Result<usize, DenseError> {
+    extents
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or(DenseError::ElementCountOverflow)
+}
+
+/// The adjoint of each column-major `rows x cols` item of `data`, column-major
+/// `cols x rows` per item.
+fn adjoint_items<T: AdjointScalar>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
+    let mut adjoint = Vec::with_capacity(data.len());
+    if rows * cols == 0 {
+        return adjoint;
+    }
+    for item in data.chunks_exact(rows * cols) {
+        for row in 0..rows {
+            adjoint.extend((0..cols).map(|col| item[row + rows * col].conj()));
+        }
+    }
+    adjoint
+}
+
+fn lq_of_adjoint<T: AdjointScalar>(
+    view: DenseView<'_, T>,
+    scratch: &mut Vec<T>,
+    largest: usize,
+    qr: impl FnOnce(DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError>,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    let shape = view.shape();
+    let (m, n, batch) = (shape[0], shape[1], &shape[2..]);
+    let k = m.min(n);
+    let dims = |a: usize, b: usize| [&[a, b][..], batch].concat();
+    let adjoint_shape = dims(n, m);
+    scratch.clear();
+    // An empty input stages nothing; its empty adjoint still goes to `qr`, so
+    // QR owns any refusal of its extents. A nonempty input's element count
+    // and column-major strides must fit `usize`.
+    let empty = shape.contains(&0);
+    if !empty {
+        if scratch.capacity() == 0 {
+            scratch.reserve(largest);
+        }
+        extend_adjoint_items(view, scratch)?;
+        #[cfg(test)]
+        crate::probe::add(crate::probe::Event::LqAdjointStaging, 1);
+    }
+    let mut adjoint_strides = Vec::with_capacity(adjoint_shape.len());
+    let mut stride = 1usize;
+    for &extent in &adjoint_shape {
+        adjoint_strides.push(stride);
+        stride = match stride.checked_mul(extent) {
+            Some(next) => next,
+            None if empty => 0,
+            None => return Err(DenseError::ElementCountOverflow),
+        };
+    }
+    let adjoint = DenseView::new(scratch, &adjoint_shape, &adjoint_strides, 0)?;
+    let outputs = qr(T::read(adjoint))?;
+    if outputs.len() != 2 {
+        return Err(arity_mismatch("qr_into", 2, outputs.len()));
+    }
+    let (q_shape, r_shape) = (dims(n, k), dims(k, m));
+    let q_prime = T::slice(&outputs[0])?;
+    check_contiguous_output("qr_into", q_prime.len(), outputs[0].shape(), &q_shape)?;
+    let r_prime = T::slice(&outputs[1])?;
+    check_contiguous_output("qr_into", r_prime.len(), outputs[1].shape(), &r_shape)?;
+    Ok(vec![
+        T::tensor(&outputs[1], dims(m, k), adjoint_items(r_prime, k, m))?,
+        T::tensor(&outputs[0], dims(k, n), adjoint_items(q_prime, n, k))?,
+    ])
 }

@@ -63,15 +63,15 @@ fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
 }
 
 #[test]
-fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
+fn compact_lq_canonical_layout_avoids_pack_and_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: canonical compact LQ avoids general pack/scatter while accounting for its three reusable scratch buffers and required adjoint copies.
+    // What: canonical compact LQ reads and writes the sector regions in place, without general pack/scatter.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
     let compact_lq_copy_rec = crate::probe::record();
-    let Lq { l: left, q: right } = lq_compact(
+    lq_compact(
         engine,
         &mut dense,
         &bound_tensor_ref!(Arc::new(rule), &tensor),
@@ -83,18 +83,6 @@ fn compact_lq_canonical_layout_uses_only_bounded_adjoint_copies() {
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_calls, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
-    assert!(probe.scratch_capacity_bytes > 0);
-    assert!(probe.adjoint_scratch_fill_calls > 0);
-    assert_eq!(
-        probe.adjoint_scratch_fill_bytes,
-        std::mem::size_of_val(tensor.data())
-    );
-    assert!(probe.final_adjoint_copy_calls > 0);
-    assert_eq!(
-        probe.final_adjoint_copy_bytes,
-        (left.data().len() + right.data().len()) * std::mem::size_of::<f64>()
-    );
 }
 
 #[test]
@@ -127,7 +115,7 @@ fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
 #[test]
 fn compact_lq_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence without direct-region scratch accounting.
+    // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -141,9 +129,6 @@ fn compact_lq_noncanonical_layout_uses_copy_fallback() {
 
     assert!(probe.input_pack_bytes > 0);
     assert!(probe.output_scatter_bytes > 0);
-    assert_eq!(probe.scratch_buffer_count, 0);
-    assert_eq!(probe.adjoint_scratch_fill_bytes, 0);
-    assert_eq!(probe.final_adjoint_copy_bytes, 0);
 }
 
 #[test]
@@ -330,7 +315,6 @@ fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
     let rank = rows.min(cols);
     if rank == 0 {
         assert!(left.space().space().homspace().domain().legs()[0]
@@ -348,8 +332,6 @@ fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
             assert!((reconstructed - tensor.data()[row + rows * col]).abs() < 1e-10);
         }
     }
-    assert_eq!(probe.adjoint_scratch_fill_calls, usize::from(rank > 0));
-    assert_eq!(probe.final_adjoint_copy_calls, usize::from(rank > 0) * 2);
 }
 
 #[test]
@@ -426,11 +408,11 @@ fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 }
 
 #[test]
-fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch() {
+fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     use num_complex::Complex64;
 
-    // What: one complex LQ call reconstructs mixed rectangular sectors using bounded adjoint scratch and final regions.
+    // What: one complex LQ call reconstructs mixed rectangular sectors in place, without general pack/scatter.
     let rule = Z2FusionRule;
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
@@ -455,9 +437,6 @@ fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors_with_bounded_scratch(
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
-    assert!(probe.adjoint_scratch_fill_bytes > 0);
-    assert!(probe.final_adjoint_copy_bytes > 0);
     let input_regions = tensor
         .structure()
         .coupled_sector_regions(1)
@@ -612,7 +591,6 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
     let probe = compact_lq_copy_rec.compact_lq_copy();
     assert_eq!(probe.input_pack_bytes, 0);
     assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.scratch_buffer_count, 1);
 }
 
 fn bound_factor_matrices<R>(
@@ -1123,7 +1101,7 @@ impl FusionRule for U1AsGeneric {
 /// Warm allocation calls of checked compact LQ (eager, lazy adjoint) minus
 /// those of the multiplicity-free direct-region route on the same U(1) data
 /// and layout, with charges `-m..=m` on every leg (`4m + 1` coupled sectors).
-fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
+fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [i64; 2] {
     use super::null_space::counting_alloc;
     static RULE: U1AsGeneric = U1AsGeneric;
     let leg = |degeneracy: usize| {
@@ -1170,7 +1148,7 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
         call(&mut dense, &mut engine);
         counting_alloc::measure(|| call(&mut dense, &mut engine))
             .1
-            .calls
+            .calls as i64
     };
     let eager = warm(&mut |dense, engine| {
         lq_compact_dyn_checked_generic(engine, dense, &checked_input).unwrap();
@@ -1191,11 +1169,222 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
     [eager, lazy]
 }
 
+/// Each coupled sector's column-major payload of `factor`.
+fn factor_sector_data<R, D: Copy>(
+    factor: &BoundDynFactor<R, D>,
+) -> std::collections::BTreeMap<SectorId, Vec<D>> {
+    factor
+        .space()
+        .space()
+        .structure()
+        .coupled_sector_regions(factor.space().space().nout())
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|region| (region.coupled(), factor.data()[region.range()].to_vec()))
+        .collect()
+}
+
+#[test]
+fn lazy_adjoint_compact_lq_is_the_gauged_parent_qr_adjointed() {
+    use num_complex::Complex64;
+    // What: compact LQ of a lazy adjoint `X = A^H` on the region-tiled
+    // routes (multiplicity-free and checked) is, bit for bit, the
+    // positive-diagonal-gauged QR `A = Q R` of each parent block followed by
+    // `l = R^H`, `q = Q^H`: the gauge applied on the final placement equals
+    // the gauge applied before the adjoint. Complex entries, so a dropped or
+    // doubled conjugation shows.
+    static RULE: U1AsGeneric = U1AsGeneric;
+    let leg = |degeneracy: usize| {
+        SectorLeg::new(
+            (-1..=1).map(|charge| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            false,
+        )
+    };
+    let homspace = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(2), leg(2)]),
+        FusionProductSpace::new([leg(1), leg(1)]),
+    );
+    let mf = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::new(U1FusionRule),
+        homspace.clone(),
+    )
+    .unwrap();
+    let checked = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
+        Arc::new(InfallibleGeneric::new(&RULE)),
+        homspace,
+    )
+    .unwrap();
+    let data = (0..mf.space().required_len().unwrap())
+        .map(|index| {
+            let x = (index * 7 + 3) as f64;
+            Complex64::new((x * 0.37).sin(), (x * 0.53).cos())
+        })
+        .collect::<Vec<_>>();
+    let mf_input = BoundDynamicTensorRef::try_new(&mf, &data).unwrap();
+    let checked_input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
+    let mf_adjoint =
+        <symtn_core::MultiplicityFreeAdmissionMode as symtn_tensors::CoefficientAlgebra<
+            U1FusionRule,
+        >>::adjoint_space(mf_input.space())
+        .unwrap();
+    let checked_adjoint = <CheckedGenericAdmissionMode as symtn_tensors::CoefficientAlgebra<
+        InfallibleGeneric<'static, U1AsGeneric>,
+    >>::adjoint_space(checked_input.space())
+    .unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+
+    let adjoint = |data: &[Complex64], rows: usize, cols: usize| {
+        let mut out = vec![Complex64::default(); data.len()];
+        for col in 0..cols {
+            for row in 0..rows {
+                out[col + cols * row] = data[row + rows * col].conj();
+            }
+        }
+        out
+    };
+    let mut want_l = std::collections::BTreeMap::new();
+    let mut want_q = std::collections::BTreeMap::new();
+    for region in mf
+        .space()
+        .structure()
+        .coupled_sector_regions(mf.space().nout())
+        .unwrap()
+        .unwrap()
+        .iter()
+    {
+        let (rows, cols) = (region.rows(), region.cols());
+        let rank = rows.min(cols);
+        let shape = [rows, cols];
+        let strides = [1, rows];
+        let view = symtn_dense::DenseView::new(&data[region.range()], &shape, &strides, 0).unwrap();
+        let [q, r]: [symtn_dense::DenseTensor; 2] = dense
+            .qr(engine, DenseRead::C64(view))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let (mut q, mut r) = (
+            q.as_c64_slice().unwrap().to_vec(),
+            r.as_c64_slice().unwrap().to_vec(),
+        );
+        crate::factorize::positive_diagonal_gauge(&mut q, rows, &mut r, rank, cols);
+        want_l.insert(region.coupled(), adjoint(&r, rank, cols));
+        want_q.insert(region.coupled(), adjoint(&q, rows, rank));
+    }
+
+    let mf_lq =
+        crate::factorize::lq_compact_adjoint_dyn(engine, &mut dense, &mf_input, &mf_adjoint)
+            .unwrap();
+    let checked_lq = crate::factorize::lq_compact_adjoint_dyn_checked_generic(
+        engine,
+        &mut dense,
+        &checked_input,
+        &checked_adjoint,
+    )
+    .unwrap();
+    for (route, l, q) in [
+        (
+            "multiplicity-free",
+            factor_sector_data(&mf_lq.l),
+            factor_sector_data(&mf_lq.q),
+        ),
+        (
+            "checked",
+            factor_sector_data(&checked_lq.l),
+            factor_sector_data(&checked_lq.q),
+        ),
+    ] {
+        assert_eq!(l, want_l, "{route} l");
+        assert_eq!(q, want_q, "{route} q");
+    }
+}
+
+/// Fails its first QR solve when `fail` (recording that it did in
+/// `injected`), and refuses every linear-algebra scope at exit.
+struct LqRefusingScope {
+    fail: bool,
+    qr_calls: usize,
+    injected: bool,
+}
+
+impl crate::tests::scripted_executor::Observer for LqRefusingScope {
+    fn call(
+        &mut self,
+        call: crate::tests::scripted_executor::Call<'_, '_>,
+    ) -> Option<crate::tests::scripted_executor::Reply> {
+        if let crate::tests::scripted_executor::Call::Read(
+            crate::tests::scripted_executor::Op::Qr,
+            _,
+        ) = call
+        {
+            self.qr_calls += 1;
+            if self.fail && self.qr_calls == 1 {
+                self.injected = true;
+                return Some(Err(DenseError::OutOfBounds));
+            }
+        }
+        None
+    }
+
+    fn scope_exit(&mut self, _: crate::tests::scripted_executor::Counts) -> Result<(), DenseError> {
+        Err(scope_refusal("lq scope"))
+    }
+}
+
+#[test]
+fn compact_lq_runs_in_one_scope_whose_refusal_wins() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: compact LQ, ordinary and of a lazy adjoint, runs its dense batch
+    // inside the executor's linear-algebra scope: a scope that refuses at
+    // exit fails an otherwise successful call, and its refusal takes
+    // precedence over a solver failure inside it.
+    let rule = Z2FusionRule;
+    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(rule), &tensor);
+    let bound = bound.as_ref();
+    let materialized = bound.dynamic();
+    let view_space = materialized.space().adjoint_view().unwrap();
+    let parent = BoundDynamicTensorRef::try_new(&view_space, materialized.data()).unwrap();
+    type Route<'r> = dyn Fn(
+            &mut dyn symtn_dense::Engine,
+            &mut crate::tests::scripted_executor::ScriptedExecutor<LqRefusingScope>,
+        ) -> Result<(), OperationError>
+        + 'r;
+    let ordinary: &Route<'_> = &|engine, dense| lq_compact(engine, dense, &bound).map(|_| ());
+    let lazy: &Route<'_> = &|engine, dense| {
+        crate::factorize::lq_compact_adjoint_dyn(engine, dense, &parent, materialized.space())
+            .map(|_| ())
+    };
+    for fail in [false, true] {
+        for (route, run) in [("ordinary", ordinary), ("lazy", lazy)] {
+            // A fresh executor per route, so each route's first QR solve is
+            // the one that fails.
+            let mut dense =
+                crate::tests::scripted_executor::ScriptedExecutor::new(LqRefusingScope {
+                    fail,
+                    qr_calls: 0,
+                    injected: false,
+                });
+            let outcome = run(engine, &mut dense);
+            assert_eq!(
+                dense.observer.injected, fail,
+                "{route}: solver failure injected"
+            );
+            assert_eq!(
+                outcome,
+                Err(OperationError::Dense(scope_refusal("lq scope"))),
+                "{route}, solver failure {fail}"
+            );
+        }
+    }
+}
+
 #[test]
 fn checked_compact_lq_adds_no_per_sector_allocation_over_the_multiplicity_free_route() {
-    // What: checked compact LQ, eager and lazy adjoint, adjoints every sector
-    // through one scratch and writes each final adjoint once into the buffers
-    // it publishes, as the multiplicity-free route does. Its
+    // What: checked compact LQ, eager and lazy adjoint, runs the same
+    // executor batch and places each sector's final factors once into the
+    // buffers it publishes, as the multiplicity-free route does. Its
     // allocation excess over that route is then the per-call checked
     // staging alone, so it must not grow with the coupled-sector count.
     fn check<D: FactorScalar>() {

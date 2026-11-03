@@ -2550,7 +2550,6 @@ where
                 crate::probe::CheckedCompactOperation::Svd,
                 data,
                 matrix,
-                None,
             );
         }
         compact_svd_sectors_staged(

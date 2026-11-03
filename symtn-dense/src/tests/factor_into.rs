@@ -90,7 +90,7 @@ fn dest_shapes(
     let adjoint = placement == FactorPlacement::Adjoint;
     match op {
         DenseFactorization::Qr if adjoint => [with(&[n, k]), with(&[k, m]), vec![]],
-        DenseFactorization::Qr => [with(&[m, k]), with(&[k, n]), vec![]],
+        DenseFactorization::Qr | DenseFactorization::Lq => [with(&[m, k]), with(&[k, n]), vec![]],
         DenseFactorization::Svd if adjoint => [with(&[n, k]), with(&[k]), with(&[k, m])],
         DenseFactorization::Svd => [with(&[m, k]), with(&[k]), with(&[k, n])],
         DenseFactorization::Eigh => [with(&[m]), with(&[m, m]), vec![]],
@@ -113,7 +113,7 @@ impl<T: Elem> Buffers<T> {
             factors: factor_shapes.map(|shape| vec![T::make(fill); len(shape)]),
             spectrum: vec![
                 T::Real::make(fill);
-                if op == DenseFactorization::Qr {
+                if matches!(op, DenseFactorization::Qr | DenseFactorization::Lq) {
                     0
                 } else {
                     len(spectrum_shape)
@@ -250,13 +250,17 @@ mod native {
     /// order with the spectrum unchanged; for every scalar, op, engine width
     /// and batch policy, over unequal rectangular blocks, a two-item input
     /// and empty extents. The owned batch is checked against independent
-    /// constructions in `block_svd` and `block_qr`.
+    /// constructions in `block_svd` and `block_qr`, and owned LQ by its
+    /// reconstruction `L Q = X` on a complex input in `executor`, so a
+    /// destination LQ whose transpose conjugated fails here for complex
+    /// scalars.
     fn destinations_match_owned<T: Elem>() {
         let shapes: &[&[usize]] = &[&[5, 3], &[2, 4], &[3, 2, 2], &[4, 4], &[2, 0], &[3, 2, 0]];
         let square: &[&[usize]] = &[&[4, 4], &[2, 2], &[3, 3, 2], &[1, 1], &[0, 0], &[2, 2, 0]];
         let cases = [
             (DenseFactorization::Qr, FactorPlacement::AsComputed),
             (DenseFactorization::Qr, FactorPlacement::Adjoint),
+            (DenseFactorization::Lq, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::Adjoint),
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
@@ -405,6 +409,7 @@ mod native {
         let cases = [
             (DenseFactorization::Qr, FactorPlacement::AsComputed),
             (DenseFactorization::Qr, FactorPlacement::Adjoint),
+            (DenseFactorization::Lq, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::Adjoint),
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
@@ -694,10 +699,18 @@ fn qr_inputs(data: &[f64]) -> [DenseRead<'_>; 2] {
 /// lanes nor a custom executor's owned entry runs.
 #[test]
 fn destinations_are_validated_whole_before_any_solve() {
+    for op in [DenseFactorization::Qr, DenseFactorization::Lq] {
+        refuses_invalid_destinations(op);
+    }
+    no_destination_form();
+}
+
+/// [`destinations_are_validated_whole_before_any_solve`] for the two-factor
+/// `op` (QR or LQ: the same destination shapes) on `3 x 2` inputs.
+fn refuses_invalid_destinations(op: DenseFactorization) {
     let engine = &mut CpuEngine::serial();
     let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
     let inputs = qr_inputs(&data);
-    let op = DenseFactorization::Qr;
     let qr_shapes = || dest_shapes(op, &[3, 2], FactorPlacement::AsComputed);
     let mut f32_q = [7.0_f32; 6];
     type Check = fn(&DenseError) -> bool;
@@ -757,8 +770,8 @@ fn destinations_are_validated_whole_before_any_solve() {
             }
             .unwrap_err();
             drop(dests);
-            assert!(is_expected(&error), "{case}: {error:?}");
-            assert_eq!(scripted.qr_calls, 0, "{case}");
+            assert!(is_expected(&error), "{op:?} {case}: {error:?}");
+            assert_eq!(scripted.qr_calls, 0, "{op:?} {case}");
             for buffers in [&first, &second, &wide] {
                 assert!(
                     buffers.factors.iter().flatten().all(|&value| value == 7.0),
@@ -769,8 +782,12 @@ fn destinations_are_validated_whole_before_any_solve() {
             assert!(f32_q.iter().all(|&value| value == 7.0), "{case}");
         }
     }
+}
 
-    // Ops and placements without a destination form.
+/// Ops and placements without a destination form: adjoint eigh and LQ, and
+/// values-only eigh.
+fn no_destination_form() {
+    let engine = &mut CpuEngine::serial();
     let square = [2.0_f64, 0.0, 0.0, 3.0];
     let eigh_input = [DenseRead::F64(
         DenseView::new(&square, &[2, 2], &[1, 2], 0).unwrap(),
@@ -793,6 +810,62 @@ fn destinations_are_validated_whole_before_any_solve() {
     }
     drop(dests);
     assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
+
+    let lq = DenseFactorization::Lq;
+    let mut buffers: Buffers<f64> = Buffers::new(
+        lq,
+        dest_shapes(lq, &[2, 2], FactorPlacement::AsComputed),
+        7.0,
+    );
+    let mut dests = vec![buffers.dest(lq, FactorPlacement::Adjoint)];
+    let error = DefaultDenseExecutor::new()
+        .factorize_batch_into(engine, lq, &eigh_input, &mut dests, &mut |_, _, _| Ok(()))
+        .unwrap_err();
+    assert!(matches!(error, DenseError::Unsupported { .. }), "{error:?}");
+    drop(dests);
+    assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
+}
+
+/// Purpose: LQ's compatibility default is the owned default's: each input's
+/// adjoint factored by the executor's own `qr` (never `qr_into`), the
+/// outcome placed into the destination as the owned batch returns it.
+#[test]
+fn lq_compatibility_default_places_the_owned_adjoint_qr() {
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
+    let inputs = qr_inputs(&data);
+    let op = DenseFactorization::Lq;
+    let owned = factorize_all(&mut Scripted::default(), engine, op, &inputs).unwrap();
+    let mut executor = Scripted::default();
+    let mut buffers: Vec<Buffers<f64>> = (0..2)
+        .map(|_| {
+            Buffers::new(
+                op,
+                dest_shapes(op, &[3, 2], FactorPlacement::AsComputed),
+                7.0,
+            )
+        })
+        .collect();
+    let mut dests: Vec<_> = buffers
+        .iter_mut()
+        .map(|b| b.dest(op, FactorPlacement::AsComputed))
+        .collect();
+    let mut delivered = Vec::new();
+    executor
+        .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |index, _, outcome| {
+            delivered.push((index, outcome));
+            Ok(())
+        })
+        .unwrap();
+    drop(dests);
+    assert_eq!(delivered, vec![(0, Ok(())), (1, Ok(()))]);
+    assert_eq!((executor.qr_calls, executor.qr_into_calls), (2, 0));
+    for (buffers, owned) in buffers.iter().zip(&owned) {
+        assert_eq!(
+            buffers.widened(op),
+            placed(op, owned, FactorPlacement::AsComputed)
+        );
+    }
 }
 
 /// Purpose: the compatibility default reaches a custom executor only

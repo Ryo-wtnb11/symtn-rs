@@ -2286,15 +2286,15 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
 }
 
 /// Whether the native provider's batch of `op` searches a lane allocation:
-/// QR batches keep the baseline placement and general eigendecompositions
-/// run per matrix on the whole engine.
+/// QR and LQ batches keep the baseline placement and general
+/// eigendecompositions run per matrix on the whole engine.
 #[cfg(not(any(
     feature = "provider-inject",
     all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
 )))]
 fn searched(op: crate::DenseFactorization) -> bool {
     use crate::DenseFactorization as Op;
-    !matches!(op, Op::Qr | Op::Eig)
+    !matches!(op, Op::Qr | Op::Lq | Op::Eig)
 }
 
 pub(crate) const LANE_ALLOCATION_OP: &str = "lane_allocation";
@@ -2427,13 +2427,18 @@ fn factorize_batch_serial(
         DenseFactorization::SvdVals => "svd_values",
         DenseFactorization::Eig => "eig_read",
         DenseFactorization::EigVals => "eig_values",
+        DenseFactorization::Lq => "qr_read",
     };
+    let mut lq = crate::executor::AdjointQrLq::for_inputs(inputs);
     let solve =
         |exec: &mut dyn Engine, input: DenseRead<'_>| -> Result<Vec<DenseTensor>, DenseError> {
             let input = TensorRead::from_view(tenferro_view(input)?);
             let tensors = match op {
                 DenseFactorization::Svd => input.svd_read(exec).map(|(u, s, vt)| vec![u, s, vt]),
-                DenseFactorization::Qr => input.qr_read(exec).map(|(q, r)| vec![q, r]),
+                // LQ reaches this only with its staged adjoint (below).
+                DenseFactorization::Qr | DenseFactorization::Lq => {
+                    input.qr_read(exec).map(|(q, r)| vec![q, r])
+                }
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
                 DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
                 DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),
@@ -2454,7 +2459,15 @@ fn factorize_batch_serial(
     with_cpu_linalg(engine, entry, |exec| {
         let mut run = || -> Result<(), DenseError> {
             for (index, &input) in inputs.iter().enumerate() {
-                sink(index, solve(&mut *exec, input))?;
+                // LQ as the executor default runs it: QR of the staged
+                // adjoint.
+                let outcome = match op {
+                    DenseFactorization::Lq => {
+                        lq.factor(input, |adjoint| solve(&mut *exec, adjoint))
+                    }
+                    _ => solve(&mut *exec, input),
+                };
+                sink(index, outcome)?;
             }
             Ok(())
         };

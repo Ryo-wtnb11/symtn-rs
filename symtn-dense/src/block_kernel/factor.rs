@@ -1,5 +1,5 @@
 //! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, Hermitian eigendecomposition, their values-only forms and general
+//! QR, LQ, Hermitian eigendecomposition, their values-only forms and general
 //! eigenvalues): one tlinalg call per block, the blocks spread over the lane
 //! driver's lanes on the caller's engine.
 //!
@@ -13,7 +13,7 @@
 //! the provider's `Vec` entry: its length is the factor's logical size and it
 //! carries no recycled-buffer history (its capacity is the provider's
 //! reservation, not necessarily the length). The destination batch
-//! ([`factorize_into`], compact QR, compact SVD and Hermitian eigh) writes
+//! ([`factorize_into`], compact QR, LQ, compact SVD and Hermitian eigh) writes
 //! each block's factors into its caller-owned destination through the
 //! provider's initialized-destination entry (`*_into_init`), with one
 //! workspace and one typed scratch per lane, sized before the lane's first
@@ -28,11 +28,11 @@ use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
-use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
+use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::schedule::{self, GrantKey, LaneJobs};
-use crate::factor_dest::{adjoint_items, compact_mut, Element, FactorSink};
+use crate::factor_dest::{adjoint_items, compact_mut, map_transposed_items, Element, FactorSink};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
 use crate::LaneAllocation;
@@ -57,6 +57,10 @@ pub(crate) trait Factor {
     /// Whether a batch of single-matrix inputs joins the lane search with
     /// [`grant`]; otherwise its batches keep the baseline placement.
     const SEARCHED: bool = true;
+
+    /// Whether the provider reads each item's transpose (the first two
+    /// extents and strides swapped, no copy) instead of the item itself.
+    const TRANSPOSED: bool = false;
 
     /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
     /// weighted multiply-adds: its total work and the part a team inside the
@@ -145,6 +149,61 @@ impl Factor for Qr {
             output::<Self, T>(&[k, n], batch, r)?,
         ])
     }
+}
+
+/// Compact LQ: `[L, Q]` of shapes `[m, k, b..]`, `[k, n, b..]` with
+/// `k = min(m, n)`, from the provider's QR of the transposed read:
+/// `X^T = Q' R'` gives `X = R'^T Q'^T`, so `L = R'^T` and `Q = Q'^T`, each
+/// transposed inside the job. No adjoint of `X` is staged.
+///
+/// Why the transpose, not the adjoint, of `X`: a strided read can swap axes
+/// but not conjugate, and `Q'^T` has orthonormal rows like `Q'^H`
+/// (`Q'^T conj(Q') = conj(Q'^H Q') = I`).
+pub(crate) struct Lq;
+
+impl Factor for Lq {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: it is the QR of the transpose (see `Qr::SEARCHED`).
+    const SEARCHED: bool = false;
+    const TRANSPOSED: bool = true;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        Qr::estimates::<T>(n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let k = m.min(n);
+        let (mut q, mut r) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            tlinalg::qr::qr(Self::OP, raw, &mut q, &mut r, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![
+            output::<Self, T>(&[m, k], batch, transpose_items(&r, k, m))?,
+            output::<Self, T>(&[k, n], batch, transpose_items(&q, n, k))?,
+        ])
+    }
+}
+
+/// The transpose of each column-major `rows x cols` item of `data`,
+/// column-major `cols x rows` per item.
+fn transpose_items<T: Copy>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
+    let mut transpose = Vec::with_capacity(data.len());
+    if rows * cols == 0 {
+        return transpose;
+    }
+    for item in data.chunks_exact(rows * cols) {
+        for row in 0..rows {
+            transpose.extend((0..cols).map(|col| item[row + rows * col]));
+        }
+    }
+    transpose
 }
 
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
@@ -523,8 +582,8 @@ pub(crate) type Sink<'s> =
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
 /// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
-/// `eig_vals`)
-/// returns it.
+/// `eig_vals`) returns it; LQ, which has no per-matrix entry, reports the
+/// QR entry's errors.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
 /// input the view and the dtype (before the engine is entered), then rank,
@@ -572,6 +631,7 @@ pub(crate) fn factorize(
             sink(index, crate::tenferro_adapter::eig_read(engine, input))
         }),
         Op::EigVals => factorize_batch::<EigVals>(engine, allocation, inputs, sink),
+        Op::Lq => factorize_batch::<Lq>(engine, allocation, inputs, sink),
     }
 }
 
@@ -714,6 +774,44 @@ impl FactorInto for Qr {
                 Ok(())
             }
         }
+    }
+}
+
+impl FactorInto for Lq {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::qr::qr_workspace::<T>(n, m, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>([m, n]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        (n + m) * m.min(n) * batch
+    }
+
+    // `raw` is the transposed read `X^T` (`n x m`): its QR `Q' R'` lands in
+    // the lane scratch, and one plain transpose pass writes `L = R'^T` and
+    // `Q = Q'^T`. Why not conjugate: this is the QR of `X^T`, not of `X^H`,
+    // so an adjoint would give the factors of `conj(X)`.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        let [first, second, _] = outputs;
+        let k = m.min(n);
+        let (q, rest) = scratch.split_at_mut(n * k * batch);
+        let r = &mut rest[..k * m * batch];
+        tlinalg::qr::qr_into_init(Self::OP, raw, q, r, workspace, exec)?;
+        map_transposed_items(r, k, m, slot::<T>(first), |value| value);
+        map_transposed_items(q, n, k, slot::<T>(second), |value| value);
+        Ok(())
     }
 }
 
@@ -1109,31 +1207,24 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
     if shape.contains(&0) {
         return Ok(());
     }
-    let offset = isize::try_from(view.offset()).map_err(|_| DenseError::OffsetOverflow {
-        value: view.offset(),
-    })?;
-    let raw = RawStridedRef::new(view.data(), shape, strides, offset).map_err(|err| {
-        tenferro_error(
-            F::ENTRY,
-            tenferro_tensor::Error::invalid_argument(op, "layout", err.to_string()),
+    with_provider_read::<F, T, _>(view, strides, |raw| {
+        if let Some(error) = sizing {
+            return Err(error);
+        }
+        let items = batch.iter().product::<usize>();
+        let placement = dest.placement();
+        F::factor_into::<T>(
+            raw,
+            [*m, *n],
+            items,
+            &mut dest.outputs,
+            placement,
+            &mut lane.workspace,
+            T::scratch(&mut lane.typed),
+            exec,
         )
-    })?;
-    if let Some(error) = sizing {
-        return Err(error);
-    }
-    let items = batch.iter().product::<usize>();
-    let placement = dest.placement();
-    F::factor_into::<T>(
-        raw,
-        [*m, *n],
-        items,
-        &mut dest.outputs,
-        placement,
-        &mut lane.workspace,
-        T::scratch(&mut lane.typed),
-        exec,
-    )
-    .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))
+        .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))
+    })
 }
 
 /// The destination batch's dispatch over the ops with a destination form;
@@ -1151,6 +1242,7 @@ pub(crate) fn factorize_into(
         Op::Svd => factorize_into_batch::<Svd>(engine, allocation, inputs, dests, sink),
         Op::Qr => factorize_into_batch::<Qr>(engine, allocation, inputs, dests, sink),
         Op::Eigh => factorize_into_batch::<Eigh>(engine, allocation, inputs, dests, sink),
+        Op::Lq => factorize_into_batch::<Lq>(engine, allocation, inputs, dests, sink),
         _ => unreachable!("validation admits the ops with a destination form only"),
     }
 }
@@ -1349,22 +1441,44 @@ fn factor_typed<F: Factor, T: Scalar>(
     if shape.contains(&0) {
         return F::factor::<T>(None, dims, batch, exec);
     }
+    // The provider's safe `Vec` entry: its workspace query and `*_into` on
+    // one per-call region. The owned outcome needs fresh factor storage per
+    // block anyway; the destination batch (`factor_into_typed`) is the
+    // lane-reused-workspace route.
+    with_provider_read::<F, T, _>(view, strides, |raw| F::factor(Some(raw), dims, batch, exec))
+}
+
+/// Runs `solve` on the provider's read of the nonempty `view`: the view
+/// itself, or for a [`Factor::TRANSPOSED`] factorization its transpose (the
+/// first two extents and strides swapped, no copy).
+fn with_provider_read<F: Factor, T, R>(
+    view: DenseView<'_, T>,
+    strides: &[isize],
+    solve: impl FnOnce(RawStridedRef<'_, T>) -> Result<R, DenseError>,
+) -> Result<R, DenseError> {
     // `DenseView` validated the offset against the storage, and the tenferro
     // view (preflight) proved it fits `isize`.
     let offset = isize::try_from(view.offset()).map_err(|_| DenseError::OffsetOverflow {
         value: view.offset(),
     })?;
+    let (swapped_shape, swapped_strides): (ShapeVec, StrideVec);
+    let (shape, strides) = if F::TRANSPOSED {
+        let mut shape: ShapeVec = view.shape().iter().copied().collect();
+        let mut strides: StrideVec = strides.iter().copied().collect();
+        shape.swap(0, 1);
+        strides.swap(0, 1);
+        (swapped_shape, swapped_strides) = (shape, strides);
+        (&swapped_shape[..], &swapped_strides[..])
+    } else {
+        (view.shape(), strides)
+    };
     let raw = RawStridedRef::new(view.data(), shape, strides, offset).map_err(|err| {
         tenferro_error(
             F::ENTRY,
-            tenferro_tensor::Error::invalid_argument(op, "layout", err.to_string()),
+            tenferro_tensor::Error::invalid_argument(F::OP.as_str(), "layout", err.to_string()),
         )
     })?;
-    // The provider's safe `Vec` entry: its workspace query and `*_into` on
-    // one per-call region. The owned outcome needs fresh factor storage per
-    // block anyway; the destination batch (`factor_into_typed`) is the
-    // lane-reused-workspace route.
-    F::factor(Some(raw), dims, batch, exec)
+    solve(raw)
 }
 
 fn linalg_error(op: &'static str, error: tenferro_linalg::Error) -> tenferro_tensor::Error {

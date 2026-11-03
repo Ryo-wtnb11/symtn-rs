@@ -23,7 +23,7 @@ pub enum FactorPlacement {
     /// spectrum unchanged. QR of `A` is placed as the LQ of `A^H`
     /// (`l = R^H`, `q = Q^H`); the compact SVD of `A` as the compact SVD of
     /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`). Hermitian eigendecompositions
-    /// refuse it.
+    /// and LQ refuse it.
     Adjoint,
 }
 
@@ -48,8 +48,8 @@ impl FactorFailure {
 }
 
 /// The destinations of one input of a batched factorization, in the op's
-/// owned output order: `Qr` `[q, r, -]`, `Svd` `[u, s, vt]`, `Eigh`
-/// `[values, vectors, -]` (`-` is `None`).
+/// owned output order: `Qr` `[q, r, -]`, `Lq` `[l, q, -]`, `Svd`
+/// `[u, s, vt]`, `Eigh` `[values, vectors, -]` (`-` is `None`).
 ///
 /// Each factor view has the input's dtype and each spectrum (`s`, eigh
 /// `values`) the input's real counterpart (`f32` for `f32`/`c32`, `f64` for
@@ -57,7 +57,8 @@ impl FactorFailure {
 /// compact column-major with the output's shape, which [`FactorPlacement`]
 /// sets: for an `m x n` input with trailing batch dimensions `b..` and
 /// `k = min(m, n)`, `AsComputed` QR is `[m, k, b..]`, `[k, n, b..]` and
-/// `Adjoint` QR `[n, k, b..]`, `[k, m, b..]`; SVD adds `s` of shape
+/// `Adjoint` QR `[n, k, b..]`, `[k, m, b..]`; LQ is `[m, k, b..]`,
+/// `[k, n, b..]`; SVD adds `s` of shape
 /// `[k, b..]` between them; eigh of `n x n` is `[n, b..]`, `[n, n, b..]`.
 #[derive(Debug)]
 pub struct FactorDest<'a> {
@@ -86,7 +87,7 @@ const ENTRY: &str = "factorize_batch_into";
 /// without a destination form.
 fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
     match op {
-        DenseFactorization::Qr | DenseFactorization::Eigh => Ok(2),
+        DenseFactorization::Qr | DenseFactorization::Lq | DenseFactorization::Eigh => Ok(2),
         DenseFactorization::Svd => Ok(3),
         _ => Err(DenseError::Unsupported {
             op: ENTRY,
@@ -100,6 +101,7 @@ fn output_label(op: DenseFactorization) -> &'static str {
     match op {
         DenseFactorization::Svd => "svd_into",
         DenseFactorization::Eigh => "eigh_into",
+        DenseFactorization::Lq => "lq",
         _ => "qr_into",
     }
 }
@@ -223,10 +225,12 @@ pub(crate) fn validate(
         if present != arity || dest.outputs[..arity].iter().any(Option::is_none) {
             return Err(arity_mismatch(ENTRY, arity, present));
         }
-        if op == DenseFactorization::Eigh && dest.placement == FactorPlacement::Adjoint {
+        if matches!(op, DenseFactorization::Eigh | DenseFactorization::Lq)
+            && dest.placement == FactorPlacement::Adjoint
+        {
             return Err(DenseError::Unsupported {
                 op: ENTRY,
-                message: "a Hermitian eigendecomposition has no adjoint placement".to_string(),
+                message: format!("{op:?} has no adjoint placement"),
             });
         }
         let dtype = input.dtype();
@@ -296,6 +300,19 @@ pub(crate) fn compact_mut<'b, T>(view: &'b mut DenseViewMut<'_, T>) -> &'b mut [
 /// Writes the conjugate transpose of each `rows x cols` column-major item of
 /// `source` into the matching `cols x rows` item of `dest`.
 pub(crate) fn adjoint_items<T: Element>(source: &[T], rows: usize, cols: usize, dest: &mut [T]) {
+    map_transposed_items(source, rows, cols, dest, T::conj);
+}
+
+/// Writes `map` of each entry of each `rows x cols` column-major item of
+/// `source` into the transposed position of the matching `cols x rows`
+/// item of `dest`.
+pub(crate) fn map_transposed_items<T: Copy>(
+    source: &[T],
+    rows: usize,
+    cols: usize,
+    dest: &mut [T],
+    map: impl Fn(T) -> T,
+) {
     let item = rows * cols;
     if item == 0 {
         return;
@@ -303,7 +320,7 @@ pub(crate) fn adjoint_items<T: Element>(source: &[T], rows: usize, cols: usize, 
     for (source, dest) in source.chunks_exact(item).zip(dest.chunks_exact_mut(item)) {
         for col in 0..cols {
             for row in 0..rows {
-                dest[col + cols * row] = source[row + rows * col].conj();
+                dest[col + cols * row] = map(source[row + rows * col]);
             }
         }
     }
