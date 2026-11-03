@@ -252,32 +252,38 @@ where
         FactorSide::Left => space.homspace().codomain(),
         FactorSide::Right => space.homspace().domain(),
     })?;
+    if side == FactorSide::Left {
+        let mut pairs = in_linalg_scope(engine, dense, |dense, engine| {
+            left_null_packed(engine, dense, &matrices, &mut null_dimensions)
+        })?;
+        return with_input_geometry!(&matrices, |geometry| publish_one_sided_factor(
+            authority,
+            space.homspace(),
+            geometry,
+            &mut pairs,
+            &null_dimensions,
+            side,
+            FactorPlacement::Direct,
+        ));
+    }
     let mut pairs = Vec::new();
     in_linalg_scope(engine, dense, |dense, engine| {
         for index in 0..matrices.len() {
             let matrix = matrices.get(index)?;
             let (rows, cols) = (matrix.rows, matrix.cols);
-            let (extent, other) = match side {
-                FactorSide::Left => (rows, cols),
-                FactorSide::Right => (cols, rows),
-            };
-            if extent <= other {
+            if cols <= rows {
                 null_dimensions.remove(&matrix.sector);
                 continue;
             }
-            let null_dim = extent - other;
-            let basis = qr_null_basis(engine, dense, matrix.data, rows, cols, side)?;
+            let null_dim = cols - rows;
+            let basis = qr_null_basis(engine, dense, matrix.data, rows, cols)?;
             null_dimensions.insert(matrix.sector, null_dim);
-            let (left, right) = match side {
-                FactorSide::Left => (basis, Vec::new()),
-                FactorSide::Right => (Vec::new(), adjoint_col_major(&basis, cols, null_dim)),
-            };
             pairs.push(FactorPair {
                 sector: matrix.sector,
                 kept: null_dim,
-                left,
+                left: Vec::new(),
                 left_rows: rows,
-                right,
+                right: adjoint_col_major(&basis, cols, null_dim),
                 right_leading: null_dim,
             });
         }
@@ -294,31 +300,109 @@ where
     ))
 }
 
-/// The orthonormal complement `N` (`m x (m - n)`, column-major) of the
-/// column space of the `rows x cols` column-major `matrix` (`Left`, `m =
-/// rows`) or of its adjoint (`Right`, `m = cols`), for `m > n`: the last
-/// `m - n` columns of [`augmented_identity_qr`]'s `Q`. This is
-/// MatrixAlgebraKit `qr_null!`'s `Q * [0; I]` up to a unitary gauge on the
-/// null block, which the null-space contract leaves free.
+/// The left null bases of every sector with `rows > cols` as one
+/// solver-first executor batch ([`DenseFactorization::QrNull`]), each
+/// written once at its final `rows x (rows - cols)` size into one packed
+/// buffer in matrix order; the other sectors have no null directions, are
+/// not solved, and leave `null_dimensions`. Each basis is any orthonormal
+/// basis of the complement of its sector's columns, which may differ by
+/// executor.
+fn left_null_packed<E, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    matrices: &(impl SectorMatrices<D> + ?Sized),
+    null_dimensions: &mut BTreeMap<SectorId, usize>,
+) -> Result<PackedFactorPairs<D>, OperationError>
+where
+    E: DenseExecutor + ?Sized,
+    D: FactorScalar,
+{
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    let (sectors, blocks): (Vec<_>, Vec<_>) = sectors
+        .into_iter()
+        .zip(blocks)
+        .filter(|&(sector, (_, rows, cols))| {
+            if rows > cols {
+                null_dimensions.insert(sector, rows - cols);
+                true
+            } else {
+                null_dimensions.remove(&sector);
+                false
+            }
+        })
+        .unzip();
+    let ranges = packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows * (rows - cols)));
+    let mut left = vec![D::zero(); ranges.last().map_or(0, |range| range.end)];
+    let mut read_layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut read_layouts)?;
+    let layouts = blocks
+        .iter()
+        .map(|&(_, rows, cols)| {
+            [
+                matrix_layout(rows, rows - cols),
+                vector_layout(0),
+                vector_layout(0),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    let mut dests = split_ranges(&mut left, &ranges)?
+        .into_iter()
+        .zip(&layouts)
+        .map(|(basis, layout)| {
+            Ok(FactorDest::new(
+                [Some(dest_write(basis, &layout[0])?), None, None],
+                symtn_dense::FactorPlacement::AsComputed,
+            ))
+        })
+        .collect::<Result<Vec<_>, OperationError>>()?;
+    factorize_into_solver_first(
+        engine,
+        dense,
+        DenseFactorization::QrNull,
+        &inputs,
+        &mut dests,
+        |_, _| Ok(()),
+    )?;
+    let pairs = blocks
+        .iter()
+        .zip(sectors)
+        .zip(ranges)
+        .map(|((&(_, rows, cols), sector), left)| PackedFactorPair {
+            sector,
+            kept: rows - cols,
+            left,
+            left_rows: rows,
+            right: 0..0,
+            right_leading: rows - cols,
+        })
+        .collect();
+    Ok(PackedFactorPairs {
+        pairs,
+        left,
+        right: Vec::new(),
+    })
+}
+
+/// The orthonormal complement `N` (`cols x (cols - rows)`, column-major)
+/// of the row space of the `rows x cols` column-major `matrix`, for
+/// `cols > rows`: the last `cols - rows` columns of
+/// [`augmented_identity_qr`]'s `Q` on `[matrix^H | I]`. This is
+/// MatrixAlgebraKit `lq_null!`'s `[0 I] Q` adjointed, up to a unitary gauge
+/// on the null block, which the null-space contract leaves free.
 fn qr_null_basis<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     matrix: &[D],
     rows: usize,
     cols: usize,
-    side: FactorSide,
 ) -> Result<Vec<D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let (m, n) = match side {
-        FactorSide::Left => (rows, cols),
-        FactorSide::Right => (cols, rows),
-    };
-    let (mut q, _) = augmented_identity_qr(engine, dense, m, n, |block| match side {
-        FactorSide::Left => block.copy_from_slice(matrix),
-        FactorSide::Right => adjoint_col_major_into(matrix, rows, cols, block),
+    let (m, n) = (cols, rows);
+    let (mut q, _) = augmented_identity_qr(engine, dense, m, n, |block| {
+        adjoint_col_major_into(matrix, rows, cols, block)
     })?;
     q.drain(..m * n);
     Ok(q)

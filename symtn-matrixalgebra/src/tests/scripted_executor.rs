@@ -353,7 +353,16 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
         self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
     // The provided entries other default bodies call (`eig_vals`, and
-    // `factorize_batch` for its general and values-only variants).
+    // `factorize_batch` for its general, values-only and full-QR variants).
+    fn qr_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+        q: DenseWrite<'_>,
+        r: DenseWrite<'_>,
+    ) -> Result<(), DenseError> {
+        self.0.qr_into(engine, input, q, r)
+    }
     fn eig(
         &mut self,
         engine: &mut dyn Engine,
@@ -432,8 +441,9 @@ impl<O: Observer> DenseExecutor for OwnedBatch<'_, O> {
     }
 }
 
-/// Runs a values-only entry's trait default body: [`Defaulted`] without its
-/// values-only forwards, which would route that entry back into itself.
+/// Runs a values-only entry's or `qr_into`'s trait default body:
+/// [`Defaulted`] without its values-only and `qr_into` forwards, which would
+/// route that entry back into itself.
 struct ValuesDefault<'d, 'a, O: Observer>(&'d mut Defaulted<'a, O>);
 
 impl<O: Observer> DenseExecutor for ValuesDefault<'_, '_, O> {
@@ -701,7 +711,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
         }
         match action {
             Action::Forward => self.script.inner.qr_into(engine, input, q, r),
-            _ => Defaulted(self).qr_into(engine, input, q, r),
+            _ => ValuesDefault(&mut Defaulted(self)).qr_into(engine, input, q, r),
         }
     }
 

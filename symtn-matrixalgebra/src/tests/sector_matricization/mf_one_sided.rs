@@ -1084,8 +1084,8 @@ fn u1_mps_side_only_space() -> BoundDynamicFusionMapSpace<symtn_core::U1FusionRu
 
 /// Byte-traffic contract for side-only publication: every full/null factor
 /// of the MPS site is published canonically, and the only elements
-/// written beyond the moved first owner are the appended factors and the
-/// in-place identities. The scatter fallback instead zero-fills all `P`
+/// written beyond the moved first owner (or the moved packed buffer) are
+/// the appended or displaced factors and the in-place identities. The scatter fallback instead zero-fills all `P`
 /// output elements and then scatters every populated block.
 fn side_only_publication_bytes_case<D>(values: impl Fn(usize) -> D)
 where
@@ -1168,12 +1168,10 @@ where
         (probe.canonical_publications, probe.fallback_publications),
         (6, 0)
     );
-    // Q: 36 + 9 identity; R: 24 (charge 2 has no domain block); L: 24;
-    // Q': 16 + 4 identity; U: 36 + 9; Vh: 16 + 4 (first owners moved).
-    assert_eq!(
-        bytes(probe.appended_elements),
-        bytes(45 + 24 + 24 + 20 + 45 + 20)
-    );
+    // Q: the 9 identity after the packed sector factors; R: 0 (packed
+    // buffer moved, charge 2 has no domain block); L: 24; Q': 16 + 4
+    // identity; U: 36 + 9; Vh: 16 + 4 (first owners moved).
+    assert_eq!(bytes(probe.appended_elements), bytes(9 + 24 + 20 + 45 + 20));
 }
 
 #[test]

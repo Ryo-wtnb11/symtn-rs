@@ -1921,6 +1921,129 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
             "{error:?}"
         );
     }
+
+    // Full QR and the QR null basis have no per-matrix entry either: on the
+    // native provider and the trait default, per input `[Q, R]` of shapes
+    // `[m, m, b..]`, `[m, n, b..]` and `[N]` of shape `[m, m - k, b..]` in
+    // the input's dtype, and per batch item `Q R = X` with `Q` unitary and
+    // `R` upper trapezoidal, `N` orthonormal with `X^H N = 0`; a `[3, 0]`
+    // input has `Q = I_3` and an empty `R`; rank below 2 is refused with the
+    // QR entry's error. Complement columns are compared by these properties
+    // only, since their basis may differ by provider.
+    let tall_batch = [1.0_f64, -2.0, 0.5, 3.0, 0.0, 1.0];
+    let full_inputs = [
+        DenseRead::C64(DenseView::new(&wide, &[2, 3], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&tall, &[3, 2], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&tall_batch, &[3, 1, 2], &[1, 3, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&batch, &[2, 2, 2], &[1, 2, 4], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[3, 0], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[0, 0], &[1, 0], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[3, 2, 0], &[1, 3, 6], 0).unwrap()),
+    ];
+    let full_matrices: [(Vec<Complex64>, [usize; 2]); 7] = [
+        (wide.to_vec(), [2, 3]),
+        (complex(&tall), [3, 2]),
+        (complex(&tall_batch), [3, 1]),
+        (complex(&batch), [2, 2]),
+        (Vec::new(), [3, 0]),
+        (Vec::new(), [0, 0]),
+        (Vec::new(), [3, 2]),
+    ];
+    let as_c64 = |t: &DenseTensor| match t.dtype() {
+        DenseDType::C64 => t.as_c64_slice().unwrap().to_vec(),
+        _ => complex(t.as_f64_slice().unwrap()),
+    };
+    // `a^H b` of the column-major `m x p` and `m x q` items is `I` (or 0).
+    let assert_gram = |a: &[Complex64], b: &[Complex64], m: usize, identity: bool| {
+        let (p, q) = (a.len() / m.max(1), b.len() / m.max(1));
+        for i in 0..p {
+            for j in 0..q {
+                let dot: Complex64 = (0..m).map(|r| a[r + m * i].conj() * b[r + m * j]).sum();
+                let want = f64::from(u8::from(identity && i == j));
+                assert_c64_close(dot, c(want, 0.0), 1.0e-12);
+            }
+        }
+    };
+    for executor in [
+        &mut executor as &mut dyn DenseExecutor,
+        &mut FullOnly(DefaultDenseExecutor::new()),
+    ] {
+        let full =
+            factorize_all(executor, engine, DenseFactorization::QrFull, &full_inputs).unwrap();
+        let null =
+            factorize_all(executor, engine, DenseFactorization::QrNull, &full_inputs).unwrap();
+        assert_eq!(
+            (full.len(), null.len()),
+            (full_inputs.len(), full_inputs.len())
+        );
+        for (((full, null), input), (matrix, [m, n])) in
+            full.iter().zip(&null).zip(&full_inputs).zip(&full_matrices)
+        {
+            let (m, n) = (*m, *n);
+            let nullity = m - m.min(n);
+            let batch_dims = &input.shape()[2..];
+            assert_eq!((full.len(), null.len()), (2, 1));
+            assert_eq!(full[0].shape(), [&[m, m][..], batch_dims].concat());
+            assert_eq!(full[1].shape(), [&[m, n][..], batch_dims].concat());
+            assert_eq!(null[0].shape(), [&[m, nullity][..], batch_dims].concat());
+            assert!(full.iter().chain(null).all(|t| t.dtype() == input.dtype()));
+            let (q, r, basis) = (as_c64(&full[0]), as_c64(&full[1]), as_c64(&null[0]));
+            let items = batch_dims.iter().product::<usize>();
+            for item in 0..items {
+                let x = matrix.get(item * m * n..(item + 1) * m * n).unwrap_or(&[]);
+                let q = &q[item * m * m..(item + 1) * m * m];
+                let r = &r[item * m * n..(item + 1) * m * n];
+                let basis = &basis[item * m * nullity..(item + 1) * m * nullity];
+                assert_gram(q, q, m, true);
+                for row in 0..m {
+                    for col in 0..n {
+                        let qr: Complex64 = (0..m).map(|j| q[row + m * j] * r[j + m * col]).sum();
+                        assert_c64_close(qr, x[row + m * col], 1.0e-12);
+                        if row > col {
+                            assert_c64_close(r[row + m * col], c(0.0, 0.0), 0.0);
+                        }
+                    }
+                }
+                assert_gram(basis, basis, m, true);
+                assert_gram(x, basis, m, false);
+                if n == 0 {
+                    for (index, &value) in q.iter().enumerate() {
+                        let want = f64::from(u8::from(index % (m + 1) == 0));
+                        assert_c64_close(value, c(want, 0.0), 0.0);
+                    }
+                }
+            }
+        }
+        for op in [DenseFactorization::QrFull, DenseFactorization::QrNull] {
+            assert!(factorize_all(executor, engine, op, &[]).unwrap().is_empty());
+            let error = factorize_all(executor, engine, op, &[rank_one]).unwrap_err();
+            assert_eq!(error, executor.qr(engine, rank_one).unwrap_err(), "{op:?}");
+        }
+    }
+}
+
+/// Purpose: the native QR null basis is retained at its final size: the
+/// owned outcome of an `m x (m - 1)` input holds exactly `m` scalars of
+/// capacity, not a full `m x m` `Q` with its leading columns dropped.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn native_null_basis_is_allocated_at_its_final_size() {
+    let engine = &mut CpuEngine::serial();
+    let m = 6;
+    let data: Vec<f64> = (0..m * (m - 1))
+        .map(|i| ((i * 7) % 11) as f64 - 5.0)
+        .collect();
+    let (shape, strides) = ([m, m - 1], [1, m]);
+    let input = DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap());
+    let mut outputs = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        engine,
+        DenseFactorization::QrNull,
+        &[input],
+    )
+    .unwrap();
+    let [basis] = <[DenseTensor; 1]>::try_from(outputs.remove(0)).unwrap();
+    assert_eq!(basis.into_f64_vec().unwrap().capacity(), m);
 }
 
 #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]

@@ -621,47 +621,69 @@ impl<D: FactorScalar> SidedFactors<D> for PackedFactorPairs<D> {
         PairedFactors::pair(self, index)
     }
 
-    /// The side's buffer as it is when no identity interleaves it (the
-    /// pairs fill it in order); otherwise one copy with the identities.
+    /// The side's buffer, moved: as it is when no identity interleaves it,
+    /// otherwise grown once in place, every factor an identity precedes
+    /// moved up (last first) and each identity written at its place, so
+    /// only those factors and the identities are written. The pairs fill
+    /// the buffer contiguously in pair order.
     fn take_side(
         &mut self,
         side: FactorSide,
         identities: &[IdentitySegment],
         required_len: usize,
     ) -> Vec<D> {
-        let packed = match side {
+        let mut data = std::mem::take(match side {
             FactorSide::Left => &mut self.left,
             FactorSide::Right => &mut self.right,
-        };
-        if identities.is_empty() && packed.len() == required_len {
-            return std::mem::take(packed);
-        }
-        let mut output = Vec::with_capacity(required_len);
-        let mut identities = identities.iter().peekable();
-        for index in 0..=self.pairs.len() {
-            while let Some(identity) = identities.next_if(|identity| identity.pairs_before == index)
-            {
-                let bond = identity.bond;
-                let start = output.len();
-                output.resize(start + bond * bond, D::zero());
-                for diagonal in 0..bond {
-                    output[start + diagonal * (bond + 1)] = D::one();
+        });
+        let mut _written = 0usize;
+        if !identities.is_empty() {
+            let factors_end = data.len();
+            let mut shift = identities
+                .iter()
+                .map(|identity| identity.bond * identity.bond)
+                .sum::<usize>();
+            data.resize(required_len, D::zero());
+            let mut identities = identities.iter().rev().peekable();
+            for index in (0..=self.pairs.len()).rev() {
+                let start = match self.pairs.get(index) {
+                    Some(pair) => {
+                        let source = match side {
+                            FactorSide::Left => pair.left.clone(),
+                            FactorSide::Right => pair.right.clone(),
+                        };
+                        if shift != 0 {
+                            data.copy_within(source.clone(), source.start + shift);
+                            _written += source.len();
+                        }
+                        source.start
+                    }
+                    None => factors_end,
+                };
+                let mut end = start + shift;
+                while let Some(identity) =
+                    identities.next_if(|identity| identity.pairs_before == index)
+                {
+                    let bond = identity.bond;
+                    let block = &mut data[end - bond * bond..end];
+                    block.fill(D::zero());
+                    for diagonal in 0..bond {
+                        block[diagonal * (bond + 1)] = D::one();
+                    }
+                    _written += bond * bond;
+                    shift -= bond * bond;
+                    end -= bond * bond;
                 }
             }
-            let Some(pair) = self.pairs.get(index) else {
-                break;
-            };
-            let range = match side {
-                FactorSide::Left => pair.left.clone(),
-                FactorSide::Right => pair.right.clone(),
-            };
-            let packed = match side {
-                FactorSide::Left => &self.left,
-                FactorSide::Right => &self.right,
-            };
-            output.extend_from_slice(&packed[range]);
         }
-        output
+        #[cfg(test)]
+        {
+            use crate::probe::Event;
+            crate::probe::hit(Event::OneSidedCanonicalPublications);
+            crate::probe::add(Event::OneSidedOwnerReused, usize::from(!data.is_empty()));
+            crate::probe::add(Event::OneSidedAppendedElements, _written);
+        }
+        data
     }
 }
 
@@ -1083,17 +1105,18 @@ where
 /// factor pair, so a side-only sector would be dropped from the full
 /// factor's `fuse(codomain)`/`fuse(domain)` bond instead of publishing its
 /// identity block, as TensorKit's `initialize_output(qr_full!/lq_full!)` does.
-pub(super) fn checked_full_factor_pair<R, D, M>(
+pub(super) fn checked_full_factor_pair<R, D, M, P>(
     provider: &Arc<R>,
     homspace: &FusionTreeHomSpace,
     matrices: &[M],
-    mut pairs: Vec<FactorPair<D>>,
+    mut pairs: P,
     dimensions: &BTreeMap<SectorId, usize>,
 ) -> Result<DynamicFactorPair<R, D>, CheckedGenericFactorPlanError<R::Error>>
 where
     R: CheckedGenericFusion,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D>,
 {
     let left = build_bound_factor_generic_checked(
         provider,

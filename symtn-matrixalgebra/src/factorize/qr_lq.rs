@@ -196,13 +196,17 @@ where
 /// the first `n` columns of `Q` span a superspace of `X`'s columns whatever
 /// its rank, and the last `m - n` span their orthogonal complement.
 ///
-/// This is the single owner of the full-`Q` cost the dense backend imposes:
-/// it exposes only economy QR, so a full `Q` costs
-/// `O(m^2 (n + m))` here against MatrixAlgebraKit's `geqrf` + `unmqr`/`ungqr`
-/// `O(m n^2 + m n (m - n))`. Its consumers are the tall branch of
-/// [`full_qr_numerical_stage`] (`qr_full`, `lq_full`), the full-SVD
+/// Through the executor's economy QR a full `Q` costs `O(m^2 (n + m))` here
+/// against MatrixAlgebraKit's `geqrf` + `unmqr`/`ungqr`
+/// `O(m n^2 + m n (m - n))`. Its consumers are the routes still built on
+/// that economy QR: the tall branch of [`full_qr_numerical_stage`]
+/// (`lq_full`), the full-SVD
 /// [`orthonormal_completion`](super::svd::orthonormal_completion), and the
-/// shape-based `left_null`/`right_null` kernel (`qr_null_basis`).
+/// shape-based `right_null` kernel (`qr_null_basis`). `qr_full` and
+/// `left_null` instead submit [`DenseFactorization::QrFull`] and
+/// [`DenseFactorization::QrNull`] batches, which the native provider solves
+/// by Householder reflectors applied to the identity at
+/// MatrixAlgebraKit's cost, and other executors by the same augmentation.
 pub(super) fn augmented_identity_qr<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -268,8 +272,8 @@ pub(super) fn scale_row<D: FactorScalar>(
 
 #[cfg(test)]
 /// Full QR `t = Q * R` (MatrixAlgebraKit `qr_full`): per sector `Q` is the
-/// square `m x m` unitary and `R` the upper-trapezoidal `m x n`, obtained
-/// from one economy QR, augmenting with identity columns only when `m > n`.
+/// square `m x m` unitary and `R` the upper-trapezoidal `m x n`, from one
+/// [`DenseFactorization::QrFull`] batch (see [`full_qr_packed`]).
 /// The positive-diagonal gauge is applied (MAK / TensorKit 0.17 default).
 pub(crate) fn qr_full<E, R, D>(
     engine: &mut dyn Engine,
@@ -302,21 +306,7 @@ where
     let space = input.space().space();
     let matrices =
         multiplicity_free_input_matricizations(space.structure(), input.data(), space.nout())?;
-    let mut pairs = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices.get(index)?;
-        let rows = matrix.rows;
-        let cols = matrix.cols;
-        let (q, r) = full_qr_numerical_stage(engine, dense, matrix.data, rows, cols)?;
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: rows,
-            left: q,
-            left_rows: rows,
-            right: r,
-            right_leading: rows,
-        });
-    }
+    let mut pairs = full_qr_packed(engine, dense, &matrices)?;
     let dimensions = MfAuthority(input.space()).coupled_dimensions(space.homspace().codomain())?;
     with_input_geometry!(&matrices, |geometry| Ok(Qr {
         q: build_bound_factor(
@@ -503,6 +493,91 @@ where
             right,
             right_leading: rank(block),
         })
+        .collect();
+    Ok(PackedFactorPairs { pairs, left, right })
+}
+
+/// Full QR of every coupled-sector matrix in one solver-first executor
+/// batch ([`DenseFactorization::QrFull`]), in the positive-diagonal gauge,
+/// as square `q` (left) and `r` (right) factors written once into one
+/// buffer per side in matrix order, laid out from the matrix shapes before
+/// the dense call, as TensorKit's `qr_full!` writes each block of its
+/// preallocated `Q`/`R` in place. `Q`'s columns past `min(rows, cols)` are
+/// any orthonormal basis of the complement, which may differ by executor.
+fn full_qr_packed<E, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    matrices: &(impl SectorMatrices<D> + ?Sized),
+) -> Result<PackedFactorPairs<D>, OperationError>
+where
+    E: DenseExecutor + ?Sized,
+    D: FactorScalar,
+{
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    let left_ranges = packed_ranges(blocks.iter().map(|&(_, rows, _)| rows * rows));
+    let right_ranges = packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows * cols));
+    let mut left = vec![D::zero(); left_ranges.last().map_or(0, |range| range.end)];
+    let mut right = vec![D::zero(); right_ranges.last().map_or(0, |range| range.end)];
+    let mut read_layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut read_layouts)?;
+    let layouts = blocks
+        .iter()
+        .map(|&(_, rows, cols)| {
+            [
+                matrix_layout(rows, rows),
+                matrix_layout(rows, cols),
+                vector_layout(0),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    let mut dests = split_ranges(&mut left, &left_ranges)?
+        .into_iter()
+        .zip(split_ranges(&mut right, &right_ranges)?)
+        .zip(&layouts)
+        .map(|((q, r), layout)| {
+            Ok(FactorDest::new(
+                [
+                    Some(dest_write(q, &layout[0])?),
+                    Some(dest_write(r, &layout[1])?),
+                    None,
+                ],
+                symtn_dense::FactorPlacement::AsComputed,
+            ))
+        })
+        .collect::<Result<Vec<_>, OperationError>>()?;
+    factorize_into_solver_first(
+        engine,
+        dense,
+        DenseFactorization::QrFull,
+        &inputs,
+        &mut dests,
+        |index, dest| {
+            let (_, rows, cols) = blocks[index];
+            let [q, r, _] = dest.outputs_mut();
+            positive_diagonal_gauge(
+                dest_data::<D>(q, "qr_into")?,
+                rows,
+                dest_data::<D>(r, "qr_into")?,
+                rows,
+                cols,
+            );
+            Ok(())
+        },
+    )?;
+    let pairs = blocks
+        .iter()
+        .zip(sectors)
+        .zip(left_ranges.into_iter().zip(right_ranges))
+        .map(
+            |((&(_, rows, _), sector), (left, right))| PackedFactorPair {
+                sector,
+                kept: rows,
+                left,
+                left_rows: rows,
+                right,
+                right_leading: rows,
+            },
+        )
         .collect();
     Ok(PackedFactorPairs { pairs, left, right })
 }
@@ -1586,7 +1661,8 @@ where
         .map(|(l, q)| Lq { l, q })
 }
 
-/// Checked-Generic full QR, augmenting only sectors that require completion.
+/// Checked-Generic full QR: one executor batch over every sector (see
+/// [`full_qr_packed`]).
 #[doc(hidden)]
 pub(crate) fn qr_full_dyn_checked_generic<E, R, D>(
     engine: &mut dyn Engine,
@@ -1602,24 +1678,8 @@ where
     let space = input.space().space();
     let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
-    let mut pairs = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices
-            .get(index)
-            .map_err(CheckedGenericFactorPlanError::from)?;
-        let rows = matrix.rows;
-        let cols = matrix.cols;
-        let (q, r) = full_qr_numerical_stage(engine, dense, matrix.data, rows, cols)
-            .map_err(CheckedGenericFactorPlanError::from)?;
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: rows,
-            left: q,
-            left_rows: rows,
-            right: r,
-            right_leading: rows,
-        });
-    }
+    let pairs =
+        full_qr_packed(engine, dense, &matrices).map_err(CheckedGenericFactorPlanError::from)?;
     let dimensions = CheckedAuthority(provider).coupled_dimensions(space.homspace().codomain())?;
     with_input_geometry!(&matrices, |geometry| checked_full_factor_pair(
         provider,
