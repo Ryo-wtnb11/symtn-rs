@@ -14,6 +14,8 @@ mod block_svd;
 pub(crate) mod counting_alloc;
 mod dot;
 mod executor;
+#[cfg(all(feature = "tenferro", not(feature = "provider-inject")))]
+mod factor_into;
 #[cfg(all(
     any(feature = "cpu-faer", feature = "cpu-blas-core"),
     not(feature = "provider-inject")

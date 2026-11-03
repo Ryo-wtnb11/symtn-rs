@@ -14,6 +14,7 @@ mod dot;
 mod dtype;
 mod error;
 mod executor;
+mod factor_dest;
 mod fresh;
 mod layout;
 mod scalar;
@@ -67,6 +68,7 @@ pub use executor::{
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
     LaneAllocation, MatrixOp,
 };
+pub use factor_dest::{FactorDest, FactorFailure, FactorPlacement};
 #[doc(hidden)]
 pub use fresh::DenseFreshSegments;
 pub use scalar::DenseScalar;

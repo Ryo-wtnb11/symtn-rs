@@ -1238,6 +1238,41 @@ impl DenseExecutor for DefaultDenseExecutor {
         }
     }
 
+    // The native provider writes each block's factors into its destination
+    // on the lanes; every other provider keeps the trait default, which
+    // places the owned per-matrix outputs of `factorize_batch` (BLAS has no
+    // destination form).
+    #[cfg(all(
+        feature = "cpu-faer",
+        not(feature = "cpu-blas-core"),
+        not(feature = "provider-inject")
+    ))]
+    fn factorize_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: crate::DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        dests: &mut [crate::FactorDest<'_>],
+        sink: &mut dyn FnMut(
+            usize,
+            &mut crate::FactorDest<'_>,
+            Result<(), crate::FactorFailure>,
+        ) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        crate::factor_dest::validate(op, inputs, dests)?;
+        if inputs.is_empty() {
+            return Ok(());
+        }
+        crate::block_kernel::factor::factorize_into(
+            engine,
+            op,
+            self.lane_allocation,
+            inputs,
+            dests,
+            sink,
+        )
+    }
+
     fn solve_into(
         &mut self,
         engine: &mut dyn Engine,

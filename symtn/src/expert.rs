@@ -27,7 +27,8 @@ pub use symtn_dense::{CudaDenseContext, CudaDenseStorage};
 pub use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDType, DenseDotConfig, DenseError, DenseExecutor,
     DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned, DenseRead,
-    DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, MatrixOp,
+    DenseScalar, DenseTensor, DenseView, DenseViewMut, DenseWrite, FactorDest, FactorFailure,
+    FactorPlacement, MatrixOp,
 };
 /// The tree-transform descriptor carried by `OperationError` variants.
 pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};

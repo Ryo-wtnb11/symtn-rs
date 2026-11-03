@@ -50,19 +50,22 @@ where
 
 /// Builds the `(codomain <- W, W <- domain)` factor pair shared by SVD and
 /// the orthogonal factorizations, in the coupled-sector matrix layout.
-pub(super) fn build_left_right_bound_pair<R, D>(
+pub(super) fn build_left_right_bound_pair<R, D, P>(
     authority: &BoundDynamicFusionMapSpace<R>,
     homspace: &FusionTreeHomSpace,
     matricizations: &[SectorMatricization<D>],
-    pairs: &mut [FactorPair<D>],
+    pairs: &mut P,
 ) -> Result<DynamicFactorPair<R, D>, OperationError>
 where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
+    P: SidedFactors<D> + ?Sized,
 {
-    let dimensions = pairs
-        .iter()
-        .map(|pair| (pair.sector, pair.kept))
+    let dimensions = (0..pairs.len())
+        .map(|index| {
+            let pair = pairs.pair(index);
+            (pair.sector, pair.kept)
+        })
         .collect::<BTreeMap<_, _>>();
     Ok((
         build_bound_factor(
@@ -109,11 +112,11 @@ where
     )
 }
 
-pub(super) fn build_bound_factor<R, D, M>(
+pub(super) fn build_bound_factor<R, D, M, P>(
     authority: &BoundDynamicFusionMapSpace<R>,
     homspace: &FusionTreeHomSpace,
     matricizations: &[M],
-    pairs: &mut [FactorPair<D>],
+    pairs: &mut P,
     dimensions: &BTreeMap<SectorId, usize>,
     side: FactorSide,
 ) -> Result<BoundDynFactor<R, D>, OperationError>
@@ -121,6 +124,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D> + ?Sized,
 {
     build_bound_factor_with_placement(
         authority,
@@ -134,11 +138,11 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn build_bound_factor_with_placement<R, D, M>(
+pub(super) fn build_bound_factor_with_placement<R, D, M, P>(
     authority: &BoundDynamicFusionMapSpace<R>,
     homspace: &FusionTreeHomSpace,
     matricizations: &[M],
-    pairs: &mut [FactorPair<D>],
+    pairs: &mut P,
     dimensions: &BTreeMap<SectorId, usize>,
     side: FactorSide,
     placement: FactorPlacement,
@@ -147,6 +151,7 @@ where
     R: MultiplicityFreeRigidSymbols,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D> + ?Sized,
 {
     publish_one_sided_factor(
         &MfAuthority(authority),
@@ -163,11 +168,11 @@ where
 /// bond `W` sized by `dimensions`: the per-sector factor columns of `pairs`
 /// where the source has the sector, identity completion where it does not.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn publish_one_sided_factor<A, R, D, M>(
+pub(super) fn publish_one_sided_factor<A, R, D, M, P>(
     authority: &A,
     homspace: &FusionTreeHomSpace,
     matricizations: &[M],
-    pairs: &mut [FactorPair<D>],
+    pairs: &mut P,
     dimensions: &BTreeMap<SectorId, usize>,
     side: FactorSide,
     placement: FactorPlacement,
@@ -176,6 +181,7 @@ where
     A: FactorSpaceAuthority<R>,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D> + ?Sized,
 {
     let bond = FusionProductSpace::new([SectorLeg::new(
         dimensions
@@ -197,7 +203,7 @@ where
     let mut routes = matricizations
         .iter()
         .map(|matrix| (matrix.sector(), None))
-        .collect::<FxHashMap<SectorId, Option<&FactorPair<D>>>>();
+        .collect::<FxHashMap<SectorId, Option<usize>>>();
     let mut validated_placements = None;
     let space = authority.commit(staged, |structure| {
         let placements = PlacementIndex::new(matricizations, &[source_trees]);
@@ -226,13 +232,14 @@ where
         FactorSide::Left => crate::probe::Event::LeftFactorBufferBuilds,
         FactorSide::Right => crate::probe::Event::RightFactorBufferBuilds,
     });
-    for pair in pairs.iter() {
-        let route = routes
-            .get_mut(&pair.sector)
-            .ok_or(OperationError::SpaceMismatch {
-                message: "factor sector absent from the source tensor",
-            })?;
-        *route = Some(pair);
+    for index in 0..pairs.len() {
+        let route =
+            routes
+                .get_mut(&pairs.pair(index).sector)
+                .ok_or(OperationError::SpaceMismatch {
+                    message: "factor sector absent from the source tensor",
+                })?;
+        *route = Some(index);
     }
     let (nout, nin) = match side {
         FactorSide::Left => (space.space().nout(), 1),
@@ -247,7 +254,7 @@ where
         side,
         source_trees,
     ) {
-        let data = take_one_sided_factors(pairs, &identities, required_len, side);
+        let data = pairs.take_side(side, &identities, required_len);
         return Ok(BoundDynFactor::from_bound(space, data, nout, nin)?);
     }
     #[cfg(test)]
@@ -269,17 +276,17 @@ where
             FactorSide::Right => (coupled_of(key.domain_tree()), 0),
         };
         if let Some(&route) = routes.get(&sector) {
-            let pair = route.ok_or(OperationError::SpaceMismatch {
+            let pair = pairs.pair(route.ok_or(OperationError::SpaceMismatch {
                 message: "factor rank absent for a populated source sector",
-            })?;
+            })?);
             let tree = match side {
                 FactorSide::Left => key.codomain_tree(),
                 FactorSide::Right => key.domain_tree(),
             };
             let side_offset = placements.placement(sector, source_trees, tree)?.0;
             let (factor, factor_rows) = match side {
-                FactorSide::Left => (pair.left.as_slice(), pair.left_rows),
-                FactorSide::Right => (pair.right.as_slice(), pair.right_leading),
+                FactorSide::Left => (pair.left, pair.left_rows),
+                FactorSide::Right => (pair.right, pair.right_leading),
             };
             scatter_matrix_block(
                 &mut data,
@@ -545,10 +552,13 @@ impl<'a> PlacementIndex<'a> {
 /// paid also for `G_s = 1`.
 ///
 /// Why not one structure-major pass routing each output block to its
-/// matricization: the compact SVD and EIGH consumers keep each sector's dense
-/// factor in a workspace reused across sectors, so scattering has to happen
-/// per matricization, and a structure-major pass would also change which
-/// missing-tree error fires first when two sectors are defective. Why not a
+/// matricization: the compact SVD and EIGH consumers scatter each sector
+/// from the batch's packed transient in sector order, as that sector is
+/// delivered (or, on the solver-first adjoint SVD route, once the batch has
+/// succeeded), so a sector's scatter error keeps its place in the error
+/// order between the solves; a structure-major pass would need every
+/// sector first and would change which missing-tree error fires first when
+/// two sectors are defective. Why not a
 /// symtn-core accessor: nothing exposes the coupled grouping
 /// (`sorted_indices` is uncoupled-major and the coupled ranges known at
 /// layout time are dropped at `BlockStructure`).

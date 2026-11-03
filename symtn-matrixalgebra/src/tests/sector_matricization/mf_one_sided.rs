@@ -294,7 +294,7 @@ fn mf_one_sided_pair_errors_precede_tree_traversal() {
         PlacementIndexProbe::default()
     );
 
-    let error = build_bound_factor_with_placement::<_, f64, _>(
+    let error = build_bound_factor_with_placement::<_, f64, _, _>(
         &authority,
         &homspace,
         std::slice::from_ref(&matrix),
