@@ -102,6 +102,181 @@ where
     Ok(())
 }
 
+/// [`factorize_batch_staged`] into caller-owned destinations: `stage` sees
+/// each delivered input's destination and tagged outcome in input order;
+/// a `stage` error stops the batch and is returned. The same delivery check
+/// guards an executor that overrides the destination entry.
+pub(super) fn factorize_batch_into_staged<E>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    op: DenseFactorization,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    mut stage: impl FnMut(
+        usize,
+        &mut FactorDest<'_>,
+        Result<(), FactorFailure>,
+    ) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor + ?Sized,
+{
+    let mut delivered = 0;
+    let mut failure = None;
+    let batch =
+        dense.factorize_batch_into(engine, op, inputs, dests, &mut |index, dest, outcome| {
+            let staged = if index != delivered || index >= inputs.len() {
+                Err(OperationError::Dense(arity_mismatch(
+                    "factorize_batch",
+                    delivered,
+                    index,
+                )))
+            } else {
+                delivered += 1;
+                stage(index, dest, outcome)
+            };
+            staged.map_err(|error| {
+                failure = Some(error);
+                DenseError::Unsupported {
+                    op: "factorize_batch",
+                    message: String::new(),
+                }
+            })
+        });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    batch.map_err(OperationError::Dense)?;
+    if delivered != inputs.len() {
+        return Err(OperationError::Dense(arity_mismatch(
+            "factorize_batch",
+            inputs.len(),
+            delivered,
+        )));
+    }
+    Ok(())
+}
+
+/// The solver-first destination batch: the first solver failure stops it;
+/// the first malformed output is returned only once the whole batch has
+/// succeeded, so a later solver failure takes precedence. `solved` sees
+/// each successfully delivered destination.
+pub(super) fn factorize_into_solver_first<E>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    op: DenseFactorization,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    mut solved: impl FnMut(usize, &mut FactorDest<'_>) -> Result<(), OperationError>,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor + ?Sized,
+{
+    let mut malformed = None;
+    factorize_batch_into_staged(engine, dense, op, inputs, dests, |index, dest, outcome| {
+        match outcome {
+            Ok(()) => solved(index, dest),
+            Err(FactorFailure::Solver(error)) => Err(OperationError::Dense(error)),
+            Err(FactorFailure::Output(error)) => {
+                malformed.get_or_insert(error);
+                Ok(())
+            }
+        }
+    })?;
+    match malformed {
+        Some(error) => Err(OperationError::Dense(error)),
+        None => Ok(()),
+    }
+}
+
+/// The column-major layouts of one destination's outputs: `(shape,
+/// strides, rank)`, a spectrum using the first extent only.
+pub(super) type DestLayouts = [([usize; 2], [usize; 2], usize); 3];
+
+pub(super) fn matrix_layout(rows: usize, cols: usize) -> ([usize; 2], [usize; 2], usize) {
+    ([rows, cols], [1, rows], 2)
+}
+
+pub(super) fn vector_layout(len: usize) -> ([usize; 2], [usize; 2], usize) {
+    ([len, 0], [1, 0], 1)
+}
+
+/// A destination view over all of `data` with layout `layout`.
+pub(super) fn dest_write<'a, T: DenseBlockScalar>(
+    data: &'a mut [T],
+    (shape, strides, rank): &'a ([usize; 2], [usize; 2], usize),
+) -> Result<DenseWrite<'a>, OperationError> {
+    DenseViewMut::new(data, &shape[..*rank], &strides[..*rank], 0)
+        .map(T::dense_write)
+        .map_err(OperationError::Dense)
+}
+
+/// The storage of a delivered destination output this crate built.
+pub(super) fn dest_data<'b, T: DenseBlockScalar>(
+    output: &'b mut Option<DenseWrite<'_>>,
+    op: &'static str,
+) -> Result<&'b mut [T], OperationError> {
+    output
+        .as_mut()
+        .and_then(T::dense_write_data)
+        .ok_or_else(|| OperationError::Dense(arity_mismatch(op, 1, 0)))
+}
+
+/// Splits `data` into the disjoint `ranges` (any order), returned in the
+/// order given; ranges are cut in storage order with `split_at_mut`.
+pub(super) fn split_ranges<'a, T>(
+    data: &'a mut [T],
+    ranges: &[std::ops::Range<usize>],
+) -> Result<Vec<&'a mut [T]>, OperationError> {
+    let mut order = (0..ranges.len()).collect::<Vec<_>>();
+    order.sort_unstable_by_key(|&index| ranges[index].start);
+    let mut slices = (0..ranges.len())
+        .map(|_| None)
+        .collect::<Vec<Option<&mut [T]>>>();
+    let mut rest = data;
+    let mut cursor = 0usize;
+    for index in order {
+        let range = &ranges[index];
+        let mismatch = OperationError::ElementCountMismatch {
+            expected: cursor,
+            actual: range.start,
+        };
+        let skip = range.start.checked_sub(cursor).ok_or(mismatch)?;
+        let len = range.len();
+        if skip + len > rest.len() {
+            return Err(OperationError::ElementCountMismatch {
+                expected: rest.len(),
+                actual: skip + len,
+            });
+        }
+        let (_, tail) = std::mem::take(&mut rest).split_at_mut(skip);
+        let (slice, tail) = tail.split_at_mut(len);
+        slices[index] = Some(slice);
+        rest = tail;
+        cursor = range.end;
+    }
+    Ok(slices
+        .into_iter()
+        .map(|slice| slice.expect("every range was cut"))
+        .collect())
+}
+
+/// Consecutive ranges of `lens`, in order.
+pub(super) fn packed_ranges(lens: impl Iterator<Item = usize>) -> Vec<std::ops::Range<usize>> {
+    let mut start = 0usize;
+    lens.map(|len| {
+        let range = start..start + len;
+        start += len;
+        range
+    })
+    .collect()
+}
+
+/// A delivered spectrum slice widened to the public `f64` owner.
+pub(super) fn widened_spectrum<R: Copy + Into<f64>>(values: &[R]) -> Vec<f64> {
+    values.iter().map(|&value| value.into()).collect()
+}
+
 /// The one tensor of a values-only batch outcome, arity checked.
 pub(super) fn single_output(
     outcome: Result<Vec<DenseTensor>, DenseError>,
@@ -154,30 +329,6 @@ pub(super) fn col_major_reads<'a, D: FactorScalar>(
         .map_err(OperationError::Dense)
 }
 
-/// The solver-first batch: every input's outputs once the whole batch has
-/// succeeded, or the first solver error; the caller checks the outputs after.
-pub(super) fn factorize_col_major_batch<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    op: DenseFactorization,
-    blocks: &[(&[D], usize, usize)],
-) -> Result<Vec<Vec<DenseTensor>>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let mut layouts = Vec::new();
-    let inputs = col_major_reads(blocks, &mut layouts)?;
-    let mut outputs = Vec::with_capacity(blocks.len());
-    // Each entry's factor count is checked by `compact_{qr,svd}_outputs`,
-    // with the same error the per-matrix path reports.
-    factorize_batch_staged(engine, dense, op, &inputs, |_, outcome| {
-        outputs.push(outcome.map_err(OperationError::Dense)?);
-        Ok(())
-    })?;
-    Ok(outputs)
-}
-
 pub(super) fn compact_factor_output_owned<D: FactorScalar>(
     tensor: DenseTensor,
     expected_shape: &[usize],
@@ -198,23 +349,6 @@ pub(super) fn compact_real_spectrum_owned<D: FactorScalar>(
     check_contiguous_output(op, spectrum.len(), tensor.shape(), expected_shape)
         .map_err(OperationError::Dense)?;
     Ok(spectrum)
-}
-
-pub(super) fn concat_compact_factor_regions<D>(
-    regions: Vec<Option<Vec<D>>>,
-    required_len: usize,
-) -> Vec<D> {
-    #[cfg(test)]
-    let first = regions
-        .iter()
-        .find_map(|region| region.as_ref().map(Vec::as_ptr));
-    let output = concat_owned_factor_regions(regions, required_len);
-    #[cfg(test)]
-    crate::probe::owned_output(
-        crate::probe::CopyOp::Qr,
-        first.is_some_and(|pointer| std::ptr::eq(pointer, output.as_ptr())),
-    );
-    output
 }
 
 pub(super) fn concat_owned_factor_regions<D>(

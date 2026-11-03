@@ -306,25 +306,6 @@ fn compact_qr_direct_spans_reconstruct_tall_and_wide_matrices() {
 }
 
 #[test]
-fn compact_qr_direct_single_sector_keeps_executor_factor_owners() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let tensor = rectangular_svd_tensor(3, 2);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact_qr_copy_rec = crate::probe::record();
-    qr_compact(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
-    )
-    .unwrap();
-    let probe = compact_qr_copy_rec.compact_qr_copy();
-    assert_eq!(probe.input_pack_bytes, 0);
-    assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.owned_output_publications, 2);
-    assert_eq!(probe.owned_output_owner_reused, 2);
-}
-
-#[test]
 fn compact_qr_zero_only_input_normalizes_to_an_empty_factorization_result() {
     // What: a zero-only row or column produces empty Q/R spaces without
     // calling an invalid factor route.

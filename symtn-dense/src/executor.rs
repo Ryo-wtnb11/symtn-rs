@@ -1,9 +1,10 @@
 use num_complex::{Complex32, Complex64};
 
+use crate::factor_dest::factorize_batch_into_owned;
 use crate::fresh::{dispatch_fresh, fresh_serial, FRESH_OP};
 use crate::{
     DenseDType, DenseDotConfig, DenseError, DenseFreshSegments, DenseRead, DenseScalar,
-    DenseTensor, DenseView, DenseViewMut, DenseWrite, Engine,
+    DenseTensor, DenseView, DenseViewMut, DenseWrite, Engine, FactorDest, FactorFailure,
 };
 
 /// One GEMM of a batched matmul over shared flat buffers: the column-major
@@ -175,6 +176,51 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             sink(index, outcome)?;
         }
         Ok(())
+    }
+
+    /// [`Self::factorize_batch`] of the compact QR, compact SVD or Hermitian
+    /// eigendecomposition `op` with each input's outputs written into its
+    /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
+    /// shapes, dtypes and [`crate::FactorPlacement`]); any other `op` is
+    /// [`DenseError::Unsupported`].
+    ///
+    /// Every destination is validated before any input is solved or any
+    /// destination written: the count, each destination's outputs, then
+    /// each output's dtype ([`DenseError::DTypeMismatch`]), shape and
+    /// compact column-major layout ([`DenseError::ShapeMismatch`]); a
+    /// rejected batch leaves every destination untouched.
+    ///
+    /// `sink(i, &mut dests[i], outcome)` is called once per delivered input,
+    /// in ascending input order, after that input's solve has completed; it
+    /// may read and rewrite that destination in place. A solver failure is
+    /// [`FactorFailure::Solver`], outputs that do not fit the destination
+    /// [`FactorFailure::Output`]; after either, that destination's contents
+    /// are unspecified. An `Err` from `sink` stops delivery and is returned;
+    /// an executor-level failure is returned without calling `sink` further.
+    ///
+    /// The default runs [`Self::factorize_batch`] and copies each delivered
+    /// `Ok` outcome into its destination (after the output checks the
+    /// matrix-algebra caller makes) before calling `sink`, so an executor
+    /// keeps exactly its own owned calls, scopes and stopping points. An
+    /// executor that solves the inputs on lanes may write the destinations
+    /// directly and deliver every outcome after the lanes join.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the sink's index, destination and tagged outcome are the documented delivery contract"
+    )]
+    fn factorize_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        dests: &mut [FactorDest<'_>],
+        sink: &mut dyn FnMut(
+            usize,
+            &mut FactorDest<'_>,
+            Result<(), FactorFailure>,
+        ) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        factorize_batch_into_owned(self, engine, op, inputs, dests, sink)
     }
 
     /// Whether this executor supports native full SVD for every [`DenseOwned`]

@@ -263,7 +263,7 @@ fn checked_generic_full_svd_failure_publishes_no_factors() {
     ));
 }
 
-fn assert_checked_compact_svd_live_stage_owners<D: crate::factorize::FactorScalar>() {
+fn assert_checked_compact_svd_owned_entry_stages<D: crate::factorize::FactorScalar>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (_, space, data) = checked_svd_truncation_input::<D>(true);
     let input = BoundDynamicTensorRef::try_new(&space, &data).unwrap();
@@ -276,16 +276,15 @@ fn assert_checked_compact_svd_live_stage_owners<D: crate::factorize::FactorScala
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(stage.len(), 2);
-    assert_eq!(dense.output_ptrs, stage);
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
 }
 
 #[test]
-fn checked_generic_compact_svd_keeps_live_stage_owners_for_every_dtype() {
-    assert_checked_compact_svd_live_stage_owners::<f64>();
-    assert_checked_compact_svd_live_stage_owners::<f32>();
-    assert_checked_compact_svd_live_stage_owners::<Complex32>();
-    assert_checked_compact_svd_live_stage_owners::<Complex64>();
+fn checked_generic_compact_svd_stages_every_sector_through_the_owned_entry_for_every_dtype() {
+    assert_checked_compact_svd_owned_entry_stages::<f64>();
+    assert_checked_compact_svd_owned_entry_stages::<f32>();
+    assert_checked_compact_svd_owned_entry_stages::<Complex32>();
+    assert_checked_compact_svd_owned_entry_stages::<Complex64>();
 }
 
 #[test]
@@ -545,7 +544,9 @@ fn checked_generic_full_svd_local_shape_error_precedes_provider_query() {
     assert_eq!(provider.calls.get(), 0);
 }
 
-fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize::FactorScalar>() {
+fn assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm<
+    D: crate::factorize::FactorScalar,
+>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (base, data) = generic_factorization_input();
     let data = data.into_iter().map(D::from_real).collect::<Vec<_>>();
@@ -567,14 +568,6 @@ fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize:
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(dense.output_ptrs.len(), 2);
     assert_eq!(dense.gemm_ptrs.len(), 2);
-    assert_eq!(
-        dense.gemm_ptrs,
-        dense
-            .output_ptrs
-            .iter()
-            .map(|&(u, vt)| (vt, u))
-            .collect::<Vec<_>>(),
-    );
     let regions = source
         .space()
         .structure()
@@ -599,11 +592,11 @@ fn assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm<D: crate::factorize:
 }
 
 #[test]
-fn checked_pinv_uses_owned_svd_outputs_at_final_gemm() {
-    assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm::<f32>();
-    assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm::<f64>();
-    assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm::<Complex32>();
-    assert_checked_pinv_uses_owned_svd_outputs_at_final_gemm::<Complex64>();
+fn checked_pinv_reads_the_staged_svd_factors_at_final_gemm() {
+    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<f32>();
+    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<f64>();
+    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<Complex32>();
+    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<Complex64>();
 }
 
 struct FailSingleLegFold {

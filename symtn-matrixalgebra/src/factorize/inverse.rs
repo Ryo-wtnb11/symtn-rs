@@ -354,52 +354,52 @@ where
     // the per-sector reconstruction GEMMs.
     in_linalg_scope(engine, dense, |dense, engine| {
         let (_, blocks) = sector_blocks(&matrices)?;
+        // Each sector's geometry and spectrum; its factors stay in the
+        // batch's packed transient until the global cutoff is known.
         let mut staged = Vec::with_capacity(blocks.len());
         // Why no SVD gauge: the pseudo-inverse is gauge invariant.
-        compact_svd_sectors_staged(
+        let mut packed = compact_svd_sectors_staged(
             engine,
             dense,
             &blocks,
             None,
             |_, _| {},
             |_, stage| {
-                staged.push(stage);
+                staged.push((
+                    stage.rows,
+                    stage.cols,
+                    stage.rank,
+                    stage.u_range,
+                    stage.singular_values,
+                    stage.vt_range,
+                ));
                 Ok(())
             },
         )?;
         let cutoff = pinv_cutoff(
-            staged
-                .iter()
-                .flat_map(|stage| stage.singular_values.iter().copied()),
+            staged.iter().flat_map(|stage| stage.4.iter().copied()),
             rcond,
         )?;
-        for (stage, landing) in staged.iter_mut().zip(&landings) {
-            if stage.rank == 0 {
+        for (stage, landing) in staged.iter().zip(&landings) {
+            let (rows, cols, rank, ref u_range, ref singular_values, ref vt_range) = *stage;
+            if rank == 0 {
                 continue;
             }
-            let CompactSvdNumericalStage {
-                rows,
-                cols,
-                rank,
-                u,
-                singular_values,
-                vt,
-            } = stage;
-            let (rows, cols, rank) = (*rows, *cols, *rank);
+            let u = &packed.u[u_range.clone()];
+            let vt = &mut packed.vt[vt_range.clone()];
             for (row, &sigma) in singular_values.iter().enumerate() {
                 let reciprocal = D::from_real(if sigma > cutoff { 1.0 / sigma } else { 0.0 });
                 for column in 0..cols {
                     vt[row + rank * column] = vt[row + rank * column] * reciprocal;
                 }
             }
+            let vt = &*vt;
             // `A^+ = V S^+ U^H` reads `S^+ Vh` and `U` conjugated and
             // transposed; `(A^H)^+ = U S^+ Vh` reads them as stored.
             let (out_rows, out_cols, left, left_strides, right, right_strides, conjugate) =
                 match placement {
-                    FactorPlacement::Direct => (cols, rows, &*vt, [rank, 1], &*u, [rows, 1], true),
-                    FactorPlacement::Adjoint => {
-                        (rows, cols, &*u, [1, rows], &*vt, [1, rank], false)
-                    }
+                    FactorPlacement::Direct => (cols, rows, vt, [rank, 1], u, [rows, 1], true),
+                    FactorPlacement::Adjoint => (rows, cols, u, [1, rows], vt, [1, rank], false),
                 };
             landing.write(
                 &mut output_data,

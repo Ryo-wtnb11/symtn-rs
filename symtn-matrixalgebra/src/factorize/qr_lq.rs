@@ -447,7 +447,7 @@ where
     );
     let mut pairs = compact_qr_pairs(engine, dense, matricizations.as_slice(), |_| {})?;
     #[cfg(test)]
-    for pair in &pairs {
+    for pair in &pairs.pairs {
         crate::probe::output_scatter::<D>(crate::probe::CopyOp::Qr, 1, pair.left.len());
         crate::probe::output_scatter::<D>(crate::probe::CopyOp::Qr, 1, pair.right.len());
     }
@@ -456,40 +456,55 @@ where
 }
 
 /// Compact QR of every coupled-sector matrix in one batched dense call, in the
-/// positive-diagonal gauge, as `q` (left) and `r` (right) factor pairs.
-/// `observe` sees each matrix before the dense call.
+/// positive-diagonal gauge, as `q` (left) and `r` (right) factors written
+/// once into one buffer per side in matrix order, laid out from the
+/// matricization shapes before the dense call (the checked builder then
+/// publishes them as they are when its output is canonical). `observe` sees
+/// each matrix before the dense call.
 pub(super) fn compact_qr_pairs<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
     mut observe: impl FnMut(&SectorMatrixRef<'_, D>),
-) -> Result<Vec<FactorPair<D>>, OperationError>
+) -> Result<PackedFactorPairs<D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
     let mut blocks = Vec::with_capacity(matrices.len());
+    let mut sectors = Vec::with_capacity(matrices.len());
     for index in 0..matrices.len() {
         let matrix = matrices.get(index)?;
         observe(&matrix);
+        sectors.push(matrix.sector);
         blocks.push((matrix.data, matrix.rows, matrix.cols));
     }
-    let factors = compact_qr_owned_batch(engine, dense, &blocks)?;
-    let mut pairs = Vec::with_capacity(blocks.len());
-    for (index, (mut q, mut r)) in factors.into_iter().enumerate() {
-        let (_, rows, cols) = blocks[index];
-        let rank = rows.min(cols);
-        positive_diagonal_gauge_strided(&mut q, rows, rows, &mut r, rank, rank, cols);
-        pairs.push(FactorPair {
-            sector: matrices.get(index)?.sector,
-            kept: rank,
-            left: q,
-            left_rows: rows,
-            right: r,
-            right_leading: rank,
-        });
-    }
-    Ok(pairs)
+    let rank = |&(_, rows, cols): &(&[D], usize, usize)| rows.min(cols);
+    let left_ranges = packed_ranges(blocks.iter().map(|block| block.1 * rank(block)));
+    let right_ranges = packed_ranges(blocks.iter().map(|block| rank(block) * block.2));
+    let mut left = vec![D::zero(); left_ranges.last().map_or(0, |range| range.end)];
+    let mut right = vec![D::zero(); right_ranges.last().map_or(0, |range| range.end)];
+    compact_qr_into_batch(
+        engine,
+        dense,
+        &blocks,
+        split_ranges(&mut left, &left_ranges)?,
+        split_ranges(&mut right, &right_ranges)?,
+    )?;
+    let pairs = blocks
+        .iter()
+        .zip(sectors)
+        .zip(left_ranges.into_iter().zip(right_ranges))
+        .map(|((block, sector), (left, right))| PackedFactorPair {
+            sector,
+            kept: rank(block),
+            left,
+            left_rows: block.1,
+            right,
+            right_leading: rank(block),
+        })
+        .collect();
+    Ok(PackedFactorPairs { pairs, left, right })
 }
 
 /// The `rows x cols` matrix `X` whose LQ a sector computes, and `X^H`, the
@@ -1060,17 +1075,12 @@ where
     debug_assert_eq!(plan.source_layout, input.space().validated_layout());
     let left_space = input.space().rebind_validated(&plan.left_layout)?;
     let right_space = input.space().rebind_validated(&plan.right_layout)?;
-    let mut left_regions = (0..plan.left_regions.len())
-        .map(|_| None)
-        .collect::<Vec<_>>();
-    let mut right_regions = (0..plan.right_regions.len())
-        .map(|_| None)
-        .collect::<Vec<_>>();
+    let mut left_data = vec![D::zero(); plan.left_layout.required_len()?];
+    let mut right_data = vec![D::zero(); plan.right_layout.required_len()?];
 
     let routes = plan
         .routes
         .iter()
-        .copied()
         .filter(|route| route.rank != 0)
         .collect::<Vec<_>>();
     let blocks = routes
@@ -1080,26 +1090,25 @@ where
             (&input.data()[source.range()], source.rows(), source.cols())
         })
         .collect::<Vec<_>>();
-    let factors = compact_qr_owned_batch(engine, dense, &blocks)?;
-    for (route, (mut left_data, mut right_data)) in routes.into_iter().zip(factors) {
-        let source = &plan.source_regions[route.source_region];
-        positive_diagonal_gauge_strided(
-            &mut left_data,
-            source.rows(),
-            source.rows(),
-            &mut right_data,
-            route.rank,
-            route.rank,
-            source.cols(),
-        );
-        left_regions[route.left_region.expect("nonzero route has left region")] = Some(left_data);
-        right_regions[route.right_region.expect("nonzero route has right region")] =
-            Some(right_data);
-    }
-
-    let left_data = concat_compact_factor_regions(left_regions, plan.left_layout.required_len()?);
-    let right_data =
-        concat_compact_factor_regions(right_regions, plan.right_layout.required_len()?);
+    let left_ranges = routes
+        .iter()
+        .map(|route| {
+            plan.left_regions[route.left_region.expect("nonzero route has left region")].range()
+        })
+        .collect::<Vec<_>>();
+    let right_ranges = routes
+        .iter()
+        .map(|route| {
+            plan.right_regions[route.right_region.expect("nonzero route has right region")].range()
+        })
+        .collect::<Vec<_>>();
+    compact_qr_into_batch(
+        engine,
+        dense,
+        &blocks,
+        split_ranges(&mut left_data, &left_ranges)?,
+        split_ranges(&mut right_data, &right_ranges)?,
+    )?;
 
     let left = BoundDynFactor::from_bound(left_space, left_data, space.nout(), 1)?;
     let right = BoundDynFactor::from_bound(right_space, right_data, 1, space.nin())?;
@@ -1453,26 +1462,72 @@ where
     compact_qr_outputs(outputs, rows, cols)
 }
 
-/// Compact QR of each column-major `(data, rows, cols)` block, submitted as one
-/// executor batch so the backend admits the whole coupled-sector loop once.
-#[expect(
-    clippy::type_complexity,
-    reason = "the dense QR ownership boundary returns one documented Q, R pair per block"
-)]
-pub(super) fn compact_qr_owned_batch<E, D>(
+/// Compact QR of each column-major `(data, rows, cols)` block into its
+/// destination slices `q` (`rows x rank`) and `r` (`rank x cols`),
+/// submitted as one solver-first executor batch so the backend admits the
+/// whole coupled-sector loop once; each solved block is positive-diagonal
+/// gauged in place.
+pub(super) fn compact_qr_into_batch<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     blocks: &[(&[D], usize, usize)],
-) -> Result<Vec<(Vec<D>, Vec<D>)>, OperationError>
+    q: Vec<&mut [D]>,
+    r: Vec<&mut [D]>,
+) -> Result<(), OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    factorize_col_major_batch(engine, dense, DenseFactorization::Qr, blocks)?
+    let mut read_layouts = Vec::new();
+    let inputs = col_major_reads(blocks, &mut read_layouts)?;
+    let layouts = blocks
+        .iter()
+        .map(|&(_, rows, cols)| {
+            let rank = rows.min(cols);
+            [
+                matrix_layout(rows, rank),
+                matrix_layout(rank, cols),
+                vector_layout(0),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    let mut dests = q
         .into_iter()
-        .zip(blocks)
-        .map(|(outputs, &(_, rows, cols))| compact_qr_outputs(outputs, rows, cols))
-        .collect()
+        .zip(r)
+        .zip(&layouts)
+        .map(|((q, r), layout)| {
+            Ok(FactorDest::new(
+                [
+                    Some(dest_write(q, &layout[0])?),
+                    Some(dest_write(r, &layout[1])?),
+                    None,
+                ],
+                symtn_dense::FactorPlacement::AsComputed,
+            ))
+        })
+        .collect::<Result<Vec<_>, OperationError>>()?;
+    factorize_into_solver_first(
+        engine,
+        dense,
+        DenseFactorization::Qr,
+        &inputs,
+        &mut dests,
+        |index, dest| {
+            let (_, rows, cols) = blocks[index];
+            let rank = rows.min(cols);
+            let [q, r, _] = dest.outputs_mut();
+            positive_diagonal_gauge_strided(
+                dest_data::<D>(q, "qr_into")?,
+                rows,
+                rows,
+                dest_data::<D>(r, "qr_into")?,
+                rank,
+                rank,
+                cols,
+            );
+            Ok(())
+        },
+    )
 }
 
 pub(super) fn compact_qr_outputs<D: FactorScalar>(

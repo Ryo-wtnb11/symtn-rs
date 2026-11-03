@@ -8,7 +8,7 @@ use std::time::Duration;
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::schedule::{self, AllocationScratch, GrantKey};
+use super::schedule::{self, AllocationScratch, GrantKey, LaneJobs};
 use crate::tenferro_adapter::{lane_allocation_unsupported, tenferro_error};
 use crate::{DenseError, LaneAllocation};
 
@@ -89,8 +89,23 @@ pub(crate) trait BlockOp: Sync {
     /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
     fn grant_key(&self, index: usize, job: &Self::Job) -> GrantKey;
 
-    /// Runs block `index` on its lane's execution context.
-    fn run(&self, index: usize, job: &mut Self::Job, exec: Exec<'_>) -> Result<(), DenseError>;
+    /// A lane's own scratch, built once per lane before its first block runs
+    /// and dropped when the lane finishes.
+    type Lane;
+
+    /// Builds one lane's [`Lane`](Self::Lane) from that lane's blocks and its
+    /// child context, before any of them runs.
+    fn lane(&self, jobs: &mut dyn LaneJobs<Self::Job>, exec: &Exec<'_>) -> Self::Lane;
+
+    /// Runs block `index` on its lane's execution context with its lane's
+    /// scratch.
+    fn run(
+        &self,
+        index: usize,
+        job: &mut Self::Job,
+        lane: &mut Self::Lane,
+        exec: Exec<'_>,
+    ) -> Result<(), DenseError>;
 }
 
 /// The driver's reusable staging: the per-block times and the lane tables.
@@ -195,9 +210,13 @@ fn on_lanes<B: BlockOp>(
         schedule::lane_allocations(),
         grant,
     );
-    let result = schedule::run(exec.reborrow(), &allocation, jobs, |index, job, exec| {
-        op.run(index, job, exec)
-    });
+    let result = schedule::run_with_lanes(
+        exec.reborrow(),
+        &allocation,
+        jobs,
+        |lane_jobs, exec| op.lane(lane_jobs, exec),
+        |index, job, lane, exec| op.run(index, job, lane, exec),
+    );
     scratch.allocation.keep(allocation);
     // A refused lane split is the engine's typed failure under this kernel's
     // label, like a refused entry.

@@ -24,7 +24,7 @@ use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use super::schedule::GrantKey;
+use super::schedule::{GrantKey, LaneJobs};
 use crate::fresh::{split_fresh_segments, FreshParts};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::LaneAllocation;
@@ -281,6 +281,9 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     const ENTRY: Entry = Entry::Contraction;
     const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -309,6 +312,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         &self,
         index: usize,
         (plan, destination): &mut Self::Job,
+        (): &mut (),
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
@@ -350,6 +354,9 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     const ENTRY: Entry = Entry::Contraction;
     const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -378,6 +385,7 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         &self,
         index: usize,
         (plan, piece, written): &mut Self::Job,
+        (): &mut (),
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];

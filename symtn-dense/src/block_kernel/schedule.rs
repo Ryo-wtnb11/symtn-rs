@@ -1264,6 +1264,51 @@ fn equal_shares(
     score
 }
 
+/// The jobs of one lane, visited in ascending index order with exclusive
+/// access to each job's state.
+pub(crate) trait LaneJobs<S> {
+    fn for_each(&mut self, visit: &mut dyn FnMut(usize, &mut S));
+}
+
+/// Every state of a one-lane run, at its own index.
+struct AllJobs<'x, S>(&'x mut [S]);
+
+impl<S> LaneJobs<S> for AllJobs<'_, S> {
+    fn for_each(&mut self, visit: &mut dyn FnMut(usize, &mut S)) {
+        for (j, state) in self.0.iter_mut().enumerate() {
+            visit(j, state);
+        }
+    }
+}
+
+/// One lane's share of a multi-lane run.
+struct PartJobs<'x, 'y, S>(&'x mut [(usize, &'y mut S)]);
+
+impl<S> LaneJobs<S> for PartJobs<'_, '_, S> {
+    fn for_each(&mut self, visit: &mut dyn FnMut(usize, &mut S)) {
+        for (j, state) in self.0.iter_mut() {
+            visit(*j, state);
+        }
+    }
+}
+
+/// [`run_with_lanes`] without lane-local state.
+#[cfg(test)]
+pub(crate) fn run<S: Send, E: Send>(
+    exec: Exec<'_>,
+    allocation: &Allocation,
+    states: &mut [S],
+    job: impl Fn(usize, &mut S, Exec<'_>) -> Result<(), E> + Sync,
+) -> Result<Result<(), (usize, E)>, tenferro_cpu::threadteam::Error> {
+    run_with_lanes(
+        exec,
+        allocation,
+        states,
+        |_, _| (),
+        |j, state, (), exec| job(j, state, exec),
+    )
+}
+
 /// Run every job of `allocation` on `exec` with exclusive access to its own
 /// `states` entry, and return the lowest canonical failure.
 ///
@@ -1271,8 +1316,11 @@ fn equal_shares(
 /// index has completed. Lane `k` gets a child token of exactly
 /// `allocation.lanes[k].budget` slots (one threadteam `fork_sized` over S;
 /// slots no lane reserves stay idle for the call) with the caller's workspace
-/// and policy. A panicking job unwinds after the lanes join; the engine's
-/// guarded entry then marks itself broken.
+/// and policy. Before its first job, each lane builds its own state once with
+/// `lane` from its jobs and its child context; every job of that lane borrows
+/// it, and it drops when the lane finishes, before the lanes join. A
+/// panicking job unwinds after the lanes join; the engine's guarded entry
+/// then marks itself broken.
 ///
 /// The outer error is threadteam's refusal of the lane budgets, before any
 /// job ran. An allocation's budgets are nonzero and sum to at most S by
@@ -1282,11 +1330,12 @@ fn equal_shares(
 /// Why per-job state is lent by lane rather than behind a lock per job: a
 /// lock per job costs an allocation per job on platforms whose mutex is
 /// boxed, and a lane already owns its jobs exclusively.
-pub(crate) fn run<S: Send, E: Send>(
+pub(crate) fn run_with_lanes<S: Send, L, E: Send>(
     exec: Exec<'_>,
     allocation: &Allocation,
     states: &mut [S],
-    job: impl Fn(usize, &mut S, Exec<'_>) -> Result<(), E> + Sync,
+    lane: impl Fn(&mut dyn LaneJobs<S>, &Exec<'_>) -> L + Sync,
+    job: impl Fn(usize, &mut S, &mut L, Exec<'_>) -> Result<(), E> + Sync,
 ) -> Result<Result<(), (usize, E)>, tenferro_cpu::threadteam::Error> {
     let lanes = &allocation.lanes;
     if lanes.is_empty() {
@@ -1295,15 +1344,15 @@ pub(crate) fn run<S: Send, E: Send>(
     let policy = *exec.batch_policy();
     let workspace = exec.workspace();
     // A lane's jobs ascend, so its first failure is its lowest one.
-    let run_lane = |token: tenferro_cpu::threadteam::Exec<'_>,
-                    jobs: &mut dyn Iterator<Item = (usize, &mut S)>| {
+    let run_lane = |token: tenferro_cpu::threadteam::Exec<'_>, jobs: &mut dyn LaneJobs<S>| {
         let mut lane_exec = Exec::from_token(token, workspace, policy);
+        let mut local = lane(jobs, &lane_exec);
         let mut first = None;
-        for (j, state) in jobs {
-            if let Err(error) = job(j, state, lane_exec.reborrow()) {
+        jobs.for_each(&mut |j, state| {
+            if let Err(error) = job(j, state, &mut local, lane_exec.reborrow()) {
                 first.get_or_insert((j, error));
             }
-        }
+        });
         first
     };
     if let [lane] = lanes.as_slice() {
@@ -1311,7 +1360,7 @@ pub(crate) fn run<S: Send, E: Send>(
         let width =
             NonZeroUsize::new(lane.budget).ok_or(tenferro_cpu::threadteam::Error::ZeroBudget)?;
         let token = exec.limit(width).into_token();
-        return Ok(run_lane(token, &mut states.iter_mut().enumerate()).map_or(Ok(()), Err));
+        return Ok(run_lane(token, &mut AllJobs(states)).map_or(Ok(()), Err));
     }
     let slots = NonZeroUsize::new(allocation.slots).unwrap_or(NonZeroUsize::MIN);
     let token = exec.limit(slots).into_token();
@@ -1337,7 +1386,7 @@ pub(crate) fn run<S: Send, E: Send>(
     token.fork_sized(&shares, |k, token| {
         let mut part = parts[k].lock().unwrap_or_else(PoisonError::into_inner);
         let (jobs, failure) = &mut *part;
-        *failure = run_lane(token, &mut jobs.iter_mut().map(|(j, s)| (*j, &mut **s)));
+        *failure = run_lane(token, &mut PartJobs(jobs));
     })?;
     Ok(parts
         .into_iter()

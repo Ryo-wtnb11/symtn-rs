@@ -1,0 +1,792 @@
+//! `DenseExecutor::factorize_batch_into`: whole-batch destination
+//! validation before any solve; the compatibility default's delivery,
+//! failure provenance and owned dispatch; and the native lanes' destination
+//! writes against the native owned batch, placed.
+
+use super::*;
+use crate::{FactorDest, FactorFailure, FactorPlacement};
+
+/// A scalar of the destination tests: its dtype-erased views and an exact
+/// widening for bit comparisons.
+trait Elem: Copy + std::fmt::Debug + 'static {
+    type Real: Elem;
+    fn make(value: Complex64) -> Self;
+    fn to_c64(self) -> Complex64;
+    fn read(view: DenseView<'_, Self>) -> DenseRead<'_>;
+    fn write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_>;
+    fn slice(tensor: &DenseTensor) -> &[Self];
+}
+
+macro_rules! elem {
+    ($ty:ty, $real:ty, $variant:ident, $slice:ident, |$v:ident| $make:expr, |$w:ident| $widen:expr) => {
+        impl Elem for $ty {
+            type Real = $real;
+            fn make($v: Complex64) -> Self {
+                $make
+            }
+            fn to_c64(self) -> Complex64 {
+                let $w = self;
+                $widen
+            }
+            fn read(view: DenseView<'_, Self>) -> DenseRead<'_> {
+                DenseRead::$variant(view)
+            }
+            fn write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_> {
+                DenseWrite::$variant(view)
+            }
+            fn slice(tensor: &DenseTensor) -> &[Self] {
+                tensor.$slice().unwrap()
+            }
+        }
+    };
+}
+
+elem!(f32, f32, F32, as_f32_slice, |v| v.re as f32, |w| {
+    Complex64::new(w as f64, 0.0)
+});
+elem!(f64, f64, F64, as_f64_slice, |v| v.re, |w| Complex64::new(
+    w, 0.0
+));
+elem!(
+    Complex32,
+    f32,
+    C32,
+    as_c32_slice,
+    |v| Complex32::new(v.re as f32, v.im as f32),
+    |w| Complex64::new(w.re as f64, w.im as f64)
+);
+elem!(Complex64, f64, C64, as_c64_slice, |v| v, |w| w);
+
+/// Column-major strides of `shape`.
+fn strides(shape: &[usize]) -> Vec<usize> {
+    let mut step = 1;
+    shape
+        .iter()
+        .map(|&dim| {
+            let stride = step;
+            step *= dim;
+            stride
+        })
+        .collect()
+}
+
+/// One input's owned destination buffers and their layouts.
+struct Buffers<T: Elem> {
+    factors: [Vec<T>; 2],
+    spectrum: Vec<T::Real>,
+    shapes: [Vec<usize>; 3],
+    strides: [Vec<usize>; 3],
+}
+
+/// The destination shapes of `op` on an input of `shape` under `placement`.
+fn dest_shapes(
+    op: DenseFactorization,
+    shape: &[usize],
+    placement: FactorPlacement,
+) -> [Vec<usize>; 3] {
+    let (m, n, batch) = (shape[0], shape[1], &shape[2..]);
+    let k = m.min(n);
+    let with = |head: &[usize]| [head, batch].concat();
+    let adjoint = placement == FactorPlacement::Adjoint;
+    match op {
+        DenseFactorization::Qr if adjoint => [with(&[n, k]), with(&[k, m]), vec![]],
+        DenseFactorization::Qr => [with(&[m, k]), with(&[k, n]), vec![]],
+        DenseFactorization::Svd if adjoint => [with(&[n, k]), with(&[k]), with(&[k, m])],
+        DenseFactorization::Svd => [with(&[m, k]), with(&[k]), with(&[k, n])],
+        DenseFactorization::Eigh => [with(&[m]), with(&[m, m]), vec![]],
+        _ => unreachable!(),
+    }
+}
+
+impl<T: Elem> Buffers<T> {
+    /// Sentinel-filled buffers of the shapes `shapes`, in the op's output
+    /// order (the spectrum is output 1 for SVD, 0 for eigh).
+    fn new(op: DenseFactorization, shapes: [Vec<usize>; 3], sentinel: f64) -> Self {
+        let len = |shape: &Vec<usize>| shape.iter().product::<usize>();
+        let fill = Complex64::new(sentinel, 0.0);
+        let (factor_shapes, spectrum_shape): ([&Vec<usize>; 2], &Vec<usize>) = match op {
+            DenseFactorization::Svd => ([&shapes[0], &shapes[2]], &shapes[1]),
+            DenseFactorization::Eigh => ([&shapes[1], &shapes[2]], &shapes[0]),
+            _ => ([&shapes[0], &shapes[1]], &shapes[2]),
+        };
+        Self {
+            factors: factor_shapes.map(|shape| vec![T::make(fill); len(shape)]),
+            spectrum: vec![
+                T::Real::make(fill);
+                if op == DenseFactorization::Qr {
+                    0
+                } else {
+                    len(spectrum_shape)
+                }
+            ],
+            strides: [
+                strides(&shapes[0]),
+                strides(&shapes[1]),
+                strides(&shapes[2]),
+            ],
+            shapes,
+        }
+    }
+
+    fn dest(&mut self, op: DenseFactorization, placement: FactorPlacement) -> FactorDest<'_> {
+        let [a, b] = &mut self.factors;
+        let view = |data, index: usize| -> DenseViewMut<'_, _> {
+            DenseViewMut::new(data, &self.shapes[index], &self.strides[index], 0).unwrap()
+        };
+        let outputs = match op {
+            DenseFactorization::Svd => [
+                Some(T::write(view(a, 0))),
+                Some(T::Real::write(
+                    DenseViewMut::new(&mut self.spectrum, &self.shapes[1], &self.strides[1], 0)
+                        .unwrap(),
+                )),
+                Some(T::write(view(b, 2))),
+            ],
+            DenseFactorization::Eigh => [
+                Some(T::Real::write(
+                    DenseViewMut::new(&mut self.spectrum, &self.shapes[0], &self.strides[0], 0)
+                        .unwrap(),
+                )),
+                Some(T::write(view(a, 1))),
+                None,
+            ],
+            _ => [Some(T::write(view(a, 0))), Some(T::write(view(b, 1))), None],
+        };
+        FactorDest::new(outputs, placement)
+    }
+
+    /// Every element, widened, in output order.
+    fn widened(&self, op: DenseFactorization) -> Vec<Vec<Complex64>> {
+        let factor = |data: &Vec<T>| data.iter().map(|&value| value.to_c64()).collect();
+        let spectrum = self.spectrum.iter().map(|&value| value.to_c64()).collect();
+        match op {
+            DenseFactorization::Svd => {
+                vec![factor(&self.factors[0]), spectrum, factor(&self.factors[1])]
+            }
+            DenseFactorization::Eigh => vec![spectrum, factor(&self.factors[0])],
+            _ => vec![factor(&self.factors[0]), factor(&self.factors[1])],
+        }
+    }
+}
+
+/// The conjugate transpose of each `rows x cols` item of `data`, written
+/// out entry by entry as the oracle of the adjoint placement.
+fn adjoint_items(data: &[Complex64], rows: usize, cols: usize) -> Vec<Complex64> {
+    let mut out = vec![Complex64::default(); data.len()];
+    for item in 0..data.len() / (rows * cols).max(1) {
+        let base = item * rows * cols;
+        for row in 0..rows {
+            for col in 0..cols {
+                out[base + col + cols * row] = data[base + row + rows * col].conj();
+            }
+        }
+    }
+    out
+}
+
+/// The owned outputs placed as `placement` places them, widened.
+fn placed(
+    op: DenseFactorization,
+    owned: &[DenseTensor],
+    placement: FactorPlacement,
+) -> Vec<Vec<Complex64>> {
+    let widen = |tensor: &DenseTensor| -> Vec<Complex64> {
+        match tensor.dtype() {
+            DenseDType::F32 => f32::slice(tensor).iter().map(|v| v.to_c64()).collect(),
+            DenseDType::F64 => f64::slice(tensor).iter().map(|v| v.to_c64()).collect(),
+            DenseDType::C32 => Complex32::slice(tensor)
+                .iter()
+                .map(|v| v.to_c64())
+                .collect(),
+            _ => Complex64::slice(tensor).to_vec(),
+        }
+    };
+    let mut outputs: Vec<_> = owned.iter().map(widen).collect();
+    if placement == FactorPlacement::Adjoint {
+        let last = outputs.len() - 1;
+        for (index, tensor) in owned.iter().enumerate() {
+            if op == DenseFactorization::Svd && index == 1 {
+                continue;
+            }
+            let shape = tensor.shape();
+            outputs[index] = adjoint_items(&outputs[index], shape[0], shape[1]);
+        }
+        outputs.swap(0, last);
+    }
+    outputs
+}
+
+/// Deterministic entries of an `m x n x batch` input; with `hermitian`,
+/// each square item is `X + X^H`.
+fn input_data<T: Elem>(shape: &[usize], hermitian: bool, seed: usize) -> Vec<T> {
+    let (m, n) = (shape[0], shape[1]);
+    let item = (m * n).max(1);
+    let raw = |index: usize| {
+        let x = ((index * 7 + seed * 13) % 17) as f64 / 17.0 - 0.4;
+        let y = ((index * 5 + seed * 3) % 11) as f64 / 11.0 - 0.5;
+        Complex64::new(x, y)
+    };
+    (0..shape.iter().product::<usize>())
+        .map(|index| {
+            if !hermitian {
+                return T::make(raw(index));
+            }
+            let (base, local) = (index - index % item, index % item);
+            let (row, col) = (local % m, local / m);
+            T::make(raw(index) + raw(base + col + m * row).conj())
+        })
+        .collect()
+}
+
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+mod native {
+    use super::*;
+    use crate::tests::block_svd::{engine, policies};
+
+    /// Purpose: on the native provider, each input's destinations receive
+    /// exactly the outputs of the native owned batch (bit for bit, since
+    /// both run the same provider item on the same lane width), and under
+    /// `Adjoint` exactly their conjugate transposes in reversed factor
+    /// order with the spectrum unchanged; for every scalar, op, engine width
+    /// and batch policy, over unequal rectangular blocks, a two-item input
+    /// and empty extents. The owned batch is checked against independent
+    /// constructions in `block_svd` and `block_qr`.
+    fn destinations_match_owned<T: Elem>() {
+        let shapes: &[&[usize]] = &[&[5, 3], &[2, 4], &[3, 2, 2], &[4, 4], &[2, 0], &[3, 2, 0]];
+        let square: &[&[usize]] = &[&[4, 4], &[2, 2], &[3, 3, 2], &[1, 1], &[0, 0], &[2, 2, 0]];
+        let cases = [
+            (DenseFactorization::Qr, FactorPlacement::AsComputed),
+            (DenseFactorization::Qr, FactorPlacement::Adjoint),
+            (DenseFactorization::Svd, FactorPlacement::AsComputed),
+            (DenseFactorization::Svd, FactorPlacement::Adjoint),
+            (DenseFactorization::Eigh, FactorPlacement::AsComputed),
+        ];
+        for (threads, policy) in policies() {
+            let mut engine = engine(threads, policy);
+            for (op, placement) in cases {
+                let shapes = if op == DenseFactorization::Eigh {
+                    square
+                } else {
+                    shapes
+                };
+                let data: Vec<Vec<T>> = shapes
+                    .iter()
+                    .enumerate()
+                    .map(|(seed, shape)| {
+                        input_data::<T>(shape, op == DenseFactorization::Eigh, seed)
+                    })
+                    .collect();
+                let layouts: Vec<_> = shapes.iter().map(|shape| strides(shape)).collect();
+                let inputs: Vec<_> = data
+                    .iter()
+                    .zip(shapes)
+                    .zip(&layouts)
+                    .map(|((data, shape), strides)| {
+                        T::read(DenseView::new(data, shape, strides, 0).unwrap())
+                    })
+                    .collect();
+                let owned =
+                    factorize_all(&mut DefaultDenseExecutor::new(), &mut engine, op, &inputs)
+                        .unwrap();
+                let mut buffers: Vec<Buffers<T>> = shapes
+                    .iter()
+                    .map(|shape| Buffers::new(op, dest_shapes(op, shape, placement), 7.0))
+                    .collect();
+                let mut dests: Vec<_> = buffers.iter_mut().map(|b| b.dest(op, placement)).collect();
+                let mut delivered = Vec::new();
+                DefaultDenseExecutor::new()
+                    .factorize_batch_into(
+                        &mut engine,
+                        op,
+                        &inputs,
+                        &mut dests,
+                        &mut |index, _, outcome| {
+                            delivered.push((index, outcome));
+                            Ok(())
+                        },
+                    )
+                    .unwrap();
+                drop(dests);
+                assert_eq!(
+                    delivered,
+                    (0..shapes.len()).map(|i| (i, Ok(()))).collect::<Vec<_>>()
+                );
+                for (index, buffers) in buffers.iter().enumerate() {
+                    assert_eq!(
+                        buffers.widened(op),
+                        placed(op, &owned[index], placement),
+                        "{op:?} {placement:?} input {index}, {threads} threads, {policy:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_destinations_match_the_owned_batch_f32() {
+        destinations_match_owned::<f32>();
+    }
+
+    #[test]
+    fn native_destinations_match_the_owned_batch_f64() {
+        destinations_match_owned::<f64>();
+    }
+
+    #[test]
+    fn native_destinations_match_the_owned_batch_c32() {
+        destinations_match_owned::<Complex32>();
+    }
+
+    #[test]
+    fn native_destinations_match_the_owned_batch_c64() {
+        destinations_match_owned::<Complex64>();
+    }
+
+    /// Purpose: the native destination batch keeps the owned batch's
+    /// admission: each admitted input's failure is its own `Solver`
+    /// outcome, delivered in order to a sink that accepts it; a pre-entry
+    /// refusal is delivered after the admitted prefix and later inputs are
+    /// not; a rank refusal precedes the zero-extent shortcut; an
+    /// empty batch delivers nothing; a sink error stops delivery; and an
+    /// engine that refuses entry is the batch's own error, nothing
+    /// delivered.
+    #[test]
+    fn native_destination_batch_keeps_the_owned_admission() {
+        let good = [1.0_f64, 2.0, 3.0, 4.0];
+        let nan = [1.0_f64, f64::NAN, 3.0, 4.0];
+        let ints = [1_i32, 2, 3, 4];
+        let ok = DenseRead::F64(DenseView::new(&good, &[2, 2], &[1, 2], 0).unwrap());
+        let non_finite = DenseRead::F64(DenseView::new(&nan, &[2, 2], &[1, 2], 0).unwrap());
+        let integer = DenseRead::I32(DenseView::new(&ints, &[2, 2], &[1, 2], 0).unwrap());
+        let rank_one = DenseRead::F64(DenseView::new(&good, &[4], &[1], 0).unwrap());
+        let empty_rank_one = DenseRead::F64(DenseView::new(&[] as &[f64], &[0], &[1], 0).unwrap());
+        let op = DenseFactorization::Svd;
+        let run = |engine: &mut CpuEngine, inputs: &[DenseRead<'_>], stop: Option<usize>| {
+            let mut buffers: Vec<Buffers<f64>> = inputs
+                .iter()
+                .map(|_| {
+                    Buffers::new(
+                        op,
+                        dest_shapes(op, &[2, 2], FactorPlacement::AsComputed),
+                        0.0,
+                    )
+                })
+                .collect();
+            let mut dests: Vec<_> = buffers
+                .iter_mut()
+                .map(|b| b.dest(op, FactorPlacement::AsComputed))
+                .collect();
+            let mut delivered = Vec::new();
+            let result = DefaultDenseExecutor::new().factorize_batch_into(
+                engine,
+                op,
+                inputs,
+                &mut dests,
+                &mut |index, _, outcome| {
+                    delivered.push((index, outcome));
+                    if stop == Some(index) {
+                        return Err(DenseError::OutOfBounds);
+                    }
+                    Ok(())
+                },
+            );
+            (delivered, result)
+        };
+        let per_call = |engine: &mut CpuEngine, input| {
+            DefaultDenseExecutor::new().svd(engine, input).unwrap_err()
+        };
+        for (threads, policy) in policies() {
+            let mut engine = engine(threads, policy);
+            let (delivered, result) = run(
+                &mut engine,
+                &[rank_one, ok, non_finite, empty_rank_one],
+                None,
+            );
+            assert_eq!(result, Ok(()));
+            let expected = vec![
+                (
+                    0,
+                    Err(FactorFailure::Solver(per_call(&mut engine, rank_one))),
+                ),
+                (1, Ok(())),
+                (
+                    2,
+                    Err(FactorFailure::Solver(per_call(&mut engine, non_finite))),
+                ),
+                (
+                    3,
+                    Err(FactorFailure::Solver(per_call(&mut engine, empty_rank_one))),
+                ),
+            ];
+            assert_eq!(delivered, expected, "{threads} threads, {policy:?}");
+
+            let (delivered, result) = run(&mut engine, &[ok, integer, ok], None);
+            assert_eq!(result, Ok(()));
+            assert_eq!(
+                delivered,
+                vec![
+                    (0, Ok(())),
+                    (
+                        1,
+                        Err(FactorFailure::Solver(per_call(&mut engine, integer)))
+                    )
+                ]
+            );
+
+            let (delivered, result) = run(&mut engine, &[ok, ok, ok], Some(1));
+            assert_eq!(result, Err(DenseError::OutOfBounds));
+            assert_eq!(delivered.len(), 2);
+
+            assert_eq!(run(&mut engine, &[], None), (vec![], Ok(())));
+        }
+
+        let mut broken = engine(
+            4,
+            tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Outer),
+        );
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::block_kernel::driver::drive(
+                &mut broken,
+                &crate::tests::block_svd::PanicsAt(0),
+                &mut [(); 2],
+                &mut crate::block_kernel::driver::LaneScratch::default(),
+                crate::LaneAllocation::Moldable,
+            )
+        }));
+        assert!(unwound.is_err() && broken.is_broken());
+        let (delivered, result) = run(&mut broken, &[ok, ok], None);
+        assert!(delivered.is_empty());
+        assert_eq!(result.unwrap_err(), per_call(&mut broken, ok));
+    }
+}
+
+/// An executor whose owned QR and destination QR disagree: its owned entry
+/// returns the scripted outcome of each call in turn (a well-formed factor
+/// pair where none is scripted), its `qr_into` always fails, and it counts
+/// both.
+#[derive(Default)]
+struct Scripted {
+    owned: std::collections::VecDeque<Option<Result<usize, DenseError>>>,
+    qr_calls: usize,
+    qr_into_calls: usize,
+}
+
+impl Scripted {
+    /// `Some(Ok(count))` keeps the first `count` factors.
+    fn new(owned: impl IntoIterator<Item = Option<Result<usize, DenseError>>>) -> Self {
+        Self {
+            owned: owned.into_iter().collect(),
+            ..Self::default()
+        }
+    }
+}
+
+impl DenseExecutor for Scripted {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        DefaultDenseExecutor::new().svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.qr_calls += 1;
+        let mut factors = DefaultDenseExecutor::new().qr(engine, input)?;
+        match self.owned.pop_front().flatten() {
+            None => Ok(factors),
+            Some(Ok(count)) => {
+                factors.truncate(count);
+                Ok(factors)
+            }
+            Some(Err(error)) => Err(error),
+        }
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        DefaultDenseExecutor::new().eigh(engine, input)
+    }
+
+    fn qr_into(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseRead<'_>,
+        _: DenseWrite<'_>,
+        _: DenseWrite<'_>,
+    ) -> Result<(), DenseError> {
+        self.qr_into_calls += 1;
+        Err(DenseError::OutOfBounds)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseWrite<'_>,
+        _: DenseRead<'_>,
+        _: DenseRead<'_>,
+        _: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        Err(DenseError::OutOfBounds)
+    }
+}
+
+/// An executor that overrides the owned batch to deliver its first outcome
+/// at index `self.0`.
+struct Misdelivers(usize);
+
+impl DenseExecutor for Misdelivers {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        DefaultDenseExecutor::new().svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        DefaultDenseExecutor::new().qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        DefaultDenseExecutor::new().eigh(engine, input)
+    }
+
+    fn factorize_batch(
+        &mut self,
+        engine: &mut dyn Engine,
+        _: DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        let outcome = self.qr(engine, inputs[0]);
+        sink(self.0, outcome)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseWrite<'_>,
+        _: DenseRead<'_>,
+        _: DenseRead<'_>,
+        _: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        Err(DenseError::OutOfBounds)
+    }
+}
+
+/// Two `3 x 2` QR inputs over `data`.
+fn qr_inputs(data: &[f64]) -> [DenseRead<'_>; 2] {
+    let view = || DenseRead::F64(DenseView::new(data, &[3, 2], &[1, 3], 0).unwrap());
+    [view(), view()]
+}
+
+/// Purpose: a batch is validated whole before any input is solved or any
+/// destination written: a valid first destination followed by an invalid
+/// one (count, missing output, dtype, shape, non-compact layout, adjoint
+/// eigh, an op without a destination form) is refused with its typed
+/// variant, every destination keeps its sentinel, and neither the native
+/// lanes nor a custom executor's owned entry runs.
+#[test]
+fn destinations_are_validated_whole_before_any_solve() {
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
+    let inputs = qr_inputs(&data);
+    let op = DenseFactorization::Qr;
+    let qr_shapes = || dest_shapes(op, &[3, 2], FactorPlacement::AsComputed);
+    let mut f32_q = [7.0_f32; 6];
+    type Check = fn(&DenseError) -> bool;
+    let cases: [(&str, Check); 5] = [
+        ("count", |e| matches!(e, DenseError::ShapeMismatch { .. })),
+        ("missing output", |e| {
+            matches!(e, DenseError::ShapeMismatch { .. })
+        }),
+        ("dtype", |e| matches!(e, DenseError::DTypeMismatch { .. })),
+        ("shape", |e| matches!(e, DenseError::ShapeMismatch { .. })),
+        ("layout", |e| matches!(e, DenseError::ShapeMismatch { .. })),
+    ];
+    for (case, is_expected) in cases {
+        for native in [true, false] {
+            let mut first: Buffers<f64> = Buffers::new(op, qr_shapes(), 7.0);
+            let mut second: Buffers<f64> = Buffers::new(op, qr_shapes(), 7.0);
+            let wrong_shape = [vec![3, 3], vec![3, 2], vec![]];
+            let mut wide: Buffers<f64> = Buffers::new(op, wrong_shape, 7.0);
+            let padded_strides = [1usize, 4];
+            let mut padded = [7.0_f64; 8];
+            let mut dests = vec![first.dest(op, FactorPlacement::AsComputed)];
+            match case {
+                "count" => {}
+                "missing output" => {
+                    let mut dest = second.dest(op, FactorPlacement::AsComputed);
+                    dest.outputs_mut()[1] = None;
+                    dests.push(dest);
+                }
+                "dtype" => {
+                    let mut dest = second.dest(op, FactorPlacement::AsComputed);
+                    dest.outputs_mut()[0] = Some(DenseWrite::F32(
+                        DenseViewMut::new(&mut f32_q, &[3, 2], &[1, 3], 0).unwrap(),
+                    ));
+                    dests.push(dest);
+                }
+                "shape" => dests.push(wide.dest(op, FactorPlacement::AsComputed)),
+                _ => {
+                    let mut dest = second.dest(op, FactorPlacement::AsComputed);
+                    dest.outputs_mut()[0] = Some(DenseWrite::F64(
+                        DenseViewMut::new(&mut padded, &[3, 2], &padded_strides, 0).unwrap(),
+                    ));
+                    dests.push(dest);
+                }
+            }
+            let mut sink = |_: usize,
+                            _: &mut FactorDest<'_>,
+                            _: Result<(), FactorFailure>|
+             -> Result<(), DenseError> {
+                panic!("a refused batch delivers nothing")
+            };
+            let mut scripted = Scripted::default();
+            let error = if native {
+                DefaultDenseExecutor::new()
+                    .factorize_batch_into(engine, op, &inputs, &mut dests, &mut sink)
+            } else {
+                scripted.factorize_batch_into(engine, op, &inputs, &mut dests, &mut sink)
+            }
+            .unwrap_err();
+            drop(dests);
+            assert!(is_expected(&error), "{case}: {error:?}");
+            assert_eq!(scripted.qr_calls, 0, "{case}");
+            for buffers in [&first, &second, &wide] {
+                assert!(
+                    buffers.factors.iter().flatten().all(|&value| value == 7.0),
+                    "{case}"
+                );
+            }
+            assert!(padded.iter().all(|&value| value == 7.0), "{case}");
+            assert!(f32_q.iter().all(|&value| value == 7.0), "{case}");
+        }
+    }
+
+    // Ops and placements without a destination form.
+    let square = [2.0_f64, 0.0, 0.0, 3.0];
+    let eigh_input = [DenseRead::F64(
+        DenseView::new(&square, &[2, 2], &[1, 2], 0).unwrap(),
+    )];
+    let eigh = DenseFactorization::Eigh;
+    let mut buffers: Buffers<f64> = Buffers::new(
+        eigh,
+        dest_shapes(eigh, &[2, 2], FactorPlacement::AsComputed),
+        7.0,
+    );
+    let mut dests = vec![buffers.dest(eigh, FactorPlacement::Adjoint)];
+    for op in [eigh, DenseFactorization::EighVals] {
+        let error = DefaultDenseExecutor::new()
+            .factorize_batch_into(engine, op, &eigh_input, &mut dests, &mut |_, _, _| Ok(()))
+            .unwrap_err();
+        assert!(
+            matches!(error, DenseError::Unsupported { .. }),
+            "{op:?}: {error:?}"
+        );
+    }
+    drop(dests);
+    assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
+}
+
+/// Purpose: the compatibility default reaches a custom executor only
+/// through its owned entry (never its `*_into` entries), once per input
+/// and in the order and stopping points its sink decides; tags an owned
+/// `Err` as `Solver` and an owned `Ok` that does not fit as `Output`, even
+/// when both carry the identical error; delivers to a sink that accepts
+/// failures and continues; and refuses a first delivery at an out-of-range
+/// index with the batch-arity error before touching any destination or
+/// calling the sink.
+#[test]
+fn compatibility_default_keeps_the_owned_calls_and_tags_failures() {
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
+    let inputs = qr_inputs(&data);
+    let op = DenseFactorization::Qr;
+    let identical = arity_mismatch("qr_into", 2, 1);
+    let mut executor = Scripted::new([Some(Err(identical.clone())), Some(Ok(1))]);
+    let mut buffers: Vec<Buffers<f64>> = (0..2)
+        .map(|_| {
+            Buffers::new(
+                op,
+                dest_shapes(op, &[3, 2], FactorPlacement::AsComputed),
+                7.0,
+            )
+        })
+        .collect();
+    let mut dests: Vec<_> = buffers
+        .iter_mut()
+        .map(|b| b.dest(op, FactorPlacement::AsComputed))
+        .collect();
+    let mut delivered = Vec::new();
+    executor
+        .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |index, _, outcome| {
+            delivered.push((index, outcome));
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        delivered,
+        vec![
+            (0, Err(FactorFailure::Solver(identical.clone()))),
+            (1, Err(FactorFailure::Output(identical.clone()))),
+        ]
+    );
+    assert_eq!((executor.qr_calls, executor.qr_into_calls), (2, 0));
+
+    // A sink stop ends the owned loop before the next solve.
+    let mut executor = Scripted::default();
+    let result = executor.factorize_batch_into(engine, op, &inputs, &mut dests, &mut |_, _, _| {
+        Err(DenseError::OutOfBounds)
+    });
+    assert_eq!(result, Err(DenseError::OutOfBounds));
+    assert_eq!((executor.qr_calls, executor.qr_into_calls), (1, 0));
+    drop(dests);
+
+    // A well-formed outcome lands in its destination as the owned factors.
+    let owned = DefaultDenseExecutor::new().qr(engine, inputs[0]).unwrap();
+    assert_eq!(
+        buffers[0].widened(op),
+        placed(op, &owned, FactorPlacement::AsComputed)
+    );
+
+    let mut buffers: Vec<Buffers<f64>> = (0..2)
+        .map(|_| {
+            Buffers::new(
+                op,
+                dest_shapes(op, &[3, 2], FactorPlacement::AsComputed),
+                7.0,
+            )
+        })
+        .collect();
+    let mut dests: Vec<_> = buffers
+        .iter_mut()
+        .map(|b| b.dest(op, FactorPlacement::AsComputed))
+        .collect();
+    let error = Misdelivers(5)
+        .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |_, _, _| {
+            panic!("a misdelivered outcome reaches no sink")
+        })
+        .unwrap_err();
+    drop(dests);
+    assert_eq!(error, arity_mismatch("factorize_batch", 0, 5));
+    assert!(buffers
+        .iter()
+        .all(|b| b.factors.iter().flatten().all(|&value| value == 7.0)));
+}

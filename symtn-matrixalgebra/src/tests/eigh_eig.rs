@@ -171,7 +171,7 @@ fn checked_generic_eigh_late_dense_failure_publishes_no_factors() {
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"
 )]
-fn assert_checked_generic_eigh_live_pair_owners<D: crate::factorize::FactorScalar>() {
+fn assert_checked_generic_eigh_pairs_through_owned_entry<D: crate::factorize::FactorScalar>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let x = SectorId::new(1);
     let leg = SectorLeg::new([(x, 1)], false);
@@ -200,18 +200,17 @@ fn assert_checked_generic_eigh_live_pair_owners<D: crate::factorize::FactorScala
         eigh_full_dyn_checked_generic(engine, &mut dense, &input, HermitianTol::DEFAULT).unwrap();
 
     assert_eq!(dense.counts().eigh_into, 0);
-    assert_eq!(dense.vector_ptrs, eigh_pairs_rec.checked_eigh_pairs());
-    assert_eq!(dense.vector_ptrs.len(), 2);
+    assert_eq!(eigh_pairs_rec.checked_eigh_pairs().len(), 2);
     assert_eq!(dense.vector_ptrs.len(), full.eigenvalues().len());
     assert!(Arc::ptr_eq(full.v().space().provider_arc(), &provider));
 }
 
 #[test]
-fn checked_generic_eigh_keeps_live_pair_owners_for_every_dtype() {
-    assert_checked_generic_eigh_live_pair_owners::<f64>();
-    assert_checked_generic_eigh_live_pair_owners::<f32>();
-    assert_checked_generic_eigh_live_pair_owners::<Complex32>();
-    assert_checked_generic_eigh_live_pair_owners::<Complex64>();
+fn checked_generic_eigh_pairs_every_sector_through_the_owned_entry_for_every_dtype() {
+    assert_checked_generic_eigh_pairs_through_owned_entry::<f64>();
+    assert_checked_generic_eigh_pairs_through_owned_entry::<f32>();
+    assert_checked_generic_eigh_pairs_through_owned_entry::<Complex32>();
+    assert_checked_generic_eigh_pairs_through_owned_entry::<Complex64>();
 }
 
 fn assert_complex_checked_eigh_reconstruction<R>(
@@ -844,60 +843,9 @@ fn eigh_rejects_non_finite_owned_eigenvalues_before_sorting() {
 }
 
 #[test]
-fn eigh_direct_outputs_keep_executor_vector_owner() {
-    // What: a one-region direct EIGH publishes the executor-returned V buffer.
-    fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        let mut dense = ScriptedExecutor::<RejectEighInto>::default();
-        let eigh = eigh_full(
-            engine,
-            &mut dense,
-            &bound_tensor_ref!(Arc::new(Z2FusionRule), tensor),
-        )
-        .unwrap();
-        assert_eq!(dense.counts().eigh, 1);
-        assert_eq!(dense.counts().eigh_into, 0);
-        assert_eq!(dense.vector_ptrs, vec![eigh.v.data().as_ptr() as usize]);
-    }
-
-    let tensor = one_sector_matrix(vec![2.0_f64, 0.0, 0.0, 3.0]);
-    let space = tensor.fusion_space().clone();
-    check(&tensor);
-    check(
-        &TestTensor::<f32>::from_vec_with_fusion_space(
-            tensor.data().iter().map(|&value| value as f32).collect(),
-            space.clone(),
-        )
-        .unwrap(),
-    );
-    check(
-        &TestTensor::<Complex32>::from_vec_with_fusion_space(
-            tensor
-                .data()
-                .iter()
-                .map(|&value| Complex32::new(value as f32, 0.0))
-                .collect(),
-            space.clone(),
-        )
-        .unwrap(),
-    );
-    check(
-        &TestTensor::<Complex64>::from_vec_with_fusion_space(
-            tensor
-                .data()
-                .iter()
-                .map(|&value| Complex64::new(value, 0.0))
-                .collect(),
-            space,
-        )
-        .unwrap(),
-    );
-}
-
-#[test]
-fn eigh_fallback_keeps_owned_vectors_until_the_final_scatter_for_every_dtype() {
-    // What: the fallback's executor V is the same allocation immediately before
-    // symtn's required structural scatter, not the final factor allocation.
+fn eigh_fallback_stages_vectors_apart_from_the_final_scatter_for_every_dtype() {
+    // What: the fallback stages each sector's V apart from the final factor
+    // allocation, which symtn's required structural scatter fills.
     fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let rule = Arc::new(Z2FusionRule);
@@ -915,7 +863,6 @@ fn eigh_fallback_keeps_owned_vectors_until_the_final_scatter_for_every_dtype() {
 
         assert!(!before_scatter.is_empty());
         assert_eq!(dense.counts().eigh_into, 0);
-        assert_eq!(dense.vector_ptrs, before_scatter);
         assert_eq!(dense.counts().eigh, before_scatter.len());
         assert!(Arc::ptr_eq(
             input.space().provider_arc(),

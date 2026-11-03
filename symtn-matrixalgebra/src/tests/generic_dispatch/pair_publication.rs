@@ -256,8 +256,16 @@ where
     let probe = generic_pair_rec.generic_pair_publication();
     assert_eq!(probe.canonical_publications, compact_calls);
     assert_eq!(probe.fallback_publications, 0);
-    assert!(probe.left_appended_elements > 0);
-    assert!(probe.right_appended_elements > 0);
+    // Each compact factorization writes its sectors once into one buffer
+    // per side, which the canonical publication keeps as it is.
+    assert_eq!(
+        (probe.left_owner_reused, probe.right_owner_reused),
+        (compact_calls, compact_calls)
+    );
+    assert_eq!(
+        (probe.left_appended_elements, probe.right_appended_elements),
+        (0, 0)
+    );
     assert_eq!(
         (
             probe.left_scattered_elements,

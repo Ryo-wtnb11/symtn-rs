@@ -109,7 +109,8 @@ svd / qr / eigh / eig (symtn)
   -> dense factorization (symtn-dense -> Tenferro; native compact and
      values-only SVD, compact QR, Hermitian EIGH and EIG values:
      symtn-dense block kernel -> tlinalg on the engine's guarded linalg
-     entry)
+     entry; compact QR/SVD and full EIGH write into the caller's
+     destinations)
   -> publish factors in the validated spaces
 ```
 

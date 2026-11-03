@@ -76,7 +76,7 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     assert!(probe.output_scatter_bytes > 0);
 }
 
-fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>() {
+fn assert_mf_compact_svd_fallback_owned_entry_stages<D: crate::factorize::FactorScalar>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<D>::from_vec_with_fusion_space(
@@ -100,7 +100,6 @@ fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>
 
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
-    assert_eq!(dense.output_ptrs, stage);
     assert_eq!(stage.len(), 2);
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
     let probe = compact_svd_copy_rec.compact_svd_copy();
@@ -114,7 +113,6 @@ fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>
     let adjoint_stage = mf_svd_fallback_rec.mf_svd_fallbacks();
     assert_eq!(adjoint_dense.counts().svd_into, 0);
     assert_eq!(adjoint_dense.counts().svd, 2);
-    assert_eq!(adjoint_dense.output_ptrs, adjoint_stage);
     assert_eq!(adjoint_stage.len(), 2);
     assert!(adjoint_stage
         .iter()
@@ -125,11 +123,11 @@ fn assert_mf_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>
 }
 
 #[test]
-fn mf_compact_svd_fallback_keeps_live_owners_for_every_dtype() {
-    assert_mf_compact_svd_fallback_live_owners::<f64>();
-    assert_mf_compact_svd_fallback_live_owners::<f32>();
-    assert_mf_compact_svd_fallback_live_owners::<Complex32>();
-    assert_mf_compact_svd_fallback_live_owners::<Complex64>();
+fn mf_compact_svd_fallback_stages_every_sector_through_the_owned_entry_for_every_dtype() {
+    assert_mf_compact_svd_fallback_owned_entry_stages::<f64>();
+    assert_mf_compact_svd_fallback_owned_entry_stages::<f32>();
+    assert_mf_compact_svd_fallback_owned_entry_stages::<Complex32>();
+    assert_mf_compact_svd_fallback_owned_entry_stages::<Complex64>();
 }
 
 #[test]
@@ -150,7 +148,7 @@ fn generic_compact_svd_packed_fallback_uses_owned_outputs() {
     assert!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls > 0);
 }
 
-fn assert_generic_compact_svd_fallback_live_owners<D: crate::factorize::FactorScalar>() {
+fn assert_generic_compact_svd_fallback_owned_entry_stages<D: crate::factorize::FactorScalar>() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let (canonical_space, canonical_data) = generic_factorization_input();
     let data = canonical_data
@@ -169,18 +167,17 @@ fn assert_generic_compact_svd_fallback_live_owners<D: crate::factorize::FactorSc
     let stage = svd_stage_rec.checked_svd_stages();
 
     assert_eq!(dense.counts().svd_into, 0);
-    assert_eq!(dense.output_ptrs, stage);
     assert_eq!(stage.len(), 2);
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
     assert!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls > 0);
 }
 
 #[test]
-fn generic_compact_svd_fallback_keeps_live_owners_for_every_dtype() {
-    assert_generic_compact_svd_fallback_live_owners::<f64>();
-    assert_generic_compact_svd_fallback_live_owners::<f32>();
-    assert_generic_compact_svd_fallback_live_owners::<Complex32>();
-    assert_generic_compact_svd_fallback_live_owners::<Complex64>();
+fn generic_compact_svd_fallback_stages_every_sector_through_the_owned_entry_for_every_dtype() {
+    assert_generic_compact_svd_fallback_owned_entry_stages::<f64>();
+    assert_generic_compact_svd_fallback_owned_entry_stages::<f32>();
+    assert_generic_compact_svd_fallback_owned_entry_stages::<Complex32>();
+    assert_generic_compact_svd_fallback_owned_entry_stages::<Complex64>();
 }
 
 #[test]
@@ -470,9 +467,6 @@ fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
     let adjoint_probe = compact_svd_copy_rec.compact_svd_copy();
     assert_eq!(adjoint_probe.input_pack_calls, 0);
     assert_eq!(adjoint_probe.output_scatter_calls, 0);
-    if rank != 0 {
-        assert_eq!(adjoint_probe.owned_output_owner_reused, 2);
-    }
     let adjoint_singular = adjoint
         .2
         .first()
@@ -498,58 +492,6 @@ fn compact_svd_direct_spans_reconstruct_tall_and_wide_matrices() {
     // What: exact final-factor spans work for both compact rectangular shapes.
     assert_rectangular_direct_svd(5, 3);
     assert_rectangular_direct_svd(3, 5);
-}
-
-#[test]
-fn compact_svd_direct_outputs_keep_executor_factor_owners() {
-    fn check<D: crate::factorize::FactorScalar>(tensor: &TestTensor<D>) {
-        let engine = &mut symtn_dense::CpuEngine::serial();
-        let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
-        let bound = bound_tensor(Arc::new(Z2FusionRule), tensor);
-        let compact_svd_copy_rec = crate::probe::record();
-        let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();
-        assert_eq!(dense.output_ptrs.len(), 1);
-        let (u, vh) = dense.output_ptrs[0];
-        assert_eq!(u, svd.u.data().as_ptr() as usize);
-        assert_eq!(vh, svd.vh.data().as_ptr() as usize);
-        let probe = compact_svd_copy_rec.compact_svd_copy();
-        assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
-        assert_eq!(probe.owned_output_publications, 2);
-        assert_eq!(probe.owned_output_owner_reused, 2);
-    }
-
-    let tensor = rectangular_svd_tensor(3, 2);
-    check(&tensor);
-    let space = tensor.fusion_space().clone();
-    check(
-        &TestTensor::<f32>::from_vec_with_fusion_space(
-            tensor.data().iter().map(|&value| value as f32).collect(),
-            space.clone(),
-        )
-        .unwrap(),
-    );
-    check(
-        &TestTensor::<Complex32>::from_vec_with_fusion_space(
-            tensor
-                .data()
-                .iter()
-                .map(|&value| Complex32::new(value as f32, value as f32 * 0.25))
-                .collect(),
-            space.clone(),
-        )
-        .unwrap(),
-    );
-    check(
-        &TestTensor::<Complex64>::from_vec_with_fusion_space(
-            tensor
-                .data()
-                .iter()
-                .map(|&value| Complex64::new(value, value * 0.25))
-                .collect(),
-            space,
-        )
-        .unwrap(),
-    );
 }
 
 #[test]
@@ -1365,4 +1307,66 @@ fn compact_svd_and_pinv_report_the_first_sector_failure_over_later_batch_outcome
             );
         }
     }
+}
+
+#[test]
+fn compact_svd_adjoint_direct_factors_follow_the_parent_row_gauge() {
+    // What: the direct adjoint-left SVD of a complex two-sector input equals
+    // the reference steps per sector: the per-matrix compact SVD of the
+    // parent block `A = U S Vh`, the parent-row gauge
+    // (`svd_compact_adjoint_gauge`), then `u = Vh^H` and `vh = U^H`
+    // concatenated in sector order.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = mixed_rectangular_c32_tensor();
+    let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
+        source
+            .data()
+            .iter()
+            .map(|value| Complex64::new(value.re as f64, value.im as f64))
+            .collect(),
+        source.fusion_space().clone(),
+    )
+    .unwrap();
+    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let compact_svd_copy_rec = crate::probe::record();
+    let (u, vh, spectrum) =
+        svd_compact_adjoint_factors_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
+    assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
+
+    let (mut expected_u, mut expected_vh) = (Vec::new(), Vec::new());
+    let mut offset = 0;
+    for (rows, cols) in [(5, 3), (2, 4)] {
+        let block = &tensor.data()[offset..offset + rows * cols];
+        offset += rows * cols;
+        let rank = usize::min(rows, cols);
+        let (shape, strides) = ([rows, cols], [1, rows]);
+        let read = DenseRead::C64(symtn_dense::DenseView::new(block, &shape, &strides, 0).unwrap());
+        let outputs = dense.svd(engine, read).unwrap();
+        let mut parent_u = outputs[0].as_c64_slice().unwrap().to_vec();
+        let mut parent_vh = outputs[2].as_c64_slice().unwrap().to_vec();
+        crate::factorize::svd_compact_adjoint_gauge(
+            &mut parent_u,
+            rows,
+            rows,
+            &mut parent_vh,
+            rank,
+            cols,
+            rank,
+        );
+        // Column-major `u` (`cols x rank`) and `vh` (`rank x rows`).
+        for row in 0..rank {
+            for col in 0..cols {
+                expected_u.push(parent_vh[row + rank * col].conj());
+            }
+        }
+        for row in 0..rows {
+            for bond in 0..rank {
+                expected_vh.push(parent_u[row + rows * bond].conj());
+            }
+        }
+    }
+    assert_eq!(u.data(), expected_u.as_slice());
+    assert_eq!(vh.data(), expected_vh.as_slice());
+    assert_eq!(spectrum.len(), 2);
 }

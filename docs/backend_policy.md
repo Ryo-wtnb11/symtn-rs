@@ -207,11 +207,26 @@ reported is the lowest-indexed sector's, the one the per-matrix loop would
 report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
-where the loop would have returned the earlier error. Each block allocates
-its own provider workspace and fresh factors of their logical size, so a
-factor never inherits a recycled buffer's capacity; a full EIGH, and a
-compact SVD over packed or Checked Generic sector matrices, holds every
-sector's raw factors at once before placing them, where the loop held one.
+where the loop would have returned the earlier error. Compact QR, compact
+SVD and full EIGH run through `DenseExecutor::factorize_batch_into`: the
+operation allocates each output once (the final packed factor for a
+direct-region or Checked Generic canonical output, otherwise one packed
+transient per call that is scattered by tree identity afterwards, about
+twice the factor payload on that route) and one packed real spectrum, and
+each block writes its factors straight into its slice through tlinalg's
+initialized-destination entries. Each lane allocates one provider workspace
+and one typed scratch (complex singular values and eigenvalues, and the
+provider-shaped factors of an adjoint placement) per call, sized from that
+lane's blocks at its own width before its first block, and drops them when
+the lane finishes; nothing is kept across calls. The positive-diagonal and
+phase gauges run in place on the delivered destination, and each sector's
+public `f64` spectrum is still its own allocation. Values-only SVD and EIGH
+and general eigenvalues keep one provider workspace and fresh outputs per
+block (tlinalg has no initialized destination form for them), and the
+pseudo-inverse keeps every sector's factors, in one packed transient, until
+its global cutoff is known. Every other executor, and the BLAS provider,
+reach `factorize_batch_into` through its default: the owned
+`factorize_batch` with each delivered output copied into its destination.
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not
