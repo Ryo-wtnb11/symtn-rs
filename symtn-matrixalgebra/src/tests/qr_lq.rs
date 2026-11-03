@@ -1300,11 +1300,12 @@ fn lazy_adjoint_compact_lq_is_the_gauged_parent_qr_adjointed() {
     }
 }
 
-/// Fails its first QR solve when `fail`, and refuses every linear-algebra
-/// scope at exit.
+/// Fails its first QR solve when `fail` (recording that it did in
+/// `injected`), and refuses every linear-algebra scope at exit.
 struct LqRefusingScope {
     fail: bool,
     qr_calls: usize,
+    injected: bool,
 }
 
 impl crate::tests::scripted_executor::Observer for LqRefusingScope {
@@ -1319,6 +1320,7 @@ impl crate::tests::scripted_executor::Observer for LqRefusingScope {
         {
             self.qr_calls += 1;
             if self.fail && self.qr_calls == 1 {
+                self.injected = true;
                 return Some(Err(DenseError::OutOfBounds));
             }
         }
@@ -1344,20 +1346,31 @@ fn compact_lq_runs_in_one_scope_whose_refusal_wins() {
     let materialized = bound.dynamic();
     let view_space = materialized.space().adjoint_view().unwrap();
     let parent = BoundDynamicTensorRef::try_new(&view_space, materialized.data()).unwrap();
+    type Route<'r> = dyn Fn(
+            &mut dyn symtn_dense::Engine,
+            &mut crate::tests::scripted_executor::ScriptedExecutor<LqRefusingScope>,
+        ) -> Result<(), OperationError>
+        + 'r;
+    let ordinary: &Route<'_> = &|engine, dense| lq_compact(engine, dense, &bound).map(|_| ());
+    let lazy: &Route<'_> = &|engine, dense| {
+        crate::factorize::lq_compact_adjoint_dyn(engine, dense, &parent, materialized.space())
+            .map(|_| ())
+    };
     for fail in [false, true] {
-        let mut dense = crate::tests::scripted_executor::ScriptedExecutor::new(LqRefusingScope {
-            fail,
-            qr_calls: 0,
-        });
-        let ordinary = lq_compact(engine, &mut dense, &bound).map(|_| ());
-        let lazy = crate::factorize::lq_compact_adjoint_dyn(
-            engine,
-            &mut dense,
-            &parent,
-            materialized.space(),
-        )
-        .map(|_| ());
-        for (route, outcome) in [("ordinary", ordinary), ("lazy", lazy)] {
+        for (route, run) in [("ordinary", ordinary), ("lazy", lazy)] {
+            // A fresh executor per route, so each route's first QR solve is
+            // the one that fails.
+            let mut dense =
+                crate::tests::scripted_executor::ScriptedExecutor::new(LqRefusingScope {
+                    fail,
+                    qr_calls: 0,
+                    injected: false,
+                });
+            let outcome = run(engine, &mut dense);
+            assert_eq!(
+                dense.observer.injected, fail,
+                "{route}: solver failure injected"
+            );
             assert_eq!(
                 outcome,
                 Err(OperationError::Dense(scope_refusal("lq scope"))),
