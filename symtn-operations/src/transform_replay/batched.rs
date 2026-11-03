@@ -505,6 +505,63 @@ pub(super) fn balanced_boundary(
     }
 }
 
+/// `exec` narrowed to Strided's own width for a copy of `widest` elements
+/// on it: a lane never holds more workers than its one component's largest
+/// planned block would use.
+pub(super) fn granted_width(exec: Exec<'_>, widest: usize) -> Exec<'_> {
+    if exec.is_serial() {
+        return exec;
+    }
+    let width = strided_kernel::execution::parallel_width(
+        &exec,
+        strided_kernel::execution::KernelClass::Copy,
+        widest,
+    );
+    exec.limit(width)
+}
+
+/// The lanes a split of components over `exec` uses: one (run inline on the
+/// whole token) when Strided's own rule gives their `total` moved elements
+/// one worker; otherwise at most `threads`, Strided's width for `total`, and
+/// the sum of the components' own widths on the whole token (`widest` is
+/// each one's largest planned block; a block that does not widen counts
+/// one, a saturating one the budget).
+///
+/// Why: a split whose moved elements do not pay a second worker only turns
+/// cache-resident copies into cross-core traffic, and lanes beyond what the
+/// components can use stay idle while the components they could have run
+/// wait. Cost: the gate's O(1) answers, one Strided width search for the
+/// total, and one for each widening, non-saturating component summed before
+/// the sum reaches the cap (each adds at least two lanes, so at most
+/// `threads / 2` searches); O(threads) per search.
+pub(super) fn split_lanes(
+    exec: &Exec<'_>,
+    gate: &LeafGate,
+    threads: usize,
+    total: usize,
+    widest: impl IntoIterator<Item = usize>,
+) -> usize {
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    if threads <= 1 || !gate.widens(exec, total) {
+        return 1;
+    }
+    let cap = threads.min(parallel_width(exec, KernelClass::Copy, total).get());
+    let mut sum = 0usize;
+    for widest in widest {
+        sum += if gate.saturates(exec, widest) {
+            exec.budget().get()
+        } else if gate.widens(exec, widest) {
+            parallel_width(exec, KernelClass::Copy, widest).get()
+        } else {
+            1
+        };
+        if sum >= cap {
+            return cap;
+        }
+    }
+    sum.max(1)
+}
+
 /// Recursive `replay_join` over the address-ordered parts `parts` (Single
 /// ownership atoms or a subset of them): `lo(p)` is part `p`'s first
 /// destination element and `weight_before(p)` the destination elements of
@@ -526,6 +583,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
     parts: Range<usize>,
     lo: &(impl Fn(usize) -> isize + Sync),
     weight_before: &(impl Fn(usize) -> usize + Sync),
+    part_widest: &(impl Fn(usize) -> usize + Sync),
     dst: &mut [T],
     dst_start: isize,
     fused_indices: &mut [usize],
@@ -555,6 +613,11 @@ pub(super) fn split_join_parts<T: Send + Sync>(
                 own_gate = LeafGate::new(gate_bound);
                 &own_gate
             }
+        };
+        let exec = if parts.len() == 1 {
+            granted_width(exec, part_widest(parts.start))
+        } else {
+            exec
         };
         return leaf(
             parts,
@@ -587,6 +650,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
                 parts.start..middle,
                 lo,
                 weight_before,
+                part_widest,
                 left_data,
                 dst_start,
                 left_indices,
@@ -603,6 +667,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
                 middle..parts.end,
                 lo,
                 weight_before,
+                part_widest,
                 right_data,
                 boundary,
                 right_indices.get(),
@@ -672,16 +737,41 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
     let parts = schedule.single_component_count();
     let atom_items = |atom: usize| &items[atoms[atom].item as usize..atoms[atom + 1].item as usize];
     let lo = |part: usize| atoms[part].lo;
-    if !(widen && threads > 1 && parts > 1 && gate.saturates(&exec, schedule.widest_single)) {
+    if parts == 0 {
+        return Ok(());
+    }
+    // Why the largest atom may decide for all: inside the gate's exact
+    // domain saturation is monotone, so a largest atom that does not fill
+    // the token proves no smaller one does; outside it every atom is asked.
+    let tiered = widen
+        && threads > 1
+        && parts > 1
+        && gate.widens(&exec, atoms[parts].weight_before)
+        && gate.may_saturate_up_to(&exec, schedule.widest_single)
+        && (0..parts).any(|atom| gate.saturates(&exec, atoms[atom].widest));
+    if !tiered {
+        let lanes = split_lanes(
+            &exec,
+            gate,
+            threads,
+            atoms[parts].weight_before,
+            (0..parts).map(|atom| atoms[atom].widest),
+        );
+        let exec = if lanes > 1 {
+            exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
+        } else {
+            exec
+        };
         return split_join_parts(
             0..parts,
             &lo,
             &|part| atoms[part].weight_before,
+            &|part| atoms[part].widest,
             dst,
             0,
             fused_indices,
             max_fused_rank,
-            threads,
+            lanes,
             exec,
             Some(gate),
             gate_bound,
@@ -726,15 +816,30 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
         weight_before: weight,
     });
     let narrow = &*narrow;
+    let lanes = split_lanes(
+        &exec,
+        gate,
+        threads,
+        weight,
+        narrow[..narrow.len() - 1]
+            .iter()
+            .map(|part| atoms[part.atom].widest),
+    );
+    let exec = if lanes > 1 {
+        exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
+    } else {
+        exec
+    };
     split_join_parts(
         0..narrow.len() - 1,
         &|part| atoms[narrow[part].atom].lo,
         &|part| narrow[part].weight_before,
+        &|part| atoms[narrow[part].atom].widest,
         dst,
         0,
         fused_indices,
         max_fused_rank,
-        threads,
+        lanes,
         exec,
         Some(gate),
         gate_bound,
@@ -975,6 +1080,22 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
         widen,
         leaf,
     )?;
+    let parts = units.len().saturating_sub(1);
+    if parts == 0 {
+        return Ok(());
+    }
+    let lanes = split_lanes(
+        &exec,
+        gate,
+        threads,
+        units[parts].weight_before,
+        units[..parts].iter().map(|unit| unit.widest),
+    );
+    let exec = if lanes > 1 {
+        exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
+    } else {
+        exec
+    };
     split_join_components(
         units,
         component_slots,
@@ -982,7 +1103,7 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
         0,
         fused_indices,
         max_fused_rank,
-        threads,
+        lanes,
         exec,
         Some(gate),
         gate_bound,
@@ -1042,6 +1163,11 @@ pub(super) fn split_join_components<T: Send + Sync>(
                 own_gate = LeafGate::new(gate_bound);
                 &own_gate
             }
+        };
+        let exec = if parts == 1 {
+            granted_width(exec, units[0].widest)
+        } else {
+            exec
         };
         return leaf(
             &units[..parts],

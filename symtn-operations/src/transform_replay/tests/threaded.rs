@@ -934,8 +934,20 @@ fn component_splits_balance_moved_elements_not_component_count() {
     assert_eq!(split(&[1, 2, 1], 2), 1);
     // The executing split runs each side on the token share it was
     // balanced for: at three workers the three light components get one
-    // slot and the heavy one two.
-    let leaves = record_single_leaves(&[(0, 1, 1), (1, 1, 1), (2, 1, 1), (3, 6, 6)]);
+    // slot and the heavy one two. (An accumulating phase, so no component
+    // runs alone; the blocks widen on any share and the total pays.)
+    const UNIT: usize = 1 << 20;
+    const WIDE: usize = 1 << 24;
+    let leaves = record_single_phase(
+        &[
+            (0, UNIT, WIDE),
+            (1, UNIT, WIDE),
+            (2, UNIT, WIDE),
+            (3, 6 * UNIT, WIDE),
+        ],
+        false,
+    )
+    .0;
     assert_eq!(leaves, [(vec![0, 1, 2], 1), (vec![3], 2)]);
     // The fixture's Single atoms at three lanes: 8 of 28 elements is the
     // closest left share to a third.
@@ -951,12 +963,15 @@ fn component_splits_balance_moved_elements_not_component_count() {
 /// widest)` of one Single each and returns every leaf's Singles with the
 /// token budget it ran on, sorted.
 fn record_single_leaves(atoms: &[(isize, usize, usize)]) -> Vec<(Vec<u32>, usize)> {
-    record_single_phase(atoms).0
+    record_single_phase(atoms, true).0
 }
 
 /// [`record_single_leaves`] and the Strided width searches the phase ran on
 /// the calling thread.
-fn record_single_phase(atoms: &[(isize, usize, usize)]) -> (Vec<(Vec<u32>, usize)>, usize) {
+fn record_single_phase(
+    atoms: &[(isize, usize, usize)],
+    widen: bool,
+) -> (Vec<(Vec<u32>, usize)>, usize) {
     use crate::kernel_adapter::sealed::WIDTH_QUERIES;
     use crate::transform_structure::TreeTransformSingleAtom;
     let mut schedule = TreeTransformParallelSchedule::default();
@@ -998,7 +1013,7 @@ fn record_single_phase(atoms: &[(isize, usize, usize)]) -> (Vec<(Vec<u32>, usize
                 exec,
                 &gate,
                 schedule.widest_single,
-                true,
+                widen,
                 &|items, _, _, _, exec, _| {
                     leaves
                         .lock()
@@ -1023,7 +1038,14 @@ fn wide_components_run_alone_on_the_whole_token_before_narrow_ones_split() {
     // the whole token and three that do not runs the wide one alone on all
     // three workers, then splits the narrow ones one per worker.
     const LARGE: usize = 1 << 24;
-    let leaves = record_single_leaves(&[(0, 1, 1), (1, LARGE, LARGE), (2, 1, 1), (3, 1, 1)]);
+    // The narrow ones move enough in total to pay a split, one worker each.
+    const NARROW: usize = 1 << 22;
+    let leaves = record_single_leaves(&[
+        (0, NARROW, 1),
+        (1, LARGE, LARGE),
+        (2, NARROW, 1),
+        (3, NARROW, 1),
+    ]);
     assert_eq!(
         leaves,
         [(vec![0], 1), (vec![1], 3), (vec![2], 1), (vec![3], 1)]
@@ -1037,11 +1059,12 @@ fn classifying_more_wide_components_asks_strided_no_more_often() {
     // Strided for a width exactly as often.
     const LARGE: usize = 1 << 24;
     let phase = |wide: isize| {
-        let atoms = std::iter::once((0, 1, 1))
+        const NARROW: usize = 1 << 22;
+        let atoms = std::iter::once((0, NARROW, 1))
             .chain((1..=wide).map(|lo| (lo, LARGE, LARGE)))
-            .chain([(wide + 1, 1, 1)])
+            .chain([(wide + 1, NARROW, 1)])
             .collect::<Vec<_>>();
-        record_single_phase(&atoms)
+        record_single_phase(&atoms, true)
     };
     let (few, few_queries) = phase(2);
     let (many, many_queries) = phase(6);
@@ -1162,6 +1185,12 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
     for (elements, budget) in budgets {
         let whole = elements == LARGE || (elements == moldable && moldable_saturates);
         assert_eq!(budget == THREADS, whole, "{elements} elements on {budget}");
+        // No lane holds more workers than Strided would use for its block.
+        let width = pool.with_exec(|exec| parallel_width(&exec, KernelClass::Copy, elements).get());
+        assert!(
+            budget <= width,
+            "{elements} elements on {budget} of width {width}"
+        );
     }
 }
 
@@ -1226,4 +1255,101 @@ fn chunks_too_small_to_pay_a_worker_scatter_without_forking() {
     };
     // Two workers chunk two groups at a time: 2 and 6 chunks.
     assert_eq!(splits(4), splits(12));
+}
+
+#[test]
+fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
+    use std::time::Duration;
+    use tenferro_cpu::threadteam::WidthCosts;
+    // What: with a cost row under which threadteam's rounded comparison
+    // gives the larger of two compiled Single blocks three of four workers
+    // and the smaller all four, the smaller still runs alone on the whole
+    // token: the largest block's answer settles nothing outside the gate's
+    // exact domain. A zero-size destination element replays the schedule
+    // without allocating the blocks' payload.
+    const LENGTHS: [usize; 2] = [150_119_987_579_016_559, 150_119_987_579_016_560];
+    let costs = WidthCosts::from_anchors(&[
+        (2, Duration::ZERO),
+        (3, Duration::ZERO),
+        (4, Duration::from_nanos(1 << 50)),
+    ])
+    .unwrap();
+    let structure =
+        Arc::new(BlockStructure::packed_column_major(1, LENGTHS.map(|len| vec![len])).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[0, 1].map(|block| TreeTransformBlockSpec::single(block, block, 1.0)),
+    )
+    .unwrap();
+    let schedule = transform.parallel_schedule();
+    assert_eq!(schedule.single_component_count(), 2);
+    assert_eq!(schedule.widest_single, LENGTHS[1]);
+    let gate = LeafGate::new(transform.layouts().max_planned_elements());
+    let mut pool = crate::host_pool::test_pool_with_costs(4, costs);
+    let widths = pool.with_exec(|exec| {
+        LENGTHS.map(|len| {
+            strided_kernel::execution::parallel_width(
+                &exec,
+                strided_kernel::execution::KernelClass::Copy,
+                len,
+            )
+            .get()
+        })
+    });
+    assert_eq!(widths, [4, 3]);
+    let leaves = std::sync::Mutex::new(Vec::new());
+    let mut dst = vec![(); structure.required_len().unwrap()];
+    let mut fused_indices = [0usize; 4];
+    let mut narrow = Vec::new();
+    pool.with_exec(|exec| {
+        replay_single_phase(
+            schedule,
+            &mut narrow,
+            &mut dst,
+            &mut fused_indices,
+            1,
+            4,
+            exec,
+            &gate,
+            transform.layouts().max_planned_elements(),
+            true,
+            &|items, _, _, _, exec, _| {
+                for &item in items {
+                    let (dst_layout, _, _) = scheduled_single(transform.blocks(), item)?;
+                    leaves.lock().unwrap().push((
+                        transform.layouts().entry(dst_layout).element_count,
+                        exec.budget().get(),
+                    ));
+                }
+                Ok(())
+            },
+        )
+    })
+    .unwrap();
+    let mut leaves = leaves.into_inner().unwrap();
+    leaves.sort_unstable();
+    // The saturating block alone on four workers; the other, the only one
+    // left, on the three Strided gives it.
+    assert_eq!(leaves, [(LENGTHS[0], 4), (LENGTHS[1], 3)]);
+}
+
+#[test]
+fn a_single_phase_whose_moves_do_not_pay_a_worker_runs_inline() {
+    // What: many tiny Single components whose total moved elements Strided
+    // gives one worker run in one list on the caller's whole token: no fork.
+    let atoms = (0..32).map(|lo| (lo, 1, 1)).collect::<Vec<_>>();
+    let leaves = record_single_leaves(&atoms);
+    assert_eq!(leaves, [((0..32).collect::<Vec<u32>>(), 3)]);
+}
+
+#[test]
+fn a_split_uses_no_more_lanes_than_its_components_can() {
+    // What: two components that move enough to pay a split but whose blocks
+    // never widen use two lanes of three, one worker each.
+    let leaves = record_single_leaves(&[(0, 1 << 22, 1), (1, 1 << 22, 1)]);
+    assert_eq!(leaves, [(vec![0], 1), (vec![1], 1)]);
+    let lanes = crate::host_pool::test_pool(3)
+        .with_exec(|exec| split_lanes(&exec, &LeafGate::new(1), 3, 2 << 22, [1, 1]));
+    assert_eq!(lanes, 2);
 }
