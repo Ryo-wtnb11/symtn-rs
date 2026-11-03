@@ -1098,10 +1098,14 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
     use strided_kernel::execution::{parallel_width, KernelClass};
     // What: in a threaded overwrite on eight workers, a Single or Multi
     // component whose blocks Strided would give all eight workers runs alone
-    // on the whole token, while a smaller widening component and two tiny
+    // on the whole token, while a smaller widening component and the tiny
     // ones of the same phase split the token and each runs on its lane's
     // share; every block holds its oracle value. The moldable size is the first count Strided widens at
-    // all, so the expectation for it follows Strided's own answer.
+    // all, so the expectation for it follows Strided's own answer. The tiny
+    // blocks hold the largest count Strided moves on one worker, and each
+    // phase has two or three of them, so the split is cheaper than running
+    // the narrow components one after another on the whole token
+    // (`split_pays`).
     const THREADS: usize = 8;
     let large = first_count(THREADS, |width| width == THREADS);
     let mut pool = crate::host_pool::test_pool(THREADS);
@@ -1119,11 +1123,13 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         }
         (at, width(at) == THREADS)
     });
+    let tiny = moldable - 1;
     let structure = Arc::new(
         BlockStructure::packed_column_major(
             1,
             [
-                2, 2, moldable, moldable, large, large, 2, 2, 2, moldable, large, 2,
+                tiny, tiny, tiny, tiny, moldable, moldable, large, large, tiny, tiny, tiny,
+                moldable, large,
             ]
             .map(|len| vec![len]),
         )
@@ -1142,7 +1148,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
                 )
             })
             .into_iter()
-            .chain((8..12).map(|block| TreeTransformBlockSpec::single(block, block, 1.5)))
+            .chain((8..13).map(|block| TreeTransformBlockSpec::single(block, block, 1.5)))
             .collect::<Vec<_>>(),
     )
     .unwrap();
@@ -1153,7 +1159,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         .collect::<Vec<_>>();
     let mut expected = vec![0.0; len];
     let mut start = 0;
-    for block_len in [2, moldable, large, 2] {
+    for block_len in [tiny, tiny, moldable, large] {
         for element in 0..block_len {
             let (a, b) = (source[start + element], source[start + block_len + element]);
             expected[start + element] = matrix[0] * a + matrix[1] * b;
@@ -1186,7 +1192,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
     .unwrap();
     assert!(destination == expected);
     let budgets = budgets.lock().unwrap().clone();
-    assert_eq!(budgets.len(), 12);
+    assert_eq!(budgets.len(), 13);
     for (elements, budget) in budgets {
         let whole = elements == large || (elements == moldable && moldable_saturates);
         assert_eq!(budget == THREADS, whole, "{elements} elements on {budget}");
@@ -1721,4 +1727,80 @@ fn independent_widening_components_share_the_token_by_their_strided_widths() {
             "budget {budget}: {leaves:?}"
         );
     }
+}
+
+#[test]
+fn a_split_that_narrows_a_widening_component_runs_sequentially_on_the_whole_token() {
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    // What: a Single phase of one widening component (Strided gives its
+    // block `w` of 16 workers, 1 < w < 16) and one single-element component
+    // runs both one after another on the whole token: a two-lane split
+    // would leave the widening block `floor((w + 1) / 2) < w` workers. `w`
+    // minimises Strided's objective for the block, so the narrower width
+    // costs at least as much, and the split adds a fork, while the
+    // sequential run adds only one element.
+    const BUDGET: usize = 16;
+    let mut pool = crate::host_pool::test_pool(BUDGET);
+    let (count, width) = pool.with_exec(|exec| {
+        let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
+        let mut at = 1usize;
+        while width(at) < 2 {
+            at *= 2;
+        }
+        let (mut below, mut at) = (at / 2, at);
+        while at - below > 1 {
+            let middle = below + (at - below) / 2;
+            if width(middle) >= 2 {
+                at = middle;
+            } else {
+                below = middle;
+            }
+        }
+        (at, width(at))
+    });
+    assert!(width > 1 && width < BUDGET, "width {width}");
+    let structure =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![count, 1], vec![1, 1]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &[
+            TreeTransformBlockSpec::single(0, 0, 2.0),
+            TreeTransformBlockSpec::single(1, 1, 2.0),
+        ],
+    )
+    .unwrap();
+    let schedule = transform.parallel_schedule();
+    assert_eq!(schedule.single_component_count(), 2);
+    let threads = pool.install(|engine| effective_tree_transform_threads(engine, schedule, BUDGET));
+    let leaves = std::sync::Mutex::new(Vec::new());
+    let mut dst = vec![(); structure.required_len().unwrap()];
+    let mut fused_indices = [0usize; 4];
+    let gate = LeafGate::new(transform.layouts().max_planned_elements());
+    pool.with_exec(|exec| {
+        replay_single_phase(
+            schedule,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut dst,
+            &mut fused_indices,
+            2,
+            threads,
+            exec,
+            &gate,
+            transform.layouts().max_planned_elements(),
+            true,
+            &|items, _, _, _, exec, _| {
+                leaves
+                    .lock()
+                    .unwrap()
+                    .push((items.to_vec(), exec.budget().get()));
+                Ok(())
+            },
+        )
+    })
+    .unwrap();
+    let mut leaves = leaves.into_inner().unwrap();
+    leaves.sort_unstable();
+    assert_eq!(leaves, [(vec![0], BUDGET), (vec![1], BUDGET)]);
 }

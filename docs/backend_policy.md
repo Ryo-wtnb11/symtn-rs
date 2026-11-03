@@ -244,19 +244,33 @@ one's answer stands for the rest only where the cost rule is provably
 monotone, below); every other component splits and widens within the share
 its lane is granted. A Single phase, or a chunk of recoupling scatter, whose
 moved elements Strided's rule would give one worker runs inline on the
-token instead of splitting. A split shares at most the sum of its
-components' own widths (and at most the token) among at most the replay's
-worker count of lanes, and each lane holds no more workers than Strided's
-width for its component's largest planned block. The replay learns these
-widths from Strided's own answers once per call: a width it has already
-learned, or one that what it learned decides, costs no further search, so
-identical chunks repeat no search, while each new undecided count asks
-Strided once. Each
-split hands the left `⌊w/2⌋` of `w` workers
-the components whose destination elements are closest to that fraction of
-the total, never dividing a component, and runs that side on the same
-share of the token. A split of the scatter phase lists its atoms and each
-chunk's components, and every Single split lists the atoms it splits;
+token instead of splitting. A split separates lanes from the workers they
+share: it shares `W`, at most the sum of its components' own widths (and at
+most the token), among `L`, at most the replay's worker count, of lanes, and
+a lane left holding a single component holds no more workers than Strided's
+width for that component's largest planned block (a lane holding several
+components keeps its share). The replay learns these widths from Strided's
+own answers once per call: a width it has already learned, or one that
+what it learned decides, costs no further search, so identical chunks
+repeat no search, while each new undecided count asks Strided once. An
+overwrite's split runs only when it is cheaper than running the same
+components one after another on the whole token, each at its own width:
+both sides cost a component by the objective Strided's width minimises (the
+serial copy estimate of its moved elements over the width it runs at, plus
+the token's dispatch cost of a section that wide), the split runs a
+component at its width capped by its lane's share, and the split costs its
+slowest lane plus one two-wide section per fork on the way to it
+(O(components + `L` log components) per decision, no allocation);
+otherwise the components run sequentially on the whole token. An
+accumulating phase moves each block on one worker, so its split loses
+nothing to the whole token and skips this comparison.
+Each split hands the left `⌊L/2⌋` of `L` lanes the components whose
+destination elements are closest to that fraction of the total, never
+dividing a component, and runs that side on `⌊W·⌊L/2⌋/L⌋` workers (at least
+one, leaving at least one), the right side on the rest. The Multi pack's
+column split instead halves its token evenly at each fork, and a half that
+reaches one slot runs its remaining columns inline. A split of the scatter
+phase lists its atoms and each chunk's components, and every Single split lists the atoms it splits;
 learning widths keeps O(engine width) more. This metadata (O(atoms + chunk
 groups + engine width)) is allocated once per call by an eager call's
 call-local workspace and kept by a reused workspace (and reported in its

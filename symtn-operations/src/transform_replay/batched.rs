@@ -1,5 +1,6 @@
 use super::*;
 use core::ops::Range;
+use core::time::Duration;
 
 pub(super) fn effective_tree_transform_threads(
     engine: &mut dyn Engine,
@@ -95,15 +96,17 @@ pub(super) fn replay_region<R>(
     crate::host_pool::region(engine, crate::host_pool::HostPoolSite::Replay, op)
 }
 
-/// One replay fork: both halves run as jobs of `exec`, the left on the share
-/// of the token that `left_threads` of the split's `threads` stand for. The
-/// split itself (and so every per-worker scratch slice and the
-/// left-before-right error order) is fixed by the replay's `threads`, not by
-/// where the token places a job.
+/// One replay fork: both halves run as jobs of `exec`. `lanes` picks the
+/// token shares ([`crate::host_pool::join_split`]): `None` halves the token
+/// evenly (the Multi pack's item split), `Some((left_threads, threads))`
+/// gives the left the share its lanes stand for (the ownership-component
+/// splits, whose lanes share a token wider than their count). The split
+/// itself (and so every per-worker scratch slice and the left-before-right
+/// error order) is fixed by the replay's `threads`, not by where the token
+/// places a job.
 pub(super) fn replay_join<A, B, RA, RB>(
     exec: Exec<'_>,
-    left_threads: usize,
-    threads: usize,
+    lanes: Option<(usize, usize)>,
     left: A,
     right: B,
 ) -> (RA, RB)
@@ -113,7 +116,7 @@ where
     RA: Send + Sync,
     RB: Send + Sync,
 {
-    pool_join(exec, left_threads, threads, left, right)
+    pool_join(exec, lanes, left, right)
 }
 
 /// Executes a validated tree-transform block list against a dense executor.
@@ -434,8 +437,7 @@ where
         split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let (left, right) = replay_join(
         exec,
-        left_threads,
-        threads,
+        None,
         |exec| {
             replay_pack_columns(
                 left_indices,
@@ -583,7 +585,7 @@ pub(super) fn whole_width(
 /// smaller of the token's budget and the sum of the components' widths.
 /// The caller splits over `min(threads, workers)` lanes, which share those
 /// workers in proportion, each lane narrowed to its component's width when
-/// it holds one.
+/// it holds only that component, provided the split [`split_pays`].
 ///
 /// Why the token budget and not the lane count: the replay's lane count is
 /// capped by its component count, while each component may use several
@@ -609,6 +611,114 @@ pub(super) fn split_workers<'w>(
         sum = sum.saturating_add(*width);
     }
     exec.budget().get().min(sum).max(1)
+}
+
+/// Whether splitting `parts` components over `lanes` lanes that share
+/// `workers` slots of the call's whole token `exec` is cheaper than running
+/// them one after another on the whole token. `weight_before(p)` is the
+/// moved elements of the components before `p` (defined up to `parts`) and
+/// `width(p)` component `p`'s whole-token width ([`split_workers`]).
+///
+/// Both sides cost a component by Strided's own objective for a copy, the
+/// one its width minimises: the serial estimate of its moved elements over
+/// the width it runs at, plus the token's dispatch cost of a section that
+/// wide (no dispatch at one worker). On the whole token a component runs at
+/// `width(p)`; in the split at `width(p)` capped by its lane's share of
+/// `workers`, which follows [`split_join_parts`] and
+/// [`split_join_components`] exactly ([`balanced_boundary`] and
+/// [`crate::host_pool::lane_share`]). The split costs its slowest lane plus
+/// one two-wide section per fork on the way to it.
+///
+/// Only an overwrite asks: an accumulating phase moves every block on one
+/// worker, where the split's one-worker lanes lose nothing.
+///
+/// Why: lanes that share a token narrower than the components' summed
+/// widths can each hold fewer workers than Strided would give a component
+/// alone, so an indivisible large component on a narrow grant, plus the
+/// forks that reach it, can bound the split above the sequential
+/// whole-token run. Cost: O(parts + lanes log parts), no allocation.
+pub(super) fn split_pays(
+    exec: &Exec<'_>,
+    parts: usize,
+    lanes: usize,
+    workers: usize,
+    weight_before: &impl Fn(usize) -> usize,
+    width: &impl Fn(usize) -> usize,
+) -> bool {
+    let time = |part: usize, at: usize| {
+        let estimate = strided_kernel::execution::KernelClass::Copy
+            .estimate(weight_before(part + 1) - weight_before(part));
+        match core::num::NonZeroUsize::new(width(part).min(at)) {
+            Some(width) if width.get() > 1 => (estimate
+                / u32::try_from(width.get()).unwrap_or(u32::MAX))
+            .saturating_add(exec.dispatch_cost(width)),
+            _ => estimate,
+        }
+    };
+    let fork =
+        exec.dispatch_cost(core::num::NonZeroUsize::new(2).unwrap_or(core::num::NonZeroUsize::MIN));
+    let sequential = (0..parts).fold(Duration::ZERO, |sum, part| {
+        sum.saturating_add(time(part, usize::MAX))
+    });
+    split_time(0..parts, lanes, workers, weight_before, &time, fork) < sequential
+}
+
+/// The slowest lane of [`split_pays`]'s split of `parts` over `lanes` lanes
+/// holding `budget` slots, each fork adding `fork`.
+fn split_time(
+    parts: Range<usize>,
+    lanes: usize,
+    budget: usize,
+    weight_before: &impl Fn(usize) -> usize,
+    time: &impl Fn(usize, usize) -> Duration,
+    fork: Duration,
+) -> Duration {
+    if lanes <= 1 || parts.len() <= 1 {
+        return parts.fold(Duration::ZERO, |sum, part| {
+            sum.saturating_add(time(part, budget))
+        });
+    }
+    let middle = parts.start
+        + balanced_boundary(parts.len(), lanes, |part| weight_before(parts.start + part));
+    let left_lanes = lanes / 2;
+    let right_lanes = lanes - left_lanes;
+    if budget < 2 {
+        // A one-slot token runs both sides inline, one after the other.
+        return split_time(
+            parts.start..middle,
+            left_lanes,
+            budget,
+            weight_before,
+            time,
+            fork,
+        )
+        .saturating_add(split_time(
+            middle..parts.end,
+            right_lanes,
+            budget,
+            weight_before,
+            time,
+            fork,
+        ));
+    }
+    let left_budget = crate::host_pool::lane_share(budget, left_lanes, lanes);
+    let left = split_time(
+        parts.start..middle,
+        left_lanes,
+        left_budget,
+        weight_before,
+        time,
+        fork,
+    );
+    let right = split_time(
+        middle..parts.end,
+        right_lanes,
+        budget - left_budget,
+        weight_before,
+        time,
+        fork,
+    );
+    fork.saturating_add(left.max(right))
 }
 
 /// Recursive `replay_join` over the address-ordered parts `parts` (Single
@@ -694,8 +804,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
         split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let (left, right) = replay_join(
         exec,
-        left_threads,
-        threads,
+        Some((left_threads, threads)),
         |exec| {
             split_join_parts(
                 parts.start..middle,
@@ -757,7 +866,8 @@ pub(super) struct NarrowAtom {
 ///    ([`split_join_parts`]) over `min(threads, workers)` lanes sharing
 ///    [`split_workers`] workers: the token's budget capped by the sum of
 ///    their own widths. Their total is admitted again, so a small remainder
-///    runs inline.
+///    runs inline, and a split that is not cheaper than running them one
+///    after another on the whole token ([`split_pays`]) runs that way.
 /// 4. Singleton grant: a lane left with one atom is narrowed to that atom's
 ///    whole-token width.
 ///
@@ -771,7 +881,8 @@ pub(super) struct NarrowAtom {
 /// classification, and per split atom one [`whole_width`] answer: O(log B)
 /// for engine budget B when the gate or what the call has learned decides
 /// it, otherwise one Strided search of O(B) (once per distinct count); past
-/// the domain each answer is a Strided search.
+/// the domain each answer is a Strided search. The split decision adds
+/// O(atoms + lanes log atoms) ([`split_pays`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_single_phase<T: Send + Sync>(
     schedule: &TreeTransformParallelSchedule,
@@ -863,8 +974,23 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
             .map(|part| (atoms[part.atom].widest, &mut part.width)),
     );
     // Lanes are the replay's split width; the workers they share are the
-    // part of the token the components can use.
-    let lanes = threads.min(workers);
+    // part of the token the components can use. A split that is not cheaper
+    // than the sequential whole-token run keeps that run; an accumulating
+    // phase moves every block on one worker, so its split loses nothing.
+    let mut lanes = threads.min(workers);
+    if lanes > 1
+        && widen
+        && !split_pays(
+            &exec,
+            listed,
+            lanes,
+            workers,
+            &|part| narrow[part].weight_before,
+            &|part| narrow[part].width,
+        )
+    {
+        lanes = 1;
+    }
     let exec = if lanes > 1 {
         granted_width(exec, workers)
     } else {
@@ -1005,8 +1131,9 @@ impl<'a, T> ScatterTarget<'a, T> {
     /// The scatter split's scratch: the atom list and the chunk unit list,
     /// O(atoms + chunk groups) metadata kept by a reused workspace and
     /// allocated once by a call-local one. A serial or one-component scatter
-    /// allocates neither. (The Single phase's narrow list,
-    /// [`replay_single_phase`], is the only other split scratch.)
+    /// allocates neither. (The other split scratch is the Single phase's
+    /// narrow list, [`replay_single_phase`], and the width levels both
+    /// phases learn, [`whole_width`], O(engine width).)
     pub(super) fn new<D>(
         workspace: &mut TreeTransformWorkspace<D>,
         schedule: &TreeTransformParallelSchedule,
@@ -1067,15 +1194,16 @@ pub(super) fn atom_start(
 /// moved elements one worker (or there is one unit or one lane); then the
 /// saturating units alone ([`run_wide_units`]); then the remaining units over
 /// `min(threads, workers)` lanes sharing [`split_workers`] workers,
-/// re-admitted on their own total
-/// ([`split_join_components`]); finally a lane left with one unit narrowed to
+/// re-admitted on their own total and against the sequential whole-token
+/// run ([`split_pays`], [`split_join_components`]); finally a lane left with one unit narrowed to
 /// its whole-token width. Admission asks the gate for every threaded
 /// multi-component chunk, planned or not and accumulating or not.
 ///
 /// Cost per chunk: O(1) gate answers inside its exact domain and one
 /// [`whole_width`] answer per split unit and for the total: O(log B) for
 /// engine budget B when the gate or what the call has learned in `levels`
-/// decides it, otherwise one Strided search, O(B). Identical chunks repeat
+/// decides it, otherwise one Strided search, O(B), plus O(units + lanes log
+/// units) for the split decision ([`split_pays`]). Identical chunks repeat
 /// no search; a new undecided count searches once. Past the exact domain
 /// each answer is a Strided search.
 ///
@@ -1148,8 +1276,23 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
             .map(|unit| (unit.widest, &mut unit.width)),
     );
     // Lanes are the replay's split width; the workers they share are the
-    // part of the token the components can use.
-    let lanes = threads.min(workers);
+    // part of the token the components can use. A split that is not cheaper
+    // than the sequential whole-token run keeps that run; an accumulating
+    // phase moves every block on one worker, so its split loses nothing.
+    let mut lanes = threads.min(workers);
+    if lanes > 1
+        && widen
+        && !split_pays(
+            &exec,
+            parts,
+            lanes,
+            workers,
+            &|part| units[part].weight_before,
+            &|part| units[part].width,
+        )
+    {
+        lanes = 1;
+    }
     let exec = if lanes > 1 {
         granted_width(exec, workers)
     } else {
@@ -1247,8 +1390,7 @@ pub(super) fn split_join_components<T: Send + Sync>(
         split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
     let (left, right) = replay_join(
         exec,
-        left_threads,
-        threads,
+        Some((left_threads, threads)),
         |exec| {
             split_join_components(
                 &units[..=middle],

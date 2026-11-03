@@ -3,7 +3,7 @@ use core::ops::{Add, Mul};
 use std::sync::{Arc, Weak};
 
 #[cfg(not(test))]
-use crate::host_pool::join as pool_join;
+use crate::host_pool::join_split as pool_join;
 use crate::host_pool::Exec;
 #[cfg(test)]
 use allocation_oracle::join as pool_join;
@@ -67,6 +67,9 @@ mod allocation_oracle {
     static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
     static JOINS: AtomicUsize = AtomicUsize::new(0);
+    // Joins whose token holds two slots or more, so the two sides run as
+    // separate tasks; a one-slot join runs both inline.
+    static DISPATCHED_JOINS: AtomicUsize = AtomicUsize::new(0);
     static SESSION: Mutex<()> = Mutex::new(());
 
     struct CountingAllocator;
@@ -136,6 +139,7 @@ mod allocation_oracle {
         ALLOCATIONS.store(0, Ordering::Relaxed);
         ALLOCATED_BYTES.store(0, Ordering::Relaxed);
         JOINS.store(0, Ordering::Relaxed);
+        DISPATCHED_JOINS.store(0, Ordering::Relaxed);
         let result = action();
         let allocations = ALLOCATIONS.load(Ordering::Relaxed);
         drop(session);
@@ -154,10 +158,13 @@ mod allocation_oracle {
         JOINS.load(Ordering::Relaxed)
     }
 
+    pub(super) fn dispatched_joins() -> usize {
+        DISPATCHED_JOINS.load(Ordering::Relaxed)
+    }
+
     pub(super) fn join<A, B, RA, RB>(
         exec: crate::host_pool::Exec<'_>,
-        left_lanes: usize,
-        lanes: usize,
+        lanes: Option<(usize, usize)>,
         left: A,
         right: B,
     ) -> (RA, RB)
@@ -170,11 +177,13 @@ mod allocation_oracle {
         let measured = is_measured();
         if measured {
             JOINS.fetch_add(1, Ordering::Relaxed);
+            if exec.budget().get() >= 2 {
+                DISPATCHED_JOINS.fetch_add(1, Ordering::Relaxed);
+            }
         }
         let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
-        let result = crate::host_pool::join(
+        let result = crate::host_pool::join_split(
             exec,
-            left_lanes,
             lanes,
             |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
@@ -612,7 +621,7 @@ mod allocation_oracle_tests {
     /// any measured scope: building an engine and its first fork allocate.
     fn two_slots() -> TestPool {
         let mut engine = crate::host_pool::test_pool(2);
-        engine.with_exec(|exec| allocation_oracle::join(exec, 1, 2, |_| (), |_| ()));
+        engine.with_exec(|exec| allocation_oracle::join(exec, None, |_| (), |_| ()));
         engine
     }
 
@@ -626,8 +635,7 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
-                        1,
-                        2,
+                        None,
                         |_| assert!(allocation_oracle::is_measured()),
                         |_| assert!(allocation_oracle::is_measured()),
                     )
@@ -645,8 +653,7 @@ mod allocation_oracle_tests {
         engine.with_exec(|exec| {
             allocation_oracle::join(
                 exec,
-                1,
-                2,
+                None,
                 |_| assert!(!allocation_oracle::is_measured()),
                 |_| assert!(!allocation_oracle::is_measured()),
             )
@@ -662,13 +669,11 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
-                        1,
-                        2,
+                        None,
                         |exec| {
                             allocation_oracle::join(
                                 exec,
-                                1,
-                                2,
+                                None,
                                 |_| assert!(allocation_oracle::is_measured()),
                                 |_| assert!(allocation_oracle::is_measured()),
                             );
@@ -721,8 +726,7 @@ mod allocation_oracle_tests {
                     engine.with_exec(|exec| {
                         replay_join(
                             exec,
-                            1,
-                            2,
+                            None,
                             |_| panic!("expected replay join panic"),
                             |_| assert!(allocation_oracle::is_measured()),
                         )

@@ -158,20 +158,33 @@ pub fn fork(exec: Exec<'_>, jobs: usize, f: impl Fn(usize, Exec<'_>) + Sync) {
     exec.fork(jobs, f);
 }
 
-/// Runs `left` and `right` as two jobs of `exec` and returns both results.
-/// `left` gets the share of the token's budget that `left_lanes` of a
-/// split's `lanes` stand for (rounded down, at least one slot), `right` the
-/// rest, so a caller that balances its work for `left_lanes / lanes` runs
-/// each side on the slots it was balanced for. A serial token runs both
-/// inline.
+/// Runs `left` and `right` as two jobs of `exec`, each with its half of the
+/// budget, and returns both results.
+pub fn join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
+where
+    A: FnOnce(Exec<'_>) -> RA + Send + Sync,
+    B: FnOnce(Exec<'_>) -> RB + Send + Sync,
+    RA: Send + Sync,
+    RB: Send + Sync,
+{
+    join_split(exec, None, left, right)
+}
+
+/// [`join`], or, with `lanes = Some((left_lanes, lanes))`, `left` on the
+/// [`lane_share`] of the budget that `left_lanes` of a split's `lanes` stand
+/// for and `right` on the rest, so a caller that balances its work for
+/// `left_lanes / lanes` runs each side on the slots it was balanced for. A
+/// serial token runs both inline either way.
 ///
-/// Why not `fork`'s even split: it gives an odd budget's spare slot to the
-/// first job, the opposite of a split that balances the left side for the
-/// floor of half its lanes.
-pub fn join<A, B, RA, RB>(
+/// Why two rules and not the lane share for every caller: the share keeps
+/// every child at least its lane count, so a recursion over many lanes forks
+/// down to every slot. That is what a component split balanced over lanes
+/// that share more workers needs; a split over items that only halves its
+/// lane count (the Multi pack) stops forking once the even halves reach one
+/// slot.
+pub(crate) fn join_split<A, B, RA, RB>(
     exec: Exec<'_>,
-    left_lanes: usize,
-    lanes: usize,
+    lanes: Option<(usize, usize)>,
     left: A,
     right: B,
 ) -> (RA, RB)
@@ -200,16 +213,24 @@ where
         }
     };
     let budget = exec.budget().get();
-    if budget < 2 {
-        fork(exec, 2, job);
-    } else {
-        let left_share = (budget.saturating_mul(left_lanes) / lanes.max(1)).clamp(1, budget - 1);
-        // INVARIANT: both shares are nonzero and sum to the budget, the only
-        // conditions under which `fork_sized` refuses.
-        exec.fork_sized(&[left_share, budget - left_share], job)
-            .expect("join shares are nonzero and sum to the budget");
+    match lanes {
+        Some((left_lanes, lanes)) if budget >= 2 => {
+            let left_share = lane_share(budget, left_lanes, lanes);
+            // INVARIANT: both shares are nonzero and sum to the budget, the
+            // only conditions under which `fork_sized` refuses.
+            exec.fork_sized(&[left_share, budget - left_share], job)
+                .expect("join shares are nonzero and sum to the budget");
+        }
+        _ => fork(exec, 2, job),
     }
     (take(&left_out), take(&right_out))
+}
+
+/// The slots of a `budget >= 2` token that [`join_split`] gives the left of
+/// `left_lanes` out of `lanes`: the proportional share rounded down, at
+/// least one slot and leaving at least one to the right. O(1).
+pub(crate) fn lane_share(budget: usize, left_lanes: usize, lanes: usize) -> usize {
+    (budget.saturating_mul(left_lanes) / lanes.max(1)).clamp(1, budget - 1)
 }
 
 fn write<T>(slot: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {

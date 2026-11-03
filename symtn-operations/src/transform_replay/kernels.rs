@@ -801,6 +801,58 @@ mod allocation_replay_tests {
     }
 
     #[test]
+    fn multi_pack_halves_its_token_evenly() {
+        // What: the Multi pack's column split halves its token evenly at
+        // each fork, so on three slots over three lanes the two-lane side
+        // holds one slot and packs inline: one dispatched fork, where a
+        // lane-proportional share (one slot left, two right) would dispatch
+        // a second. One Multi group of three blocks has no Single phase and
+        // one scatter component, so the pack makes every join.
+        let block_structure =
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![1]; 3]).unwrap());
+        let matrix = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+        let structure = TreeTransformStructure::compile_structures(
+            &block_structure,
+            &block_structure,
+            &[TreeTransformBlockSpec::multi(
+                vec![0, 1, 2],
+                vec![0, 1, 2],
+                matrix,
+            )],
+        )
+        .unwrap();
+        assert_eq!(structure.parallel_schedule().pack_columns.len(), 3);
+        let src = [1.0, 2.0, 3.0];
+        let mut dst = [0.0; 3];
+        let mut pool = crate::host_pool::test_pool(3);
+        let (dispatched, _) = allocation_oracle::with_session(|| {
+            pool.install(|engine| {
+                allocation_oracle::with_measurement(|| {
+                    tree_transform_structure_with_structural_recoupling_raw(
+                        engine,
+                        &mut StridedHostKernelAdapter::default(),
+                        &mut DefaultDenseExecutor::new(),
+                        &mut TreeTransformWorkspace::default(),
+                        &structure,
+                        &block_structure,
+                        &block_structure,
+                        &mut dst,
+                        &src,
+                        1.0,
+                        0.0,
+                        3,
+                    )
+                    .unwrap();
+                    allocation_oracle::dispatched_joins()
+                })
+            })
+        });
+        assert_eq!(dispatched, 1);
+        // dst_i = sum_j U[i][j] src_j for the row-major `matrix`.
+        assert_eq!(dst, [14.0, 32.0, 50.0]);
+    }
+
+    #[test]
     fn warm_threaded_overwrite_replay_has_no_owned_allocations() {
         let block_structure = Arc::new(
             BlockStructure::packed_column_major(1, [vec![4], vec![4], vec![4], vec![4]]).unwrap(),
