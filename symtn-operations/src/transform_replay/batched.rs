@@ -918,7 +918,10 @@ pub(super) fn atom_start(
 /// gives the chunk's moved elements a single worker (`gate.widens` on their
 /// total), the units run inline on the token, as an unsplit list does;
 /// otherwise the saturating units run alone ([`run_wide_units`]) and the
-/// rest split ([`split_join_components`]).
+/// rest split ([`split_join_components`]). This admission asks the gate for
+/// every threaded multi-component chunk, planned or not and accumulating or
+/// not; past the gate's exact domain, or past its bound when no role
+/// widens, that is one Strided width search per chunk.
 ///
 /// Why per chunk and not once per phase: a chunk's packed destination exists
 /// only between its GEMM and the next chunk's, so a split cannot outlive it;

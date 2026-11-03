@@ -83,16 +83,19 @@ mod tests {
                         );
                         assert_eq!(
                             gate.saturates(&exec, n),
-                            threads > 1 && saturates(n),
+                            saturates(n),
                             "saturates, threads {threads}, elements {n}"
                         );
-                        if n <= bound {
-                            assert_eq!(
-                                bounded.widens(&exec, n),
-                                widens,
-                                "bounded, threads {threads}, elements {n}"
-                            );
-                        }
+                        assert_eq!(
+                            bounded.widens(&exec, n),
+                            widens,
+                            "bounded, threads {threads}, elements {n}"
+                        );
+                        assert_eq!(
+                            bounded.saturates(&exec, n),
+                            saturates(n),
+                            "bounded saturates, threads {threads}, elements {n}"
+                        );
                         seen[usize::from(widens)] = true;
                     }
                     // The sweep crosses the threshold on every wide token.
@@ -100,6 +103,50 @@ mod tests {
                 });
             }
         }
+    }
+
+    /// What: where threadteam's rounded objectives tie two widths that real
+    /// arithmetic separates, so that a larger copy gets a narrower width
+    /// than a smaller one, the gate still answers exactly what Strided
+    /// answers, bounded or not. The cost row (two and three workers free,
+    /// four costing 2^50 ns) makes four workers win at 13510798882111490 ns
+    /// and lose the tie to three at the next estimates.
+    #[test]
+    fn leaf_gate_follows_strided_where_rounding_breaks_monotonicity() {
+        use std::time::Duration;
+        use strided_kernel::execution::{parallel_width, KernelClass};
+        use tenferro_cpu::threadteam::WidthCosts;
+        let costs = WidthCosts::from_anchors(&[
+            (2, Duration::ZERO),
+            (3, Duration::ZERO),
+            (4, Duration::from_nanos(1 << 50)),
+        ])
+        .unwrap();
+        crate::host_pool::test_pool_with_costs(4, costs).with_exec(|exec| {
+            let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
+            // The first count whose estimate reaches the tie, by bisection
+            // on the estimate alone.
+            let tie = Duration::from_nanos(13_510_798_882_111_491);
+            let (mut below, mut at) = (0usize, usize::MAX);
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if KernelClass::Copy.estimate(middle) >= tie {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            let counts = (below.saturating_sub(4)..=at + 4).collect::<Vec<_>>();
+            assert!(counts.iter().any(|&n| width(n) == 4));
+            assert!(counts.iter().any(|&n| n > below && width(n) == 3));
+            for bound in [usize::MAX, at] {
+                let gate = sealed::LeafGate::new(bound);
+                for &n in counts.iter().chain(&[0, 1, 4096, 1 << 30]) {
+                    assert_eq!(gate.saturates(&exec, n), width(n) == 4, "elements {n}");
+                    assert_eq!(gate.widens(&exec, n), width(n) > 1, "elements {n}");
+                }
+            }
+        });
     }
 
     #[test]

@@ -502,11 +502,13 @@ fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
     }
 }
 
-/// What: the leaf gate's dispatch-cost scan runs only when an overwrite of a
-/// role with a retained plan reaches admission, once per call on one token:
-/// planless and accumulating calls scan nothing, and an overwrite of planned
-/// roles scans exactly once on a wide engine, however many block lists (one
-/// Single list, one scatter list per Multi block) the call visits.
+/// What: in a serial replay, which admits no threaded chunk, the leaf gate's
+/// dispatch-cost scan runs only when an overwrite of a role with a retained
+/// plan reaches leaf admission, once per call on one token: planless and
+/// accumulating calls scan nothing, and an overwrite of planned roles scans
+/// exactly once on a wide engine, however many block lists (one Single list,
+/// one scatter list per Multi block) the call visits. (A threaded chunk
+/// scatter also asks the gate whether its moved elements pay a worker.)
 #[test]
 fn leaf_gate_scans_only_for_planned_overwrites() {
     use crate::kernel_adapter::sealed::GATE_SCANS;

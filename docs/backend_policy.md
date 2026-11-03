@@ -253,7 +253,10 @@ call-local workspace allocates once per call and a reused workspace keeps
 (and reports in its retained bytes); a serial or one-component phase, and a
 Single phase of one tier, allocates none. Whether a component is wide is one
 comparison against the smallest element count Strided's rule gives every
-worker, which the replay finds once per token shape. Inside the replay each Single block
+worker, which the replay finds once per token shape; a count so large that
+threadteam's rounded cost comparison is no longer provably monotone (the
+estimate plus the largest dispatch cost reaching `2^51 / w^2` ns) asks
+Strided directly instead. Inside the replay each Single block
 and scatter column keeps the token share of the worker that visits it, the
 whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained

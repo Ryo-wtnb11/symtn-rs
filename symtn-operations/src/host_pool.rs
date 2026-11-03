@@ -331,6 +331,23 @@ pub fn eager_test_engine(threads: usize) -> tenferro_cpu::CpuEngine {
     )
 }
 
+/// Test support: a `threads`-worker pool whose every dispatch kind costs
+/// `costs`, for cost-rule edge cases.
+#[cfg(all(test, feature = "tenferro"))]
+pub(crate) fn test_pool_with_costs(
+    threads: usize,
+    costs: tenferro_cpu::threadteam::WidthCosts,
+) -> TestPool {
+    use tenferro_cpu::threadteam::DispatchCosts;
+    TestPool(tenferro_cpu::CpuEngine::new(
+        tenferro_cpu::Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(costs, costs, costs))
+            .build()
+            .expect("test pool"),
+    ))
+}
+
 /// Test support: [`eager_test_engine`] as a [`TestPool`].
 #[cfg(all(any(test, feature = "testing"), feature = "tenferro"))]
 #[doc(hidden)]

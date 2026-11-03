@@ -5,22 +5,25 @@ pub(crate) mod sealed {
     use super::*;
     use strided_kernel::execution;
 
-    /// The smallest element count that widens on one token shape, found at
-    /// most once per call and token shape on one thread.
+    /// The smallest element counts that widen and that fill one token shape,
+    /// found at most once per call and token shape on one thread.
     ///
     /// Why: Strided's `parallel_width` scans every width up to the budget on
     /// each call, so asking it for every block (or every component a threaded
     /// replay classifies) costs O(blocks x budget) and makes wide engines
-    /// slower on small tensors. Its answer is monotone in the element count
-    /// (see [`LeafGate::scan`]), so one threshold per token shape answers
-    /// every later query exactly in O(1).
+    /// slower on small tensors. Inside the token's exact domain (see
+    /// [`LeafGate::exact_domain`]) both answers are monotone in the element
+    /// count, so one threshold each answers every query there in O(1); a
+    /// count outside it asks Strided directly.
     ///
-    /// Why lazy: the scan runs only when an overwrite of a role with a
-    /// retained plan reaches admission, so a call of planless or accumulating
-    /// blocks pays nothing. A gate lives on the thread that runs its blocks,
-    /// because a token's dispatch cost depends on the calling thread: one per
-    /// call for the calling thread's unsplit lists, one per forked leaf
-    /// otherwise.
+    /// Why lazy: the scan runs on the first query of a token shape: a planned
+    /// overwrite reaching leaf admission, a threaded replay classifying its
+    /// components, or a threaded chunk scatter deciding whether its moved
+    /// elements pay a second worker (the last also for accumulating or
+    /// planless replays). A serial replay of planless or accumulating blocks
+    /// asks nothing. A gate lives on the thread that runs its blocks, because
+    /// a token's dispatch cost depends on the calling thread: one per call
+    /// for the calling thread's unsplit lists, one per forked leaf otherwise.
     pub struct LeafGate {
         /// The largest element count any planned role this gate admits has.
         bound: usize,
@@ -36,6 +39,8 @@ pub(crate) mod sealed {
         min_elements: Option<usize>,
         /// The smallest count that widens to the whole budget.
         min_full: Option<usize>,
+        /// The largest count of the token's exact domain, if any.
+        exact: Option<usize>,
     }
 
     impl LeafGate {
@@ -47,11 +52,11 @@ pub(crate) mod sealed {
             }
         }
 
-        /// The smallest element count up to `bound` at which Strided's
-        /// `parallel_width` for a copy exceeds one, or `None` when `bound`
-        /// does not.
+        /// The smallest element count up to `bound` (inside the token's exact
+        /// domain) at which Strided's `parallel_width` for a copy exceeds
+        /// one, or `None` when `bound` does not.
         ///
-        /// Why a bisection is exact: the copy estimate is monotone in the
+        /// Why a bisection is exact: in real arithmetic, the copy estimate is monotone in the
         /// element count, and `parallel_width > 1` holds exactly when some
         /// width `k >= 2` both pays (`estimate >= PAYS * D(k)`) and beats one
         /// worker (`D(k) + estimate / k < estimate`); each condition only
@@ -117,11 +122,12 @@ pub(crate) mod sealed {
             Some(at)
         }
 
-        /// The smallest element count up to `bound` at which Strided's
-        /// `parallel_width` for a copy is the whole budget, at or above the
-        /// widening count `from`; `None` when `bound` does not saturate.
+        /// The smallest element count up to `bound` (inside the token's exact
+        /// domain) at which Strided's `parallel_width` for a copy is the whole
+        /// budget, at or above the widening count `from`; `None` when `bound`
+        /// does not saturate.
         ///
-        /// Why a bisection is exact: `parallel_width` picks the width `k`
+        /// Why a bisection is exact: in real arithmetic, `parallel_width` picks the width `k`
         /// minimising `D(k) + estimate / k` among the widths that pay. As the
         /// estimate grows, a wider width's objective falls faster than a
         /// narrower one's (slope `1 / k`), so once the whole budget `B` beats
@@ -129,7 +135,9 @@ pub(crate) mod sealed {
         /// starts paying later has `D(k) > D(B)` (paying is monotone in the
         /// cost, and `B` already pays), so its objective
         /// `D(k) + estimate / k` exceeds `D(B) + estimate / B` for good.
-        /// `parallel_width == B` is therefore monotone in the element count.
+        /// `parallel_width == B` is therefore monotone in the element count;
+        /// [`Self::exact_domain`] carries this over to threadteam's rounded
+        /// comparison.
         fn scan_full(
             exec: &crate::host_pool::Exec<'_>,
             bound: usize,
@@ -160,8 +168,58 @@ pub(crate) mod sealed {
             Some(at)
         }
 
-        /// The token shape's widening and saturating counts, scanned once per
-        /// shape.
+        /// The largest element count whose width question the thresholds
+        /// answer exactly on this token: `None` when there is none.
+        ///
+        /// Why a domain: threadteam compares the objectives
+        /// `D(k) + estimate / k` as rounded `f64`s, and the monotonicity
+        /// arguments of [`Self::scan_widen`] and [`Self::scan_full`] hold for
+        /// real arithmetic. For integer nanoseconds `E` and `D(k)`, two
+        /// different real objectives of widths `j, k <= B` differ by at least
+        /// `1 / B^2` (both are integers plus multiples of `1 / k`, `1 / j`),
+        /// and width one's objective `E` differs from another by at least
+        /// `1 / B`. Each rounded objective is within `2^-52` of its real
+        /// value relatively (one division, one addition, both operands exact
+        /// below `2^53`). So while every objective stays below `2^51 / B^2`,
+        /// that is `E + max D(k) < 2^51 / B^2`, a rounded comparison agrees
+        /// with the real one except at a real tie, where either answer keeps
+        /// the predicate a single step: the predicates are monotone there.
+        /// Beyond it rounding can break a tie the other way at a larger
+        /// estimate, so larger counts ask Strided. The copy estimate is
+        /// monotone in the element count, so the domain is a count prefix,
+        /// found by bisection on the estimate alone.
+        fn exact_domain(exec: &crate::host_pool::Exec<'_>) -> Option<usize> {
+            let budget = exec.budget().get() as u128;
+            let max_cost = (2..=exec.budget().get())
+                .filter_map(core::num::NonZeroUsize::new)
+                .map(|width| exec.dispatch_cost(width))
+                .filter(|&cost| cost != core::time::Duration::MAX)
+                .map(|cost| cost.as_nanos())
+                .max()
+                .unwrap_or(0);
+            let limit = ((1u128 << 51) / (budget * budget)).checked_sub(max_cost + 1)?;
+            let estimate =
+                |elements: usize| execution::KernelClass::Copy.estimate(elements).as_nanos();
+            if estimate(0) > limit {
+                return None;
+            }
+            if estimate(usize::MAX) <= limit {
+                return Some(usize::MAX);
+            }
+            let (mut inside, mut outside) = (0usize, usize::MAX);
+            while outside - inside > 1 {
+                let middle = inside + (outside - inside) / 2;
+                if estimate(middle) <= limit {
+                    inside = middle;
+                } else {
+                    outside = middle;
+                }
+            }
+            Some(inside)
+        }
+
+        /// The token shape's widening and saturating counts and exact domain,
+        /// scanned once per shape.
         ///
         /// Why the memo is keyed by budget and team authority: one gate
         /// serves every unsplit block list of a call on the calling thread,
@@ -174,14 +232,18 @@ pub(crate) mod sealed {
             match self.memo.get() {
                 Some(scan) if scan.budget == budget && scan.team == team => scan,
                 _ => {
-                    let min_elements = Self::scan_widen(exec, self.bound);
-                    let min_full =
-                        min_elements.and_then(|from| Self::scan_full(exec, self.bound, from));
+                    let exact = Self::exact_domain(exec);
+                    let bound = exact.map(|exact| exact.min(self.bound));
+                    let min_elements = bound.and_then(|bound| Self::scan_widen(exec, bound));
+                    let min_full = bound
+                        .zip(min_elements)
+                        .and_then(|(bound, from)| Self::scan_full(exec, bound, from));
                     let scan = GateScan {
                         budget,
                         team,
                         min_elements,
                         min_full,
+                        exact,
                     };
                     self.memo.set(Some(scan));
                     scan
@@ -189,36 +251,59 @@ pub(crate) mod sealed {
             }
         }
 
-        /// Exactly `parallel_width(exec, Copy, elements) > 1`, in O(1) once
-        /// the token shape's threshold is known (a count past `bound` that
-        /// the threshold cannot decide asks Strided directly).
+        /// `elements` against a threshold scanned up to `min(bound, exact)`:
+        /// `Some` answer where the threshold decides it exactly (below the
+        /// scanned range by the threshold, above it by monotonicity inside
+        /// the exact domain), `None` where Strided must be asked.
+        fn decide(
+            &self,
+            scan: GateScan,
+            threshold: Option<usize>,
+            elements: usize,
+        ) -> Option<bool> {
+            let exact = scan.exact?;
+            if elements > exact {
+                return None;
+            }
+            match threshold {
+                Some(min) => Some(elements >= min),
+                None if elements <= self.bound => Some(false),
+                None => None,
+            }
+        }
+
+        /// Strided's own width for a copy of `elements` on `exec`.
+        fn width(exec: &crate::host_pool::Exec<'_>, elements: usize) -> usize {
+            #[cfg(test)]
+            WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
+            execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
+        }
+
+        /// Exactly `parallel_width(exec, Copy, elements) > 1`: O(1) inside
+        /// the token's exact domain once its threshold is known, Strided's
+        /// own answer outside it.
         #[inline]
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
             if exec.is_serial() {
                 return false;
             }
-            match self.thresholds(exec).min_elements {
-                Some(min) => elements >= min,
-                None if elements > self.bound => {
-                    #[cfg(test)]
-                    WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
-                    execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
-                        > 1
-                }
-                None => false,
-            }
+            let scan = self.thresholds(exec);
+            self.decide(scan, scan.min_elements, elements)
+                .unwrap_or_else(|| Self::width(exec, elements) > 1)
         }
 
-        /// Exactly `parallel_width(exec, Copy, elements) == budget` for
-        /// `elements <= bound`, in O(1) once the token shape's thresholds are
-        /// known: whether a copy of `elements` uses the whole token.
+        /// Exactly `parallel_width(exec, Copy, elements) == budget`, whether
+        /// a copy of `elements` uses the whole token (always on a serial
+        /// one): O(1) inside the token's exact domain once its threshold is
+        /// known, Strided's own answer outside it.
         #[inline]
         pub(crate) fn saturates(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
-            !exec.is_serial()
-                && self
-                    .thresholds(exec)
-                    .min_full
-                    .is_some_and(|min| elements >= min)
+            if exec.is_serial() {
+                return true;
+            }
+            let scan = self.thresholds(exec);
+            self.decide(scan, scan.min_full, elements)
+                .unwrap_or_else(|| Self::width(exec, elements) == exec.budget().get())
         }
     }
 
