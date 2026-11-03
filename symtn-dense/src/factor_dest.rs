@@ -22,8 +22,8 @@ pub enum FactorPlacement {
     /// factor order, each conjugate-transposed (per batch item), the
     /// spectrum unchanged. QR of `A` is placed as the LQ of `A^H`
     /// (`l = R^H`, `q = Q^H`); the compact SVD of `A` as the compact SVD of
-    /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`). Hermitian eigendecompositions
-    /// and LQ refuse it.
+    /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`). Hermitian eigendecompositions,
+    /// LQ, full QR and the QR null basis refuse it.
     Adjoint,
 }
 
@@ -48,8 +48,9 @@ impl FactorFailure {
 }
 
 /// The destinations of one input of a batched factorization, in the op's
-/// owned output order: `Qr` `[q, r, -]`, `Lq` `[l, q, -]`, `Svd`
-/// `[u, s, vt]`, `Eigh` `[values, vectors, -]` (`-` is `None`).
+/// owned output order: `Qr` and `QrFull` `[q, r, -]`, `QrNull` `[n, -, -]`,
+/// `Lq` `[l, q, -]`, `Svd` `[u, s, vt]`, `Eigh` `[values, vectors, -]` (`-`
+/// is `None`).
 ///
 /// Each factor view has the input's dtype and each spectrum (`s`, eigh
 /// `values`) the input's real counterpart (`f32` for `f32`/`c32`, `f64` for
@@ -58,7 +59,8 @@ impl FactorFailure {
 /// sets: for an `m x n` input with trailing batch dimensions `b..` and
 /// `k = min(m, n)`, `AsComputed` QR is `[m, k, b..]`, `[k, n, b..]` and
 /// `Adjoint` QR `[n, k, b..]`, `[k, m, b..]`; LQ is `[m, k, b..]`,
-/// `[k, n, b..]`; SVD adds `s` of shape
+/// `[k, n, b..]`; full QR is `[m, m, b..]`, `[m, n, b..]` and the QR null
+/// basis `[m, m - k, b..]`; SVD adds `s` of shape
 /// `[k, b..]` between them; eigh of `n x n` is `[n, b..]`, `[n, n, b..]`.
 #[derive(Debug)]
 pub struct FactorDest<'a> {
@@ -87,7 +89,11 @@ const ENTRY: &str = "factorize_batch_into";
 /// without a destination form.
 fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
     match op {
-        DenseFactorization::Qr | DenseFactorization::Lq | DenseFactorization::Eigh => Ok(2),
+        DenseFactorization::QrNull => Ok(1),
+        DenseFactorization::Qr
+        | DenseFactorization::Lq
+        | DenseFactorization::QrFull
+        | DenseFactorization::Eigh => Ok(2),
         DenseFactorization::Svd => Ok(3),
         _ => Err(DenseError::Unsupported {
             op: ENTRY,
@@ -130,6 +136,9 @@ fn head(
         (DenseFactorization::Eigh, 0, _) => ([m, 0], 1),
         (DenseFactorization::Eigh, _, _) => ([m, m], 2),
         (DenseFactorization::Svd, 1, _) => ([k, 0], 1),
+        (DenseFactorization::QrFull, 0, _) => ([m, m], 2),
+        (DenseFactorization::QrFull, _, _) => ([m, n], 2),
+        (DenseFactorization::QrNull, _, _) => ([m, m - k], 2),
         (_, 0, false) => ([m, k], 2),
         (_, 0, true) => ([n, k], 2),
         (_, _, false) => ([k, n], 2),
@@ -225,8 +234,13 @@ pub(crate) fn validate(
         if present != arity || dest.outputs[..arity].iter().any(Option::is_none) {
             return Err(arity_mismatch(ENTRY, arity, present));
         }
-        if matches!(op, DenseFactorization::Eigh | DenseFactorization::Lq)
-            && dest.placement == FactorPlacement::Adjoint
+        if matches!(
+            op,
+            DenseFactorization::Eigh
+                | DenseFactorization::Lq
+                | DenseFactorization::QrFull
+                | DenseFactorization::QrNull
+        ) && dest.placement == FactorPlacement::Adjoint
         {
             return Err(DenseError::Unsupported {
                 op: ENTRY,

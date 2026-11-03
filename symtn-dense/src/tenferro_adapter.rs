@@ -1234,6 +1234,20 @@ impl DenseExecutor for DefaultDenseExecutor {
                     "the serial per-block factorization route has no lane allocator",
                 ));
             }
+            if matches!(
+                op,
+                crate::DenseFactorization::QrFull | crate::DenseFactorization::QrNull
+            ) {
+                // BLAS keeps the executor default's `[X I]` augmentation
+                // through this executor's own `qr_into`, one input after
+                // another.
+                let null = op == crate::DenseFactorization::QrNull;
+                for (index, &input) in inputs.iter().enumerate() {
+                    let outcome = crate::executor::full_qr_by_qr_into(self, engine, input, null);
+                    sink(index, outcome)?;
+                }
+                return Ok(());
+            }
             factorize_batch_serial(engine, op, inputs, sink)
         }
     }
@@ -2286,7 +2300,7 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
 }
 
 /// Whether the native provider's batch of `op` searches a lane allocation:
-/// QR and LQ batches keep the baseline placement and general
+/// the QR family's batches keep the baseline placement and general
 /// eigendecompositions run per matrix on the whole engine.
 #[cfg(not(any(
     feature = "provider-inject",
@@ -2294,7 +2308,7 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
 )))]
 fn searched(op: crate::DenseFactorization) -> bool {
     use crate::DenseFactorization as Op;
-    !matches!(op, Op::Qr | Op::Lq | Op::Eig)
+    !matches!(op, Op::Qr | Op::Lq | Op::QrFull | Op::QrNull | Op::Eig)
 }
 
 pub(crate) const LANE_ALLOCATION_OP: &str = "lane_allocation";
@@ -2428,6 +2442,9 @@ fn factorize_batch_serial(
         DenseFactorization::Eig => "eig_read",
         DenseFactorization::EigVals => "eig_values",
         DenseFactorization::Lq => "qr_read",
+        DenseFactorization::QrFull | DenseFactorization::QrNull => {
+            unreachable!("full QR and its null basis run through `qr_into` (`factorize_batch`)")
+        }
     };
     let mut lq = crate::executor::AdjointQrLq::for_inputs(inputs);
     let solve =
@@ -2435,10 +2452,12 @@ fn factorize_batch_serial(
             let input = TensorRead::from_view(tenferro_view(input)?);
             let tensors = match op {
                 DenseFactorization::Svd => input.svd_read(exec).map(|(u, s, vt)| vec![u, s, vt]),
-                // LQ reaches this only with its staged adjoint (below).
-                DenseFactorization::Qr | DenseFactorization::Lq => {
-                    input.qr_read(exec).map(|(q, r)| vec![q, r])
-                }
+                // LQ reaches this only with its staged adjoint (below); full
+                // QR never reaches it (see `entry`).
+                DenseFactorization::Qr
+                | DenseFactorization::Lq
+                | DenseFactorization::QrFull
+                | DenseFactorization::QrNull => input.qr_read(exec).map(|(q, r)| vec![q, r]),
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
                 DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
                 DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),

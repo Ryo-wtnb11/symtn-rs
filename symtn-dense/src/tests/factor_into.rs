@@ -94,6 +94,8 @@ fn dest_shapes(
         DenseFactorization::Svd if adjoint => [with(&[n, k]), with(&[k]), with(&[k, m])],
         DenseFactorization::Svd => [with(&[m, k]), with(&[k]), with(&[k, n])],
         DenseFactorization::Eigh => [with(&[m]), with(&[m, m]), vec![]],
+        DenseFactorization::QrFull => [with(&[m, m]), with(&[m, n]), vec![]],
+        DenseFactorization::QrNull => [with(&[m, m - k]), vec![], vec![]],
         _ => unreachable!(),
     }
 }
@@ -113,7 +115,13 @@ impl<T: Elem> Buffers<T> {
             factors: factor_shapes.map(|shape| vec![T::make(fill); len(shape)]),
             spectrum: vec![
                 T::Real::make(fill);
-                if matches!(op, DenseFactorization::Qr | DenseFactorization::Lq) {
+                if matches!(
+                    op,
+                    DenseFactorization::Qr
+                        | DenseFactorization::Lq
+                        | DenseFactorization::QrFull
+                        | DenseFactorization::QrNull
+                ) {
                     0
                 } else {
                     len(spectrum_shape)
@@ -150,6 +158,7 @@ impl<T: Elem> Buffers<T> {
                 Some(T::write(view(a, 1))),
                 None,
             ],
+            DenseFactorization::QrNull => [Some(T::write(view(a, 0))), None, None],
             _ => [Some(T::write(view(a, 0))), Some(T::write(view(b, 1))), None],
         };
         FactorDest::new(outputs, placement)
@@ -164,6 +173,7 @@ impl<T: Elem> Buffers<T> {
                 vec![factor(&self.factors[0]), spectrum, factor(&self.factors[1])]
             }
             DenseFactorization::Eigh => vec![spectrum, factor(&self.factors[0])],
+            DenseFactorization::QrNull => vec![factor(&self.factors[0])],
             _ => vec![factor(&self.factors[0]), factor(&self.factors[1])],
         }
     }
@@ -250,10 +260,10 @@ mod native {
     /// order with the spectrum unchanged; for every scalar, op, engine width
     /// and batch policy, over unequal rectangular blocks, a two-item input
     /// and empty extents. The owned batch is checked against independent
-    /// constructions in `block_svd` and `block_qr`, and owned LQ by its
-    /// reconstruction `L Q = X` on a complex input in `executor`, so a
-    /// destination LQ whose transpose conjugated fails here for complex
-    /// scalars.
+    /// constructions in `block_svd` and `block_qr`, and owned LQ, full QR
+    /// and the QR null basis by their properties on a complex input in
+    /// `executor`, so a destination LQ whose transpose conjugated fails here
+    /// for complex scalars.
     fn destinations_match_owned<T: Elem>() {
         let shapes: &[&[usize]] = &[&[5, 3], &[2, 4], &[3, 2, 2], &[4, 4], &[2, 0], &[3, 2, 0]];
         let square: &[&[usize]] = &[&[4, 4], &[2, 2], &[3, 3, 2], &[1, 1], &[0, 0], &[2, 2, 0]];
@@ -261,6 +271,8 @@ mod native {
             (DenseFactorization::Qr, FactorPlacement::AsComputed),
             (DenseFactorization::Qr, FactorPlacement::Adjoint),
             (DenseFactorization::Lq, FactorPlacement::AsComputed),
+            (DenseFactorization::QrFull, FactorPlacement::AsComputed),
+            (DenseFactorization::QrNull, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::Adjoint),
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
@@ -694,25 +706,36 @@ fn qr_inputs(data: &[f64]) -> [DenseRead<'_>; 2] {
 /// Purpose: a batch is validated whole before any input is solved or any
 /// destination written: a valid first destination followed by an invalid
 /// one (count, missing output, dtype, shape, non-compact layout, adjoint
-/// eigh, an op without a destination form) is refused with its typed
-/// variant, every destination keeps its sentinel, and neither the native
-/// lanes nor a custom executor's owned entry runs.
+/// eigh, LQ, full QR or null basis, an op without a destination form) is
+/// refused with its typed variant, every destination keeps its sentinel,
+/// and neither the native lanes nor a custom executor's owned entry runs.
 #[test]
 fn destinations_are_validated_whole_before_any_solve() {
-    for op in [DenseFactorization::Qr, DenseFactorization::Lq] {
+    for op in [
+        DenseFactorization::Qr,
+        DenseFactorization::Lq,
+        DenseFactorization::QrFull,
+        DenseFactorization::QrNull,
+    ] {
         refuses_invalid_destinations(op);
     }
     no_destination_form();
 }
 
-/// [`destinations_are_validated_whole_before_any_solve`] for the two-factor
-/// `op` (QR or LQ: the same destination shapes) on `3 x 2` inputs.
+/// [`destinations_are_validated_whole_before_any_solve`] for the QR-family
+/// `op` (QR, LQ, full QR or the null basis) on `3 x 2` inputs.
 fn refuses_invalid_destinations(op: DenseFactorization) {
     let engine = &mut CpuEngine::serial();
     let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
     let inputs = qr_inputs(&data);
     let qr_shapes = || dest_shapes(op, &[3, 2], FactorPlacement::AsComputed);
-    let mut f32_q = [7.0_f32; 6];
+    // The first output's shape, and a shape it must not have.
+    let first_shape = qr_shapes()[0].clone();
+    let first_len = first_shape.iter().product::<usize>();
+    let first_strides = strides(&first_shape);
+    let mut wrong_shape = qr_shapes();
+    wrong_shape[0][1] += 1;
+    let mut f32_q = vec![7.0_f32; first_len];
     type Check = fn(&DenseError) -> bool;
     let cases: [(&str, Check); 5] = [
         ("count", |e| matches!(e, DenseError::ShapeMismatch { .. })),
@@ -727,22 +750,21 @@ fn refuses_invalid_destinations(op: DenseFactorization) {
         for native in [true, false] {
             let mut first: Buffers<f64> = Buffers::new(op, qr_shapes(), 7.0);
             let mut second: Buffers<f64> = Buffers::new(op, qr_shapes(), 7.0);
-            let wrong_shape = [vec![3, 3], vec![3, 2], vec![]];
-            let mut wide: Buffers<f64> = Buffers::new(op, wrong_shape, 7.0);
-            let padded_strides = [1usize, 4];
-            let mut padded = [7.0_f64; 8];
+            let mut wide: Buffers<f64> = Buffers::new(op, wrong_shape.clone(), 7.0);
+            let padded_strides = [1usize, first_shape[0] + 1];
+            let mut padded = vec![7.0_f64; (first_shape[0] + 1) * first_shape[1]];
             let mut dests = vec![first.dest(op, FactorPlacement::AsComputed)];
             match case {
                 "count" => {}
                 "missing output" => {
                     let mut dest = second.dest(op, FactorPlacement::AsComputed);
-                    dest.outputs_mut()[1] = None;
+                    dest.outputs_mut()[0] = None;
                     dests.push(dest);
                 }
                 "dtype" => {
                     let mut dest = second.dest(op, FactorPlacement::AsComputed);
                     dest.outputs_mut()[0] = Some(DenseWrite::F32(
-                        DenseViewMut::new(&mut f32_q, &[3, 2], &[1, 3], 0).unwrap(),
+                        DenseViewMut::new(&mut f32_q, &first_shape, &first_strides, 0).unwrap(),
                     ));
                     dests.push(dest);
                 }
@@ -750,7 +772,7 @@ fn refuses_invalid_destinations(op: DenseFactorization) {
                 _ => {
                     let mut dest = second.dest(op, FactorPlacement::AsComputed);
                     dest.outputs_mut()[0] = Some(DenseWrite::F64(
-                        DenseViewMut::new(&mut padded, &[3, 2], &padded_strides, 0).unwrap(),
+                        DenseViewMut::new(&mut padded, &first_shape, &padded_strides, 0).unwrap(),
                     ));
                     dests.push(dest);
                 }
@@ -784,8 +806,8 @@ fn refuses_invalid_destinations(op: DenseFactorization) {
     }
 }
 
-/// Ops and placements without a destination form: adjoint eigh and LQ, and
-/// values-only eigh.
+/// Ops and placements without a destination form: adjoint eigh, LQ, full
+/// QR and null basis, and values-only eigh.
 fn no_destination_form() {
     let engine = &mut CpuEngine::serial();
     let square = [2.0_f64, 0.0, 0.0, 3.0];
@@ -811,19 +833,27 @@ fn no_destination_form() {
     drop(dests);
     assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
 
-    let lq = DenseFactorization::Lq;
-    let mut buffers: Buffers<f64> = Buffers::new(
-        lq,
-        dest_shapes(lq, &[2, 2], FactorPlacement::AsComputed),
-        7.0,
-    );
-    let mut dests = vec![buffers.dest(lq, FactorPlacement::Adjoint)];
-    let error = DefaultDenseExecutor::new()
-        .factorize_batch_into(engine, lq, &eigh_input, &mut dests, &mut |_, _, _| Ok(()))
-        .unwrap_err();
-    assert!(matches!(error, DenseError::Unsupported { .. }), "{error:?}");
-    drop(dests);
-    assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
+    for op in [
+        DenseFactorization::Lq,
+        DenseFactorization::QrFull,
+        DenseFactorization::QrNull,
+    ] {
+        let mut buffers: Buffers<f64> = Buffers::new(
+            op,
+            dest_shapes(op, &[2, 2], FactorPlacement::AsComputed),
+            7.0,
+        );
+        let mut dests = vec![buffers.dest(op, FactorPlacement::Adjoint)];
+        let error = DefaultDenseExecutor::new()
+            .factorize_batch_into(engine, op, &eigh_input, &mut dests, &mut |_, _, _| Ok(()))
+            .unwrap_err();
+        assert!(
+            matches!(error, DenseError::Unsupported { .. }),
+            "{op:?}: {error:?}"
+        );
+        drop(dests);
+        assert!(buffers.factors.iter().flatten().all(|&value| value == 7.0));
+    }
 }
 
 /// Purpose: LQ's compatibility default is the owned default's: each input's

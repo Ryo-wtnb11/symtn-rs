@@ -877,7 +877,14 @@ fn null_qr_failure_preserves_input_and_builds_no_factor() {
             right_null(engine, &mut dense, &input.as_ref())
         };
 
-        assert!(matches!(result, Err(OperationError::Dense(_))));
+        assert!(
+            matches!(
+                &result,
+                Err(OperationError::Dense(DenseError::Backend { op: "qr_into", message, .. }))
+                    if message == "injected null QR failure"
+            ),
+            "{result:?}"
+        );
         assert_eq!(dense.counts().qr_into, 1);
         assert_eq!(buffer_builds_rec.factor_buffer_builds(), (0, 0));
         assert_eq!(tensor.data(), before);

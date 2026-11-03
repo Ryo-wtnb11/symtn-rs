@@ -199,6 +199,31 @@ impl DenseTensor {
         })
     }
 
+    /// A host tensor of `shape` over the column-major `data`: an output an
+    /// executor default computes into its own storage.
+    #[cfg(feature = "tenferro")]
+    pub(crate) fn host_col_major<T: tenferro_tensor::TensorScalar>(
+        shape: Vec<usize>,
+        data: Vec<T>,
+    ) -> Result<Self, DenseError> {
+        let tensor = tenferro_tensor::Tensor::from_vec_col_major(shape, data)
+            .map_err(|err| tenferro_error("DenseTensor::host_col_major", err))?;
+        Ok(Self {
+            backend: DenseBackend::Tenferro,
+            dtype: dense_dtype_from_tenferro(tensor.dtype())?,
+            inner: DenseTensorInner::Tenferro(tensor),
+        })
+    }
+
+    /// Without a backend no host tensor exists.
+    #[cfg(not(feature = "tenferro"))]
+    pub(crate) fn host_col_major<T>(_: Vec<usize>, _: Vec<T>) -> Result<Self, DenseError> {
+        Err(DenseError::Unsupported {
+            op: "DenseTensor::host_col_major",
+            message: "no host tensor backend is enabled".to_string(),
+        })
+    }
+
     /// Without a backend no tensor exists, so `like` cannot be given.
     #[cfg(not(feature = "tenferro"))]
     pub(crate) fn host_col_major_like<T>(

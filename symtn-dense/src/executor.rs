@@ -83,6 +83,22 @@ pub enum DenseFactorization {
     /// each input's adjoint with [`DenseExecutor::qr`] (`X^H = Q' R'`) and
     /// returns `[R'^H, Q'^H]`.
     Lq,
+    /// Full QR `X = Q R`: `[Q, R]` of shapes `[m, m, b..]` and `[m, n, b..]`,
+    /// `Q` unitary and `R` upper trapezoidal, in the provider's gauge. Past
+    /// the first `min(m, n)`, `Q`'s columns are an orthonormal basis of the
+    /// complement and may differ by provider. It has no per-matrix entry;
+    /// the default calls [`DenseExecutor::qr_into`] on `X` when `m <= n`,
+    /// otherwise on the `m x (n + m)` block `[X I_m]`, keeping the first `n`
+    /// columns of its `R`.
+    QrFull,
+    /// The shape-based null basis of `X`'s columns (MatrixAlgebraKit
+    /// `qr_null`): `[N]` of shape `[m, m - min(m, n), b..]` with orthonormal
+    /// columns orthogonal to every column of `X`, the trailing columns of a
+    /// full QR's `Q`; any orthonormal basis of that complement, which may
+    /// differ by provider. It has no per-matrix entry; the default calls
+    /// [`DenseExecutor::qr_into`] on `[X I_m]` when `m > n` and keeps its
+    /// `Q`'s last `m - n` columns, and solves nothing when `m <= n`.
+    QrNull,
 }
 
 mod sealed {
@@ -157,7 +173,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     ///
     /// The default solves input `i` with the per-matrix entry (for
     /// [`DenseFactorization::Lq`], [`Self::qr`] of the input's adjoint,
-    /// written into one scratch sized for the largest input) and calls
+    /// written into one scratch sized for the largest input; for
+    /// [`DenseFactorization::QrFull`] and [`DenseFactorization::QrNull`],
+    /// [`Self::qr_into`] as each variant states) and calls
     /// `sink(i, outcome)` before solving input `i + 1`, so an executor using
     /// it sees the same call sequence as a per-matrix loop that checks each
     /// output before the next solve. An executor whose per-call entry carries
@@ -182,14 +200,17 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::Eig => self.eig(engine, input),
                 DenseFactorization::EigVals => self.eig_vals(engine, input).map(|v| vec![v]),
                 DenseFactorization::Lq => lq.factor(input, |adjoint| self.qr(engine, adjoint)),
+                DenseFactorization::QrFull => full_qr_by_qr_into(self, engine, input, false),
+                DenseFactorization::QrNull => full_qr_by_qr_into(self, engine, input, true),
             };
             sink(index, outcome)?;
         }
         Ok(())
     }
 
-    /// [`Self::factorize_batch`] of the compact QR, compact LQ, compact SVD or
-    /// Hermitian eigendecomposition `op` with each input's outputs written into its
+    /// [`Self::factorize_batch`] of the compact QR, compact LQ, full QR, QR
+    /// null basis, compact SVD or Hermitian eigendecomposition `op` with each
+    /// input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
     /// shapes, dtypes and [`crate::FactorPlacement`]); any other `op` is
     /// [`DenseError::Unsupported`].
@@ -986,10 +1007,15 @@ impl AdjointQrLq {
     }
 }
 
-/// A scalar the LQ default stages: its conjugate, and its typed reads.
+/// A scalar the LQ and full-QR defaults stage: its conjugate, its typed
+/// reads and writes, and its owned outputs.
 trait AdjointScalar: Copy {
+    const ZERO: Self;
+    const ONE: Self;
     fn conj(self) -> Self;
     fn read(view: DenseView<'_, Self>) -> DenseRead<'_>;
+    fn write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_>;
+    fn owned(shape: Vec<usize>, data: Vec<Self>) -> Result<DenseTensor, DenseError>;
     fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
     fn tensor(
         like: &DenseTensor,
@@ -999,14 +1025,22 @@ trait AdjointScalar: Copy {
 }
 
 macro_rules! adjoint_scalar {
-    ($ty:ty, $variant:ident, $slice:ident, |$value:ident| $conj:expr) => {
+    ($ty:ty, $variant:ident, $slice:ident, $zero:expr, $one:expr, |$value:ident| $conj:expr) => {
         impl AdjointScalar for $ty {
+            const ZERO: Self = $zero;
+            const ONE: Self = $one;
             fn conj(self) -> Self {
                 let $value = self;
                 $conj
             }
             fn read(view: DenseView<'_, Self>) -> DenseRead<'_> {
                 DenseRead::$variant(view)
+            }
+            fn write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_> {
+                DenseWrite::$variant(view)
+            }
+            fn owned(shape: Vec<usize>, data: Vec<Self>) -> Result<DenseTensor, DenseError> {
+                DenseTensor::host_col_major(shape, data)
             }
             fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
                 tensor.$slice()
@@ -1022,14 +1056,24 @@ macro_rules! adjoint_scalar {
     };
 }
 
-adjoint_scalar!(f32, F32, as_f32_slice, |value| value);
-adjoint_scalar!(f64, F64, as_f64_slice, |value| value);
-adjoint_scalar!(Complex32, C32, as_c32_slice, |value| {
-    num_complex::Complex::conj(&value)
-});
-adjoint_scalar!(Complex64, C64, as_c64_slice, |value| {
-    num_complex::Complex::conj(&value)
-});
+adjoint_scalar!(f32, F32, as_f32_slice, 0.0, 1.0, |value| value);
+adjoint_scalar!(f64, F64, as_f64_slice, 0.0, 1.0, |value| value);
+adjoint_scalar!(
+    Complex32,
+    C32,
+    as_c32_slice,
+    Complex32::new(0.0, 0.0),
+    Complex32::new(1.0, 0.0),
+    |value| num_complex::Complex::conj(&value)
+);
+adjoint_scalar!(
+    Complex64,
+    C64,
+    as_c64_slice,
+    Complex64::new(0.0, 0.0),
+    Complex64::new(1.0, 0.0),
+    |value| num_complex::Complex::conj(&value)
+);
 
 /// Writes the adjoint of each `m x n` item of the nonempty strided
 /// `[m, n, b..]` `view` into `output` as column-major `[n, m, b..]`.
@@ -1128,4 +1172,139 @@ fn lq_of_adjoint<T: AdjointScalar>(
         T::tensor(&outputs[1], dims(m, k), adjoint_items(r_prime, k, m))?,
         T::tensor(&outputs[0], dims(k, n), adjoint_items(q_prime, n, k))?,
     ])
+}
+
+/// [`DenseFactorization::QrFull`] (`null` false) or
+/// [`DenseFactorization::QrNull`] (`null` true) of one input through
+/// `executor`'s [`DenseExecutor::qr_into`], as the variants document: `X`
+/// itself when `m <= n`, else the `m x (n + m)` block `[X I_m]` per batch
+/// item, whose `Q` is square and whose upper-trapezoidal `R` makes `Q`'s
+/// first `n` columns span a superspace of `X`'s columns whatever its rank.
+/// An input the staging cannot read (rank below 2, or a dtype without a
+/// factorization) goes to [`DenseExecutor::qr`] unchanged, so it is refused
+/// with `qr`'s own error.
+pub(crate) fn full_qr_by_qr_into<E: DenseExecutor + ?Sized>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+    null: bool,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    match input {
+        DenseRead::F32(view) if view.shape().len() >= 2 => full_qr_of(executor, engine, view, null),
+        DenseRead::F64(view) if view.shape().len() >= 2 => full_qr_of(executor, engine, view, null),
+        DenseRead::C32(view) if view.shape().len() >= 2 => full_qr_of(executor, engine, view, null),
+        DenseRead::C64(view) if view.shape().len() >= 2 => full_qr_of(executor, engine, view, null),
+        other => {
+            executor.qr(engine, other)?;
+            Err(DenseError::Unsupported {
+                op: "qr_full",
+                message: format!(
+                    "full QR input of dtype {:?} and rank {}",
+                    other.dtype(),
+                    other.shape().len()
+                ),
+            })
+        }
+    }
+}
+
+/// Compact column-major strides of `shape`; a nonempty payload's element
+/// count must fit `usize` (an empty one never addresses its strides).
+fn col_major_strides(shape: &[usize]) -> Result<Vec<usize>, DenseError> {
+    let empty = shape.contains(&0);
+    let mut strides = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &extent in shape {
+        strides.push(stride);
+        stride = match stride.checked_mul(extent) {
+            Some(next) => next,
+            None if empty => 0,
+            None => return Err(DenseError::ElementCountOverflow),
+        };
+    }
+    Ok(strides)
+}
+
+fn full_qr_of<E: DenseExecutor + ?Sized, T: AdjointScalar>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    view: DenseView<'_, T>,
+    null: bool,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    let shape = view.shape();
+    let (m, n, batch) = (shape[0], shape[1], &shape[2..]);
+    let dims = |a: usize, b: usize| [&[a, b][..], batch].concat();
+    if null && m <= n {
+        return Ok(vec![T::owned(dims(m, 0), Vec::new())?]);
+    }
+    let len = |cols: usize| checked_count(&dims(m, cols));
+    let q_shape = dims(m, m);
+    let q_strides = col_major_strides(&q_shape)?;
+    let mut q = vec![T::ZERO; len(m)?];
+    if m <= n {
+        let r_shape = dims(m, n);
+        let r_strides = col_major_strides(&r_shape)?;
+        let mut r = vec![T::ZERO; len(n)?];
+        executor.qr_into(
+            engine,
+            T::read(view),
+            T::write(DenseViewMut::new(&mut q, &q_shape, &q_strides, 0)?),
+            T::write(DenseViewMut::new(&mut r, &r_shape, &r_strides, 0)?),
+        )?;
+        return Ok(vec![T::owned(q_shape, q)?, T::owned(r_shape, r)?]);
+    }
+    let width = n + m;
+    let augmented_shape = dims(m, width);
+    let augmented_strides = col_major_strides(&augmented_shape)?;
+    let mut augmented = vec![T::ZERO; len(width)?];
+    let mut r = vec![T::ZERO; augmented.len()];
+    let (data, strides) = (view.data(), view.strides());
+    for (item, block) in augmented.chunks_exact_mut(m * width).enumerate() {
+        let mut base = view.offset();
+        let mut rest = item;
+        for (&extent, &stride) in batch.iter().zip(&strides[2..]) {
+            base += rest % extent * stride;
+            rest /= extent;
+        }
+        for col in 0..n {
+            for row in 0..m {
+                block[row + m * col] = data[base + row * strides[0] + col * strides[1]];
+            }
+        }
+        for row in 0..m {
+            block[m * n + row * m + row] = T::ONE;
+        }
+    }
+    executor.qr_into(
+        engine,
+        T::read(DenseView::new(
+            &augmented,
+            &augmented_shape,
+            &augmented_strides,
+            0,
+        )?),
+        T::write(DenseViewMut::new(&mut q, &q_shape, &q_strides, 0)?),
+        T::write(DenseViewMut::new(
+            &mut r,
+            &augmented_shape,
+            &augmented_strides,
+            0,
+        )?),
+    )?;
+    // Per item, `Q`'s last `m - n` columns (null) or `R`'s first `n`.
+    let (source, cols, skip, keep) = if null {
+        (&q, m, m * n, m * (m - n))
+    } else {
+        (&r, width, 0, m * n)
+    };
+    let kept = source
+        .chunks_exact(m * cols)
+        .flat_map(|item| &item[skip..skip + keep])
+        .copied()
+        .collect();
+    if null {
+        Ok(vec![T::owned(dims(m, m - n), kept)?])
+    } else {
+        Ok(vec![T::owned(q_shape, q)?, T::owned(dims(m, n), kept)?])
+    }
 }

@@ -1,7 +1,8 @@
-//! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, LQ, Hermitian eigendecomposition, their values-only forms and general
-//! eigenvalues): one tlinalg call per block, the blocks spread over the lane
-//! driver's lanes on the caller's engine.
+//! The native provider's factorizations of independent blocks (compact SVD,
+//! compact and full QR, the QR null basis, LQ, Hermitian eigendecomposition,
+//! their values-only forms and general eigenvalues): tlinalg calls per
+//! block, the blocks spread over the lane driver's lanes on the caller's
+//! engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
 //! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
@@ -13,12 +14,14 @@
 //! the provider's `Vec` entry: its length is the factor's logical size and it
 //! carries no recycled-buffer history (its capacity is the provider's
 //! reservation, not necessarily the length). The destination batch
-//! ([`factorize_into`], compact QR, LQ, compact SVD and Hermitian eigh) writes
+//! ([`factorize_into`], compact QR, LQ, full QR, the QR null basis, compact
+//! SVD and Hermitian eigh) writes
 //! each block's factors into its caller-owned destination through the
 //! provider's initialized-destination entry (`*_into_init`), with one
 //! workspace and one typed scratch per lane, sized before the lane's first
 //! block from that lane's blocks and child context and dropped when the lane
-//! finishes.
+//! finishes; a tall full QR or null basis goes through tlinalg's compact
+//! Householder kernel, whose own workspace is still allocated per block.
 
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
@@ -40,6 +43,7 @@ use crate::{
     DenseError, DenseRead, DenseTensor, DenseView, DenseWrite, FactorDest, FactorFailure,
     FactorPlacement,
 };
+use tlinalg::householder::{self, ReflectorShape};
 
 /// One compact factorization the provider runs per block. The shared code
 /// owns validation, costing and scheduling; an implementation owns only its
@@ -206,6 +210,251 @@ fn transpose_items<T: Copy>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
     transpose
 }
 
+/// Full QR: `[Q, R]` of shapes `[m, m, b..]`, `[m, n, b..]`. When `m <= n`
+/// it is the compact QR ([`Qr`]), whose `Q` is already square. Otherwise
+/// the provider's compact Householder factor of `X` has its reflectors
+/// applied to `I_m` (MatrixAlgebraKit `qr_full`): `O(m n^2 + m^2 n)`, no
+/// `[X I]` augmentation; `R` is the factor's upper trapezoid. Both in the
+/// provider's gauge.
+pub(crate) struct QrFull;
+
+impl Factor for QrFull {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
+    const SEARCHED: bool = false;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        if m <= n {
+            return Qr::estimates::<T>(m, n);
+        }
+        householder_estimates::<T>(m, n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        if m <= n {
+            return Qr::factor::<T>(raw, [m, n], batch, exec);
+        }
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, m], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
+        let mut r = vec![T::ZERO; checked_len(&[m, n, items])?];
+        let mut q = vec![T::ZERO; checked_len(&[m, m, items])?];
+        match raw {
+            Some(raw) => {
+                compact_copy(raw, &mut r);
+                owned_householder::<T>(&mut r, [m, n], items, &mut q, 0, exec)
+                    .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+                zero_below_diagonal(&mut r, m, n);
+            }
+            None => identity_columns(&mut q, m, m, 0),
+        }
+        Ok(vec![
+            output::<Self, T>(&[m, m], batch, q)?,
+            output::<Self, T>(&[m, n], batch, r)?,
+        ])
+    }
+}
+
+/// The shape-based QR null basis: `[N]` of shape `[m, m - k, b..]` with
+/// `k = min(m, n)`, the reflectors of `X`'s compact Householder factor
+/// applied to `[0; I_{m-k}]` (MatrixAlgebraKit `qr_null`), written at its
+/// final size; nothing is solved when `m <= n`.
+pub(crate) struct QrNull;
+
+impl Factor for QrNull {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
+    const SEARCHED: bool = false;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        householder_estimates::<T>(m, n, m - m.min(n))
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let null = m - m.min(n);
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, null], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
+        let mut basis = vec![T::ZERO; checked_len(&[m, null, items])?];
+        match raw {
+            Some(raw) if null > 0 => {
+                let mut state = vec![T::ZERO; checked_len(&[m, n, items])?];
+                compact_copy(raw, &mut state);
+                owned_householder::<T>(&mut state, [m, n], items, &mut basis, n, exec)
+                    .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+            }
+            Some(_) => {}
+            None => identity_columns(&mut basis, m, null, m - null),
+        }
+        Ok(vec![output::<Self, T>(&[m, null], batch, basis)?])
+    }
+}
+
+/// tlinalg's estimates of a compact Householder factor of `m x n` plus its
+/// reflectors applied to `cols` target columns.
+fn householder_estimates<T: tlinalg::FaerScalar>(m: usize, n: usize, cols: usize) -> [f64; 2] {
+    let shape = reflector_shape(m, n, cols);
+    [
+        householder::estimate_work::<T>(m, n)
+            + householder::estimate_apply_reflectors_work::<T>(shape),
+        householder::estimate_payback_work::<T>(m, n)
+            + householder::estimate_apply_reflectors_payback_work::<T>(shape),
+    ]
+}
+
+/// Every reflector of an `m x n` compact factor applied to `cols` columns.
+fn reflector_shape(m: usize, n: usize, cols: usize) -> ReflectorShape {
+    ReflectorShape {
+        rows: m,
+        a_cols: n,
+        cols,
+        k: m.min(n),
+    }
+}
+
+/// The product of `extents`, or [`DenseError::ElementCountOverflow`].
+fn checked_len(extents: &[usize]) -> Result<usize, DenseError> {
+    extents
+        .iter()
+        .try_fold(1usize, |len, &extent| len.checked_mul(extent))
+        .ok_or(DenseError::ElementCountOverflow)
+}
+
+/// Copies the nonempty strided `raw` into `out` as compact column-major
+/// items, in batch order.
+fn compact_copy<T: Copy>(raw: RawStridedRef<'_, T>, out: &mut [T]) {
+    let (dims, strides, data) = (raw.dims(), raw.strides(), raw.data());
+    let (m, n) = (dims[0], dims[1]);
+    for (item, block) in out.chunks_exact_mut(m * n).enumerate() {
+        let mut base = raw.offset();
+        let mut rest = item;
+        for (&extent, &stride) in dims[2..].iter().zip(&strides[2..]) {
+            base += (rest % extent) as isize * stride;
+            rest /= extent;
+        }
+        for col in 0..n {
+            for row in 0..m {
+                let at = base + row as isize * strides[0] + col as isize * strides[1];
+                // `RawStridedRef::new` proved every reachable offset in range.
+                block[row + m * col] = data[at as usize];
+            }
+        }
+    }
+}
+
+/// Writes `[0; I_cols; 0]` into each column-major `m x cols` item of `c`,
+/// the identity block starting at row `first`.
+fn identity_columns<T: Scalar>(c: &mut [T], m: usize, cols: usize, first: usize) {
+    c.fill(T::ZERO);
+    if m * cols == 0 {
+        return;
+    }
+    for item in c.chunks_exact_mut(m * cols) {
+        for col in 0..cols {
+            item[first + col + m * col] = T::ONE;
+        }
+    }
+}
+
+/// Zeroes the strictly lower triangle of each column-major `m x n` item,
+/// leaving the upper trapezoid `R` of a compact Householder factor.
+fn zero_below_diagonal<T: Scalar>(r: &mut [T], m: usize, n: usize) {
+    if m * n == 0 {
+        return;
+    }
+    for item in r.chunks_exact_mut(m * n) {
+        for col in 0..n.min(m) {
+            item[col + 1 + m * col..m * (col + 1)].fill(T::ZERO);
+        }
+    }
+}
+
+/// Factors each compact `m x n` item of `state` in place (`R` above the
+/// diagonal, reflectors below, coefficients into `coeff`), then sets each
+/// `m x cols` item of `target` to `[0; I_cols]` with the identity from row
+/// `first` and applies `Q` to it: `Q`'s columns `first..first + cols`.
+///
+/// Why the `Vec` coefficient wrapper: `compact_factor_into` writes them as
+/// `MaybeUninit` while `apply_reflectors_into` reads `&[T]`; joining the two
+/// would need `unsafe`, so the lane lends a reused `Vec` instead and only the
+/// factor's own workspace is allocated per call.
+#[allow(clippy::too_many_arguments)]
+fn householder_into<T: Scalar>(
+    state: &mut [T],
+    [m, n]: [usize; 2],
+    batch: usize,
+    coeff: &mut Vec<T>,
+    target: &mut [T],
+    first: usize,
+    workspace: &mut [MaybeUninit<u8>],
+    exec: &mut Exec<'_>,
+) -> tlinalg::Result<()> {
+    let cols = target.len().checked_div(m * batch).unwrap_or(0);
+    householder::compact_factor(tlinalg::Op::HouseholderQr, m, n, batch, state, coeff, exec)?;
+    identity_columns(target, m, cols, first);
+    householder::apply_reflectors_into(
+        tlinalg::Op::HouseholderQrQColumns,
+        reflector_shape(m, n, cols),
+        batch,
+        state,
+        coeff,
+        target,
+        false,
+        workspace,
+        exec,
+    )
+}
+
+/// [`householder_into`] with a fresh coefficient `Vec` and reflector
+/// workspace: the owned batch's per-block storage.
+fn owned_householder<T: Scalar>(
+    state: &mut [T],
+    dims @ [m, n]: [usize; 2],
+    batch: usize,
+    target: &mut [T],
+    first: usize,
+    exec: &mut Exec<'_>,
+) -> tlinalg::Result<()> {
+    let cols = target.len().checked_div(m * batch).unwrap_or(0);
+    let bytes = householder::apply_reflectors_workspace::<T>(
+        reflector_shape(m, n, cols),
+        batch,
+        false,
+        exec,
+    )?;
+    let mut workspace = vec![MaybeUninit::uninit(); bytes];
+    householder_into(
+        state,
+        dims,
+        batch,
+        &mut Vec::new(),
+        target,
+        first,
+        &mut workspace,
+        exec,
+    )
+}
+
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
 /// (real) and `[n, n, b..]`.
 pub(crate) struct Eigh;
@@ -368,8 +617,12 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
     /// real one, so a destination batch stages it in typed scratch.
     const COMPLEX: bool;
 
+    /// Zero and one, for identity targets and zeroed scratch.
+    const ZERO: Self;
+    const ONE: Self;
+
     /// The lane's typed scratch of this scalar.
-    fn scratch(lane: &mut TypedScratch) -> &mut [Self];
+    fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self>;
 
     /// The compact payload of a destination of this scalar, `None` for
     /// another dtype.
@@ -403,12 +656,15 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
 // `TensorScalar::Real` only once the scalar is concrete.
 macro_rules! scalar {
     ($ty:ty, $complex:ty, $variant:ident, $real_variant:ident, $slot:ident, $is_complex:expr,
+     $zero:expr, $one:expr,
      |$values:ident| $real:expr, |$dest:ident, $scratch:ident, $solve:ident| $spectrum:expr) => {
         impl Scalar for $ty {
+            const ZERO: Self = $zero;
+            const ONE: Self = $one;
             type EigScalar = $complex;
             const COMPLEX: bool = $is_complex;
 
-            fn scratch(lane: &mut TypedScratch) -> &mut [Self] {
+            fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self> {
                 &mut lane.$slot
             }
 
@@ -476,6 +732,8 @@ scalar!(
     F32,
     f32,
     false,
+    0.0,
+    1.0,
     |values| values,
     |dest, _scratch, solve| solve(dest)
 );
@@ -486,6 +744,8 @@ scalar!(
     F64,
     f64,
     false,
+    0.0,
+    1.0,
     |values| values,
     |dest, _scratch, solve| solve(dest)
 );
@@ -496,6 +756,8 @@ scalar!(
     F32,
     c32,
     true,
+    Complex32::new(0.0, 0.0),
+    Complex32::new(1.0, 0.0),
     |values| values.into_iter().map(|value| value.re).collect(),
     |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
 );
@@ -506,6 +768,8 @@ scalar!(
     F64,
     c64,
     true,
+    Complex64::new(0.0, 0.0),
+    Complex64::new(1.0, 0.0),
     |values| values.into_iter().map(|value| value.re).collect(),
     |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
 );
@@ -632,6 +896,8 @@ pub(crate) fn factorize(
         }),
         Op::EigVals => factorize_batch::<EigVals>(engine, allocation, inputs, sink),
         Op::Lq => factorize_batch::<Lq>(engine, allocation, inputs, sink),
+        Op::QrFull => factorize_batch::<QrFull>(engine, allocation, inputs, sink),
+        Op::QrNull => factorize_batch::<QrNull>(engine, allocation, inputs, sink),
     }
 }
 
@@ -694,6 +960,16 @@ pub(crate) trait FactorInto: Factor {
     /// factors.
     fn scratch_len<T: Scalar>(dims: [usize; 2], batch: usize, placement: FactorPlacement) -> usize;
 
+    /// The Householder coefficients one input needs (the capacity of the
+    /// lane's reused coefficient `Vec`).
+    fn coeff_len(_dims: [usize; 2], _batch: usize) -> usize {
+        0
+    }
+
+    /// Writes the outputs of an input with a zero extent, whose solve is
+    /// skipped; most factorizations have nothing to write.
+    fn empty_into<T: Scalar>(_dims: [usize; 2], _outputs: &mut [Option<DenseWrite<'_>>; 3]) {}
+
     /// Solves one input into `outputs` (validated destinations of `T`).
     #[allow(clippy::too_many_arguments)]
     fn factor_into<T: Scalar>(
@@ -704,6 +980,7 @@ pub(crate) trait FactorInto: Factor {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        coeff: &mut Vec<T>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()>;
 }
@@ -752,6 +1029,7 @@ impl FactorInto for Qr {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut Vec<T>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()> {
         let [first, second, _] = outputs;
@@ -802,6 +1080,7 @@ impl FactorInto for Lq {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut Vec<T>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()> {
         let [first, second, _] = outputs;
@@ -812,6 +1091,132 @@ impl FactorInto for Lq {
         map_transposed_items(r, k, m, slot::<T>(first), |value| value);
         map_transposed_items(q, n, k, slot::<T>(second), |value| value);
         Ok(())
+    }
+}
+
+impl FactorInto for QrFull {
+    fn workspace<T: Scalar>(
+        dims @ [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        if m <= n {
+            return Qr::workspace::<T>(dims, batch, exec);
+        }
+        householder::apply_reflectors_workspace::<T>(reflector_shape(m, n, m), batch, false, exec)
+    }
+
+    fn scratch_len<T: Scalar>(_: [usize; 2], _: usize, _: FactorPlacement) -> usize {
+        0
+    }
+
+    fn coeff_len([m, n]: [usize; 2], batch: usize) -> usize {
+        if m <= n {
+            0
+        } else {
+            n * batch
+        }
+    }
+
+    // `[m, 0]`: `Q = I_m`, `R` empty.
+    fn empty_into<T: Scalar>([m, _]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
+        identity_columns(slot::<T>(&mut outputs[0]), m, m, 0);
+    }
+
+    // `m <= n`: the compact QR's destinations are the full ones. Otherwise
+    // the input is copied once into `r`, factored there in place, and its
+    // reflectors applied to `q = I_m`; `R` is the factor's upper trapezoid.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        placement: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        coeff: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        if m <= n {
+            return Qr::factor_into::<T>(
+                raw,
+                [m, n],
+                batch,
+                outputs,
+                placement,
+                workspace,
+                scratch,
+                coeff,
+                exec,
+            );
+        }
+        let [first, second, _] = outputs;
+        let (q, r) = (slot::<T>(first), slot::<T>(second));
+        compact_copy(raw, r);
+        householder_into(r, [m, n], batch, coeff, q, 0, workspace, exec)?;
+        zero_below_diagonal(r, m, n);
+        Ok(())
+    }
+}
+
+impl FactorInto for QrNull {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        let null = m - m.min(n);
+        householder::apply_reflectors_workspace::<T>(
+            reflector_shape(m, n, null),
+            batch,
+            false,
+            exec,
+        )
+    }
+
+    fn scratch_len<T: Scalar>([m, n]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        if m > n {
+            m * n * batch
+        } else {
+            0
+        }
+    }
+
+    fn coeff_len([m, n]: [usize; 2], batch: usize) -> usize {
+        if m > n {
+            n * batch
+        } else {
+            0
+        }
+    }
+
+    // `[m, 0]`: every direction is null, `N = I_m`.
+    fn empty_into<T: Scalar>([m, n]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
+        let null = m - m.min(n);
+        identity_columns(slot::<T>(&mut outputs[0]), m, null, m - null);
+    }
+
+    // The input is copied once into the lane scratch and factored there;
+    // the reflectors go straight onto `n = [0; I_{m-k}]`, so only the final
+    // `m x (m - k)` basis is written.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        coeff: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        if m <= n {
+            return Ok(());
+        }
+        let state = &mut scratch[..m * n * batch];
+        compact_copy(raw, state);
+        let basis = slot::<T>(&mut outputs[0]);
+        householder_into(state, [m, n], batch, coeff, basis, n, workspace, exec)
     }
 }
 
@@ -845,6 +1250,7 @@ impl FactorInto for Svd {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut Vec<T>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()> {
         let [first, values, third] = outputs;
@@ -896,6 +1302,7 @@ impl FactorInto for Eigh {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut Vec<T>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()> {
         let [values, second, _] = outputs;
@@ -906,14 +1313,30 @@ impl FactorInto for Eigh {
     }
 }
 
-/// One lane's typed scratch per scalar, zero-filled once when the lane is
-/// set up.
+/// One lane's typed scratch per scalar, set up once with the lane.
 #[derive(Default)]
 pub(crate) struct TypedScratch {
-    f32: Vec<f32>,
-    f64: Vec<f64>,
-    c32: Vec<Complex32>,
-    c64: Vec<Complex64>,
+    f32: ScalarScratch<f32>,
+    f64: ScalarScratch<f64>,
+    c32: ScalarScratch<Complex32>,
+    c64: ScalarScratch<Complex64>,
+}
+
+/// One scalar's lane scratch: zero-filled values and an empty Householder
+/// coefficient `Vec` whose capacity covers every block of the lane.
+#[derive(Default)]
+pub(crate) struct ScalarScratch<T> {
+    values: Vec<T>,
+    coeff: Vec<T>,
+}
+
+impl<T: Scalar> ScalarScratch<T> {
+    fn new(values: usize, coeff: usize) -> Self {
+        Self {
+            values: vec![T::ZERO; values],
+            coeff: Vec::with_capacity(coeff),
+        }
+    }
 }
 
 /// One lane's provider workspace and typed scratch: the largest need of the
@@ -935,6 +1358,7 @@ pub(crate) struct LaneBuffers {
 struct Needs {
     bytes: usize,
     typed: [usize; 4],
+    coeff: [usize; 4],
 }
 
 /// One block of a destination batch: its validated input, its signed
@@ -975,10 +1399,10 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
             (
                 vec![MaybeUninit::uninit(); needs.bytes],
                 TypedScratch {
-                    f32: vec![0.0; needs.typed[0]],
-                    f64: vec![0.0; needs.typed[1]],
-                    c32: vec![Complex32::default(); needs.typed[2]],
-                    c64: vec![Complex64::default(); needs.typed[3]],
+                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
+                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
+                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
+                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
                 },
             )
         };
@@ -1168,6 +1592,7 @@ fn needs_of<F: FactorInto>(
             .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))?;
         needs.bytes = needs.bytes.max(bytes);
         needs.typed[slot] = needs.typed[slot].max(F::scratch_len::<T>([*m, *n], items, placement));
+        needs.coeff[slot] = needs.coeff[slot].max(F::coeff_len([*m, *n], items));
         Ok(())
     }
     match input {
@@ -1205,14 +1630,17 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
         ));
     }
     if shape.contains(&0) {
+        F::empty_into::<T>([*m, *n], &mut dest.outputs);
         return Ok(());
     }
+    // A nonempty view's element count fits, so its batch product does.
+    let items = batch.iter().product::<usize>();
     with_provider_read::<F, T, _>(view, strides, |raw| {
         if let Some(error) = sizing {
             return Err(error);
         }
-        let items = batch.iter().product::<usize>();
         let placement = dest.placement();
+        let scratch = T::scratch(&mut lane.typed);
         F::factor_into::<T>(
             raw,
             [*m, *n],
@@ -1220,7 +1648,8 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
             &mut dest.outputs,
             placement,
             &mut lane.workspace,
-            T::scratch(&mut lane.typed),
+            &mut scratch.values,
+            &mut scratch.coeff,
             exec,
         )
         .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))
@@ -1243,6 +1672,8 @@ pub(crate) fn factorize_into(
         Op::Qr => factorize_into_batch::<Qr>(engine, allocation, inputs, dests, sink),
         Op::Eigh => factorize_into_batch::<Eigh>(engine, allocation, inputs, dests, sink),
         Op::Lq => factorize_into_batch::<Lq>(engine, allocation, inputs, dests, sink),
+        Op::QrFull => factorize_into_batch::<QrFull>(engine, allocation, inputs, dests, sink),
+        Op::QrNull => factorize_into_batch::<QrNull>(engine, allocation, inputs, dests, sink),
         _ => unreachable!("validation admits the ops with a destination form only"),
     }
 }

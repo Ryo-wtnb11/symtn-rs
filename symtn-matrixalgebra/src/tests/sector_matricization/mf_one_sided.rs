@@ -1039,6 +1039,80 @@ fn mf_one_sided_identity_sector_between_populated_sectors_publishes_canonically(
         side,
     );
 
+    // The same factors packed into one buffer, as the full-QR and null
+    // batches write them: the buffer is moved and grown once, each factor an
+    // identity precedes is moved past it (last first, so an overlapping
+    // move reads its source before it is overwritten), and only those
+    // factors and the identities are written. With the first sector side-only
+    // both factors move by more than nothing and less than their combined
+    // length.
+    for side_only in [1, 0] {
+        let (_, mut populated) = two_leg_geometry::<_, f64>(
+            Arc::new(symtn_core::ZNFusionRule::new(3).unwrap()),
+            [
+                vec![(s0, 1), (s1, 2), (s2, 1)],
+                vec![(s0, 2), (s1, 1), (s2, 1)],
+                vec![(s0, 1), (s1, 1), (s2, 2)],
+                vec![(s0, 2), (s1, 1), (s2, 1)],
+            ],
+        );
+        let identity = col_dimensions[&populated.remove(side_only).sector];
+        let pairs = staged_one_sided_pairs(&populated, &col_dimensions, side, side, &|k| {
+            k as f64 + 0.25
+        });
+        let selected = pairs
+            .iter()
+            .map(|pair| pair.right.clone())
+            .collect::<Vec<_>>();
+        let ranges = packed_ranges(selected.iter().map(Vec::len));
+        let displaced = ranges[side_only..]
+            .iter()
+            .map(|range| range.len())
+            .sum::<usize>();
+        let mut packed = PackedFactorPairs {
+            pairs: pairs
+                .iter()
+                .zip(&ranges)
+                .map(|(pair, range)| PackedFactorPair {
+                    sector: pair.sector,
+                    kept: pair.kept,
+                    left: 0..0,
+                    left_rows: pair.left_rows,
+                    right: range.clone(),
+                    right_leading: pair.right_leading,
+                })
+                .collect(),
+            left: Vec::new(),
+            right: selected.concat(),
+        };
+        let one_sided_rec = crate::probe::record();
+        let factor = build_bound_factor_with_placement(
+            &authority,
+            authority.space().homspace(),
+            &populated,
+            &mut packed,
+            &col_dimensions,
+            side,
+            FactorPlacement::Direct,
+        )
+        .unwrap();
+        let probe = one_sided_rec.one_sided_publication();
+        assert_eq!(
+            (probe.canonical_publications, probe.fallback_publications),
+            (1, 0)
+        );
+        assert_eq!(probe.appended_elements, identity * identity + displaced);
+        assert_literal_one_sided_layout(
+            factor.space().space().structure(),
+            factor.data(),
+            &populated,
+            &selected,
+            &col_dimensions,
+            side,
+            side,
+        );
+    }
+
     // Reordered records around the identity sector keep the tree-identity
     // scatter and publish the same output.
     let (_, mut reversed) = two_leg_geometry::<_, f64>(
@@ -1084,8 +1158,8 @@ fn u1_mps_side_only_space() -> BoundDynamicFusionMapSpace<symtn_core::U1FusionRu
 
 /// Byte-traffic contract for side-only publication: every full/null factor
 /// of the MPS site is published canonically, and the only elements
-/// written beyond the moved first owner are the appended factors and the
-/// in-place identities. The scatter fallback instead zero-fills all `P`
+/// written beyond the moved first owner (or the moved packed buffer) are
+/// the appended or displaced factors and the in-place identities. The scatter fallback instead zero-fills all `P`
 /// output elements and then scatters every populated block.
 fn side_only_publication_bytes_case<D>(values: impl Fn(usize) -> D)
 where
@@ -1168,12 +1242,10 @@ where
         (probe.canonical_publications, probe.fallback_publications),
         (6, 0)
     );
-    // Q: 36 + 9 identity; R: 24 (charge 2 has no domain block); L: 24;
-    // Q': 16 + 4 identity; U: 36 + 9; Vh: 16 + 4 (first owners moved).
-    assert_eq!(
-        bytes(probe.appended_elements),
-        bytes(45 + 24 + 24 + 20 + 45 + 20)
-    );
+    // Q: the 9 identity after the packed sector factors; R: 0 (packed
+    // buffer moved, charge 2 has no domain block); L: 24; Q': 16 + 4
+    // identity; U: 36 + 9; Vh: 16 + 4 (first owners moved).
+    assert_eq!(bytes(probe.appended_elements), bytes(9 + 24 + 20 + 45 + 20));
 }
 
 #[test]

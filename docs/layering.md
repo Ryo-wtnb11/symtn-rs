@@ -107,10 +107,10 @@ svd / qr / eigh / eig (symtn)
   -> admit leg roles and source
   -> factor spaces and per-sector stages (symtn-matrixalgebra)
   -> dense factorization (symtn-dense -> Tenferro; native compact and
-     values-only SVD, compact QR and LQ, Hermitian EIGH and EIG values:
-     symtn-dense block kernel -> tlinalg on the engine's guarded linalg
-     entry; compact QR/LQ/SVD and full EIGH write into the caller's
-     destinations)
+     values-only SVD, compact and full QR, LQ, the left null basis,
+     Hermitian EIGH and EIG values: symtn-dense block kernel -> tlinalg on
+     the engine's guarded linalg entry; compact QR/LQ/SVD, full QR, the left
+     null basis and full EIGH write into the caller's destinations)
   -> publish factors in the validated spaces
 ```
 
