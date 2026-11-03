@@ -354,6 +354,9 @@ pub struct HostTreeTransformWorkspace<T> {
     lane_shapes: Vec<symtn_dense::LaneGemmShape>,
     #[cfg(feature = "tenferro")]
     lane_pieces: Vec<Option<lanes::ParkedPiece>>,
+    // One packed source buffer per lane of the lane route, grow-only.
+    #[cfg(feature = "tenferro")]
+    lane_sources: Vec<HostScratchBuffer<T>>,
     // What one call has learned of the whole token's width transitions
     // (`whole_width`), O(engine width), cleared at the start of every
     // threaded replay.
@@ -395,6 +398,8 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             lane_shapes: Vec::new(),
             #[cfg(feature = "tenferro")]
             lane_pieces: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_sources: Vec::new(),
             width_levels: Vec::new(),
             atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
@@ -462,7 +467,14 @@ impl<T> HostTreeTransformWorkspace<T> {
             ) + bytes(
                 self.lane_pieces.capacity(),
                 std::mem::size_of::<Option<lanes::ParkedPiece>>(),
-            )
+            ) + bytes(
+                self.lane_sources.capacity(),
+                std::mem::size_of::<HostScratchBuffer<T>>(),
+            ) + self
+                .lane_sources
+                .iter()
+                .map(|buffer| bytes(buffer.capacity(), std::mem::size_of::<T>()))
+                .sum::<usize>()
         }
         #[cfg(not(feature = "tenferro"))]
         {
@@ -506,10 +518,20 @@ impl<T> HostTreeTransformWorkspace<T> {
         self.packed.destination().len()
     }
 
+    /// Packed source capacity (the staged buffer and every lane's) and
+    /// packed destination capacity.
     #[cfg(test)]
     fn packed_capacities(&self) -> (usize, usize) {
+        #[cfg(feature = "tenferro")]
+        let lanes = self
+            .lane_sources
+            .iter()
+            .map(HostScratchBuffer::capacity)
+            .sum::<usize>();
+        #[cfg(not(feature = "tenferro"))]
+        let lanes = 0;
         (
-            self.packed.source().capacity(),
+            self.packed.source().capacity() + lanes,
             self.packed.destination().capacity(),
         )
     }

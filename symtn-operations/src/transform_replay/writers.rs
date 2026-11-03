@@ -71,6 +71,20 @@ pub(super) fn crop_dims<'s>(
 /// Zero source strides for a one-sided (inactive) layout.
 const ZERO_STRIDES: [isize; FUSED_LAYOUT_INLINE_RANK] = [0; FUSED_LAYOUT_INLINE_RANK];
 
+/// `rank` zero source strides: the inline ones, or above their rank (a
+/// whole inactive item, which compilation admits at any rank; only bands
+/// are limited to the inline rank) the lane's `scratch` resized to `rank`.
+fn zero_source_strides(scratch: &mut Vec<isize>, rank: usize) -> &[isize] {
+    match ZERO_STRIDES.get(..rank) {
+        Some(zeros) => zeros,
+        None => {
+            scratch.clear();
+            scratch.resize(rank, 0);
+            scratch
+        }
+    }
+}
+
 /// Writes the destination items of a replay into a destination of `T`.
 /// `dst` starts at absolute element `dst_start`; `band` crops the item to
 /// outer indices of its bandable atom (see [`crop_dims`]), `None` writes it
@@ -182,7 +196,7 @@ where
                             &zero,
                             dims,
                             strides,
-                            &ZERO_STRIDES[..dims.len()],
+                            zero_source_strides(zero_strides, dims.len()),
                             offset,
                             0,
                             false,
@@ -344,7 +358,7 @@ where
     fn direct(
         &self,
         _: &mut (),
-        _: &mut Vec<isize>,
+        zero_strides: &mut Vec<isize>,
         item: TreeTransformDirectItem,
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
@@ -368,7 +382,7 @@ where
                     crate::BakedFusedLayout::from_compiled_normalized_slices(
                         dims,
                         strides,
-                        &ZERO_STRIDES[..dims.len()],
+                        zero_source_strides(zero_strides, dims.len()),
                         None,
                     ),
                     dst,

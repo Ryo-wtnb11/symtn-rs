@@ -1031,6 +1031,16 @@ impl HostKernelAdapter<f64> for WriterRecorder {
 }
 
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
+)]
 fn banded_components_write_each_band_from_one_slot_in_every_stage() {
     // What: a component whose atom holds a Single's and a scatter column's
     // interleaved blocks (two codomain trees of two rows over six columns,
@@ -1786,11 +1796,22 @@ impl DenseExecutor for FailingLanes {
 }
 
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
+)]
 fn a_failing_lane_replay_returns_the_first_error_by_tier() {
     // What: on four workers, three one-element groups split over lanes and
     // an eight-element group runs alone on the whole token (first). Two
     // failing split groups return the lower one's error; a failing alone
-    // group's error wins over a lower failing split group's.
+    // group's error wins over a lower failing split group's. A failing
+    // native owned replay returns the error and publishes nothing.
     let structure = Arc::new(
         BlockStructure::packed_column_major(1, [1, 1, 1, 1, 1, 1, 8, 8].map(|len| vec![len]))
             .unwrap(),
@@ -1838,5 +1859,33 @@ fn a_failing_lane_replay_returns_the_first_error_by_tier() {
             }
             other => panic!("failing {failing:?}: {other:?}"),
         }
+    }
+    // A native owned replay whose lane GEMM fails publishes nothing.
+    let (su2, su2_transform) = su2_interleaved_fixture();
+    let su2_source = (1..=60).map(f64::from).collect::<Vec<_>>();
+    const FIRST: &[usize] = &[0];
+    let owned = pool.install(|engine| {
+        try_tree_transform_structure_overwrite_owned_raw(
+            engine,
+            &mut FailingLanes {
+                inner: DefaultDenseExecutor::new(),
+                failing: FIRST,
+            },
+            &mut TreeTransformWorkspace::default(),
+            &su2_transform,
+            &su2,
+            &su2,
+            2,
+            &su2_source,
+            1.0,
+            4,
+            None,
+        )
+    });
+    match owned {
+        Err(OperationError::Dense(DenseError::Backend { message, .. })) => {
+            assert_eq!(message, "job 0")
+        }
+        other => panic!("owned: {other:?}"),
     }
 }

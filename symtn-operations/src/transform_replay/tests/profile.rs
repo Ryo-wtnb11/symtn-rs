@@ -85,10 +85,21 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 }
 
 #[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
+)]
 fn profiled_lane_route_reports_one_fused_region_and_the_counts() {
     // What: on the lane route the profile's separate stage timers are zero
-    // (no stage is separate), the fused region's wall is its own field, and
-    // the semantic counts are those of the staged route.
+    // (no stage is separate), the fused region's wall is its own field, the
+    // preparation before the entry is `multi_workspace_prepare`, and the
+    // semantic counts are those of the staged route.
     let mut pool = crate::host_pool::test_pool(2);
     pool.install(|engine| {
         let (dst_structure, src_structure, structure) = identity_multi_fixture();
@@ -113,6 +124,9 @@ fn profiled_lane_route_reports_one_fused_region_and_the_counts() {
             .unwrap();
             assert_eq!(dst, [6.0, 8.0, 0.0]);
             assert!(profile.fused_lanes > Duration::ZERO);
+            // The shape list before the entry and the entry are disjoint
+            // intervals of the whole call.
+            assert!(profile.multi_workspace_prepare + profile.fused_lanes <= profile.total);
             assert_eq!(
                 profile.single_total
                     + profile.multi_pack

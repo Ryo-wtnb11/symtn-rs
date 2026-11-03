@@ -710,9 +710,12 @@ pub(crate) fn with_lane_gemms(
     // `order` holds each job's plan index for the call. Each table is
     // sized once for every job, so a fresh executor allocates it once
     // however many geometries the call has.
+    // `reserve` adds to the current length, so each table is emptied first.
     order.clear();
     order.reserve(jobs.len());
+    geometries.clear();
     geometries.reserve(jobs.len());
+    plans.clear();
     plans.reserve(jobs.len());
     let geometry = jobs.iter().map(|job| DenseGemmBatchJob {
         dst_offset: 0,

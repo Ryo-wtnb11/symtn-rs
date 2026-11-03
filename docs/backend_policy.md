@@ -236,17 +236,20 @@ with the transform: the destination intervals of its Single blocks, Multi
 scatter columns and inactive blocks merge, where they overlap (canonical
 coupled-sector blocks interleave), into atoms, and the blocks, Multi groups
 and inactive blocks writing one atom form one component, which can own
-several separated atoms. Every write of a component (its inactive zeros or
-beta scales, its Singles, and for each Multi group the pack, the recoupling
-GEMM and the scatter) runs on lane slots that component owns for the whole
-call, so within a call each destination element is written from one slot,
-and identical calls on one engine write it from the same slot (adjacent
-atoms can still share a cache line at their boundary).
+several separated atoms. On the native provider every write of a component
+(its inactive zeros or beta scales, its Singles, and for each Multi group
+the pack, the recoupling GEMM and the scatter) runs on lane slots that
+component owns for the whole call, so within a call each destination
+element is written from one slot, and identical calls on one engine write
+it from the same slot (adjacent atoms can still share a cache line at their
+boundary). The staged route below writes the same components, but its
+phases split them separately.
 
 On the native provider (the lane route) the replay enters the engine once
 and runs each group's GEMM on its component's own lanes, with the dense
-provider's prepared plan writing an uninitialized packed destination (the
-packed source is grow-only scratch, zeroed only when it grows). A component
+provider's prepared plan writing an uninitialized packed destination; each
+lane packs its group's source into a grow-only buffer of its own, which no
+pass zeroes (every packed element is written before the GEMM reads it). A component
 of `g` groups takes the width `w` (up to the replay's worker count `B` and
 its band units) that minimises its modeled time: strided's copy estimate of
 the elements it moves over `w`, plus `1 + 2g` sections of `w`-wide dispatch,
@@ -265,11 +268,16 @@ is one indivisible unit; contiguous runs of units balanced by the elements
 they move go to the component's slots, and every stage writes each band from
 the same slot. Pack and GEMM write scratch, so they use the component's
 whole share. A replay with one worker runs every component in order on the
-whole destination. Retained scratch: one packed source and destination
-region per concurrently running lane, the per-call placement tables
+whole destination. Retained scratch: one packed source buffer and one
+packed destination region per concurrently running lane, the per-call placement tables
 (O(components + lanes)), the GEMM shapes (O(groups)) and the band pieces
 (O(atoms + lanes)), allocated once per call by an eager call's call-local
 workspace and kept by a reused one (and reported in its retained bytes).
+Profiling reports this route's work as one interval, `fused_lanes`, from the
+call into the dense lane-GEMM entry to its return, packed-scratch
+reservation included (it depends on the placement made there); the GEMM
+shape list built before the entry is `multi_workspace_prepare`, and the
+other stage timers stay zero.
 
 The BLAS provider and custom executors (the staged route) have no GEMM that
 runs on a caller's lane: theirs needs the engine itself, and BLAS thread

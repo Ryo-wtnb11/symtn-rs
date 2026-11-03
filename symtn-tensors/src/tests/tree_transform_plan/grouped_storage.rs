@@ -102,7 +102,6 @@ fn tree_transform_compile_grouped_lowers_to_replay_ready_structure() {
 
     assert_eq!(structure.block_count(), 1);
     assert_eq!(dst.data(), &[7020.0, 9240.0, 3510.0, 4620.0]);
-    assert_eq!(workspace.source_len(), 6);
 }
 
 #[test]

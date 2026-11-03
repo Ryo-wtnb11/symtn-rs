@@ -6,7 +6,6 @@
 
 use super::writers::{Band, DestinationWriter, ReplayParts};
 use super::*;
-use crate::kernel_adapter::apply_fused_pair_slices;
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::time::Duration;
@@ -119,6 +118,7 @@ pub(super) fn lane_replay<E, W, T, D, C>(
     writer: &W,
     kernels: &mut W::Kernels,
     threads: usize,
+    mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(), OperationError>
 where
     E: DenseExecutor,
@@ -127,6 +127,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
+    let start = profile.as_ref().map(|_| std::time::Instant::now());
     let mut shapes = core::mem::take(&mut workspace.lane_shapes);
     shapes.clear();
     shapes.extend(
@@ -139,8 +140,12 @@ where
                 n: job.cols,
             }),
     );
+    if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+        profile.multi_workspace_prepare += start.elapsed();
+    }
     let mut inputs = Some((&mut *workspace, dst, kernels));
     let mut outcome = None;
+    let start = profile.as_ref().map(|_| std::time::Instant::now());
     let entered =
         dense.with_lane_gemms(engine, dense_dtype::<D>(), &shapes, &mut |token, gemms| {
             let Some((workspace, dst, kernels)) = inputs.take() else {
@@ -150,6 +155,9 @@ where
                 token, gemms, workspace, task, schedule, dst, src, writer, kernels, threads,
             ));
         });
+    if let (Some(profile), Some(start)) = (profile, start) {
+        profile.fused_lanes += start.elapsed();
+    }
     workspace.lane_shapes = shapes;
     entered.map_err(OperationError::Dense)?;
     outcome.unwrap_or(Err(OperationError::InvalidArgument {
@@ -229,21 +237,33 @@ where
 
     if budget == 1 {
         // The one-lane iteration: components in index order on the whole
-        // destination, one packed region, no slices table.
+        // destination, one packed source buffer and destination region, no
+        // slices table.
         let (source, destination) = (0..components).fold((0, 0), |(s, d), component| {
             let (source, destination) = group_sizes(component);
             (s.max(source), d.max(destination))
         });
         let HostTreeTransformWorkspace {
             packed,
+            lane_sources,
             coefficient_scratch,
             fused_indices,
             zero_strides,
             ..
         } = &mut *workspace;
-        let (source_buffer, destination_buffer) = packed.both_mut();
-        let source_region = source_buffer.initialized_prefix_mut(source, D::zero());
-        let destination_region = destination_buffer.uninit_mut(destination);
+        // A structure without Multi groups packs nothing and keeps no
+        // source buffer.
+        let mut unused = HostScratchBuffer::default();
+        let source_buffer = if task.recoupling_plan().is_empty() {
+            &mut unused
+        } else {
+            if lane_sources.is_empty() {
+                lane_sources.push(HostScratchBuffer::default());
+            }
+            &mut lane_sources[0]
+        };
+        source_buffer.reserve_overwrite(source);
+        let destination_region = packed.destination_mut().uninit_mut(destination);
         let lanes = Lanes {
             writer,
             task: ReplayParts::new(task),
@@ -262,7 +282,7 @@ where
                 component,
                 exec.reborrow(),
                 &mut Target::Whole(&mut *dst),
-                &mut *source_region,
+                &mut *source_buffer,
                 &mut *destination_region,
                 &mut fused_indices[..rank],
                 kernels,
@@ -415,17 +435,38 @@ where
     let result = {
         let HostTreeTransformWorkspace {
             packed,
+            lane_sources,
             coefficient_scratch,
             fused_indices,
             atom_slices,
             lane_pieces,
             ..
         } = &mut *workspace;
-        let (source_buffer, destination_buffer) = packed.both_mut();
-        let source_region =
-            source_buffer.initialized_prefix_mut(alone_source.max(source_before), D::zero());
-        let destination_region =
-            destination_buffer.uninit_mut(alone_destination.max(destination_before));
+        // One packed source buffer per split lane (the alone tier reuses the
+        // first), each sized for its largest group before the first fork.
+        // A structure without Multi groups packs nothing and keeps none.
+        let lanes_listed = if task.recoupling_plan().is_empty() {
+            0
+        } else {
+            (leaves.len() - 1).max(1)
+        };
+        if lane_sources.len() < lanes_listed {
+            lane_sources.resize_with(lanes_listed, HostScratchBuffer::default);
+        }
+        let mut unused = HostScratchBuffer::default();
+        if lanes_listed > 0 {
+            for (buffer, pair) in lane_sources.iter_mut().zip(leaves.windows(2)) {
+                buffer.reserve_overwrite(pair[1].source_before - pair[0].source_before);
+            }
+            let first_lane = leaves
+                .get(1)
+                .map_or(0, |next| next.source_before - leaves[0].source_before);
+            lane_sources[0].reserve_overwrite(alone_source.max(first_lane));
+        }
+
+        let destination_region = packed
+            .destination_mut()
+            .uninit_mut(alone_destination.max(destination_before));
         let mut pieces: Vec<Option<Piece<'_, T>>> = recycle(core::mem::take(lane_pieces));
         pieces.resize_with(alone_pieces.max(pieces_before), || None);
         let mut slots = split_atoms(recycle(core::mem::take(atom_slices)), schedule, dst)?;
@@ -449,7 +490,10 @@ where
                     budget,
                     token.reborrow(),
                     &mut Target::Atoms(&mut slots[..], 0),
-                    &mut *source_region,
+                    match lane_sources[..lanes_listed].first_mut() {
+                        Some(buffer) => buffer,
+                        None => &mut unused,
+                    },
                     &mut *destination_region,
                     &mut pieces,
                     fused_indices.as_mut_slice(),
@@ -471,7 +515,7 @@ where
                 exec,
                 &mut slots,
                 0,
-                &mut source_region[..source_before],
+                &mut lane_sources[..lanes_listed],
                 &mut destination_region[..destination_before],
                 &mut pieces[..pieces_before],
                 fused_indices.as_mut_slice(),
@@ -583,7 +627,7 @@ where
         exec: Exec<'_>,
         slots: &mut [&'a mut [T]],
         slot_base: usize,
-        source: &mut [D],
+        sources: &mut [HostScratchBuffer<D>],
         destination: &mut [MaybeUninit<D>],
         pieces: &mut [Option<Piece<'a, T>>],
         fused: &mut [usize],
@@ -593,6 +637,12 @@ where
         T: Send + Sync,
     {
         if lanes <= 1 || range.len() <= 1 {
+            // No buffer: a structure without Multi groups packs nothing.
+            let mut unused = HostScratchBuffer::default();
+            let source = match sources.first_mut() {
+                Some(buffer) => buffer,
+                None => &mut unused,
+            };
             let mut exec = exec;
             for part in range {
                 let component = parts[part].component as usize;
@@ -623,8 +673,7 @@ where
         };
         let first = leaves.partition_point(|leaf| leaf.parts.0 < range.start);
         let cut = leaves.partition_point(|leaf| leaf.parts.0 < middle);
-        let (left_source, right_source) =
-            source.split_at_mut(leaves[cut].source_before - leaves[first].source_before);
+        let (left_source, right_source) = sources.split_at_mut((cut - first).min(sources.len()));
         let (left_destination, right_destination) = destination
             .split_at_mut(leaves[cut].destination_before - leaves[first].destination_before);
         let (left_pieces, right_pieces) =
@@ -684,7 +733,7 @@ where
         width: usize,
         exec: Exec<'_>,
         target: &mut Target<'_, 'a, T>,
-        source: &mut [D],
+        source: &mut HostScratchBuffer<D>,
         destination: &mut [MaybeUninit<D>],
         pieces: &mut [Option<Piece<'a, T>>],
         fused: &mut [usize],
@@ -806,7 +855,7 @@ where
         component: usize,
         mut exec: Exec<'_>,
         target: &mut Target<'_, '_, T>,
-        source: &mut [D],
+        source: &mut HostScratchBuffer<D>,
         destination: &mut [MaybeUninit<D>],
         index: &mut [usize],
         kernels: &mut W::Kernels,
@@ -858,44 +907,45 @@ where
     }
 
     /// Packs group `group`'s source columns into `source` over `threads`
-    /// slots of `exec`, then runs its GEMM on `exec` into `destination`,
+    /// slots of `exec`, through the buffer's write-before-read column
+    /// protocol (split on column boundaries as the staged pack splits), then
+    /// runs its GEMM on `exec` from the packed source into `destination`,
     /// returning the initialised packed destination.
     fn gemm<'d>(
         &self,
         group: usize,
         threads: usize,
         mut exec: Exec<'_>,
-        source: &mut [D],
+        source: &mut HostScratchBuffer<D>,
         destination: &'d mut [MaybeUninit<D>],
         fused: &mut [usize],
     ) -> Result<&'d mut [D], OperationError> {
         let job = &self.task.plan.jobs()[group];
-        let Some(&TreeTransformBlock::Multi {
-            src_layout_start, ..
-        }) = self.task.blocks.get(self.task.plan.block_indices()[group])
-        else {
-            return Err(OperationError::InvalidArgument {
-                message: "tree transform recoupling plan references a single block",
-            });
-        };
         let source_len = job.rows * job.contracted;
         let destination_len = job.rows * job.cols;
-        let (Some(source), Some(destination)) = (
-            source.get_mut(..source_len),
-            destination.get_mut(..destination_len),
-        ) else {
+        let Some(destination) = destination.get_mut(..destination_len) else {
             return Err(OperationError::InvalidArgument {
                 message: "tree transform lane scratch is shorter than its group",
             });
         };
-        self.pack(
-            src_layout_start..src_layout_start + job.contracted,
-            job.rows,
-            source,
-            threads,
-            exec.reborrow(),
-            fused,
-        )?;
+        let columns = &self.schedule.pack_columns;
+        let first = columns.partition_point(|column| column.packed_offset < job.lhs_offset);
+        let end =
+            columns.partition_point(|column| column.packed_offset < job.lhs_offset + source_len);
+        source.overwrite_with_columns(source_len, |writer| {
+            replay_pack_columns(
+                fused,
+                self.rank,
+                self.task.layouts,
+                &columns[first..end],
+                writer,
+                job.lhs_offset,
+                self.src,
+                self.task.storage_conjugate,
+                threads,
+                exec.reborrow(),
+            )
+        })?;
         let coefficients = self
             .coefficients
             .get(job.rhs_offset..job.rhs_offset + job.contracted * job.cols)
@@ -907,83 +957,12 @@ where
             .run(
                 exec,
                 group,
-                D::dense_lane_gemm_io(source, coefficients, destination, &mut written),
+                D::dense_lane_gemm_io(source.as_slice(), coefficients, destination, &mut written),
             )
             .map_err(OperationError::Dense)?;
         written.ok_or(OperationError::InvalidArgument {
             message: "a lane GEMM reported success without its destination",
         })
-    }
-
-    /// Packs source layouts `columns` (of `rows` elements each) as
-    /// consecutive dense columns of `packed`, split on column boundaries
-    /// over `threads` slots of `exec`.
-    fn pack(
-        &self,
-        columns: Range<usize>,
-        rows: usize,
-        packed: &mut [D],
-        threads: usize,
-        exec: Exec<'_>,
-        fused: &mut [usize],
-    ) -> Result<(), OperationError> {
-        let layouts = self.task.layouts;
-        let conjugate = self.task.storage_conjugate;
-        if threads <= 1 || columns.len() <= 1 {
-            for (position, entry) in columns.enumerate() {
-                let role = layouts.role(entry)?;
-                let Some(index) = fused.get_mut(..role.dims().len()) else {
-                    return Err(OperationError::InvalidArgument {
-                        message: "fused traversal scratch is shorter than the normalized rank",
-                    });
-                };
-                apply_fused_pair_slices(
-                    packed,
-                    self.src,
-                    role.dims(),
-                    role.dst_strides(),
-                    role.src_strides(),
-                    offset_to_isize(position * rows)?,
-                    layouts.entry(entry).offset,
-                    index,
-                    |slot: &mut D, value| *slot = value,
-                    |value: D| value.maybe_conj(conjugate),
-                );
-            }
-            return Ok(());
-        }
-        let middle = parallel_split(columns.len(), threads);
-        let (left_packed, right_packed) = packed.split_at_mut(middle * rows);
-        let left_threads = threads / 2;
-        let (left_fused, mut right_fused) =
-            split_lane_indices(fused, left_threads, threads, self.rank);
-        let split = columns.start + middle;
-        let (left, right) = replay_join(
-            exec,
-            None,
-            |exec| {
-                self.pack(
-                    columns.start..split,
-                    rows,
-                    left_packed,
-                    left_threads,
-                    exec,
-                    left_fused,
-                )
-            },
-            |exec| {
-                self.pack(
-                    split..columns.end,
-                    rows,
-                    right_packed,
-                    threads - left_threads,
-                    exec,
-                    right_fused.get(),
-                )
-            },
-        );
-        left?;
-        right
     }
 
     /// Splits component `component`'s atom slices (in `slots` from slot

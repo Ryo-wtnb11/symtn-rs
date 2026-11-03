@@ -958,24 +958,151 @@ mod allocation_replay_tests {
         assert_eq!(dst, expected);
     }
 
+    /// The native executor whose lane GEMMs each run on one slot of their
+    /// lane token; placement still sees the native times.
+    ///
+    /// Why not the lane's whole token: on x86_64 a GEMM given two slots or
+    /// more takes faer's team kernel, which allocates its job tables on
+    /// every call outside the engine workspace (tensor4all/faer#223), so the
+    /// row would measure that dependency rather than the replay.
+    struct OneSlotLaneGemms(DefaultDenseExecutor);
+
+    struct OneSlot<'g>(&'g dyn symtn_dense::LaneGemms);
+
+    impl symtn_dense::LaneGemms for OneSlot<'_> {
+        fn run<'d>(
+            &self,
+            token: symtn_dense::LaneToken<'_>,
+            job: usize,
+            io: symtn_dense::LaneGemmIo<'_, 'd>,
+        ) -> Result<(), DenseError> {
+            self.0
+                .run(token.limit(core::num::NonZeroUsize::MIN), job, io)
+        }
+
+        fn time(
+            &self,
+            token: &mut symtn_dense::LaneToken<'_>,
+            job: usize,
+            width: core::num::NonZeroUsize,
+        ) -> std::time::Duration {
+            self.0.time(token, job, width)
+        }
+    }
+
+    impl DenseExecutor for OneSlotLaneGemms {
+        fn svd(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.0.svd(engine, input)
+        }
+
+        fn qr(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.0.qr(engine, input)
+        }
+
+        fn eigh(
+            &mut self,
+            engine: &mut dyn Engine,
+            input: DenseRead<'_>,
+        ) -> Result<Vec<DenseTensor>, DenseError> {
+            self.0.eigh(engine, input)
+        }
+
+        fn dot_general_into(
+            &mut self,
+            engine: &mut dyn Engine,
+            output: DenseWrite<'_>,
+            lhs: DenseRead<'_>,
+            rhs: DenseRead<'_>,
+            config: &DenseDotConfig,
+        ) -> Result<(), DenseError> {
+            self.0.dot_general_into(engine, output, lhs, rhs, config)
+        }
+
+        fn supports_lane_gemms(&self) -> bool {
+            true
+        }
+
+        fn with_lane_gemms(
+            &mut self,
+            engine: &mut dyn Engine,
+            dtype: symtn_dense::DenseDType,
+            jobs: &[symtn_dense::LaneGemmShape],
+            body: &mut symtn_dense::LaneGemmBody<'_>,
+        ) -> Result<(), DenseError> {
+            self.0
+                .with_lane_gemms(engine, dtype, jobs, &mut |token, gemms| {
+                    body(token, &OneSlot(gemms))
+                })
+        }
+    }
+
     #[test]
+    #[cfg_attr(
+        any(
+            feature = "cpu-blas",
+            feature = "blas-accelerate",
+            feature = "blas-openblas",
+            feature = "blas-mkl",
+            feature = "provider-inject"
+        ),
+        ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
+    )]
     fn warm_lane_replay_allocates_nothing_on_any_lane() {
         // What: once a workspace and an executor with lane GEMMs have
         // replayed a structure on an engine, a second identical call
         // allocates nothing on any lane (the lanes' GEMMs warm their engine
         // workspace slots in the first call), at one worker and banded on
-        // three, initialised and owned.
+        // three: an initialised overwrite, an initialised overwrite whose
+        // groups have distinct GEMM geometries, and an owned replay, which
+        // allocates its one output.
         let (structure, transform) = super::super::tests::su2_interleaved_fixture();
         let src = (1..=60).map(f64::from).collect::<Vec<_>>();
         let expected = super::super::tests::su2_oracle(&src, 1.0);
-        for mut pool in [
+        // Groups of one to four elements per block: four geometries.
+        let mixed = Arc::new(
+            BlockStructure::packed_column_major(1, (1..=4).flat_map(|n| [vec![n], vec![n]]))
+                .unwrap(),
+        );
+        let mixed_transform = TreeTransformStructure::compile_structures(
+            &mixed,
+            &mixed,
+            &(0..4)
+                .map(|g| {
+                    TreeTransformBlockSpec::multi(
+                        vec![2 * g, 2 * g + 1],
+                        vec![2 * g, 2 * g + 1],
+                        vec![0.0, 1.0, 1.0, 0.0],
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let mixed_src = (1..=20).map(f64::from).collect::<Vec<_>>();
+        let mut mixed_expected = Vec::new();
+        for (start, n) in [(0, 1), (2, 2), (6, 3), (12, 4)] {
+            mixed_expected.extend_from_slice(&mixed_src[start + n..start + 2 * n]);
+            mixed_expected.extend_from_slice(&mixed_src[start..start + n]);
+        }
+        for (index, mut pool) in [
             crate::host_pool::test_pool(1),
             crate::host_pool::test_pool(3),
             crate::host_pool::eager_test_pool(3),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let mut dst = vec![f64::NAN; 60];
+            let mut mixed_dst = vec![f64::NAN; 20];
             let mut kernels = StridedHostKernelAdapter::default();
-            let mut dense = DefaultDenseExecutor::new();
+            let mut dense = OneSlotLaneGemms(DefaultDenseExecutor::new());
             let mut workspace = TreeTransformWorkspace::default();
             let mut replay = |engine: &mut dyn Engine| {
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
@@ -993,13 +1120,54 @@ mod allocation_replay_tests {
                     3,
                 )
                 .unwrap();
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    engine,
+                    &mut kernels,
+                    &mut dense,
+                    &mut workspace,
+                    &mixed_transform,
+                    &mixed,
+                    &mixed,
+                    &mut mixed_dst,
+                    &mixed_src,
+                    1.0,
+                    &[],
+                    3,
+                )
+                .unwrap();
             };
             pool.install(&mut replay);
             let (_, allocations) = allocation_oracle::with_session(|| {
                 pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
             });
-            assert_eq!(allocations, 0);
+            assert_eq!(allocations, 0, "pool #{index}");
             assert_eq!(dst, expected);
+            assert_eq!(mixed_dst, mixed_expected);
+
+            let mut owned_workspace = TreeTransformWorkspace::default();
+            let mut owned = |engine: &mut dyn Engine| {
+                try_tree_transform_structure_overwrite_owned_raw(
+                    engine,
+                    &mut dense,
+                    &mut owned_workspace,
+                    &transform,
+                    &structure,
+                    &structure,
+                    2,
+                    &src,
+                    1.0,
+                    3,
+                    None,
+                )
+                .unwrap()
+                .unwrap()
+            };
+            pool.install(&mut owned);
+            let (result, allocations) = allocation_oracle::with_session(|| {
+                pool.install(|engine| allocation_oracle::with_measurement(|| owned(engine)))
+            });
+            assert_eq!(allocations, 1, "pool #{index}: the owned output only");
+            assert_eq!(result, expected);
         }
     }
 

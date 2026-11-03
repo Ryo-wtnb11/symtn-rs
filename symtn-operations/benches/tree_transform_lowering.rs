@@ -148,7 +148,8 @@ fn print_sample(label: &str, profile: TreeTransformReplayProfile, calls: usize, 
         + profile.multi_coefficient_prepare
         + profile.multi_matmul_total
         + profile.multi_scatter
-        + profile.strided_kernel;
+        + profile.strided_kernel
+        + profile.fused_lanes;
     println!(
         "phase={} total_ns={} admission_ns={} coefficient_prepare_ns={} numerical_replay_phases_ns={} caller_allocations={} caller_requested_bytes={}",
         label,

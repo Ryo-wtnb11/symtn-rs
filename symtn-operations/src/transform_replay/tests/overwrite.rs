@@ -485,6 +485,78 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
         1.0,
     )
     .unwrap();
+
+    // An inactive block of rank 17 whose axes never fuse (strides
+    // `2^(j+1) - 1` are injective), above the inline fused rank: an overwrite
+    // zeroes exactly its elements on both routes and leaves the holes.
+    const RANK: usize = 17;
+    let strides = (0..RANK)
+        .map(|j| (1usize << (j + 1)) - 1)
+        .collect::<Vec<_>>();
+    let wide = Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            RANK,
+            vec![
+                BlockSpec::with_key(BlockKey::ordinal(0), vec![2; RANK], strides.clone(), 0)
+                    .unwrap(),
+            ],
+        )
+        .unwrap(),
+    );
+    let wide_src =
+        Arc::new(BlockStructure::packed_column_major(RANK, vec![vec![2; RANK]]).unwrap());
+    let inactive =
+        TreeTransformStructure::<f64>::compile_structures(&wide, &wide_src, &[]).unwrap();
+    let len = wide.required_len().unwrap();
+    let mut zeroed = vec![false; len];
+    for linear in 0..1usize << RANK {
+        let at = (0..RANK)
+            .map(|j| ((linear >> j) & 1) * strides[j])
+            .sum::<usize>();
+        zeroed[at] = true;
+    }
+    let wide_source = vec![1.0; 1 << RANK];
+    for lanes in [true, false] {
+        let mut destination = vec![f64::NAN; len];
+        let mut native = DefaultDenseExecutor::new();
+        let mut staged = super::Staged::new();
+        if lanes {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut native,
+                &mut TreeTransformWorkspace::default(),
+                &inactive,
+                &wide,
+                &wide_src,
+                &mut destination,
+                &wide_source,
+                1.0,
+                &[],
+                1,
+            )
+        } else {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut staged,
+                &mut TreeTransformWorkspace::default(),
+                &inactive,
+                &wide,
+                &wide_src,
+                &mut destination,
+                &wide_source,
+                1.0,
+                &[],
+                1,
+            )
+        }
+        .unwrap();
+        assert!(destination
+            .iter()
+            .zip(&zeroed)
+            .all(|(&value, &zero)| if zero { value == 0.0 } else { value.is_nan() }));
+    }
 }
 
 #[test]

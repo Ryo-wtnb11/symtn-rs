@@ -154,7 +154,7 @@ pub(super) fn parallel_split(items: usize, threads: usize) -> usize {
 /// Packs `items` through `packed`, whose slot 0 is packed offset
 /// `packed_start`, split over `threads` lanes on item boundaries.
 #[allow(clippy::too_many_arguments)]
-fn replay_pack_columns<D>(
+pub(super) fn replay_pack_columns<D>(
     fused_indices: &mut [usize],
     max_fused_rank: usize,
     layouts: &TreeTransformLayoutTable,
@@ -1414,8 +1414,10 @@ where
 }
 
 /// [`super::lanes::lane_replay`] with the profile's lane-route fields: the
-/// semantic counts, and the entry's whole wall as `fused_lanes` (the
-/// separate stage timers stay zero: no stage is separate on this route).
+/// semantic counts, the GEMM shape list built before the entry as
+/// `multi_workspace_prepare`, and the entry from call to return as
+/// `fused_lanes` (the separate stage timers stay zero: no stage is separate
+/// on this route).
 #[cfg(feature = "tenferro")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_on_lanes<E, W, T, D, C>(
@@ -1438,12 +1440,21 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    let start = profile.as_ref().map(|_| std::time::Instant::now());
+    let mut profile = profile;
     let result = super::lanes::lane_replay(
-        engine, dense, workspace, task, schedule, dst, src, writer, kernels, threads,
+        engine,
+        dense,
+        workspace,
+        task,
+        schedule,
+        dst,
+        src,
+        writer,
+        kernels,
+        threads,
+        profile.as_deref_mut(),
     );
-    if let (Some(profile), Some(start)) = (profile, start) {
-        profile.fused_lanes += start.elapsed();
+    if let Some(profile) = profile {
         profile.single_blocks += schedule.single_block_count;
         profile.multi_blocks += task.recoupling_plan().jobs().len();
         profile.packed_columns += schedule.packed_column_count;

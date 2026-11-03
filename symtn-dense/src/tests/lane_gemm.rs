@@ -229,3 +229,25 @@ fn every_refusal_comes_before_the_body_runs() {
         .is_err());
     assert!(!ran);
 }
+
+#[cfg(feature = "cuda")]
+#[test]
+#[ignore = "needs a CUDA device"]
+fn a_non_cpu_engine_is_refused_before_the_body_runs() {
+    // What: lanes borrow a CPU engine's team; a CUDA engine is a typed
+    // refusal before the body is called.
+    let mut engine =
+        tenferro_gpu::cuda::CudaEngine::open(tenferro_gpu::cuda::CudaDeviceId::from_ordinal(0))
+            .unwrap();
+    let mut ran = false;
+    assert!(matches!(
+        DefaultDenseExecutor::new().with_lane_gemms(
+            &mut engine,
+            DenseDType::F64,
+            &[shape(1, 1, 1)],
+            &mut |_, _| ran = true,
+        ),
+        Err(DenseError::Unsupported { .. })
+    ));
+    assert!(!ran);
+}

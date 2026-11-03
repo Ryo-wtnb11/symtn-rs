@@ -16,11 +16,13 @@ pub struct TreeTransformReplayProfile {
     pub multi_scatter: Duration,
     pub strided_view_setup: Duration,
     pub strided_kernel: Duration,
-    /// Wall time of the lane route's one fused region (GEMM plan
-    /// resolution, placement, scratch carving, every component's writes and
-    /// GEMMs, and their joins); zero on the staged route. The separate stage
-    /// timers above stay zero on the lane route, which has no separate
-    /// stages.
+    /// Wall time of the lane route's one fused region, from the call into
+    /// the dense lane-GEMM entry to its return: GEMM plan resolution,
+    /// placement, packed-scratch reservation (sized inside the entry, since
+    /// it depends on the placement there), every component's writes and
+    /// GEMMs, and their joins; zero on the staged route. On the lane route
+    /// `multi_workspace_prepare` is the GEMM shape list built before the
+    /// entry, and the other stage timers stay zero: no stage is separate.
     pub fused_lanes: Duration,
     pub single_blocks: usize,
     pub multi_blocks: usize,

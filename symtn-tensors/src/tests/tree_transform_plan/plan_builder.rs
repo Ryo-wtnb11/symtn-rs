@@ -972,7 +972,6 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
     )
     .unwrap();
     let first = dst.data().to_vec();
-    assert_eq!(workspace.source_len(), 2);
 
     dst.data_mut().fill(Complex64::new(0.0, 0.0));
     replay_into(
@@ -987,7 +986,6 @@ fn tree_transform_recoupling_replays_complex_data_with_real_structural_coefficie
     )
     .unwrap();
     assert_eq!(dst.data(), first.as_slice());
-    assert_eq!(workspace.source_len(), 2);
 }
 
 #[test]
@@ -1106,7 +1104,6 @@ fn tree_transform_structure_replays_su2_recoupling_without_recompiling() {
     let expected_first = expected([0.0, 0.0], [10.0, 20.0], 1.0, 0.0);
     assert!((dst.data()[0] - expected_first[0]).abs() < 1.0e-12);
     assert!((dst.data()[1] - expected_first[1]).abs() < 1.0e-12);
-    assert_eq!(workspace.source_len(), 2);
 
     src.data_mut().copy_from_slice(&[3.0, -4.0]);
     dst.data_mut().copy_from_slice(&[1.0, 2.0]);
