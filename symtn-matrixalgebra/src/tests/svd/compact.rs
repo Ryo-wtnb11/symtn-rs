@@ -101,6 +101,8 @@ fn assert_mf_compact_svd_fallback_owned_entry_stages<D: crate::factorize::Factor
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(stage.len(), 2);
+    // Each sector is staged from the destination the batch wrote.
+    assert_eq!(stage, staged_svd_factors(&mf_svd_fallback_rec));
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
     let probe = compact_svd_copy_rec.compact_svd_copy();
     assert!(probe.input_pack_calls > 0);
@@ -114,6 +116,7 @@ fn assert_mf_compact_svd_fallback_owned_entry_stages<D: crate::factorize::Factor
     assert_eq!(adjoint_dense.counts().svd_into, 0);
     assert_eq!(adjoint_dense.counts().svd, 2);
     assert_eq!(adjoint_stage.len(), 2);
+    assert_eq!(adjoint_stage, staged_svd_factors(&mf_svd_fallback_rec));
     assert!(adjoint_stage
         .iter()
         .all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
@@ -168,6 +171,7 @@ fn assert_generic_compact_svd_fallback_owned_entry_stages<D: crate::factorize::F
 
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(stage.len(), 2);
+    assert_eq!(stage, staged_svd_factors(&svd_stage_rec));
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
     assert!(compact_svd_copy_rec.compact_svd_copy().input_pack_calls > 0);
 }
@@ -1369,4 +1373,13 @@ fn compact_svd_adjoint_direct_factors_follow_the_parent_row_gauge() {
     assert_eq!(u.data(), expected_u.as_slice());
     assert_eq!(vh.data(), expected_vh.as_slice());
     assert_eq!(spectrum.len(), 2);
+}
+
+/// The `(u, vt)` payload addresses of each staged compact-SVD destination.
+pub(super) fn staged_svd_factors(recording: &crate::probe::Recording) -> Vec<(usize, usize)> {
+    recording
+        .staged_destinations()
+        .iter()
+        .map(|(_, [u, _, vt])| (u.unwrap(), vt.unwrap()))
+        .collect()
 }

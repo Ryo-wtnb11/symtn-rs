@@ -165,6 +165,7 @@ enum Observation {
     CheckedEighPairs(Vec<usize>),
     CheckedSvdStage(usize, usize),
     MfSvdFallback(usize, usize),
+    StagedDestination(usize, [Option<usize>; 3]),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -309,6 +310,15 @@ impl Recording {
         })
     }
 
+    /// Every destination the staging boundary handed to a sector, with its
+    /// sector index and each output's payload address.
+    pub(crate) fn staged_destinations(&self) -> Vec<(usize, [Option<usize>; 3])> {
+        self.observed(|o| match o {
+            Observation::StagedDestination(index, outputs) => Some((*index, *outputs)),
+            _ => None,
+        })
+    }
+
     /// Factor buffers built as `(left, right)`.
     pub(crate) fn factor_buffer_builds(&self) -> (usize, usize) {
         (
@@ -414,6 +424,29 @@ pub(crate) fn checked_svd_stage<D>(u: &[D], vt: &[D]) {
     observe(Observation::CheckedSvdStage(
         u.as_ptr() as usize,
         vt.as_ptr() as usize,
+    ));
+}
+
+/// Records the payload address of each output of a destination handed to
+/// sector `index` by the staging boundary.
+pub(crate) fn staged_destination(index: usize, dest: &mut symtn_dense::FactorDest<'_>) {
+    fn address(write: &symtn_dense::DenseWrite<'_>) -> usize {
+        use symtn_dense::DenseWrite as W;
+        match write {
+            W::F32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::F64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::C32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::C64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::I32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::I64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::Bool(view) => view.data()[view.offset()..].as_ptr() as usize,
+        }
+    }
+    observe(Observation::StagedDestination(
+        index,
+        dest.outputs_mut()
+            .each_ref()
+            .map(|output| output.as_ref().map(address)),
     ));
 }
 

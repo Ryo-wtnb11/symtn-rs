@@ -552,10 +552,13 @@ impl<'a> PlacementIndex<'a> {
 /// paid also for `G_s = 1`.
 ///
 /// Why not one structure-major pass routing each output block to its
-/// matricization: the compact SVD and EIGH consumers keep each sector's dense
-/// factor in a workspace reused across sectors, so scattering has to happen
-/// per matricization, and a structure-major pass would also change which
-/// missing-tree error fires first when two sectors are defective. Why not a
+/// matricization: the compact SVD and EIGH consumers scatter each sector
+/// from the batch's packed transient in sector order, as that sector is
+/// delivered (or, on the solver-first adjoint SVD route, once the batch has
+/// succeeded), so a sector's scatter error keeps its place in the error
+/// order between the solves; a structure-major pass would need every
+/// sector first and would change which missing-tree error fires first when
+/// two sectors are defective. Why not a
 /// symtn-core accessor: nothing exposes the coupled grouping
 /// (`sorted_indices` is uncoupled-major and the coupled ranges known at
 /// layout time are dropped at `BlockStructure`).

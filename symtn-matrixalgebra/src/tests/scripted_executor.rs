@@ -18,6 +18,7 @@ use symtn_dense::Engine;
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
     DenseFactorization, DenseLinalgScopeBody, DenseOwned, DenseRead, DenseTensor, DenseWrite,
+    FactorDest, FactorFailure,
 };
 
 /// One scripted executor entry point.
@@ -37,9 +38,10 @@ pub enum Op {
     Solve,
     DotGeneral,
     FactorizeBatch,
+    FactorizeBatchInto,
 }
 
-const OPS: usize = 14;
+const OPS: usize = 15;
 
 /// What an entry point does once counted, faults and the observer allowing.
 #[derive(Clone, Copy, Debug)]
@@ -71,6 +73,7 @@ pub struct Counts {
     pub solve: usize,
     pub dot_general: usize,
     pub factorize_batch: usize,
+    pub factorize_batch_into: usize,
 }
 
 impl Counts {
@@ -90,6 +93,7 @@ impl Counts {
             Op::Solve => &mut self.solve,
             Op::DotGeneral => &mut self.dot_general,
             Op::FactorizeBatch => &mut self.factorize_batch,
+            Op::FactorizeBatchInto => &mut self.factorize_batch_into,
         }
     }
 
@@ -164,6 +168,25 @@ pub trait Observer {
         sink(index, outcome)
     }
 
+    /// Stands between a forwarded `factorize_batch_into` and its caller's
+    /// sink: sees each delivered destination and outcome and decides what
+    /// the caller receives, then may replace the batch's own result.
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut FactorDest<'_>,
+        outcome: Result<(), FactorFailure>,
+        sink: &mut BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        sink(index, dest, outcome)
+    }
+
+    /// The result a forwarded `factorize_batch_into` returns, given the
+    /// wrapped executor's.
+    fn batch_into_result(&mut self, result: Result<(), DenseError>) -> Result<(), DenseError> {
+        result
+    }
+
     /// Runs after a `with_linalg_scope` body, with the counts so far; an
     /// error replaces the scope's result, as a backend admission refused at
     /// scope exit would.
@@ -175,6 +198,10 @@ pub trait Observer {
 /// A `factorize_batch` caller's outcome sink.
 pub type BatchSink<'s> =
     dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError> + 's;
+
+/// A `factorize_batch_into` caller's sink.
+pub type BatchIntoSink<'s> =
+    dyn FnMut(usize, &mut FactorDest<'_>, Result<(), FactorFailure>) -> Result<(), DenseError> + 's;
 
 impl Observer for () {}
 
@@ -354,6 +381,54 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
         input: DenseRead<'_>,
     ) -> Result<DenseTensor, DenseError> {
         self.0.eig_vals(engine, input)
+    }
+}
+
+/// Runs the trait's default `factorize_batch_into` with this executor: it
+/// forwards the owned batch and the required entries, so the default
+/// reaches the scripted `factorize_batch`.
+struct OwnedBatch<'a, O: Observer>(&'a mut ScriptedExecutor<O>);
+
+impl<O: Observer> DenseExecutor for OwnedBatch<'_, O> {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
+    }
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
+    }
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
+    }
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
+    }
+    fn factorize_batch(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        sink: &mut BatchSink<'_>,
+    ) -> Result<(), DenseError> {
+        self.0.factorize_batch(engine, op, inputs, sink)
     }
 }
 
@@ -726,6 +801,35 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
                     })
             }
             _ => Defaulted(self).factorize_batch(engine, op, inputs, sink),
+        }
+    }
+
+    /// `Forward` runs the wrapped executor's destination entry (the native
+    /// lanes) through [`Observer::batch_into_outcome`]; `Default` keeps the
+    /// trait default, which reaches this executor's own `factorize_batch`.
+    fn factorize_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        dests: &mut [FactorDest<'_>],
+        sink: &mut BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        match self.script.enter(Op::FactorizeBatchInto)? {
+            Action::Forward => {
+                let observer = &mut self.observer;
+                let result = self.script.inner.factorize_batch_into(
+                    engine,
+                    op,
+                    inputs,
+                    dests,
+                    &mut |index, dest, outcome| {
+                        observer.batch_into_outcome(index, dest, outcome, sink)
+                    },
+                );
+                self.observer.batch_into_result(result)
+            }
+            _ => OwnedBatch(self).factorize_batch_into(engine, op, inputs, dests, sink),
         }
     }
 

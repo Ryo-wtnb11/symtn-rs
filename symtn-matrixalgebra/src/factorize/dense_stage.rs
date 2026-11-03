@@ -133,6 +133,8 @@ where
                 )))
             } else {
                 delivered += 1;
+                #[cfg(test)]
+                crate::probe::staged_destination(index, dest);
                 stage(index, dest, outcome)
             };
             staged.map_err(|error| {

@@ -342,6 +342,96 @@ mod native {
         destinations_match_owned::<Complex64>();
     }
 
+    /// The allocation calls of one native batch of `blocks` copies of an
+    /// `8 x 8` input of `T` on four threads split into two lanes: the
+    /// lanes' buffer setups (summed once per lane) and every block's solve,
+    /// provider call included, observed at their own sites on the lane
+    /// threads; scheduler and route metadata are outside both.
+    fn owner_calls<T: Elem>(
+        op: DenseFactorization,
+        placement: FactorPlacement,
+        blocks: usize,
+    ) -> (usize, u64, Vec<Option<u64>>) {
+        use crate::block_kernel::factor::owners;
+        let split = tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Split {
+            lanes: std::num::NonZeroUsize::new(2).unwrap(),
+        });
+        let mut engine = engine(4, split);
+        let shape = [8usize, 8];
+        let item = input_data::<T>(&shape, op == DenseFactorization::Eigh, 1);
+        let data: Vec<T> = (0..blocks).flat_map(|_| item.iter().copied()).collect();
+        let layout = strides(&shape);
+        let inputs: Vec<_> = data
+            .as_chunks::<64>()
+            .0
+            .iter()
+            .map(|chunk| T::read(DenseView::new(chunk, &shape, &layout, 0).unwrap()))
+            .collect();
+        let mut buffers: Vec<Buffers<T>> = (0..blocks)
+            .map(|_| Buffers::new(op, dest_shapes(op, &shape, placement), 0.0))
+            .collect();
+        let mut dests: Vec<_> = buffers.iter_mut().map(|b| b.dest(op, placement)).collect();
+        let mark = owners::mark();
+        DefaultDenseExecutor::new()
+            .factorize_batch_into(
+                &mut engine,
+                op,
+                &inputs,
+                &mut dests,
+                &mut |_, _, outcome| outcome.map_err(FactorFailure::into_error),
+            )
+            .unwrap();
+        let start = data.as_ptr() as usize;
+        let records = owners::within(mark, start..start + std::mem::size_of_val(&data[..]));
+        assert_eq!(records.len(), blocks);
+        let mut lanes = std::collections::BTreeMap::new();
+        for record in &records {
+            lanes.insert(record.lane, record.setup.unwrap());
+        }
+        (
+            lanes.len(),
+            lanes.values().sum(),
+            records.iter().map(|record| record.solve).collect(),
+        )
+    }
+
+    /// Purpose: on lanes of a multi-lane engine, the destination batch's
+    /// provider workspace and temporary factor and spectrum scratch are
+    /// allocated per lane, never per block: no block's solve allocates
+    /// (provider call included), and a batch of twice the blocks at the
+    /// same width sets its lanes up with exactly as many allocation calls;
+    /// for every scalar, op, and the adjoint placement.
+    fn owners_do_not_grow<T: Elem>() {
+        let cases = [
+            (DenseFactorization::Qr, FactorPlacement::AsComputed),
+            (DenseFactorization::Qr, FactorPlacement::Adjoint),
+            (DenseFactorization::Svd, FactorPlacement::AsComputed),
+            (DenseFactorization::Svd, FactorPlacement::Adjoint),
+            (DenseFactorization::Eigh, FactorPlacement::AsComputed),
+        ];
+        for (op, placement) in cases {
+            let (small_lanes, small_setup, small_solves) = owner_calls::<T>(op, placement, 4);
+            let (large_lanes, large_setup, large_solves) = owner_calls::<T>(op, placement, 8);
+            assert_eq!((small_lanes, large_lanes), (2, 2), "{op:?} {placement:?}");
+            assert_eq!(small_setup, large_setup, "{op:?} {placement:?} lane setup");
+            assert!(
+                small_solves
+                    .iter()
+                    .chain(&large_solves)
+                    .all(|&calls| calls == Some(0)),
+                "{op:?} {placement:?} solves: {small_solves:?} {large_solves:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lane_owners_do_not_grow_with_blocks() {
+        owners_do_not_grow::<f32>();
+        owners_do_not_grow::<f64>();
+        owners_do_not_grow::<Complex32>();
+        owners_do_not_grow::<Complex64>();
+    }
+
     /// Purpose: the native destination batch keeps the owned batch's
     /// admission: each admitted input's failure is its own `Solver`
     /// outcome, delivered in order to a sink that accepts it; a pre-entry

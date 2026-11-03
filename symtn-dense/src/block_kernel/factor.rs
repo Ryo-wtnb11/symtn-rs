@@ -826,6 +826,9 @@ pub(crate) struct LaneBuffers {
     /// A process-unique id of this lane setup.
     #[cfg(test)]
     id: usize,
+    /// The allocation calls of this lane's buffer setup.
+    #[cfg(test)]
+    setup_allocs: Option<u64>,
 }
 
 /// The largest workspace bytes and typed scratch elements (per scalar, in
@@ -870,20 +873,32 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
                 job.sizing = Some(error);
             }
         });
+        let build = || {
+            (
+                vec![MaybeUninit::uninit(); needs.bytes],
+                TypedScratch {
+                    f32: vec![0.0; needs.typed[0]],
+                    f64: vec![0.0; needs.typed[1]],
+                    c32: vec![Complex32::default(); needs.typed[2]],
+                    c64: vec![Complex64::default(); needs.typed[3]],
+                },
+            )
+        };
+        #[cfg(test)]
+        let ((workspace, typed), setup_allocs) = owners::measured(build);
+        #[cfg(not(test))]
+        let (workspace, typed) = build();
         LaneBuffers {
-            workspace: vec![MaybeUninit::uninit(); needs.bytes],
-            typed: TypedScratch {
-                f32: vec![0.0; needs.typed[0]],
-                f64: vec![0.0; needs.typed[1]],
-                c32: vec![Complex32::default(); needs.typed[2]],
-                c64: vec![Complex64::default(); needs.typed[3]],
-            },
+            workspace,
+            typed,
             #[cfg(test)]
             id: {
                 static SETUPS: std::sync::atomic::AtomicUsize =
                     std::sync::atomic::AtomicUsize::new(1);
                 SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             },
+            #[cfg(test)]
+            setup_allocs,
         }
     }
 
@@ -924,7 +939,9 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
             job.lane_seen = (lane.id, lane.workspace.len());
         }
         let sizing = job.sizing.take();
-        let outcome = match job.input {
+        #[cfg(test)]
+        let (setup, id, input) = (lane.setup_allocs, lane.id, owners::address(job.input));
+        let solve = || match job.input {
             DenseRead::F32(view) => {
                 factor_into_typed::<F, _>(view, &job.strides, job.dest, sizing, lane, &mut exec)
             }
@@ -939,8 +956,88 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
             }
             _ => unreachable!("preflight admits the provider's dtypes only"),
         };
+        #[cfg(test)]
+        let outcome = {
+            let (outcome, solve_allocs) = owners::measured(solve);
+            owners::record(input, id, setup, solve_allocs);
+            outcome
+        };
+        #[cfg(not(test))]
+        let outcome = solve();
         job.outcome = Some(outcome.map_err(FactorFailure::Solver));
         Ok(())
+    }
+}
+
+/// Test-only observation of the destination batch's allocation owners: each
+/// lane's buffer setup and each block's solve (provider call included),
+/// measured on the thread that runs them and kept by input payload address.
+#[cfg(test)]
+pub(crate) mod owners {
+    use std::sync::{Mutex, PoisonError};
+
+    use crate::tests::counting_alloc;
+    use crate::DenseRead;
+
+    /// One solved block: its input's payload address, its lane setup's id
+    /// and allocation calls, and the allocation calls inside its solve.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct Record {
+        pub(crate) input: usize,
+        pub(crate) lane: usize,
+        pub(crate) setup: Option<u64>,
+        pub(crate) solve: Option<u64>,
+    }
+
+    static RECORDS: Mutex<Vec<Record>> = Mutex::new(Vec::new());
+
+    /// `f`'s allocation calls on this thread, `None` inside another
+    /// measurement window, which a nested count would reset.
+    pub(super) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+        if counting_alloc::active() {
+            return (f(), None);
+        }
+        let (value, allocs) = counting_alloc::measure(f);
+        (value, Some(allocs.calls))
+    }
+
+    pub(super) fn address(input: DenseRead<'_>) -> usize {
+        match input {
+            DenseRead::F32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::F64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::C32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::C64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::I32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::I64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::Bool(view) => view.data()[view.offset()..].as_ptr() as usize,
+        }
+    }
+
+    pub(super) fn record(input: usize, lane: usize, setup: Option<u64>, solve: Option<u64>) {
+        RECORDS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Record {
+                input,
+                lane,
+                setup,
+                solve,
+            });
+    }
+
+    /// The position the next record takes.
+    pub(crate) fn mark() -> usize {
+        RECORDS.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+
+    /// The records since `mark` of blocks whose input payload lies in
+    /// `range` (other tests record concurrently).
+    pub(crate) fn within(mark: usize, range: std::ops::Range<usize>) -> Vec<Record> {
+        RECORDS.lock().unwrap_or_else(PoisonError::into_inner)[mark..]
+            .iter()
+            .filter(|record| range.contains(&record.input))
+            .copied()
+            .collect()
     }
 }
 

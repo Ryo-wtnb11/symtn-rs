@@ -181,6 +181,12 @@ fn start_matching(sizes: (usize, usize)) {
     });
 }
 
+/// Whether this thread is inside a [`measure`] window, so a nested probe
+/// must not restart its counts.
+pub fn active() -> bool {
+    STATE.with(|state| state.enabled.get())
+}
+
 /// Stops counting and returns what was counted since [`start`].
 pub fn stop() -> Allocs {
     STATE.with(|state| {

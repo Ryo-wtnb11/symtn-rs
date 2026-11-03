@@ -276,6 +276,7 @@ fn assert_checked_compact_svd_owned_entry_stages<D: crate::factorize::FactorScal
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(stage.len(), 2);
+    assert_eq!(stage, super::compact::staged_svd_factors(&svd_stage_rec));
     assert!(stage.iter().all(|&(u, vt)| u != 0 && vt != 0 && u != vt));
 }
 
@@ -562,12 +563,22 @@ fn assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm<
     .unwrap();
     let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
 
+    let staged_rec = crate::probe::record();
     let result = pinv_direct_into_dyn(engine, &mut dense, &input, output, 0.0).unwrap();
 
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(dense.output_ptrs.len(), 2);
-    assert_eq!(dense.gemm_ptrs.len(), 2);
+    // The reconstruction GEMMs read the staged factors in place: `S^+ Vh`
+    // and `U` are the destinations the batch wrote.
+    let staged = staged_rec.staged_destinations();
+    assert_eq!(
+        dense.gemm_ptrs,
+        staged
+            .iter()
+            .map(|(_, [u, _, vt])| (vt.unwrap(), u.unwrap()))
+            .collect::<Vec<_>>(),
+    );
     let regions = source
         .space()
         .structure()
