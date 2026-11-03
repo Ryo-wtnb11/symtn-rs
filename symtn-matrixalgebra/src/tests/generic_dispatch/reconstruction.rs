@@ -1157,7 +1157,7 @@ fn staged_into(
 #[test]
 fn direct_factor_destinations_are_the_published_allocations() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the direct-region QR, SVD and eigh batches hand each sector a
+    // What: the direct-region QR, LQ, SVD and eigh batches hand each sector a
     // destination inside the factor buffer the operation publishes, so a
     // delivered factor reaches the result with no further payload copy.
     let rule = Z2FusionRule;
@@ -1171,6 +1171,13 @@ fn direct_factor_destinations_are_the_published_allocations() {
     assert_eq!(staged.len(), 2);
     assert!(staged_into(&staged, 0, qr.q.data()));
     assert!(staged_into(&staged, 1, qr.r.data()));
+
+    let recording = crate::probe::record();
+    let lq = lq_compact(engine, &mut dense, &bound.as_ref()).unwrap();
+    let staged = recording.staged_destinations();
+    assert_eq!(staged.len(), 2);
+    assert!(staged_into(&staged, 0, lq.l.data()));
+    assert!(staged_into(&staged, 1, lq.q.data()));
 
     let recording = crate::probe::record();
     let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();

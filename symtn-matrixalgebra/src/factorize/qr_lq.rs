@@ -528,8 +528,9 @@ fn lq_qr_input<'a, D: FactorScalar>(
 
 /// Compact LQ `X = L Q` of each column-major `(data, rows, cols)` block into
 /// its destination slices `l` (`X` rows `x k`) and `q` (`k x` `X` cols),
-/// `k = min(rows, cols)`, as one solver-first executor batch; each solved
-/// block is positive-diagonal gauged in place on its final placement.
+/// `k = min(rows, cols)`, as one solver-first executor batch inside one
+/// linear-algebra scope; each solved block is positive-diagonal gauged in
+/// place on its final placement.
 /// Under [`FactorPlacement::Direct`] a block is `X`, factored by
 /// [`DenseFactorization::Lq`]. Under [`FactorPlacement::Adjoint`] it is the
 /// parent block `A` of a lazy adjoint `X = A^H`, read in place (#2070) and
@@ -593,17 +594,22 @@ where
             ))
         })
         .collect::<Result<Vec<_>, OperationError>>()?;
-    factorize_into_solver_first(engine, dense, op, &inputs, &mut dests, |index, dest| {
-        let (rows, cols) = lq_dims(&blocks[index]);
-        let [l, q, _] = dest.outputs_mut();
-        positive_diagonal_gauge_lq(
-            dest_data::<D>(l, "lq")?,
-            rows,
-            dest_data::<D>(q, "lq")?,
-            rows.min(cols),
-            cols,
-        );
-        Ok(())
+    // One executor scope around the batch, as compact LQ has always run:
+    // the scope's own admission and its refusal take precedence over the
+    // batch's outcome.
+    in_linalg_scope(engine, dense, |dense, engine| {
+        factorize_into_solver_first(engine, dense, op, &inputs, &mut dests, |index, dest| {
+            let (rows, cols) = lq_dims(&blocks[index]);
+            let [l, q, _] = dest.outputs_mut();
+            positive_diagonal_gauge_lq(
+                dest_data::<D>(l, "lq")?,
+                rows,
+                dest_data::<D>(q, "lq")?,
+                rows.min(cols),
+                cols,
+            );
+            Ok(())
+        })
     })
 }
 

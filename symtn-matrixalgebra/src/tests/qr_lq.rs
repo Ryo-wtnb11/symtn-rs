@@ -1300,6 +1300,73 @@ fn lazy_adjoint_compact_lq_is_the_gauged_parent_qr_adjointed() {
     }
 }
 
+/// Fails its first QR solve when `fail`, and refuses every linear-algebra
+/// scope at exit.
+struct LqRefusingScope {
+    fail: bool,
+    qr_calls: usize,
+}
+
+impl crate::tests::scripted_executor::Observer for LqRefusingScope {
+    fn call(
+        &mut self,
+        call: crate::tests::scripted_executor::Call<'_, '_>,
+    ) -> Option<crate::tests::scripted_executor::Reply> {
+        if let crate::tests::scripted_executor::Call::Read(
+            crate::tests::scripted_executor::Op::Qr,
+            _,
+        ) = call
+        {
+            self.qr_calls += 1;
+            if self.fail && self.qr_calls == 1 {
+                return Some(Err(DenseError::OutOfBounds));
+            }
+        }
+        None
+    }
+
+    fn scope_exit(&mut self, _: crate::tests::scripted_executor::Counts) -> Result<(), DenseError> {
+        Err(scope_refusal("lq scope"))
+    }
+}
+
+#[test]
+fn compact_lq_runs_in_one_scope_whose_refusal_wins() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: compact LQ, ordinary and of a lazy adjoint, runs its dense batch
+    // inside the executor's linear-algebra scope: a scope that refuses at
+    // exit fails an otherwise successful call, and its refusal takes
+    // precedence over a solver failure inside it.
+    let rule = Z2FusionRule;
+    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(rule), &tensor);
+    let bound = bound.as_ref();
+    let materialized = bound.dynamic();
+    let view_space = materialized.space().adjoint_view().unwrap();
+    let parent = BoundDynamicTensorRef::try_new(&view_space, materialized.data()).unwrap();
+    for fail in [false, true] {
+        let mut dense = crate::tests::scripted_executor::ScriptedExecutor::new(LqRefusingScope {
+            fail,
+            qr_calls: 0,
+        });
+        let ordinary = lq_compact(engine, &mut dense, &bound).map(|_| ());
+        let lazy = crate::factorize::lq_compact_adjoint_dyn(
+            engine,
+            &mut dense,
+            &parent,
+            materialized.space(),
+        )
+        .map(|_| ());
+        for (route, outcome) in [("ordinary", ordinary), ("lazy", lazy)] {
+            assert_eq!(
+                outcome,
+                Err(OperationError::Dense(scope_refusal("lq scope"))),
+                "{route}, solver failure {fail}"
+            );
+        }
+    }
+}
+
 #[test]
 fn checked_compact_lq_adds_no_per_sector_allocation_over_the_multiplicity_free_route() {
     // What: checked compact LQ, eager and lazy adjoint, runs the same
