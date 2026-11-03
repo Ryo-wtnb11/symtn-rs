@@ -545,7 +545,7 @@ fn checked_generic_full_svd_local_shape_error_precedes_provider_query() {
     assert_eq!(provider.calls.get(), 0);
 }
 
-fn assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm<
+fn assert_checked_pinv_reads_the_owned_svd_outputs_at_final_gemm<
     D: crate::factorize::FactorScalar,
 >() {
     let engine = &mut symtn_dense::CpuEngine::serial();
@@ -569,14 +569,16 @@ fn assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm<
     assert_eq!(dense.counts().svd_into, 0);
     assert_eq!(dense.counts().svd, 2);
     assert_eq!(dense.output_ptrs.len(), 2);
-    // The reconstruction GEMMs read the staged factors in place: `S^+ Vh`
-    // and `U` are the destinations the batch wrote.
-    let staged = staged_rec.staged_destinations();
+    // The reconstruction GEMMs read the owned batch's factors in place:
+    // `S^+ Vh` and `U` are the executor's own `(U, Vh)` outputs, with no
+    // destination batch and no payload copy in between.
+    assert!(staged_rec.staged_destinations().is_empty());
     assert_eq!(
         dense.gemm_ptrs,
-        staged
+        dense
+            .output_ptrs
             .iter()
-            .map(|(_, [u, _, vt])| (vt.unwrap(), u.unwrap()))
+            .map(|&(u, vt)| (vt, u))
             .collect::<Vec<_>>(),
     );
     let regions = source
@@ -603,11 +605,11 @@ fn assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm<
 }
 
 #[test]
-fn checked_pinv_reads_the_staged_svd_factors_at_final_gemm() {
-    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<f32>();
-    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<f64>();
-    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<Complex32>();
-    assert_checked_pinv_reads_the_staged_svd_factors_at_final_gemm::<Complex64>();
+fn checked_pinv_reads_the_owned_svd_outputs_at_final_gemm() {
+    assert_checked_pinv_reads_the_owned_svd_outputs_at_final_gemm::<f32>();
+    assert_checked_pinv_reads_the_owned_svd_outputs_at_final_gemm::<f64>();
+    assert_checked_pinv_reads_the_owned_svd_outputs_at_final_gemm::<Complex32>();
+    assert_checked_pinv_reads_the_owned_svd_outputs_at_final_gemm::<Complex64>();
 }
 
 struct FailSingleLegFold {

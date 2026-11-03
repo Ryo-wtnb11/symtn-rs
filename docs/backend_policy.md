@@ -222,9 +222,14 @@ the lane finishes; nothing is kept across calls. The positive-diagonal and
 phase gauges run in place on the delivered destination, and each sector's
 public `f64` spectrum is still its own allocation. Values-only SVD and EIGH
 and general eigenvalues keep one provider workspace and fresh outputs per
-block (tlinalg has no initialized destination form for them), and the
-pseudo-inverse keeps every sector's factors, in one packed transient, until
-its global cutoff is known. Every other executor, and the BLAS provider,
+block (tlinalg has no initialized destination form for them). The
+pseudo-inverse's SVD keeps the owned batch, one provider workspace and
+fresh factors per block, which it holds until its global cutoff is known and
+then reads in place in its reconstruction GEMMs: a destination needs the
+whole transient zero-initialized first, a serial pass the owned outputs do
+not pay and that a caller which never scatters or publishes the factors
+does not recover (TensorKit's `pinv` also solves each block into its own
+temporaries). Every other executor, and the BLAS provider,
 reach `factorize_batch_into` through its default: the owned
 `factorize_batch` with each delivered output copied into its destination.
 The full general eigendecomposition goes through the same batch but solves

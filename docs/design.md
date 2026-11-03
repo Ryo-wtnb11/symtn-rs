@@ -56,7 +56,9 @@ over all three input routes) and values-only general eigendecomposition. For the
 the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
 per block; compact QR, compact SVD and full EIGH write each block's factors
 into the operation's preallocated output (`factorize_batch_into`), as
-TensorKit writes each block of its `initialize_output` result in place;
+TensorKit writes each block of its `initialize_output` result in place,
+except the pseudo-inverse's SVD, which keeps per-block factors as
+TensorKit's `pinv` does;
 see [backend policy](backend_policy.md#parallel-execution). The multiplicity-free Host
 direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
 `CompactFactorPlan` as the per-call, placement-neutral authority for bond

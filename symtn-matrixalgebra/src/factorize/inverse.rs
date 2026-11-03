@@ -355,14 +355,16 @@ where
     in_linalg_scope(engine, dense, |dense, engine| {
         let (_, blocks) = sector_blocks(&matrices)?;
         // Each sector's geometry and spectrum; its factors stay in the
-        // batch's packed transient until the global cutoff is known.
+        // owned batch's per-sector outputs until the global cutoff is known,
+        // and the reconstruction GEMMs read them in place.
         let mut staged = Vec::with_capacity(blocks.len());
         // Why no SVD gauge: the pseudo-inverse is gauge invariant.
-        let mut packed = compact_svd_sectors_staged(
+        let mut factors = compact_svd_sectors_staged(
             engine,
             dense,
             &blocks,
             None,
+            SvdStorage::PerSector,
             |_, _| {},
             |_, stage| {
                 staged.push((
@@ -380,13 +382,13 @@ where
             staged.iter().flat_map(|stage| stage.4.iter().copied()),
             rcond,
         )?;
-        for (stage, landing) in staged.iter().zip(&landings) {
+        for (position, (stage, landing)) in staged.iter().zip(&landings).enumerate() {
             let (rows, cols, rank, ref u_range, ref singular_values, ref vt_range) = *stage;
             if rank == 0 {
                 continue;
             }
-            let u = &packed.u[u_range.clone()];
-            let vt = &mut packed.vt[vt_range.clone()];
+            let (u, vt) = factors.sector_mut(position, u_range.clone(), vt_range.clone());
+            let u = &*u;
             for (row, &sigma) in singular_values.iter().enumerate() {
                 let reciprocal = D::from_real(if sigma > cutoff { 1.0 / sigma } else { 0.0 });
                 for column in 0..cols {
