@@ -14,6 +14,7 @@ mod dot;
 mod dtype;
 mod error;
 mod executor;
+mod factor_dest;
 mod fresh;
 mod layout;
 mod scalar;
@@ -60,17 +61,23 @@ mod tests;
 pub use dot::DenseDotConfig;
 pub use dtype::{DenseBackend, DenseDType};
 pub use error::DenseError;
+#[doc(hidden)]
+pub use executor::batch_searches_lanes;
 pub use executor::{
     arity_mismatch, check_contiguous_output, strided_batch_runs, strided_batch_runs_into,
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
-    MatrixOp,
+    LaneAllocation, MatrixOp,
 };
+pub use factor_dest::{FactorDest, FactorFailure, FactorPlacement};
 #[doc(hidden)]
 pub use fresh::DenseFreshSegments;
 pub use scalar::DenseScalar;
 pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
+#[cfg(feature = "tenferro")]
+#[doc(hidden)]
+pub use tenferro_adapter::admit_lane_allocation;
 #[cfg(feature = "tenferro")]
 pub use tenferro_adapter::DefaultDenseExecutor;
 

@@ -17,10 +17,12 @@
 //! its admission satisfies the operation's capability bounds; those bounds,
 //! the sealed provider traits generic code names, are in [`sector`].
 //!
-//! **Execution.** Every numerical operation takes the caller's engine as its
-//! first argument, `engine: &mut dyn Engine` ([`typed::Engine`]): a
-//! [`typed::CpuEngine`] (serial, or over a [`typed::Pool`] of threads) for
-//! Host tensors. The caller owns the engine; symtn stores none, and the
+//! **Execution.** Every numerical operation takes the caller's execution
+//! context as its first argument ([`typed::ExecContext`]): an engine
+//! ([`typed::Engine`]), a [`typed::CpuEngine`] (serial, or over a
+//! [`typed::Pool`] of threads) for Host tensors, or a [`typed::Configured`]
+//! engine carrying [`typed::ExecOptions`] for the calls it is passed to. The
+//! caller owns the engine; symtn stores none, and the
 //! dense provider (faer or a linked BLAS/LAPACK) is the one compiled in by
 //! cargo feature. A [`typed::Runtime`] holds prepared structural state only:
 //! the per-rule contraction/tree-transform contexts, reusable scratch, and
@@ -50,7 +52,7 @@
 //!   observability;
 //! - `krylov` (feature `krylov`): the [krylov](https://docs.rs/krylov)
 //!   crate re-exported, with Host [`typed::TensorMap`] as its vector type
-//!   and the caller's [`typed::Engine`] as its execution context.
+//!   and the caller's [`typed::ExecContext`] as its execution context.
 //!
 //! Checked-provider failures remain structured as
 //! [`typed::GenericTensorError`] variants whose nested errors retain their

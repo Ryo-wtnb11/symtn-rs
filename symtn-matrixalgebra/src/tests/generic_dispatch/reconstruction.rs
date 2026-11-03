@@ -904,7 +904,7 @@ impl Observer for MalformedBatch {
 #[test]
 fn compact_factorizations_reject_a_malformed_executor_batch() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: the planned compact QR/SVD batch is solver-first: a delivered
+    // What: the planned compact QR/LQ/SVD batch is solver-first: a delivered
     // solver error is the result even after an earlier malformed factor,
     // which is checked only once the batch succeeded. A missing,
     // repeated or misplaced delivery is symtn's own typed arity error,
@@ -924,20 +924,28 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
     };
     let solver = |error: &OperationError| *error == OperationError::Dense(solver_failure());
     type Expect = Box<dyn Fn(&OperationError) -> bool>;
-    let cases: [(Delivery, Expect, Expect); 6] = [
+    let cases: [(Delivery, Expect, Expect, Expect); 6] = [
         (
             Delivery::DropLast,
+            Box::new(arity("factorize_batch")),
             Box::new(arity("factorize_batch")),
             Box::new(arity("factorize_batch")),
         ),
         (
             Delivery::DropFactor,
             Box::new(arity("qr_into")),
+            Box::new(arity("lq")),
             Box::new(arity("svd_into")),
         ),
-        (Delivery::FailFirst, Box::new(solver), Box::new(solver)),
+        (
+            Delivery::FailFirst,
+            Box::new(solver),
+            Box::new(solver),
+            Box::new(solver),
+        ),
         (
             Delivery::DropFactorThenFail,
+            Box::new(solver),
             Box::new(solver),
             Box::new(solver),
         ),
@@ -945,22 +953,241 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
             Delivery::Duplicate,
             Box::new(arity("factorize_batch")),
             Box::new(arity("factorize_batch")),
+            Box::new(arity("factorize_batch")),
         ),
         (
             Delivery::OutOfOrder,
             Box::new(arity("factorize_batch")),
             Box::new(arity("factorize_batch")),
+            Box::new(arity("factorize_batch")),
         ),
     ];
-    for (delivery, qr_expect, svd_expect) in cases {
+    for (delivery, qr_expect, lq_expect, svd_expect) in cases {
         let mut dense = ScriptedExecutor::new(MalformedBatch { delivery });
         let qr = qr_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
         assert!(qr_expect(&qr), "{delivery:?} qr_compact: {qr:?}");
+        let lq = lq_compact(engine, &mut dense, &input)
+            .map(|_| ())
+            .unwrap_err();
+        assert!(lq_expect(&lq), "{delivery:?} lq_compact: {lq:?}");
         let svd = svd_compact(engine, &mut dense, &input)
             .map(|_| ())
             .unwrap_err();
         assert!(svd_expect(&svd), "{delivery:?} svd_compact: {svd:?}");
     }
+}
+
+use crate::tests::scripted_executor::BatchIntoSink;
+use symtn_dense::{FactorDest, FactorFailure};
+
+/// How a forwarded two-input destination batch reaches the caller.
+#[derive(Clone, Copy, Debug)]
+enum IntoDelivery {
+    /// The second input is never delivered.
+    DropLast,
+    /// The first input fails in the solver.
+    FailFirst,
+    /// The first input's outputs do not fit, then the second fails.
+    OutputThenFail,
+    /// The first input is delivered twice.
+    Duplicate,
+    /// The inputs are delivered in reversed order.
+    Swapped,
+    /// The first input is delivered under an index past the batch.
+    OutOfRange,
+    /// The first input is delivered, then the batch fails.
+    PrefixThenError,
+    /// The first input fails, the executor ignores the sink's stop, delivers
+    /// the second and fails the batch with another error.
+    IgnoresStop,
+}
+
+/// Overrides `factorize_batch_into` itself (the native destination lanes),
+/// standing between them and the caller as `delivery` says.
+struct MalformedIntoBatch {
+    delivery: IntoDelivery,
+}
+
+fn batch_failure() -> DenseError {
+    DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op: "injected batch",
+        message: "injected batch failure".to_string(),
+    }
+}
+
+impl Observer for MalformedIntoBatch {
+    fn script(script: &mut Script) {
+        script
+            .set(
+                Op::FactorizeBatch,
+                Action::Panic("the destination override bypasses the owned batch"),
+            )
+            .set(Op::FactorizeBatchInto, Action::Forward)
+            .set(
+                Op::DotGeneral,
+                Action::Panic("test only exercises factorizations"),
+            );
+    }
+
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut FactorDest<'_>,
+        outcome: Result<(), FactorFailure>,
+        sink: &mut BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        use IntoDelivery::*;
+        let output = || Err(FactorFailure::Output(arity_mismatch("qr_into", 2, 1)));
+        let solver = || Err(FactorFailure::Solver(solver_failure()));
+        match (self.delivery, index) {
+            (DropLast, 1) => Ok(()),
+            (FailFirst, 0) | (OutputThenFail, 1) => sink(index, dest, solver()),
+            (OutputThenFail, 0) => sink(index, dest, output()),
+            (Duplicate, 0) => {
+                sink(index, dest, outcome.clone())?;
+                sink(index, dest, outcome)
+            }
+            // The lanes deliver in order: the first delivery is withheld and
+            // the second is delivered first, then again under the first
+            // index, as an executor that reorders its deliveries would.
+            (Swapped, 0) => Ok(()),
+            (Swapped, 1) => {
+                sink(1, dest, outcome.clone())?;
+                sink(0, dest, outcome)
+            }
+            (OutOfRange, 0) => sink(5, dest, outcome),
+            (PrefixThenError, 1) => Err(batch_failure()),
+            (IgnoresStop, 0) => {
+                let _ = sink(index, dest, solver());
+                Ok(())
+            }
+            _ => sink(index, dest, outcome),
+        }
+    }
+
+    fn batch_into_result(&mut self, result: Result<(), DenseError>) -> Result<(), DenseError> {
+        match self.delivery {
+            IntoDelivery::PrefixThenError => result.and(Err(batch_failure())),
+            IntoDelivery::IgnoresStop => Err(batch_failure()),
+            _ => result,
+        }
+    }
+}
+
+#[test]
+fn compact_factorizations_reject_a_malformed_destination_batch() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: an executor that overrides the destination entry itself, below
+    // the owned-batch adapter, gets the same delivery contract. A missing,
+    // repeated, reordered or out-of-range delivery is symtn's typed
+    // batch-arity error, and no misdelivered destination is staged as a
+    // sector; a batch error after a delivered prefix is the result; a
+    // staging stop wins over whatever the executor returns after ignoring
+    // it; the solver-first QR/SVD batches let a later solver failure win
+    // over an earlier malformed output.
+    let rule = Z2FusionRule;
+    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(rule), &tensor);
+    let input = bound.as_ref();
+    let arity = |error: &OperationError| {
+        matches!(
+            error,
+            OperationError::Dense(DenseError::ShapeMismatch {
+                op: "factorize_batch",
+                ..
+            })
+        )
+    };
+    let solver = |error: &OperationError| *error == OperationError::Dense(solver_failure());
+    let batch = |error: &OperationError| *error == OperationError::Dense(batch_failure());
+    type Expect = fn(&OperationError) -> bool;
+    let cases: [(IntoDelivery, Expect); 8] = [
+        (IntoDelivery::DropLast, arity),
+        (IntoDelivery::FailFirst, solver),
+        (IntoDelivery::OutputThenFail, solver),
+        (IntoDelivery::Duplicate, arity),
+        (IntoDelivery::Swapped, arity),
+        (IntoDelivery::OutOfRange, arity),
+        (IntoDelivery::PrefixThenError, batch),
+        (IntoDelivery::IgnoresStop, solver),
+    ];
+    for (delivery, expect) in cases {
+        // Only in-order, in-range deliveries reach a sector: the staged
+        // indices are a prefix of `0, 1`.
+        let staged_in_order = |recording: &crate::probe::Recording| {
+            let staged = recording.staged_destinations();
+            staged.len() <= 2 && staged.iter().enumerate().all(|(n, &(index, _))| n == index)
+        };
+        let mut dense = ScriptedExecutor::new(MalformedIntoBatch { delivery });
+        let recording = crate::probe::record();
+        let qr = qr_compact(engine, &mut dense, &input)
+            .map(|_| ())
+            .unwrap_err();
+        assert!(expect(&qr), "{delivery:?} qr_compact: {qr:?}");
+        assert!(staged_in_order(&recording), "{delivery:?} qr_compact");
+        let recording = crate::probe::record();
+        let svd = svd_compact(engine, &mut dense, &input)
+            .map(|_| ())
+            .unwrap_err();
+        assert!(expect(&svd), "{delivery:?} svd_compact: {svd:?}");
+        assert!(staged_in_order(&recording), "{delivery:?} svd_compact");
+        assert_eq!(dense.counts().factorize_batch, 0, "{delivery:?}");
+    }
+}
+
+/// Whether every staged payload address of output `output` lies in
+/// `published`, the first one at its start.
+fn staged_into(
+    staged: &[(usize, [Option<usize>; 3])],
+    output: usize,
+    published: &[impl Sized],
+) -> bool {
+    let start = published.as_ptr() as usize;
+    let end = start + std::mem::size_of_val(published);
+    !staged.is_empty()
+        && staged[0].1[output] == Some(start)
+        && staged
+            .iter()
+            .all(|(_, outputs)| outputs[output].is_some_and(|at| (start..end).contains(&at)))
+}
+
+#[test]
+fn direct_factor_destinations_are_the_published_allocations() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: the direct-region QR, SVD and eigh batches hand each sector a
+    // destination inside the factor buffer the operation publishes, so a
+    // delivered factor reaches the result with no further payload copy.
+    let rule = Z2FusionRule;
+    let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(rule), &tensor);
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+
+    let recording = crate::probe::record();
+    let qr = qr_compact(engine, &mut dense, &bound.as_ref()).unwrap();
+    let staged = recording.staged_destinations();
+    assert_eq!(staged.len(), 2);
+    assert!(staged_into(&staged, 0, qr.q.data()));
+    assert!(staged_into(&staged, 1, qr.r.data()));
+
+    let recording = crate::probe::record();
+    let svd = svd_compact(engine, &mut dense, &bound.as_ref()).unwrap();
+    let staged = recording.staged_destinations();
+    assert_eq!(staged.len(), 2);
+    assert!(staged_into(&staged, 0, svd.u.data()));
+    assert!(staged_into(&staged, 2, svd.vh.data()));
+
+    let hermitian = one_sector_matrix(vec![2.0_f64, 1.0, 1.0, 3.0]);
+    let recording = crate::probe::record();
+    let eigh = crate::factorize::eigh_full(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(Z2FusionRule), &hermitian),
+    )
+    .unwrap();
+    let staged = recording.staged_destinations();
+    assert_eq!(staged.len(), 1);
+    assert!(staged_into(&staged, 1, eigh.v.data()));
 }

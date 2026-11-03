@@ -291,25 +291,6 @@ fn compact_qr_direct_spans_reconstruct_tall_and_wide_matrices() {
 }
 
 #[test]
-fn compact_qr_direct_single_sector_keeps_executor_factor_owners() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let tensor = rectangular_svd_tensor(3, 2);
-    let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let compact_qr_copy_rec = crate::probe::record();
-    qr_compact(
-        engine,
-        &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
-    )
-    .unwrap();
-    let probe = compact_qr_copy_rec.compact_qr_copy();
-    assert_eq!(probe.input_pack_bytes, 0);
-    assert_eq!(probe.output_scatter_bytes, 0);
-    assert_eq!(probe.owned_output_publications, 2);
-    assert_eq!(probe.owned_output_owner_reused, 2);
-}
-
-#[test]
 fn compact_qr_zero_only_input_normalizes_to_an_empty_factorization_result() {
     // What: a zero-only row or column produces empty Q/R spaces without
     // calling an invalid factor route.
@@ -1120,7 +1101,7 @@ impl FusionRule for U1AsGeneric {
 /// Warm allocation calls of checked compact LQ (eager, lazy adjoint) minus
 /// those of the multiplicity-free direct-region route on the same U(1) data
 /// and layout, with charges `-m..=m` on every leg (`4m + 1` coupled sectors).
-fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
+fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [i64; 2] {
     use super::null_space::counting_alloc;
     static RULE: U1AsGeneric = U1AsGeneric;
     let leg = |degeneracy: usize| {
@@ -1167,7 +1148,7 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
         call(&mut dense, &mut engine);
         counting_alloc::measure(|| call(&mut dense, &mut engine))
             .1
-            .calls
+            .calls as i64
     };
     let eager = warm(&mut |dense, engine| {
         lq_compact_dyn_checked_generic(engine, dense, &checked_input).unwrap();
@@ -1186,6 +1167,137 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [u64; 2] {
         crate::factorize::lq_compact_adjoint_dyn(engine, dense, &mf_input, &mf_adjoint).unwrap();
     });
     [eager, lazy]
+}
+
+/// Each coupled sector's column-major payload of `factor`.
+fn factor_sector_data<R, D: Copy>(
+    factor: &BoundDynFactor<R, D>,
+) -> std::collections::BTreeMap<SectorId, Vec<D>> {
+    factor
+        .space()
+        .space()
+        .structure()
+        .coupled_sector_regions(factor.space().space().nout())
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|region| (region.coupled(), factor.data()[region.range()].to_vec()))
+        .collect()
+}
+
+#[test]
+fn lazy_adjoint_compact_lq_is_the_gauged_parent_qr_adjointed() {
+    use num_complex::Complex64;
+    // What: compact LQ of a lazy adjoint `X = A^H` on the region-tiled
+    // routes (multiplicity-free and checked) is, bit for bit, the
+    // positive-diagonal-gauged QR `A = Q R` of each parent block followed by
+    // `l = R^H`, `q = Q^H`: the gauge applied on the final placement equals
+    // the gauge applied before the adjoint. Complex entries, so a dropped or
+    // doubled conjugation shows.
+    static RULE: U1AsGeneric = U1AsGeneric;
+    let leg = |degeneracy: usize| {
+        SectorLeg::new(
+            (-1..=1).map(|charge| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            false,
+        )
+    };
+    let homspace = FusionTreeHomSpace::new(
+        FusionProductSpace::new([leg(2), leg(2)]),
+        FusionProductSpace::new([leg(1), leg(1)]),
+    );
+    let mf = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::new(U1FusionRule),
+        homspace.clone(),
+    )
+    .unwrap();
+    let checked = BoundDynamicFusionMapSpace::from_final_homspace_generic_checked(
+        Arc::new(InfallibleGeneric::new(&RULE)),
+        homspace,
+    )
+    .unwrap();
+    let data = (0..mf.space().required_len().unwrap())
+        .map(|index| {
+            let x = (index * 7 + 3) as f64;
+            Complex64::new((x * 0.37).sin(), (x * 0.53).cos())
+        })
+        .collect::<Vec<_>>();
+    let mf_input = BoundDynamicTensorRef::try_new(&mf, &data).unwrap();
+    let checked_input = BoundDynamicTensorRef::try_new(&checked, &data).unwrap();
+    let mf_adjoint =
+        <symtn_core::MultiplicityFreeAdmissionMode as symtn_tensors::CoefficientAlgebra<
+            U1FusionRule,
+        >>::adjoint_space(mf_input.space())
+        .unwrap();
+    let checked_adjoint = <CheckedGenericAdmissionMode as symtn_tensors::CoefficientAlgebra<
+        InfallibleGeneric<'static, U1AsGeneric>,
+    >>::adjoint_space(checked_input.space())
+    .unwrap();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+
+    let adjoint = |data: &[Complex64], rows: usize, cols: usize| {
+        let mut out = vec![Complex64::default(); data.len()];
+        for col in 0..cols {
+            for row in 0..rows {
+                out[col + cols * row] = data[row + rows * col].conj();
+            }
+        }
+        out
+    };
+    let mut want_l = std::collections::BTreeMap::new();
+    let mut want_q = std::collections::BTreeMap::new();
+    for region in mf
+        .space()
+        .structure()
+        .coupled_sector_regions(mf.space().nout())
+        .unwrap()
+        .unwrap()
+        .iter()
+    {
+        let (rows, cols) = (region.rows(), region.cols());
+        let rank = rows.min(cols);
+        let shape = [rows, cols];
+        let strides = [1, rows];
+        let view = symtn_dense::DenseView::new(&data[region.range()], &shape, &strides, 0).unwrap();
+        let [q, r]: [symtn_dense::DenseTensor; 2] = dense
+            .qr(engine, DenseRead::C64(view))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let (mut q, mut r) = (
+            q.as_c64_slice().unwrap().to_vec(),
+            r.as_c64_slice().unwrap().to_vec(),
+        );
+        crate::factorize::positive_diagonal_gauge(&mut q, rows, &mut r, rank, cols);
+        want_l.insert(region.coupled(), adjoint(&r, rank, cols));
+        want_q.insert(region.coupled(), adjoint(&q, rows, rank));
+    }
+
+    let mf_lq =
+        crate::factorize::lq_compact_adjoint_dyn(engine, &mut dense, &mf_input, &mf_adjoint)
+            .unwrap();
+    let checked_lq = crate::factorize::lq_compact_adjoint_dyn_checked_generic(
+        engine,
+        &mut dense,
+        &checked_input,
+        &checked_adjoint,
+    )
+    .unwrap();
+    for (route, l, q) in [
+        (
+            "multiplicity-free",
+            factor_sector_data(&mf_lq.l),
+            factor_sector_data(&mf_lq.q),
+        ),
+        (
+            "checked",
+            factor_sector_data(&checked_lq.l),
+            factor_sector_data(&checked_lq.q),
+        ),
+    ] {
+        assert_eq!(l, want_l, "{route} l");
+        assert_eq!(q, want_q, "{route} q");
+    }
 }
 
 #[test]

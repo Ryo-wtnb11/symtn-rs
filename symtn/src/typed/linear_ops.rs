@@ -17,8 +17,17 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     /// # Errors
     ///
     /// The materialization of a lazy adjoint input can fail on the engine.
-    pub fn re(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, |value| value.re)
+    pub fn re(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
+        let (engine, options) = cx.parts();
+        self.re_impl(engine, options)
+    }
+
+    fn re_impl(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+    ) -> Result<TensorMap<R, f64>, Error> {
+        self.map_parts(engine, options, |value| value.re)
     }
 
     /// The element-wise imaginary part, as an f64 tensor map on the same
@@ -31,18 +40,28 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     /// # Errors
     ///
     /// As [`Self::re`].
-    pub fn im(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, |value| value.im)
+    pub fn im(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
+        let (engine, options) = cx.parts();
+        self.im_impl(engine, options)
+    }
+
+    fn im_impl(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+    ) -> Result<TensorMap<R, f64>, Error> {
+        self.map_parts(engine, options, |value| value.im)
     }
 
     /// The shared owned-input route of [`Self::re`] / [`Self::im`].
     fn map_parts(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         part: impl Fn(num_complex::Complex64) -> f64,
     ) -> Result<TensorMap<R, f64>, Error> {
         admit_host_engine(engine)?;
-        let materialized = self.materialized_tensor_uncached(engine)?;
+        let materialized = self.materialized_tensor_uncached(engine, options)?;
         let source = materialized
             .owned_body()
             .expect("uncached materialization is owned");
@@ -110,6 +129,17 @@ where
     /// ```
     pub fn axpby<'a>(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        alpha: D,
+        y: impl Into<TensorRef<'a, R, D, S>>,
+        beta: D,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.axpby_impl(engine, alpha, y, beta)
+    }
+
+    fn axpby_impl<'a>(
+        &self,
         engine: &mut dyn Engine,
         alpha: D,
         y: impl Into<TensorRef<'a, R, D, S>>,
@@ -160,7 +190,21 @@ where
     /// materialization is cached. A zero factor gives exact zeros whatever
     /// `self` holds (TensorKit's `scale(x, 0)`); signed-zero bits are
     /// storage-local.
-    pub fn scale(&self, engine: &mut dyn Engine, factor: D) -> Result<Self, FacadeError<R>> {
+    pub fn scale(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        factor: D,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, options) = cx.parts();
+        self.scale_impl(engine, options, factor)
+    }
+
+    fn scale_impl(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+        factor: D,
+    ) -> Result<Self, FacadeError<R>> {
         if let Some(spectrum) = self.spectrum() {
             admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
@@ -178,9 +222,10 @@ where
             ));
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self
-                .parent_of(view)
-                .scale(engine, FactorScalar::adjoint(factor))?;
+            let parent = self.parent_of(view).scale(
+                &mut Invocation::new(engine, options),
+                FactorScalar::adjoint(factor),
+            )?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         Ok(S::combine(engine, EXEC, self, factor, None)?)
@@ -247,6 +292,17 @@ where
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn axpby_into(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        destination: &mut Self,
+        alpha: D,
+        beta: D,
+    ) -> Result<(), FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.axpby_into_impl(engine, destination, alpha, beta)
+    }
+
+    fn axpby_into_impl(
         &self,
         engine: &mut dyn Engine,
         destination: &mut Self,
@@ -607,6 +663,15 @@ where
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn scale_assign(
+        &mut self,
+        cx: &mut (impl ExecContext + ?Sized),
+        factor: D,
+    ) -> Result<(), FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.scale_assign_impl(engine, factor)
+    }
+
+    fn scale_assign_impl(
         &mut self,
         engine: &mut dyn Engine,
         factor: D,

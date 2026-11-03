@@ -24,9 +24,10 @@ use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use super::schedule::GrantKey;
+use super::schedule::{GrantKey, LaneJobs};
 use crate::fresh::{split_fresh_segments, FreshParts};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
+use crate::LaneAllocation;
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -280,6 +281,9 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     const ENTRY: Entry = Entry::Contraction;
     const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -308,6 +312,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         &self,
         index: usize,
         (plan, destination): &mut Self::Job,
+        (): &mut (),
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
@@ -349,6 +354,9 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     const ENTRY: Entry = Entry::Contraction;
     const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -377,6 +385,7 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         &self,
         index: usize,
         (plan, piece, written): &mut Self::Job,
+        (): &mut (),
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
@@ -516,6 +525,7 @@ pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
+    allocation: LaneAllocation,
     output: &mut DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -582,7 +592,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         beta,
         source,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
     *kept_slots = recycle(slots);
     plans.clear();
     result
@@ -634,6 +644,7 @@ fn index_plans<T: Scalar>(
 pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
+    allocation: LaneAllocation,
     parts: FreshParts<'_, 'a, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -664,7 +675,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         alpha,
         destination: PhantomData,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
     if result.is_ok() {
         for (j, (_, _, written)) in slots.iter_mut().enumerate() {
             (parts.written)(j, std::mem::take(written));

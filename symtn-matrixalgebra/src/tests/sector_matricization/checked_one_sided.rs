@@ -227,7 +227,7 @@ fn checked_one_sided_reports_missing_pairs_and_full_trees() {
     let dimensions = BTreeMap::from([(SectorId::new(1), 2)]);
     for side in [FactorSide::Left, FactorSide::Right] {
         let placement_index_rec = crate::probe::record();
-        let error = build_bound_factor_generic_checked::<_, Complex64, _>(
+        let error = build_bound_factor_generic_checked::<_, Complex64, _, _>(
             &provider,
             &homspace,
             std::slice::from_ref(&matrix),

@@ -1,9 +1,10 @@
 use num_complex::{Complex32, Complex64};
 
+use crate::factor_dest::factorize_batch_into_owned;
 use crate::fresh::{dispatch_fresh, fresh_serial, FRESH_OP};
 use crate::{
     DenseDType, DenseDotConfig, DenseError, DenseFreshSegments, DenseRead, DenseScalar,
-    DenseTensor, DenseView, DenseViewMut, DenseWrite, Engine,
+    DenseTensor, DenseView, DenseViewMut, DenseWrite, Engine, FactorDest, FactorFailure,
 };
 
 /// One GEMM of a batched matmul over shared flat buffers: the column-major
@@ -38,6 +39,24 @@ pub enum DenseOwned {
     F64(Vec<f64>),
     C32(Vec<Complex32>),
     C64(Vec<Complex64>),
+}
+
+/// How the block scheduler places a batch of independent dense blocks on an
+/// engine's lanes when the engine's batch policy is `Auto`.
+///
+/// Every variant is legal and deterministic for one complete configuration
+/// (provider, engine width, batch policy and work model, inputs); different
+/// variants may place the blocks differently and so round differently.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum LaneAllocation {
+    /// The lowest modeled time among the equal-share placements and a
+    /// large-block reservation on uneven lanes.
+    #[default]
+    Moldable,
+    /// The lowest modeled time among the equal-share placements only: every
+    /// lane reserves an equal share of the slots.
+    EqualShare,
 }
 
 /// The per-matrix factorization a [`DenseExecutor::factorize_batch`] issues.
@@ -167,6 +186,51 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             sink(index, outcome)?;
         }
         Ok(())
+    }
+
+    /// [`Self::factorize_batch`] of the compact QR, compact LQ, compact SVD or
+    /// Hermitian eigendecomposition `op` with each input's outputs written into its
+    /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
+    /// shapes, dtypes and [`crate::FactorPlacement`]); any other `op` is
+    /// [`DenseError::Unsupported`].
+    ///
+    /// Every destination is validated before any input is solved or any
+    /// destination written: the count, each destination's outputs, then
+    /// each output's dtype ([`DenseError::DTypeMismatch`]), shape and
+    /// compact column-major layout ([`DenseError::ShapeMismatch`]); a
+    /// rejected batch leaves every destination untouched.
+    ///
+    /// `sink(i, &mut dests[i], outcome)` is called once per delivered input,
+    /// in ascending input order, after that input's solve has completed; it
+    /// may read and rewrite that destination in place. A solver failure is
+    /// [`FactorFailure::Solver`], outputs that do not fit the destination
+    /// [`FactorFailure::Output`]; after either, that destination's contents
+    /// are unspecified. An `Err` from `sink` stops delivery and is returned;
+    /// an executor-level failure is returned without calling `sink` further.
+    ///
+    /// The default runs [`Self::factorize_batch`] and copies each delivered
+    /// `Ok` outcome into its destination (after the output checks the
+    /// matrix-algebra caller makes) before calling `sink`, so an executor
+    /// keeps exactly its own owned calls, scopes and stopping points. An
+    /// executor that solves the inputs on lanes may write the destinations
+    /// directly and deliver every outcome after the lanes join.
+    #[expect(
+        clippy::type_complexity,
+        reason = "the sink's index, destination and tagged outcome are the documented delivery contract"
+    )]
+    fn factorize_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        dests: &mut [FactorDest<'_>],
+        sink: &mut dyn FnMut(
+            usize,
+            &mut FactorDest<'_>,
+            Result<(), FactorFailure>,
+        ) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        factorize_batch_into_owned(self, engine, op, inputs, dests, sink)
     }
 
     /// Whether this executor supports native full SVD for every [`DenseOwned`]
@@ -732,6 +796,59 @@ pub fn strided_batch_runs(jobs: &[DenseGemmBatchJob]) -> Vec<usize> {
     let mut runs = Vec::new();
     strided_batch_runs_into(jobs, &mut runs);
     runs
+}
+
+/// Whether a batch of `jobs` (partitioned into `runs`) is one strided
+/// submission: one job, or one affine run of at least two jobs whose
+/// destination step covers a whole block (the O(1) proof that the rank-3
+/// destination is self-disjoint). The executor runs such a batch on the
+/// strided entry, which places no blocks on lanes; an op-bearing run also
+/// needs a layout its views admit.
+pub(crate) fn single_strided_batch(jobs: &[DenseGemmBatchJob], runs: &[usize]) -> bool {
+    jobs.len() == 1
+        || runs == [jobs.len()]
+            && jobs.len() >= 2
+            && strided_batch_run_len(jobs, 0) == jobs.len()
+            && jobs[1]
+                .dst_offset
+                .checked_sub(jobs[0].dst_offset)
+                .zip(jobs[0].rows.checked_mul(jobs[0].cols))
+                .is_some_and(|(dst_step, block)| dst_step >= block)
+}
+
+/// Whether the batch of `jobs` in `runs` (with operand ops `ops`) is placed
+/// by the block scheduler's lane search, the phase a [`crate::LaneAllocation`]
+/// selects for: two or more jobs that the executor's route does not submit
+/// as one strided call. An initialized destination (`fresh == false`) takes
+/// the strided call for one self-disjoint affine run (see
+/// [`single_strided_batch`]); a fresh destination needs that run gapless
+/// (each output right after the previous one, so the run is one contiguous
+/// segment) with nonzero blocks. An op-bearing run with a zero extent is not
+/// strided. The views the facade's packed batches pass always admit the
+/// strided layout of such a run (their extents are the jobs' compact matrix
+/// bounds). Unstable plumbing for symtn's capability admission, which decides
+/// participation from a plan's batches before any write.
+#[doc(hidden)]
+pub fn batch_searches_lanes(
+    jobs: &[DenseGemmBatchJob],
+    runs: &[usize],
+    ops: [MatrixOp; 2],
+    fresh: bool,
+) -> bool {
+    if jobs.len() < 2 {
+        return false;
+    }
+    let extents = ops == [MatrixOp::Identity; 2]
+        || jobs[0].rows != 0 && jobs[0].contracted != 0 && jobs[0].cols != 0;
+    let strided = if fresh {
+        let block = jobs[0].rows.checked_mul(jobs[0].cols);
+        strided_batch_run_len(jobs, 0) == jobs.len()
+            && block.is_some_and(|block| block != 0)
+            && jobs[1].dst_offset.checked_sub(jobs[0].dst_offset) == block
+    } else {
+        single_strided_batch(jobs, runs)
+    };
+    !(strided && extents)
 }
 
 /// Writes [`strided_batch_runs`] into caller-owned scratch.

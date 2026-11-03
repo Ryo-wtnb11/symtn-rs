@@ -2,10 +2,10 @@
 //! one allocation of `P * size_of::<D>()` bytes for every dtype, and none of
 //! that size is allocator-zeroed, when the route's core GEMMs write the
 //! destination or its output transform proves it overwrites every element
-//! once. An output transform without that proof (a coupled sector whose
-//! blocks are strided) overwrites one allocator-zeroed payload. This
-//! concerns the allocator-level whole-output zero fill only; kernel-side
-//! output fills are not visible here.
+//! once, which canonical layouts do even when a coupled sector's blocks
+//! interleave. An output transform without that proof (a padded layout)
+//! overwrites one allocator-zeroed payload. This concerns the allocator-level
+//! whole-output zero fill only; kernel-side output fills are not visible here.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -233,13 +233,13 @@ fn owned_moved_output_with_contiguous_blocks_is_one_unzeroed_payload() {
 
 /// Purpose: with `r` also charge 1, the coupled charge 0 stacks the codomain
 /// trees `(p, r) = (0, 0)` (10 rows) and `(1, 1)` (6 rows) over 2 columns,
-/// so its blocks are strided, the overwrite proof fails, and the transform
-/// overwrites one allocator-zeroed payload.
+/// so its blocks interleave; they still write every element once, so the
+/// transform writes one payload that is not allocator-zeroed.
 #[test]
-fn owned_moved_output_with_strided_blocks_is_one_zeroed_payload() {
+fn owned_moved_output_with_interleaved_blocks_is_one_unzeroed_payload() {
     let _serial = crate::counting_alloc::serial();
     let (payload_len, output) = moved_output_allocations(&[(0, 5), (1, 2)]);
     // (p, q, r) = (0, 0, 0), (0, 1, 1) and (1, 0, 1).
     assert_eq!(payload_len, 2 * 2 * 5 + 2 * 4 * 2 + 3 * 2 * 2);
-    assert_eq!(output, (1, 1), "(payload calls, allocator-zeroed calls)");
+    assert_eq!(output, (1, 0), "(payload calls, allocator-zeroed calls)");
 }

@@ -55,7 +55,11 @@ and a lazy adjoint's LQ runs its parent blocks through the QR batch), values-onl
 pseudo-inverse, every Hermitian eigendecomposition (full and values-only,
 over all three input routes) and values-only general eigendecomposition. For these, symtn's block kernel spreads the blocks over the engine's lanes inside
 the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
-per block;
+per block; compact QR, compact LQ, compact SVD and full EIGH write each block's factors
+into the operation's preallocated output (`factorize_batch_into`), as
+TensorKit writes each block of its `initialize_output` result in place,
+except the pseudo-inverse's SVD, which keeps per-block factors as
+TensorKit's `pinv` does;
 see [backend policy](backend_policy.md#parallel-execution). The multiplicity-free Host
 direct-region and CUDA routes for dense compact QR/SVD and full EIGH use
 `CompactFactorPlan` as the per-call, placement-neutral authority for bond

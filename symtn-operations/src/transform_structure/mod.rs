@@ -123,6 +123,10 @@ impl<T> TreeTransformReplay<T> {
                 self.layouts.fused_src_strides.capacity(),
                 core::mem::size_of::<isize>(),
             ))
+            .saturating_add(vector_bytes(
+                self.layouts.plans.capacity(),
+                core::mem::size_of::<strided_kernel::UpdatePlan>(),
+            ))
             .saturating_add(self.coefficients.charged_bytes())
             .saturating_add(vector_bytes(
                 self.inactive_dst_layouts.capacity(),
@@ -481,6 +485,7 @@ pub enum TreeTransformBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strided_kernel::execution::KernelClass;
     use symtn_core::{BlockKey, BlockSpec};
 
     /// Independent hand normalization of a two-sided role: drop extent-1
@@ -587,8 +592,9 @@ mod tests {
     #[test]
     fn retained_layout_arena_is_exact_and_charged_by_capacity() {
         // What: every retained layout vector is sized exactly — the arena to
-        // the normalized ranks, not `rank` per role, and the Single schedule
-        // to its entries — and the admission charge follows capacity.
+        // the normalized ranks, not `rank` per role, the Single schedule to
+        // its entries and the compiled plans to the planned roles — and the
+        // admission charge follows capacity.
         let blocks = vec![
             BlockSpec::with_key(BlockKey::ordinal(0), vec![2, 2], vec![1, 2], 0).unwrap(),
             BlockSpec::with_key(BlockKey::ordinal(1), vec![2, 2], vec![1, 2], 4).unwrap(),
@@ -612,6 +618,14 @@ mod tests {
         assert_eq!(layouts.fused_dims.capacity(), 4);
         assert_eq!(layouts.fused_dst_strides.capacity(), 4);
         assert_eq!(layouts.entries.capacity(), 5);
+        // Both four-element Single roles are planned unless Strided estimates
+        // their copy at zero time; the inactive role never is.
+        let planned = if KernelClass::Copy.estimate(4).is_zero() {
+            0
+        } else {
+            2
+        };
+        assert_eq!(layouts.plans.capacity(), planned);
         assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
@@ -627,6 +641,32 @@ mod tests {
             .fused_dims
             .reserve_exact(128);
         assert!(compiled.charged_payload_bytes() > charged);
+        let charged = compiled.charged_payload_bytes();
+        Arc::get_mut(&mut compiled.core)
+            .unwrap()
+            .layouts
+            .plans
+            .reserve_exact(1);
+        assert!(compiled.charged_payload_bytes() > charged);
+
+        // Tiny interleaved roles, whose copy Strided estimates at zero time,
+        // retain no plan: `B` two-element blocks at stride `B` and offset `b`.
+        const B: usize = 128;
+        assert!(KernelClass::Copy.estimate(2).is_zero());
+        let interleaved = BlockStructure::from_blocks_with_rank(
+            1,
+            (0..B)
+                .map(|b| BlockSpec::with_key(BlockKey::ordinal(b), vec![2], vec![B], b).unwrap())
+                .collect(),
+        )
+        .unwrap();
+        let packed = BlockStructure::packed_column_major(1, vec![vec![2]; B]).unwrap();
+        let specs = (0..B)
+            .map(|b| TreeTransformBlockSpec::single(b, b, 1.0_f64))
+            .collect::<Vec<_>>();
+        let tiny =
+            TreeTransformStructure::compile_structures(&interleaved, &packed, &specs).unwrap();
+        assert_eq!(tiny.layouts().plans.capacity(), 0);
     }
 
     #[test]

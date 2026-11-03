@@ -9,7 +9,11 @@ where
 {
     /// The one body of the exponential: a compact diagonal exponentiates its
     /// entries, everything else takes the dense route.
-    pub(super) fn factor_exp(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
+    pub(super) fn factor_exp(
+        &self,
+        engine: &mut dyn Engine,
+        options: ExecOptions,
+    ) -> Result<Self, FacadeError<R>> {
         // TensorKit `exp!`: `domain == codomain` before anything else.
         symtn_matrixalgebra::seam::EndomorphismFamily::Exp
             .require_endomorphism(self.logical_space().space().homspace())
@@ -35,11 +39,11 @@ where
             .same_homspace_output(space)
             .map_err(R::Mode::map_root_error)?;
         let local = matches!(&self.repr, TypedTensorRepr::Adjoint(_))
-            .then(|| self.materialized_tensor_uncached(engine))
+            .then(|| self.materialized_tensor_uncached(engine, options))
             .transpose()?;
         let (space, data) = local.as_ref().unwrap_or(self).dense_operand()?;
         let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
-        let factor = RuntimeDense(&self.runtime)
+        let factor = RuntimeDense(&self.runtime, options)
             .run(|dense| {
                 symtn_matrixalgebra::seam::exp_direct_into_dyn(engine, dense, &input, output)
             })
@@ -60,6 +64,7 @@ where
     pub(super) fn factor_solve(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         rhs: &Self,
     ) -> Result<Self, FacadeError<R>> {
         if self.logical_space().space().homspace().codomain()
@@ -76,7 +81,7 @@ where
             // route materializes both operands.
             rhs.refuse_borrowed_view("solve")?;
             let output = self.factor_output_space(self.solve_homspace(rhs))?;
-            return self.dense_solve(engine, rhs, output);
+            return self.dense_solve(engine, options, rhs, output);
         };
         self.admit_compact(spectrum)?;
         reject_singular_compact_divisor(spectrum)?;
@@ -103,12 +108,13 @@ where
     fn dense_solve(
         &self,
         engine: &mut dyn Engine,
+        options: ExecOptions,
         rhs: &Self,
         output: BoundDynamicFusionMapSpace<R>,
     ) -> Result<Self, FacadeError<R>> {
         let mut materialize = |tensor: &Self| {
             matches!(&tensor.repr, TypedTensorRepr::Adjoint(_))
-                .then(|| tensor.materialized_tensor_uncached(engine))
+                .then(|| tensor.materialized_tensor_uncached(engine, options))
                 .transpose()
         };
         let (divisor_local, rhs_local) = (materialize(self)?, materialize(rhs)?);
@@ -118,7 +124,7 @@ where
         let divisor =
             BoundDynamicTensorRef::try_new(divisor_space, &divisor_data).map_err(Error::from)?;
         let rhs = BoundDynamicTensorRef::try_new(rhs_space, &rhs_data).map_err(Error::from)?;
-        let factor = RuntimeDense(&self.runtime)
+        let factor = RuntimeDense(&self.runtime, options)
             .run(|dense| {
                 symtn_matrixalgebra::seam::solve_left_direct_into_dyn(
                     engine, dense, &divisor, &rhs, output,

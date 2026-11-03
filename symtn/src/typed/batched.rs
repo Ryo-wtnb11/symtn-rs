@@ -19,6 +19,7 @@
 //! warm one. After a failed `execute_into` the caller's destination contents
 //! are unspecified; a validation error never writes them.
 
+use crate::typed::ExecContext;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -401,7 +402,16 @@ where
     ///
     /// An index at or past [`Self::len`] is
     /// [`Error::BatchMemberOutOfRange`].
-    pub fn member(&self, engine: &mut dyn Engine, i: usize) -> Result<TensorMap<R, D>, Error> {
+    pub fn member(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        i: usize,
+    ) -> Result<TensorMap<R, D>, Error> {
+        let (engine, _) = cx.parts();
+        self.member_impl(engine, i)
+    }
+
+    fn member_impl(&self, engine: &mut dyn Engine, i: usize) -> Result<TensorMap<R, D>, Error> {
         super::admit_host_engine(engine)?;
         if i >= self.members {
             return Err(Error::BatchMemberOutOfRange {
@@ -439,7 +449,16 @@ impl<R, D, S: StackExec<D>> StackedTensorMap<R, D, S> {
     /// member offsets and one Tenferro `gather` launch per call, whatever
     /// `B` and the block structure; the gather allocates the result buffer.
     /// Nothing is downloaded and nothing waits on the device.
-    pub fn select(&self, engine: &mut dyn Engine, members: &[usize]) -> Result<Self, Error> {
+    pub fn select(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        members: &[usize],
+    ) -> Result<Self, Error> {
+        let (engine, _) = cx.parts();
+        self.select_impl(engine, members)
+    }
+
+    fn select_impl(&self, engine: &mut dyn Engine, members: &[usize]) -> Result<Self, Error> {
         let len = self.selection_len(members)?;
         S::select_members(engine, EXEC, self, members, len)
     }
@@ -485,6 +504,18 @@ where
     /// a selection of another rule is [`Error::RuleMismatch`]. Nothing is
     /// allocated before every check.
     pub fn restrict_leg(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        legs: &[(usize, &LegSelection<R>)],
+    ) -> Result<Self, FacadeError<R>>
+    where
+        R::Mode: TypedTensorRootDispatch<R>,
+    {
+        let (engine, _) = cx.parts();
+        self.restrict_leg_impl(engine, legs)
+    }
+
+    fn restrict_leg_impl(
         &self,
         engine: &mut dyn Engine,
         legs: &[(usize, &LegSelection<R>)],
@@ -721,6 +752,14 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D> {
     /// caller's CUDA engine.
     pub fn to_cuda(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+    ) -> Result<StackedTensorMap<R, D, CudaStorage<D>>, Error> {
+        let (engine, _) = cx.parts();
+        self.to_cuda_impl(engine)
+    }
+
+    fn to_cuda_impl(
+        &self,
         engine: &mut dyn Engine,
     ) -> Result<StackedTensorMap<R, D, CudaStorage<D>>, Error> {
         let lease = crate::runtime::cuda_call(engine)?;
@@ -738,7 +777,15 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D> {
 impl<R, D: CudaPayload> StackedTensorMap<R, D, CudaStorage<D>> {
     /// Downloads the whole stack with one device-to-host transfer, through
     /// the caller's CUDA engine that owns it.
-    pub fn to_host(&self, engine: &mut dyn Engine) -> Result<StackedTensorMap<R, D>, Error> {
+    pub fn to_host(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+    ) -> Result<StackedTensorMap<R, D>, Error> {
+        let (engine, _) = cx.parts();
+        self.to_host_impl(engine)
+    }
+
+    fn to_host_impl(&self, engine: &mut dyn Engine) -> Result<StackedTensorMap<R, D>, Error> {
         let lease = crate::runtime::cuda_call(engine)?;
         let storage = self.storage.download(&lease)?;
         Ok(self.with_storage(storage, self.members))

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use symtn::typed::Engine;
+use symtn::typed::ExecContext;
 
 use symtn::expert::SectorLeg;
 #[cfg(feature = "cuda")]
@@ -22,7 +22,7 @@ fn label(name: &str) -> TemporaryLabel {
     reason = "the test fixture returns the three network inputs and its independent oracle"
 )]
 fn rank_four_orientation_inputs<D>(
-    engine: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
     runtime: &Runtime,
     provider: &Arc<U1FusionRule>,
     dimensions: [usize; 6],
@@ -128,7 +128,7 @@ fn rank_four_orientation_network() -> Network {
 }
 
 fn assert_rank_four_orientation_replay<D>(
-    engine: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
     runtime: &Runtime,
     provider: &Arc<U1FusionRule>,
     make: fn(f64, f64) -> D,
@@ -183,7 +183,8 @@ fn assert_rank_four_orientation_replay<D>(
         Some(1),
     )
     .unwrap();
-    let execute = |engine: &mut dyn Engine, x, y, z| cached.contract(engine, &[x, y, z]).unwrap();
+    let execute =
+        |engine: &mut dyn ExecContext, x, y, z| cached.contract(engine, &[x, y, z]).unwrap();
     for (x, y, z, expected) in [
         (&first.0, &first.1, &first.2, &first.3),
         (&second.0, &second.1, &second.2, &second.3),
@@ -1058,7 +1059,7 @@ fn compact_input_preflight_applies_to_output_slices() {
     ));
 }
 
-fn assert_fermionic_mixed_slice<D>(engine: &mut dyn Engine)
+fn assert_fermionic_mixed_slice<D>(engine: &mut dyn ExecContext)
 where
     D: TensorScalar + PartialEq + std::fmt::Debug,
 {
@@ -1334,8 +1335,8 @@ fn device_network_admission_refuses_a_cpu_engine_before_any_operand_check() {
 #[cfg(feature = "cuda")]
 #[allow(clippy::too_many_arguments)]
 fn assert_asymmetric_cuda_plan_parity<R>(
-    engine: &mut dyn Engine,
-    cuda: &mut dyn Engine,
+    engine: &mut dyn ExecContext,
+    cuda: &mut dyn ExecContext,
     runtime: &Runtime,
     x0: &GradedSpace<R>,
     x1: &GradedSpace<R>,
@@ -1666,8 +1667,8 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
         &mut symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let other_domain = host_tensors[1].to_cuda(other_engine).unwrap();
     for (what, engine) in [
-        ("foreign engine operand", &mut *cuda as &mut dyn Engine),
-        ("CPU engine", engine as &mut dyn Engine),
+        ("foreign engine operand", &mut *cuda as &mut dyn ExecContext),
+        ("CPU engine", engine as &mut dyn ExecContext),
     ] {
         let steps = crate::probe::record();
         let operands = if what == "CPU engine" {
@@ -2262,7 +2263,7 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
             &mut NetworkExecutionWorkspace::default(),
         )
         .unwrap();
-    let on = |cuda: &mut dyn Engine| {
+    let on = |cuda: &mut dyn ExecContext| {
         host.iter()
             .map(|tensor| tensor.to_cuda(cuda).unwrap())
             .collect::<Vec<_>>()
@@ -2270,7 +2271,7 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
     let (on_a, on_b) = (on(first), on(second));
     let mut workspace = NetworkExecutionWorkspace::default();
     for (what, on_b_engine) in [("A", false), ("B", true), ("A again", false)] {
-        let (cuda, tensors): (&mut dyn Engine, _) = if on_b_engine {
+        let (cuda, tensors): (&mut dyn ExecContext, _) = if on_b_engine {
             (&mut *second, &on_b)
         } else {
             (&mut *first, &on_a)

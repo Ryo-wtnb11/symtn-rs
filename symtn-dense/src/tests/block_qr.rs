@@ -359,6 +359,7 @@ fn broken_engine_refuses_like_the_per_matrix_entry() {
             &PanicsAt(1),
             &mut [(); 3],
             &mut LaneScratch::default(),
+            crate::LaneAllocation::Moldable,
         )
     }));
     assert!(unwound.is_err());

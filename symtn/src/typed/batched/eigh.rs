@@ -1,6 +1,7 @@
 use super::*;
 #[cfg(feature = "cuda")]
 use crate::typed::ensure_cuda_owns;
+use crate::typed::{ExecContext, ExecOptions};
 use symtn_dense::Engine;
 
 /// The factors of one [`EighFullPlan::execute`], borrowed from its workspace.
@@ -180,6 +181,17 @@ where
     /// payload, a layout without packed coupled-sector regions, or leg roles
     /// other than the current split.
     pub fn new(
+        cx: &mut (impl ExecContext + ?Sized),
+        source: &StackedTensorMap<R, D, S>,
+        rows: &[usize],
+        cols: &[usize],
+        hermitian_tol: HermitianTol,
+    ) -> Result<Self, Error> {
+        let (engine, _) = cx.parts();
+        Self::new_impl(engine, source, rows, cols, hermitian_tol)
+    }
+
+    fn new_impl(
         engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D, S>,
         rows: &[usize],
@@ -438,6 +450,16 @@ where
     /// and backend failures are [`BatchError::Operation`].
     pub fn execute<'a>(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        source: &StackedTensorMap<R, D, S>,
+        workspace: &'a mut EighFullWorkspace<R, D, S>,
+    ) -> Result<EighStackOutput<'a, R, D, S>, BatchError> {
+        let (engine, _) = cx.parts();
+        self.execute_impl(engine, source, workspace)
+    }
+
+    fn execute_impl<'a>(
+        &self,
         engine: &mut dyn Engine,
         source: &StackedTensorMap<R, D, S>,
         workspace: &'a mut EighFullWorkspace<R, D, S>,
@@ -545,7 +567,9 @@ where
             ..
         } = plan;
         let runtime = self.runtime.clone();
-        let mut dense = runtime.lease_dense();
+        // Each member streams on the whole engine: no lane allocation is
+        // searched, so the call's lane allocation does not apply.
+        let mut dense = runtime.lease_dense(ExecOptions::default());
         // One linear-algebra scope for the batch: eager opens one per member.
         let faults =
             symtn_matrixalgebra::seam::in_linalg_scope(engine, dense.dense(), |dense, engine| {

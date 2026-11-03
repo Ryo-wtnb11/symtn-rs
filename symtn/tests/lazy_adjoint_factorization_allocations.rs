@@ -147,18 +147,22 @@ macro_rules! assert_excess_is_metadata {
                 );
             }
         }
-        // The LQ seam reads the parent in place: materialize-then-LQ
-        // pays at least the adjoint copy of the payload on top of it.
-        for (scale_rows, &payload) in rows.iter().zip(&payload_bytes) {
-            for (name, (lazy, eager)) in scale_rows {
-                if name.starts_with("lq_") {
-                    assert!(
-                        eager - lazy >= payload,
-                        "{} {name}: lazy {lazy} bytes, materialize-then-factor {eager}, \
-                         payload {payload}",
-                        $mode
-                    );
-                }
+        // The LQ seam reads the parent in place: materialize-then-LQ pays
+        // the adjoint copy of the payload on top of it, so its saving grows
+        // at least as fast as the payload. The lazy route's own region
+        // metadata does not depend on the degeneracies and cancels.
+        let payload_growth = payload_bytes[1] - payload_bytes[0];
+        for (small, large) in rows[0].iter().zip(&rows[1]) {
+            let (name, (small_lazy, small_eager)) = small;
+            let (_, (large_lazy, large_eager)) = large;
+            if name.starts_with("lq_") {
+                let saving_growth = (large_eager - large_lazy) - (small_eager - small_lazy);
+                assert!(
+                    saving_growth >= payload_growth,
+                    "{} {name}: saving grows by {saving_growth} bytes, payload by \
+                     {payload_growth}",
+                    $mode
+                );
             }
         }
         for (small, large) in rows[0].iter().zip(&rows[1]) {

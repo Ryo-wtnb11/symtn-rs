@@ -1527,15 +1527,14 @@ mod tests {
     /// the fresh core replay exactly when its route's core writes the
     /// destination (Core, a DynamicTree without an output transform). A
     /// route with an output transform (CopyC, `three_stages`) runs no fresh
-    /// core replay; its transform writes a fresh payload once when every
-    /// destination block is one contiguous interval, and otherwise
-    /// overwrites an allocator-zeroed payload.
+    /// core replay; its transform writes a fresh payload once, never an
+    /// allocator-zeroed one, since the canonical destination's blocks reach
+    /// every element exactly once.
     ///
     /// The two-leg sector-1 codomain and domain each reach sector 1 through
     /// two fusion trees (multiplicity 2). At degeneracy 1 every block is one
-    /// element, hence one interval; at degeneracy 2 the four 4x4 blocks tile
-    /// one 8x8 coupled matrix, so each block is strided and the overwrite
-    /// proof fails.
+    /// element; at degeneracy 2 the four 4x4 blocks interleave inside one
+    /// 8x8 coupled matrix, which the overwrite proof equally admits.
     #[test]
     fn owned_contraction_output_takes_the_fresh_writer_its_route_and_layout_admit() {
         let engine = &mut symtn_dense::CpuEngine::serial();
@@ -1565,12 +1564,7 @@ mod tests {
                     crate::probe::Event::OwnedOutputZeroedFallback,
                 ]
                 .map(|event| recording.get(event));
-                let expected = [
-                    core_writes_destination,
-                    transform_writes && degeneracy == 1,
-                    transform_writes && degeneracy == 2,
-                ]
-                .map(usize::from);
+                let expected = [core_writes_destination, transform_writes, false].map(usize::from);
                 assert_eq!(counts, expected, "{name} at degeneracy {degeneracy}");
             }
         }

@@ -67,6 +67,14 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
     /// ```
     pub fn to_cuda(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+    ) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
+        let (engine, _) = cx.parts();
+        self.to_cuda_impl(engine)
+    }
+
+    fn to_cuda_impl(
+        &self,
         engine: &mut dyn Engine,
     ) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
         let mut lease = crate::runtime::cuda_call(engine)?;
@@ -118,7 +126,12 @@ impl<R, D: CudaPayload> TensorMap<R, D, CudaStorage<D>> {
     ///     let _ = tensor.dense_data();
     /// }
     /// ```
-    pub fn to_host(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, D>, Error> {
+    pub fn to_host(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, D>, Error> {
+        let (engine, _) = cx.parts();
+        self.to_host_impl(engine)
+    }
+
+    fn to_host_impl(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, D>, Error> {
         let mut lease = crate::runtime::cuda_call(engine)?;
         let cuda = &mut *lease;
         let download = |body: &Arc<TypedTensorBody<R, D, CudaStorage<D>>>| {

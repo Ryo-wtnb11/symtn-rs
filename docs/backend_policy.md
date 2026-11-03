@@ -78,11 +78,11 @@ The output is published only after every element has been written. A route
 with an output transform (`copyC`, a `DynamicTree` output) runs its core into
 scratch; the transform then writes every destination element once into an
 unzeroed payload, inactive blocks as `+0.0`, when the destination proves
-exact overwrite coverage: each block one contiguous interval, the blocks
-tiling the payload, and the coupled-sector regions tiling it. Without that
-proof (for example a coupled sector stacking several codomain trees over more
-than one column, whose blocks are strided) the transform overwrites an
-allocator-zeroed payload.
+exact overwrite coverage: its blocks, inactive ones included, reach every
+payload element exactly once (canonical layouts, including coupled sectors
+whose several codomain trees interleave their blocks' columns), and the
+coupled-sector regions tile the payload. Without that proof (for example a
+layout with padding) the transform overwrites an allocator-zeroed payload.
 
 Backend choice does not change mathematical semantics or numerical tolerance
 policy. Capabilities may differ and must be explicit. New dense capabilities
@@ -105,8 +105,11 @@ operations. Per-method bounds remain authoritative; see the
 
 ## Parallel execution
 
-Every numerical operation takes the caller's engine
-(`engine: &mut dyn Engine`). A `CpuEngine::serial()` runs on the calling
+Every numerical operation takes the caller's execution context
+(`cx: &mut (impl ExecContext + ?Sized)`): an engine (`&mut CpuEngine`,
+`&mut dyn Engine`), which runs with the default execution options, or a
+`Configured` engine that carries `ExecOptions` (the lane allocation, below)
+for the calls it is passed to. A `CpuEngine::serial()` runs on the calling
 thread; `CpuEngine::new(pool)` runs on a caller-owned `Pool` of threads. The
 engine owns the threads and the dense provider's resources an operation uses:
 its thread team, its buffer pool and its provider scratch. symtn stores no
@@ -125,6 +128,10 @@ engine's batch decision, so the work model's fan-out limits are never
 exceeded. Each lane reserves a nonzero share of those threads, the shares
 summing to at most the thread count, and each block runs on a context of
 exactly its lane's share; a thread no lane reserves stays idle for the call.
+Which placements the kernel scores is the call's `LaneAllocation`: the
+default `Moldable` scores every candidate below, and `EqualShare` scores the
+baseline and the equal-share placements only, without the large-block
+reservation.
 A batch of a few large blocks gives each lane several threads, and a batch
 of many small blocks runs one thread per lane. The kernel scores the
 baseline placement (equal shares over `L0 = min(threads, blocks, decision
@@ -160,7 +167,7 @@ thread-count) blocks above the mean load, and the reserved lanes' widths for
 the others. Each searched allocation is kept in the process-global structure
 cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
 function of (the kernel's kind, GEMM or factorization, which fixes the grant;
-the engine's budget, work model, team and dispatch cost at every width, the
+the call's lane allocation, which fixes the candidates; the engine's budget, work model, team and dispatch cost at every width, the
 mean work, and each block's serial time and grant inputs), so a
 batch already searched, on any executor including an eager call's fresh one,
 rebuilds its lanes without a query. Each entry is charged its inline key and
@@ -200,21 +207,43 @@ reported is the lowest-indexed sector's, the one the per-matrix loop would
 report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
-where the loop would have returned the earlier error. Each block allocates
-its own provider workspace and fresh factors of their logical size, so a
-factor never inherits a recycled buffer's capacity; a full EIGH, and a
-compact SVD over packed or Checked Generic sector matrices, holds every
-sector's raw factors at once before placing them, where the loop held one.
-Compact LQ of `X` reads each block's transpose in place (a strided view,
-no adjoint copy), factors `X^T = Q' R'` and returns `L = R'^T`,
-`Q = Q'^T`; the positive-diagonal gauge is applied per sector as the
-outcomes are delivered. An executor without this route (the trait default
-and every BLAS provider) writes each block's adjoint into one scratch sized
-for the largest block and factors it with QR, as before. LQ of a lazy
-adjoint `A^H` runs the parent blocks `A` through the QR batch and adjoints
-the factors. The positive-diagonal LQ is unique only when a sector's
-leading `k x k` triangular factor is nonsingular; otherwise the routes
-return valid but possibly different factors.
+where the loop would have returned the earlier error. Compact QR, compact
+LQ, compact SVD and full EIGH run through
+`DenseExecutor::factorize_batch_into`: the
+operation allocates each output once (the final packed factor for a
+direct-region or Checked Generic canonical output, otherwise one packed
+transient per call that is scattered by tree identity afterwards, about
+twice the factor payload on that route) and one packed real spectrum, and
+each block writes its factors straight into its slice through tlinalg's
+initialized-destination entries. Each lane allocates one provider workspace
+and one typed scratch (complex singular values and eigenvalues, and the
+provider-shaped factors of an adjoint placement or of LQ) per call, sized
+from that
+lane's blocks at its own width before its first block, and drops them when
+the lane finishes; nothing is kept across calls. Compact LQ of `X` reads
+each block's transpose in place (a strided view, no adjoint copy), solves
+`X^T = Q' R'` into the lane scratch and writes `L = R'^T`, `Q = Q'^T` into
+the destination in one plain transpose pass; LQ of a lazy adjoint `A^H`
+solves the parent blocks `A` by QR placed as the adjoint problem
+(`l = R^H`, `q = Q^H`). The positive-diagonal and phase gauges run in place
+on the delivered destination, and each sector's public `f64` spectrum is
+still its own allocation. The positive-diagonal LQ is unique only when a
+sector's leading `k x k` triangular factor is nonsingular; otherwise the
+native transpose route, the default's adjoint route and the lazy parent's
+QR return valid but possibly different factors. Values-only SVD and EIGH
+and general eigenvalues keep one provider workspace and fresh outputs per
+block (tlinalg has no initialized destination form for them). The
+pseudo-inverse's SVD keeps the owned batch, one provider workspace and
+fresh factors per block, which it holds until its global cutoff is known and
+then reads in place in its reconstruction GEMMs: a destination needs the
+whole transient zero-initialized first, a serial pass the owned outputs do
+not pay and that a caller which never scatters or publishes the factors
+does not recover (TensorKit's `pinv` also solves each block into its own
+temporaries). Every other executor, and the BLAS provider,
+reach `factorize_batch_into` through its default: the owned
+`factorize_batch` with each delivered output copied into its destination
+(for LQ, each block's adjoint written into one scratch sized for the
+largest block and factored with QR).
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not
@@ -233,9 +262,66 @@ the vendor library. A backend-free Host region
 placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
 destination length against the pool's dispatch cost) admits the parallel
-section. A serial engine never forks. Results are bit-identical for one
-configuration (provider, build, engine width, inputs); no promise is made
-across widths or providers. BLAS-internal threads remain separate.
+section. A serial engine never forks. Inside a tree-transform replay, each
+Single block and recoupling scatter column keeps the token share of the
+worker that visits it, the whole token when the replay cannot split its
+blocks (one block, or blocks whose destination ranges interleave). An
+overwrite of such a block runs on that share through the block's retained
+Strided plan when Strided's own rule (`execution::parallel_width` for a copy
+of its elements) gives the share more than one worker. Accumulating updates
+(`beta` neither zero nor absent), pack columns, and blocks whose normalized
+layout exceeds Strided's inline fused rank of eight keep one worker per
+block. Results are bit-identical for one
+configuration (provider, build, engine width, batch policy and work model,
+lane allocation, inputs), whether the lane allocation is searched or taken
+from the cache; no promise is made across widths, providers or lane
+allocations, which agree within rounding. BLAS-internal threads remain
+separate.
+
+### Lane allocation
+
+A call's `LaneAllocation` (from its `ExecContext`; `Moldable` unless a
+`Configured` context selects another) applies to every phase of the call
+that searches a block placement, judged on the batch the executor will
+actually receive: a grouped GEMM batch of a contraction (two or more blocks
+that are not one strided submission: into an initialized destination, one
+self-disjoint affine run; into a fresh owned output, one gapless affine run),
+a grouped recoupling GEMM batch of a tree transform (the parallel replay
+submits the Multi blocks in chunks of its worker count, a member replay all
+members' blocks at once; a serial replay submits each Multi block alone, which
+does not search), and an SVD, values-only SVD, Hermitian eigen (full and
+values-only) or general-eigenvalue batch of two or more blocks. It is applied on every
+call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
+workspace or a network's pooled workspace kept from an earlier call; a
+workspace never keeps an earlier call's allocation. Other phases run as
+with the default: a single GEMM and an admitted affine strided GEMM run
+(which do not search), transforms that submit no grouped recoupling batch
+(unique fusion, a serial replay, one Multi block per chunk, compact
+diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
+the full general eigendecomposition, the prepared batched `EighFullPlan`,
+and operations without dense blocks (norms, linear combinations,
+transfers).
+
+The default lane allocation adds no restriction. Another allocation needs
+the native provider's CPU engine under the `Auto` batch policy, the only
+configuration that searches. On a CPU engine, participation is decided per
+phase from the call's plan (its GEMM batches, the destination form its core
+writes, and the recoupling batches its transforms submit at the engine's
+replay width) before the call writes a destination, and a participating phase is refused with
+`OperationError::Dense(DenseError::Unsupported { op: "lane_allocation", .. })`
+when the build links a BLAS provider (which has no lane allocator for its
+grouped GEMM and factorization routes) or when the engine's batch policy is
+forced (`Inner`, `Outer`, `Split`, `Sequential`), which fixes the placement
+itself: symtn does not override the engine's policy, and does not silently
+run another placement than the one requested. A factorization batch, whose
+outputs are fresh, is refused when it would run. A CUDA engine has no lane
+allocator and no Host fallback: a contraction, transform, prepared plan or
+compact SVD/eigh call with another allocation is refused before any upload
+or submission. On the native provider under `Auto`, a call that has nothing
+to search (one block, or one thread) runs as with the default. A
+factorization whose leg roles need a permute with a grouped recoupling batch
+first is refused for that permute even when its own dense stage ignores the
+allocation.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
 An eager operation builds its execution scratch (tree-transform and

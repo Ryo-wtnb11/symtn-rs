@@ -1,10 +1,10 @@
-//! Compact LQ and checked-Generic polar build their outputs without
-//! zero-filling them first: LQ moves the first sector's factors in as the
-//! output owner and appends the others, and polar runs its GEMMs into the
+//! Compact LQ reconstructs its input, and checked-Generic polar builds its
+//! outputs without zero-filling them first: it runs its GEMMs into the
 //! output regions instead of per-sector temporaries that are then copied.
 
 use crate::numerics;
 
+#[cfg(feature = "cgc-gen")]
 use std::hint::black_box;
 #[cfg(feature = "cgc-gen")]
 use symtn::typed::HermitianTol;
@@ -16,23 +16,19 @@ use crate::fixtures;
 
 use fixtures::{codomain_axes, domain_axes};
 
+#[cfg(feature = "cgc-gen")]
 use crate::counting_alloc;
 
 use crate::legs::{su2_leg_2_2_1, u1_leg_2_3_2};
 
+#[cfg(feature = "cgc-gen")]
 #[derive(Debug)]
-#[cfg_attr(
-    not(feature = "cgc-gen"),
-    expect(
-        dead_code,
-        reason = "only the checked-Generic contracts read total bytes"
-    )
-)]
 struct Counts {
     bytes: usize,
     zeroed_bytes: usize,
 }
 
+#[cfg(feature = "cgc-gen")]
 fn measured<T>(operation: impl FnOnce() -> T) -> (T, Counts) {
     let (value, allocs) = counting_alloc::measure(operation);
     let counts = Counts {
@@ -143,43 +139,6 @@ fn multiplicity_free_compact_lq_matches_reconstruction_oracle() {
     let runtime = Runtime::builder().build().unwrap();
     lq_cases!(engine, f64, &runtime);
     lq_cases!(engine, Complex64, &runtime);
-}
-
-// Byte-traffic contract: the native provider factors each sector's
-// transpose in place and returns fresh factor vectors (the transposed R and
-// Q of its QR), and symtn aggregates them into the outputs without
-// zero-filling, so neither requests zeroed storage for the outputs. The only
-// zeroed request allowed is the provider's R factor, whose total over
-// sectors is at most the payload of L. The counter observes `alloc_zeroed`
-// (e.g. `vec![0.0; len]`) for f64.
-/// Purpose: compact LQ requests no zeroed storage beyond the dense backend's
-/// R factor.
-#[test]
-#[cfg_attr(
-    any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ),
-    ignore = "the zeroed-byte bound models faer's R factor; a BLAS provider zero-fills its own workspaces"
-)]
-fn compact_lq_requests_no_zeroed_output_storage() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let _serial = crate::counting_alloc::serial();
-    let runtime = Runtime::builder().build().unwrap();
-    let leg = u1_leg_2_3_2();
-    let a: TensorMap<_, f64> =
-        TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg], [&leg, &leg], 1480).unwrap();
-    let warm = a.lq_compact(engine, &[0, 1], &[2, 3]).unwrap();
-    let (Lq { l, q }, counts) = measured(|| a.lq_compact(engine, &[0, 1], &[2, 3]).unwrap());
-    black_box((&warm, &q));
-    let backend_r_bytes = std::mem::size_of_val(l.dense_data().unwrap());
-    assert!(
-        counts.zeroed_bytes <= backend_r_bytes,
-        "{counts:?}, L bytes {backend_r_bytes}"
-    );
 }
 
 #[cfg(feature = "cgc-gen")]

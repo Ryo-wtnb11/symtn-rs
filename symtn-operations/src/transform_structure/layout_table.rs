@@ -1,4 +1,5 @@
 use smallvec::SmallVec;
+use strided_kernel::UpdatePlan;
 
 use super::*;
 
@@ -13,6 +14,8 @@ use super::*;
 pub(super) struct RoleSlot {
     start: u32,
     rank: u32,
+    /// One plus the index of this role's compiled plan; zero for none.
+    plan: u32,
 }
 
 /// The retained layout authority of a completed tree transform: per entry its
@@ -39,7 +42,17 @@ pub(super) struct RoleSlot {
 /// two-sided role so the source stride column stops at the two-sided prefix.
 /// The raw (pre-normalization, source-permuted) table lives only during
 /// compilation, where every structural proof runs on it.
-#[derive(Clone, Debug, Default, PartialEq)]
+///
+/// Every role a Single block or a Multi scatter writes, up to Strided's
+/// inline fused rank (`RAW_FUSED_RANK_LIMIT`) and with a nonzero Strided copy
+/// estimate, also retains Strided's compiled
+/// replay of that normalized layout (a fixed inline size per role), so a leaf
+/// that a wide token widens replays it without planning. TensorKit has no
+/// counterpart: Strided.jl plans each `tensoradd!` on every call. Pack roles
+/// keep none,
+/// because pack columns stay on the baked walk; roles above the inline rank
+/// keep none, because Strided's spilled replay allocates per worker range.
+#[derive(Clone, Debug, Default)]
 pub struct TreeTransformLayoutTable {
     pub(super) entries: Vec<TreeTransformLayout>,
     pub(super) fused_dims: Vec<usize>,
@@ -50,6 +63,26 @@ pub struct TreeTransformLayoutTable {
     /// Largest two-sided role rank: the traversal scratch compiled replay
     /// hands each worker.
     pub(super) max_fused_rank: usize,
+    /// Compiled replays of the planned roles, in role order; inline plans
+    /// own no heap storage, so the charge is the vector's capacity.
+    pub(super) plans: Vec<UpdatePlan>,
+    /// The largest element count of a planned role: the range a leaf gate
+    /// searches for the smallest paying size.
+    pub(super) max_planned_elements: usize,
+}
+
+/// Why not compare `plans`: each is a pure function of the role geometry the
+/// other fields already compare, and Strided's plan type has no equality.
+impl PartialEq for TreeTransformLayoutTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.entries == other.entries
+            && self.fused_dims == other.fused_dims
+            && self.fused_dst_strides == other.fused_dst_strides
+            && self.fused_src_strides == other.fused_src_strides
+            && self.max_fused_rank == other.max_fused_rank
+            && self.plans.len() == other.plans.len()
+            && self.max_planned_elements == other.max_planned_elements
+    }
 }
 
 impl TreeTransformLayoutTable {
@@ -59,6 +92,17 @@ impl TreeTransformLayoutTable {
 
     pub(crate) fn max_fused_rank(&self) -> usize {
         self.max_fused_rank
+    }
+
+    pub(crate) fn max_planned_elements(&self) -> usize {
+        self.max_planned_elements
+    }
+
+    /// Roles that retain a compiled plan; tests use it to prove a fixture
+    /// reaches the planned leaf on every host class.
+    #[cfg(test)]
+    pub(crate) fn retained_plan_count(&self) -> usize {
+        self.plans.len()
     }
 
     fn slot_range(&self, entry_index: usize) -> Option<Range<usize>> {
@@ -80,10 +124,14 @@ impl TreeTransformLayoutTable {
     pub(crate) fn role(&self, entry_index: usize) -> Result<BakedFusedLayout<'_>, OperationError> {
         match self.slot_range(entry_index) {
             Some(range) if range.end <= self.fused_src_strides.len() => {
+                let plan = (self.entries[entry_index].role.plan as usize)
+                    .checked_sub(1)
+                    .and_then(|plan| self.plans.get(plan));
                 Ok(BakedFusedLayout::from_compiled_normalized_slices(
                     &self.fused_dims[range.clone()],
                     &self.fused_dst_strides[range.clone()],
                     &self.fused_src_strides[range],
+                    plan,
                 ))
             }
             _ => Err(missing_role()),
@@ -340,6 +388,27 @@ enum RoleKind {
     Inactive,
 }
 
+impl RoleKind {
+    fn is_paired(self) -> bool {
+        !matches!(self, Self::Inactive)
+    }
+
+    /// Whether the role retains a compiled plan: a destination write (Single
+    /// or scatter) within Strided's inline fused rank whose copy Strided
+    /// estimates above zero time.
+    ///
+    /// Why not plan a zero-estimate role: Strided's width rule can never
+    /// widen it on any token, so its plan would only cost retained bytes and
+    /// a width search per replay.
+    fn is_planned(self, fused: &FusedLayoutScratch) -> bool {
+        matches!(self, Self::Single { .. } | Self::Scatter)
+            && fused.dims().len() <= strided_kernel::RAW_FUSED_RANK_LIMIT
+            && !strided_kernel::execution::KernelClass::Copy
+                .estimate(fused.dims().iter().product())
+                .is_zero()
+    }
+}
+
 /// Compile-time layout table: the retained entries plus the raw
 /// (source-permuted) shapes and strides every structural proof reads. Every
 /// entry has the structure rank, so entry `i`'s raw geometry starts at
@@ -482,7 +551,7 @@ impl RawLayoutTable {
         blocks: &[TreeTransformBlock],
         inactive: &[usize],
         scratch: &mut FusedLayoutScratch,
-        mut visit: impl FnMut(usize, bool, &FusedLayoutScratch) -> Result<(), OperationError>,
+        mut visit: impl FnMut(usize, RoleKind, &FusedLayoutScratch) -> Result<(), OperationError>,
     ) -> Result<(), OperationError> {
         let mut packed = SmallVec::<[isize; 8]>::new();
         let mut normalize = |entry: usize,
@@ -509,7 +578,7 @@ impl RawLayoutTable {
                 RoleKind::Scatter => normalize_fused_layout(shape, strides, &packed, scratch)?,
                 RoleKind::Inactive => normalize_fused_layout(shape, strides, strides, scratch)?,
             }
-            visit(entry, !matches!(kind, RoleKind::Inactive), scratch)
+            visit(entry, kind, scratch)
         };
         for block in blocks {
             match *block {
@@ -560,14 +629,15 @@ impl RawLayoutTable {
         inactive: &[usize],
     ) -> Result<TreeTransformLayoutTable, OperationError> {
         let mut scratch = FusedLayoutScratch::default();
-        let (mut two_sided, mut one_sided) = (0usize, 0usize);
-        self.for_each_role(blocks, inactive, &mut scratch, |_, paired, fused| {
-            let total = if paired {
+        let (mut two_sided, mut one_sided, mut planned) = (0usize, 0usize, 0usize);
+        self.for_each_role(blocks, inactive, &mut scratch, |_, kind, fused| {
+            let total = if kind.is_paired() {
                 &mut two_sided
             } else {
                 &mut one_sided
             };
             *total = total.saturating_add(fused.dims().len());
+            planned += usize::from(kind.is_planned(fused));
             Ok(())
         })?;
         let all = two_sided.saturating_add(one_sided);
@@ -575,13 +645,27 @@ impl RawLayoutTable {
         table.fused_dims.reserve_exact(all);
         table.fused_dst_strides.reserve_exact(all);
         table.fused_src_strides.reserve_exact(two_sided);
-        self.for_each_role(blocks, inactive, &mut scratch, |entry, paired, fused| {
+        table.plans.reserve_exact(planned);
+        self.for_each_role(blocks, inactive, &mut scratch, |entry, kind, fused| {
+            let paired = kind.is_paired();
             if paired {
                 BakedFusedLayout::try_from_normalized_slices(
                     fused.dims(),
                     fused.dst_strides(),
                     fused.src_strides(),
                 )?;
+            }
+            let mut plan = 0;
+            if kind.is_planned(fused) {
+                table.plans.push(
+                    UpdatePlan::compile(fused.dims(), fused.dst_strides(), fused.src_strides())
+                        .map_err(crate::strided::error)?,
+                );
+                plan = u32::try_from(table.plans.len())
+                    .map_err(|_| OperationError::ElementCountOverflow)?;
+                table.max_planned_elements = table
+                    .max_planned_elements
+                    .max(fused.dims().iter().product());
             }
             let start = u32::try_from(table.fused_dims.len())
                 .map_err(|_| OperationError::ElementCountOverflow)?;
@@ -600,11 +684,12 @@ impl RawLayoutTable {
                     .extend_from_slice(fused.src_strides());
                 table.max_fused_rank = table.max_fused_rank.max(rank as usize);
             }
-            table.entries[entry].role = RoleSlot { start, rank };
+            table.entries[entry].role = RoleSlot { start, rank, plan };
             Ok(())
         })?;
         debug_assert_eq!(table.fused_src_strides.len(), two_sided);
         debug_assert_eq!(table.fused_dims.len(), all);
+        debug_assert_eq!(table.plans.len(), planned);
         Ok(table)
     }
 }

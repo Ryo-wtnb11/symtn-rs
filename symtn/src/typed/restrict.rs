@@ -96,6 +96,19 @@ where
     /// before every check has passed.
     pub fn restrict_leg(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        legs: &[(usize, &LegSelection<R>)],
+    ) -> Result<Self, FacadeError<R>>
+    where
+        R: TypedSectorAdmission,
+        R::Mode: TypedTensorRootDispatch<R>,
+    {
+        let (engine, _) = cx.parts();
+        self.restrict_leg_impl(engine, legs)
+    }
+
+    fn restrict_leg_impl(
+        &self,
         engine: &mut dyn Engine,
         legs: &[(usize, &LegSelection<R>)],
     ) -> Result<Self, FacadeError<R>>
@@ -192,6 +205,20 @@ where
     /// Every block is preflighted before the first destination element is
     /// written.
     pub fn embed_leg(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        axis: usize,
+        selection: &LegSelection<R>,
+    ) -> Result<Self, FacadeError<R>>
+    where
+        R: TypedSectorAdmission,
+        R::Mode: TypedTensorRootDispatch<R>,
+    {
+        let (engine, _) = cx.parts();
+        self.embed_leg_impl(engine, axis, selection)
+    }
+
+    fn embed_leg_impl(
         &self,
         engine: &mut dyn Engine,
         axis: usize,

@@ -285,10 +285,15 @@ where
     let v_target = v_space.space();
     in_linalg_scope(engine, dense, |dense, engine| {
         let (sectors, blocks) = sector_blocks(matricizations)?;
+        // One packed transient for every sector's eigenvectors, scattered
+        // by tree identity as each sector is delivered.
+        let ranges = packed_ranges(blocks.iter().map(|&(_, n, _)| n * n));
+        let mut transient = vec![D::zero(); ranges.last().map_or(0, |range| range.end)];
         eigh_sectors_staged(
             engine,
             dense,
             &blocks,
+            split_ranges(&mut transient, &ranges)?,
             &mut scratch,
             |position, sorted_values, vectors| {
                 let n = blocks[position].1;
@@ -297,14 +302,14 @@ where
                     values: sorted_values,
                 });
                 #[cfg(test)]
-                crate::probe::eigh_owned_vector(&vectors);
+                crate::probe::eigh_owned_vector(vectors);
                 scatter_left_sector_blocks(
                     v_target,
                     &mut v_data,
                     &geometry[position],
                     &index,
                     &v_groups,
-                    &vectors,
+                    vectors,
                     n,
                 )?;
                 #[cfg(test)]
@@ -358,9 +363,7 @@ where
             values: Vec::new(),
         })
         .collect::<Vec<_>>();
-    let mut regions = vec![None; plan.left_regions.len()];
-    let mut next_left_region = 0;
-    let mut output = None;
+    let mut v_data = vec![D::zero(); v_len];
 
     let data = input.data();
     in_linalg_scope(engine, dense, |dense, engine| {
@@ -374,34 +377,30 @@ where
                 (n != 0).then(|| (position, (&data[source.range()], n, n)))
             })
             .unzip();
+        let ranges = solved
+            .iter()
+            .map(|&position| {
+                plan.left_regions[plan.routes[position]
+                    .left_region
+                    .expect("nonzero route has left region")]
+                .range()
+            })
+            .collect::<Vec<_>>();
         eigh_sectors_staged(
             engine,
             dense,
             &blocks,
+            split_ranges(&mut v_data, &ranges)?,
             &mut scratch,
-            |index, sorted_values, vectors| {
-                let position = solved[index];
-                let route = plan.routes[position];
-                regions[route.left_region.expect("nonzero route has left region")] = Some(vectors);
-                while next_left_region < plan.left_regions.len() {
-                    if plan.left_regions[next_left_region].range().is_empty() {
-                        next_left_region += 1;
-                        continue;
-                    }
-                    let Some(region) = regions[next_left_region].take() else {
-                        break;
-                    };
-                    append_owned_factor(&mut output, region, v_len);
-                    next_left_region += 1;
-                }
-                eigenvalues[position].values = sorted_values;
+            |index, sorted_values, _| {
+                eigenvalues[solved[index]].values = sorted_values;
                 Ok(())
             },
         )
     })?;
 
     Ok(EighFullDyn {
-        v: BoundDynFactor::from_bound(v_space, output.unwrap_or_default(), space.nout(), 1)?,
+        v: BoundDynFactor::from_bound(v_space, v_data, space.nout(), 1)?,
         eigenvalues,
     })
 }
@@ -1048,15 +1047,19 @@ fn order_eigh_sector<D: FactorScalar>(
 }
 
 /// Hermitian eigendecompositions of the `n x n` column-major sectors
-/// `blocks` (`(data, n, n)`) as one executor batch: `stage` receives, in
-/// sector order, each sector's values in [`ascending_eigh_order`] and its
-/// eigenvectors reordered to match and phase-gauged ([`order_eigh_sector`]).
+/// `blocks` (`(data, n, n)`) as one executor batch writing each sector's
+/// eigenvectors into its `n x n` destination `vectors[i]`: `stage`
+/// receives, in sector order, each sector's values in
+/// [`ascending_eigh_order`] and its eigenvectors, reordered in place to
+/// match and phase-gauged ([`order_eigh_sector`]). Either failure of a
+/// sector stops the batch.
 fn eigh_sectors_staged<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     blocks: &[(&[D], usize, usize)],
+    vectors: Vec<&mut [D]>,
     scratch: &mut EighScratch<D>,
-    mut stage: impl FnMut(usize, Vec<f64>, Vec<D>) -> Result<(), OperationError>,
+    mut stage: impl FnMut(usize, Vec<f64>, &mut [D]) -> Result<(), OperationError>,
 ) -> Result<(), OperationError>
 where
     E: DenseExecutor + ?Sized,
@@ -1064,16 +1067,40 @@ where
 {
     let mut layouts = Vec::new();
     let inputs = col_major_reads(blocks, &mut layouts)?;
-    factorize_batch_staged(
+    let value_ranges = packed_ranges(blocks.iter().map(|&(_, n, _)| n));
+    let mut values = vec![D::Real::zero(); value_ranges.last().map_or(0, |range| range.end)];
+    let dest_layouts = blocks
+        .iter()
+        .map(|&(_, n, _)| [vector_layout(n), matrix_layout(n, n), vector_layout(0)])
+        .collect::<Vec<DestLayouts>>();
+    let mut dests = split_ranges(&mut values, &value_ranges)?
+        .into_iter()
+        .zip(vectors)
+        .zip(&dest_layouts)
+        .map(|((values, vectors), layout)| {
+            Ok(FactorDest::new(
+                [
+                    Some(dest_write(values, &layout[0])?),
+                    Some(dest_write(vectors, &layout[1])?),
+                    None,
+                ],
+                symtn_dense::FactorPlacement::AsComputed,
+            ))
+        })
+        .collect::<Result<Vec<_>, OperationError>>()?;
+    factorize_batch_into_staged(
         engine,
         dense,
         DenseFactorization::Eigh,
         &inputs,
-        |index, outcome| {
+        &mut dests,
+        |index, dest, outcome| {
+            outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
             let n = blocks[index].1;
-            let (values, vectors) = eigh_output_pair(outcome.map_err(OperationError::Dense)?)?;
-            let (real_values, mut vectors) = eigh_pair_owned::<D>(values, vectors, n)?;
-            let sorted_values = if order_eigh_sector(&real_values, &mut vectors, n, scratch)? {
+            let [values, vectors, _] = dest.outputs_mut();
+            let real_values = widened_spectrum(dest_data::<D::Real>(values, "eigh_into")?);
+            let vectors = dest_data::<D>(vectors, "eigh_into")?;
+            let sorted_values = if order_eigh_sector(&real_values, vectors, n, scratch)? {
                 scratch
                     .order
                     .iter()
@@ -1758,25 +1785,31 @@ where
     let mut scratch = EighScratch::for_order(max_n);
     let mut eigenvalues = Vec::with_capacity(matrices.len());
     let mut pairs = Vec::with_capacity(matrices.len());
+    let mut packed = Vec::new();
     in_linalg_scope(engine, dense, |dense, engine| {
         let (sectors, blocks) = sector_blocks(&matrices)?;
+        // Every sector's eigenvectors written once into one buffer in
+        // matrix order, published as it is when the output is canonical.
+        let ranges = packed_ranges(blocks.iter().map(|&(_, n, _)| n * n));
+        packed = vec![D::zero(); ranges.last().map_or(0, |range| range.end)];
         eigh_sectors_staged(
             engine,
             dense,
             &blocks,
+            split_ranges(&mut packed, &ranges)?,
             &mut scratch,
-            |index, sorted_values, vectors| {
+            |index, sorted_values, _| {
                 let (sector, n) = (sectors[index], blocks[index].1);
                 eigenvalues.push(SectorSpectrum {
                     sector,
                     values: sorted_values,
                 });
-                pairs.push(FactorPair {
+                pairs.push(PackedFactorPair {
                     sector,
                     kept: n,
-                    left: vectors,
+                    left: ranges[index].clone(),
                     left_rows: n,
-                    right: Vec::new(),
+                    right: 0..0,
                     right_leading: 0,
                 });
                 Ok(())
@@ -1784,15 +1817,19 @@ where
         )
     })
     .map_err(CheckedGenericFactorPlanError::from)?;
+    let mut pairs = PackedFactorPairs {
+        pairs,
+        left: packed,
+        right: Vec::new(),
+    };
     let dimensions = with_input_geometry!(&matrices, |geometry| geometry
         .iter()
         .map(|matrix| (matrix.sector(), matrix.rows()))
         .collect::<BTreeMap<_, _>>());
     #[cfg(test)]
     crate::probe::checked_eigh_pairs(
-        pairs
-            .iter()
-            .map(|pair| pair.left.as_ptr() as usize)
+        (0..pairs.pairs.len())
+            .map(|index| PairedFactors::pair(&pairs, index).left.as_ptr() as usize)
             .collect(),
     );
     let v = with_input_geometry!(&matrices, |geometry| build_bound_factor_generic_checked(

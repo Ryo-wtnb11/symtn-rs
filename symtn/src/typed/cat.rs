@@ -75,6 +75,16 @@ where
     /// provider error.
     pub fn cat<'a>(
         &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        other: impl Into<TensorRef<'a, R, D>>,
+        side: Side,
+    ) -> Result<Self, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.cat_impl(engine, other, side)
+    }
+
+    fn cat_impl<'a>(
+        &self,
         engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D>>,
         side: Side,

@@ -1033,8 +1033,7 @@ where
                 **output = data;
                 return Ok(());
             }
-            // No overwrite proof (a block that is not one contiguous
-            // interval, padding, non-tiling coupled regions): the
+            // No overwrite proof (padding, non-tiling coupled regions): the
             // transform overwrites an allocator-zeroed payload, which
             // covers what no block writes.
             #[cfg(test)]
@@ -1340,4 +1339,71 @@ where
         members,
         ContractDestinationInit::Axpby(D::zero()),
     )
+}
+
+impl<C: DenseBlockScalar> StorageContractResolution<C> {
+    /// Whether one replay of this route on `engine` submits a GEMM batch the
+    /// dense executor places by its lane search: a core batch (into a fresh
+    /// owned output when `fresh` and the route writes its core straight to
+    /// the destination, else into an initialized one), or a recoupling batch
+    /// of a source or output transform as that replay submits it. Decided
+    /// from the plan alone, before any write. Unstable plumbing for symtn's
+    /// lane-allocation admission.
+    #[doc(hidden)]
+    pub fn searches_lanes(&self, engine: &mut dyn Engine, fresh: bool) -> bool {
+        let fresh_core = fresh
+            && match &self.route {
+                ContractRoute::Core { .. } => true,
+                ContractRoute::CopyC(_) => false,
+                ContractRoute::DynamicTree(artifact) => artifact.core_dst.is_none(),
+            };
+        self.route_searches_lanes(engine, 1, |plan| plan.searches_lanes(fresh_core))
+    }
+
+    /// [`Self::searches_lanes`] of the initialized replay over `members`
+    /// members, whose core and transforms run the member-expanded batches.
+    #[doc(hidden)]
+    pub fn member_searches_lanes(&self, engine: &mut dyn Engine, members: usize) -> bool
+    where
+        C: Neg<Output = C>,
+    {
+        self.route_searches_lanes(engine, members, |plan| {
+            StackedDirectReplay::searches_lanes(plan, members)
+        })
+    }
+
+    fn route_searches_lanes(
+        &self,
+        engine: &mut dyn Engine,
+        members: usize,
+        core: impl Fn(&Arc<FusionBlockContractPlan<C>>) -> bool,
+    ) -> bool {
+        let mut transform = |structure: &TreeTransformStructure<C>| {
+            symtn_operations::transform_replay::tree_transform_searches_lanes(
+                engine, structure, members,
+            )
+        };
+        match &self.route {
+            ContractRoute::Core { plan, .. } => core(plan),
+            ContractRoute::CopyC(copy) => core(&copy.core) || transform(&copy.transform),
+            ContractRoute::DynamicTree(artifact) => {
+                let sources = [
+                    (&artifact.lhs_transform, artifact.lhs_borrowed),
+                    (&artifact.rhs_transform, artifact.rhs_borrowed),
+                ];
+                core(&artifact.block_plan)
+                    || sources.into_iter().any(|(entry, borrowed)| {
+                        !borrowed
+                            && entry
+                                .transform_structure
+                                .as_ref()
+                                .is_some_and(&mut transform)
+                    })
+                    || artifact
+                        .core_dst
+                        .as_ref()
+                        .is_some_and(|entry| transform(&entry.output_transform_structure))
+            }
+        }
+    }
 }

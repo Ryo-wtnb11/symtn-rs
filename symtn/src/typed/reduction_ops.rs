@@ -16,7 +16,12 @@ where
     /// # Errors
     ///
     /// [`Error::InvalidArgument`] on a tensor with legs.
-    pub fn scalar(&self, engine: &mut dyn Engine) -> Result<D, Error> {
+    pub fn scalar(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<D, Error> {
+        let (engine, options) = cx.parts();
+        self.scalar_impl(engine, options)
+    }
+
+    fn scalar_impl(&self, engine: &mut dyn Engine, options: ExecOptions) -> Result<D, Error> {
         if self.rank() != 0 {
             return Err(Error::InvalidArgument(format!(
                 "scalar() requires a rank-0 tensor, got rank {}",
@@ -26,7 +31,7 @@ where
         admit_host_engine(engine)?;
         // A rank-0 payload holds at most one element; summing gives the empty
         // payload its zero for free.
-        let materialized = self.materialized_tensor_uncached(engine)?;
+        let materialized = self.materialized_tensor_uncached(engine, options)?;
         Ok(materialized
             .owned_body()
             .expect("uncached materialization is owned")
@@ -222,7 +227,16 @@ where
     /// assert_eq!(id.tr(engine)?, 2.0);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn norm(&self, engine: &mut dyn Engine, p: f64) -> Result<f64, FacadeError<R>> {
+    pub fn norm(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        p: f64,
+    ) -> Result<f64, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.norm_impl(engine, p)
+    }
+
+    fn norm_impl(&self, engine: &mut dyn Engine, p: f64) -> Result<f64, FacadeError<R>> {
         // Checked before any dispatch so an invalid `p` is rejected the same
         // way on every representation and storage.
         validate_norm_p(p)?;
@@ -273,6 +287,15 @@ where
     /// [`Error::UnsupportedOnDevice`].
     #[doc(alias = "dot")]
     pub fn inner<'a>(
+        &self,
+        cx: &mut (impl ExecContext + ?Sized),
+        other: impl Into<TensorRef<'a, R, D, S>>,
+    ) -> Result<D, FacadeError<R>> {
+        let (engine, _) = cx.parts();
+        self.inner_impl(engine, other)
+    }
+
+    fn inner_impl<'a>(
         &self,
         engine: &mut dyn Engine,
         other: impl Into<TensorRef<'a, R, D, S>>,
@@ -624,7 +647,12 @@ where
     /// assert!((id.tr(engine)? - Complex64::new(golden_ratio, 0.0)).norm() < 1e-15);
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
-    pub fn tr(&self, engine: &mut dyn Engine) -> Result<D, FacadeError<R>> {
+    pub fn tr(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<D, FacadeError<R>> {
+        let (engine, options) = cx.parts();
+        self.tr_impl(engine, options)
+    }
+
+    fn tr_impl(&self, engine: &mut dyn Engine, options: ExecOptions) -> Result<D, FacadeError<R>> {
         admit_host_engine(engine)?;
         let hom = self.logical_space().space().homspace();
         // The weighted trace below indexes codomain axis `i` together with
@@ -652,7 +680,8 @@ where
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
             return Ok(FactorScalar::adjoint(
-                Self::adjoint_parent(view, &self.runtime).tr(engine)?,
+                Self::adjoint_parent(view, &self.runtime)
+                    .tr(&mut Invocation::new(engine, options))?,
             ));
         }
         Ok(D::from_complex64(weighted_trace(
