@@ -328,10 +328,11 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
     chunk_units: Vec<ScatterUnit>,
-    // Narrow Single atoms of a threaded replay that also has wide ones.
+    // The atoms a threaded Single split runs (all but the wide ones).
     narrow_atoms: Vec<NarrowAtom>,
-    // One call's whole-token width-transition counts (`whole_width`),
-    // cleared at the start of every threaded replay.
+    // What one call has learned of the whole token's width transitions
+    // (`whole_width`), O(engine width), cleared at the start of every
+    // threaded replay.
     width_levels: Vec<usize>,
     // Capacity of the per-call atom slice list of component-owned scatter
     // (`take_atom_slices`); always empty between calls.

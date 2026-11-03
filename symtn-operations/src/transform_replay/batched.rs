@@ -506,7 +506,7 @@ pub(super) fn balanced_boundary(
 }
 
 /// `exec` narrowed to `width`, the whole-token width of its one component
-/// ([`split_lanes`]): a lane never holds more workers than its component's
+/// ([`split_workers`]): a lane never holds more workers than its component's
 /// largest planned block would use. O(1).
 pub(super) fn granted_width(exec: Exec<'_>, width: usize) -> Exec<'_> {
     exec.limit(core::num::NonZeroUsize::new(width).unwrap_or(core::num::NonZeroUsize::MIN))
@@ -575,22 +575,24 @@ pub(super) fn whole_width(
     width
 }
 
-/// The lanes a split of components over the call's whole token `exec`
-/// uses, recording each component's whole-token width in its slot
-/// ([`whole_width`] of its largest planned block). One (run inline on the
-/// whole token) when Strided's own rule gives their `total` moved elements
-/// one worker; otherwise at most the split width `threads` and the sum of
-/// the components' widths.
+/// The workers of the call's whole token `exec` a split of components
+/// shares, recording each component's whole-token width in its slot
+/// ([`whole_width`] of its largest planned block): one (run inline on the
+/// whole token) when the replay has one lane or Strided's own rule gives
+/// the components' `total` moved elements one worker; otherwise the
+/// smaller of the token's budget and the sum of the components' widths.
+/// The caller splits over `min(threads, workers)` lanes, which share those
+/// workers in proportion, each lane narrowed to its component's width when
+/// it holds one.
 ///
-/// Why the total only admits: it decides whether the moves pay a second
-/// worker at all, but its own copy width is that of one copy, not of a
-/// phase of independent components, which can run side by side up to their
-/// summed widths. Lanes beyond that sum would stay idle while the components
-/// they could have run wait. Cost: one [`whole_width`] lookup for the total
-/// and one per component, O(C log B) for C components and engine budget B
-/// after the call's lazy table setup (O(B) per lookup past the exact
-/// domain).
-pub(super) fn split_lanes<'w>(
+/// Why the token budget and not the lane count: the replay's lane count is
+/// capped by its component count, while each component may use several
+/// workers; lanes holding only one worker each would leave the rest of the
+/// token idle. Why the total only admits: its copy width is that of one
+/// copy, not of a phase of independent components, which can run side by
+/// side up to their summed widths. Cost: one [`whole_width`] answer for the
+/// total and one per component.
+pub(super) fn split_workers<'w>(
     exec: &Exec<'_>,
     gate: &LeafGate,
     levels: &mut Vec<usize>,
@@ -606,7 +608,7 @@ pub(super) fn split_lanes<'w>(
         *width = whole_width(exec, gate, levels, widest);
         sum = sum.saturating_add(*width);
     }
-    threads.min(sum).max(1)
+    exec.budget().get().min(sum).max(1)
 }
 
 /// Recursive `replay_join` over the address-ordered parts `parts` (Single
@@ -734,7 +736,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
 }
 
 /// A Single atom the split runs: its index, the destination elements of the
-/// listed atoms before it, and its whole-token width ([`split_lanes`]).
+/// listed atoms before it, and its whole-token width ([`split_workers`]).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct NarrowAtom {
     atom: usize,
@@ -752,20 +754,24 @@ pub(super) struct NarrowAtom {
 ///    never runs a plan): an atom whose largest planned Single would use
 ///    every worker of the token runs alone on it, one after another.
 /// 3. Capped split: the remaining atoms split by moved elements
-///    ([`split_join_parts`]) over at most [`split_lanes`] lanes: the split
-///    width `threads` and the sum of their own widths; their total is
-///    admitted again, so a small remainder runs inline.
+///    ([`split_join_parts`]) over `min(threads, workers)` lanes sharing
+///    [`split_workers`] workers: the token's budget capped by the sum of
+///    their own widths. Their total is admitted again, so a small remainder
+///    runs inline.
 /// 4. Singleton grant: a lane left with one atom is narrowed to that atom's
 ///    whole-token width.
 ///
 /// `leaf` writes one list of Singles into `dst` from absolute offset
 /// `dst_start`. `narrow` is the split's atom list (O(atoms) workspace
-/// scratch, kept and charged) and `levels` the call's width table
-/// ([`whole_width`]); neither grows on an inline phase.
+/// scratch, kept and charged; untouched by an inline phase) and `levels`
+/// what the call has learned of widths ([`whole_width`], O(B) workspace
+/// scratch, which even the inline admission may fill).
 ///
 /// Cost: inside the gate's exact domain, O(1) per atom for admission and
-/// classification and one O(log B) table lookup per split atom, for engine
-/// budget B; past it each such answer is one Strided search of O(B).
+/// classification, and per split atom one [`whole_width`] answer: O(log B)
+/// for engine budget B when the gate or what the call has learned decides
+/// it, otherwise one Strided search of O(B) (once per distinct count); past
+/// the domain each answer is a Strided search.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_single_phase<T: Send + Sync>(
     schedule: &TreeTransformParallelSchedule,
@@ -846,7 +852,7 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
         weight_before: weight,
         width: 1,
     });
-    let lanes = split_lanes(
+    let workers = split_workers(
         &exec,
         gate,
         levels,
@@ -856,8 +862,11 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
             .iter_mut()
             .map(|part| (atoms[part.atom].widest, &mut part.width)),
     );
+    // Lanes are the replay's split width; the workers they share are the
+    // part of the token the components can use.
+    let lanes = threads.min(workers);
     let exec = if lanes > 1 {
-        granted_width(exec, lanes)
+        granted_width(exec, workers)
     } else {
         exec
     };
@@ -909,7 +918,7 @@ pub(super) struct ScatterUnit {
     weight_before: usize,
     /// Elements of the unit's largest planned column.
     widest: usize,
-    /// The unit's whole-token width, recorded by [`split_lanes`].
+    /// The unit's whole-token width, recorded by [`split_workers`].
     width: usize,
 }
 
@@ -1057,15 +1066,18 @@ pub(super) fn atom_start(
 /// [`replay_single_phase`]: inline admission when Strided gives the chunk's
 /// moved elements one worker (or there is one unit or one lane); then the
 /// saturating units alone ([`run_wide_units`]); then the remaining units over
-/// at most [`split_lanes`] lanes, re-admitted on their own total
+/// `min(threads, workers)` lanes sharing [`split_workers`] workers,
+/// re-admitted on their own total
 /// ([`split_join_components`]); finally a lane left with one unit narrowed to
 /// its whole-token width. Admission asks the gate for every threaded
 /// multi-component chunk, planned or not and accumulating or not.
 ///
 /// Cost per chunk: O(1) gate answers inside its exact domain and one
-/// O(log B) lookup in the call's width table `levels` per split unit, for
-/// engine budget B; the table is set up at most once per call, however many
-/// chunks ask. Past the exact domain each answer is a Strided search, O(B).
+/// [`whole_width`] answer per split unit and for the total: O(log B) for
+/// engine budget B when the gate or what the call has learned in `levels`
+/// decides it, otherwise one Strided search, O(B). Identical chunks repeat
+/// no search; a new undecided count searches once. Past the exact domain
+/// each answer is a Strided search.
 ///
 /// Why per chunk and not once per phase: a chunk's packed destination exists
 /// only between its GEMM and the next chunk's, so a split cannot outlive it;
@@ -1125,7 +1137,7 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
         return Ok(());
     }
     let total = units[parts].weight_before;
-    let lanes = split_lanes(
+    let workers = split_workers(
         &exec,
         gate,
         levels,
@@ -1135,8 +1147,11 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
             .iter_mut()
             .map(|unit| (unit.widest, &mut unit.width)),
     );
+    // Lanes are the replay's split width; the workers they share are the
+    // part of the token the components can use.
+    let lanes = threads.min(workers);
     let exec = if lanes > 1 {
-        granted_width(exec, lanes)
+        granted_width(exec, workers)
     } else {
         exec
     };

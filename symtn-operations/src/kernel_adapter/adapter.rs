@@ -5,16 +5,18 @@ pub(crate) mod sealed {
     use super::*;
     use strided_kernel::execution;
 
-    /// The smallest element counts that widen and that fill one token shape,
-    /// found at most once per call and token shape on one thread.
+    /// The smallest element counts that widen and that fill a token shape,
+    /// found once for the first shape a gate is asked about (a call's whole
+    /// token, which it keeps) and once for each change of a second,
+    /// replaceable shape (a narrowed lane).
     ///
     /// Why: Strided's `parallel_width` scans every width up to the budget on
     /// each call, so asking it for every block (or every component a threaded
     /// replay classifies) costs O(blocks x budget) and makes wide engines
     /// slower on small tensors. Inside the token's exact domain (see
     /// [`LeafGate::exact_domain`]) both answers are monotone in the element
-    /// count, so one threshold each answers every query there in O(1); a
-    /// count outside it asks Strided directly.
+    /// count, so one threshold each answers every query there in O(1) once
+    /// the shape is scanned; a count outside it asks Strided directly.
     ///
     /// Why lazy: the scan runs on the first query of a token shape: a planned
     /// overwrite reaching leaf admission, a threaded replay classifying its

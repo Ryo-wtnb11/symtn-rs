@@ -945,7 +945,7 @@ fn component_splits_balance_moved_elements_not_component_count() {
             (0, unit, wide),
             (1, unit, wide),
             (2, unit, wide),
-            (3, 6 * unit, wide),
+            (3, 6 * unit, 6 * unit),
         ],
         false,
     )
@@ -1388,7 +1388,7 @@ fn a_split_uses_no_more_lanes_than_its_components_can() {
     let (lanes, widths) = crate::host_pool::test_pool(3).with_exec(|exec| {
         let mut widths = [0, 0];
         let [first, second] = &mut widths;
-        let lanes = split_lanes(
+        let lanes = split_workers(
             &exec,
             &LeafGate::new(1),
             &mut Vec::new(),
@@ -1558,7 +1558,9 @@ fn a_narrowed_lane_keeps_the_whole_token_gate() {
     // What: a gate asked alternately on the call's whole token and on a lane
     // narrowed to two workers (as a chunk's wide components and its one
     // narrowed remainder ask it) sets up each token shape's thresholds once,
-    // however many chunks alternate.
+    // however many chunks alternate. (Driven directly: the recoupling plan
+    // orders Multi groups by size, so compiled chunks cannot repeat a mix of
+    // saturating groups and one narrow remainder.)
     let (mut pool, two, eight) = intermediate_width_pool();
     let scans = pool.with_exec(|mut exec| {
         let gate = LeafGate::new(eight);
@@ -1623,7 +1625,7 @@ fn independent_components_split_up_to_their_summed_widths() {
         let mut levels = Vec::new();
         let mut widths = [0; 8];
         let total = 8 * two;
-        let lanes = split_lanes(
+        let lanes = split_workers(
             &exec,
             &gate,
             &mut levels,
@@ -1634,4 +1636,89 @@ fn independent_components_split_up_to_their_summed_widths() {
         (lanes, whole_width(&exec, &gate, &mut levels, total))
     });
     assert_eq!((lanes, total_width), (8, 2));
+}
+
+#[test]
+fn independent_widening_components_share_the_token_by_their_strided_widths() {
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    // What: nine independent compiled Single components whose blocks Strided
+    // gives more than one but fewer than all workers of a 16- and a 96-worker
+    // token run on nine lanes (the replay's worker count, capped by its
+    // component count) that together hold as much of the token as their
+    // widths can use: each lane at most its component's width, all lanes
+    // `min(budget, sum of widths)`.
+    for budget in [16, 96] {
+        let mut pool = crate::host_pool::test_pool(budget);
+        let (count, width) = pool.with_exec(|exec| {
+            let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
+            let mut at = 1usize;
+            while width(at) < 2 {
+                at *= 2;
+            }
+            let (mut below, mut at) = (at / 2, at);
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if width(middle) >= 2 {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            (at, width(at))
+        });
+        assert!(
+            width > 1 && width < budget,
+            "budget {budget}: width {width}"
+        );
+        let structure =
+            Arc::new(BlockStructure::packed_column_major(2, vec![vec![count, 1]; 9]).unwrap());
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &(0..9)
+                .map(|block| TreeTransformBlockSpec::single(block, block, 2.0))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        let schedule = transform.parallel_schedule();
+        assert_eq!(schedule.single_component_count(), 9);
+        let threads =
+            pool.install(|engine| effective_tree_transform_threads(engine, schedule, budget));
+        assert_eq!(threads, 9);
+        let leaves = std::sync::Mutex::new(Vec::new());
+        let mut dst = vec![(); structure.required_len().unwrap()];
+        let mut fused_indices = [0usize; 2];
+        let gate = LeafGate::new(transform.layouts().max_planned_elements());
+        pool.with_exec(|exec| {
+            replay_single_phase(
+                schedule,
+                &mut Vec::new(),
+                &mut Vec::new(),
+                &mut dst,
+                &mut fused_indices,
+                2,
+                threads,
+                exec,
+                &gate,
+                transform.layouts().max_planned_elements(),
+                true,
+                &|_, _, _, _, exec, _| {
+                    leaves.lock().unwrap().push(exec.budget().get());
+                    Ok(())
+                },
+            )
+        })
+        .unwrap();
+        let leaves = leaves.into_inner().unwrap();
+        assert_eq!(leaves.len(), 9, "budget {budget}");
+        assert!(
+            leaves.iter().all(|&lane| lane <= width),
+            "budget {budget}: {leaves:?}"
+        );
+        assert_eq!(
+            leaves.iter().sum::<usize>(),
+            budget.min(9 * width),
+            "budget {budget}: {leaves:?}"
+        );
+    }
 }
