@@ -352,7 +352,7 @@ fn compact_copy<T: Copy>(raw: RawStridedRef<'_, T>, out: &mut [T]) {
 
 /// Writes `[0; I_cols; 0]` into each column-major `m x cols` item of `c`,
 /// the identity block starting at row `first`.
-fn identity_columns<T: Element>(c: &mut [T], m: usize, cols: usize, first: usize) {
+fn identity_columns<T: Scalar>(c: &mut [T], m: usize, cols: usize, first: usize) {
     c.fill(T::ZERO);
     if m * cols == 0 {
         return;
@@ -366,7 +366,7 @@ fn identity_columns<T: Element>(c: &mut [T], m: usize, cols: usize, first: usize
 
 /// Zeroes the strictly lower triangle of each column-major `m x n` item,
 /// leaving the upper trapezoid `R` of a compact Householder factor.
-fn zero_below_diagonal<T: Element>(r: &mut [T], m: usize, n: usize) {
+fn zero_below_diagonal<T: Scalar>(r: &mut [T], m: usize, n: usize) {
     if m * n == 0 {
         return;
     }
@@ -605,6 +605,10 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
     /// real one, so a destination batch stages it in typed scratch.
     const COMPLEX: bool;
 
+    /// Zero and one, for identity targets and zeroed scratch.
+    const ZERO: Self;
+    const ONE: Self;
+
     /// The lane's typed scratch of this scalar.
     fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self>;
 
@@ -640,8 +644,11 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
 // `TensorScalar::Real` only once the scalar is concrete.
 macro_rules! scalar {
     ($ty:ty, $complex:ty, $variant:ident, $real_variant:ident, $slot:ident, $is_complex:expr,
+     $zero:expr, $one:expr,
      |$values:ident| $real:expr, |$dest:ident, $scratch:ident, $solve:ident| $spectrum:expr) => {
         impl Scalar for $ty {
+            const ZERO: Self = $zero;
+            const ONE: Self = $one;
             type EigScalar = $complex;
             const COMPLEX: bool = $is_complex;
 
@@ -713,6 +720,8 @@ scalar!(
     F32,
     f32,
     false,
+    0.0,
+    1.0,
     |values| values,
     |dest, _scratch, solve| solve(dest)
 );
@@ -723,6 +732,8 @@ scalar!(
     F64,
     f64,
     false,
+    0.0,
+    1.0,
     |values| values,
     |dest, _scratch, solve| solve(dest)
 );
@@ -733,6 +744,8 @@ scalar!(
     F32,
     c32,
     true,
+    Complex32::new(0.0, 0.0),
+    Complex32::new(1.0, 0.0),
     |values| values.into_iter().map(|value| value.re).collect(),
     |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
 );
@@ -743,6 +756,8 @@ scalar!(
     F64,
     c64,
     true,
+    Complex64::new(0.0, 0.0),
+    Complex64::new(1.0, 0.0),
     |values| values.into_iter().map(|value| value.re).collect(),
     |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
 );
@@ -1316,7 +1331,7 @@ pub(crate) struct ScalarScratch<T> {
     coeff: Vec<T>,
 }
 
-impl<T: Element> ScalarScratch<T> {
+impl<T: Scalar> ScalarScratch<T> {
     fn new(values: usize, coeff: usize) -> Self {
         Self {
             values: vec![T::ZERO; values],

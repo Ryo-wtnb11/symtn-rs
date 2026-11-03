@@ -277,38 +277,28 @@ pub(crate) fn validate(
 
 /// A scalar a destination holds.
 pub(crate) trait Element: Copy {
-    const ZERO: Self;
-    const ONE: Self;
     fn conj(self) -> Self;
 }
 
 impl Element for f32 {
-    const ZERO: Self = 0.0;
-    const ONE: Self = 1.0;
     fn conj(self) -> Self {
         self
     }
 }
 
 impl Element for f64 {
-    const ZERO: Self = 0.0;
-    const ONE: Self = 1.0;
     fn conj(self) -> Self {
         self
     }
 }
 
 impl Element for Complex32 {
-    const ZERO: Self = Complex32::new(0.0, 0.0);
-    const ONE: Self = Complex32::new(1.0, 0.0);
     fn conj(self) -> Self {
         Complex32::conj(&self)
     }
 }
 
 impl Element for Complex64 {
-    const ZERO: Self = Complex64::new(0.0, 0.0);
-    const ONE: Self = Complex64::new(1.0, 0.0);
     fn conj(self) -> Self {
         Complex64::conj(&self)
     }
