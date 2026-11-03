@@ -936,14 +936,14 @@ fn component_splits_balance_moved_elements_not_component_count() {
     // balanced for: at three workers the three light components get one
     // slot and the heavy one two. (An accumulating phase, so no component
     // runs alone; the blocks widen on any share and the total pays.)
-    const UNIT: usize = 1 << 20;
-    const WIDE: usize = 1 << 24;
+    let unit = first_count(3, |width| width == 3);
+    let wide = unit.max(first_count(2, |width| width == 2));
     let leaves = record_single_phase(
         &[
-            (0, UNIT, WIDE),
-            (1, UNIT, WIDE),
-            (2, UNIT, WIDE),
-            (3, 6 * UNIT, WIDE),
+            (0, unit, wide),
+            (1, unit, wide),
+            (2, unit, wide),
+            (3, 6 * unit, wide),
         ],
         false,
     )
@@ -1037,14 +1037,14 @@ fn wide_components_run_alone_on_the_whole_token_before_narrow_ones_split() {
     // What: a Single phase with one component whose planned block widens on
     // the whole token and three that do not runs the wide one alone on all
     // three workers, then splits the narrow ones one per worker.
-    const LARGE: usize = 1 << 24;
-    // The narrow ones move enough in total to pay a split, one worker each.
-    const NARROW: usize = 1 << 22;
+    let large = first_count(3, |width| width == 3);
+    // The narrow ones move enough in total to fill the token, so the split
+    // pays; their blocks never widen, so each runs on one worker.
     let leaves = record_single_leaves(&[
-        (0, NARROW, 1),
-        (1, LARGE, LARGE),
-        (2, NARROW, 1),
-        (3, NARROW, 1),
+        (0, large, 1),
+        (1, large, large),
+        (2, large, 1),
+        (3, large, 1),
     ]);
     assert_eq!(
         leaves,
@@ -1057,12 +1057,11 @@ fn classifying_more_wide_components_asks_strided_no_more_often() {
     // What: deciding which components widen takes one threshold search per
     // token shape, so a phase with three times the wide components asks
     // Strided for a width exactly as often.
-    const LARGE: usize = 1 << 24;
+    let large = first_count(3, |width| width == 3);
     let phase = |wide: isize| {
-        const NARROW: usize = 1 << 22;
-        let atoms = std::iter::once((0, NARROW, 1))
-            .chain((1..=wide).map(|lo| (lo, LARGE, LARGE)))
-            .chain([(wide + 1, NARROW, 1)])
+        let atoms = std::iter::once((0, large, 1))
+            .chain((1..=wide).map(|lo| (lo, large, large)))
+            .chain([(wide + 1, large, 1)])
             .collect::<Vec<_>>();
         record_single_phase(&atoms, true)
     };
@@ -1098,12 +1097,12 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
     // share; every block holds its oracle value. The moldable size is the first count Strided widens at
     // all, so the expectation for it follows Strided's own answer.
     const THREADS: usize = 8;
-    const LARGE: usize = 1 << 21;
+    let large = first_count(THREADS, |width| width == THREADS);
     let mut pool = crate::host_pool::test_pool(THREADS);
     let (moldable, moldable_saturates) = pool.with_exec(|exec| {
         let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
-        assert_eq!(width(LARGE), THREADS);
-        let (mut below, mut at) = (0usize, LARGE);
+        assert_eq!(width(large), THREADS);
+        let (mut below, mut at) = (0usize, large);
         while at - below > 1 {
             let middle = below + (at - below) / 2;
             if width(middle) > 1 {
@@ -1118,7 +1117,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         BlockStructure::packed_column_major(
             1,
             [
-                2, 2, moldable, moldable, LARGE, LARGE, 2, 2, 2, moldable, LARGE, 2,
+                2, 2, moldable, moldable, large, large, 2, 2, 2, moldable, large, 2,
             ]
             .map(|len| vec![len]),
         )
@@ -1148,7 +1147,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         .collect::<Vec<_>>();
     let mut expected = vec![0.0; len];
     let mut start = 0;
-    for block_len in [2, moldable, LARGE, 2] {
+    for block_len in [2, moldable, large, 2] {
         for element in 0..block_len {
             let (a, b) = (source[start + element], source[start + block_len + element]);
             expected[start + element] = matrix[0] * a + matrix[1] * b;
@@ -1183,7 +1182,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
     let budgets = budgets.lock().unwrap().clone();
     assert_eq!(budgets.len(), 12);
     for (elements, budget) in budgets {
-        let whole = elements == LARGE || (elements == moldable && moldable_saturates);
+        let whole = elements == large || (elements == moldable && moldable_saturates);
         assert_eq!(budget == THREADS, whole, "{elements} elements on {budget}");
         // No lane holds more workers than Strided would use for its block.
         let width = pool.with_exec(|exec| parallel_width(&exec, KernelClass::Copy, elements).get());
@@ -1253,7 +1252,9 @@ fn chunks_too_small_to_pay_a_worker_scatter_without_forking() {
         assert_eq!(destination, expected);
         SCATTER_SPLITS.with(|splits| splits.get()) - before
     };
-    // Two workers chunk two groups at a time: 2 and 6 chunks.
+    // Two workers chunk two groups at a time, 2 and 6 chunks, each moving
+    // eight elements: fewer than pay a second worker.
+    assert!(first_count(2, |width| width > 1) > 8);
     assert_eq!(splits(4), splits(12));
 }
 
@@ -1267,15 +1268,50 @@ fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
     // token: the largest block's answer settles nothing outside the gate's
     // exact domain. A zero-size destination element replays the schedule
     // without allocating the blocks' payload.
-    const LENGTHS: [usize; 2] = [150_119_987_579_016_559, 150_119_987_579_016_560];
     let costs = WidthCosts::from_anchors(&[
         (2, Duration::ZERO),
         (3, Duration::ZERO),
         (4, Duration::from_nanos(1 << 50)),
     ])
     .unwrap();
+    let mut pool = crate::host_pool::test_pool_with_costs(4, costs);
+    // The counts around the estimate where rounding ties widths 3 and 4, by
+    // bisection on this host's copy estimate: a count Strided gives four
+    // workers, then the next larger count it gives three.
+    let width = |exec: &Exec<'_>, n| {
+        strided_kernel::execution::parallel_width(
+            exec,
+            strided_kernel::execution::KernelClass::Copy,
+            n,
+        )
+        .get()
+    };
+    let tie = Duration::from_nanos(13_510_798_882_111_491);
+    let (mut below, mut at) = (0usize, usize::MAX);
+    while at - below > 1 {
+        let middle = below + (at - below) / 2;
+        if strided_kernel::execution::KernelClass::Copy.estimate(middle) >= tie {
+            at = middle;
+        } else {
+            below = middle;
+        }
+    }
+    let lengths = pool.with_exec(|exec| {
+        let window = below.saturating_sub(4)..=at + 4;
+        let narrower = window
+            .clone()
+            .find(|&n| {
+                width(&exec, n) == 3 && window.clone().any(|m| m < n && width(&exec, m) == 4)
+            })
+            .expect("the cost row ties widths 3 and 4 near this estimate");
+        let wider = (below.saturating_sub(4)..narrower)
+            .rev()
+            .find(|&n| width(&exec, n) == 4)
+            .expect("a smaller count gets four workers");
+        [wider, narrower]
+    });
     let structure =
-        Arc::new(BlockStructure::packed_column_major(1, LENGTHS.map(|len| vec![len])).unwrap());
+        Arc::new(BlockStructure::packed_column_major(1, lengths.map(|len| vec![len])).unwrap());
     let transform = TreeTransformStructure::compile_structures(
         &structure,
         &structure,
@@ -1284,19 +1320,9 @@ fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
     .unwrap();
     let schedule = transform.parallel_schedule();
     assert_eq!(schedule.single_component_count(), 2);
-    assert_eq!(schedule.widest_single, LENGTHS[1]);
+    assert_eq!(schedule.widest_single, lengths[1]);
     let gate = LeafGate::new(transform.layouts().max_planned_elements());
-    let mut pool = crate::host_pool::test_pool_with_costs(4, costs);
-    let widths = pool.with_exec(|exec| {
-        LENGTHS.map(|len| {
-            strided_kernel::execution::parallel_width(
-                &exec,
-                strided_kernel::execution::KernelClass::Copy,
-                len,
-            )
-            .get()
-        })
-    });
+    let widths = pool.with_exec(|exec| lengths.map(|len| width(&exec, len)));
     assert_eq!(widths, [4, 3]);
     let leaves = std::sync::Mutex::new(Vec::new());
     let mut dst = vec![(); structure.required_len().unwrap()];
@@ -1331,13 +1357,14 @@ fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
     leaves.sort_unstable();
     // The saturating block alone on four workers; the other, the only one
     // left, on the three Strided gives it.
-    assert_eq!(leaves, [(LENGTHS[0], 4), (LENGTHS[1], 3)]);
+    assert_eq!(leaves, [(lengths[0], 4), (lengths[1], 3)]);
 }
 
 #[test]
 fn a_single_phase_whose_moves_do_not_pay_a_worker_runs_inline() {
     // What: many tiny Single components whose total moved elements Strided
     // gives one worker run in one list on the caller's whole token: no fork.
+    assert!(first_count(3, |width| width > 1) > 32);
     let atoms = (0..32).map(|lo| (lo, 1, 1)).collect::<Vec<_>>();
     let leaves = record_single_leaves(&atoms);
     assert_eq!(leaves, [((0..32).collect::<Vec<u32>>(), 3)]);
@@ -1347,9 +1374,40 @@ fn a_single_phase_whose_moves_do_not_pay_a_worker_runs_inline() {
 fn a_split_uses_no_more_lanes_than_its_components_can() {
     // What: two components that move enough to pay a split but whose blocks
     // never widen use two lanes of three, one worker each.
-    let leaves = record_single_leaves(&[(0, 1 << 22, 1), (1, 1 << 22, 1)]);
+    // Each moves enough to fill the token on its own.
+    let moved = first_count(3, |width| width == 3);
+    let leaves = record_single_leaves(&[(0, moved, 1), (1, moved, 1)]);
     assert_eq!(leaves, [(vec![0], 1), (vec![1], 1)]);
     let lanes = crate::host_pool::test_pool(3)
-        .with_exec(|exec| split_lanes(&exec, &LeafGate::new(1), 3, 2 << 22, [1, 1]));
+        .with_exec(|exec| split_lanes(&exec, &LeafGate::new(1), 3, 2 * moved, [1, 1]));
     assert_eq!(lanes, 2);
+}
+
+/// The smallest count whose copy Strided gives a width satisfying `holds` on
+/// a `threads`-worker test pool, by doubling then bisection (the predicates
+/// used here are monotone on the pool's ordinary cost row).
+fn first_count(threads: usize, holds: impl Fn(usize) -> bool) -> usize {
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    crate::host_pool::test_pool(threads).with_exec(|exec| {
+        let meets = |n| holds(parallel_width(&exec, KernelClass::Copy, n).get());
+        let mut at = 1usize;
+        while !meets(at) {
+            at = at
+                .checked_mul(2)
+                .expect("Strided reaches the width at some count");
+        }
+        let mut below = at / 2;
+        if below == 0 {
+            return at;
+        }
+        while at - below > 1 {
+            let middle = below + (at - below) / 2;
+            if meets(middle) {
+                at = middle;
+            } else {
+                below = middle;
+            }
+        }
+        at
+    })
 }
