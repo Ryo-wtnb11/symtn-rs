@@ -4,10 +4,13 @@
 //! A backend-free Host region (tree-transform replay fan-out, plan compile,
 //! strided kernels) takes that engine's placement token through [`region`]
 //! and splits it with [`fork`] / [`join`]; leaf kernels take a token argument
-//! and pass it to strided, whose own cost rule decides whether to fan out. symtn schedules no work of its own and keeps no
-//! engine, pool or token anywhere: the token lives only inside [`region`]'s
-//! callback, so a region cannot call the dense backend on the same engine,
-//! and the next dense call can borrow the engine again once it returns.
+//! and pass it to strided, whose own cost rule decides whether to fan out. symtn keeps no
+//! engine, pool or token anywhere: the token lives only inside the callback
+//! of the entry that lent it ([`region`], or the dense backend's lane-GEMM
+//! entry, `DenseExecutor::with_lane_gemms`). A region never enters the
+//! engine; it calls the dense backend only through the handle its entry
+//! prepared (the lane GEMMs), and the next dense call can borrow the engine
+//! again once the entry returns.
 //!
 //! A CPU engine supplies its team's token (a one-thread engine a serial
 //! one). Without a compiled CPU provider there is no CPU engine type, so
@@ -30,7 +33,8 @@ use symtn_dense::{DenseError, Engine};
 use crate::OperationError;
 
 /// Runs `op` with the placement token of the caller's CPU engine. `op` must
-/// not call the dense backend; it returns before the engine is used again.
+/// not enter the engine (no dense call); it returns before the engine is
+/// used again.
 #[doc(hidden)]
 pub fn region<R>(
     engine: &mut dyn Engine,

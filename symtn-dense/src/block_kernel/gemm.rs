@@ -596,17 +596,28 @@ pub(crate) type FreshSlots<'a, T> = Vec<(usize, &'a mut [MaybeUninit<T>], &'a mu
 /// Indexes the distinct geometries of `jobs` in order of first use, looks
 /// each one's plan up once in the geometry-plan cache, and passes every
 /// job's plan index to `slot`, in job order.
-fn index_plans<T: Scalar>(
+fn index_plans<'j, T: Scalar>(
     geometries: &mut HashMap<Geometry, usize>,
     plans: &mut Vec<Arc<ErasedPlan>>,
-    jobs: &[DenseGemmBatchJob],
+    jobs: impl IntoIterator<Item = &'j DenseGemmBatchJob>,
+    ops: [MatrixOp; 2],
+    slot: impl FnMut(usize),
+) -> Result<(), DenseError> {
+    index_job_plans::<T>(geometries, plans, jobs.into_iter().copied(), ops, slot)
+}
+
+/// [`index_plans`] over jobs produced by value.
+fn index_job_plans<T: Scalar>(
+    geometries: &mut HashMap<Geometry, usize>,
+    plans: &mut Vec<Arc<ErasedPlan>>,
+    jobs: impl Iterator<Item = DenseGemmBatchJob>,
     ops: [MatrixOp; 2],
     mut slot: impl FnMut(usize),
 ) -> Result<(), DenseError> {
     geometries.clear();
     plans.clear();
-    for (index, job) in jobs.iter().enumerate() {
-        let geometry = Geometry::new(job, ops)?;
+    for (index, job) in jobs.enumerate() {
+        let geometry = Geometry::new(&job, ops)?;
         let next = geometries.len();
         let plan = *geometries.entry(geometry).or_insert(next);
         if plan == plans.len() {
@@ -676,4 +687,227 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     plans.clear();
     scratch.keep_fresh_slots(slots);
     result
+}
+
+/// The native [`crate::DenseExecutor::with_lane_gemms`]: resolves every
+/// job's plan from the geometry-plan cache into `scratch`, enters `cpu`'s
+/// guarded contraction entry once and calls `body` with its whole token and
+/// the prepared GEMMs, which forward the entered bundle's shared workspace
+/// and batch policy to each lane's `Exec`.
+pub(crate) fn with_lane_gemms(
+    cpu: &mut CpuEngine,
+    scratch: &mut GemmScratch,
+    dtype: crate::DenseDType,
+    jobs: &[crate::LaneGemmShape],
+    body: &mut crate::LaneGemmBody<'_>,
+) -> Result<(), DenseError> {
+    let GemmScratch {
+        order,
+        geometries,
+        plans,
+        ..
+    } = scratch;
+    // `order` holds each job's plan index for the call. Each table is
+    // sized once for every job, so a fresh executor allocates it once
+    // however many geometries the call has.
+    order.clear();
+    order.reserve(jobs.len());
+    geometries.reserve(jobs.len());
+    plans.reserve(jobs.len());
+    let geometry = jobs.iter().map(|job| DenseGemmBatchJob {
+        dst_offset: 0,
+        lhs_offset: 0,
+        rhs_offset: 0,
+        rows: job.rows,
+        contracted: job.k,
+        cols: job.n,
+    });
+    let identity = [MatrixOp::Identity; 2];
+    let resolved = match dtype {
+        crate::DenseDType::F32 => {
+            index_job_plans::<f32>(geometries, plans, geometry, identity, |p| order.push(p))
+        }
+        crate::DenseDType::F64 => {
+            index_job_plans::<f64>(geometries, plans, geometry, identity, |p| order.push(p))
+        }
+        crate::DenseDType::C32 => {
+            index_job_plans::<num_complex::Complex32>(geometries, plans, geometry, identity, |p| {
+                order.push(p)
+            })
+        }
+        crate::DenseDType::C64 => {
+            index_job_plans::<num_complex::Complex64>(geometries, plans, geometry, identity, |p| {
+                order.push(p)
+            })
+        }
+        other => Err(DenseError::Unsupported {
+            op: crate::lane_gemm::LANE_GEMM_OP,
+            message: format!("no GEMM of dtype {other:?}"),
+        }),
+    };
+    let entered = resolved.and_then(|()| {
+        cpu.with_contraction_exec(|exec, _, _| {
+            let gemms = NativeLaneGemms {
+                jobs,
+                plan_of_job: order,
+                plans,
+                dtype,
+                workspace: exec.workspace(),
+                policy: *exec.batch_policy(),
+            };
+            body(exec.token(), &gemms);
+            Ok(())
+        })
+        .map_err(|err| crate::tenferro_adapter::tenferro_error(crate::lane_gemm::LANE_GEMM_OP, err))
+    });
+    plans.clear();
+    entered
+}
+
+struct NativeLaneGemms<'r, 'w> {
+    jobs: &'r [crate::LaneGemmShape],
+    plan_of_job: &'r [usize],
+    plans: &'r [Arc<ErasedPlan>],
+    dtype: crate::DenseDType,
+    workspace: Option<&'w dyn tcontract_exec::WorkspaceProvider>,
+    policy: tcontract_exec::BatchPolicy,
+}
+
+impl NativeLaneGemms<'_, '_> {
+    fn run_typed<'d, T: Scalar + Default>(
+        &self,
+        token: crate::LaneToken<'_>,
+        job: usize,
+        actual: crate::DenseDType,
+        one: T,
+        (lhs, rhs, destination): (&[T], &[T], &'d mut [MaybeUninit<T>]),
+    ) -> Result<&'d mut [T], DenseError> {
+        let plan = self.plans[self.plan_of_job[job]]
+            .downcast_ref::<Plan<T>>()
+            .ok_or(DenseError::DTypeMismatch {
+                op: crate::lane_gemm::LANE_GEMM_OP,
+                expected: self.dtype,
+                actual,
+            })?;
+        let mut exec = Exec::from_token(token, self.workspace, self.policy);
+        plan.execute_uninit_slices(
+            &mut exec,
+            one,
+            (lhs, 0),
+            (rhs, 0),
+            T::default(),
+            SliceAccumulationSource::Absent,
+            (destination, 0),
+        )
+        .map_err(|err| grouped_error(format!("lane job {job}: {err}")))
+    }
+
+    /// [`crate::LaneGemms::time`] at scalar type `T`: the block driver's
+    /// serial cost of the job's weighted work, then, under Auto, the job's
+    /// plan grant within `width` as the scheduler's [`grant`] models it.
+    fn time_typed<T: Scalar>(
+        &self,
+        token: &mut crate::LaneToken<'_>,
+        job: usize,
+        width: core::num::NonZeroUsize,
+    ) -> Duration {
+        let Some(plan) = self.plans[self.plan_of_job[job]].downcast_ref::<Plan<T>>() else {
+            return Duration::MAX;
+        };
+        let shape = self.jobs[job];
+        let work = work::<T>(&DenseGemmBatchJob {
+            dst_offset: 0,
+            lhs_offset: 0,
+            rhs_offset: 0,
+            rows: shape.rows,
+            contracted: shape.k,
+            cols: shape.n,
+        });
+        let exec = Exec::from_token(token.reborrow(), self.workspace, self.policy);
+        let serial = driver::cost(OpKind::Gemm, work, &exec.batch_policy().model);
+        // Why serial under a forced policy: the scheduler does not model
+        // widening there, so placement must not widen on a grant it cannot
+        // state; the GEMM itself still runs under the forced policy.
+        if exec.batch_policy().strategy != tcontract_exec::BatchStrategy::Auto {
+            return serial;
+        }
+        let budget = width.get().min(exec.budget());
+        let granted = grant(plan, work, &exec, budget, serial);
+        super::schedule::item_time(&exec, serial, granted)
+    }
+}
+
+impl crate::LaneGemms for NativeLaneGemms<'_, '_> {
+    fn run<'d>(
+        &self,
+        token: crate::LaneToken<'_>,
+        job: usize,
+        io: crate::LaneGemmIo<'_, 'd>,
+    ) -> Result<(), DenseError> {
+        use crate::{DenseDType as D, LaneGemmIo as Io};
+        use num_complex::Complex;
+        if job >= self.jobs.len() {
+            return Err(DenseError::OutOfBounds);
+        }
+        match io {
+            Io::F32 {
+                lhs,
+                rhs,
+                destination,
+                written,
+            } => {
+                *written =
+                    Some(self.run_typed(token, job, D::F32, 1.0, (lhs, rhs, destination))?);
+            }
+            Io::F64 {
+                lhs,
+                rhs,
+                destination,
+                written,
+            } => {
+                *written =
+                    Some(self.run_typed(token, job, D::F64, 1.0, (lhs, rhs, destination))?);
+            }
+            Io::C32 {
+                lhs,
+                rhs,
+                destination,
+                written,
+            } => {
+                let one = Complex::new(1.0, 0.0);
+                *written =
+                    Some(self.run_typed(token, job, D::C32, one, (lhs, rhs, destination))?);
+            }
+            Io::C64 {
+                lhs,
+                rhs,
+                destination,
+                written,
+            } => {
+                let one = Complex::new(1.0, 0.0);
+                *written =
+                    Some(self.run_typed(token, job, D::C64, one, (lhs, rhs, destination))?);
+            }
+        }
+        Ok(())
+    }
+
+    fn time(
+        &self,
+        token: &mut crate::LaneToken<'_>,
+        job: usize,
+        width: core::num::NonZeroUsize,
+    ) -> Duration {
+        use num_complex::{Complex32, Complex64};
+        if job >= self.jobs.len() {
+            return Duration::MAX;
+        }
+        match self.dtype {
+            crate::DenseDType::F32 => self.time_typed::<f32>(token, job, width),
+            crate::DenseDType::F64 => self.time_typed::<f64>(token, job, width),
+            crate::DenseDType::C32 => self.time_typed::<Complex32>(token, job, width),
+            crate::DenseDType::C64 => self.time_typed::<Complex64>(token, job, width),
+            _ => Duration::MAX,
+        }
+    }
 }

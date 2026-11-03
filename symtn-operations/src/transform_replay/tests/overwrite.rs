@@ -553,7 +553,7 @@ fn a_failed_component_replay_keeps_its_scratch_for_the_retry() {
         ],
     )
     .unwrap();
-    assert_eq!(replay.parallel_schedule().scatter_component_count(), 2);
+    assert_eq!(replay.parallel_schedule().component_count(), 2);
     let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
     let mut workspace = TreeTransformWorkspace::default();
     let mut dst = [f64::NAN; 8];
@@ -584,7 +584,7 @@ fn a_failed_component_replay_keeps_its_scratch_for_the_retry() {
             )
         })
     }
-    let mut fresh = DefaultDenseExecutor::new();
+    let mut fresh = super::Staged::new();
     run(
         &mut pool,
         &mut fresh,

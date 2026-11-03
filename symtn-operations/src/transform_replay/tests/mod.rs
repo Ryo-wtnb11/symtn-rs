@@ -13,6 +13,68 @@ mod overwrite;
 mod profile;
 mod threaded;
 
+/// The native executor without lane GEMMs: what the BLAS provider and
+/// custom executors run, the staged route.
+pub(crate) struct Staged(pub DefaultDenseExecutor);
+
+impl Staged {
+    pub(crate) fn new() -> Self {
+        Self(DefaultDenseExecutor::new())
+    }
+}
+
+impl DenseExecutor for Staged {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
+    }
+
+    fn matmul_batch_axpby_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        jobs: &[DenseGemmBatchJob],
+        runs: &[usize],
+        alpha: DenseScalar,
+        beta: DenseScalar,
+    ) -> Result<(), DenseError> {
+        self.0
+            .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
+    }
+}
+
 /// Test-only host operand: a block structure and the storage it describes.
 struct TestTensor {
     structure: Arc<BlockStructure>,
@@ -174,10 +236,7 @@ mod su2_interleaved {
         expected
     }
 }
-pub(super) use su2_interleaved::{
-    addresses as su2_addresses, fixture as su2_interleaved_fixture, oracle as su2_oracle,
-    MULTIS as SU2_MULTIS,
-};
+pub(super) use su2_interleaved::{fixture as su2_interleaved_fixture, oracle as su2_oracle};
 
 fn identity_multi_fixture() -> (
     Arc<BlockStructure>,

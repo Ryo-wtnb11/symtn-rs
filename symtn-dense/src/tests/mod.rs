@@ -20,6 +20,8 @@ mod executor;
 ))]
 mod factor_properties;
 mod fresh;
+#[cfg(all(feature = "tenferro", not(feature = "cpu-blas-core")))]
+mod lane_gemm;
 #[path = "../../../tests/support/numerics.rs"]
 mod numerics;
 mod tensor;

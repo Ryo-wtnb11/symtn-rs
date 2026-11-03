@@ -311,45 +311,78 @@ where
         // structure-identity check makes that call a no-work cache hit.
         ensure_recoupling_coefficients(workspace, task, structure.identity_marker())?;
     }
-    crate::host_pool::with_exec(engine, |exec| {
-        scale_inactive_destinations(
-            exec,
-            kernels,
-            &mut workspace.zero_strides,
-            task,
-            dst_data,
-            mode,
-        )
-    })?;
-    if threads > 1 {
-        return tree_transform_blocks_with_batched_recoupling_parallel(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            schedule,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            threads,
-            None,
-        );
-    }
-    tree_transform_blocks_with_batched_recoupling(
+    replay_initialized(
         engine,
         kernels,
         dense,
         workspace,
         task,
+        schedule,
         structure.identity_marker(),
         dst_data,
         src_data,
         alpha,
         mode,
+        threads,
         None,
+    )
+}
+
+/// The initialised replay on the route `dense` selects before any write:
+/// the lane route for an executor with lane GEMMs, the staged route
+/// otherwise. `threads` is the effective width.
+#[allow(clippy::too_many_arguments)]
+fn replay_initialized<A, E, D, C>(
+    engine: &mut dyn Engine,
+    kernels: &mut A,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    task: TreeTransformTaskView<'_, C>,
+    schedule: &TreeTransformParallelSchedule,
+    structure_identity: &Arc<()>,
+    dst_data: &mut [D],
+    src_data: &[D],
+    alpha: DestinationAlpha<'_, D, C>,
+    mode: DestinationMode<D>,
+    threads: usize,
+    profile: Option<&mut TreeTransformReplayProfile>,
+) -> Result<(), OperationError>
+where
+    A: HostKernelAdapter<D> + Clone + Send + Sync,
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    let writer = InitializedWriter {
+        prototype: kernels.clone(),
+        task: writers::ReplayParts::new(task),
+        src: src_data,
+        alpha,
+        mode,
+    };
+    #[cfg(feature = "tenferro")]
+    if lane_route(dense) {
+        if !task.recoupling_plan().is_empty() {
+            ensure_recoupling_coefficients(workspace, task, structure_identity)?;
+        }
+        return replay_on_lanes(
+            engine, dense, workspace, task, schedule, dst_data, src_data, &writer, kernels,
+            threads, profile,
+        );
+    }
+    staged_replay(
+        engine,
+        dense,
+        workspace,
+        task,
+        schedule,
+        structure_identity,
+        dst_data,
+        src_data,
+        &writer,
+        kernels,
+        threads,
+        profile,
     )
 }
 
@@ -485,50 +518,21 @@ where
         }
     }
 
-    let start = std::time::Instant::now();
-    crate::host_pool::with_exec(engine, |exec| {
-        scale_inactive_destinations(
-            exec,
-            kernels,
-            &mut workspace.zero_strides,
-            task,
-            dst_data,
-            mode,
-        )
-    })?;
-    profile.strided_kernel += start.elapsed();
-
-    if threads > 1 {
-        tree_transform_blocks_with_batched_recoupling_parallel(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            schedule,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            threads,
-            Some(profile),
-        )?;
-    } else {
-        tree_transform_blocks_with_batched_recoupling(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            Some(profile),
-        )?;
-    }
+    replay_initialized(
+        engine,
+        kernels,
+        dense,
+        workspace,
+        task,
+        schedule,
+        structure.identity_marker(),
+        dst_data,
+        src_data,
+        alpha,
+        mode,
+        threads,
+        Some(profile),
+    )?;
 
     profile.total += total_start.elapsed();
     Ok(())

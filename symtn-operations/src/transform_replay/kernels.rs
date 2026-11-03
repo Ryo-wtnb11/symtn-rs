@@ -512,7 +512,7 @@ where
 /// A scatter column's strided kernel over its resolved role and offsets.
 #[inline]
 #[allow(clippy::too_many_arguments)]
-fn scatter_role<A, T>(
+pub(super) fn scatter_role<A, T>(
     exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
@@ -591,6 +591,7 @@ pub(super) fn recoupling_multi_block<C: Copy>(
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) fn scale_inactive_destinations<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
@@ -831,7 +832,7 @@ mod allocation_replay_tests {
                     tree_transform_structure_with_structural_recoupling_raw(
                         engine,
                         &mut StridedHostKernelAdapter::default(),
-                        &mut DefaultDenseExecutor::new(),
+                        &mut crate::transform_replay::tests::Staged::new(),
                         &mut TreeTransformWorkspace::default(),
                         &structure,
                         &block_structure,
@@ -916,7 +917,7 @@ mod allocation_replay_tests {
         // own disconnected atoms, a threaded replay splits the destination
         // into those atoms again without allocating.
         let (structure, transform) = super::super::tests::su2_interleaved_fixture();
-        assert!(transform.parallel_schedule().scatter_component_count() > 1);
+        assert!(transform.parallel_schedule().component_count() > 1);
         let src = (1..=60).map(f64::from).collect::<Vec<_>>();
         let expected = super::super::tests::su2_oracle(&src, 1.0);
         let mut dst = vec![f64::NAN; 60];
@@ -955,6 +956,140 @@ mod allocation_replay_tests {
         assert_eq!(allocations, 0);
         assert!(joins > 0);
         assert_eq!(dst, expected);
+    }
+
+    #[test]
+    fn warm_lane_replay_allocates_nothing_on_any_lane() {
+        // What: once a workspace and an executor with lane GEMMs have
+        // replayed a structure on an engine, a second identical call
+        // allocates nothing on any lane (the lanes' GEMMs warm their engine
+        // workspace slots in the first call), at one worker and banded on
+        // three, initialised and owned.
+        let (structure, transform) = super::super::tests::su2_interleaved_fixture();
+        let src = (1..=60).map(f64::from).collect::<Vec<_>>();
+        let expected = super::super::tests::su2_oracle(&src, 1.0);
+        for mut pool in [
+            crate::host_pool::test_pool(1),
+            crate::host_pool::test_pool(3),
+            crate::host_pool::eager_test_pool(3),
+        ] {
+            let mut dst = vec![f64::NAN; 60];
+            let mut kernels = StridedHostKernelAdapter::default();
+            let mut dense = DefaultDenseExecutor::new();
+            let mut workspace = TreeTransformWorkspace::default();
+            let mut replay = |engine: &mut dyn Engine| {
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    engine,
+                    &mut kernels,
+                    &mut dense,
+                    &mut workspace,
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut dst,
+                    &src,
+                    1.0,
+                    &[],
+                    3,
+                )
+                .unwrap();
+            };
+            pool.install(&mut replay);
+            let (_, allocations) = allocation_oracle::with_session(|| {
+                pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
+            });
+            assert_eq!(allocations, 0);
+            assert_eq!(dst, expected);
+        }
+    }
+
+    #[test]
+    fn lane_scratch_meets_each_buffers_requirement_and_is_charged_by_capacity() {
+        // What: two sequential components whose groups need `(rows k, rows
+        // n)` of `(200, 2)` and `(2, 200)` reserve 200 elements in each of
+        // the two packed buffers (not 202 in all), the retained charge
+        // covers both capacities, and a later smaller call keeps and still
+        // charges them; the values are `U * source`.
+        let sources = 101;
+        let structure =
+            Arc::new(BlockStructure::packed_column_major(1, vec![vec![2]; 101]).unwrap());
+        let transform = TreeTransformStructure::compile_structures(
+            &structure,
+            &structure,
+            &[
+                TreeTransformBlockSpec::multi(vec![0], (0..100).collect(), vec![1.0; 100]),
+                TreeTransformBlockSpec::multi(
+                    (1..101).collect(),
+                    vec![100],
+                    (1..=100).map(f64::from).collect(),
+                ),
+            ],
+        )
+        .unwrap();
+        let src = (0..2 * sources).map(|v| v as f64).collect::<Vec<_>>();
+        let mut expected = vec![0.0; 2 * sources];
+        for row in 0..2 {
+            expected[row] = (0..100).map(|block| src[2 * block + row]).sum();
+            for block in 1..101 {
+                expected[2 * block + row] = block as f64 * src[200 + row];
+            }
+        }
+        let mut workspace = TreeTransformWorkspace::default();
+        let mut dense = DefaultDenseExecutor::new();
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let mut dst = vec![f64::NAN; 2 * sources];
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut dense,
+            &mut workspace,
+            &transform,
+            &structure,
+            &structure,
+            &mut dst,
+            &src,
+            1.0,
+            &[],
+            1,
+        )
+        .unwrap();
+        assert_eq!(dst, expected);
+        let (source, destination) = workspace.packed_capacities();
+        assert!(source >= 200 && destination >= 200);
+        let charged = workspace.retained_bytes();
+        assert!(charged >= (source + destination) * std::mem::size_of::<f64>());
+
+        let small = Arc::new(BlockStructure::packed_column_major(1, vec![vec![2]; 2]).unwrap());
+        let small_transform = TreeTransformStructure::compile_structures(
+            &small,
+            &small,
+            &[TreeTransformBlockSpec::multi(
+                vec![0, 1],
+                vec![0, 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )],
+        )
+        .unwrap();
+        let small_src = [1.0, 2.0, 3.0, 4.0];
+        let mut small_dst = [f64::NAN; 4];
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut dense,
+            &mut workspace,
+            &small_transform,
+            &small,
+            &small,
+            &mut small_dst,
+            &small_src,
+            1.0,
+            &[],
+            1,
+        )
+        .unwrap();
+        assert_eq!(small_dst, small_src);
+        assert_eq!(workspace.packed_capacities(), (source, destination));
+        assert!(workspace.retained_bytes() >= (source + destination) * std::mem::size_of::<f64>());
     }
 
     #[test]

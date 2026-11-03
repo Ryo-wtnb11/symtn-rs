@@ -102,10 +102,10 @@ fn bits(values: &[f64]) -> Vec<u64> {
 }
 
 /// What: each distinct executor path that searches (fresh and initialized
-/// contraction GEMM, the Multi recoupling GEMM of a transform, a
-/// factorization batch) runs the call's lane allocation: after the default
-/// is cached, the other allocation searches once and then hits its own
-/// entry.
+/// contraction GEMM, a factorization batch) runs the call's lane
+/// allocation: after the default is cached, the other allocation searches
+/// once and then hits its own entry. (A transform's recoupling GEMMs run on
+/// its own lanes and search nothing.)
 #[test]
 #[cfg_attr(
     any(
@@ -124,10 +124,8 @@ fn every_searching_path_runs_the_calls_lane_allocation() {
     let v = u1_space();
     let a = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&v], 5).unwrap();
     let b = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&v], [&v], 6).unwrap();
-    let w = u1_su2_space();
-    let t = TensorMap::<_, f64>::rand_with_seed(seed, &runtime, [&w, &w], [&w, &w], 7).unwrap();
     type Path<'a> = (&'a str, Box<dyn Fn(&mut dyn ExecContext) + 'a>);
-    let paths: [Path<'_>; 4] = [
+    let paths: [Path<'_>; 3] = [
         (
             "contract",
             Box::new(|cx| drop(a.contract(cx, &b, &SPEC).unwrap())),
@@ -139,10 +137,6 @@ fn every_searching_path_runs_the_calls_lane_allocation() {
                 a.contract_into(cx, &b, &SPEC, &mut destination, 1.0, 0.0)
                     .unwrap();
             }),
-        ),
-        (
-            "permute",
-            Box::new(|cx| drop(t.permute(cx, &[0, 2], &[1, 3]).unwrap())),
         ),
         (
             "svd_compact",

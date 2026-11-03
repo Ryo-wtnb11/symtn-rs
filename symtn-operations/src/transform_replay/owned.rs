@@ -5,12 +5,10 @@ use super::*;
 /// once. Returns `Ok(None)` without allocating output when the destination
 /// does not have a proof of exact physical overwrite coverage.
 ///
-/// `threads` is the requested replay worker count; the effective count follows
-/// the same schedule rule as the initialised replay
-/// (`effective_tree_transform_threads`), so the writer runs under the parallel
-/// schedule whenever the initialised path would, and serially otherwise.
-/// Either way each block keeps the engine-token share of the worker that
-/// writes it, so one large block can still widen its own move.
+/// `threads` is the requested replay worker count; the effective count and
+/// the route follow the initialised replay's rules
+/// (`effective_tree_transform_threads`, [`lane_route`]), so the writer
+/// places every write exactly as the initialised replay of the same call.
 ///
 /// `profile` accumulates the same phases as the initialised profiled replay
 /// (benches and tests only; production callers pass `None`).
@@ -55,211 +53,54 @@ where
     let task = structure.task_view()?;
     let schedule = structure.parallel_schedule();
     let threads = effective_tree_transform_threads(engine, schedule, threads);
-    let layouts = structure.layouts();
-    let max_fused_rank = layouts.max_fused_rank();
-    // One gate for every unsplit block list on the calling thread; forked
-    // leaves build their own.
-    let gate = LeafGate::new(layouts.max_planned_elements());
-    // The width table belongs to this call's engine and token.
-    workspace.width_levels.clear();
-    workspace.prepare_fused_indices(threads, max_fused_rank)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
-        profile.single_blocks += schedule.single_block_count;
-        profile.multi_blocks += structure.recoupling_plan().jobs().len();
     }
 
     let output = initialize_owned::<D, OperationError>(proof.required_len, |dst_data| {
-        let recoupling_plan = structure.recoupling_plan();
-        let storage_conjugate = structure.storage_conjugate();
-        let coefficients = task.single_coefficients();
-
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        for &layout_index in structure.inactive_destination_layouts() {
-            write_uninit_layout_zero(layouts, layout_index, dst_data)?;
-        }
-        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-            profile.strided_kernel += start.elapsed();
-        }
-        let blocks = structure.blocks();
-        // Singles run over their ownership atoms in the initialised parallel
-        // replay's two tiers; one atom stays on the calling lane.
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        let HostTreeTransformWorkspace {
-            fused_indices,
-            narrow_atoms,
-            width_levels,
-            ..
-        } = &mut *workspace;
-        replay_region(engine, |exec| {
-            replay_single_phase(
-                schedule,
-                narrow_atoms,
-                width_levels,
-                dst_data,
-                fused_indices.as_mut_slice(),
-                max_fused_rank,
-                threads,
-                exec,
-                &gate,
-                layouts.max_planned_elements(),
-                true,
-                &|items, dst, dst_start, fused_index, mut exec, gate| {
-                    for &item in items {
-                        let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
-                        write_uninit_layout_from_source(
-                            exec.reborrow(),
-                            gate,
-                            layouts,
-                            dst_layout,
-                            src_layout,
-                            dst,
-                            dst_start,
-                            src_data,
-                            storage_conjugate,
-                            TransformScale::new(alpha, coefficients[coefficient]),
-                            fused_index,
-                        )?;
-                    }
-                    Ok(())
-                },
-            )
-        })??;
-        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-            let elapsed = start.elapsed();
-            profile.single_total += elapsed;
-            profile.strided_kernel += elapsed;
-        }
-
-        if recoupling_plan.is_empty() {
-            return Ok(());
-        }
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        if ensure_recoupling_coefficients(workspace, task, structure.identity_marker())? {
-            if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-                profile.multi_coefficient_prepare += start.elapsed();
-            }
-        }
-        let chunk_size = threads.max(1);
-        reserve_multi_chunk_scratch(workspace, recoupling_plan.jobs(), chunk_size)?;
-        let mut target = ScatterTarget::new(
-            workspace,
-            schedule,
-            threads,
-            recoupling_plan.jobs().len(),
-            dst_data,
-        )?;
-        let mut pack_cursor = 0;
-        // Why a closure: an error still returns the atom-list capacity to
-        // the workspace before it propagates.
-        let mut replay_chunks = || -> Result<(), OperationError> {
-            for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
-                let destination_start = replay_multi_chunk(
-                    engine,
-                    dense,
-                    workspace,
-                    task,
-                    schedule,
-                    chunk_index * chunk_size,
-                    chunk,
-                    &mut pack_cursor,
-                    src_data,
-                    threads,
-                    matches!(target, ScatterTarget::Atoms(_)),
-                    profile.as_deref_mut(),
-                )?;
-                let HostTreeTransformWorkspace {
-                    packed,
-                    fused_indices,
-                    chunk_scatter_groups,
-                    chunk_units,
-                    width_levels,
-                    ..
-                } = &mut *workspace;
-                let packed = packed.destination().as_slice();
-                let scatter_columns = &schedule.scatter_columns;
-                let scatter_groups = &schedule.scatter_groups;
-                let start = profile.as_ref().map(|_| std::time::Instant::now());
-                match &mut target {
-                    ScatterTarget::Atoms(slots) => {
-                        let leaf = |units: &[ScatterUnit],
-                                    slots: &mut [&mut [MaybeUninit<D>]],
-                                    slot_base: usize,
-                                    fused_index: &mut [usize],
-                                    mut exec: Exec<'_>,
-                                    gate: &LeafGate| {
-                            for unit in units {
-                                for &group in unit.groups(chunk_scatter_groups) {
-                                    for item in
-                                        &scatter_columns[scatter_groups[group].columns.clone()]
-                                    {
-                                        write_uninit_layout_from_packed(
-                                            exec.reborrow(),
-                                            gate,
-                                            layouts,
-                                            item.dst_layout,
-                                            &mut *slots[item.slot as usize - slot_base],
-                                            atom_start(layouts, item)?,
-                                            packed,
-                                            item.packed_offset - destination_start,
-                                            alpha,
-                                            &mut *fused_index,
-                                        )?;
-                                    }
-                                }
-                            }
-                            Ok(())
-                        };
-                        replay_region(engine, |exec| {
-                            scatter_chunk_components(
-                                chunk_units,
-                                width_levels,
-                                &schedule.component_slots,
-                                slots,
-                                fused_indices.as_mut_slice(),
-                                max_fused_rank,
-                                threads,
-                                exec,
-                                &gate,
-                                layouts.max_planned_elements(),
-                                true,
-                                &leaf,
-                            )
-                        })??
-                    }
-                    ScatterTarget::Whole(dst) => replay_region(engine, |mut exec| {
-                        let fused_index = &mut fused_indices[..max_fused_rank];
-                        for &group in chunk_scatter_groups.iter() {
-                            for item in &scatter_columns[scatter_groups[group].columns.clone()] {
-                                write_uninit_layout_from_packed(
-                                    exec.reborrow(),
-                                    &gate,
-                                    layouts,
-                                    item.dst_layout,
-                                    dst,
-                                    0,
-                                    packed,
-                                    item.packed_offset - destination_start,
-                                    alpha,
-                                    fused_index,
-                                )?;
-                            }
-                        }
-                        Ok::<(), OperationError>(())
-                    })??,
-                }
-                if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-                    profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
-                    profile.multi_scatter += start.elapsed();
-                }
-            }
-            Ok(())
+        let writer = OwnedWriter {
+            task: writers::ReplayParts::new(task),
+            src: src_data,
+            alpha,
         };
-        let replayed = replay_chunks();
-        target.finish(workspace);
-        replayed?;
-        debug_assert_eq!(pack_cursor, schedule.pack_columns.len());
-        Ok(())
+        #[cfg(feature = "tenferro")]
+        if lane_route(dense) {
+            if !task.recoupling_plan().is_empty() {
+                let start = profile.as_ref().map(|_| std::time::Instant::now());
+                if ensure_recoupling_coefficients(workspace, task, structure.identity_marker())? {
+                    if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+                        profile.multi_coefficient_prepare += start.elapsed();
+                    }
+                }
+            }
+            return replay_on_lanes(
+                engine,
+                dense,
+                workspace,
+                task,
+                schedule,
+                dst_data,
+                src_data,
+                &writer,
+                &mut (),
+                threads,
+                profile.as_deref_mut(),
+            );
+        }
+        staged_replay(
+            engine,
+            dense,
+            workspace,
+            task,
+            schedule,
+            structure.identity_marker(),
+            dst_data,
+            src_data,
+            &writer,
+            &mut (),
+            threads,
+            profile.as_deref_mut(),
+        )
     })?;
     if let (Some(profile), Some(start)) = (profile, total_start) {
         profile.total += start.elapsed();
@@ -267,64 +108,19 @@ where
     Ok(Some(output))
 }
 
-fn layout_linear_offset(
-    mut linear: usize,
-    shape: &[usize],
-    strides: &[isize],
-    base: isize,
-) -> Result<usize, OperationError> {
-    let mut offset = base;
-    for (&dim, &stride) in shape.iter().zip(strides) {
-        let coordinate = if dim == 0 { 0 } else { linear % dim };
-        if let Some(quotient) = linear.checked_div(dim) {
-            linear = quotient;
-        }
-        let coordinate =
-            isize::try_from(coordinate).map_err(|_| OperationError::ElementCountOverflow)?;
-        offset = offset
-            .checked_add(
-                coordinate
-                    .checked_mul(stride)
-                    .ok_or_else(|| OperationError::ElementCountOverflow)?,
-            )
-            .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    }
-    usize::try_from(offset).map_err(|_| OperationError::OffsetOverflow { value: usize::MAX })
-}
-
-// Why-not fuse the zero writer: it has no paired source view, and a pure
-// permute — the deg=1 U(1) owned-path regime this optimization targets — always
-// touches every destination block, so `inactive_destination_layouts` is empty
-// and this writer never runs on the hot path. It walks the inactive entry's
-// compiled one-sided role, which addresses the same element set as the raw
-// block, on the per-element odometer (issue #232, condition 2).
-fn write_uninit_layout_zero<D: Zero + Copy>(
-    layouts: &TreeTransformLayoutTable,
-    layout_index: usize,
-    dst: &mut [MaybeUninit<D>],
-) -> Result<(), OperationError> {
-    let (dims, strides) = layouts.inactive_role(layout_index)?;
-    let layout = layouts.entry(layout_index);
-    for linear in 0..layout.element_count {
-        let index = layout_linear_offset(linear, dims, strides, layout.offset)?;
-        dst[index].write(D::zero());
-    }
-    Ok(())
-}
-
-/// `dst` may be a split of the owned destination starting at absolute offset
-/// `dst_start`; layout offsets are rebased exactly as the initialised parallel
-/// replay rebases them.
+/// One Single block's role (`role`, of `elements` elements, possibly a
+/// band crop) into uninitialised `dst` at `dst_offset` from `src` at
+/// `src_offset`.
 #[allow(clippy::too_many_arguments)]
-fn write_uninit_layout_from_source<D, C>(
+pub(super) fn write_uninit_layout_from_source<D, C>(
     exec: Exec<'_>,
     gate: &LeafGate,
-    layouts: &TreeTransformLayoutTable,
-    dst_index: usize,
-    src_index: usize,
+    role: crate::BakedFusedLayout<'_>,
+    elements: usize,
     dst: &mut [MaybeUninit<D>],
-    dst_start: isize,
+    dst_offset: isize,
     src: &[D],
+    src_offset: isize,
     conjugate: bool,
     scale: TransformScale<D, C>,
     fused_index: &mut [usize],
@@ -344,30 +140,30 @@ where
     // The element op is chosen once per block, with the structural coefficient
     // still in its own type; see `TransformScale`.
     if scale.is_identity() {
-        return write_uninit_layout_mapped(
+        return write_role_uninit(
             exec,
             gate,
-            layouts,
-            dst_index,
-            src_index,
+            role,
+            elements,
             dst,
-            dst_start,
             src,
+            dst_offset,
+            src_offset,
             fused_index,
             move |value: D| value.maybe_conj(conjugate),
         );
     }
     if scale.is_zero() {
         let zero = scale.apply(D::zero());
-        return write_uninit_layout_mapped(
+        return write_role_uninit(
             exec,
             gate,
-            layouts,
-            dst_index,
-            src_index,
+            role,
+            elements,
             dst,
-            dst_start,
             src,
+            dst_offset,
+            src_offset,
             fused_index,
             move |_: D| zero,
         );
@@ -375,15 +171,15 @@ where
     match scale {
         TransformScale::Structural(coefficient) => {
             let coefficient = &coefficient;
-            write_uninit_layout_mapped(
+            write_role_uninit(
                 exec,
                 gate,
-                layouts,
-                dst_index,
-                src_index,
+                role,
+                elements,
                 dst,
-                dst_start,
                 src,
+                dst_offset,
+                src_offset,
                 fused_index,
                 move |value: D| {
                     value
@@ -392,50 +188,19 @@ where
                 },
             )
         }
-        TransformScale::Data(scale) => write_uninit_layout_mapped(
+        TransformScale::Data(scale) => write_role_uninit(
             exec,
             gate,
-            layouts,
-            dst_index,
-            src_index,
+            role,
+            elements,
             dst,
-            dst_start,
             src,
+            dst_offset,
+            src_offset,
             fused_index,
             move |value: D| scale * value.maybe_conj(conjugate),
         ),
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_uninit_layout_mapped<D, F>(
-    exec: Exec<'_>,
-    gate: &LeafGate,
-    layouts: &TreeTransformLayoutTable,
-    dst_index: usize,
-    src_index: usize,
-    dst: &mut [MaybeUninit<D>],
-    dst_start: isize,
-    src: &[D],
-    fused_index: &mut [usize],
-    map: F,
-) -> Result<(), OperationError>
-where
-    D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
-    F: Fn(D) -> D + Send + Sync,
-{
-    write_role_uninit(
-        exec,
-        gate,
-        layouts.role(dst_index)?,
-        layouts.entry(dst_index).element_count,
-        dst,
-        src,
-        layouts.entry(dst_index).offset - dst_start,
-        layouts.entry(src_index).offset,
-        fused_index,
-        map,
-    )
 }
 
 /// Writes one role into uninitialized memory: its compiled plan across
@@ -463,16 +228,19 @@ where
     }
 }
 
+/// One scatter column's role (`role`, of `elements` elements, possibly a
+/// band crop) into uninitialised `dst` at `dst_offset` from `packed` at
+/// `packed_offset`, scaled by `alpha`.
 #[allow(clippy::too_many_arguments)]
-fn write_uninit_layout_from_packed<D>(
+pub(super) fn write_uninit_layout_from_packed<D>(
     exec: Exec<'_>,
     gate: &LeafGate,
-    layouts: &TreeTransformLayoutTable,
-    dst_index: usize,
+    role: crate::BakedFusedLayout<'_>,
+    elements: usize,
     dst: &mut [MaybeUninit<D>],
-    dst_start: isize,
+    dst_offset: isize,
     packed: &[D],
-    packed_offset: usize,
+    src_offset: isize,
     alpha: D,
     fused_index: &mut [usize],
 ) -> Result<(), OperationError>
@@ -484,12 +252,8 @@ where
     // alpha gives `scale_value`'s exact zero even where the recoupling GEMM
     // left a NaN in `packed`, as TensorKit's scatter `tensoradd!` does.
     // The scatter role bakes src = packed (column-major) strides, so the
-    // fused walk over `packed` starting at `packed_offset` reproduces the
-    // column-major gather `packed[packed_offset + linear]`.
-    let role = layouts.role(dst_index)?;
-    let elements = layouts.entry(dst_index).element_count;
-    let dst_offset = layouts.entry(dst_index).offset - dst_start;
-    let src_offset = offset_to_isize(packed_offset)?;
+    // fused walk over `packed` starting at `src_offset` reproduces the
+    // column-major gather `packed[src_offset + linear]`.
     if alpha.is_one() {
         write_role_uninit(
             exec,
@@ -1005,127 +769,151 @@ mod owned_overwrite_tests {
     fn owned_writer_under_the_parallel_schedule_is_bit_identical_to_serial() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         // What: with a multi-worker budget the owned writer splits the
-        // uninitialised destination over its ownership components and
-        // produces exactly the serial owned bytes for real and complex
-        // data, which in turn equal the initialised overwrite oracle.
+        // uninitialised destination over its joint components (and, on the
+        // free-dispatch engine, bands them over several slots) and produces
+        // exactly the serial owned bytes for real and complex data, which in
+        // turn equal the initialised overwrite oracle and the initialised
+        // replay on the same engine.
         let (structure, transform, source) = mixed_fixture();
         let schedule = transform.parallel_schedule();
-        assert_eq!(schedule.single_component_count(), 3);
-        assert_eq!(schedule.scatter_component_count(), 2);
-        assert_eq!(schedule.singles.len(), 3);
+        assert_eq!(schedule.component_count(), 5);
+        assert_eq!(schedule.direct.len(), 3);
         assert_eq!(schedule.pack_columns.len(), 5);
 
-        let mut pool = pool(3);
-        assert_eq!(
-            pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
-            3
-        );
+        for mut pool in [pool(3), crate::host_pool::eager_test_pool(3)] {
+            assert_eq!(
+                pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
+                3
+            );
 
-        let mut oracle = vec![f64::NAN; source.len()];
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            &mut oracle,
-            &source,
-            1.5,
-            &[],
-            1,
-        )
-        .unwrap();
-        let serial = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            1,
-            &source,
-            1.5,
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-        assert_eq!(serial, oracle);
-        let mut workspace = TreeTransformWorkspace::default();
-        let parallel = pool
-            .install(|engine| {
-                try_tree_transform_structure_overwrite_owned_raw(
-                    engine,
-                    &mut DefaultDenseExecutor::new(),
-                    &mut workspace,
-                    &transform,
-                    &structure,
-                    &structure,
-                    1,
-                    &source,
-                    1.5,
-                    3,
-                    None,
-                )
-            })
+            let mut oracle = vec![f64::NAN; source.len()];
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut oracle,
+                &source,
+                1.5,
+                &[],
+                1,
+            )
+            .unwrap();
+            let serial = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                1,
+                &source,
+                1.5,
+                1,
+                None,
+            )
             .unwrap()
             .unwrap();
-        assert!(serial
-            .iter()
-            .zip(&parallel)
-            .all(|(serial, parallel)| serial.to_bits() == parallel.to_bits()));
-
-        let complex_source = source
-            .iter()
-            .map(|&value| Complex64::new(value, -0.5 * value))
-            .collect::<Vec<_>>();
-        let alpha = Complex64::new(1.5, -1.0);
-        let serial = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &structure,
-            &structure,
-            1,
-            &complex_source,
-            alpha,
-            1,
-            None,
-        )
-        .unwrap()
-        .unwrap();
-        let parallel = pool
-            .install(|engine| {
-                try_tree_transform_structure_overwrite_owned_raw(
+            assert_eq!(serial, oracle);
+            let mut workspace = TreeTransformWorkspace::default();
+            let parallel = pool
+                .install(|engine| {
+                    try_tree_transform_structure_overwrite_owned_raw(
+                        engine,
+                        &mut DefaultDenseExecutor::new(),
+                        &mut workspace,
+                        &transform,
+                        &structure,
+                        &structure,
+                        1,
+                        &source,
+                        1.5,
+                        3,
+                        None,
+                    )
+                })
+                .unwrap()
+                .unwrap();
+            assert!(serial
+                .iter()
+                .zip(&parallel)
+                .all(|(serial, parallel)| serial.to_bits() == parallel.to_bits()));
+            let mut initialized = vec![f64::NAN; source.len()];
+            pool.install(|engine| {
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
                     engine,
+                    &mut StridedHostKernelAdapter::default(),
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
                     &transform,
                     &structure,
                     &structure,
-                    1,
-                    &complex_source,
-                    alpha,
+                    &mut initialized,
+                    &source,
+                    1.5,
+                    &[],
                     3,
-                    None,
                 )
             })
+            .unwrap();
+            assert!(initialized
+                .iter()
+                .zip(&parallel)
+                .all(|(initialized, owned)| initialized.to_bits() == owned.to_bits()));
+
+            let complex_source = source
+                .iter()
+                .map(|&value| Complex64::new(value, -0.5 * value))
+                .collect::<Vec<_>>();
+            let alpha = Complex64::new(1.5, -1.0);
+            let serial = try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                1,
+                &complex_source,
+                alpha,
+                1,
+                None,
+            )
             .unwrap()
             .unwrap();
-        assert!(serial.iter().zip(&parallel).all(|(serial, parallel)| {
-            serial.re.to_bits() == parallel.re.to_bits()
-                && serial.im.to_bits() == parallel.im.to_bits()
-        }));
+            let parallel = pool
+                .install(|engine| {
+                    try_tree_transform_structure_overwrite_owned_raw(
+                        engine,
+                        &mut DefaultDenseExecutor::new(),
+                        &mut TreeTransformWorkspace::default(),
+                        &transform,
+                        &structure,
+                        &structure,
+                        1,
+                        &complex_source,
+                        alpha,
+                        3,
+                        None,
+                    )
+                })
+                .unwrap()
+                .unwrap();
+            assert!(serial.iter().zip(&parallel).all(|(serial, parallel)| {
+                serial.re.to_bits() == parallel.re.to_bits()
+                    && serial.im.to_bits() == parallel.im.to_bits()
+            }));
+        }
     }
 
     #[test]
-    fn owned_writer_without_a_disjoint_split_uses_the_serial_writer() {
-        // What: a schedule with one runnable item has no disjoint split, so a
-        // multi-worker budget collapses to the serial writer, which still
-        // returns the owned result.
+    fn owned_writer_of_one_component_on_many_workers_returns_the_result() {
+        // What: a schedule with one component on a multi-worker budget
+        // returns the owned result: the component bands its one Single over
+        // the block's three columns.
         let structure = canonical_structure(0);
         let transform = TreeTransformStructure::compile_structures(
             &structure,
@@ -1135,9 +923,10 @@ mod owned_overwrite_tests {
         .unwrap();
         let schedule = transform.parallel_schedule();
         let mut pool = pool(3);
+        assert_eq!(schedule.component_count(), 1);
         assert_eq!(
             pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
-            1
+            3
         );
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let actual = pool
@@ -1167,7 +956,7 @@ mod owned_overwrite_tests {
         // What: a serial owned replay of several Multi components builds no
         // ownership split, so a fresh workspace keeps no component scratch.
         let (structure, transform) = crate::transform_replay::tests::su2_interleaved_fixture();
-        assert!(transform.parallel_schedule().scatter_component_count() > 1);
+        assert!(transform.parallel_schedule().component_count() > 1);
         let source = (1..=60).map(f64::from).collect::<Vec<_>>();
         let mut workspace = TreeTransformWorkspace::default();
         let owned = try_tree_transform_structure_overwrite_owned_raw(

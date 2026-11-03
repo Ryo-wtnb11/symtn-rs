@@ -1,8 +1,7 @@
 //! Owned transforms on a multi-threaded engine: the uninitialised
 //! owned writer runs under the parallel schedule, so the result is
-//! bit-identical to the serial owned result and the caller thread makes the
-//! same allocations as the serial path, with no allocator-zeroed payload (no
-//! `vec![zero; P]` fallback).
+//! bit-identical to the serial owned result, with no allocator-zeroed
+//! payload (no `vec![zero; P]` fallback).
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ use crate::counting_alloc;
 /// not stop a preceding test's dropped `Runtime`/pool from leaving
 /// process-global structural-cache work (symtn-core's fusion-tree-layout and
 /// complete-HomSpace caches) still in flight when the lock is re-acquired.
-/// `parallel_owned_permute_allocates_like_the_serial_owned_path` shares its
+/// `parallel_owned_permute_writes_no_zeroed_payload` shares its
 /// `u1_su2_space` fixture (same sectors and degeneracies) with
 /// `u1_su2_owned_transforms_are_bit_identical_across_thread_counts`, so a
 /// rebuild landing in that window changes this thread's allocation count (8
@@ -216,20 +215,21 @@ fn u1_owned_transforms_are_bit_identical_across_thread_counts() {
 }
 
 #[test]
-fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
+fn parallel_owned_permute_writes_no_zeroed_payload() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     if run_isolated_or_return(
-        "SYMTN_PARALLEL_OWNED_PERMUTE_ALLOCATES_LIKE_SERIAL_ISOLATED",
-        "parallel_owned_permute_allocates_like_the_serial_owned_path",
+        "SYMTN_PARALLEL_OWNED_PERMUTE_NO_ZEROED_PAYLOAD_ISOLATED",
+        "parallel_owned_permute_writes_no_zeroed_payload",
     ) {
         return;
     }
-    // What: on a multi-threaded engine a warmed owned permute makes the
-    // same caller-thread allocations as the serial owned path and none of them
-    // is allocator-zeroed: the multi-threaded backend writes the owned output
-    // directly, with no `vec![0.0; P]` fallback and destination-reading
-    // replay.
+    // What: on a multi-threaded engine a warmed owned permute makes no
+    // allocator-zeroed caller-thread allocation, as the serial owned path:
+    // the multi-threaded backend writes the owned output directly, with no
+    // `vec![0.0; P]` fallback and destination-reading replay. (Its other
+    // allocations are an eager call's own scratch, which includes the
+    // per-call lane placement tables a serial call does not build.)
     let runtime = Runtime::builder().build().unwrap();
     let (serial, parallel) = (&runtime, &runtime);
     let parallel_engine = &mut parallel_engine();
@@ -275,8 +275,8 @@ fn parallel_owned_permute_allocates_like_the_serial_owned_path() {
         "owned outputs allocate at least the payload: {serial_bytes} / {parallel_bytes}"
     );
     assert_eq!(
-        (parallel_allocations, parallel_bytes, parallel_zeroed),
-        (serial_allocations, serial_bytes, 0),
-        "serial owned path: {serial_allocations} allocations, {serial_bytes} bytes, {serial_zeroed} zeroed"
+        (parallel_zeroed, serial_zeroed),
+        (0, 0),
+        "{parallel_allocations} / {serial_allocations} allocations"
     );
 }

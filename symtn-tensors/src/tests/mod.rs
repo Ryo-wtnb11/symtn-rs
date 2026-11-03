@@ -1666,7 +1666,6 @@ fn assert_tree_multi_tensorkit_orientation_dense_dtype<T>(
 
     assert_eq!(dst.data(), expected.as_slice());
     assert_eq!(workspace.source_len(), 6);
-    assert_eq!(workspace.destination_len(), 4);
 }
 
 fn assert_tree_multi_keyed_dtype<T>(

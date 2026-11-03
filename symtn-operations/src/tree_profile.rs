@@ -16,6 +16,12 @@ pub struct TreeTransformReplayProfile {
     pub multi_scatter: Duration,
     pub strided_view_setup: Duration,
     pub strided_kernel: Duration,
+    /// Wall time of the lane route's one fused region (GEMM plan
+    /// resolution, placement, scratch carving, every component's writes and
+    /// GEMMs, and their joins); zero on the staged route. The separate stage
+    /// timers above stay zero on the lane route, which has no separate
+    /// stages.
+    pub fused_lanes: Duration,
     pub single_blocks: usize,
     pub multi_blocks: usize,
     pub packed_columns: usize,
@@ -39,6 +45,7 @@ impl TreeTransformReplayProfile {
         self.multi_scatter += other.multi_scatter;
         self.strided_view_setup += other.strided_view_setup;
         self.strided_kernel += other.strided_kernel;
+        self.fused_lanes += other.fused_lanes;
         self.single_blocks += other.single_blocks;
         self.multi_blocks += other.multi_blocks;
         self.packed_columns += other.packed_columns;

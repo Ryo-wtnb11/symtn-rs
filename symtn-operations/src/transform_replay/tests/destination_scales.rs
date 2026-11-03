@@ -109,8 +109,10 @@ where
             assert_eq!(actual, expected, "B={members} threads={threads}");
         }
         if members == 1 {
+            // A free-dispatch four-worker engine runs the lanes wide.
             for threads in [1, 4] {
                 let mut actual = vec![D::from(f64::NAN); 20];
+                let engine = &mut crate::host_pool::eager_test_engine(threads);
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
                     engine,
                     &mut StridedHostKernelAdapter::default(),

@@ -318,6 +318,14 @@ pub trait DenseBlockScalar:
         segments: &'s mut [(usize, &'a mut [core::mem::MaybeUninit<Self>])],
         written: &'s mut dyn FnMut(usize, &'a mut [Self]),
     ) -> symtn_dense::DenseFreshSegments<'s, 'a>;
+    /// Dtype-erased carrier of one lane GEMM (see `symtn_dense::LaneGemms`).
+    #[doc(hidden)]
+    fn dense_lane_gemm_io<'s, 'd>(
+        lhs: &'s [Self],
+        rhs: &'s [Self],
+        destination: &'d mut [core::mem::MaybeUninit<Self>],
+        written: &'s mut Option<&'d mut [Self]>,
+    ) -> symtn_dense::LaneGemmIo<'s, 'd>;
 }
 
 #[doc(hidden)]
@@ -347,6 +355,20 @@ macro_rules! impl_dense_block_scalar {
                 symtn_dense::DenseFreshSegments::$read_variant {
                     segments,
                     zeroed: crate::owned_overwrite_buffer::write_zeros::<$ty>,
+                    written,
+                }
+            }
+
+            fn dense_lane_gemm_io<'s, 'd>(
+                lhs: &'s [Self],
+                rhs: &'s [Self],
+                destination: &'d mut [core::mem::MaybeUninit<Self>],
+                written: &'s mut Option<&'d mut [Self]>,
+            ) -> symtn_dense::LaneGemmIo<'s, 'd> {
+                symtn_dense::LaneGemmIo::$read_variant {
+                    lhs,
+                    rhs,
+                    destination,
                     written,
                 }
             }

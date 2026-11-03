@@ -331,24 +331,6 @@ pub(crate) mod sealed {
                 .unwrap_or_else(|| Self::width(exec, elements) > 1)
         }
 
-        /// Whether some count up to `largest` may saturate the token:
-        /// `false` only when the gate proves none does, which needs
-        /// `largest` inside the token's exact domain (where saturation is
-        /// monotone, so `largest` not saturating settles every smaller
-        /// count). Outside it the caller must ask each count.
-        #[inline]
-        pub(crate) fn may_saturate_up_to(
-            &self,
-            exec: &crate::host_pool::Exec<'_>,
-            largest: usize,
-        ) -> bool {
-            if exec.is_serial() {
-                return true;
-            }
-            let scan = self.thresholds(exec);
-            self.decide(scan, scan.min_full, largest).unwrap_or(true)
-        }
-
         /// Exactly `parallel_width(exec, Copy, elements) == budget`, whether
         /// a copy of `elements` uses the whole token (always on a serial
         /// one): O(1) inside the token's exact domain once its threshold is

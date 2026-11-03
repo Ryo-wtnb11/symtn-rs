@@ -231,70 +231,89 @@ placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
 destination length against the pool's dispatch cost) admits the parallel
 section. A serial engine never forks. A tree-transform replay, initialized
-or owned, splits its Single blocks and, after each chunk's GEMM, its
-recoupling scatter columns over ownership components compiled with the
-transform: blocks whose destination ranges overlap (canonical coupled-sector
-blocks interleave) share an atom, and a component is the set of atoms its
-blocks write, a Multi block's columns always together, so one component can
-own several separated atoms. An overwrite first runs each wide component
-(one whose largest planned block Strided's own rule, `parallel_width` for a
-copy of its elements, would give every worker of the whole token) alone on
-the whole token, one after another (every component is asked; the largest
-one's answer stands for the rest only where the cost rule is provably
-monotone, below); every other component splits and widens within the share
-its lane is granted. A Single phase, or a chunk of recoupling scatter, whose
-moved elements Strided's rule would give one worker runs inline on the
-token instead of splitting. A split separates lanes from the workers they
-share: it shares `W`, at most the sum of its components' own widths (and at
-most the token), among `L`, at most the replay's worker count, of lanes, and
-a lane left holding a single component holds no more workers than Strided's
-width for that component's largest planned block (a lane holding several
-components keeps its share). The replay learns these widths from Strided's
-own answers once per call: a width it has already learned, or one that
-what it learned decides, costs no further search, so identical chunks
-repeat no search, while each new undecided count asks Strided once. An
-overwrite's split runs only when it is cheaper than running the same
-components one after another on the whole token, each at its own width:
-both sides cost a component by the objective Strided's width minimises (the
-serial copy estimate of its moved elements over the width it runs at, plus
-the token's dispatch cost of a section that wide), the split runs a
-component at its width capped by its lane's share, and the split costs its
-slowest lane plus one two-wide section per fork on the way to it
-(O(components + `L` log components) per decision, no allocation);
-otherwise the components run sequentially on the whole token. An
-accumulating phase moves each block on one worker, so its split loses
-nothing to the whole token and skips this comparison.
-Each split hands the left `⌊L/2⌋` of `L` lanes the components whose
-destination elements are closest to that fraction of the total, never
+or owned, writes its destination through joint ownership components compiled
+with the transform: the destination intervals of its Single blocks, Multi
+scatter columns and inactive blocks merge, where they overlap (canonical
+coupled-sector blocks interleave), into atoms, and the blocks, Multi groups
+and inactive blocks writing one atom form one component, which can own
+several separated atoms. Every write of a component (its inactive zeros or
+beta scales, its Singles, and for each Multi group the pack, the recoupling
+GEMM and the scatter) runs on lane slots that component owns for the whole
+call, so within a call each destination element is written from one slot,
+and identical calls on one engine write it from the same slot (adjacent
+atoms can still share a cache line at their boundary).
+
+On the native provider (the lane route) the replay enters the engine once
+and runs each group's GEMM on its component's own lanes, with the dense
+provider's prepared plan writing an uninitialized packed destination (the
+packed source is grow-only scratch, zeroed only when it grows). A component
+of `g` groups takes the width `w` (up to the replay's worker count `B` and
+its band units) that minimises its modeled time: strided's copy estimate of
+the elements it moves over `w`, plus `1 + 2g` sections of `w`-wide dispatch,
+plus the dense provider's own time for each GEMM at `w` (its serial
+estimate, over the width its plan would take under `Auto`; a forced batch
+policy is not modeled and leaves the GEMM's time serial). Components that
+take all of `B` run alone on the whole token first, in address order; the
+rest split recursively over their serial times on at most the sum of their
+widths, when that split is cheaper than running them one after another on
+the whole token, and a lane runs its components one after another. A
+component wider than one slot splits its atoms by bands: an atom whose
+items all share the outermost compiled dimension (its stride `S` and extent
+`E >= 2`) with every item's inner reach inside one `S`-slab is `E` bands,
+and any other atom (a non-canonical injective layout, single-element blocks)
+is one indivisible unit; contiguous runs of units balanced by the elements
+they move go to the component's slots, and every stage writes each band from
+the same slot. Pack and GEMM write scratch, so they use the component's
+whole share. A replay with one worker runs every component in order on the
+whole destination. Retained scratch: one packed source and destination
+region per concurrently running lane, the per-call placement tables
+(O(components + lanes)), the GEMM shapes (O(groups)) and the band pieces
+(O(atoms + lanes)), allocated once per call by an eager call's call-local
+workspace and kept by a reused one (and reported in its retained bytes).
+
+The BLAS provider and custom executors (the staged route) have no GEMM that
+runs on a caller's lane: theirs needs the engine itself, and BLAS thread
+settings are process-global. They keep a staged replay over the same joint
+components: the components' inactive and Single writes, then the Multi
+groups in chunks of the replay's worker count, each chunk's pack, one
+grouped GEMM on the caller and its scatter, with a barrier between stages.
+A later stage can therefore find its destination lines owned by the cores
+of an earlier, differently split one. In each staged phase an overwrite
+first runs each wide component (one whose largest planned block Strided's
+own rule, `parallel_width` for a copy of its elements, would give every
+worker of the whole token) alone on the whole token, one after another;
+every other component splits and widens within the share its lane is
+granted. A phase whose moved elements Strided's rule would give one worker
+runs inline on the token instead of splitting. A split shares `W`, at most
+the sum of its components' own widths (and at most the token), among `L`, at
+most the replay's worker count, of lanes, and a lane left holding a single
+component holds no more workers than Strided's width for that component's
+largest planned block. The replay learns these widths from Strided's own
+answers once per call, so identical chunks repeat no search. An overwrite's
+split runs only when it is cheaper than running the same components one
+after another on the whole token, each at its own width (both sides cost a
+component by the objective Strided's width minimises; the split costs its
+slowest lane plus one two-wide section per fork on the way to it); an
+accumulating phase moves each block on one worker and skips this
+comparison. Each split hands the left `⌊L/2⌋` of `L` lanes the components
+whose destination elements are closest to that fraction of the total, never
 dividing a component, and runs that side on `⌊W·⌊L/2⌋/L⌋` workers (at least
 one, leaving at least one), the right side on the rest. The Multi pack's
-column split instead halves its token evenly at each fork, and a half that
-reaches one slot runs its remaining columns inline. A split of the scatter
-phase lists its atoms and each chunk's components, and every Single split lists the atoms it splits;
-learning widths keeps O(engine width) more. This metadata (O(atoms + chunk
-groups + engine width)) is allocated once per call by an eager call's
-call-local workspace and kept by a reused workspace (and reported in its
-retained bytes); a serial or one-component phase, and an inline Single
-phase, lists nothing (an inline phase may still learn a width). Whether a
-component is wide is one comparison against the smallest element count
-Strided's rule gives every worker, which the replay finds once for the
-whole token and once for the latest narrower lane token it asks about; a
-count so large that
-threadteam's rounded cost comparison is no longer provably monotone (the
-estimate plus the largest dispatch cost reaching `2^51 / w^2` ns) asks
-Strided directly instead. Inside the replay each Single block
-and scatter column keeps the token share of the worker that visits it, the
-whole token when its phase has one component. An
-overwrite of such a block runs on that share through the block's retained
-Strided plan when Strided's own rule (`execution::parallel_width` for a copy
-of its elements) gives the share more than one worker. Accumulating updates
-(`beta` neither zero nor absent), pack columns, and blocks whose normalized
-layout exceeds Strided's inline fused rank of eight keep one worker per
-block. Results are bit-identical for one
-configuration (provider, build, engine width, batch policy and work model,
-lane allocation, inputs), whether the lane allocation is searched or taken
-from the cache; no promise is made across widths, providers or lane
-allocations, which agree within rounding. BLAS-internal threads remain
+column split instead halves its token evenly at each fork. A staged block or
+scatter column keeps the token share of the worker that visits it, and an
+overwrite of it runs on that share through the block's retained Strided
+plan when Strided's own rule gives the share more than one worker.
+Accumulating updates, pack columns, and blocks whose normalized layout
+exceeds Strided's inline fused rank of eight keep one worker per block.
+
+Results are bit-identical for one configuration (provider, build, engine
+width, batch policy and work model, lane allocation, inputs), owned and
+initialized alike, whether the lane allocation is searched or taken from
+the cache; no promise is made across widths, providers or lane allocations,
+which agree within rounding. A failing replay returns, on the lane route,
+the error of the first failing alone component, or else of the lowest
+failing split component; an initialized destination may then be partly
+written, and an owned one is never published. BLAS-internal threads remain
 separate.
 
 ### Lane allocation
@@ -305,18 +324,20 @@ that searches a block placement, judged on the batch the executor will
 actually receive: a grouped GEMM batch of a contraction (two or more blocks
 that are not one strided submission: into an initialized destination, one
 self-disjoint affine run; into a fresh owned output, one gapless affine run),
-a grouped recoupling GEMM batch of a tree transform (the parallel replay
-submits the Multi blocks in chunks of its worker count, a member replay all
-members' blocks at once; a serial replay submits each Multi block alone, which
-does not search), and an SVD, values-only SVD, Hermitian eigen (full and
+a grouped recoupling GEMM batch of a tree transform (a member replay submits
+all members' blocks at once; on the staged route of the BLAS provider the
+parallel replay submits the Multi blocks in chunks of its worker count and a
+serial replay each Multi block alone, which does not search; a one-member
+replay on the native provider runs its GEMMs on its own lanes and submits no
+batch), and an SVD, values-only SVD, Hermitian eigen (full and
 values-only) or general-eigenvalue batch of two or more blocks. It is applied on every
 call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
 workspace or a network's pooled workspace kept from an earlier call; a
 workspace never keeps an earlier call's allocation. Other phases run as
 with the default: a single GEMM and an admitted affine strided GEMM run
 (which do not search), transforms that submit no grouped recoupling batch
-(unique fusion, a serial replay, one Multi block per chunk, compact
-diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
+(unique fusion, a one-member replay on the native provider, a serial
+replay, one Multi block per chunk, compact diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
 the full general eigendecomposition, the prepared batched `EighFullPlan`,
 and operations without dense blocks (norms, linear combinations,
 transfers).

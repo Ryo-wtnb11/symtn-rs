@@ -88,6 +88,30 @@ impl<T: Copy> HostScratchBuffer<T> {
         }
     }
 
+    /// The first `len` elements, initialised: grown (by zeros) only when
+    /// shorter, so a warm caller of one size fills nothing. Grow-only: a
+    /// later smaller call keeps the length.
+    pub(crate) fn initialized_prefix_mut(&mut self, len: usize, zero: T) -> &mut [T] {
+        if len > self.data.len() {
+            if len > self.data.capacity() {
+                // A fresh allocation lets std zero real scalars through the
+                // allocator instead of a fill pass on the calling thread.
+                *self = Self::filled(len, zero);
+            } else {
+                self.data.resize(len, zero);
+            }
+        }
+        &mut self.data[..len]
+    }
+
+    /// Empties the buffer and lends `len` slots of its capacity
+    /// uninitialised, for a writer that reports what it initialised itself;
+    /// the buffer's length stays zero.
+    pub(crate) fn uninit_mut(&mut self, len: usize) -> &mut [MaybeUninit<T>] {
+        self.reserve_overwrite(len);
+        &mut self.data.spare_capacity_mut()[..len]
+    }
+
     /// Replaces the contents with `len` elements that `write` produces as
     /// consecutive dense columns, without initialising them first.
     ///

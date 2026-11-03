@@ -93,7 +93,7 @@ fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
         ],
     )
     .unwrap();
-    assert_eq!(structure.parallel_schedule().single_component_count(), 1);
+    assert_eq!(structure.parallel_schedule().component_count(), 1);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -174,7 +174,7 @@ fn threaded_replay_ignores_zero_extent_work() {
         &[TreeTransformBlockSpec::single(0, 0, 1.0)],
     )
     .unwrap();
-    assert!(transform.parallel_schedule().singles.is_empty());
+    assert!(transform.parallel_schedule().direct.is_empty());
     crate::host_pool::test_pool(4)
         .install(|engine| {
             tree_transform_structure_with_structural_recoupling_raw(
@@ -211,7 +211,7 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
     )
     .unwrap();
     assert_eq!(transform.parallel_schedule().scatter_groups.len(), 1);
-    assert_eq!(transform.parallel_schedule().scatter_component_count(), 1);
+    assert_eq!(transform.parallel_schedule().component_count(), 1);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -541,7 +541,7 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &planless,
             &tiny,
@@ -575,7 +575,7 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
         tree_transform_structure_with_structural_recoupling_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &singles,
             &blocks,
@@ -596,7 +596,7 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &singles,
             &blocks,
@@ -648,7 +648,7 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &multi,
             &groups,
@@ -667,7 +667,7 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
     let owned_scans = scans(&mut |engine| {
         owned = try_tree_transform_structure_overwrite_owned_raw(
             engine,
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &multi,
             &groups,
@@ -684,102 +684,474 @@ fn leaf_gate_scans_only_for_planned_overwrites() {
     assert_eq!(owned_scans, 1);
 }
 
+/// Seven one-axis destination blocks of two elements (`offset; stride`):
+/// `0;3`, `1;3`, `2;3` interleave in one atom `[0, 5]`; `6;1` alone; `8;2`
+/// and `9;2` interleave in `[8, 11]`; `12;1` alone. Block 0 is a Single,
+/// blocks 1 and 6 one Multi group (one destination in each of two
+/// disconnected atoms), block 2 inactive, block 3 a Single, and blocks 4 and
+/// 5 the destinations of two Multi groups sharing their atom.
+fn joint_fixture() -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let dst = Arc::new(custom_structure(vec![
+        block(0, 2, 3, 0),
+        block(1, 2, 3, 1),
+        block(2, 2, 3, 2),
+        block(3, 2, 1, 6),
+        block(4, 2, 2, 8),
+        block(5, 2, 2, 9),
+        block(6, 2, 1, 12),
+    ]));
+    let src = Arc::new(BlockStructure::packed_column_major(1, vec![vec![2]; 8]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, 2.0),
+            TreeTransformBlockSpec::multi(vec![1, 6], vec![1, 2], vec![1.0, 2.0, 3.0, 4.0]),
+            TreeTransformBlockSpec::single(3, 3, -1.0),
+            TreeTransformBlockSpec::multi(vec![4], vec![4, 5], vec![1.0, -1.0]),
+            TreeTransformBlockSpec::multi(vec![5], vec![6, 7], vec![2.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    (dst, src, transform)
+}
+
 #[test]
-fn ownership_components_own_disconnected_atoms_exclusively() {
-    // What: overlapping destination intervals merge into address-ordered
-    // atoms, and a Multi group owns every atom its columns write, however
-    // far apart: each group's two blocks give two atoms with other groups'
-    // atoms between them, every atom has one slot inside its own component's
-    // slot range, and every column lies inside its atom.
-    let (_, transform) = su2_interleaved_fixture();
+fn joint_components_own_every_writer_of_their_atoms() {
+    // What: the Single, the Multi group and the inactive layout writing the
+    // first atom form one component, which also owns the group's
+    // disconnected atom; the two groups sharing an atom form another; the
+    // lone Single a third. Every item lies inside the atom of its slot.
+    let (dst, _, transform) = joint_fixture();
     let schedule = transform.parallel_schedule();
-
-    // Singles: (0, 0) [4, 9] and (1, 0) [6, 11] share one atom.
-    let single_atoms = schedule
-        .single_atoms
-        .iter()
-        .map(|atom| (atom.lo, atom.item, atom.weight_before))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        single_atoms,
-        [
-            (4, 0, 0),
-            (12, 2, 8),
-            (22, 3, 12),
-            (28, 4, 16),
-            (38, 5, 20),
-            (44, 6, 24),
-            (50, 7, 28),
-        ]
-    );
-
-    let atoms = schedule
-        .scatter_atoms
-        .iter()
-        .map(|atom| (atom.lo, atom.len))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        atoms,
-        [
-            (0, 4),
-            (14, 6),
-            (20, 6),
-            (30, 6),
-            (36, 6),
-            (46, 6),
-            (52, 4),
-            (56, 4)
-        ]
-    );
-    let mut slots = schedule
-        .scatter_atoms
-        .iter()
-        .map(|atom| atom.slot)
-        .collect::<Vec<_>>();
-    slots.sort_unstable();
-    assert_eq!(slots, (0..8).collect::<Vec<u32>>());
-    assert_eq!(schedule.scatter_component_count(), 4);
-
-    let layouts = transform.layouts();
-    let mut components = Vec::new();
-    for group in &schedule.scatter_groups {
-        let slot_range = schedule.component_slots[group.component as usize]
-            ..schedule.component_slots[group.component as usize + 1];
-        let mut owned = Vec::new();
-        for column in &schedule.scatter_columns[group.columns.clone()] {
-            assert!(slot_range.contains(&column.slot));
-            let atom = schedule
-                .scatter_atoms
-                .iter()
-                .find(|atom| atom.slot == column.slot)
-                .unwrap();
-            let offset = layouts.entry(column.dst_layout).offset;
-            assert_eq!(offset - atom.lo, column.local_base as isize);
-            let [.., last] = su2_addresses(offset as usize);
-            assert!(last < atom.lo as usize + atom.len);
-            owned.push((offset, atom.lo));
-        }
-        owned.sort_unstable();
-        assert_eq!(slot_range.len(), owned.len());
-        components.push((group.component, owned));
-    }
-    components.sort_unstable();
-    let expected = SU2_MULTIS
-        .iter()
-        .map(|(offsets, _)| offsets.map(|offset| offset as isize))
-        .map(|[left, right]| {
-            let atom = |offset: isize| atoms.iter().rfind(|&&(lo, _)| lo <= offset).unwrap().0;
-            vec![(left, atom(left)), (right, atom(right))]
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        components,
-        expected
-            .into_iter()
-            .enumerate()
-            .map(|(component, owned)| (component as u32, owned))
+    assert_eq!(schedule.component_count(), 3);
+    let atoms = |component: usize| {
+        schedule.atoms[schedule.component_atoms(component)]
+            .iter()
+            .map(|atom| (atom.lo, atom.len))
             .collect::<Vec<_>>()
+    };
+    assert_eq!(atoms(0), [(0, 6), (12, 2)]);
+    assert_eq!(atoms(1), [(6, 2)]);
+    assert_eq!(atoms(2), [(8, 4)]);
+    let kinds = |component: usize| {
+        schedule
+            .component_direct(component)
+            .iter()
+            .map(|item| match *item {
+                crate::transform_structure::TreeTransformDirectItem::Inactive { .. } => "inactive",
+                crate::transform_structure::TreeTransformDirectItem::Single { .. } => "single",
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kinds(0), ["inactive", "single"]);
+    assert_eq!(kinds(1), ["single"]);
+    assert!(kinds(2).is_empty());
+    let groups = (0..3)
+        .map(|component| schedule.component_group_list(component).len())
+        .collect::<Vec<_>>();
+    assert_eq!(groups, [1, 0, 2]);
+    for group in &schedule.scatter_groups {
+        for column in &schedule.scatter_columns[group.columns.clone()] {
+            let atom = &schedule.atoms[column.slot as usize];
+            let offset = transform.layouts().entry(column.dst_layout).offset;
+            assert!(offset >= atom.lo && offset < atom.lo + atom.len as isize);
+            assert!(schedule
+                .component_atoms(group.component as usize)
+                .contains(&(column.slot as usize)));
+        }
+    }
+    assert_eq!(dst.required_len().unwrap(), 14);
+}
+
+#[test]
+fn joint_component_replay_matches_the_block_oracle() {
+    // What: on both routes and at one and three workers, an overwrite
+    // writes `U * source` per block and zeroes the inactive block that
+    // interleaves with active ones; an accumulation scales that block by
+    // beta in its lane.
+    let (dst, src, transform) = joint_fixture();
+    let source = (1..=16).map(f64::from).collect::<Vec<_>>();
+    // Blocks at 0;3, 1;3, 2;3 (inactive), 6;1, 8;2, 9;2, 12;1.
+    let expected = [
+        2.0, 13.0, 0.0, 4.0, 16.0, 0.0, -7.0, -8.0, -2.0, 41.0, -2.0, 44.0, 29.0, 36.0,
+    ];
+    let initial = (0..14).map(|at| f64::from(at) - 3.0).collect::<Vec<_>>();
+    let axpby = expected
+        .iter()
+        .zip(&initial)
+        .map(|(value, old)| value + 0.5 * old)
+        .collect::<Vec<_>>();
+    for threads in [1, 3] {
+        let mut pool = crate::host_pool::eager_test_pool(threads);
+        for lanes in [true, false] {
+            fn replay<E: DenseExecutor>(
+                engine: &mut dyn Engine,
+                dense: &mut E,
+                (transform, dst, src, source): (
+                    &TreeTransformStructure<f64>,
+                    &Arc<BlockStructure>,
+                    &Arc<BlockStructure>,
+                    &[f64],
+                ),
+                dst_data: &mut [f64],
+                beta: Option<f64>,
+                threads: usize,
+            ) {
+                match beta {
+                    None => tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                        engine,
+                        &mut StridedHostKernelAdapter::default(),
+                        dense,
+                        &mut TreeTransformWorkspace::default(),
+                        transform,
+                        dst,
+                        src,
+                        dst_data,
+                        source,
+                        1.0,
+                        &[],
+                        threads,
+                    ),
+                    Some(beta) => tree_transform_structure_with_structural_recoupling_raw(
+                        engine,
+                        &mut StridedHostKernelAdapter::default(),
+                        dense,
+                        &mut TreeTransformWorkspace::default(),
+                        transform,
+                        dst,
+                        src,
+                        dst_data,
+                        source,
+                        1.0,
+                        beta,
+                        threads,
+                    ),
+                }
+                .unwrap();
+            }
+            let parts = (&transform, &dst, &src, &source[..]);
+            let run = |engine: &mut dyn Engine, dst_data: &mut [f64], beta: Option<f64>| {
+                if lanes {
+                    replay(
+                        engine,
+                        &mut DefaultDenseExecutor::new(),
+                        parts,
+                        dst_data,
+                        beta,
+                        threads,
+                    );
+                } else {
+                    replay(
+                        engine,
+                        &mut super::Staged::new(),
+                        parts,
+                        dst_data,
+                        beta,
+                        threads,
+                    );
+                }
+            };
+            let mut overwritten = vec![f64::NAN; 14];
+            let mut accumulated = initial.clone();
+            pool.install(|engine| {
+                run(engine, &mut overwritten, None);
+                run(engine, &mut accumulated, Some(0.5));
+            });
+            assert_eq!(overwritten, expected, "threads {threads}, lanes {lanes}");
+            assert_eq!(accumulated, axpby, "threads {threads}, lanes {lanes}");
+        }
+    }
+}
+
+/// Records, for every element a copy writes, its address in the
+/// destination starting at `base` and the writing thread.
+#[derive(Clone)]
+struct WriterRecorder {
+    inner: StridedHostKernelAdapter,
+    base: usize,
+    writes: Arc<std::sync::Mutex<Vec<(usize, std::thread::ThreadId)>>>,
+}
+
+impl crate::kernel_adapter::sealed::Sealed for WriterRecorder {}
+
+impl HostKernelAdapter<f64> for WriterRecorder {
+    fn add_strided_baked(
+        &mut self,
+        exec: Exec<'_>,
+        zero_strides: &mut Vec<isize>,
+        dst_data: &mut [f64],
+        src_data: &[f64],
+        shape: &[usize],
+        dst_strides: &[isize],
+        src_strides: &[isize],
+        dst_offset: isize,
+        src_offset: isize,
+        source_conjugate: bool,
+        alpha: f64,
+        beta: f64,
+        baked: Option<crate::BakedFusedLayout<'_>>,
+        index: Option<&mut [usize]>,
+    ) -> Result<(), OperationError> {
+        self.inner.add_strided_baked(
+            exec,
+            zero_strides,
+            dst_data,
+            src_data,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            source_conjugate,
+            alpha,
+            beta,
+            baked,
+            index,
+        )
+    }
+
+    fn axpby_strided_baked(
+        &mut self,
+        exec: Exec<'_>,
+        dst_data: &mut [f64],
+        src_data: &[f64],
+        shape: &[usize],
+        dst_strides: &[isize],
+        src_strides: &[isize],
+        dst_offset: isize,
+        src_offset: isize,
+        alpha: f64,
+        beta: f64,
+        baked: Option<crate::BakedFusedLayout<'_>>,
+        index: Option<&mut [usize]>,
+    ) -> Result<(), OperationError> {
+        self.inner.axpby_strided_baked(
+            exec,
+            dst_data,
+            src_data,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            alpha,
+            beta,
+            baked,
+            index,
+        )
+    }
+
+    fn copy_scale_strided_baked(
+        &mut self,
+        exec: Exec<'_>,
+        dst_data: &mut [f64],
+        src_data: &[f64],
+        shape: &[usize],
+        dst_strides: &[isize],
+        src_strides: &[isize],
+        dst_offset: isize,
+        src_offset: isize,
+        source_conjugate: bool,
+        alpha: f64,
+        baked: Option<crate::BakedFusedLayout<'_>>,
+        index: Option<&mut [usize]>,
+    ) -> Result<(), OperationError> {
+        let start = (dst_data.as_ptr() as usize - self.base) / std::mem::size_of::<f64>();
+        let thread = std::thread::current().id();
+        let mut addresses = vec![0isize];
+        for (&dim, &stride) in shape.iter().zip(dst_strides) {
+            addresses = addresses
+                .iter()
+                .flat_map(|&at| (0..dim as isize).map(move |step| at + step * stride))
+                .collect();
+        }
+        self.writes.lock().unwrap().extend(
+            addresses
+                .into_iter()
+                .map(|at| ((start as isize + dst_offset + at) as usize, thread)),
+        );
+        self.inner.copy_scale_strided_baked(
+            exec,
+            dst_data,
+            src_data,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            source_conjugate,
+            alpha,
+            baked,
+            index,
+        )
+    }
+
+    fn scale_strided(
+        &mut self,
+        exec: Exec<'_>,
+        dst_data: &mut [f64],
+        shape: &[usize],
+        dst_strides: &[isize],
+        dst_offset: isize,
+        beta: f64,
+    ) -> Result<(), OperationError> {
+        self.inner
+            .scale_strided(exec, dst_data, shape, dst_strides, dst_offset, beta)
+    }
+
+    fn recoupling_src_times_u_transpose<C>(
+        &mut self,
+        exec: Exec<'_>,
+        destination: &mut [f64],
+        source: &[f64],
+        recoupling_coefficients_dst_src: &[C],
+        element_count: usize,
+        src_count: usize,
+        dst_count: usize,
+    ) -> Result<(), OperationError>
+    where
+        C: Copy,
+        f64: RecouplingCoefficientAction<C>,
+    {
+        self.inner.recoupling_src_times_u_transpose(
+            exec,
+            destination,
+            source,
+            recoupling_coefficients_dst_src,
+            element_count,
+            src_count,
+            dst_count,
+        )
+    }
+}
+
+#[test]
+fn banded_components_write_each_band_from_one_slot_in_every_stage() {
+    // What: a component whose atom holds a Single's and a scatter column's
+    // interleaved blocks (two codomain trees of two rows over six columns,
+    // rows 4) and whose group's other column has its own atom runs banded
+    // on three slots: every band (column) of each atom, interior ones
+    // included, is written from one thread by both the Single and the
+    // scatter, three threads in all, and the values are the dense oracle.
+    // A unit-row-and-column atom and the injective `[3, 2]` / `[2, 3]`
+    // layout, whose inner reach leaves its first slab, stay indivisible.
+    let key = |sector| BlockKey::ordinal(sector);
+    let dst = Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            2,
+            vec![
+                BlockSpec::with_key(key(0), vec![2, 6], vec![1, 4], 0).unwrap(),
+                BlockSpec::with_key(key(1), vec![2, 6], vec![1, 4], 2).unwrap(),
+                BlockSpec::with_key(key(2), vec![2, 6], vec![1, 2], 24).unwrap(),
+            ],
+        )
+        .unwrap(),
     );
+    let src = Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 6]; 3]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, -2.0),
+            TreeTransformBlockSpec::multi(vec![1, 2], vec![1, 2], vec![1.0, 2.0, 3.0, 4.0]),
+        ],
+    )
+    .unwrap();
+    let schedule = transform.parallel_schedule();
+    assert_eq!(schedule.component_count(), 1);
+    let bands = schedule
+        .atoms
+        .iter()
+        .map(|atom| (atom.lo, atom.band_stride, atom.band_extent))
+        .collect::<Vec<_>>();
+    // The second atom's block fuses with its packed column to one axis.
+    assert_eq!(bands, [(0, 4, 6), (24, 1, 12)]);
+
+    let source = (1..=36).map(f64::from).collect::<Vec<_>>();
+    let mut expected = vec![0.0; 36];
+    for column in 0..6 {
+        for row in 0..2 {
+            let (a, b) = (source[12 + row + 2 * column], source[24 + row + 2 * column]);
+            expected[row + 4 * column] = -2.0 * source[row + 2 * column];
+            expected[2 + row + 4 * column] = a + 2.0 * b;
+            expected[24 + row + 2 * column] = 3.0 * a + 4.0 * b;
+        }
+    }
+    let mut destination = vec![f64::NAN; 36];
+    let writes = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut kernels = WriterRecorder {
+        inner: StridedHostKernelAdapter::default(),
+        base: destination.as_ptr() as usize,
+        writes: Arc::clone(&writes),
+    };
+    crate::host_pool::eager_test_pool(3)
+        .install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut kernels,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst,
+                &src,
+                &mut destination,
+                &source,
+                1.0,
+                &[],
+                3,
+            )
+        })
+        .unwrap();
+    assert_eq!(destination, expected);
+    let writes = writes.lock().unwrap().clone();
+    assert_eq!(writes.len(), 36);
+    let band = |at: usize| if at < 24 { at / 4 } else { 6 + (at - 24) / 2 };
+    let mut writer_of_band = std::collections::HashMap::new();
+    for &(at, thread) in &writes {
+        assert_eq!(
+            *writer_of_band.entry(band(at)).or_insert(thread),
+            thread,
+            "band {}",
+            band(at)
+        );
+    }
+    let threads = writer_of_band
+        .values()
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(threads.len(), 3);
+
+    let single = |shape: Vec<usize>, strides: Vec<usize>| {
+        let rank = shape.len();
+        let dst = Arc::new(
+            BlockStructure::from_blocks_with_rank(
+                rank,
+                vec![BlockSpec::with_key(key(0), shape.clone(), strides, 0).unwrap()],
+            )
+            .unwrap(),
+        );
+        let src = Arc::new(BlockStructure::packed_column_major(rank, vec![shape]).unwrap());
+        TreeTransformStructure::compile_structures(
+            &dst,
+            &src,
+            &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+        )
+        .unwrap()
+    };
+    let bandable = |transform: &TreeTransformStructure<f64>| {
+        transform
+            .parallel_schedule()
+            .atoms
+            .iter()
+            .map(|atom| atom.bandable())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(bandable(&single(vec![1, 1], vec![1, 2])), [false]);
+    assert_eq!(bandable(&single(vec![3, 2], vec![2, 3])), [false]);
 }
 
 #[test]
@@ -862,54 +1234,6 @@ fn component_replay_matches_the_block_oracle_at_odd_and_even_widths() {
 }
 
 #[test]
-fn multi_groups_sharing_an_atom_replay_as_one_component() {
-    // What: two Multi groups whose interleaved blocks share one atom own it
-    // together, apart from a third group's separate atom, and threaded
-    // replay writes the independent physical-output oracle.
-    let src_structure = Arc::new(
-        BlockStructure::packed_column_major(1, [vec![2], vec![2], vec![2], vec![2]]).unwrap(),
-    );
-    let dst_structure = Arc::new(custom_structure(vec![
-        block(0, 2, 3, 0),
-        block(1, 2, 3, 1),
-        block(2, 2, 3, 2),
-        block(3, 2, 1, 6),
-    ]));
-    let transform = TreeTransformStructure::compile_structures(
-        &dst_structure,
-        &src_structure,
-        &[
-            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, 2.0]),
-            TreeTransformBlockSpec::multi(vec![1, 2], vec![2], vec![3.0, -1.0]),
-            TreeTransformBlockSpec::multi(vec![3], vec![3, 0], vec![0.5, 1.0]),
-        ],
-    )
-    .unwrap();
-    assert_eq!(transform.parallel_schedule().scatter_component_count(), 2);
-    let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-    let mut destination = [f64::NAN; 8];
-    crate::host_pool::test_pool(4)
-        .install(|engine| {
-            tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                engine,
-                &mut StridedHostKernelAdapter::default(),
-                &mut DefaultDenseExecutor::new(),
-                &mut TreeTransformWorkspace::default(),
-                &transform,
-                &dst_structure,
-                &src_structure,
-                &mut destination,
-                &source,
-                1.0,
-                &[],
-                4,
-            )
-        })
-        .unwrap();
-    assert_eq!(destination, [7.0, 15.0, -5.0, 10.0, 18.0, -6.0, 4.5, 6.0]);
-}
-
-#[test]
 fn component_splits_balance_moved_elements_not_component_count() {
     // What: a split gives the left `threads / 2` lanes the legal component
     // boundary whose moved elements are closest to that fraction of the
@@ -932,164 +1256,6 @@ fn component_splits_balance_moved_elements_not_component_count() {
     assert_eq!(split(&[1, 1, 10], 2), 2);
     // 1 and 3 are equally far from half of 4: the earlier boundary.
     assert_eq!(split(&[1, 2, 1], 2), 1);
-    // The executing split runs each side on the token share it was
-    // balanced for: at three workers the three light components get one
-    // slot and the heavy one two. (An accumulating phase, so no component
-    // runs alone; the blocks widen on any share and the total pays.)
-    // Each atom is one block that fills either share, so its weight is its
-    // largest block, as compiled metadata has it.
-    let wide = first_count(3, |width| width == 3).max(first_count(2, |width| width == 2));
-    let unit = wide;
-    let leaves = record_single_phase(
-        &[
-            (0, unit, wide),
-            (1, unit, wide),
-            (2, unit, wide),
-            (3, 6 * unit, 6 * unit),
-        ],
-        false,
-    )
-    .0;
-    assert_eq!(
-        leaves,
-        [(vec![0], 1), (vec![1], 1), (vec![2], 1), (vec![3], 2)]
-    );
-    // The fixture's Single atoms at three lanes: 8 of 28 elements is the
-    // closest left share to a third.
-    let (_, transform) = su2_interleaved_fixture();
-    let atoms = &transform.parallel_schedule().single_atoms;
-    assert_eq!(
-        balanced_boundary(atoms.len() - 1, 3, |part| atoms[part].weight_before),
-        1
-    );
-}
-
-/// Runs a three-worker threaded Single phase over atoms `(lo, weight,
-/// widest)` of one Single each and returns every leaf's Singles with the
-/// token budget it ran on, sorted.
-fn record_single_leaves(atoms: &[(isize, usize, usize)]) -> Vec<(Vec<u32>, usize)> {
-    record_single_phase(atoms, true).0
-}
-
-/// [`record_single_leaves`] and the Strided width searches the phase ran on
-/// the calling thread.
-fn record_single_phase(
-    atoms: &[(isize, usize, usize)],
-    widen: bool,
-) -> (Vec<(Vec<u32>, usize)>, usize) {
-    use crate::kernel_adapter::sealed::WIDTH_QUERIES;
-    use crate::transform_structure::TreeTransformSingleAtom;
-    let mut schedule = TreeTransformParallelSchedule::default();
-    let mut weight_before = 0;
-    for (item, &(lo, weight, widest)) in atoms.iter().enumerate() {
-        schedule.singles.push(item as u32);
-        schedule.single_atoms.push(TreeTransformSingleAtom {
-            item: item as u32,
-            lo,
-            weight_before,
-            widest,
-        });
-        weight_before += weight;
-        schedule.widest_single = schedule.widest_single.max(widest);
-    }
-    let end = atoms.last().map_or(0, |&(lo, _, _)| lo + 1);
-    schedule.single_atoms.push(TreeTransformSingleAtom {
-        item: atoms.len() as u32,
-        lo: end,
-        weight_before,
-        widest: 0,
-    });
-    let leaves = std::sync::Mutex::new(Vec::new());
-    let mut dst = vec![0.0f64; end as usize];
-    let mut fused_indices = [0usize; 3];
-    let mut narrow = Vec::new();
-    let gate = LeafGate::new(schedule.widest_single);
-    let mut pool = crate::host_pool::test_pool(3);
-    let queries = WIDTH_QUERIES.with(|queries| queries.get());
-    pool.install(|engine| {
-        replay_region(engine, |exec| {
-            replay_single_phase(
-                &schedule,
-                &mut narrow,
-                &mut Vec::new(),
-                &mut dst,
-                &mut fused_indices,
-                1,
-                3,
-                exec,
-                &gate,
-                schedule.widest_single,
-                widen,
-                &|items, _, _, _, exec, _| {
-                    leaves
-                        .lock()
-                        .unwrap()
-                        .push((items.to_vec(), exec.budget().get()));
-                    Ok(())
-                },
-            )
-        })
-    })
-    .unwrap()
-    .unwrap();
-    let queries = WIDTH_QUERIES.with(|queries| queries.get()) - queries;
-    let mut leaves = leaves.into_inner().unwrap();
-    leaves.sort_unstable();
-    (leaves, queries)
-}
-
-#[test]
-fn wide_components_run_alone_on_the_whole_token_before_narrow_ones_split() {
-    // What: a Single phase with one component whose planned block widens on
-    // the whole token and three that do not runs the wide one alone on all
-    // three workers, then splits the narrow ones one per worker.
-    let large = first_count(3, |width| width == 3);
-    // The narrow ones move enough in total to fill the token, so the split
-    // pays; their blocks never widen, so each runs on one worker.
-    let leaves = record_single_leaves(&[
-        (0, large, 1),
-        (1, large, large),
-        (2, large, 1),
-        (3, large, 1),
-    ]);
-    assert_eq!(
-        leaves,
-        [(vec![0], 1), (vec![1], 3), (vec![2], 1), (vec![3], 1)]
-    );
-}
-
-#[test]
-fn classifying_more_wide_components_asks_strided_no_more_often() {
-    // What: deciding which components widen takes one threshold search per
-    // token shape, so a phase with three times the wide components asks
-    // Strided for a width exactly as often.
-    let large = first_count(3, |width| width == 3);
-    let phase = |wide: isize| {
-        let atoms = std::iter::once((0, large, 1))
-            .chain((1..=wide).map(|lo| (lo, large, large)))
-            .chain([(wide + 1, large, 1)])
-            .collect::<Vec<_>>();
-        record_single_phase(&atoms, true)
-    };
-    let (few, few_queries) = phase(2);
-    let (many, many_queries) = phase(6);
-    assert_eq!(few.iter().filter(|(_, budget)| *budget == 3).count(), 2);
-    assert_eq!(many.iter().filter(|(_, budget)| *budget == 3).count(), 6);
-    assert!(few_queries > 0);
-    assert_eq!(many_queries, few_queries);
-}
-
-#[test]
-fn narrow_single_scratch_is_charged_by_capacity() {
-    // What: the Single phase's narrow-atom list counts in the workspace's
-    // retained bytes by its capacity.
-    let mut workspace = TreeTransformWorkspace::<f64>::default();
-    let before = workspace.retained_bytes();
-    workspace.narrow_atoms.reserve_exact(4);
-    assert_eq!(
-        workspace.retained_bytes() - before,
-        workspace.narrow_atoms.capacity() * std::mem::size_of::<NarrowAtom>()
-    );
 }
 
 #[test]
@@ -1152,7 +1318,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
             .collect::<Vec<_>>(),
     )
     .unwrap();
-    assert_eq!(transform.parallel_schedule().scatter_component_count(), 4);
+    assert_eq!(transform.parallel_schedule().component_count(), 9);
     let len = structure.required_len().unwrap();
     let source = (0..len)
         .map(|value| (value % 97) as f64 - 48.0)
@@ -1177,7 +1343,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut kernels,
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
             &structure,
@@ -1248,7 +1414,7 @@ fn chunks_too_small_to_pay_a_worker_scatter_without_forking() {
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
                     engine,
                     &mut StridedHostKernelAdapter::default(),
-                    &mut DefaultDenseExecutor::new(),
+                    &mut super::Staged::new(),
                     &mut TreeTransformWorkspace::default(),
                     &transform,
                     &structure,
@@ -1271,126 +1437,10 @@ fn chunks_too_small_to_pay_a_worker_scatter_without_forking() {
 }
 
 #[test]
-fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
-    use std::time::Duration;
-    use tenferro_cpu::threadteam::WidthCosts;
-    // What: with a cost row under which threadteam's rounded comparison
-    // gives the larger of two compiled Single blocks three of four workers
-    // and the smaller all four, the smaller still runs alone on the whole
-    // token: the largest block's answer settles nothing outside the gate's
-    // exact domain. A zero-size destination element replays the schedule
-    // without allocating the blocks' payload.
-    let costs = WidthCosts::from_anchors(&[
-        (2, Duration::ZERO),
-        (3, Duration::ZERO),
-        (4, Duration::from_nanos(1 << 50)),
-    ])
-    .unwrap();
-    let mut pool = crate::host_pool::test_pool_with_costs(4, costs);
-    // The counts around the estimate where rounding ties widths 3 and 4, by
-    // bisection on this host's copy estimate: a count Strided gives four
-    // workers, then the next larger count it gives three.
-    let width = |exec: &Exec<'_>, n| {
-        strided_kernel::execution::parallel_width(
-            exec,
-            strided_kernel::execution::KernelClass::Copy,
-            n,
-        )
-        .get()
-    };
-    let tie = Duration::from_nanos(13_510_798_882_111_491);
-    let (mut below, mut at) = (0usize, usize::MAX);
-    while at - below > 1 {
-        let middle = below + (at - below) / 2;
-        if strided_kernel::execution::KernelClass::Copy.estimate(middle) >= tie {
-            at = middle;
-        } else {
-            below = middle;
-        }
-    }
-    let lengths = pool.with_exec(|exec| {
-        let window = below.saturating_sub(64)..=at + 64;
-        let narrower = window
-            .clone()
-            .find(|&n| {
-                width(&exec, n) == 3 && window.clone().any(|m| m < n && width(&exec, m) == 4)
-            })
-            .expect("the cost row ties widths 3 and 4 near this estimate");
-        let wider = (below.saturating_sub(64)..narrower)
-            .rev()
-            .find(|&n| width(&exec, n) == 4)
-            .expect("a smaller count gets four workers");
-        [wider, narrower]
-    });
-    let structure =
-        Arc::new(BlockStructure::packed_column_major(1, lengths.map(|len| vec![len])).unwrap());
-    let transform = TreeTransformStructure::compile_structures(
-        &structure,
-        &structure,
-        &[0, 1].map(|block| TreeTransformBlockSpec::single(block, block, 1.0)),
-    )
-    .unwrap();
-    let schedule = transform.parallel_schedule();
-    assert_eq!(schedule.single_component_count(), 2);
-    assert_eq!(schedule.widest_single, lengths[1]);
-    let gate = LeafGate::new(transform.layouts().max_planned_elements());
-    let widths = pool.with_exec(|exec| lengths.map(|len| width(&exec, len)));
-    assert_eq!(widths, [4, 3]);
-    let leaves = std::sync::Mutex::new(Vec::new());
-    let mut dst = vec![(); structure.required_len().unwrap()];
-    let mut fused_indices = [0usize; 4];
-    let mut narrow = Vec::new();
-    pool.with_exec(|exec| {
-        replay_single_phase(
-            schedule,
-            &mut narrow,
-            &mut Vec::new(),
-            &mut dst,
-            &mut fused_indices,
-            1,
-            4,
-            exec,
-            &gate,
-            transform.layouts().max_planned_elements(),
-            true,
-            &|items, _, _, _, exec, _| {
-                for &item in items {
-                    let (dst_layout, _, _) = scheduled_single(transform.blocks(), item)?;
-                    leaves.lock().unwrap().push((
-                        transform.layouts().entry(dst_layout).element_count,
-                        exec.budget().get(),
-                    ));
-                }
-                Ok(())
-            },
-        )
-    })
-    .unwrap();
-    let mut leaves = leaves.into_inner().unwrap();
-    leaves.sort_unstable();
-    // The saturating block alone on four workers; the other, the only one
-    // left, on the three Strided gives it.
-    assert_eq!(leaves, [(lengths[0], 4), (lengths[1], 3)]);
-}
-
-#[test]
-fn a_single_phase_whose_moves_do_not_pay_a_worker_runs_inline() {
-    // What: many tiny Single components whose total moved elements Strided
-    // gives one worker run in one list on the caller's whole token: no fork.
-    assert!(first_count(3, |width| width > 1) > 32);
-    let atoms = (0..32).map(|lo| (lo, 1, 1)).collect::<Vec<_>>();
-    let leaves = record_single_leaves(&atoms);
-    assert_eq!(leaves, [((0..32).collect::<Vec<u32>>(), 3)]);
-}
-
-#[test]
 fn a_split_uses_no_more_lanes_than_its_components_can() {
     // What: two components that move enough to pay a split but whose blocks
-    // never widen use two lanes of three, one worker each.
-    // Each moves enough to fill the token on its own.
+    // never widen share two of three workers, one each.
     let moved = first_count(3, |width| width == 3);
-    let leaves = record_single_leaves(&[(0, moved, 1), (1, moved, 1)]);
-    assert_eq!(leaves, [(vec![0], 1), (vec![1], 1)]);
     let (lanes, widths) = crate::host_pool::test_pool(3).with_exec(|exec| {
         let mut widths = [0, 0];
         let [first, second] = &mut widths;
@@ -1527,7 +1577,7 @@ fn replay_chunks(
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
+            &mut super::Staged::new(),
             &mut TreeTransformWorkspace::default(),
             &transform,
             &structure,
@@ -1644,163 +1694,149 @@ fn independent_components_split_up_to_their_summed_widths() {
     assert_eq!((lanes, total_width), (8, 2));
 }
 
-#[test]
-fn independent_widening_components_share_the_token_by_their_strided_widths() {
-    use strided_kernel::execution::{parallel_width, KernelClass};
-    // What: nine independent compiled Single components whose blocks Strided
-    // gives more than one but fewer than all workers of a 16- and a 96-worker
-    // token run on nine lanes (the replay's worker count, capped by its
-    // component count) that together hold as much of the token as their
-    // widths can use: each lane at most its component's width, all lanes
-    // `min(budget, sum of widths)`.
-    for budget in [16, 96] {
-        let mut pool = crate::host_pool::test_pool(budget);
-        let (count, width) = pool.with_exec(|exec| {
-            let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
-            let mut at = 1usize;
-            while width(at) < 2 {
-                at *= 2;
-            }
-            let (mut below, mut at) = (at / 2, at);
-            while at - below > 1 {
-                let middle = below + (at - below) / 2;
-                if width(middle) >= 2 {
-                    at = middle;
-                } else {
-                    below = middle;
-                }
-            }
-            (at, width(at))
-        });
-        assert!(
-            width > 1 && width < budget,
-            "budget {budget}: width {width}"
-        );
-        let structure =
-            Arc::new(BlockStructure::packed_column_major(2, vec![vec![count, 1]; 9]).unwrap());
-        let transform = TreeTransformStructure::compile_structures(
-            &structure,
-            &structure,
-            &(0..9)
-                .map(|block| TreeTransformBlockSpec::single(block, block, 2.0))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        let schedule = transform.parallel_schedule();
-        assert_eq!(schedule.single_component_count(), 9);
-        let threads =
-            pool.install(|engine| effective_tree_transform_threads(engine, schedule, budget));
-        assert_eq!(threads, 9);
-        let leaves = std::sync::Mutex::new(Vec::new());
-        let mut dst = vec![(); structure.required_len().unwrap()];
-        let mut fused_indices = [0usize; 2];
-        let gate = LeafGate::new(transform.layouts().max_planned_elements());
-        pool.with_exec(|exec| {
-            replay_single_phase(
-                schedule,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut dst,
-                &mut fused_indices,
-                2,
-                threads,
-                exec,
-                &gate,
-                transform.layouts().max_planned_elements(),
-                true,
-                &|_, _, _, _, exec, _| {
-                    leaves.lock().unwrap().push(exec.budget().get());
-                    Ok(())
-                },
-            )
-        })
-        .unwrap();
-        let leaves = leaves.into_inner().unwrap();
-        assert_eq!(leaves.len(), 9, "budget {budget}");
-        assert!(
-            leaves.iter().all(|&lane| lane <= width),
-            "budget {budget}: {leaves:?}"
-        );
-        assert_eq!(
-            leaves.iter().sum::<usize>(),
-            budget.min(9 * width),
-            "budget {budget}: {leaves:?}"
-        );
+/// The native executor whose lane GEMMs of `failing` jobs fail with an
+/// error naming the job.
+struct FailingLanes {
+    inner: DefaultDenseExecutor,
+    failing: &'static [usize],
+}
+
+struct FailOn<'g> {
+    inner: &'g dyn symtn_dense::LaneGemms,
+    failing: &'static [usize],
+}
+
+impl symtn_dense::LaneGemms for FailOn<'_> {
+    fn run<'d>(
+        &self,
+        token: symtn_dense::LaneToken<'_>,
+        job: usize,
+        io: symtn_dense::LaneGemmIo<'_, 'd>,
+    ) -> Result<(), DenseError> {
+        if self.failing.contains(&job) {
+            return Err(DenseError::Backend {
+                backend: DenseBackend::Tenferro,
+                op: "lane",
+                message: format!("job {job}"),
+            });
+        }
+        self.inner.run(token, job, io)
+    }
+
+    fn time(
+        &self,
+        token: &mut symtn_dense::LaneToken<'_>,
+        job: usize,
+        width: core::num::NonZeroUsize,
+    ) -> Duration {
+        self.inner.time(token, job, width)
+    }
+}
+
+impl DenseExecutor for FailingLanes {
+    fn svd(
+        &mut self,
+        e: &mut dyn Engine,
+        i: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.svd(e, i)
+    }
+    fn qr(&mut self, e: &mut dyn Engine, i: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.qr(e, i)
+    }
+    fn eigh(
+        &mut self,
+        e: &mut dyn Engine,
+        i: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.eigh(e, i)
+    }
+    fn dot_general_into(
+        &mut self,
+        e: &mut dyn Engine,
+        o: DenseWrite<'_>,
+        l: DenseRead<'_>,
+        r: DenseRead<'_>,
+        c: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.inner.dot_general_into(e, o, l, r, c)
+    }
+    fn supports_lane_gemms(&self) -> bool {
+        true
+    }
+    fn with_lane_gemms(
+        &mut self,
+        engine: &mut dyn Engine,
+        dtype: symtn_dense::DenseDType,
+        jobs: &[symtn_dense::LaneGemmShape],
+        body: &mut symtn_dense::LaneGemmBody<'_>,
+    ) -> Result<(), DenseError> {
+        let failing = self.failing;
+        self.inner
+            .with_lane_gemms(engine, dtype, jobs, &mut |token, gemms| {
+                body(
+                    token,
+                    &FailOn {
+                        inner: gemms,
+                        failing,
+                    },
+                )
+            })
     }
 }
 
 #[test]
-fn a_split_that_narrows_a_widening_component_runs_sequentially_on_the_whole_token() {
-    use strided_kernel::execution::{parallel_width, KernelClass};
-    // What: a Single phase of one widening component (Strided gives its
-    // block `w` of 16 workers, 1 < w < 16) and one single-element component
-    // runs both one after another on the whole token: a two-lane split
-    // would leave the widening block `floor((w + 1) / 2) < w` workers. `w`
-    // minimises Strided's objective for the block, so the narrower width
-    // costs at least as much, and the split adds a fork, while the
-    // sequential run adds only one element.
-    const BUDGET: usize = 16;
-    let mut pool = crate::host_pool::test_pool(BUDGET);
-    let (count, width) = pool.with_exec(|exec| {
-        let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
-        let mut at = 1usize;
-        while width(at) < 2 {
-            at *= 2;
-        }
-        let (mut below, mut at) = (at / 2, at);
-        while at - below > 1 {
-            let middle = below + (at - below) / 2;
-            if width(middle) >= 2 {
-                at = middle;
-            } else {
-                below = middle;
-            }
-        }
-        (at, width(at))
-    });
-    assert!(width > 1 && width < BUDGET, "width {width}");
-    let structure =
-        Arc::new(BlockStructure::packed_column_major(2, vec![vec![count, 1], vec![1, 1]]).unwrap());
+fn a_failing_lane_replay_returns_the_first_error_by_tier() {
+    // What: on four workers, three one-element groups split over lanes and
+    // an eight-element group runs alone on the whole token (first). Two
+    // failing split groups return the lower one's error; a failing alone
+    // group's error wins over a lower failing split group's.
+    let structure = Arc::new(
+        BlockStructure::packed_column_major(1, [1, 1, 1, 1, 1, 1, 8, 8].map(|len| vec![len]))
+            .unwrap(),
+    );
     let transform = TreeTransformStructure::compile_structures(
         &structure,
         &structure,
-        &[
-            TreeTransformBlockSpec::single(0, 0, 2.0),
-            TreeTransformBlockSpec::single(1, 1, 2.0),
-        ],
+        &[0, 2, 4, 6].map(|first| {
+            TreeTransformBlockSpec::multi(
+                vec![first, first + 1],
+                vec![first, first + 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )
+        }),
     )
     .unwrap();
-    let schedule = transform.parallel_schedule();
-    assert_eq!(schedule.single_component_count(), 2);
-    let threads = pool.install(|engine| effective_tree_transform_threads(engine, schedule, BUDGET));
-    let leaves = std::sync::Mutex::new(Vec::new());
-    let mut dst = vec![(); structure.required_len().unwrap()];
-    let mut fused_indices = [0usize; 4];
-    let gate = LeafGate::new(transform.layouts().max_planned_elements());
-    pool.with_exec(|exec| {
-        replay_single_phase(
-            schedule,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut dst,
-            &mut fused_indices,
-            2,
-            threads,
-            exec,
-            &gate,
-            transform.layouts().max_planned_elements(),
-            true,
-            &|items, _, _, _, exec, _| {
-                leaves
-                    .lock()
-                    .unwrap()
-                    .push((items.to_vec(), exec.budget().get()));
-                Ok(())
-            },
-        )
-    })
-    .unwrap();
-    let mut leaves = leaves.into_inner().unwrap();
-    leaves.sort_unstable();
-    assert_eq!(leaves, [(vec![0], BUDGET), (vec![1], BUDGET)]);
+    let source = (1..=22).map(f64::from).collect::<Vec<_>>();
+    let mut pool = crate::host_pool::eager_test_pool(4);
+    const SPLIT: &[usize] = &[1, 2];
+    const TIERS: &[usize] = &[0, 3];
+    for (failing, error) in [(SPLIT, "job 1"), (TIERS, "job 3")] {
+        let mut destination = vec![0.0; 22];
+        let result = pool.install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut FailingLanes {
+                    inner: DefaultDenseExecutor::new(),
+                    failing,
+                },
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut destination,
+                &source,
+                1.0,
+                &[],
+                4,
+            )
+        });
+        match result {
+            Err(OperationError::Dense(DenseError::Backend { message, .. })) => {
+                assert_eq!(message, error, "failing {failing:?}")
+            }
+            other => panic!("failing {failing:?}: {other:?}"),
+        }
+    }
 }

@@ -519,6 +519,43 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             fresh_serial(self, engine, parts, lhs, rhs, jobs, ops, alpha)
         })
     }
+
+    /// Whether [`Self::with_lane_gemms`] can run its body: a route choice
+    /// that costs no call and no error allocation. The default executor of a
+    /// build without lane GEMMs, the BLAS provider and every custom executor
+    /// answer `false`.
+    #[doc(hidden)]
+    fn supports_lane_gemms(&self) -> bool {
+        false
+    }
+
+    /// Prepares one `dtype` GEMM per shape of `jobs`, enters the engine once
+    /// and calls `body` once with the entry's whole token and the prepared
+    /// GEMMs; lanes split the token themselves and run their jobs through
+    /// [`crate::LaneGemms::run`] on exact packed operands.
+    ///
+    /// Every refusal (no lane GEMMs, not a usable CPU engine, broken engine,
+    /// plan preparation, a dtype without GEMMs) is returned before `body` is
+    /// called, so a caller can select another route before it writes
+    /// anything. Once `body` has been called the method returns `Ok`; the
+    /// body's own outcome is the caller's. A panic in `body` unwinds out of
+    /// this call and leaves the engine broken. The default refuses without
+    /// calling `body`.
+    #[cfg(feature = "tenferro")]
+    #[doc(hidden)]
+    fn with_lane_gemms(
+        &mut self,
+        engine: &mut dyn Engine,
+        dtype: DenseDType,
+        jobs: &[crate::LaneGemmShape],
+        body: &mut crate::LaneGemmBody<'_>,
+    ) -> Result<(), DenseError> {
+        let _ = (engine, dtype, jobs, body);
+        Err(DenseError::Unsupported {
+            op: crate::lane_gemm::LANE_GEMM_OP,
+            message: "executor runs no GEMM on a caller's lanes".to_string(),
+        })
+    }
 }
 
 /// Executor-returned output count disagrees with the decomposition's arity.

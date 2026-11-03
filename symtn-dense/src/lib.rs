@@ -15,6 +15,7 @@ mod dtype;
 mod error;
 mod executor;
 mod fresh;
+mod lane_gemm;
 mod layout;
 mod scalar;
 mod tensor;
@@ -69,6 +70,11 @@ pub use executor::{
 };
 #[doc(hidden)]
 pub use fresh::DenseFreshSegments;
+#[doc(hidden)]
+pub use lane_gemm::LaneGemmIo;
+#[cfg(feature = "tenferro")]
+#[doc(hidden)]
+pub use lane_gemm::{LaneGemmBody, LaneGemmShape, LaneGemms, LaneToken};
 pub use scalar::DenseScalar;
 pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};

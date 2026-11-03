@@ -141,12 +141,24 @@ impl<T> TreeTransformReplay<T> {
                 core::mem::size_of::<DenseGemmBatchJob>(),
             ))
             .saturating_add(vector_bytes(
-                self.parallel_schedule.singles.capacity(),
+                self.parallel_schedule.atoms.capacity(),
+                core::mem::size_of::<TreeTransformJointAtom>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.address_order.capacity(),
                 core::mem::size_of::<u32>(),
             ))
             .saturating_add(vector_bytes(
-                self.parallel_schedule.single_atoms.capacity(),
-                core::mem::size_of::<TreeTransformSingleAtom>(),
+                self.parallel_schedule.components.capacity(),
+                core::mem::size_of::<TreeTransformJointComponent>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.direct.capacity(),
+                core::mem::size_of::<TreeTransformDirectItem>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.component_groups.capacity(),
+                core::mem::size_of::<u32>(),
             ))
             .saturating_add(vector_bytes(
                 self.parallel_schedule.pack_columns.capacity(),
@@ -159,14 +171,6 @@ impl<T> TreeTransformReplay<T> {
             .saturating_add(vector_bytes(
                 self.parallel_schedule.scatter_groups.capacity(),
                 core::mem::size_of::<TreeTransformScatterGroupReplay>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.scatter_atoms.capacity(),
-                core::mem::size_of::<TreeTransformScatterAtom>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.component_slots.capacity(),
-                core::mem::size_of::<u32>(),
             ))
     }
 }
@@ -638,9 +642,10 @@ mod tests {
             2
         };
         assert_eq!(layouts.plans.capacity(), planned);
-        assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
-        // Two disjoint Single atoms and the sentinel.
-        assert_eq!(compiled.parallel_schedule().single_atoms.capacity(), 3);
+        // Two disjoint Single atoms and the inactive one; three components
+        // and the sentinel.
+        assert_eq!(compiled.parallel_schedule().atoms.capacity(), 3);
+        assert_eq!(compiled.parallel_schedule().components.capacity(), 4);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
             (&[4usize][..], &[1isize][..])
@@ -664,15 +669,15 @@ mod tests {
         assert!(compiled.charged_payload_bytes() > charged);
         let charged = compiled.charged_payload_bytes();
         let schedule = &mut Arc::get_mut(&mut compiled.core).unwrap().parallel_schedule;
-        schedule.single_atoms.reserve_exact(4);
-        schedule.scatter_atoms.reserve_exact(1);
-        schedule.component_slots.reserve_exact(1);
+        schedule.atoms.reserve_exact(4);
+        schedule.components.reserve_exact(1);
+        schedule.direct.reserve_exact(1);
         assert!(
             compiled.charged_payload_bytes()
                 >= charged
-                    + 4 * core::mem::size_of::<TreeTransformSingleAtom>()
-                    + core::mem::size_of::<TreeTransformScatterAtom>()
-                    + core::mem::size_of::<u32>()
+                    + 4 * core::mem::size_of::<TreeTransformJointAtom>()
+                    + core::mem::size_of::<TreeTransformJointComponent>()
+                    + core::mem::size_of::<TreeTransformDirectItem>()
         );
 
         // Tiny interleaved roles, whose copy Strided estimates at zero time,

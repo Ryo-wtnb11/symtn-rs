@@ -27,22 +27,27 @@ use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
 use crate::transform_structure::{
-    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterReplay,
+    TreeTransformJointComponent, TreeTransformPackReplay, TreeTransformParallelSchedule,
+    TreeTransformScatterReplay,
 };
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
     RecouplingCoefficientAction, ReportsPlacement, TransformScale, TreeTransformBlock,
     TreeTransformLayoutTable, TreeTransformReplayProfile, TreeTransformStructure,
 };
+use writers::{DestinationWriter, InitializedWriter, OwnedWriter};
 
 mod batched;
 mod coefficients;
 mod entry;
 mod kernels;
+#[cfg(feature = "tenferro")]
+mod lanes;
 mod member;
 mod owned;
 #[cfg(test)]
 mod tests;
+mod writers;
 
 pub use batched::tree_transform_searches_lanes;
 use batched::*;
@@ -337,8 +342,18 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
     chunk_units: Vec<ScatterUnit>,
-    // The atoms a threaded Single split runs (all but the wide ones).
-    narrow_atoms: Vec<NarrowAtom>,
+    // The lane route's per-call placement tables (O(components + lanes)),
+    // its GEMM shapes (O(groups)) and its band pieces (O(atoms + lanes)).
+    #[cfg(feature = "tenferro")]
+    lane_placements: Vec<lanes::LanePlacement>,
+    #[cfg(feature = "tenferro")]
+    lane_parts: Vec<lanes::LanePart>,
+    #[cfg(feature = "tenferro")]
+    lane_leaves: Vec<lanes::LaneLeaf>,
+    #[cfg(feature = "tenferro")]
+    lane_shapes: Vec<symtn_dense::LaneGemmShape>,
+    #[cfg(feature = "tenferro")]
+    lane_pieces: Vec<Option<lanes::ParkedPiece>>,
     // What one call has learned of the whole token's width transitions
     // (`whole_width`), O(engine width), cleared at the start of every
     // threaded replay.
@@ -370,7 +385,16 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
             chunk_units: Vec::new(),
-            narrow_atoms: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_placements: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_parts: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_leaves: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_shapes: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_pieces: Vec::new(),
             width_levels: Vec::new(),
             atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
@@ -414,11 +438,36 @@ impl<T> HostTreeTransformWorkspace<T> {
             self.chunk_units.capacity(),
             std::mem::size_of::<ScatterUnit>(),
         ) + bytes(self.width_levels.capacity(), std::mem::size_of::<usize>())
-            + bytes(
-                self.narrow_atoms.capacity(),
-                std::mem::size_of::<NarrowAtom>(),
-            )
             + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
+            + self.lane_retained_bytes()
+    }
+
+    /// The lane route's tables, by capacity.
+    fn lane_retained_bytes(&self) -> usize {
+        #[cfg(feature = "tenferro")]
+        {
+            let bytes = |capacity: usize, item: usize| capacity.saturating_mul(item);
+            bytes(
+                self.lane_placements.capacity(),
+                std::mem::size_of::<lanes::LanePlacement>(),
+            ) + bytes(
+                self.lane_parts.capacity(),
+                std::mem::size_of::<lanes::LanePart>(),
+            ) + bytes(
+                self.lane_leaves.capacity(),
+                std::mem::size_of::<lanes::LaneLeaf>(),
+            ) + bytes(
+                self.lane_shapes.capacity(),
+                std::mem::size_of::<symtn_dense::LaneGemmShape>(),
+            ) + bytes(
+                self.lane_pieces.capacity(),
+                std::mem::size_of::<Option<lanes::ParkedPiece>>(),
+            )
+        }
+        #[cfg(not(feature = "tenferro"))]
+        {
+            0
+        }
     }
 
     /// The kept atom-slice capacity, emptied, for slices of `T` borrowed

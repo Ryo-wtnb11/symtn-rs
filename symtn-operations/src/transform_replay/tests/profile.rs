@@ -85,7 +85,10 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 }
 
 #[test]
-fn profiled_multi_attributes_recoupling_to_dense_gemm() {
+fn profiled_lane_route_reports_one_fused_region_and_the_counts() {
+    // What: on the lane route the profile's separate stage timers are zero
+    // (no stage is separate), the fused region's wall is its own field, and
+    // the semantic counts are those of the staged route.
     let mut pool = crate::host_pool::test_pool(2);
     pool.install(|engine| {
         let (dst_structure, src_structure, structure) = identity_multi_fixture();
@@ -96,6 +99,56 @@ fn profiled_multi_attributes_recoupling_to_dense_gemm() {
                 engine,
                 &mut StridedHostKernelAdapter::default(),
                 &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &structure,
+                &dst_structure,
+                &src_structure,
+                &mut dst,
+                &[3.0, 4.0],
+                2.0,
+                &[],
+                threads,
+                &mut profile,
+            )
+            .unwrap();
+            assert_eq!(dst, [6.0, 8.0, 0.0]);
+            assert!(profile.fused_lanes > Duration::ZERO);
+            assert_eq!(
+                profile.single_total
+                    + profile.multi_pack
+                    + profile.multi_matmul_total
+                    + profile.multi_scatter
+                    + profile.strided_kernel,
+                Duration::ZERO
+            );
+            assert_eq!(
+                (
+                    profile.multi_blocks,
+                    profile.packed_columns,
+                    profile.scattered_columns
+                ),
+                (1, 2, 2)
+            );
+            let mut sum = TreeTransformReplayProfile::default();
+            sum.accumulate(&profile);
+            sum.accumulate(&profile);
+            assert_eq!(sum.fused_lanes, 2 * profile.fused_lanes);
+        }
+    });
+}
+
+#[test]
+fn profiled_multi_attributes_recoupling_to_dense_gemm() {
+    let mut pool = crate::host_pool::test_pool(2);
+    pool.install(|engine| {
+        let (dst_structure, src_structure, structure) = identity_multi_fixture();
+        for threads in [1, 2] {
+            let mut dst = vec![f64::NAN; 3];
+            let mut profile = TreeTransformReplayProfile::default();
+            tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut super::Staged::new(),
                 &mut TreeTransformWorkspace::default(),
                 &structure,
                 &dst_structure,

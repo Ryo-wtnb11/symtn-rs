@@ -77,6 +77,11 @@ impl<Source, Destination> TreeTransformScratchBuffers<Source, Destination> {
     pub fn source_and_destination_mut(&mut self) -> (&Source, &mut Destination) {
         (&self.source, &mut self.destination)
     }
+
+    #[inline]
+    pub(crate) fn both_mut(&mut self) -> (&mut Source, &mut Destination) {
+        (&mut self.source, &mut self.destination)
+    }
 }
 
 #[cfg(test)]
