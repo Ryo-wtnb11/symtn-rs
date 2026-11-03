@@ -60,6 +60,8 @@ where
     // One gate for every unsplit block list on the calling thread; forked
     // leaves build their own.
     let gate = LeafGate::new(layouts.max_planned_elements());
+    // The width table belongs to this call's engine and token.
+    workspace.width_levels.clear();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
@@ -86,12 +88,14 @@ where
         let HostTreeTransformWorkspace {
             fused_indices,
             narrow_atoms,
+            width_levels,
             ..
         } = &mut *workspace;
         replay_region(engine, |exec| {
             replay_single_phase(
                 schedule,
                 narrow_atoms,
+                width_levels,
                 dst_data,
                 fused_indices.as_mut_slice(),
                 max_fused_rank,
@@ -169,6 +173,7 @@ where
                     fused_indices,
                     chunk_scatter_groups,
                     chunk_units,
+                    width_levels,
                     ..
                 } = &mut *workspace;
                 let packed = packed.destination().as_slice();
@@ -208,6 +213,7 @@ where
                         replay_region(engine, |exec| {
                             scatter_chunk_components(
                                 chunk_units,
+                                width_levels,
                                 &schedule.component_slots,
                                 slots,
                                 fused_indices.as_mut_slice(),

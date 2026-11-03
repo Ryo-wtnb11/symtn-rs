@@ -27,8 +27,11 @@ pub(crate) mod sealed {
     pub struct LeafGate {
         /// The largest element count any planned role this gate admits has.
         bound: usize,
-        /// The last scan, keyed by the token shape it was taken on.
-        memo: core::cell::Cell<Option<GateScan>>,
+        /// Scans keyed by the token shape they were taken on: the first
+        /// shape asked (the call's whole token) keeps slot 0; any later shape
+        /// (a lane narrowed to its component's width) takes slot 1, so
+        /// narrowing never evicts the whole token's scan.
+        memo: [core::cell::Cell<Option<GateScan>>; 2],
     }
 
     #[derive(Clone, Copy)]
@@ -48,7 +51,7 @@ pub(crate) mod sealed {
         pub(crate) fn new(bound: usize) -> Self {
             Self {
                 bound,
-                memo: core::cell::Cell::new(None),
+                memo: [core::cell::Cell::new(None), core::cell::Cell::new(None)],
             }
         }
 
@@ -229,9 +232,13 @@ pub(crate) mod sealed {
         /// worker builds its own.
         fn thresholds(&self, exec: &crate::host_pool::Exec<'_>) -> GateScan {
             let (budget, team) = (exec.budget(), exec.carries_team());
-            match self.memo.get() {
-                Some(scan) if scan.budget == budget && scan.team == team => scan,
-                _ => {
+            let hit = |slot: &core::cell::Cell<Option<GateScan>>| {
+                slot.get()
+                    .filter(|scan| scan.budget == budget && scan.team == team)
+            };
+            match hit(&self.memo[0]).or_else(|| hit(&self.memo[1])) {
+                Some(scan) => scan,
+                None => {
                     let exact = Self::exact_domain(exec);
                     let bound = exact.map(|exact| exact.min(self.bound));
                     let min_elements = bound.and_then(|bound| Self::scan_widen(exec, bound));
@@ -245,7 +252,8 @@ pub(crate) mod sealed {
                         min_full,
                         exact,
                     };
-                    self.memo.set(Some(scan));
+                    let slot = usize::from(self.memo[0].get().is_some());
+                    self.memo[slot].set(Some(scan));
                     scan
                 }
             }
@@ -272,8 +280,37 @@ pub(crate) mod sealed {
             }
         }
 
-        /// Strided's own width for a copy of `elements` on `exec`.
-        fn width(exec: &crate::host_pool::Exec<'_>, elements: usize) -> usize {
+        /// The gate's O(1) answer to `parallel_width > 1` and to
+        /// `parallel_width == budget` where its thresholds decide them, each
+        /// `None` where only Strided can answer.
+        pub(crate) fn decided(
+            &self,
+            exec: &crate::host_pool::Exec<'_>,
+            elements: usize,
+        ) -> (Option<bool>, Option<bool>) {
+            if exec.is_serial() {
+                return (Some(false), Some(true));
+            }
+            let scan = self.thresholds(exec);
+            (
+                self.decide(scan, scan.min_elements, elements),
+                self.decide(scan, scan.min_full, elements),
+            )
+        }
+
+        /// The largest count of the token's exact domain, where Strided's
+        /// copy width is monotone in the count (see
+        /// [`Self::exact_domain`]); `None` when the domain is empty.
+        pub(crate) fn exact_end(&self, exec: &crate::host_pool::Exec<'_>) -> Option<usize> {
+            if exec.is_serial() {
+                return Some(usize::MAX);
+            }
+            self.thresholds(exec).exact
+        }
+
+        /// Strided's own width for a copy of `elements` on `exec`: one full
+        /// width search (O(budget)), counted for tests.
+        pub(crate) fn width(exec: &crate::host_pool::Exec<'_>, elements: usize) -> usize {
             #[cfg(test)]
             WIDTH_QUERIES.with(|queries| queries.set(queries.get() + 1));
             execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()

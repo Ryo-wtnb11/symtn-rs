@@ -505,61 +505,108 @@ pub(super) fn balanced_boundary(
     }
 }
 
-/// `exec` narrowed to Strided's own width for a copy of `widest` elements
-/// on it: a lane never holds more workers than its one component's largest
-/// planned block would use.
-pub(super) fn granted_width(exec: Exec<'_>, widest: usize) -> Exec<'_> {
-    if exec.is_serial() {
-        return exec;
-    }
-    let width = strided_kernel::execution::parallel_width(
-        &exec,
-        strided_kernel::execution::KernelClass::Copy,
-        widest,
-    );
-    exec.limit(width)
+/// `exec` narrowed to `width`, the whole-token width of its one component
+/// ([`split_lanes`]): a lane never holds more workers than its component's
+/// largest planned block would use. O(1).
+pub(super) fn granted_width(exec: Exec<'_>, width: usize) -> Exec<'_> {
+    exec.limit(core::num::NonZeroUsize::new(width).unwrap_or(core::num::NonZeroUsize::MIN))
 }
 
-/// The lanes a split of components over `exec` uses: one (run inline on the
-/// whole token) when Strided's own rule gives their `total` moved elements
-/// one worker; otherwise at most `threads`, Strided's width for `total`, and
-/// the sum of the components' own widths on the whole token (`widest` is
-/// each one's largest planned block; a block that does not widen counts
-/// one, a saturating one the budget).
+/// Strided's width for a copy of `elements` on the call's whole token
+/// `exec`, exactly: the gate's O(1) answer where it decides one worker or
+/// the whole budget; otherwise, inside the gate's exact domain, from what
+/// this call has learned about the width transitions, asking Strided only
+/// when that knowledge does not decide the count; outside the domain
+/// Strided's own answer.
 ///
-/// Why: a split whose moved elements do not pay a second worker only turns
-/// cache-resident copies into cross-core traffic, and lanes beyond what the
-/// components can use stay idle while the components they could have run
-/// wait. Cost: the gate's O(1) answers, one Strided width search for the
-/// total, and one for each widening, non-saturating component summed before
-/// the sum reaches the cap (each adds at least two lanes, so at most
-/// `threads / 2` searches); O(threads) per search.
-pub(super) fn split_lanes(
+/// `levels` holds, for each width `k` of the engine budget `B`, the
+/// smallest count known to reach width `k` (`reach`, `usize::MAX` when
+/// unknown) and one more than the largest count known not to (`miss`, zero
+/// when unknown). Why that is exact: inside the domain `width >= k` is
+/// monotone in the count for every `k` (the argument of
+/// `LeafGate::scan_full`: a wider width's objective falls faster, a width
+/// that starts paying later has a larger cost and cannot undercut the
+/// current choice, and the domain makes threadteam's rounded comparisons
+/// agree), so one Strided answer `w` at count `m` proves `width >= k` for
+/// every count from `m` on when `k <= w`, and `width < k` up to `m` when
+/// `k > w`.
+///
+/// Cost: an undecided count costs one Strided search (O(B)) and an O(B)
+/// update; a count the knowledge decides costs O(log B). A call therefore
+/// searches at most once per distinct count its decisions need, however
+/// many chunks or components repeat it.
+pub(super) fn whole_width(
     exec: &Exec<'_>,
     gate: &LeafGate,
+    levels: &mut Vec<usize>,
+    elements: usize,
+) -> usize {
+    let budget = exec.budget().get();
+    match gate.decided(exec, elements) {
+        (Some(false), _) => return 1,
+        (_, Some(true)) => return budget,
+        _ => {}
+    }
+    if gate.exact_end(exec).is_none_or(|exact| elements > exact) {
+        return LeafGate::width(exec, elements);
+    }
+    if levels.len() != 2 * (budget + 1) {
+        levels.clear();
+        levels.resize(budget + 1, usize::MAX);
+        levels.resize(2 * (budget + 1), 0);
+        // Every count reaches one worker.
+        levels[1] = 0;
+    }
+    let (reach, miss) = levels.split_at_mut(budget + 1);
+    // Both lists are nondecreasing in `k`: the largest width the count is
+    // known to reach, and the smallest it is known to miss.
+    let reached = reach[1..].partition_point(|&count| count <= elements);
+    let missed = 1 + miss[1..].partition_point(|&above| above <= elements);
+    if reached + 1 == missed {
+        return reached;
+    }
+    let width = LeafGate::width(exec, elements);
+    for count in &mut reach[1..=width] {
+        *count = (*count).min(elements);
+    }
+    for above in &mut miss[width + 1..] {
+        *above = (*above).max(elements + 1);
+    }
+    width
+}
+
+/// The lanes a split of components over the call's whole token `exec`
+/// uses, recording each component's whole-token width in its slot
+/// ([`whole_width`] of its largest planned block). One (run inline on the
+/// whole token) when Strided's own rule gives their `total` moved elements
+/// one worker; otherwise at most the split width `threads` and the sum of
+/// the components' widths.
+///
+/// Why the total only admits: it decides whether the moves pay a second
+/// worker at all, but its own copy width is that of one copy, not of a
+/// phase of independent components, which can run side by side up to their
+/// summed widths. Lanes beyond that sum would stay idle while the components
+/// they could have run wait. Cost: one [`whole_width`] lookup for the total
+/// and one per component, O(C log B) for C components and engine budget B
+/// after the call's lazy table setup (O(B) per lookup past the exact
+/// domain).
+pub(super) fn split_lanes<'w>(
+    exec: &Exec<'_>,
+    gate: &LeafGate,
+    levels: &mut Vec<usize>,
     threads: usize,
     total: usize,
-    widest: impl IntoIterator<Item = usize>,
+    components: impl IntoIterator<Item = (usize, &'w mut usize)>,
 ) -> usize {
-    use strided_kernel::execution::{parallel_width, KernelClass};
-    if threads <= 1 || !gate.widens(exec, total) {
+    if threads <= 1 || whole_width(exec, gate, levels, total) <= 1 {
         return 1;
     }
-    let cap = threads.min(parallel_width(exec, KernelClass::Copy, total).get());
     let mut sum = 0usize;
-    for widest in widest {
-        sum += if gate.saturates(exec, widest) {
-            exec.budget().get()
-        } else if gate.widens(exec, widest) {
-            parallel_width(exec, KernelClass::Copy, widest).get()
-        } else {
-            1
-        };
-        if sum >= cap {
-            return cap;
-        }
+    for (widest, width) in components {
+        *width = whole_width(exec, gate, levels, widest);
+        sum = sum.saturating_add(*width);
     }
-    sum.max(1)
+    threads.min(sum).max(1)
 }
 
 /// Recursive `replay_join` over the address-ordered parts `parts` (Single
@@ -570,8 +617,10 @@ pub(super) fn split_lanes(
 /// [`balanced_boundary`], with `threads / 2` lanes and the matching share of
 /// the token to the left; `leaf` writes a range of parts into its part of
 /// `dst` with one worker's traversal scratch and that worker's share of
-/// `exec`. An unsplit list keeps the whole of `exec` and the caller's `gate`;
-/// forked leaves build their own gate bounded by `gate_bound`.
+/// `exec`. An unsplit list keeps the caller's `gate` and the whole of
+/// `exec`, narrowed to `part_width(p)` (the part's whole-token width) when
+/// it is a single part `p`; forked leaves build their own gate bounded by
+/// `gate_bound`.
 ///
 /// No `unsafe` is needed: atoms are maximal runs of overlapping item
 /// intervals, so every item lies inside one atom and `split_at_mut` at an
@@ -583,7 +632,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
     parts: Range<usize>,
     lo: &(impl Fn(usize) -> isize + Sync),
     weight_before: &(impl Fn(usize) -> usize + Sync),
-    part_widest: &(impl Fn(usize) -> usize + Sync),
+    part_width: &(impl Fn(usize) -> usize + Sync),
     dst: &mut [T],
     dst_start: isize,
     fused_indices: &mut [usize],
@@ -615,7 +664,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
             }
         };
         let exec = if parts.len() == 1 {
-            granted_width(exec, part_widest(parts.start))
+            granted_width(exec, part_width(parts.start))
         } else {
             exec
         };
@@ -650,7 +699,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
                 parts.start..middle,
                 lo,
                 weight_before,
-                part_widest,
+                part_width,
                 left_data,
                 dst_start,
                 left_indices,
@@ -667,7 +716,7 @@ pub(super) fn split_join_parts<T: Send + Sync>(
                 middle..parts.end,
                 lo,
                 weight_before,
-                part_widest,
+                part_width,
                 right_data,
                 boundary,
                 right_indices.get(),
@@ -684,36 +733,44 @@ pub(super) fn split_join_parts<T: Send + Sync>(
     right
 }
 
-/// A Single atom left to the split after the wide atoms ran: its index and
-/// the destination elements of the narrow atoms before it.
+/// A Single atom the split runs: its index, the destination elements of the
+/// listed atoms before it, and its whole-token width ([`split_lanes`]).
 #[derive(Clone, Copy, Debug)]
 pub(super) struct NarrowAtom {
     atom: usize,
     weight_before: usize,
+    width: usize,
 }
 
-/// The Single phase of a threaded replay over its ownership atoms, in two
-/// tiers by Strided's own width rule (`gate`, on the phase's whole token
-/// `exec`): an atom whose largest planned Single would use every worker of
-/// that token (`parallel_width` equal to its budget) is wide and runs alone
-/// on the whole token, one after another, as an unsplit list runs its
-/// blocks; every other atom is moldable and splits over `threads` lanes by
-/// moved elements ([`split_join_parts`]), each widening within the token
-/// share its lane is granted. Without a wide atom (or for an accumulating
-/// `widen = false` replay, which never runs a plan) every atom splits;
-/// without a moldable one nothing does. `leaf` writes one list of Singles
-/// into `dst` from absolute offset `dst_start`.
+/// The Single phase of a threaded replay over its ownership atoms, on the
+/// phase's whole token `exec` by Strided's own width rule (`gate`):
 ///
-/// Why only saturating components run alone: a component that would use the
-/// whole token loses nothing by having it, while one that would use fewer
-/// workers leaves the rest idle unless it shares the token with others. `narrow` is the narrow
-/// list's scratch (O(atoms), workspace-retained and charged), used only when
-/// both tiers are present; classification asks the gate's O(1) threshold
-/// once per atom.
+/// 1. Inline admission: when Strided gives the phase's total moved elements
+///    one worker (or there is one atom or one lane), every Single runs in
+///    one list on the whole token, as an unsplit list does.
+/// 2. Wide tier (overwrites only; an accumulating `widen = false` replay
+///    never runs a plan): an atom whose largest planned Single would use
+///    every worker of the token runs alone on it, one after another.
+/// 3. Capped split: the remaining atoms split by moved elements
+///    ([`split_join_parts`]) over at most [`split_lanes`] lanes: the split
+///    width `threads` and the sum of their own widths; their total is
+///    admitted again, so a small remainder runs inline.
+/// 4. Singleton grant: a lane left with one atom is narrowed to that atom's
+///    whole-token width.
+///
+/// `leaf` writes one list of Singles into `dst` from absolute offset
+/// `dst_start`. `narrow` is the split's atom list (O(atoms) workspace
+/// scratch, kept and charged) and `levels` the call's width table
+/// ([`whole_width`]); neither grows on an inline phase.
+///
+/// Cost: inside the gate's exact domain, O(1) per atom for admission and
+/// classification and one O(log B) table lookup per split atom, for engine
+/// budget B; past it each such answer is one Strided search of O(B).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay_single_phase<T: Send + Sync>(
     schedule: &TreeTransformParallelSchedule,
     narrow: &mut Vec<NarrowAtom>,
+    levels: &mut Vec<usize>,
     dst: &mut [T],
     fused_indices: &mut [usize],
     max_fused_rank: usize,
@@ -735,63 +792,34 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
     let atoms = &schedule.single_atoms;
     let items = &schedule.singles;
     let parts = schedule.single_component_count();
-    let atom_items = |atom: usize| &items[atoms[atom].item as usize..atoms[atom + 1].item as usize];
-    let lo = |part: usize| atoms[part].lo;
     if parts == 0 {
         return Ok(());
+    }
+    let atom_items = |atom: usize| &items[atoms[atom].item as usize..atoms[atom + 1].item as usize];
+    if threads <= 1
+        || parts == 1
+        || whole_width(&exec, gate, levels, atoms[parts].weight_before) <= 1
+    {
+        return leaf(
+            &items[atoms[0].item as usize..atoms[parts].item as usize],
+            dst,
+            0,
+            &mut fused_indices[..max_fused_rank],
+            exec,
+            gate,
+        );
     }
     // Why the largest atom may decide for all: inside the gate's exact
     // domain saturation is monotone, so a largest atom that does not fill
     // the token proves no smaller one does; outside it every atom is asked.
     let tiered = widen
-        && threads > 1
-        && parts > 1
-        && gate.widens(&exec, atoms[parts].weight_before)
         && gate.may_saturate_up_to(&exec, schedule.widest_single)
         && (0..parts).any(|atom| gate.saturates(&exec, atoms[atom].widest));
-    if !tiered {
-        let lanes = split_lanes(
-            &exec,
-            gate,
-            threads,
-            atoms[parts].weight_before,
-            (0..parts).map(|atom| atoms[atom].widest),
-        );
-        let exec = if lanes > 1 {
-            exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
-        } else {
-            exec
-        };
-        return split_join_parts(
-            0..parts,
-            &lo,
-            &|part| atoms[part].weight_before,
-            &|part| atoms[part].widest,
-            dst,
-            0,
-            fused_indices,
-            max_fused_rank,
-            lanes,
-            exec,
-            Some(gate),
-            gate_bound,
-            &|range: Range<usize>, dst, dst_start, fused_index, exec, gate| {
-                leaf(
-                    &items[atoms[range.start].item as usize..atoms[range.end].item as usize],
-                    dst,
-                    dst_start,
-                    fused_index,
-                    exec,
-                    gate,
-                )
-            },
-        );
-    }
 
     narrow.clear();
     let mut weight = 0usize;
     for atom in 0..parts {
-        if gate.saturates(&exec, atoms[atom].widest) {
+        if tiered && gate.saturates(&exec, atoms[atom].widest) {
             leaf(
                 atom_items(atom),
                 dst,
@@ -804,6 +832,7 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
             narrow.push(NarrowAtom {
                 atom,
                 weight_before: weight,
+                width: 1,
             });
             weight += atoms[atom + 1].weight_before - atoms[atom].weight_before;
         }
@@ -811,30 +840,33 @@ pub(super) fn replay_single_phase<T: Send + Sync>(
     if narrow.is_empty() {
         return Ok(());
     }
+    let listed = narrow.len();
     narrow.push(NarrowAtom {
         atom: parts,
         weight_before: weight,
+        width: 1,
     });
-    let narrow = &*narrow;
     let lanes = split_lanes(
         &exec,
         gate,
+        levels,
         threads,
         weight,
-        narrow[..narrow.len() - 1]
-            .iter()
-            .map(|part| atoms[part.atom].widest),
+        narrow[..listed]
+            .iter_mut()
+            .map(|part| (atoms[part.atom].widest, &mut part.width)),
     );
     let exec = if lanes > 1 {
-        exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
+        granted_width(exec, lanes)
     } else {
         exec
     };
+    let narrow = &*narrow;
     split_join_parts(
-        0..narrow.len() - 1,
+        0..listed,
         &|part| atoms[narrow[part].atom].lo,
         &|part| narrow[part].weight_before,
-        &|part| atoms[narrow[part].atom].widest,
+        &|part| narrow[part].width,
         dst,
         0,
         fused_indices,
@@ -877,6 +909,8 @@ pub(super) struct ScatterUnit {
     weight_before: usize,
     /// Elements of the unit's largest planned column.
     widest: usize,
+    /// The unit's whole-token width, recorded by [`split_lanes`].
+    width: usize,
 }
 
 impl ScatterUnit {
@@ -1019,14 +1053,19 @@ pub(super) fn atom_start(
 }
 
 /// One chunk's scatter over its ownership components (`units`, with their
-/// sentinel) on the phase's whole token `exec`. When Strided's own rule
-/// gives the chunk's moved elements a single worker (`gate.widens` on their
-/// total), the units run inline on the token, as an unsplit list does;
-/// otherwise the saturating units run alone ([`run_wide_units`]) and the
-/// rest split ([`split_join_components`]). This admission asks the gate for
-/// every threaded multi-component chunk, planned or not and accumulating or
-/// not; past the gate's exact domain, or past its bound when no role
-/// widens, that is one Strided width search per chunk.
+/// sentinel) on the phase's whole token `exec`, in the order of
+/// [`replay_single_phase`]: inline admission when Strided gives the chunk's
+/// moved elements one worker (or there is one unit or one lane); then the
+/// saturating units alone ([`run_wide_units`]); then the remaining units over
+/// at most [`split_lanes`] lanes, re-admitted on their own total
+/// ([`split_join_components`]); finally a lane left with one unit narrowed to
+/// its whole-token width. Admission asks the gate for every threaded
+/// multi-component chunk, planned or not and accumulating or not.
+///
+/// Cost per chunk: O(1) gate answers inside its exact domain and one
+/// O(log B) lookup in the call's width table `levels` per split unit, for
+/// engine budget B; the table is set up at most once per call, however many
+/// chunks ask. Past the exact domain each answer is a Strided search, O(B).
 ///
 /// Why per chunk and not once per phase: a chunk's packed destination exists
 /// only between its GEMM and the next chunk's, so a split cannot outlive it;
@@ -1034,6 +1073,7 @@ pub(super) fn atom_start(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_chunk_components<T: Send + Sync>(
     units: &mut Vec<ScatterUnit>,
+    levels: &mut Vec<usize>,
     component_slots: &[u32],
     slots: &mut [&mut [T]],
     fused_indices: &mut [usize],
@@ -1058,7 +1098,7 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
         return Ok(());
     }
     let total = units[parts].weight_before;
-    if threads <= 1 || parts == 1 || !gate.widens(&exec, total) {
+    if threads <= 1 || parts == 1 || whole_width(&exec, gate, levels, total) <= 1 {
         return leaf(
             &units[..parts],
             slots,
@@ -1084,15 +1124,19 @@ pub(super) fn scatter_chunk_components<T: Send + Sync>(
     if parts == 0 {
         return Ok(());
     }
+    let total = units[parts].weight_before;
     let lanes = split_lanes(
         &exec,
         gate,
+        levels,
         threads,
-        units[parts].weight_before,
-        units[..parts].iter().map(|unit| unit.widest),
+        total,
+        units[..parts]
+            .iter_mut()
+            .map(|unit| (unit.widest, &mut unit.width)),
     );
     let exec = if lanes > 1 {
-        exec.limit(core::num::NonZeroUsize::new(lanes).unwrap_or(core::num::NonZeroUsize::MIN))
+        granted_width(exec, lanes)
     } else {
         exec
     };
@@ -1165,7 +1209,7 @@ pub(super) fn split_join_components<T: Send + Sync>(
             }
         };
         let exec = if parts == 1 {
-            granted_width(exec, units[0].widest)
+            granted_width(exec, units[0].width)
         } else {
             exec
         };
@@ -1438,6 +1482,7 @@ where
                 weight: group_weight,
                 weight_before: weight,
                 widest: replay.widest,
+                width: 1,
             }),
         }
         weight = weight.saturating_add(group_weight);
@@ -1449,6 +1494,7 @@ where
         weight: 0,
         weight_before: weight,
         widest: 0,
+        width: 1,
     });
     Ok(destination_start)
 }
@@ -1514,6 +1560,8 @@ where
     // One gate for every block list this call visits on the calling
     // thread; forked leaves build their own.
     let gate = LeafGate::new(layouts.max_planned_elements());
+    // The width table belongs to this call's engine and token.
+    workspace.width_levels.clear();
     let recoupling_plan = task.recoupling_plan();
     let max_fused_rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
@@ -1544,12 +1592,14 @@ where
             let HostTreeTransformWorkspace {
                 fused_indices,
                 narrow_atoms,
+                width_levels,
                 ..
             } = &mut *workspace;
             replay_region(engine, |exec| {
                 replay_single_phase(
                     schedule,
                     narrow_atoms,
+                    width_levels,
                     dst_data,
                     fused_indices.as_mut_slice(),
                     max_fused_rank,
@@ -1658,6 +1708,7 @@ where
                 fused_indices,
                 chunk_scatter_groups,
                 chunk_units,
+                width_levels,
                 ..
             } = &mut *workspace;
             let packed_destination = packed.destination().as_slice();
@@ -1704,6 +1755,7 @@ where
                     replay_region(engine, |exec| {
                         scatter_chunk_components(
                             chunk_units,
+                            width_levels,
                             &schedule.component_slots,
                             slots,
                             fused_indices.as_mut_slice(),

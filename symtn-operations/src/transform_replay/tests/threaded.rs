@@ -936,8 +936,10 @@ fn component_splits_balance_moved_elements_not_component_count() {
     // balanced for: at three workers the three light components get one
     // slot and the heavy one two. (An accumulating phase, so no component
     // runs alone; the blocks widen on any share and the total pays.)
-    let unit = first_count(3, |width| width == 3);
-    let wide = unit.max(first_count(2, |width| width == 2));
+    // Each atom is one block that fills either share, so its weight is its
+    // largest block, as compiled metadata has it.
+    let wide = first_count(3, |width| width == 3).max(first_count(2, |width| width == 2));
+    let unit = wide;
     let leaves = record_single_phase(
         &[
             (0, unit, wide),
@@ -948,7 +950,10 @@ fn component_splits_balance_moved_elements_not_component_count() {
         false,
     )
     .0;
-    assert_eq!(leaves, [(vec![0, 1, 2], 1), (vec![3], 2)]);
+    assert_eq!(
+        leaves,
+        [(vec![0], 1), (vec![1], 1), (vec![2], 1), (vec![3], 2)]
+    );
     // The fixture's Single atoms at three lanes: 8 of 28 elements is the
     // closest left share to a third.
     let (_, transform) = su2_interleaved_fixture();
@@ -1006,6 +1011,7 @@ fn record_single_phase(
             replay_single_phase(
                 &schedule,
                 &mut narrow,
+                &mut Vec::new(),
                 &mut dst,
                 &mut fused_indices,
                 1,
@@ -1297,14 +1303,14 @@ fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
         }
     }
     let lengths = pool.with_exec(|exec| {
-        let window = below.saturating_sub(4)..=at + 4;
+        let window = below.saturating_sub(64)..=at + 64;
         let narrower = window
             .clone()
             .find(|&n| {
                 width(&exec, n) == 3 && window.clone().any(|m| m < n && width(&exec, m) == 4)
             })
             .expect("the cost row ties widths 3 and 4 near this estimate");
-        let wider = (below.saturating_sub(4)..narrower)
+        let wider = (below.saturating_sub(64)..narrower)
             .rev()
             .find(|&n| width(&exec, n) == 4)
             .expect("a smaller count gets four workers");
@@ -1332,6 +1338,7 @@ fn a_saturating_single_runs_alone_even_where_a_larger_one_does_not() {
         replay_single_phase(
             schedule,
             &mut narrow,
+            &mut Vec::new(),
             &mut dst,
             &mut fused_indices,
             1,
@@ -1378,9 +1385,20 @@ fn a_split_uses_no_more_lanes_than_its_components_can() {
     let moved = first_count(3, |width| width == 3);
     let leaves = record_single_leaves(&[(0, moved, 1), (1, moved, 1)]);
     assert_eq!(leaves, [(vec![0], 1), (vec![1], 1)]);
-    let lanes = crate::host_pool::test_pool(3)
-        .with_exec(|exec| split_lanes(&exec, &LeafGate::new(1), 3, 2 * moved, [1, 1]));
-    assert_eq!(lanes, 2);
+    let (lanes, widths) = crate::host_pool::test_pool(3).with_exec(|exec| {
+        let mut widths = [0, 0];
+        let [first, second] = &mut widths;
+        let lanes = split_lanes(
+            &exec,
+            &LeafGate::new(1),
+            &mut Vec::new(),
+            3,
+            2 * moved,
+            [(1, first), (1, second)],
+        );
+        (lanes, widths)
+    });
+    assert_eq!((lanes, widths), (2, [1, 1]));
 }
 
 /// The smallest count whose copy Strided gives a width satisfying `holds` on
@@ -1410,4 +1428,210 @@ fn first_count(threads: usize, holds: impl Fn(usize) -> bool) -> usize {
         }
         at
     })
+}
+
+/// The eight-worker cost row under which a tiny column widens to two
+/// workers but no further, and the smallest column counts Strided gives two
+/// and all eight workers under it.
+fn intermediate_width_pool() -> (crate::host_pool::TestPool, usize, usize) {
+    use std::time::Duration;
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    use tenferro_cpu::threadteam::WidthCosts;
+    let row = WidthCosts::from_anchors(&[
+        (2, Duration::from_nanos(1)),
+        (3, Duration::from_nanos(400)),
+        (8, Duration::from_nanos(400)),
+    ])
+    .unwrap();
+    let mut pool = crate::host_pool::test_pool_with_costs(8, row);
+    let (two, eight) = pool.with_exec(|exec| {
+        let width = |n| parallel_width(&exec, KernelClass::Copy, n).get();
+        let first = |workers: usize| {
+            let mut at = 1usize;
+            while width(at) < workers {
+                at *= 2;
+            }
+            let (mut below, mut at) = (at / 2, at);
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if width(middle) >= workers {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            at
+        };
+        let (two, eight) = (first(2), first(8));
+        assert_eq!((width(two), width(16 * two), width(eight)), (2, 2, 8));
+        (two, eight)
+    });
+    (pool, two, eight)
+}
+
+/// Replays `chunks` identical chunks of eight two-column Multi groups whose
+/// columns hold `columns[g]` elements on `pool`'s eight workers, checks
+/// `U * source`, and returns the Strided width searches and gate threshold
+/// setups the calling thread ran.
+fn replay_chunks(
+    pool: &mut crate::host_pool::TestPool,
+    columns: [usize; 8],
+    chunks: usize,
+) -> (usize, usize) {
+    use crate::kernel_adapter::sealed::{GATE_SCANS, WIDTH_QUERIES};
+    let matrix = [2.0, -1.0, 0.5, 3.0];
+    let sizes = (0..chunks)
+        .flat_map(|_| columns)
+        .flat_map(|column| [column, column])
+        .collect::<Vec<_>>();
+    let structure = Arc::new(
+        BlockStructure::packed_column_major(1, sizes.iter().map(|&len| vec![len])).unwrap(),
+    );
+    let groups = 8 * chunks;
+    let transform = TreeTransformStructure::compile_structures(
+        &structure,
+        &structure,
+        &(0..groups)
+            .map(|group| {
+                let blocks = vec![2 * group, 2 * group + 1];
+                TreeTransformBlockSpec::multi(blocks.clone(), blocks, matrix.to_vec())
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap();
+    let len = structure.required_len().unwrap();
+    let source = (0..len)
+        .map(|value| (value % 31) as f64)
+        .collect::<Vec<_>>();
+    let mut expected = Vec::with_capacity(len);
+    let mut start = 0;
+    for pair in sizes.chunks(2) {
+        let column = pair[0];
+        let (a, b) = source[start..start + 2 * column].split_at(column);
+        expected.extend(a.iter().zip(b).map(|(a, b)| matrix[0] * a + matrix[1] * b));
+        expected.extend(a.iter().zip(b).map(|(a, b)| matrix[2] * a + matrix[3] * b));
+        start += 2 * column;
+    }
+    let mut destination = vec![f64::NAN; len];
+    let before = (
+        WIDTH_QUERIES.with(|queries| queries.get()),
+        GATE_SCANS.with(|scans| scans.get()),
+    );
+    pool.install(|engine| {
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &structure,
+            &structure,
+            &mut destination,
+            &source,
+            1.0,
+            &[],
+            8,
+        )
+    })
+    .unwrap();
+    assert!(destination == expected);
+    (
+        WIDTH_QUERIES.with(|queries| queries.get()) - before.0,
+        GATE_SCANS.with(|scans| scans.get()) - before.1,
+    )
+}
+
+#[test]
+fn repeated_chunks_reuse_the_calls_width_decisions() {
+    // What: 1 or 10 identical chunks of components that widen to two of
+    // eight workers ask Strided for widths, and set up the gate's
+    // thresholds, equally often: the call's width answers are reused.
+    let (mut pool, two, _) = intermediate_width_pool();
+    let one = replay_chunks(&mut pool, [two; 8], 1);
+    assert!(one.0 > 0 && one.1 > 0);
+    assert_eq!(replay_chunks(&mut pool, [two; 8], 10), one);
+}
+
+#[test]
+fn a_narrowed_lane_keeps_the_whole_token_gate() {
+    use crate::kernel_adapter::sealed::GATE_SCANS;
+    // What: a gate asked alternately on the call's whole token and on a lane
+    // narrowed to two workers (as a chunk's wide components and its one
+    // narrowed remainder ask it) sets up each token shape's thresholds once,
+    // however many chunks alternate.
+    let (mut pool, two, eight) = intermediate_width_pool();
+    let scans = pool.with_exec(|mut exec| {
+        let gate = LeafGate::new(eight);
+        let before = GATE_SCANS.with(|scans| scans.get());
+        for _ in 0..10 {
+            assert!(gate.saturates(&exec, eight));
+            let narrowed = granted_width(exec.reborrow(), 2);
+            assert!(gate.widens(&narrowed, two));
+        }
+        GATE_SCANS.with(|scans| scans.get()) - before
+    });
+    assert_eq!(scans, 2);
+}
+
+#[test]
+fn whole_token_widths_from_the_call_table_match_strided() {
+    use std::time::Duration;
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    use tenferro_cpu::threadteam::WidthCosts;
+    // What: the call's width-transition table answers every count's copy
+    // width exactly as Strided does, for a plain, a free-dispatch and an
+    // intermediate-width cost row, below, around and past the gate's bound.
+    let row = WidthCosts::from_anchors(&[
+        (2, Duration::from_nanos(1)),
+        (3, Duration::from_nanos(400)),
+        (8, Duration::from_nanos(400)),
+    ])
+    .unwrap();
+    let counts = (0..2048)
+        .chain((11..=34).flat_map(|shift| [(1usize << shift) - 1, 1 << shift, (1 << shift) + 1]))
+        .collect::<Vec<_>>();
+    for mut pool in [
+        crate::host_pool::test_pool(8),
+        crate::host_pool::eager_test_pool(4),
+        crate::host_pool::test_pool_with_costs(8, row),
+    ] {
+        pool.with_exec(|exec| {
+            for bound in [0, 4096, usize::MAX] {
+                let gate = LeafGate::new(bound);
+                let mut levels = Vec::new();
+                for &n in &counts {
+                    assert_eq!(
+                        whole_width(&exec, &gate, &mut levels, n),
+                        parallel_width(&exec, KernelClass::Copy, n).get(),
+                        "elements {n}, bound {bound}"
+                    );
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn independent_components_split_up_to_their_summed_widths() {
+    // What: eight components that each use one worker split over all eight
+    // lanes even though Strided gives their total moved elements, as one
+    // copy, only two: the phase's width is that of its components side by
+    // side, not of one copy.
+    let (mut pool, two, _) = intermediate_width_pool();
+    let (lanes, total_width) = pool.with_exec(|exec| {
+        let gate = LeafGate::new(1);
+        let mut levels = Vec::new();
+        let mut widths = [0; 8];
+        let total = 8 * two;
+        let lanes = split_lanes(
+            &exec,
+            &gate,
+            &mut levels,
+            8,
+            total,
+            widths.iter_mut().map(|width| (1, width)),
+        );
+        (lanes, whole_width(&exec, &gate, &mut levels, total))
+    });
+    assert_eq!((lanes, total_width), (8, 2));
 }

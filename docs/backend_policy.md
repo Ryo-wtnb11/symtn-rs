@@ -244,10 +244,12 @@ one's answer stands for the rest only where the cost rule is provably
 monotone, below); every other component splits and widens within the share
 its lane is granted. A Single phase, or a chunk of recoupling scatter, whose
 moved elements Strided's rule would give one worker runs inline on the
-token instead of splitting. A split uses at most Strided's width for its
-total moved elements and at most the sum of its components' own widths, and
+token instead of splitting. A split uses at most the sum of its
+components' own widths, and
 each lane holds no more workers than Strided's width for its component's
-largest planned block. Each
+largest planned block. These widths come from one table of width
+transitions per call, built lazily from Strided's own answers, so repeated
+chunks do not repeat the width searches. Each
 split hands the left `⌊w/2⌋` of `w` workers
 the components whose destination elements are closest to that fraction of
 the total, never dividing a component, and runs that side on the same

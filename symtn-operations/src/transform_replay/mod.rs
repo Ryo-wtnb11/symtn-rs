@@ -330,6 +330,9 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_units: Vec<ScatterUnit>,
     // Narrow Single atoms of a threaded replay that also has wide ones.
     narrow_atoms: Vec<NarrowAtom>,
+    // One call's whole-token width-transition counts (`whole_width`),
+    // cleared at the start of every threaded replay.
+    width_levels: Vec<usize>,
     // Capacity of the per-call atom slice list of component-owned scatter
     // (`take_atom_slices`); always empty between calls.
     atom_slices: Vec<&'static [u8]>,
@@ -358,6 +361,7 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_scatter_groups: Vec::new(),
             chunk_units: Vec::new(),
             narrow_atoms: Vec::new(),
+            width_levels: Vec::new(),
             atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
@@ -399,10 +403,12 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.chunk_units.capacity(),
             std::mem::size_of::<ScatterUnit>(),
-        ) + bytes(
-            self.narrow_atoms.capacity(),
-            std::mem::size_of::<NarrowAtom>(),
-        ) + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
+        ) + bytes(self.width_levels.capacity(), std::mem::size_of::<usize>())
+            + bytes(
+                self.narrow_atoms.capacity(),
+                std::mem::size_of::<NarrowAtom>(),
+            )
+            + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
     }
 
     /// The kept atom-slice capacity, emptied, for slices of `T` borrowed
