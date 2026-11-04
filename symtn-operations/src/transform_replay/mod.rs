@@ -471,11 +471,19 @@ impl<T> HostTreeTransformWorkspace<T> {
         #[cfg(feature = "tenferro")]
         {
             let bytes = |capacity: usize, item: usize| capacity.saturating_mul(item);
-            // A hash table holds about 8/7 buckets per entry of capacity,
-            // each with one control byte.
-            let buckets = match self.lane_class_widths.capacity() {
+            // The reduced-width memo's table at its largest bucket count for
+            // its capacity: entries plus one control byte each, plus one
+            // group of trailing control bytes (as the dense GEMM scratch
+            // charges its geometry index). An unallocated table holds none.
+            let class_widths = match self.lane_class_widths.capacity() {
                 0 => 0,
-                capacity => (capacity.saturating_mul(8) / 7).max(1).next_power_of_two(),
+                capacity => capacity
+                    .saturating_mul(8)
+                    .div_ceil(7)
+                    .max(1)
+                    .next_power_of_two()
+                    .saturating_mul(std::mem::size_of::<((u32, u32), core::time::Duration)>() + 1)
+                    .saturating_add(16),
             };
             bytes(
                 self.lane_placements.capacity(),
@@ -483,35 +491,40 @@ impl<T> HostTreeTransformWorkspace<T> {
             ) + bytes(
                 self.lane_classes.capacity(),
                 std::mem::size_of::<Option<lanes::ClassPlacement>>(),
-            ) + bytes(
-                buckets,
-                std::mem::size_of::<((u32, u32), core::time::Duration)>() + 1,
-            ) + bytes(
-                self.lane_scans.capacity(),
-                std::mem::size_of::<lanes::ShapeScan>(),
-            ) + bytes(
-                self.lane_scan_levels.capacity(),
-                std::mem::size_of::<usize>(),
-            ) + bytes(
-                self.lane_parts.capacity(),
-                std::mem::size_of::<lanes::LanePart>(),
-            ) + bytes(
-                self.lane_leaves.capacity(),
-                std::mem::size_of::<lanes::LaneLeaf>(),
-            ) + bytes(
-                self.lane_shapes.capacity(),
-                std::mem::size_of::<symtn_dense::LaneGemmShape>(),
-            ) + bytes(
-                self.lane_pieces.capacity(),
-                std::mem::size_of::<Option<lanes::ParkedPiece>>(),
-            ) + bytes(
-                self.lane_sources.capacity(),
-                std::mem::size_of::<HostScratchBuffer<T>>(),
-            ) + self
-                .lane_sources
-                .iter()
-                .map(|buffer| bytes(buffer.capacity(), std::mem::size_of::<T>()))
-                .sum::<usize>()
+            ) + class_widths
+                + bytes(
+                    self.lane_scans.capacity(),
+                    std::mem::size_of::<lanes::ShapeScan>(),
+                )
+                + bytes(
+                    self.lane_scan_levels.capacity(),
+                    std::mem::size_of::<usize>(),
+                )
+                + bytes(
+                    self.lane_parts.capacity(),
+                    std::mem::size_of::<lanes::LanePart>(),
+                )
+                + bytes(
+                    self.lane_leaves.capacity(),
+                    std::mem::size_of::<lanes::LaneLeaf>(),
+                )
+                + bytes(
+                    self.lane_shapes.capacity(),
+                    std::mem::size_of::<symtn_dense::LaneGemmShape>(),
+                )
+                + bytes(
+                    self.lane_pieces.capacity(),
+                    std::mem::size_of::<Option<lanes::ParkedPiece>>(),
+                )
+                + bytes(
+                    self.lane_sources.capacity(),
+                    std::mem::size_of::<HostScratchBuffer<T>>(),
+                )
+                + self
+                    .lane_sources
+                    .iter()
+                    .map(|buffer| bytes(buffer.capacity(), std::mem::size_of::<T>()))
+                    .sum::<usize>()
         }
         #[cfg(not(feature = "tenferro"))]
         {

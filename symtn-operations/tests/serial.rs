@@ -7,6 +7,7 @@ mod counting_alloc;
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 mod fusion_group_replay_allocations;
+mod lane_workspace_retained;
 mod owned_cat_allocations;
 mod owned_trace_allocations;
 mod owned_transform_allocations;

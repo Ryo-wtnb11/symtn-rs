@@ -1,11 +1,15 @@
 //! The native block GEMM kernel: a batch of disjoint column-major GEMMs, one
-//! tcontract `Plan` per distinct geometry, run on the shared scheduler.
+//! tcontract `Plan` per distinct geometry and plan class, run on the shared
+//! scheduler.
 //!
 //! TensorKit (`mul!` per matched sector) and QSpace (`contractDATA_group`)
 //! set up each block GEMM per call. A tcontract plan is immutable data of its
-//! geometry alone, so the kernel keeps each in the process-global
-//! [`StructureCacheKind::GemmPlans`] cache: a repeated geometry, in this call
-//! or a later one, reuses the prepared plan.
+//! geometry and config, and the config is fixed by the plan class (Serial
+//! for a one-slot token, Shared otherwise; one class for a dtype without a
+//! Faer bound), so the kernel keeps each in the process-global
+//! [`StructureCacheKind::GemmPlans`] cache: a repeated normalized
+//! (dtype, geometry, class), in this call or a later one, reuses the
+//! prepared plan.
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -579,7 +583,8 @@ pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 /// caller's engine, staged in `scratch`.
 ///
 /// Every operand range and destination overlap is checked before the first
-/// write. Each distinct geometry's plan is looked up once per call in the
+/// write. Each distinct geometry's plans are looked up once per call, once
+/// per normalized class the engine can run ([`index_plans`]), in the
 /// geometry-plan cache. The jobs then run on the scheduler's lanes, each into
 /// its own disjoint destination slice, so lane order cannot change a result;
 /// every job runs, and the error returned is the lowest-indexed job's.

@@ -34,8 +34,9 @@ Serial class; a wider one looks up the Shared class and, for `Complex64`,
 the Serial class too, for lanes narrowed to one slot. The plans live in the
 process-global structure cache `StructureCacheKind::GemmPlans`, shared by
 every call, `Runtime`, engine and prepared workspace: a warm call, eager or
-prepared, of any member count, looks each geometry up once and prepares no
-plan. The call's staging (O(J) job records, the geometry index, plan
+prepared, of any member count, looks each distinct normalized (scalar type,
+geometry, class) up once (one class per geometry on a one-slot engine, two
+for `Complex64` on a wider one) and prepares no plan. The call's staging (O(J) job records, the geometry index, plan
 handles, costs and the lane table) belongs to the dense executor that runs
 it: an eager call's executor lives for the call, while a prepared
 `ContractPlan`/`ComposePlan` workspace keeps its executor, so a warm replay
@@ -319,7 +320,9 @@ other component are banded. Components with equal moved elements, band
 units, that eligibility and Multi job shapes form one cost class, whose
 search runs once per call. The gate scans that admission needs are taken
 once per call and token shape the placement queries, and seed the gates of
-the lanes that run those components. Components that
+the lanes that run those components; finding a shape scans the call's
+short list of shapes (at most one per distinct width the placement asks),
+and each new shape initialises width knowledge of O(workers). Components that
 take all of `B` run alone on the whole token first, in address order; the
 rest split recursively over their serial times on at most the sum of their
 widths, when that split is cheaper than running them one after another on

@@ -58,8 +58,9 @@ pub(super) struct Piece<'a, T> {
     data: &'a mut [T],
 }
 
-/// One cost class's placement: its width, `time(1)` and `time(width)`.
-pub(super) type ClassPlacement = (usize, Duration, Duration);
+/// One cost class's placement, which every member shares: equal job-shape
+/// multisets also give equal packed scratch maxima.
+pub(super) type ClassPlacement = LanePlacement;
 
 /// One token shape a lane placement queried: its gate scan (keyed by budget
 /// and team authority) and where its width knowledge starts in the call's
@@ -76,6 +77,11 @@ pub(super) struct ShapeScan {
 /// reduced split widths, final grants), each taken at most once per call
 /// and reused on every revisit, with that shape's width answers beside it.
 /// The workers' gates are seeded from the same list ([`seed`]).
+///
+/// Cost: a lookup scans the list, so R queries over S shapes cost O(R S)
+/// comparisons at worst (S is at most the distinct widths the placement
+/// asks, O(log B) candidates plus the split's reduced widths); each new
+/// shape initialises `2 (budget + 1)` levels, O(Σ_shapes budget) per call.
 pub(super) struct Admission<'w> {
     /// Whether the call's writer overwrites: only then may a component run
     /// whole on its plan.
@@ -212,9 +218,11 @@ fn dense_dtype<D: DenseRecouplingScalar>() -> DenseDType {
 /// times); a lane runs its components one after another, each banded at
 /// `min(lane slots, width_c)`. Cost: O(C) plus O(Σ_q (1 + g_q) log B) time
 /// evaluations over the classes `q`, the split's reduced widths once per
-/// (class, width), one gate scan per token shape queried
-/// ([`Admission`]), O(components + lanes log components) for the split, no
-/// allocation once the workspace is warm.
+/// (class, width), one gate scan per token shape queried, O(R S)
+/// worst-case lookups for R admission queries over S shapes and
+/// O(Σ_shapes budget) level initialisation ([`Admission`]),
+/// O(components + lanes log components) for the split, no allocation once
+/// the workspace is warm.
 ///
 /// One budget slot runs [`TreeTransformParallelSchedule::one_slot_order`]
 /// on the whole destination instead.
@@ -690,11 +698,12 @@ where
 /// Every component's [`LanePlacement`] into `placements` (see
 /// [`lane_replay`]), evaluated once per cost class
 /// ([`TreeTransformParallelSchedule::component_class`]): a class's members
-/// have equal modeled times at every width, so the first member's search
-/// serves them all, and each member keeps only its own packed scratch
-/// sizes. Cost: O(C) plus, per class `q`, `(1 + g_q)` time evaluations at
-/// each of its O(log B) candidate widths, each a dense `time` query of
-/// Θ(B) dispatch-cost reads.
+/// have equal modeled times at every width and, having equal job-shape
+/// multisets, equal packed scratch maxima, so the first member's search and
+/// its `O(g_q)` scratch fold serve them all. Cost: O(C) plus, per class
+/// `q`, `O(g_q)` and `(1 + g_q)` time evaluations at each of its O(log B)
+/// candidate widths, each a dense `time` query of Θ(B) dispatch-cost reads
+/// (plus the admission lookups of [`Admission`]).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn place_components(
     token: &mut LaneToken<'_>,
@@ -714,9 +723,9 @@ pub(super) fn place_components(
     classes.clear();
     classes.resize(schedule.class_count, None);
     for component in 0..components {
-        let (source, destination) = group_sizes(component);
         let class = &mut classes[schedule.component_class[component] as usize];
-        let (width, serial, timed) = *class.get_or_insert_with(|| {
+        let placement = *class.get_or_insert_with(|| {
+            let (source, destination) = group_sizes(component);
             let cap = budget.min(schedule.components[component].units).max(1);
             let serial = component_time(token, gemms, schedule, component, 1, admission);
             let (mut width, mut timed) = (1, serial);
@@ -735,15 +744,15 @@ pub(super) fn place_components(
                     candidate * 2
                 };
             }
-            (width, serial, timed)
+            LanePlacement {
+                width,
+                serial,
+                timed,
+                source,
+                destination,
+            }
         });
-        placements.push(LanePlacement {
-            width,
-            serial,
-            timed,
-            source,
-            destination,
-        });
+        placements.push(placement);
     }
 }
 
