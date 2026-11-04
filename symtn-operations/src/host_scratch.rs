@@ -26,6 +26,8 @@ impl<T> HostScratchBuffer<T> {
     where
         T: Clone,
     {
+        #[cfg(test)]
+        crate::transform_replay::allocation_oracle::record_fill(len);
         let reference = Vec::<T>::new();
         let allocator = SamePlacementScratchAllocator;
         Self {
@@ -38,6 +40,10 @@ impl<T> HostScratchBuffer<T> {
     where
         T: Clone,
     {
+        #[cfg(test)]
+        crate::transform_replay::allocation_oracle::record_fill(
+            len.saturating_sub(self.data.len()),
+        );
         self.data.resize(len, value);
     }
 
@@ -46,6 +52,8 @@ impl<T> HostScratchBuffer<T> {
     where
         T: Clone,
     {
+        #[cfg(test)]
+        crate::transform_replay::allocation_oracle::record_fill(self.data.len());
         self.data.fill(value);
     }
 

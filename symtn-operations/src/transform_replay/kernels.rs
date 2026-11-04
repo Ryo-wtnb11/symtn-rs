@@ -1062,7 +1062,8 @@ mod allocation_replay_tests {
         // workspace slots in the first call), at one worker and banded on
         // three: an initialised overwrite, an initialised overwrite whose
         // groups have distinct GEMM geometries, and an owned replay, which
-        // allocates its one output.
+        // allocates its one output. The warm overwrites also initialise no
+        // scratch element before packing overwrites it (no source fill).
         let (structure, transform) = super::super::tests::su2_interleaved_fixture();
         let src = (1..=60).map(f64::from).collect::<Vec<_>>();
         let expected = super::super::tests::su2_oracle(&src, 1.0);
@@ -1137,10 +1138,12 @@ mod allocation_replay_tests {
                 .unwrap();
             };
             pool.install(&mut replay);
-            let (_, allocations) = allocation_oracle::with_session(|| {
-                pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
+            let (filled, allocations) = allocation_oracle::with_session(|| {
+                pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)));
+                allocation_oracle::filled_elements()
             });
             assert_eq!(allocations, 0, "pool #{index}");
+            assert_eq!(filled, 0, "pool #{index}: scratch elements filled");
             assert_eq!(dst, expected);
             assert_eq!(mixed_dst, mixed_expected);
 

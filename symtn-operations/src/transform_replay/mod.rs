@@ -58,7 +58,7 @@ pub use member::*;
 pub use owned::*;
 
 #[cfg(test)]
-mod allocation_oracle {
+pub(crate) mod allocation_oracle {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::cell::Cell;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -75,6 +75,8 @@ mod allocation_oracle {
     // Joins whose token holds two slots or more, so the two sides run as
     // separate tasks; a one-slot join runs both inline.
     static DISPATCHED_JOINS: AtomicUsize = AtomicUsize::new(0);
+    // Elements a `HostScratchBuffer` fill entry initialised.
+    static FILLED_ELEMENTS: AtomicUsize = AtomicUsize::new(0);
     static SESSION: Mutex<()> = Mutex::new(());
 
     struct CountingAllocator;
@@ -145,6 +147,7 @@ mod allocation_oracle {
         ALLOCATED_BYTES.store(0, Ordering::Relaxed);
         JOINS.store(0, Ordering::Relaxed);
         DISPATCHED_JOINS.store(0, Ordering::Relaxed);
+        FILLED_ELEMENTS.store(0, Ordering::Relaxed);
         let result = action();
         let allocations = ALLOCATIONS.load(Ordering::Relaxed);
         drop(session);
@@ -165,6 +168,16 @@ mod allocation_oracle {
 
     pub(super) fn dispatched_joins() -> usize {
         DISPATCHED_JOINS.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn record_fill(elements: usize) {
+        if is_measured() {
+            FILLED_ELEMENTS.fetch_add(elements, Ordering::Relaxed);
+        }
+    }
+
+    pub(super) fn filled_elements() -> usize {
+        FILLED_ELEMENTS.load(Ordering::Relaxed)
     }
 
     pub(super) fn join<A, B, RA, RB>(
