@@ -14,6 +14,7 @@ mod dot;
 mod dtype;
 mod error;
 mod executor;
+mod factor_dest;
 mod fresh;
 mod lane_gemm;
 mod layout;
@@ -68,6 +69,7 @@ pub use executor::{
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
     LaneAllocation, MatrixOp,
 };
+pub use factor_dest::{FactorDest, FactorFailure, FactorPlacement};
 #[doc(hidden)]
 pub use fresh::DenseFreshSegments;
 #[doc(hidden)]

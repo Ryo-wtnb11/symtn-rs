@@ -116,10 +116,10 @@ fn one_configuration_repeats_its_bits_at_every_width() {
     }
 }
 
-/// The eigh, eigh-values, svd-values, pinv, qr, trace and general eig
-/// outputs of `t`, as one payload each, so a width that splits the block
-/// scheduler differently shows in any of them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7] {
+/// The eigh, eigh-values, svd-values, pinv, qr, trace, general eig, lq,
+/// full qr and left null space outputs of `t`, as one payload each, so a
+/// width that splits the block scheduler differently shows in any of them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 10] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
@@ -181,6 +181,32 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7
             .iter()
             .flat_map(|value| [value.re, value.im]),
     );
+    // LQ's factors are unique only for a nonsingular leading triangular
+    // factor; the reconstruction `L Q` is gauge-free.
+    let lq = t.lq_compact(engine, &[0], &[1, 2]).unwrap();
+    let lq_out =
+        lq.l.compose(engine, &lq.q)
+            .unwrap()
+            .dense_data()
+            .unwrap()
+            .to_vec();
+    // The complement columns of the full `Q` and the null basis are free;
+    // the reconstruction `Q R` and the projector `N Nᴴ` are not.
+    let full = t.qr_full(engine, &[0, 1], &[2]).unwrap();
+    let qr_full_out = full
+        .q
+        .compose(engine, &full.r)
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
+    let null = t.left_null(engine, &[0, 1], &[2]).unwrap();
+    let null_out = null
+        .compose(engine, null.adjoint_view())
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     [
         eigh_out,
         eigh_vals_out,
@@ -189,6 +215,9 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 7
         qr_out,
         traced.dense_data().unwrap().to_vec(),
         eig_out,
+        lq_out,
+        qr_full_out,
+        null_out,
     ]
 }
 
@@ -209,6 +238,9 @@ fn factorizations_and_trace_agree_across_widths() {
         "qr",
         "trace",
         "eig",
+        "lq",
+        "qr_full",
+        "left_null",
     ];
     for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);

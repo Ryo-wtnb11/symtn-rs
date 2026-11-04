@@ -780,70 +780,239 @@ fn gauged_compact_svd_stage<D: FactorScalar>(
     }
 }
 
+/// One sector of [`compact_svd_sectors_staged`]: its gauged factors, in
+/// place in the batch's storage at `u_range`/`vt_range` (the whole
+/// per-sector factor under [`SvdStorage::PerSector`]), and its spectrum.
+pub(super) struct CompactSvdSector<'s, D> {
+    pub(super) rows: usize,
+    pub(super) cols: usize,
+    pub(super) rank: usize,
+    pub(super) u: &'s mut [D],
+    pub(super) u_range: std::ops::Range<usize>,
+    pub(super) singular_values: Vec<f64>,
+    pub(super) vt: &'s mut [D],
+    pub(super) vt_range: std::ops::Range<usize>,
+}
+
+/// Where [`compact_svd_sectors_staged`] keeps the solved factors.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SvdStorage {
+    /// One packed transient per factor, written by the destination batch:
+    /// for a caller that scatters or publishes the factors, where it
+    /// replaces the per-sector owners and their copy.
+    Packed,
+    /// The owned batch's per-sector factors, as the executor publishes
+    /// them: for a caller that only reads the factors in place. Why not
+    /// packed there: the transient must be zero-initialized before the
+    /// destination entry overwrites it, a serial pass the owned batch's
+    /// provider-published outputs do not pay and that such a caller never
+    /// recovers (TensorKit's `pinv` likewise solves each block into its own
+    /// temporaries).
+    PerSector,
+}
+
+/// The factors [`compact_svd_sectors_staged`] solved, in sector order.
+pub(super) enum StagedSvdFactors<D> {
+    /// Every sector's `u` and `vt` concatenated.
+    Packed { u: Vec<D>, vt: Vec<D> },
+    /// Each sector's own `(u, vt)`; empty for a zero-rank sector.
+    PerSector(Vec<(Vec<D>, Vec<D>)>),
+}
+
+impl<D> StagedSvdFactors<D> {
+    /// Sector `position`'s `(u, vt)`, at `u_range`/`vt_range` of the
+    /// packed transient.
+    pub(super) fn sector_mut(
+        &mut self,
+        position: usize,
+        u_range: std::ops::Range<usize>,
+        vt_range: std::ops::Range<usize>,
+    ) -> (&mut [D], &mut [D]) {
+        match self {
+            Self::Packed { u, vt } => (&mut u[u_range], &mut vt[vt_range]),
+            Self::PerSector(sectors) => {
+                let (u, vt) = &mut sectors[position];
+                (u, vt)
+            }
+        }
+    }
+}
+
 /// Compact SVDs of the column-major sectors `blocks` (`(data, rows, cols)`)
-/// as one executor batch: `stage` receives every sector in sector order,
-/// each solved sector gauged as [`gauged_compact_svd_stage`] does and a
-/// zero-rank sector as an empty stage that makes no dense call. Each
-/// zero-rank sector is staged as soon as every sector before it has been,
-/// so a per-matrix executor sees the same call sequence as a sector loop.
+/// as one executor batch, the factors kept as `storage` says: `stage`
+/// receives every sector in sector order, each solved sector gauged in place
+/// (`None` keeps the solver's gauge) and a zero-rank sector as an empty
+/// sector that makes no dense call. Each zero-rank sector is staged as soon
+/// as every sector before it has been, so a per-matrix executor sees the
+/// same call sequence as a sector loop. Either failure of a sector stops the
+/// batch. `observe` sees each solved sector's gauged `u` and `vt`.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compact_svd_sectors_staged<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     blocks: &[(&[D], usize, usize)],
     gauge: Option<CompactSvdGauge>,
+    storage: SvdStorage,
     mut observe: impl FnMut(&[D], &[D]),
-    mut stage: impl FnMut(usize, CompactSvdNumericalStage<D>) -> Result<(), OperationError>,
-) -> Result<(), OperationError>
+    mut stage: impl FnMut(usize, CompactSvdSector<'_, D>) -> Result<(), OperationError>,
+) -> Result<StagedSvdFactors<D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let is_empty = |position: usize| blocks[position].1.min(blocks[position].2) == 0;
-    let empty = |position: usize| CompactSvdNumericalStage {
+    let rank_of = |position: usize| blocks[position].1.min(blocks[position].2);
+    let u_ranges = packed_ranges((0..blocks.len()).map(|p| blocks[p].1 * rank_of(p)));
+    let vt_ranges = packed_ranges((0..blocks.len()).map(|p| rank_of(p) * blocks[p].2));
+    let empty = |position: usize| CompactSvdSector {
         rows: blocks[position].1,
         cols: blocks[position].2,
         rank: 0,
-        u: Vec::new(),
+        u: &mut [],
+        u_range: u_ranges[position].clone(),
         singular_values: Vec::new(),
-        vt: Vec::new(),
+        vt: &mut [],
+        vt_range: vt_ranges[position].clone(),
     };
-    let (solved, solved_blocks): (Vec<_>, Vec<_>) = blocks
-        .iter()
-        .enumerate()
-        .filter(|&(position, _)| !is_empty(position))
-        .map(|(position, &block)| (position, block))
-        .unzip();
+    let solved = (0..blocks.len())
+        .filter(|&position| rank_of(position) != 0)
+        .collect::<Vec<_>>();
+    let solved_blocks = solved.iter().map(|&p| blocks[p]).collect::<Vec<_>>();
     let mut layouts = Vec::new();
     let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
     let mut next = 0;
-    while next < blocks.len() && is_empty(next) {
+    while next < blocks.len() && rank_of(next) == 0 {
         stage(next, empty(next))?;
         next += 1;
     }
-    if inputs.is_empty() {
-        return Ok(());
-    }
-    factorize_batch_staged(
-        engine,
-        dense,
-        DenseFactorization::Svd,
-        &inputs,
-        |index, outcome| {
-            let position = solved[index];
-            let (_, rows, cols) = blocks[position];
-            let factors = compact_svd_outputs(outcome.map_err(OperationError::Dense)?, rows, cols)?;
-            stage(
-                position,
-                gauged_compact_svd_stage(rows, cols, factors, gauge, &mut observe),
-            )?;
-            next = position + 1;
-            while next < blocks.len() && is_empty(next) {
-                stage(next, empty(next))?;
-                next += 1;
+    // One solved sector, gauged and staged, then the zero-rank sectors after
+    // it.
+    let mut deliver = |position: usize,
+                       u: &mut [D],
+                       singular_values: Vec<f64>,
+                       vt: &mut [D],
+                       ranges: [std::ops::Range<usize>; 2]|
+     -> Result<(), OperationError> {
+        let (_, rows, cols) = blocks[position];
+        let rank = rows.min(cols);
+        match gauge {
+            Some(CompactSvdGauge::Left) => svd_compact_gauge(u, rows, rows, vt, rank, cols, rank),
+            Some(CompactSvdGauge::AdjointLeft) => {
+                svd_compact_adjoint_gauge(u, rows, rows, vt, rank, cols, rank)
             }
-            Ok(())
-        },
-    )
+            None => {}
+        }
+        observe(u, vt);
+        let [u_range, vt_range] = ranges;
+        stage(
+            position,
+            CompactSvdSector {
+                rows,
+                cols,
+                rank,
+                u,
+                u_range,
+                singular_values,
+                vt,
+                vt_range,
+            },
+        )?;
+        next = position + 1;
+        while next < blocks.len() && rank_of(next) == 0 {
+            stage(next, empty(next))?;
+            next += 1;
+        }
+        Ok(())
+    };
+    if storage == SvdStorage::PerSector {
+        let mut sectors = (0..blocks.len())
+            .map(|_| (Vec::new(), Vec::new()))
+            .collect::<Vec<_>>();
+        if !inputs.is_empty() {
+            factorize_batch_staged(
+                engine,
+                dense,
+                DenseFactorization::Svd,
+                &inputs,
+                |index, outcome| {
+                    let position = solved[index];
+                    let (_, rows, cols) = blocks[position];
+                    let (mut u, singular_values, mut vt) =
+                        compact_svd_outputs(outcome.map_err(OperationError::Dense)?, rows, cols)?;
+                    let ranges = [0..u.len(), 0..vt.len()];
+                    deliver(position, &mut u, singular_values, &mut vt, ranges)?;
+                    sectors[position] = (u, vt);
+                    Ok(())
+                },
+            )?;
+        }
+        return Ok(StagedSvdFactors::PerSector(sectors));
+    }
+    let s_ranges = packed_ranges((0..blocks.len()).map(rank_of));
+    let end = |ranges: &[std::ops::Range<usize>]| ranges.last().map_or(0, |range| range.end);
+    let mut u = vec![D::zero(); end(&u_ranges)];
+    let mut vt = vec![D::zero(); end(&vt_ranges)];
+    let mut s = vec![D::Real::zero(); end(&s_ranges)];
+    let dest_layouts = solved_blocks
+        .iter()
+        .map(|&(_, rows, cols)| {
+            let rank = rows.min(cols);
+            [
+                matrix_layout(rows, rank),
+                vector_layout(rank),
+                matrix_layout(rank, cols),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    {
+        let mut u_slices = split_ranges(&mut u, &u_ranges)?;
+        let mut vt_slices = split_ranges(&mut vt, &vt_ranges)?;
+        let mut s_slices = split_ranges(&mut s, &s_ranges)?;
+        let mut dests = solved
+            .iter()
+            .zip(&dest_layouts)
+            .map(|(&position, layout)| {
+                Ok(FactorDest::new(
+                    [
+                        Some(dest_write(
+                            std::mem::take(&mut u_slices[position]),
+                            &layout[0],
+                        )?),
+                        Some(dest_write(
+                            std::mem::take(&mut s_slices[position]),
+                            &layout[1],
+                        )?),
+                        Some(dest_write(
+                            std::mem::take(&mut vt_slices[position]),
+                            &layout[2],
+                        )?),
+                    ],
+                    symtn_dense::FactorPlacement::AsComputed,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        if !inputs.is_empty() {
+            factorize_batch_into_staged(
+                engine,
+                dense,
+                DenseFactorization::Svd,
+                &inputs,
+                &mut dests,
+                |index, dest, outcome| {
+                    outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                    let position = solved[index];
+                    let [u, s, vt] = dest.outputs_mut();
+                    let (u, vt) = (
+                        dest_data::<D>(u, "svd_into")?,
+                        dest_data::<D>(vt, "svd_into")?,
+                    );
+                    let singular_values = widened_spectrum(dest_data::<D::Real>(s, "svd_into")?);
+                    let ranges = [u_ranges[position].clone(), vt_ranges[position].clone()];
+                    deliver(position, u, singular_values, vt, ranges)
+                },
+            )?;
+        }
+    }
+    Ok(StagedSvdFactors::Packed { u, vt })
 }
 
 #[cfg(test)]
@@ -975,13 +1144,14 @@ where
             dense,
             &blocks,
             Some(gauge),
+            SvdStorage::Packed,
             |_u, _vt| {
                 #[cfg(test)]
                 crate::probe::mf_svd_fallback(_u, _vt);
             },
             |position, stage| {
                 let matrix = &matricizations[position];
-                let CompactSvdNumericalStage {
+                let CompactSvdSector {
                     rank,
                     u,
                     singular_values: values,
@@ -999,7 +1169,7 @@ where
                         matrix,
                         &index,
                         &u_groups,
-                        &u,
+                        u,
                         matrix.rows,
                     )?,
                     CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
@@ -1008,7 +1178,7 @@ where
                         matrix,
                         &index,
                         &u_groups,
-                        &vt,
+                        vt,
                         rank,
                         FactorSide::Left,
                     )?,
@@ -1022,7 +1192,7 @@ where
                         matrix,
                         &index,
                         &vt_groups,
-                        &vt,
+                        vt,
                         rank,
                     )?,
                     CompactSvdGauge::AdjointLeft => scatter_adjoint_svd_factor(
@@ -1031,7 +1201,7 @@ where
                         matrix,
                         &index,
                         &vt_groups,
-                        &u,
+                        u,
                         matrix.rows,
                         FactorSide::Right,
                     )?,
@@ -1041,7 +1211,8 @@ where
                 Ok(())
             },
         )
-    })?;
+    })
+    .map(drop)?;
 
     let (u_nout, u_nin) = (u_target.nout(), u_target.nin());
     let (vh_nout, vh_nin) = (vt_target.nout(), vt_target.nin());
@@ -1072,7 +1243,9 @@ where
             input.space().rebind_validated(&plan.right_layout)?,
         ),
     };
-    let adjoint_routes = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
+    // The adjoint's own factor regions, per route, when its trees match the
+    // parent's so each route's adjoint factors are one contiguous region.
+    let adjoint_regions = if matches!(gauge, CompactSvdGauge::AdjointLeft) {
         let left =
             checked_sector_regions(left_space.space().structure(), left_space.space().nout())?;
         let right =
@@ -1093,163 +1266,199 @@ where
                             && right[ri].col_trees() == source.row_trees()
                             && left[li].rows() == source.cols()
                             && right[ri].cols() == source.rows();
-                        routes.push((li, ri));
+                        routes.push((left[li].range(), right[ri].range()));
                     } else {
                         compatible = false;
                         break;
                     }
                 }
-                compatible.then_some((routes, left.len(), right.len()))
+                compatible.then_some(routes)
             }
             _ => None,
         }
     } else {
         None
     };
-    let reuse_regions = matches!(gauge, CompactSvdGauge::Left) || adjoint_routes.is_some();
-    let mut u_regions = if reuse_regions {
-        vec![
-            None;
-            adjoint_routes
-                .as_ref()
-                .map_or(plan.left_regions.len(), |r| r.1)
-        ]
-    } else {
-        Vec::new()
-    };
-    let mut vh_regions = if reuse_regions {
-        vec![
-            None;
-            adjoint_routes
-                .as_ref()
-                .map_or(plan.right_regions.len(), |r| r.2)
-        ]
-    } else {
-        Vec::new()
-    };
-    let mut singular_values = Vec::with_capacity(plan.routes.len());
-    let mut left_data = if matches!(gauge, CompactSvdGauge::AdjointLeft) && !reuse_regions {
-        vec![D::zero(); left_space.space().required_len()?]
-    } else {
-        Vec::new()
-    };
-    let mut right_data = if matches!(gauge, CompactSvdGauge::AdjointLeft) && !reuse_regions {
-        vec![D::zero(); right_space.space().required_len()?]
-    } else {
-        Vec::new()
-    };
-    let adjoint_replay = if matches!(gauge, CompactSvdGauge::AdjointLeft) && !reuse_regions {
-        Some((
-            PlacementIndex::new(&plan.source_regions, &[FactorSide::Left, FactorSide::Right]),
-            SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?,
-            SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?,
-        ))
-    } else {
-        None
-    };
-
-    let blocks = plan
+    // A zero-rank route is not solved; its spectrum stays empty.
+    let mut singular_values = plan
         .routes
         .iter()
-        .filter(|route| route.rank != 0)
-        .map(|route| {
-            let region = &plan.source_regions[route.source_region];
+        .map(|route| SectorSpectrum {
+            sector: route.sector,
+            values: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let solved = (0..plan.routes.len())
+        .filter(|&position| plan.routes[position].rank != 0)
+        .collect::<Vec<_>>();
+    let blocks = solved
+        .iter()
+        .map(|&position| {
+            let region = &plan.source_regions[plan.routes[position].source_region];
             (&input.data()[region.range()], region.rows(), region.cols())
         })
         .collect::<Vec<_>>();
-    let mut factors = compact_svd_owned_batch(engine, dense, &blocks)?.into_iter();
+    let mut u_data = vec![D::zero(); left_space.space().required_len()?];
+    let mut vh_data = vec![D::zero(); right_space.space().required_len()?];
 
-    for (route_index, route) in plan.routes.iter().copied().enumerate() {
-        let region = &plan.source_regions[route.source_region];
-        let rank = route.rank;
-        if rank == 0 {
-            singular_values.push(SectorSpectrum {
-                sector: route.sector,
-                values: Vec::new(),
-            });
-            continue;
-        }
-        let left_region = route.left_region.expect("nonzero route has left region");
-        let right_region = route.right_region.expect("nonzero route has right region");
-        let (mut u, spectrum, mut vh) = factors
-            .next()
-            .expect("one batch output per nonzero-rank route");
-        match gauge {
-            CompactSvdGauge::Left => svd_compact_gauge(
-                &mut u,
-                region.rows(),
-                region.rows(),
-                &mut vh,
-                rank,
-                region.cols(),
-                rank,
-            ),
-            CompactSvdGauge::AdjointLeft => svd_compact_adjoint_gauge(
-                &mut u,
-                region.rows(),
-                region.rows(),
-                &mut vh,
-                rank,
-                region.cols(),
-                rank,
-            ),
-        }
-        match gauge {
-            CompactSvdGauge::Left => {
-                u_regions[left_region] = Some(u);
-                vh_regions[right_region] = Some(vh);
-            }
-            CompactSvdGauge::AdjointLeft => {
-                if let Some((routes, _, _)) = &adjoint_routes {
-                    adjoint_col_major_in_place(&mut vh, rank, region.cols());
-                    adjoint_col_major_in_place(&mut u, region.rows(), rank);
-                    let (li, ri) = routes[route_index];
-                    u_regions[li] = Some(vh);
-                    vh_regions[ri] = Some(u);
-                } else {
-                    let (index, left_groups, right_groups) = adjoint_replay
-                        .as_ref()
-                        .expect("adjoint replay is present for adjoint gauge");
-                    scatter_adjoint_svd_factor(
-                        left_space.space(),
-                        &mut left_data,
-                        region,
-                        index,
-                        left_groups,
-                        &vh,
-                        rank,
-                        FactorSide::Left,
-                    )?;
-                    scatter_adjoint_svd_factor(
-                        right_space.space(),
-                        &mut right_data,
-                        region,
-                        index,
-                        right_groups,
-                        &u,
-                        region.rows(),
-                        FactorSide::Right,
-                    )?;
-                }
-            }
-        }
-        singular_values.push(SectorSpectrum {
-            sector: route.sector,
-            values: spectrum,
-        });
-    }
-
-    let (u_data, vh_data) = match gauge {
-        CompactSvdGauge::Left => (
-            concat_compact_svd_factor_regions(u_regions, plan.left_layout.required_len()?),
-            concat_compact_svd_factor_regions(vh_regions, plan.right_layout.required_len()?),
+    // Where each solved route's factors land: the final regions (as
+    // computed, or the adjoint problem's factors in the adjoint's regions),
+    // or, for an adjoint whose trees do not match, one packed transient that
+    // is scattered once the batch has succeeded.
+    let scattered = matches!(gauge, CompactSvdGauge::AdjointLeft) && adjoint_regions.is_none();
+    let (u_ranges, vh_ranges, placement) = match (gauge, &adjoint_regions) {
+        (CompactSvdGauge::Left, _) => (
+            solved
+                .iter()
+                .map(|&p| {
+                    plan.left_regions[plan.routes[p]
+                        .left_region
+                        .expect("nonzero route has left region")]
+                    .range()
+                })
+                .collect::<Vec<_>>(),
+            solved
+                .iter()
+                .map(|&p| {
+                    plan.right_regions[plan.routes[p]
+                        .right_region
+                        .expect("nonzero route has right region")]
+                    .range()
+                })
+                .collect::<Vec<_>>(),
+            symtn_dense::FactorPlacement::AsComputed,
         ),
-        CompactSvdGauge::AdjointLeft if reuse_regions => (
-            concat_compact_svd_factor_regions(u_regions, left_space.space().required_len()?),
-            concat_compact_svd_factor_regions(vh_regions, right_space.space().required_len()?),
+        (CompactSvdGauge::AdjointLeft, Some(routes)) => (
+            solved.iter().map(|&p| routes[p].0.clone()).collect(),
+            solved.iter().map(|&p| routes[p].1.clone()).collect(),
+            symtn_dense::FactorPlacement::Adjoint,
         ),
-        CompactSvdGauge::AdjointLeft => (left_data, right_data),
+        (CompactSvdGauge::AdjointLeft, None) => (
+            packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows * rows.min(cols))),
+            packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows.min(cols) * cols)),
+            symtn_dense::FactorPlacement::AsComputed,
+        ),
     };
+    let end = |ranges: &[std::ops::Range<usize>]| ranges.last().map_or(0, |range| range.end);
+    let (mut u_transient, mut vh_transient) = if scattered {
+        (
+            vec![D::zero(); end(&u_ranges)],
+            vec![D::zero(); end(&vh_ranges)],
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let s_ranges = packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows.min(cols)));
+    let mut s_data = vec![D::Real::zero(); end(&s_ranges)];
+    let layouts = blocks
+        .iter()
+        .map(|&(_, rows, cols)| {
+            let rank = rows.min(cols);
+            match placement {
+                symtn_dense::FactorPlacement::Adjoint => [
+                    matrix_layout(cols, rank),
+                    vector_layout(rank),
+                    matrix_layout(rank, rows),
+                ],
+                _ => [
+                    matrix_layout(rows, rank),
+                    vector_layout(rank),
+                    matrix_layout(rank, cols),
+                ],
+            }
+        })
+        .collect::<Vec<DestLayouts>>();
+    {
+        let (u_target, vh_target) = if scattered {
+            (&mut u_transient[..], &mut vh_transient[..])
+        } else {
+            (&mut u_data[..], &mut vh_data[..])
+        };
+        let u_slices = split_ranges(u_target, &u_ranges)?;
+        let vh_slices = split_ranges(vh_target, &vh_ranges)?;
+        let s_slices = split_ranges(&mut s_data, &s_ranges)?;
+        let mut dests = u_slices
+            .into_iter()
+            .zip(s_slices)
+            .zip(vh_slices)
+            .zip(&layouts)
+            .map(|(((u, s), vh), layout)| {
+                Ok(FactorDest::new(
+                    [
+                        Some(dest_write(u, &layout[0])?),
+                        Some(dest_write(s, &layout[1])?),
+                        Some(dest_write(vh, &layout[2])?),
+                    ],
+                    placement,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        let mut layouts = Vec::new();
+        let inputs = col_major_reads(&blocks, &mut layouts)?;
+        factorize_into_solver_first(
+            engine,
+            dense,
+            DenseFactorization::Svd,
+            &inputs,
+            &mut dests,
+            |index, dest| {
+                let (_, rows, cols) = blocks[index];
+                let rank = rows.min(cols);
+                let [u, s, vh] = dest.outputs_mut();
+                let (u, vh) = (
+                    dest_data::<D>(u, "svd_into")?,
+                    dest_data::<D>(vh, "svd_into")?,
+                );
+                match (gauge, placement) {
+                    (CompactSvdGauge::Left, _) => {
+                        svd_compact_gauge(u, rows, rows, vh, rank, cols, rank)
+                    }
+                    // The adjoint's `u` columns are the conjugated parent `Vh`
+                    // rows, so its left gauge is the parent-row gauge.
+                    (CompactSvdGauge::AdjointLeft, symtn_dense::FactorPlacement::Adjoint) => {
+                        svd_compact_gauge(u, cols, cols, vh, rank, rows, rank)
+                    }
+                    (CompactSvdGauge::AdjointLeft, _) => {
+                        svd_compact_adjoint_gauge(u, rows, rows, vh, rank, cols, rank)
+                    }
+                }
+                singular_values[solved[index]].values =
+                    widened_spectrum(dest_data::<D::Real>(s, "svd_into")?);
+                Ok(())
+            },
+        )?;
+    }
+    if scattered {
+        let index =
+            PlacementIndex::new(&plan.source_regions, &[FactorSide::Left, FactorSide::Right]);
+        let left_groups = SectorBlockGroups::new(left_space.space().structure(), FactorSide::Left)?;
+        let right_groups =
+            SectorBlockGroups::new(right_space.space().structure(), FactorSide::Right)?;
+        for (solved_index, &position) in solved.iter().enumerate() {
+            let region = &plan.source_regions[plan.routes[position].source_region];
+            let rank = plan.routes[position].rank;
+            scatter_adjoint_svd_factor(
+                left_space.space(),
+                &mut u_data,
+                region,
+                &index,
+                &left_groups,
+                &vh_transient[vh_ranges[solved_index].clone()],
+                rank,
+                FactorSide::Left,
+            )?;
+            scatter_adjoint_svd_factor(
+                right_space.space(),
+                &mut vh_data,
+                region,
+                &index,
+                &right_groups,
+                &u_transient[u_ranges[solved_index].clone()],
+                region.rows(),
+                FactorSide::Right,
+            )?;
+        }
+    }
     let u = BoundDynFactor::from_bound(
         left_space,
         u_data,
@@ -2178,28 +2387,6 @@ where
     compact_svd_outputs(outputs, rows, cols)
 }
 
-/// Compact SVD of each column-major `(data, rows, cols)` block, submitted as one
-/// executor batch so the backend admits the whole coupled-sector loop once.
-#[expect(
-    clippy::type_complexity,
-    reason = "the dense SVD ownership boundary returns its documented U, S, Vt tuple"
-)]
-pub(super) fn compact_svd_owned_batch<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    blocks: &[(&[D], usize, usize)],
-) -> Result<Vec<(Vec<D>, Vec<f64>, Vec<D>)>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factorize_col_major_batch(engine, dense, DenseFactorization::Svd, blocks)?
-        .into_iter()
-        .zip(blocks)
-        .map(|(outputs, &(_, rows, cols))| compact_svd_outputs(outputs, rows, cols))
-        .collect()
-}
-
 #[expect(
     clippy::type_complexity,
     reason = "the dense SVD ownership boundary returns its documented U, S, Vt tuple"
@@ -2223,6 +2410,7 @@ pub(super) fn compact_svd_outputs<D: FactorScalar>(
     Ok((u, singular_values, vt))
 }
 
+/// The compact diagonal SVD's per-route factors concatenated in region order.
 pub(super) fn concat_compact_svd_factor_regions<D>(
     regions: Vec<Option<Vec<D>>>,
     required_len: usize,
@@ -2354,7 +2542,7 @@ where
     let mut singular_values = Vec::with_capacity(matrices.len());
     #[cfg(test)]
     let data = input.data();
-    in_linalg_scope(engine, dense, |dense, engine| {
+    let packed = in_linalg_scope(engine, dense, |dense, engine| {
         let (sectors, blocks) = sector_blocks(&matrices)?;
         #[cfg(test)]
         for &(matrix, _, _) in &blocks {
@@ -2362,7 +2550,6 @@ where
                 crate::probe::CheckedCompactOperation::Svd,
                 data,
                 matrix,
-                None,
             );
         }
         compact_svd_sectors_staged(
@@ -2370,6 +2557,7 @@ where
             dense,
             &blocks,
             Some(gauge),
+            SvdStorage::Packed,
             |_u, _vt| {
                 #[cfg(test)]
                 if matches!(gauge, CompactSvdGauge::Left) {
@@ -2378,35 +2566,38 @@ where
             },
             |index, stage| {
                 let sector = sectors[index];
-                let CompactSvdNumericalStage {
+                let CompactSvdSector {
                     rows,
                     cols,
                     rank,
-                    mut u,
+                    u,
+                    u_range,
                     singular_values: values,
-                    mut vt,
+                    vt,
+                    vt_range,
                 } = stage;
                 singular_values.push(SectorSpectrum { sector, values });
                 pairs.push(match placement {
-                    FactorPlacement::Direct => FactorPair {
+                    FactorPlacement::Direct => PackedFactorPair {
                         sector,
                         kept: rank,
-                        left: u,
+                        left: u_range,
                         left_rows: rows,
-                        right: vt,
+                        right: vt_range,
                         right_leading: rank,
                     },
-                    // `A^H = V S U^H`: the adjoint's left factor is `vt^H`.
+                    // `A^H = V S U^H`: the adjoint's left factor is `vt^H`,
+                    // adjointed in place in the packed `vt`.
                     FactorPlacement::Adjoint => {
                         ranks.insert(sector, rank);
-                        adjoint_col_major_in_place(&mut vt, rank, cols);
-                        adjoint_col_major_in_place(&mut u, rows, rank);
-                        FactorPair {
+                        adjoint_col_major_in_place(vt, rank, cols);
+                        adjoint_col_major_in_place(u, rows, rank);
+                        PackedFactorPair {
                             sector,
                             kept: rank,
-                            left: vt,
+                            left: vt_range,
                             left_rows: cols,
-                            right: u,
+                            right: u_range,
                             right_leading: rank,
                         }
                     }
@@ -2416,10 +2607,27 @@ where
         )
     })
     .map_err(CheckedGenericFactorPlanError::from)?;
+    let StagedSvdFactors::Packed {
+        u: packed_u,
+        vt: packed_vt,
+    } = packed
+    else {
+        unreachable!("the packed storage was requested")
+    };
     if matches!(placement, FactorPlacement::Direct) {
+        let pairs = PackedFactorPairs {
+            pairs,
+            left: packed_u,
+            right: packed_vt,
+        };
         let (u, vh) = build_checked_pair_from_input(provider, space.homspace(), &matrices, pairs)?;
         return Ok((u, vh, singular_values));
     }
+    let mut pairs = PackedFactorPairs {
+        pairs,
+        left: packed_vt,
+        right: packed_u,
+    };
     // Why not the direct pair builder: it orders and admits factor keys by
     // the input's own sides, while the adjoint publishes on the swapped hom
     // space with the parent's sides exchanged.

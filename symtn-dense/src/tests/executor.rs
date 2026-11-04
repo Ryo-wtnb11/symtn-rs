@@ -1682,7 +1682,8 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
     // eigenvalues with `V D Vᴴ = A`, general eigenpairs with `A v = λ v` and
     // unit-norm `v`, empty and trailing-batch extents included; it refuses
     // rank below 2, and a non-square input to an eigendecomposition before
-    // the zero-extent shortcut, with the per-matrix entry's error.
+    // the zero-extent shortcut, with the per-matrix entry's error. `Lq`
+    // (no per-matrix entry) is checked by its properties below.
     use DenseFactorization::{Eig, EigVals, Eigh, EighVals, SvdVals};
     let engine = &mut CpuEngine::serial();
     let mut executor = DefaultDenseExecutor::new();
@@ -1833,6 +1834,298 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
         let want = per_matrix_factorization(&mut executor, engine, op, refused).unwrap_err();
         assert_eq!(error, want, "{op:?}");
     }
+
+    // LQ has no per-matrix entry: per input, `[L, Q]` in the input's dtype
+    // with shapes `[m, k, b..]` and `[k, n, b..]`, and per batch item
+    // `L Q = X`, `L` lower trapezoidal and `Q Qᴴ = I`; rank below 2 is
+    // refused with the QR entry's error.
+    let wide = [
+        c(1.0, 2.0),
+        c(0.0, -1.0),
+        c(3.0, 0.5),
+        c(2.0, 0.0),
+        c(-1.0, 1.0),
+        c(0.5, 0.0),
+    ];
+    let tall = [4.0_f64, 1.0, -2.0, 0.0, 3.0, 1.0];
+    let lq_inputs = [
+        DenseRead::C64(DenseView::new(&wide, &[2, 3], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&tall, &[3, 2], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&batch, &[2, 2, 2], &[1, 2, 4], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[0, 0], &[1, 0], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[2, 2, 0], &[1, 2, 4], 0).unwrap()),
+    ];
+    let lq_matrices: [(Vec<Complex64>, [usize; 2]); 5] = [
+        (wide.to_vec(), [2, 3]),
+        (complex(&tall), [3, 2]),
+        (complex(&batch), [2, 2]),
+        (Vec::new(), [0, 0]),
+        (Vec::new(), [2, 2]),
+    ];
+    let outputs = factorize_all(&mut executor, engine, DenseFactorization::Lq, &lq_inputs).unwrap();
+    assert_eq!(outputs.len(), lq_inputs.len());
+    for ((got, input), (matrix, [m, n])) in outputs.iter().zip(&lq_inputs).zip(&lq_matrices) {
+        let (m, n) = (*m, *n);
+        let k = m.min(n);
+        let batch_dims = &input.shape()[2..];
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].shape(), [&[m, k][..], batch_dims].concat());
+        assert_eq!(got[1].shape(), [&[k, n][..], batch_dims].concat());
+        assert!(got.iter().all(|t| t.dtype() == input.dtype()));
+        let as_c64 = |t: &DenseTensor| match t.dtype() {
+            DenseDType::C64 => t.as_c64_slice().unwrap().to_vec(),
+            _ => complex(t.as_f64_slice().unwrap()),
+        };
+        let (l, q) = (as_c64(&got[0]), as_c64(&got[1]));
+        for item in 0..matrix.len() / (m * n).max(1) {
+            let x = &matrix[item * m * n..(item + 1) * m * n];
+            let l = &l[item * m * k..(item + 1) * m * k];
+            let q = &q[item * k * n..(item + 1) * k * n];
+            for row in 0..m {
+                for col in 0..n {
+                    let lq: Complex64 = (0..k).map(|j| l[row + m * j] * q[j + k * col]).sum();
+                    assert_c64_close(lq, x[row + m * col], 1.0e-12);
+                }
+                for col in row + 1..k {
+                    assert_c64_close(l[row + m * col], c(0.0, 0.0), 0.0);
+                }
+            }
+            for a in 0..k {
+                for b in 0..k {
+                    let qq: Complex64 = (0..n).map(|j| q[a + k * j] * q[b + k * j].conj()).sum();
+                    assert_c64_close(qq, c(f64::from(u8::from(a == b)), 0.0), 1.0e-12);
+                }
+            }
+        }
+    }
+    assert!(
+        factorize_all(&mut executor, engine, DenseFactorization::Lq, &[])
+            .unwrap()
+            .is_empty()
+    );
+    let error =
+        factorize_all(&mut executor, engine, DenseFactorization::Lq, &[rank_one]).unwrap_err();
+    assert_eq!(error, executor.qr(engine, rank_one).unwrap_err());
+    // An empty input whose batch extents overflow the element count is
+    // refused as an outcome by the output metadata (QR's for LQ and full QR),
+    // on this executor and the trait default, without a panic.
+    let overflowing =
+        DenseRead::F64(DenseView::new(&empty, &[0, 0, usize::MAX, 2], &[1, 0, 0, 0], 0).unwrap());
+    for executor in [
+        &mut executor as &mut dyn DenseExecutor,
+        &mut FullOnly(DefaultDenseExecutor::new()),
+    ] {
+        for op in [
+            DenseFactorization::Lq,
+            DenseFactorization::QrFull,
+            DenseFactorization::QrNull,
+        ] {
+            let error = factorize_all(executor, engine, op, &[overflowing]).unwrap_err();
+            assert!(
+                matches!(error, DenseError::Backend { .. }),
+                "{op:?}: {error:?}"
+            );
+        }
+    }
+    // Into empty destinations of the same shape, the native destination
+    // batch takes the empty shortcut before any batch count and delivers an
+    // empty result; a provider on the owned route delivers the owned
+    // refusal as a typed solver failure. Nothing panics and the engine stays
+    // usable.
+    for op in [
+        DenseFactorization::Qr,
+        DenseFactorization::QrFull,
+        DenseFactorization::QrNull,
+    ] {
+        let mut storage: [[f64; 0]; 2] = [[], []];
+        let [first, second] = &mut storage;
+        let (shape, strides) = ([0, 0, usize::MAX, 2], [1, 0, 0, 0]);
+        let write = |data| DenseWrite::F64(DenseViewMut::new(data, &shape, &strides, 0).unwrap());
+        let outputs = match op {
+            DenseFactorization::QrNull => [Some(write(first)), None, None],
+            _ => [Some(write(first)), Some(write(second)), None],
+        };
+        let mut dests = [FactorDest::new(outputs, FactorPlacement::AsComputed)];
+        let mut delivered = Vec::new();
+        let result = executor.factorize_batch_into(
+            engine,
+            op,
+            &[overflowing],
+            &mut dests,
+            &mut |index, _, outcome| {
+                delivered.push((index, outcome));
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()), "{op:?}");
+        let native = cfg!(all(feature = "cpu-faer", not(feature = "cpu-blas-core")));
+        match &delivered[..] {
+            [(0, Ok(()))] if native => {}
+            [(0, Err(FactorFailure::Solver(DenseError::Backend { .. })))] if !native => {}
+            other => panic!("{op:?}: {other:?}"),
+        }
+        assert!(!engine.is_broken(), "{op:?}");
+    }
+
+    // Full QR and the QR null basis have no per-matrix entry either: on the
+    // native provider and the trait default, per input `[Q, R]` of shapes
+    // `[m, m, b..]`, `[m, n, b..]` and `[N]` of shape `[m, m - k, b..]` in
+    // the input's dtype, and per batch item `Q R = X` with `Q` unitary and
+    // `R` upper trapezoidal, `N` orthonormal with `X^H N = 0`; a `[3, 0]`
+    // input has `Q = I_3` and an empty `R`; rank below 2 is refused with the
+    // QR entry's error. Complement columns are compared by these properties
+    // only, since their basis may differ by provider.
+    let tall_batch = [1.0_f64, -2.0, 0.5, 3.0, 0.0, 1.0];
+    let full_inputs = [
+        DenseRead::C64(DenseView::new(&wide, &[2, 3], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&tall, &[3, 2], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&tall_batch, &[3, 1, 2], &[1, 3, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&batch, &[2, 2, 2], &[1, 2, 4], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[3, 0], &[1, 3], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[0, 0], &[1, 0], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&empty, &[3, 2, 0], &[1, 3, 6], 0).unwrap()),
+    ];
+    let full_matrices: [(Vec<Complex64>, [usize; 2]); 7] = [
+        (wide.to_vec(), [2, 3]),
+        (complex(&tall), [3, 2]),
+        (complex(&tall_batch), [3, 1]),
+        (complex(&batch), [2, 2]),
+        (Vec::new(), [3, 0]),
+        (Vec::new(), [0, 0]),
+        (Vec::new(), [3, 2]),
+    ];
+    let as_c64 = |t: &DenseTensor| match t.dtype() {
+        DenseDType::C64 => t.as_c64_slice().unwrap().to_vec(),
+        _ => complex(t.as_f64_slice().unwrap()),
+    };
+    // `a^H b` of the column-major `m x p` and `m x q` items is `I` (or 0).
+    let assert_gram = |a: &[Complex64], b: &[Complex64], m: usize, identity: bool| {
+        let (p, q) = (a.len() / m.max(1), b.len() / m.max(1));
+        for i in 0..p {
+            for j in 0..q {
+                let dot: Complex64 = (0..m).map(|r| a[r + m * i].conj() * b[r + m * j]).sum();
+                let want = f64::from(u8::from(identity && i == j));
+                assert_c64_close(dot, c(want, 0.0), 1.0e-12);
+            }
+        }
+    };
+    for executor in [
+        &mut executor as &mut dyn DenseExecutor,
+        &mut FullOnly(DefaultDenseExecutor::new()),
+    ] {
+        let full =
+            factorize_all(executor, engine, DenseFactorization::QrFull, &full_inputs).unwrap();
+        let null =
+            factorize_all(executor, engine, DenseFactorization::QrNull, &full_inputs).unwrap();
+        assert_eq!(
+            (full.len(), null.len()),
+            (full_inputs.len(), full_inputs.len())
+        );
+        for (((full, null), input), (matrix, [m, n])) in
+            full.iter().zip(&null).zip(&full_inputs).zip(&full_matrices)
+        {
+            let (m, n) = (*m, *n);
+            let nullity = m - m.min(n);
+            let batch_dims = &input.shape()[2..];
+            assert_eq!((full.len(), null.len()), (2, 1));
+            assert_eq!(full[0].shape(), [&[m, m][..], batch_dims].concat());
+            assert_eq!(full[1].shape(), [&[m, n][..], batch_dims].concat());
+            assert_eq!(null[0].shape(), [&[m, nullity][..], batch_dims].concat());
+            assert!(full.iter().chain(null).all(|t| t.dtype() == input.dtype()));
+            let (q, r, basis) = (as_c64(&full[0]), as_c64(&full[1]), as_c64(&null[0]));
+            let items = batch_dims.iter().product::<usize>();
+            for item in 0..items {
+                let x = matrix.get(item * m * n..(item + 1) * m * n).unwrap_or(&[]);
+                let q = &q[item * m * m..(item + 1) * m * m];
+                let r = &r[item * m * n..(item + 1) * m * n];
+                let basis = &basis[item * m * nullity..(item + 1) * m * nullity];
+                assert_gram(q, q, m, true);
+                for row in 0..m {
+                    for col in 0..n {
+                        let qr: Complex64 = (0..m).map(|j| q[row + m * j] * r[j + m * col]).sum();
+                        assert_c64_close(qr, x[row + m * col], 1.0e-12);
+                        if row > col {
+                            assert_c64_close(r[row + m * col], c(0.0, 0.0), 0.0);
+                        }
+                    }
+                }
+                assert_gram(basis, basis, m, true);
+                assert_gram(x, basis, m, false);
+                if n == 0 {
+                    for (index, &value) in q.iter().enumerate() {
+                        let want = f64::from(u8::from(index % (m + 1) == 0));
+                        assert_c64_close(value, c(want, 0.0), 0.0);
+                    }
+                }
+            }
+        }
+        for op in [DenseFactorization::QrFull, DenseFactorization::QrNull] {
+            assert!(factorize_all(executor, engine, op, &[]).unwrap().is_empty());
+            let error = factorize_all(executor, engine, op, &[rank_one]).unwrap_err();
+            assert_eq!(error, executor.qr(engine, rank_one).unwrap_err(), "{op:?}");
+        }
+    }
+}
+
+/// Purpose: the native QR null basis is retained at its final size: the
+/// owned outcome of an `m x (m - 1)` input holds exactly `m` scalars of
+/// capacity, not a full `m x m` `Q` with its leading columns dropped.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn native_null_basis_is_allocated_at_its_final_size() {
+    let engine = &mut CpuEngine::serial();
+    let m = 6;
+    let data: Vec<f64> = (0..m * (m - 1))
+        .map(|i| ((i * 7) % 11) as f64 - 5.0)
+        .collect();
+    let (shape, strides) = ([m, m - 1], [1, m]);
+    let input = DenseRead::F64(DenseView::new(&data, &shape, &strides, 0).unwrap());
+    let mut outputs = factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        engine,
+        DenseFactorization::QrNull,
+        &[input],
+    )
+    .unwrap();
+    let [basis] = <[DenseTensor; 1]>::try_from(outputs.remove(0)).unwrap();
+    assert_eq!(basis.into_f64_vec().unwrap().capacity(), m);
+}
+
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn native_lq_batch_stages_no_adjoint() {
+    // What: the native provider's LQ reads each input's transpose in place,
+    // so it stages no adjoint, while the executor default stages one per
+    // input (the positive control that makes the zero meaningful).
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0_f64, 2.0, 0.0, 3.0, -1.0, 4.0];
+    let inputs = [
+        DenseRead::F64(DenseView::new(&data, &[2, 3], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&data, &[3, 2], &[1, 3], 0).unwrap()),
+    ];
+
+    let native = crate::probe::record();
+    factorize_all(
+        &mut DefaultDenseExecutor::new(),
+        engine,
+        DenseFactorization::Lq,
+        &inputs,
+    )
+    .unwrap();
+    assert_eq!(native.get(crate::probe::Event::LqAdjointStaging), 0);
+
+    let default = crate::probe::record();
+    factorize_all(
+        &mut FullOnly(DefaultDenseExecutor::new()),
+        engine,
+        DenseFactorization::Lq,
+        &inputs,
+    )
+    .unwrap();
+    assert_eq!(
+        default.get(crate::probe::Event::LqAdjointStaging),
+        inputs.len()
+    );
 }
 #[cfg(not(feature = "provider-inject"))]
 #[test]

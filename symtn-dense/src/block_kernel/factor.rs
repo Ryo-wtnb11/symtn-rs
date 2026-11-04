@@ -1,32 +1,49 @@
-//! The native provider's compact factorizations of independent blocks (SVD,
-//! QR, Hermitian eigendecomposition, their values-only forms and general
-//! eigenvalues): one tlinalg call per block, the blocks spread over the lane
-//! driver's lanes on the caller's engine.
+//! The native provider's factorizations of independent blocks (compact SVD,
+//! compact and full QR, the QR null basis, LQ, Hermitian eigendecomposition,
+//! their values-only forms and general eigenvalues): tlinalg calls per
+//! block, the blocks spread over the lane driver's lanes on the caller's
+//! engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
 //! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
 //! `eigvals`) does (same provider, same validation, same error values), but
 //! on its lane's child token instead of the whole engine, so a block's faer
-//! width is the engine's decision within its lane's reserved share. Each factor is a fresh `Vec`
-//! from the provider's `Vec` entry: its length is the factor's logical size
-//! and it carries no recycled-buffer history (its capacity is the provider's
-//! reservation, not necessarily the length).
+//! width is the engine's decision within its lane's reserved share.
+//!
+//! The owned batch ([`factorize`]) returns each factor as a fresh `Vec` from
+//! the provider's `Vec` entry: its length is the factor's logical size and it
+//! carries no recycled-buffer history (its capacity is the provider's
+//! reservation, not necessarily the length). The destination batch
+//! ([`factorize_into`], compact QR, LQ, full QR, the QR null basis, compact
+//! SVD and Hermitian eigh) writes
+//! each block's factors into its caller-owned destination through the
+//! provider's initialized-destination entry (`*_into_init`), with one
+//! workspace and one typed scratch per lane, sized before the lane's first
+//! block from that lane's blocks and child context and dropped when the lane
+//! finishes; a tall full QR or null basis goes through tlinalg's compact
+//! Householder kernel, whose own workspace is still allocated per block.
 
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 use std::time::Duration;
 
 use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
-use tenferro_tensor::{StrideVec, Tensor, TensorScalar};
+use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use super::schedule::{self, GrantKey};
+use super::schedule::{self, GrantKey, LaneJobs};
+use crate::factor_dest::{adjoint_items, compact_mut, map_transposed_items, Element, FactorSink};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
 use crate::LaneAllocation;
-use crate::{DenseError, DenseRead, DenseTensor, DenseView};
+use crate::{
+    DenseError, DenseRead, DenseTensor, DenseView, DenseWrite, FactorDest, FactorFailure,
+    FactorPlacement,
+};
+use tlinalg::householder::{self, ReflectorShape};
 
 /// One compact factorization the provider runs per block. The shared code
 /// owns validation, costing and scheduling; an implementation owns only its
@@ -44,6 +61,10 @@ pub(crate) trait Factor {
     /// Whether a batch of single-matrix inputs joins the lane search with
     /// [`grant`]; otherwise its batches keep the baseline placement.
     const SEARCHED: bool = true;
+
+    /// Whether the provider reads each item's transpose (the first two
+    /// extents and strides swapped, no copy) instead of the item itself.
+    const TRANSPOSED: bool = false;
 
     /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
     /// weighted multiply-adds: its total work and the part a team inside the
@@ -132,6 +153,306 @@ impl Factor for Qr {
             output::<Self, T>(&[k, n], batch, r)?,
         ])
     }
+}
+
+/// Compact LQ: `[L, Q]` of shapes `[m, k, b..]`, `[k, n, b..]` with
+/// `k = min(m, n)`, from the provider's QR of the transposed read:
+/// `X^T = Q' R'` gives `X = R'^T Q'^T`, so `L = R'^T` and `Q = Q'^T`, each
+/// transposed inside the job. No adjoint of `X` is staged.
+///
+/// Why the transpose, not the adjoint, of `X`: a strided read can swap axes
+/// but not conjugate, and `Q'^T` has orthonormal rows like `Q'^H`
+/// (`Q'^T conj(Q') = conj(Q'^H Q') = I`).
+pub(crate) struct Lq;
+
+impl Factor for Lq {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: it is the QR of the transpose (see `Qr::SEARCHED`).
+    const SEARCHED: bool = false;
+    const TRANSPOSED: bool = true;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        Qr::estimates::<T>(n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let k = m.min(n);
+        let (mut q, mut r) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            tlinalg::qr::qr(Self::OP, raw, &mut q, &mut r, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
+        Ok(vec![
+            output::<Self, T>(&[m, k], batch, transpose_items(&r, k, m))?,
+            output::<Self, T>(&[k, n], batch, transpose_items(&q, n, k))?,
+        ])
+    }
+}
+
+/// The transpose of each column-major `rows x cols` item of `data`,
+/// column-major `cols x rows` per item.
+fn transpose_items<T: Copy>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
+    let mut transpose = Vec::with_capacity(data.len());
+    if rows * cols == 0 {
+        return transpose;
+    }
+    for item in data.chunks_exact(rows * cols) {
+        for row in 0..rows {
+            transpose.extend((0..cols).map(|col| item[row + rows * col]));
+        }
+    }
+    transpose
+}
+
+/// Full QR: `[Q, R]` of shapes `[m, m, b..]`, `[m, n, b..]`. When `m <= n`
+/// it is the compact QR ([`Qr`]), whose `Q` is already square. Otherwise
+/// the provider's compact Householder factor of `X` has its reflectors
+/// applied to `I_m` (MatrixAlgebraKit `qr_full`): `O(m n^2 + m^2 n)`, no
+/// `[X I]` augmentation; `R` is the factor's upper trapezoid. Both in the
+/// provider's gauge.
+pub(crate) struct QrFull;
+
+impl Factor for QrFull {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
+    const SEARCHED: bool = false;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        if m <= n {
+            return Qr::estimates::<T>(m, n);
+        }
+        householder_estimates::<T>(m, n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        if m <= n {
+            return Qr::factor::<T>(raw, [m, n], batch, exec);
+        }
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, m], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
+        let mut r = vec![T::ZERO; checked_len(&[m, n, items])?];
+        let mut q = vec![T::ZERO; checked_len(&[m, m, items])?];
+        match raw {
+            Some(raw) => {
+                compact_copy(raw, &mut r);
+                owned_householder::<T>(&mut r, [m, n], items, &mut q, 0, exec)
+                    .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+                zero_below_diagonal(&mut r, m, n);
+            }
+            None => identity_columns(&mut q, m, m, 0),
+        }
+        Ok(vec![
+            output::<Self, T>(&[m, m], batch, q)?,
+            output::<Self, T>(&[m, n], batch, r)?,
+        ])
+    }
+}
+
+/// The shape-based QR null basis: `[N]` of shape `[m, m - k, b..]` with
+/// `k = min(m, n)`, the reflectors of `X`'s compact Householder factor
+/// applied to `[0; I_{m-k}]` (MatrixAlgebraKit `qr_null`), written at its
+/// final size; nothing is solved when `m <= n`.
+pub(crate) struct QrNull;
+
+impl Factor for QrNull {
+    const ENTRY: &'static str = Qr::ENTRY;
+    const OP: tlinalg::Op = Qr::OP;
+    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
+    const SEARCHED: bool = false;
+
+    fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        householder_estimates::<T>(m, n, m - m.min(n))
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [m, n]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let null = m - m.min(n);
+        let Ok(items) = checked_len(batch) else {
+            // The output metadata refuses the batch as owned QR does; an
+            // output it would admit still cannot hold the batch's factors.
+            return Err(output::<Self, T>(&[m, null], batch, Vec::new())
+                .err()
+                .unwrap_or(DenseError::ElementCountOverflow));
+        };
+        let mut basis = vec![T::ZERO; checked_len(&[m, null, items])?];
+        match raw {
+            Some(raw) if null > 0 => {
+                let mut state = vec![T::ZERO; checked_len(&[m, n, items])?];
+                compact_copy(raw, &mut state);
+                owned_householder::<T>(&mut state, [m, n], items, &mut basis, n, exec)
+                    .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+            }
+            Some(_) => {}
+            None => identity_columns(&mut basis, m, null, m - null),
+        }
+        Ok(vec![output::<Self, T>(&[m, null], batch, basis)?])
+    }
+}
+
+/// tlinalg's estimates of a compact Householder factor of `m x n` plus its
+/// reflectors applied to `cols` target columns.
+fn householder_estimates<T: tlinalg::FaerScalar>(m: usize, n: usize, cols: usize) -> [f64; 2] {
+    let shape = reflector_shape(m, n, cols);
+    [
+        householder::estimate_work::<T>(m, n)
+            + householder::estimate_apply_reflectors_work::<T>(shape),
+        householder::estimate_payback_work::<T>(m, n)
+            + householder::estimate_apply_reflectors_payback_work::<T>(shape),
+    ]
+}
+
+/// Every reflector of an `m x n` compact factor applied to `cols` columns.
+fn reflector_shape(m: usize, n: usize, cols: usize) -> ReflectorShape {
+    ReflectorShape {
+        rows: m,
+        a_cols: n,
+        cols,
+        k: m.min(n),
+    }
+}
+
+/// The product of `extents`, or [`DenseError::ElementCountOverflow`].
+fn checked_len(extents: &[usize]) -> Result<usize, DenseError> {
+    extents
+        .iter()
+        .try_fold(1usize, |len, &extent| len.checked_mul(extent))
+        .ok_or(DenseError::ElementCountOverflow)
+}
+
+/// Copies the nonempty strided `raw` into `out` as compact column-major
+/// items, in batch order.
+fn compact_copy<T: Copy>(raw: RawStridedRef<'_, T>, out: &mut [T]) {
+    let (dims, strides, data) = (raw.dims(), raw.strides(), raw.data());
+    let (m, n) = (dims[0], dims[1]);
+    for (item, block) in out.chunks_exact_mut(m * n).enumerate() {
+        let mut base = raw.offset();
+        let mut rest = item;
+        for (&extent, &stride) in dims[2..].iter().zip(&strides[2..]) {
+            base += (rest % extent) as isize * stride;
+            rest /= extent;
+        }
+        for col in 0..n {
+            for row in 0..m {
+                let at = base + row as isize * strides[0] + col as isize * strides[1];
+                // `RawStridedRef::new` proved every reachable offset in range.
+                block[row + m * col] = data[at as usize];
+            }
+        }
+    }
+}
+
+/// Writes `[0; I_cols; 0]` into each column-major `m x cols` item of `c`,
+/// the identity block starting at row `first`.
+fn identity_columns<T: Scalar>(c: &mut [T], m: usize, cols: usize, first: usize) {
+    c.fill(T::ZERO);
+    if m * cols == 0 {
+        return;
+    }
+    for item in c.chunks_exact_mut(m * cols) {
+        for col in 0..cols {
+            item[first + col + m * col] = T::ONE;
+        }
+    }
+}
+
+/// Zeroes the strictly lower triangle of each column-major `m x n` item,
+/// leaving the upper trapezoid `R` of a compact Householder factor.
+fn zero_below_diagonal<T: Scalar>(r: &mut [T], m: usize, n: usize) {
+    if m * n == 0 {
+        return;
+    }
+    for item in r.chunks_exact_mut(m * n) {
+        for col in 0..n.min(m) {
+            item[col + 1 + m * col..m * (col + 1)].fill(T::ZERO);
+        }
+    }
+}
+
+/// Factors each compact `m x n` item of `state` in place (`R` above the
+/// diagonal, reflectors below, coefficients into `coeff`), then sets each
+/// `m x cols` item of `target` to `[0; I_cols]` with the identity from row
+/// `first` and applies `Q` to it: `Q`'s columns `first..first + cols`.
+///
+/// Why the `Vec` coefficient wrapper: `compact_factor_into` writes them as
+/// `MaybeUninit` while `apply_reflectors_into` reads `&[T]`; joining the two
+/// would need `unsafe`, so the lane lends a reused `Vec` instead and only the
+/// factor's own workspace is allocated per call.
+#[allow(clippy::too_many_arguments)]
+fn householder_into<T: Scalar>(
+    state: &mut [T],
+    [m, n]: [usize; 2],
+    batch: usize,
+    coeff: &mut Vec<T>,
+    target: &mut [T],
+    first: usize,
+    workspace: &mut [MaybeUninit<u8>],
+    exec: &mut Exec<'_>,
+) -> tlinalg::Result<()> {
+    let cols = target.len().checked_div(m * batch).unwrap_or(0);
+    householder::compact_factor(tlinalg::Op::HouseholderQr, m, n, batch, state, coeff, exec)?;
+    identity_columns(target, m, cols, first);
+    householder::apply_reflectors_into(
+        tlinalg::Op::HouseholderQrQColumns,
+        reflector_shape(m, n, cols),
+        batch,
+        state,
+        coeff,
+        target,
+        false,
+        workspace,
+        exec,
+    )
+}
+
+/// [`householder_into`] with a fresh coefficient `Vec` and reflector
+/// workspace: the owned batch's per-block storage.
+fn owned_householder<T: Scalar>(
+    state: &mut [T],
+    dims @ [m, n]: [usize; 2],
+    batch: usize,
+    target: &mut [T],
+    first: usize,
+    exec: &mut Exec<'_>,
+) -> tlinalg::Result<()> {
+    let cols = target.len().checked_div(m * batch).unwrap_or(0);
+    let bytes = householder::apply_reflectors_workspace::<T>(
+        reflector_shape(m, n, cols),
+        batch,
+        false,
+        exec,
+    )?;
+    let mut workspace = vec![MaybeUninit::uninit(); bytes];
+    householder_into(
+        state,
+        dims,
+        batch,
+        &mut Vec::new(),
+        target,
+        first,
+        &mut workspace,
+        exec,
+    )
 }
 
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
@@ -271,7 +592,7 @@ fn output<F: Factor, T: TensorScalar>(
 
 /// A scalar the provider factors; its singular values and eigenvalues are in
 /// [`TensorScalar::Real`].
-pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
+pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
     /// tlinalg returns the singular values and eigenvalues of a full
     /// factorization in `Self`; tenferro publishes their real part.
     fn real_values(values: Vec<Self>) -> Vec<<Self as TensorScalar>::Real>;
@@ -292,6 +613,36 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
     /// published.
     type EigScalar: TensorScalar;
 
+    /// Whether tlinalg's `Self`-typed spectrum differs from the published
+    /// real one, so a destination batch stages it in typed scratch.
+    const COMPLEX: bool;
+
+    /// Zero and one, for identity targets and zeroed scratch.
+    const ZERO: Self;
+    const ONE: Self;
+
+    /// The lane's typed scratch of this scalar.
+    fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self>;
+
+    /// The compact payload of a destination of this scalar, `None` for
+    /// another dtype.
+    fn factor_slot<'b>(write: &'b mut DenseWrite<'_>) -> Option<&'b mut [Self]>;
+
+    /// The compact payload of a spectrum destination (the real
+    /// counterpart), `None` for another dtype.
+    fn spectrum_slot<'b>(
+        write: &'b mut DenseWrite<'_>,
+    ) -> Option<&'b mut [<Self as TensorScalar>::Real]>;
+
+    /// Runs `solve` with a `Self` spectrum slot of `dest.len()` elements:
+    /// `dest` itself for a real scalar; otherwise the front of `scratch`,
+    /// whose real parts are copied into `dest` after `solve` succeeds.
+    fn with_spectrum<R>(
+        dest: &mut [<Self as TensorScalar>::Real],
+        scratch: &mut [Self],
+        solve: impl FnOnce(&mut [Self]) -> tlinalg::Result<R>,
+    ) -> tlinalg::Result<R>;
+
     /// tlinalg's general eigenvalues only, in its order.
     fn eig_values(
         raw: RawStridedRef<'_, Self>,
@@ -304,9 +655,42 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar {
 // associated type of a trait it does not export, so it equals
 // `TensorScalar::Real` only once the scalar is concrete.
 macro_rules! scalar {
-    ($ty:ty, $complex:ty, |$values:ident| $real:expr) => {
+    ($ty:ty, $complex:ty, $variant:ident, $real_variant:ident, $slot:ident, $is_complex:expr,
+     $zero:expr, $one:expr,
+     |$values:ident| $real:expr, |$dest:ident, $scratch:ident, $solve:ident| $spectrum:expr) => {
         impl Scalar for $ty {
+            const ZERO: Self = $zero;
+            const ONE: Self = $one;
             type EigScalar = $complex;
+            const COMPLEX: bool = $is_complex;
+
+            fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self> {
+                &mut lane.$slot
+            }
+
+            fn factor_slot<'b>(write: &'b mut DenseWrite<'_>) -> Option<&'b mut [Self]> {
+                match write {
+                    DenseWrite::$variant(view) => Some(compact_mut(view)),
+                    _ => None,
+                }
+            }
+
+            fn spectrum_slot<'b>(
+                write: &'b mut DenseWrite<'_>,
+            ) -> Option<&'b mut [<Self as TensorScalar>::Real]> {
+                match write {
+                    DenseWrite::$real_variant(view) => Some(compact_mut(view)),
+                    _ => None,
+                }
+            }
+
+            fn with_spectrum<R>(
+                $dest: &mut [<Self as TensorScalar>::Real],
+                $scratch: &mut [Self],
+                $solve: impl FnOnce(&mut [Self]) -> tlinalg::Result<R>,
+            ) -> tlinalg::Result<R> {
+                $spectrum
+            }
 
             fn real_values($values: Vec<$ty>) -> Vec<<$ty as TensorScalar>::Real> {
                 $real
@@ -341,16 +725,69 @@ macro_rules! scalar {
     };
 }
 
-scalar!(f32, Complex32, |values| values);
-scalar!(f64, Complex64, |values| values);
-scalar!(Complex32, Complex32, |values| values
-    .into_iter()
-    .map(|value| value.re)
-    .collect());
-scalar!(Complex64, Complex64, |values| values
-    .into_iter()
-    .map(|value| value.re)
-    .collect());
+scalar!(
+    f32,
+    Complex32,
+    F32,
+    F32,
+    f32,
+    false,
+    0.0,
+    1.0,
+    |values| values,
+    |dest, _scratch, solve| solve(dest)
+);
+scalar!(
+    f64,
+    Complex64,
+    F64,
+    F64,
+    f64,
+    false,
+    0.0,
+    1.0,
+    |values| values,
+    |dest, _scratch, solve| solve(dest)
+);
+scalar!(
+    Complex32,
+    Complex32,
+    C32,
+    F32,
+    c32,
+    true,
+    Complex32::new(0.0, 0.0),
+    Complex32::new(1.0, 0.0),
+    |values| values.into_iter().map(|value| value.re).collect(),
+    |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
+);
+scalar!(
+    Complex64,
+    Complex64,
+    C64,
+    F64,
+    c64,
+    true,
+    Complex64::new(0.0, 0.0),
+    Complex64::new(1.0, 0.0),
+    |values| values.into_iter().map(|value| value.re).collect(),
+    |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
+);
+
+/// [`Scalar::with_spectrum`] of a complex scalar: tlinalg returns the real
+/// spectrum with a zero imaginary part.
+fn complex_spectrum<T: Copy, Out>(
+    dest: &mut [T],
+    scratch: &mut [num_complex::Complex<T>],
+    solve: impl FnOnce(&mut [num_complex::Complex<T>]) -> tlinalg::Result<Out>,
+) -> tlinalg::Result<Out> {
+    let slot = &mut scratch[..dest.len()];
+    let out = solve(slot)?;
+    for (dest, value) in dest.iter_mut().zip(slot.iter()) {
+        *dest = value.re;
+    }
+    Ok(out)
+}
 
 /// One block: its validated input, its signed strides and, once run, its
 /// own outcome (factors or that block's error).
@@ -368,6 +805,9 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
     const ENTRY: Entry = Entry::Linalg;
     const KIND: OpKind = OpKind::Factorization;
     const LABEL: &'static str = F::ENTRY;
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn LaneJobs<Job<'a>>, _: &Exec<'_>) {}
 
     fn work(&self, _: usize, job: &Job<'a>) -> f64 {
         work::<F>(job.input)
@@ -387,7 +827,13 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
 
     // A block's error is its own outcome, not the driver's: the caller
     // delivers every block's outcome in input order.
-    fn run(&self, _: usize, job: &mut Job<'a>, mut exec: Exec<'_>) -> Result<(), DenseError> {
+    fn run(
+        &self,
+        _: usize,
+        job: &mut Job<'a>,
+        (): &mut (),
+        mut exec: Exec<'_>,
+    ) -> Result<(), DenseError> {
         job.outcome = Some(factor::<F>(job.input, &job.strides, &mut exec));
         Ok(())
     }
@@ -400,8 +846,8 @@ pub(crate) type Sink<'s> =
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
 /// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
-/// `eig_vals`)
-/// returns it.
+/// `eig_vals`) returns it; LQ, which has no per-matrix entry, reports the
+/// QR entry's errors.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
 /// input the view and the dtype (before the engine is entered), then rank,
@@ -449,6 +895,9 @@ pub(crate) fn factorize(
             sink(index, crate::tenferro_adapter::eig_read(engine, input))
         }),
         Op::EigVals => factorize_batch::<EigVals>(engine, allocation, inputs, sink),
+        Op::Lq => factorize_batch::<Lq>(engine, allocation, inputs, sink),
+        Op::QrFull => factorize_batch::<QrFull>(engine, allocation, inputs, sink),
+        Op::QrNull => factorize_batch::<QrNull>(engine, allocation, inputs, sink),
     }
 }
 
@@ -492,6 +941,809 @@ fn batch_on<F: Factor>(
     }
     match refused {
         Some(error) => sink(admitted, Err(error)),
+        None => Ok(()),
+    }
+}
+
+/// A [`Factor`] with a destination form: its provider workspace query and
+/// its initialized-destination entry.
+pub(crate) trait FactorInto: Factor {
+    /// tlinalg's workspace bytes for `batch` items of `dims` on `exec`.
+    fn workspace<T: Scalar>(
+        dims: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize>;
+
+    /// The typed scratch elements one input needs: the staged complex
+    /// spectrum and, under [`FactorPlacement::Adjoint`], the provider-shaped
+    /// factors.
+    fn scratch_len<T: Scalar>(dims: [usize; 2], batch: usize, placement: FactorPlacement) -> usize;
+
+    /// The Householder coefficients one input needs (the capacity of the
+    /// lane's reused coefficient `Vec`).
+    fn coeff_len(_dims: [usize; 2], _batch: usize) -> usize {
+        0
+    }
+
+    /// Writes the outputs of an input with a zero extent, whose solve is
+    /// skipped; most factorizations have nothing to write.
+    fn empty_into<T: Scalar>(_dims: [usize; 2], _outputs: &mut [Option<DenseWrite<'_>>; 3]) {}
+
+    /// Solves one input into `outputs` (validated destinations of `T`).
+    #[allow(clippy::too_many_arguments)]
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        dims: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        placement: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        coeff: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()>;
+}
+
+fn slot<'b, T: Scalar>(output: &'b mut Option<DenseWrite<'_>>) -> &'b mut [T] {
+    output
+        .as_mut()
+        .and_then(T::factor_slot)
+        .expect("validation checked the destination dtype")
+}
+
+fn spectrum<'b, T: Scalar>(
+    output: &'b mut Option<DenseWrite<'_>>,
+) -> &'b mut [<T as TensorScalar>::Real] {
+    output
+        .as_mut()
+        .and_then(T::spectrum_slot)
+        .expect("validation checked the destination dtype")
+}
+
+impl FactorInto for Qr {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::qr::qr_workspace::<T>(m, n, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        placement: FactorPlacement,
+    ) -> usize {
+        match placement {
+            FactorPlacement::AsComputed => 0,
+            FactorPlacement::Adjoint => (m + n) * m.min(n) * batch,
+        }
+    }
+
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        placement: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        _: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        let [first, second, _] = outputs;
+        match placement {
+            FactorPlacement::AsComputed => tlinalg::qr::qr_into_init(
+                Self::OP,
+                raw,
+                slot::<T>(first),
+                slot::<T>(second),
+                workspace,
+                exec,
+            ),
+            FactorPlacement::Adjoint => {
+                let k = m.min(n);
+                let (q, rest) = scratch.split_at_mut(m * k * batch);
+                let r = &mut rest[..k * n * batch];
+                tlinalg::qr::qr_into_init(Self::OP, raw, q, r, workspace, exec)?;
+                adjoint_items(r, k, n, slot::<T>(first));
+                adjoint_items(q, m, k, slot::<T>(second));
+                Ok(())
+            }
+        }
+    }
+}
+
+impl FactorInto for Lq {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::qr::qr_workspace::<T>(n, m, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>([m, n]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        (n + m) * m.min(n) * batch
+    }
+
+    // `raw` is the transposed read `X^T` (`n x m`): its QR `Q' R'` lands in
+    // the lane scratch, and one plain transpose pass writes `L = R'^T` and
+    // `Q = Q'^T`. Why not conjugate: this is the QR of `X^T`, not of `X^H`,
+    // so an adjoint would give the factors of `conj(X)`.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        _: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        let [first, second, _] = outputs;
+        let k = m.min(n);
+        let (q, rest) = scratch.split_at_mut(n * k * batch);
+        let r = &mut rest[..k * m * batch];
+        tlinalg::qr::qr_into_init(Self::OP, raw, q, r, workspace, exec)?;
+        map_transposed_items(r, k, m, slot::<T>(first), |value| value);
+        map_transposed_items(q, n, k, slot::<T>(second), |value| value);
+        Ok(())
+    }
+}
+
+impl FactorInto for QrFull {
+    fn workspace<T: Scalar>(
+        dims @ [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        if m <= n {
+            return Qr::workspace::<T>(dims, batch, exec);
+        }
+        householder::apply_reflectors_workspace::<T>(reflector_shape(m, n, m), batch, false, exec)
+    }
+
+    fn scratch_len<T: Scalar>(_: [usize; 2], _: usize, _: FactorPlacement) -> usize {
+        0
+    }
+
+    fn coeff_len([m, n]: [usize; 2], batch: usize) -> usize {
+        if m <= n {
+            0
+        } else {
+            n * batch
+        }
+    }
+
+    // `[m, 0]`: `Q = I_m`, `R` empty.
+    fn empty_into<T: Scalar>([m, _]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
+        identity_columns(slot::<T>(&mut outputs[0]), m, m, 0);
+    }
+
+    // `m <= n`: the compact QR's destinations are the full ones. Otherwise
+    // the input is copied once into `r`, factored there in place, and its
+    // reflectors applied to `q = I_m`; `R` is the factor's upper trapezoid.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        placement: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        coeff: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        if m <= n {
+            return Qr::factor_into::<T>(
+                raw,
+                [m, n],
+                batch,
+                outputs,
+                placement,
+                workspace,
+                scratch,
+                coeff,
+                exec,
+            );
+        }
+        let [first, second, _] = outputs;
+        let (q, r) = (slot::<T>(first), slot::<T>(second));
+        compact_copy(raw, r);
+        householder_into(r, [m, n], batch, coeff, q, 0, workspace, exec)?;
+        zero_below_diagonal(r, m, n);
+        Ok(())
+    }
+}
+
+impl FactorInto for QrNull {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        let null = m - m.min(n);
+        householder::apply_reflectors_workspace::<T>(
+            reflector_shape(m, n, null),
+            batch,
+            false,
+            exec,
+        )
+    }
+
+    fn scratch_len<T: Scalar>([m, n]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        if m > n {
+            m * n * batch
+        } else {
+            0
+        }
+    }
+
+    fn coeff_len([m, n]: [usize; 2], batch: usize) -> usize {
+        if m > n {
+            n * batch
+        } else {
+            0
+        }
+    }
+
+    // `[m, 0]`: every direction is null, `N = I_m`.
+    fn empty_into<T: Scalar>([m, n]: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
+        let null = m - m.min(n);
+        identity_columns(slot::<T>(&mut outputs[0]), m, null, m - null);
+    }
+
+    // The input is copied once into the lane scratch and factored there;
+    // the reflectors go straight onto `n = [0; I_{m-k}]`, so only the final
+    // `m x (m - k)` basis is written.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        coeff: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        if m <= n {
+            return Ok(());
+        }
+        let state = &mut scratch[..m * n * batch];
+        compact_copy(raw, state);
+        let basis = slot::<T>(&mut outputs[0]);
+        householder_into(state, [m, n], batch, coeff, basis, n, workspace, exec)
+    }
+}
+
+impl FactorInto for Svd {
+    fn workspace<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::svd::svd_workspace::<T>(m, n, false, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>(
+        [m, n]: [usize; 2],
+        batch: usize,
+        placement: FactorPlacement,
+    ) -> usize {
+        let k = m.min(n);
+        let spectrum = if T::COMPLEX { k * batch } else { 0 };
+        match placement {
+            FactorPlacement::AsComputed => spectrum,
+            FactorPlacement::Adjoint => spectrum + (m + n) * k * batch,
+        }
+    }
+
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [m, n]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        placement: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        _: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        let [first, values, third] = outputs;
+        let values = spectrum::<T>(values);
+        match placement {
+            FactorPlacement::AsComputed => {
+                let (u, vt) = (slot::<T>(first), slot::<T>(third));
+                T::with_spectrum(values, scratch, |s| {
+                    tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)
+                })
+            }
+            FactorPlacement::Adjoint => {
+                let k = m.min(n);
+                let (u, rest) = scratch.split_at_mut(m * k * batch);
+                let (vt, s) = rest.split_at_mut(k * n * batch);
+                T::with_spectrum(values, s, |s| {
+                    tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)
+                })?;
+                adjoint_items(vt, k, n, slot::<T>(first));
+                adjoint_items(u, m, k, slot::<T>(third));
+                Ok(())
+            }
+        }
+    }
+}
+
+impl FactorInto for Eigh {
+    fn workspace<T: Scalar>(
+        [n, _]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::eigh::eigh_workspace::<T>(n, true, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>([n, _]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        if T::COMPLEX {
+            n * batch
+        } else {
+            0
+        }
+    }
+
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        _: [usize; 2],
+        _: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        _: &mut Vec<T>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()> {
+        let [values, second, _] = outputs;
+        let vectors = slot::<T>(second);
+        T::with_spectrum(spectrum::<T>(values), scratch, |w| {
+            tlinalg::eigh::eigh_into_init(Self::OP, raw, w, vectors, workspace, exec)
+        })
+    }
+}
+
+/// One lane's typed scratch per scalar, set up once with the lane.
+#[derive(Default)]
+pub(crate) struct TypedScratch {
+    f32: ScalarScratch<f32>,
+    f64: ScalarScratch<f64>,
+    c32: ScalarScratch<Complex32>,
+    c64: ScalarScratch<Complex64>,
+}
+
+/// One scalar's lane scratch: zero-filled values and an empty Householder
+/// coefficient `Vec` whose capacity covers every block of the lane.
+#[derive(Default)]
+pub(crate) struct ScalarScratch<T> {
+    values: Vec<T>,
+    coeff: Vec<T>,
+}
+
+impl<T: Scalar> ScalarScratch<T> {
+    fn new(values: usize, coeff: usize) -> Self {
+        Self {
+            values: vec![T::ZERO; values],
+            coeff: Vec::with_capacity(coeff),
+        }
+    }
+}
+
+/// One lane's provider workspace and typed scratch: the largest need of the
+/// lane's blocks, allocated once before its first block.
+pub(crate) struct LaneBuffers {
+    workspace: Vec<MaybeUninit<u8>>,
+    typed: TypedScratch,
+    /// A process-unique id of this lane setup.
+    #[cfg(test)]
+    id: usize,
+    /// The allocation calls of this lane's buffer setup.
+    #[cfg(test)]
+    setup_allocs: Option<u64>,
+}
+
+/// The largest workspace bytes and typed scratch elements (per scalar, in
+/// [`TypedScratch`] field order) of one lane's blocks.
+#[derive(Default)]
+struct Needs {
+    bytes: usize,
+    typed: [usize; 4],
+    coeff: [usize; 4],
+}
+
+/// One block of a destination batch: its validated input, its signed
+/// strides, its destination, a workspace query that failed while its lane
+/// was set up, and, once run, its outcome.
+pub(crate) struct IntoJob<'a, 'd, 'w> {
+    input: DenseRead<'a>,
+    strides: StrideVec,
+    dest: &'d mut FactorDest<'w>,
+    sizing: Option<DenseError>,
+    outcome: Option<Result<(), FactorFailure>>,
+    /// The id and workspace length of the lane setup this block ran with.
+    #[cfg(test)]
+    lane_seen: (usize, usize),
+}
+
+/// Factorization `F` of each block into its destination on the lane driver.
+struct IntoBlocks<'a, 'd, 'w, F>(PhantomData<IntoMarker<'a, 'd, 'w, F>>);
+
+/// [`IntoBlocks`]' variance and auto-trait marker.
+type IntoMarker<'a, 'd, 'w, F> = fn() -> (&'a (), &'d (), &'w (), F);
+
+impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
+    type Job = IntoJob<'a, 'd, 'w>;
+    const ENTRY: Entry = Entry::Linalg;
+    const KIND: OpKind = OpKind::Factorization;
+    const LABEL: &'static str = F::ENTRY;
+    type Lane = LaneBuffers;
+
+    fn lane(&self, jobs: &mut dyn LaneJobs<Self::Job>, exec: &Exec<'_>) -> LaneBuffers {
+        let mut needs = Needs::default();
+        jobs.for_each(&mut |_, job| {
+            if let Err(error) = needs_of::<F>(job.input, job.dest.placement(), exec, &mut needs) {
+                job.sizing = Some(error);
+            }
+        });
+        let build = || {
+            (
+                vec![MaybeUninit::uninit(); needs.bytes],
+                TypedScratch {
+                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
+                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
+                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
+                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
+                },
+            )
+        };
+        #[cfg(test)]
+        let ((workspace, typed), setup_allocs) = owners::measured(build);
+        #[cfg(not(test))]
+        let (workspace, typed) = build();
+        LaneBuffers {
+            workspace,
+            typed,
+            #[cfg(test)]
+            id: {
+                static SETUPS: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(1);
+                SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            #[cfg(test)]
+            setup_allocs,
+        }
+    }
+
+    fn work(&self, _: usize, job: &Self::Job) -> f64 {
+        work::<F>(job.input)
+    }
+
+    fn modeled(&self, _: usize, job: &Self::Job) -> bool {
+        F::SEARCHED && single_item::<F>(job.input).is_some()
+    }
+
+    fn grant(
+        &self,
+        _: usize,
+        job: &Self::Job,
+        exec: &Exec<'_>,
+        budget: usize,
+        _: Duration,
+    ) -> usize {
+        single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item))
+    }
+
+    fn grant_key(&self, _: usize, job: &Self::Job) -> GrantKey {
+        single_item::<F>(job.input).map_or([0; 2], |item| item.map(f64::to_bits))
+    }
+
+    // A block's error is its own outcome, not the driver's: the caller
+    // delivers every block's outcome in input order.
+    fn run(
+        &self,
+        _: usize,
+        job: &mut Self::Job,
+        lane: &mut LaneBuffers,
+        mut exec: Exec<'_>,
+    ) -> Result<(), DenseError> {
+        #[cfg(test)]
+        {
+            job.lane_seen = (lane.id, lane.workspace.len());
+        }
+        let sizing = job.sizing.take();
+        #[cfg(test)]
+        let (setup, id, input) = (lane.setup_allocs, lane.id, owners::address(job.input));
+        let solve = || match job.input {
+            DenseRead::F32(view) => {
+                factor_into_typed::<F, _>(view, &job.strides, job.dest, sizing, lane, &mut exec)
+            }
+            DenseRead::F64(view) => {
+                factor_into_typed::<F, _>(view, &job.strides, job.dest, sizing, lane, &mut exec)
+            }
+            DenseRead::C32(view) => {
+                factor_into_typed::<F, _>(view, &job.strides, job.dest, sizing, lane, &mut exec)
+            }
+            DenseRead::C64(view) => {
+                factor_into_typed::<F, _>(view, &job.strides, job.dest, sizing, lane, &mut exec)
+            }
+            _ => unreachable!("preflight admits the provider's dtypes only"),
+        };
+        #[cfg(test)]
+        let outcome = {
+            let (outcome, solve_allocs) = owners::measured(solve);
+            owners::record(input, id, setup, solve_allocs);
+            outcome
+        };
+        #[cfg(not(test))]
+        let outcome = solve();
+        job.outcome = Some(outcome.map_err(FactorFailure::Solver));
+        Ok(())
+    }
+}
+
+/// Test-only observation of the destination batch's allocation owners: each
+/// lane's buffer setup and each block's solve (provider call included),
+/// measured on the thread that runs them and kept by input payload address.
+#[cfg(test)]
+pub(crate) mod owners {
+    use std::sync::{Mutex, PoisonError};
+
+    use crate::tests::counting_alloc;
+    use crate::DenseRead;
+
+    /// One solved block: its input's payload address, its lane setup's id
+    /// and allocation calls, and the allocation calls inside its solve.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct Record {
+        pub(crate) input: usize,
+        pub(crate) lane: usize,
+        pub(crate) setup: Option<u64>,
+        pub(crate) solve: Option<u64>,
+    }
+
+    static RECORDS: Mutex<Vec<Record>> = Mutex::new(Vec::new());
+
+    /// `f`'s allocation calls on this thread, `None` inside another
+    /// measurement window, which a nested count would reset.
+    pub(super) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+        if counting_alloc::active() {
+            return (f(), None);
+        }
+        let (value, allocs) = counting_alloc::measure(f);
+        (value, Some(allocs.calls))
+    }
+
+    pub(super) fn address(input: DenseRead<'_>) -> usize {
+        match input {
+            DenseRead::F32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::F64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::C32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::C64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::I32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::I64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            DenseRead::Bool(view) => view.data()[view.offset()..].as_ptr() as usize,
+        }
+    }
+
+    pub(super) fn record(input: usize, lane: usize, setup: Option<u64>, solve: Option<u64>) {
+        RECORDS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Record {
+                input,
+                lane,
+                setup,
+                solve,
+            });
+    }
+
+    /// The position the next record takes.
+    pub(crate) fn mark() -> usize {
+        RECORDS.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+
+    /// The records since `mark` of blocks whose input payload lies in
+    /// `range` (other tests record concurrently).
+    pub(crate) fn within(mark: usize, range: std::ops::Range<usize>) -> Vec<Record> {
+        RECORDS.lock().unwrap_or_else(PoisonError::into_inner)[mark..]
+            .iter()
+            .filter(|record| range.contains(&record.input))
+            .copied()
+            .collect()
+    }
+}
+
+/// Folds `input`'s workspace and typed scratch into `needs` at the lane's
+/// context `exec`. An input whose rank, squareness or extents the solve
+/// refuses or skips needs nothing; a failed workspace query is that input's
+/// own outcome.
+fn needs_of<F: FactorInto>(
+    input: DenseRead<'_>,
+    placement: FactorPlacement,
+    exec: &Exec<'_>,
+    needs: &mut Needs,
+) -> Result<(), DenseError> {
+    fn of<F: FactorInto, T: Scalar>(
+        shape: &[usize],
+        placement: FactorPlacement,
+        exec: &Exec<'_>,
+        slot: usize,
+        needs: &mut Needs,
+    ) -> Result<(), DenseError> {
+        let [m, n, batch @ ..] = shape else {
+            return Ok(());
+        };
+        if F::SQUARE && m != n || shape.contains(&0) {
+            return Ok(());
+        }
+        // The view's element count fits, so its batch product does.
+        let items = batch.iter().product::<usize>();
+        let bytes = F::workspace::<T>([*m, *n], items, exec)
+            .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))?;
+        needs.bytes = needs.bytes.max(bytes);
+        needs.typed[slot] = needs.typed[slot].max(F::scratch_len::<T>([*m, *n], items, placement));
+        needs.coeff[slot] = needs.coeff[slot].max(F::coeff_len([*m, *n], items));
+        Ok(())
+    }
+    match input {
+        DenseRead::F32(view) => of::<F, f32>(view.shape(), placement, exec, 0, needs),
+        DenseRead::F64(view) => of::<F, f64>(view.shape(), placement, exec, 1, needs),
+        DenseRead::C32(view) => of::<F, Complex32>(view.shape(), placement, exec, 2, needs),
+        DenseRead::C64(view) => of::<F, Complex64>(view.shape(), placement, exec, 3, needs),
+        _ => Ok(()),
+    }
+}
+
+/// [`factor_typed`]'s checks in the same order (rank, square, the
+/// empty-extent shortcut, layout), then the lane's failed workspace query or
+/// the provider's destination entry on the lane's buffers.
+fn factor_into_typed<F: FactorInto, T: Scalar>(
+    view: DenseView<'_, T>,
+    strides: &[isize],
+    dest: &mut FactorDest<'_>,
+    sizing: Option<DenseError>,
+    lane: &mut LaneBuffers,
+    exec: &mut Exec<'_>,
+) -> Result<(), DenseError> {
+    let op = F::OP.as_str();
+    let shape = view.shape();
+    let [m, n, batch @ ..] = shape else {
+        return Err(tenferro_error(
+            F::ENTRY,
+            tenferro_tensor::Error::rank_mismatch(op, 2, shape.len()),
+        ));
+    };
+    if F::SQUARE && m != n {
+        return Err(tenferro_error(
+            F::ENTRY,
+            tenferro_tensor::Error::shape_mismatch(op, vec![*m], vec![*n]),
+        ));
+    }
+    if shape.contains(&0) {
+        F::empty_into::<T>([*m, *n], &mut dest.outputs);
+        return Ok(());
+    }
+    // A nonempty view's element count fits, so its batch product does.
+    let items = batch.iter().product::<usize>();
+    with_provider_read::<F, T, _>(view, strides, |raw| {
+        if let Some(error) = sizing {
+            return Err(error);
+        }
+        let placement = dest.placement();
+        let scratch = T::scratch(&mut lane.typed);
+        F::factor_into::<T>(
+            raw,
+            [*m, *n],
+            items,
+            &mut dest.outputs,
+            placement,
+            &mut lane.workspace,
+            &mut scratch.values,
+            &mut scratch.coeff,
+            exec,
+        )
+        .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))
+    })
+}
+
+/// The destination batch's dispatch over the ops with a destination form;
+/// the caller validated `op` and `dests`.
+pub(crate) fn factorize_into(
+    engine: &mut dyn tenferro_tensor::Engine,
+    op: crate::DenseFactorization,
+    allocation: LaneAllocation,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    sink: &mut FactorSink<'_>,
+) -> Result<(), DenseError> {
+    use crate::DenseFactorization as Op;
+    match op {
+        Op::Svd => factorize_into_batch::<Svd>(engine, allocation, inputs, dests, sink),
+        Op::Qr => factorize_into_batch::<Qr>(engine, allocation, inputs, dests, sink),
+        Op::Eigh => factorize_into_batch::<Eigh>(engine, allocation, inputs, dests, sink),
+        Op::Lq => factorize_into_batch::<Lq>(engine, allocation, inputs, dests, sink),
+        Op::QrFull => factorize_into_batch::<QrFull>(engine, allocation, inputs, dests, sink),
+        Op::QrNull => factorize_into_batch::<QrNull>(engine, allocation, inputs, dests, sink),
+        _ => unreachable!("validation admits the ops with a destination form only"),
+    }
+}
+
+fn factorize_into_batch<F: FactorInto>(
+    engine: &mut dyn tenferro_tensor::Engine,
+    allocation: LaneAllocation,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    sink: &mut FactorSink<'_>,
+) -> Result<(), DenseError> {
+    with_cpu_engine(engine, |cpu| {
+        batch_into_on::<F>(cpu, allocation, inputs, dests, sink)
+    })
+    .unwrap_or_else(|| {
+        Err(tenferro_error(
+            F::ENTRY,
+            tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
+        ))
+    })
+}
+
+/// [`batch_on`] into destinations: the same preflight, admission, lanes and
+/// ordered post-join delivery, with each block's outcome kept as
+/// `Result<(), FactorFailure>` instead of its factors.
+fn batch_into_on<F: FactorInto>(
+    cpu: &mut CpuEngine,
+    allocation: LaneAllocation,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    sink: &mut FactorSink<'_>,
+) -> Result<(), DenseError> {
+    let mut jobs = Vec::with_capacity(inputs.len());
+    let mut slots = dests.iter_mut();
+    let mut refused = None;
+    for (&input, dest) in inputs.iter().zip(&mut slots) {
+        match preflight::<F>(input) {
+            Ok(strides) => jobs.push(IntoJob {
+                input,
+                strides,
+                dest,
+                sizing: None,
+                outcome: None,
+                #[cfg(test)]
+                lane_seen: (0, 0),
+            }),
+            Err(error) => {
+                refused = Some((error, dest));
+                break;
+            }
+        }
+    }
+    if !jobs.is_empty() {
+        driver::drive(
+            cpu,
+            &IntoBlocks::<F>(PhantomData),
+            &mut jobs,
+            &mut LaneScratch::default(),
+            allocation,
+        )?;
+    }
+    let admitted = jobs.len();
+    for (index, job) in jobs.into_iter().enumerate() {
+        let outcome = job
+            .outcome
+            .unwrap_or_else(|| unreachable!("the driver runs every admitted job"));
+        sink(index, job.dest, outcome)?;
+    }
+    match refused {
+        Some((error, dest)) => sink(admitted, dest, Err(FactorFailure::Solver(error))),
         None => Ok(()),
     }
 }
@@ -620,22 +1872,44 @@ fn factor_typed<F: Factor, T: Scalar>(
     if shape.contains(&0) {
         return F::factor::<T>(None, dims, batch, exec);
     }
+    // The provider's safe `Vec` entry: its workspace query and `*_into` on
+    // one per-call region. The owned outcome needs fresh factor storage per
+    // block anyway; the destination batch (`factor_into_typed`) is the
+    // lane-reused-workspace route.
+    with_provider_read::<F, T, _>(view, strides, |raw| F::factor(Some(raw), dims, batch, exec))
+}
+
+/// Runs `solve` on the provider's read of the nonempty `view`: the view
+/// itself, or for a [`Factor::TRANSPOSED`] factorization its transpose (the
+/// first two extents and strides swapped, no copy).
+fn with_provider_read<F: Factor, T, R>(
+    view: DenseView<'_, T>,
+    strides: &[isize],
+    solve: impl FnOnce(RawStridedRef<'_, T>) -> Result<R, DenseError>,
+) -> Result<R, DenseError> {
     // `DenseView` validated the offset against the storage, and the tenferro
     // view (preflight) proved it fits `isize`.
     let offset = isize::try_from(view.offset()).map_err(|_| DenseError::OffsetOverflow {
         value: view.offset(),
     })?;
+    let (swapped_shape, swapped_strides): (ShapeVec, StrideVec);
+    let (shape, strides) = if F::TRANSPOSED {
+        let mut shape: ShapeVec = view.shape().iter().copied().collect();
+        let mut strides: StrideVec = strides.iter().copied().collect();
+        shape.swap(0, 1);
+        strides.swap(0, 1);
+        (swapped_shape, swapped_strides) = (shape, strides);
+        (&swapped_shape[..], &swapped_strides[..])
+    } else {
+        (view.shape(), strides)
+    };
     let raw = RawStridedRef::new(view.data(), shape, strides, offset).map_err(|err| {
         tenferro_error(
             F::ENTRY,
-            tenferro_tensor::Error::invalid_argument(op, "layout", err.to_string()),
+            tenferro_tensor::Error::invalid_argument(F::OP.as_str(), "layout", err.to_string()),
         )
     })?;
-    // The provider's safe `Vec` entry: its workspace query and `*_into` on
-    // one per-call region. Why not `*_into` with a lane-reused workspace:
-    // its destinations are uninitialized and this crate forbids the unsafe
-    // code that publishes them.
-    F::factor(Some(raw), dims, batch, exec)
+    solve(raw)
 }
 
 fn linalg_error(op: &'static str, error: tenferro_linalg::Error) -> tenferro_tensor::Error {
@@ -702,6 +1976,9 @@ mod tests {
         const ENTRY: Entry = Entry::Linalg;
         const KIND: OpKind = OpKind::Factorization;
         const LABEL: &'static str = F::ENTRY;
+        type Lane = ();
+
+        fn lane(&self, _: &mut dyn LaneJobs<Job<'a>>, _: &Exec<'_>) {}
 
         fn work(&self, index: usize, job: &Job<'a>) -> f64 {
             self.0.work(index, job)
@@ -726,7 +2003,13 @@ mod tests {
             self.0.grant_key(index, job)
         }
 
-        fn run(&self, index: usize, _: &mut Job<'a>, exec: Exec<'_>) -> Result<(), DenseError> {
+        fn run(
+            &self,
+            index: usize,
+            _: &mut Job<'a>,
+            (): &mut (),
+            exec: Exec<'_>,
+        ) -> Result<(), DenseError> {
             self.1[index].store(exec.budget(), Ordering::Relaxed);
             Ok(())
         }
@@ -787,6 +2070,116 @@ mod tests {
         )
         .unwrap();
         op.1.iter().map(|w| w.load(Ordering::Relaxed)).collect()
+    }
+
+    /// Purpose: each lane of a destination batch is set up once, before its
+    /// first block, with a workspace sufficient for every block it runs:
+    /// every block of a lane runs with that one setup, whose workspace is
+    /// never regrown, on uneven blocks over two forced lanes and on the
+    /// single-lane path, including a two-item and an empty-batch input; every
+    /// block succeeds, so no workspace was short.
+    #[test]
+    fn each_lane_is_set_up_once_for_all_its_blocks() {
+        use crate::factor_dest::validate;
+        use std::collections::BTreeMap;
+        use tcontract_exec::BatchStrategy;
+        let shapes: [&[usize]; 5] = [&[40, 30], &[3, 2], &[17, 9], &[6, 5, 2], &[4, 3, 0]];
+        let data = vec![0.25_f64; 2400];
+        let strides: Vec<Vec<usize>> = shapes
+            .iter()
+            .map(|shape| {
+                (0..shape.len())
+                    .map(|axis| shape[..axis].iter().product())
+                    .collect()
+            })
+            .collect();
+        let inputs: Vec<DenseRead<'_>> = shapes
+            .iter()
+            .zip(&strides)
+            .map(|(&shape, strides)| {
+                let len = shape.iter().product();
+                DenseRead::F64(DenseView::new(&data[..len], shape, strides, 0).unwrap())
+            })
+            .collect();
+        let engines = [
+            CpuEngine::serial(),
+            CpuEngine::new(Pool::builder().threads(4).build().unwrap()).with_batch_policy(
+                BatchPolicy::new(BatchStrategy::Split {
+                    lanes: std::num::NonZeroUsize::new(2).unwrap(),
+                }),
+            ),
+        ];
+        for (mut engine, lanes) in engines.into_iter().zip([1, 2]) {
+            let geometry: Vec<_> = shapes
+                .iter()
+                .map(|shape| {
+                    let (m, n) = (shape[0], shape[1]);
+                    let k = m.min(n);
+                    let batch = &shape[2..];
+                    let q = [&[m, k][..], batch].concat();
+                    let r = [&[k, n][..], batch].concat();
+                    let q_strides: Vec<usize> =
+                        (0..q.len()).map(|a| q[..a].iter().product()).collect();
+                    let r_strides: Vec<usize> =
+                        (0..r.len()).map(|a| r[..a].iter().product()).collect();
+                    (q, q_strides, r, r_strides)
+                })
+                .collect();
+            let mut storage: Vec<(Vec<f64>, Vec<f64>)> = geometry
+                .iter()
+                .map(|(q, _, r, _)| (vec![0.0; q.iter().product()], vec![0.0; r.iter().product()]))
+                .collect();
+            let mut dests: Vec<FactorDest<'_>> = storage
+                .iter_mut()
+                .zip(&geometry)
+                .map(|((q, r), (qs, qst, rs, rst))| {
+                    FactorDest::new(
+                        [
+                            Some(DenseWrite::F64(
+                                crate::DenseViewMut::new(q, qs, qst, 0).unwrap(),
+                            )),
+                            Some(DenseWrite::F64(
+                                crate::DenseViewMut::new(r, rs, rst, 0).unwrap(),
+                            )),
+                            None,
+                        ],
+                        FactorPlacement::AsComputed,
+                    )
+                })
+                .collect();
+            validate(crate::DenseFactorization::Qr, &inputs, &dests).unwrap();
+            let mut jobs: Vec<IntoJob<'_, '_, '_>> = inputs
+                .iter()
+                .zip(dests.iter_mut())
+                .map(|(&input, dest)| IntoJob {
+                    input,
+                    strides: preflight::<Qr>(input).unwrap(),
+                    dest,
+                    sizing: None,
+                    outcome: None,
+                    lane_seen: (0, 0),
+                })
+                .collect();
+            driver::drive(
+                &mut engine,
+                &IntoBlocks::<Qr>(PhantomData),
+                &mut jobs,
+                &mut LaneScratch::default(),
+                LaneAllocation::Moldable,
+            )
+            .unwrap();
+            let mut setups = BTreeMap::new();
+            for job in &jobs {
+                assert_eq!(job.outcome, Some(Ok(())));
+                let (id, len) = job.lane_seen;
+                assert_eq!(
+                    *setups.entry(id).or_insert(len),
+                    len,
+                    "one buffer per setup"
+                );
+            }
+            assert_eq!(setups.len(), lanes, "{lanes} lane(s)");
+        }
     }
 
     /// Purpose: a factorization batch whose every input is one matrix joins

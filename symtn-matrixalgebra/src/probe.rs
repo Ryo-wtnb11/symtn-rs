@@ -85,12 +85,6 @@ events! {
         input_pack_bytes: LqInputPackBytes,
         output_scatter_calls: LqOutputScatterCalls,
         output_scatter_bytes: LqOutputScatterBytes,
-        scratch_buffer_count: LqScratchBuffers,
-        scratch_capacity_bytes: LqScratchCapacityBytes,
-        adjoint_scratch_fill_calls: LqAdjointFillCalls,
-        adjoint_scratch_fill_bytes: LqAdjointFillBytes,
-        final_adjoint_copy_calls: LqFinalAdjointCopyCalls,
-        final_adjoint_copy_bytes: LqFinalAdjointCopyBytes,
     }
     /// Copies of Hermitian eigendecomposition.
     EighCopyProbe => eigh_copy {
@@ -165,6 +159,7 @@ enum Observation {
     CheckedEighPairs(Vec<usize>),
     CheckedSvdStage(usize, usize),
     MfSvdFallback(usize, usize),
+    StagedDestination(usize, [Option<usize>; 3]),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -179,7 +174,6 @@ pub(crate) struct CheckedCompactInputObservation {
     pub operation: CheckedCompactOperation,
     pub input_pointer: usize,
     pub matrix_pointer: usize,
-    pub adjoint_pointer: Option<usize>,
     pub elements: usize,
 }
 
@@ -309,6 +303,15 @@ impl Recording {
         })
     }
 
+    /// Every destination the staging boundary handed to a sector, with its
+    /// sector index and each output's payload address.
+    pub(crate) fn staged_destinations(&self) -> Vec<(usize, [Option<usize>; 3])> {
+        self.observed(|o| match o {
+            Observation::StagedDestination(index, outputs) => Some((*index, *outputs)),
+            _ => None,
+        })
+    }
+
     /// Factor buffers built as `(left, right)`.
     pub(crate) fn factor_buffer_builds(&self) -> (usize, usize) {
         (
@@ -370,33 +373,16 @@ pub(crate) fn owned_output(op: CopyOp, owner_reused: bool) {
     add(reused, usize::from(owner_reused));
 }
 
-pub(crate) fn lq_scratch<D>(elements: usize) {
-    hit(Event::LqScratchBuffers);
-    add(Event::LqScratchCapacityBytes, bytes::<D>(elements));
-}
-
-pub(crate) fn lq_adjoint_fill<D>(elements: usize) {
-    hit(Event::LqAdjointFillCalls);
-    add(Event::LqAdjointFillBytes, bytes::<D>(elements));
-}
-
-pub(crate) fn lq_final_adjoint_copy<D>(elements: usize) {
-    hit(Event::LqFinalAdjointCopyCalls);
-    add(Event::LqFinalAdjointCopyBytes, bytes::<D>(elements));
-}
-
 pub(crate) fn checked_compact_input<D>(
     operation: CheckedCompactOperation,
     input: &[D],
     matrix: &[D],
-    adjoint: Option<&[D]>,
 ) {
     observe(Observation::CheckedCompactInput(
         CheckedCompactInputObservation {
             operation,
             input_pointer: input.as_ptr() as usize,
             matrix_pointer: matrix.as_ptr() as usize,
-            adjoint_pointer: adjoint.map(|data| data.as_ptr() as usize),
             elements: matrix.len(),
         },
     ));
@@ -414,6 +400,29 @@ pub(crate) fn checked_svd_stage<D>(u: &[D], vt: &[D]) {
     observe(Observation::CheckedSvdStage(
         u.as_ptr() as usize,
         vt.as_ptr() as usize,
+    ));
+}
+
+/// Records the payload address of each output of a destination handed to
+/// sector `index` by the staging boundary.
+pub(crate) fn staged_destination(index: usize, dest: &mut symtn_dense::FactorDest<'_>) {
+    fn address(write: &symtn_dense::DenseWrite<'_>) -> usize {
+        use symtn_dense::DenseWrite as W;
+        match write {
+            W::F32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::F64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::C32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::C64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::I32(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::I64(view) => view.data()[view.offset()..].as_ptr() as usize,
+            W::Bool(view) => view.data()[view.offset()..].as_ptr() as usize,
+        }
+    }
+    observe(Observation::StagedDestination(
+        index,
+        dest.outputs_mut()
+            .each_ref()
+            .map(|output| output.as_ref().map(address)),
     ));
 }
 

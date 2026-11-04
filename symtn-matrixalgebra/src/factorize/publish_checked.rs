@@ -354,10 +354,10 @@ pub(super) struct IdentitySegment {
 /// Every pair is consumed in order, so the plan records only the identity
 /// segments; the list stays unallocated when there are none, keeping the
 /// all-populated case free of plan allocation.
-pub(super) fn one_sided_factor_output_plan<D, M: SectorGeometry>(
+pub(super) fn one_sided_factor_output_plan<D, M: SectorGeometry, P: SidedFactors<D> + ?Sized>(
     structure: &BlockStructure,
     matricizations: &[M],
-    pairs: &[FactorPair<D>],
+    pairs: &P,
     dimensions: &BTreeMap<SectorId, usize>,
     required_len: usize,
     side: FactorSide,
@@ -365,7 +365,9 @@ pub(super) fn one_sided_factor_output_plan<D, M: SectorGeometry>(
 ) -> Option<Vec<IdentitySegment>> {
     let mut identities = Vec::new();
     let mut matrices = matricizations.iter().peekable();
-    let mut pair_records = pairs.iter().enumerate().peekable();
+    let mut pair_records = (0..pairs.len())
+        .map(|index| (index, pairs.pair(index)))
+        .peekable();
     let mut bonds = dimensions.iter().peekable();
     let mut previous_matrix = None;
     let mut block_index = 0usize;
@@ -529,6 +531,162 @@ pub(super) struct FactorPairRef<'a, D> {
     pub(super) right_leading: usize,
 }
 
+/// The factor pairs a one-sided publisher reads, in matricization order.
+pub(super) trait SidedFactors<D> {
+    fn len(&self) -> usize;
+    fn pair(&self, index: usize) -> FactorPairRef<'_, D>;
+    /// Publishes the plan proved by [`one_sided_factor_output_plan`] for
+    /// `side`: the side's factors in pair order with each identity written
+    /// once at its place, so no output element is written twice. The
+    /// opposite side stays in place for its own publication.
+    fn take_side(
+        &mut self,
+        side: FactorSide,
+        identities: &[IdentitySegment],
+        required_len: usize,
+    ) -> Vec<D>;
+}
+
+impl<D: FactorScalar> SidedFactors<D> for [FactorPair<D>] {
+    fn len(&self) -> usize {
+        <[FactorPair<D>]>::len(self)
+    }
+
+    fn pair(&self, index: usize) -> FactorPairRef<'_, D> {
+        let pair = &self[index];
+        FactorPairRef {
+            sector: pair.sector,
+            kept: pair.kept,
+            left: &pair.left,
+            left_rows: pair.left_rows,
+            right: &pair.right,
+            right_leading: pair.right_leading,
+        }
+    }
+
+    fn take_side(
+        &mut self,
+        side: FactorSide,
+        identities: &[IdentitySegment],
+        required_len: usize,
+    ) -> Vec<D> {
+        take_one_sided_factors(self, identities, required_len, side)
+    }
+}
+
+impl<D: FactorScalar> SidedFactors<D> for Vec<FactorPair<D>> {
+    fn len(&self) -> usize {
+        <[FactorPair<D>]>::len(self)
+    }
+
+    fn pair(&self, index: usize) -> FactorPairRef<'_, D> {
+        SidedFactors::pair(self.as_slice(), index)
+    }
+
+    fn take_side(
+        &mut self,
+        side: FactorSide,
+        identities: &[IdentitySegment],
+        required_len: usize,
+    ) -> Vec<D> {
+        take_one_sided_factors(self, identities, required_len, side)
+    }
+}
+
+impl<D: FactorScalar, const N: usize> SidedFactors<D> for [FactorPair<D>; N] {
+    fn len(&self) -> usize {
+        N
+    }
+
+    fn pair(&self, index: usize) -> FactorPairRef<'_, D> {
+        SidedFactors::pair(self.as_slice(), index)
+    }
+
+    fn take_side(
+        &mut self,
+        side: FactorSide,
+        identities: &[IdentitySegment],
+        required_len: usize,
+    ) -> Vec<D> {
+        take_one_sided_factors(self, identities, required_len, side)
+    }
+}
+
+impl<D: FactorScalar> SidedFactors<D> for PackedFactorPairs<D> {
+    fn len(&self) -> usize {
+        self.pairs.len()
+    }
+
+    fn pair(&self, index: usize) -> FactorPairRef<'_, D> {
+        PairedFactors::pair(self, index)
+    }
+
+    /// The side's buffer, moved: as it is when no identity interleaves it,
+    /// otherwise grown once in place, every factor an identity precedes
+    /// moved up (last first) and each identity written at its place, so
+    /// only those factors and the identities are written. The pairs fill
+    /// the buffer contiguously in pair order.
+    fn take_side(
+        &mut self,
+        side: FactorSide,
+        identities: &[IdentitySegment],
+        required_len: usize,
+    ) -> Vec<D> {
+        let mut data = std::mem::take(match side {
+            FactorSide::Left => &mut self.left,
+            FactorSide::Right => &mut self.right,
+        });
+        let mut _written = 0usize;
+        if !identities.is_empty() {
+            let factors_end = data.len();
+            let mut shift = identities
+                .iter()
+                .map(|identity| identity.bond * identity.bond)
+                .sum::<usize>();
+            data.resize(required_len, D::zero());
+            let mut identities = identities.iter().rev().peekable();
+            for index in (0..=self.pairs.len()).rev() {
+                let start = match self.pairs.get(index) {
+                    Some(pair) => {
+                        let source = match side {
+                            FactorSide::Left => pair.left.clone(),
+                            FactorSide::Right => pair.right.clone(),
+                        };
+                        if shift != 0 {
+                            data.copy_within(source.clone(), source.start + shift);
+                            _written += source.len();
+                        }
+                        source.start
+                    }
+                    None => factors_end,
+                };
+                let mut end = start + shift;
+                while let Some(identity) =
+                    identities.next_if(|identity| identity.pairs_before == index)
+                {
+                    let bond = identity.bond;
+                    let block = &mut data[end - bond * bond..end];
+                    block.fill(D::zero());
+                    for diagonal in 0..bond {
+                        block[diagonal * (bond + 1)] = D::one();
+                    }
+                    _written += bond * bond;
+                    shift -= bond * bond;
+                    end -= bond * bond;
+                }
+            }
+        }
+        #[cfg(test)]
+        {
+            use crate::probe::Event;
+            crate::probe::hit(Event::OneSidedCanonicalPublications);
+            crate::probe::add(Event::OneSidedOwnerReused, usize::from(!data.is_empty()));
+            crate::probe::add(Event::OneSidedAppendedElements, _written);
+        }
+        data
+    }
+}
+
 /// The factor pairs the checked paired builder publishes, in matricization
 /// order.
 pub(super) trait PairedFactors<D> {
@@ -588,12 +746,14 @@ impl<D> PairedFactors<D> for PackedFactorPairs<D> {
 
     fn pair(&self, index: usize) -> FactorPairRef<'_, D> {
         let pair = &self.pairs[index];
+        // A side a one-sided publication already took reads as empty, as a
+        // taken `FactorPair` side does.
         FactorPairRef {
             sector: pair.sector,
             kept: pair.kept,
-            left: &self.left[pair.left.clone()],
+            left: self.left.get(pair.left.clone()).unwrap_or_default(),
             left_rows: pair.left_rows,
-            right: &self.right[pair.right.clone()],
+            right: self.right.get(pair.right.clone()).unwrap_or_default(),
             right_leading: pair.right_leading,
         }
     }
@@ -816,11 +976,11 @@ where
 
 /// Checked generic factor materialization with identity completion for sectors
 /// absent from the source matricization (the full-factor contract).
-pub(super) fn build_bound_factor_generic_checked<R, D, M>(
+pub(super) fn build_bound_factor_generic_checked<R, D, M, P>(
     provider: &Arc<R>,
     homspace: &FusionTreeHomSpace,
     matricizations: &[M],
-    pairs: &mut [FactorPair<D>],
+    pairs: &mut P,
     dimensions: &BTreeMap<SectorId, usize>,
     side: FactorSide,
 ) -> Result<BoundDynFactor<R, D>, CheckedGenericFactorPlanError<R::Error>>
@@ -828,6 +988,7 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D> + ?Sized,
 {
     publish_one_sided_factor(
         &CheckedAuthority(provider),
@@ -944,17 +1105,18 @@ where
 /// factor pair, so a side-only sector would be dropped from the full
 /// factor's `fuse(codomain)`/`fuse(domain)` bond instead of publishing its
 /// identity block, as TensorKit's `initialize_output(qr_full!/lq_full!)` does.
-pub(super) fn checked_full_factor_pair<R, D, M>(
+pub(super) fn checked_full_factor_pair<R, D, M, P>(
     provider: &Arc<R>,
     homspace: &FusionTreeHomSpace,
     matrices: &[M],
-    mut pairs: Vec<FactorPair<D>>,
+    mut pairs: P,
     dimensions: &BTreeMap<SectorId, usize>,
 ) -> Result<DynamicFactorPair<R, D>, CheckedGenericFactorPlanError<R::Error>>
 where
     R: CheckedGenericFusion,
     D: FactorScalar,
     M: SectorGeometry,
+    P: SidedFactors<D>,
 {
     let left = build_bound_factor_generic_checked(
         provider,

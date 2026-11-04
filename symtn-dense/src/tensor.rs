@@ -182,6 +182,60 @@ impl DenseTensor {
         }
     }
 
+    /// A host tensor of `shape` over the column-major `data`, on `like`'s
+    /// backend: an output an executor derives from one it was returned.
+    #[cfg(feature = "tenferro")]
+    pub(crate) fn host_col_major_like<T: tenferro_tensor::TensorScalar>(
+        like: &Self,
+        shape: Vec<usize>,
+        data: Vec<T>,
+    ) -> Result<Self, DenseError> {
+        let tensor = tenferro_tensor::Tensor::from_vec_col_major(shape, data)
+            .map_err(|err| tenferro_error("DenseTensor::host_col_major_like", err))?;
+        Ok(Self {
+            backend: like.backend,
+            dtype: dense_dtype_from_tenferro(tensor.dtype())?,
+            inner: DenseTensorInner::Tenferro(tensor),
+        })
+    }
+
+    /// A host tensor of `shape` over the column-major `data`: an output an
+    /// executor default computes into its own storage.
+    #[cfg(feature = "tenferro")]
+    pub(crate) fn host_col_major<T: tenferro_tensor::TensorScalar>(
+        shape: Vec<usize>,
+        data: Vec<T>,
+    ) -> Result<Self, DenseError> {
+        let tensor = tenferro_tensor::Tensor::from_vec_col_major(shape, data)
+            .map_err(|err| tenferro_error("DenseTensor::host_col_major", err))?;
+        Ok(Self {
+            backend: DenseBackend::Tenferro,
+            dtype: dense_dtype_from_tenferro(tensor.dtype())?,
+            inner: DenseTensorInner::Tenferro(tensor),
+        })
+    }
+
+    /// Without a backend no host tensor exists.
+    #[cfg(not(feature = "tenferro"))]
+    pub(crate) fn host_col_major<T>(_: Vec<usize>, _: Vec<T>) -> Result<Self, DenseError> {
+        Err(DenseError::Unsupported {
+            op: "DenseTensor::host_col_major",
+            message: "no host tensor backend is enabled".to_string(),
+        })
+    }
+
+    /// Without a backend no tensor exists, so `like` cannot be given.
+    #[cfg(not(feature = "tenferro"))]
+    pub(crate) fn host_col_major_like<T>(
+        like: &Self,
+        _: Vec<usize>,
+        _: Vec<T>,
+    ) -> Result<Self, DenseError> {
+        match like.inner {
+            DenseTensorInner::Empty(never) => match never {},
+        }
+    }
+
     #[cfg(feature = "tenferro")]
     #[cfg(not(feature = "provider-inject"))]
     pub(crate) fn from_tenferro(tensor: tenferro_tensor::Tensor) -> Result<Self, DenseError> {

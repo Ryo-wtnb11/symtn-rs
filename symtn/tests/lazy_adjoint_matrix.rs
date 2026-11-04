@@ -613,17 +613,30 @@ mod factorizations {
                 &lazy.svd_vals($engine, r, c).unwrap(),
                 &eager.svd_vals($engine, r, c).unwrap(),
             );
-            assert_factor_close!(
-                $engine,
-                format!("{label} left_null"),
+            // A null basis is free up to a unitary on its bond (and may come
+            // from another route on the lazy input): compare the spaces and
+            // the projectors `N N^H` and `N^H N`.
+            let (n, en) = (
                 lazy.left_null($engine, r, c).unwrap(),
-                eager.left_null($engine, r, c).unwrap()
+                eager.left_null($engine, r, c).unwrap(),
             );
+            assert_eq!(n.domain(), en.domain(), "{label} left_null bond");
             assert_factor_close!(
                 $engine,
-                format!("{label} right_null"),
+                format!("{label} left_null projector"),
+                n.compose($engine, n.adjoint_view()).unwrap(),
+                en.compose($engine, en.adjoint_view()).unwrap()
+            );
+            let (n, en) = (
                 lazy.right_null($engine, r, c).unwrap(),
-                eager.right_null($engine, r, c).unwrap()
+                eager.right_null($engine, r, c).unwrap(),
+            );
+            assert_eq!(n.codomain(), en.codomain(), "{label} right_null bond");
+            assert_factor_close!(
+                $engine,
+                format!("{label} right_null projector"),
+                n.adjoint($engine).unwrap().compose($engine, &n).unwrap(),
+                en.adjoint($engine).unwrap().compose($engine, &en).unwrap()
             );
             assert_factor_close!(
                 $engine,

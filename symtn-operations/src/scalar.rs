@@ -306,6 +306,8 @@ pub trait DenseBlockScalar:
 {
     fn dense_read(view: DenseView<'_, Self>) -> DenseRead<'_>;
     fn dense_write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_>;
+    /// The storage of a destination of this dtype, `None` for another dtype.
+    fn dense_write_data<'b>(write: &'b mut DenseWrite<'_>) -> Option<&'b mut [Self]>;
     /// Dtype-erased carrier for accumulate-form GEMM parameters.
     fn dense_scalar(self) -> DenseScalar;
     /// Dtype-erased carrier of a fresh-destination GEMM call: `segments`
@@ -342,6 +344,13 @@ macro_rules! impl_dense_block_scalar {
 
             fn dense_write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_> {
                 DenseWrite::$write_variant(view)
+            }
+
+            fn dense_write_data<'b>(write: &'b mut DenseWrite<'_>) -> Option<&'b mut [Self]> {
+                match write {
+                    DenseWrite::$write_variant(view) => Some(view.data_mut()),
+                    _ => None,
+                }
             }
 
             fn dense_scalar(self) -> DenseScalar {

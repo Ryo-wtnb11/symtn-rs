@@ -181,24 +181,28 @@ entry, the entry overhead, and its per-block, per-width and per-lane slices;
 with a budget of zero every call searches, with the same allocation. Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
 core batches the same way. The native provider's compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR, Hermitian eigendecomposition
-(full and values-only) and general eigenvalues over a tensor's sector blocks
-run on the same lanes, through the same lane driver as the GEMM kernel
+SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR, the QR null
+basis of `left_null`, Hermitian
+eigendecomposition (full and values-only) and general eigenvalues over a
+tensor's sector blocks run on the same lanes, through the same lane driver as the GEMM kernel
 (inside the engine's guarded linalg entry rather than its contraction entry):
 each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
-`m n k - k^3/3` with `k = min(m, n)`, EIGH and EIG values tlinalg's `n^3`, four times that
+`m n k - k^3/3` with `k = min(m, n)`, LQ that of its transpose's QR, a
+tall full QR or null basis tlinalg's Householder factor `m n k` plus its
+reflector application `m c k` onto `c` target columns, EIGH and EIG values tlinalg's `n^3`, four times that
 for complex scalars) under the engine's work model, and each
 block's factorization gets its faer width from the engine's cost rule within
 its lane's share, so a small block takes no width the engine would not grant
 it. A batch whose every input is one matrix (batch product one) takes the
-same search, except for QR, with each block's granted width composed as tlinalg decides it
+same search, except for the QR family (compact and full QR, LQ, the null
+basis), with each block's granted width composed as tlinalg decides it
 for one item under `Auto`: the engine's cost rule over the total work's time,
 capped at the width the provider's payback work (`estimate_payback_work`,
 the part of the estimate a team inside the item can pay back; for general
 eigenvalues it is the whole estimate, so the cap is inert) pays for, and one
 thread on a token without a team. The serial times stay the work model's
 estimates, which run low for SVD; no correction is applied, so the choice
-remains a scheduling estimate. QR batches keep the baseline placement over
+remains a scheduling estimate. QR-family batches keep the baseline placement over
 `L0` lanes, without the search: the model credits a granted width with a
 linear speedup that faer's QR does not deliver at the widths QR's payback
 share admits, and on few large QR blocks the searched placement ran slower
@@ -213,11 +217,56 @@ reported is the lowest-indexed sector's, the one the per-matrix loop would
 report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
-where the loop would have returned the earlier error. Each block allocates
-its own provider workspace and fresh factors of their logical size, so a
-factor never inherits a recycled buffer's capacity; a full EIGH, and a
-compact SVD over packed or Checked Generic sector matrices, holds every
-sector's raw factors at once before placing them, where the loop held one.
+where the loop would have returned the earlier error. Compact QR, compact
+LQ, full QR, the `left_null` basis, compact SVD and full EIGH run through
+`DenseExecutor::factorize_batch_into`: the
+operation allocates each output once (the final packed factor for a
+direct-region or Checked Generic canonical output, otherwise one packed
+transient per call that is scattered by tree identity afterwards, about
+twice the factor payload on that route) and one packed real spectrum, and
+each block writes its factors straight into its slice through tlinalg's
+initialized-destination entries. Each lane allocates one provider workspace
+and one typed scratch (complex singular values and eigenvalues, and the
+provider-shaped factors of an adjoint placement or of LQ) per call, sized
+from that
+lane's blocks at its own width before its first block, and drops them when
+the lane finishes; nothing is kept across calls. Compact LQ of `X` reads
+each block's transpose in place (a strided view, no adjoint copy), solves
+`X^T = Q' R'` into the lane scratch and writes `L = R'^T`, `Q = Q'^T` into
+the destination in one plain transpose pass; LQ of a lazy adjoint `A^H`
+solves the parent blocks `A` by QR placed as the adjoint problem
+(`l = R^H`, `q = Q^H`). The positive-diagonal and phase gauges run in place
+on the delivered destination, and each sector's public `f64` spectrum is
+still its own allocation. The positive-diagonal LQ is unique only when a
+sector's leading `k x k` triangular factor is nonsingular; otherwise the
+native transpose route, the default's adjoint route and the lazy parent's
+QR return valid but possibly different factors. Native full QR of an
+`m x n` block with `m <= n` is its compact QR; with `m > n`, as the
+`left_null` basis, the input is copied once into the destination `R` (the
+null basis: into the lane scratch), factored in place by tlinalg's compact
+Householder kernel, and its reflectors applied straight onto `I_m` (onto
+`[0; I_{m-n}]`, so only the final `m x (m - n)` basis is written):
+`O(m n^2 + m^2 n)` against the `O(m^2 (n + m))` economy QR of `[X | I]`
+that every other executor, and the BLAS provider, still runs through its
+own `qr_into` (`lq_full`, `right_null` and the full SVD's completion keep
+that route on every provider). Each tall block allocates the compact
+factor's own workspace once (tlinalg has no initialized-coefficient
+destination form; the lane lends the reused coefficient `Vec`). Columns past
+`min(m, n)` of the full `Q`, and the null basis, are any orthonormal basis
+of the complement and may differ by provider. Values-only SVD and EIGH
+and general eigenvalues keep one provider workspace and fresh outputs per
+block (tlinalg has no initialized destination form for them). The
+pseudo-inverse's SVD keeps the owned batch, one provider workspace and
+fresh factors per block, which it holds until its global cutoff is known and
+then reads in place in its reconstruction GEMMs: a destination needs the
+whole transient zero-initialized first, a serial pass the owned outputs do
+not pay and that a caller which never scatters or publishes the factors
+does not recover (TensorKit's `pinv` also solves each block into its own
+temporaries). Every other executor, and the BLAS provider,
+reach `factorize_batch_into` through its default: the owned
+`factorize_batch` with each delivered output copied into its destination
+(for LQ, each block's adjoint written into one scratch sized for the
+largest block and factored with QR).
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not

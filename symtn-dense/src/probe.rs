@@ -29,9 +29,11 @@ pub(crate) enum Event {
     /// One geometry-plan cache lookup of the Serial plan class (a dtype
     /// whose classes differ).
     GemmSerialPlanLookup,
+    /// The LQ default wrote one input's adjoint into its scratch.
+    LqAdjointStaging,
 }
 
-const EVENTS: usize = Event::GemmSerialPlanLookup as usize + 1;
+const EVENTS: usize = Event::LqAdjointStaging as usize + 1;
 
 #[derive(Default)]
 struct Probe {

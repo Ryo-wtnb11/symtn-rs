@@ -241,8 +241,7 @@ where
     ///
     /// Other inputs run one dense QR per sector, with cost
     /// `O(sum_c m_c * n_c * min(m_c, n_c))`. Lazy adjoints are materialized
-    /// only for the operation (LQ is itself the QR of the adjoint, so the
-    /// copy is the one LQ would make). Checked factors use the same provider
+    /// only for the operation. Checked factors use the same provider
     /// instance as `self`.
     /// If any sector fails or the provider rejects an output space, no factors
     /// are returned.
@@ -642,8 +641,15 @@ where
     /// are compact, including on a dual `V`.
     /// Checked factors use the source provider instance, and a failure returns
     /// no factors. A lazy adjoint `A^H` is not materialized: the QR
-    /// `A = Q R` of its parent, read in place, gives `l = R^H` and `q = Q^H`
-    /// in the gauge LQ of the materialized adjoint has.
+    /// `A = Q R` of its parent, read in place, gives `l = R^H` and `q = Q^H`.
+    ///
+    /// The factors are unique (to rounding) when each sector's leading
+    /// `k_c x k_c` block of `l` is nonsingular; full row rank with
+    /// `m_c <= n_c` suffices, full column rank with `m_c > n_c` does not.
+    /// Then a lazy adjoint's factors equal those of LQ of the materialized
+    /// adjoint, and every provider returns the same factors. Otherwise any
+    /// two routes (lazy or materialized, one provider or another) return
+    /// valid LQ factors that may differ.
     ///
     /// ```
     /// use std::sync::Arc;
@@ -790,9 +796,14 @@ where
     /// `m_c x n_c` upper-trapezoidal `r`; the intermediate bond therefore has
     /// the codomain's coupled-sector dimensions. The diagonal of `r` is real
     /// and non-negative. For sector shape `m_c x n_c`, dense work is
-    /// `O(m_c² n_c)` when `m_c <= n_c`; when `m_c > n_c`, completing the
-    /// square `q` costs `O(m_c²(n_c + m_c))`. Source packing and owned factor
-    /// publication are additional costs. An owned Host compact diagonal
+    /// `O(m_c² n_c)` when `m_c <= n_c`; when `m_c > n_c`, the native provider
+    /// applies the Householder reflectors of `self` to the identity,
+    /// `O(m_c n_c² + m_c² n_c)`, while other providers complete the square
+    /// `q` with one economy QR of `[A_c | I]`, `O(m_c²(n_c + m_c))`. The
+    /// first `k = min(m_c, n_c)` columns of `q` span a superspace of
+    /// `range(A_c)`; the columns past them span the orthogonal complement of
+    /// those first `k`, in an orthonormal basis that may differ by provider.
+    /// Source packing and owned factor publication are additional costs. An owned Host compact diagonal
     /// uses `W = V` and two compact factors under the boundary documented by
     /// [`Self::qr_compact`].
     /// See [`Self::qr_compact`] for the
@@ -1184,8 +1195,12 @@ where
     /// whole degeneracy; sectors with zero nullity are absent.
     /// [`Self::right_null`] returns the corresponding basis on the domain side.
     ///
-    /// Only sectors with `m_c > n_c` run dense work: one economy QR of the
-    /// `m_c x (n_c + m_c)` block `[A_c | I]`, `O(m_c^2 (n_c + m_c))`. A compact
+    /// Only sectors with `m_c > n_c` run dense work: on the native provider
+    /// the Householder reflectors of `A_c` applied to `[0; I]`,
+    /// `O(m_c n_c² + m_c² n_c)`, on other providers one economy QR of the
+    /// `m_c x (n_c + m_c)` block `[A_c | I]`, `O(m_c^2 (n_c + m_c))`. The
+    /// basis is any orthonormal basis of the complement and may differ by
+    /// provider. A compact
     /// diagonal is square in every sector, so its null space is empty and is
     /// returned with no dense work. A nonfinite entry, dense or diagonal,
     /// returns [`Error::Operation`] (an `InvalidArgument`: `null input components must be
@@ -1311,8 +1326,11 @@ where
     ///
     /// The fresh bond contains `(n_c - m_c)+` directions per sector, the
     /// trailing rows of the sector's full LQ (TensorKit/MatrixAlgebraKit
-    /// `RightNullViaLQ`, `lq_null!`), with the cost of [`Self::left_null`] with
-    /// rows and columns exchanged. Compact diagonals return an empty null
+    /// `RightNullViaLQ`, `lq_null!`): each sector with `n_c > m_c` runs one
+    /// economy QR of the `n_c x (m_c + n_c)` block `[A_c^H | I]`,
+    /// `O(n_c^2 (m_c + n_c))`, for an owned input on every provider. The
+    /// basis is any orthonormal basis of the complement. Compact diagonals
+    /// return an empty null
     /// space directly; a lazy
     /// adjoint uses the left null space of its owned parent without
     /// materializing the receiver. Checked results use the source provider instance, and a

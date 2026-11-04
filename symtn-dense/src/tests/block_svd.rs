@@ -646,6 +646,9 @@ impl BlockOp for PanicsAt {
     const ENTRY: Entry = Entry::Linalg;
     const KIND: OpKind = OpKind::Factorization;
     const LABEL: &'static str = "svd_read";
+    type Lane = ();
+
+    fn lane(&self, _: &mut dyn schedule::LaneJobs<()>, _: &Exec<'_>) {}
 
     fn work(&self, _: usize, _: &()) -> f64 {
         1.0
@@ -659,7 +662,7 @@ impl BlockOp for PanicsAt {
         [0; 2]
     }
 
-    fn run(&self, index: usize, _: &mut (), _: Exec<'_>) -> Result<(), DenseError> {
+    fn run(&self, index: usize, _: &mut (), (): &mut (), _: Exec<'_>) -> Result<(), DenseError> {
         assert_ne!(index, self.0, "injected lane panic");
         Ok(())
     }
