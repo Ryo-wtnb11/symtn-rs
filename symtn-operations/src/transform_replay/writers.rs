@@ -160,6 +160,7 @@ where
         self.mode.overwrites()
     }
 
+    #[inline(always)]
     fn direct(
         &self,
         kernels: &mut A,
@@ -177,9 +178,12 @@ where
             TreeTransformDirectItem::Inactive { layout, .. } => {
                 let layout = layout as usize;
                 let (dims, strides) = layouts.inactive_role(layout)?;
-                let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+                let mut cropped: [usize; FUSED_LAYOUT_INLINE_RANK];
                 let (dims, shift, _) = match band {
-                    Some(band) => crop_dims(dims, strides, &[], band, &mut cropped)?,
+                    Some(band) => {
+                        cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+                        crop_dims(dims, strides, &[], band, &mut cropped)?
+                    }
                     None => (dims, 0, 0),
                 };
                 let offset = layouts.entry(layout).offset - dst_start + shift;
@@ -269,6 +273,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn scatter(
         &self,
         kernels: &mut A,
@@ -355,6 +360,7 @@ where
         true
     }
 
+    #[inline(always)]
     fn direct(
         &self,
         _: &mut (),
@@ -368,13 +374,17 @@ where
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        // Built only on the band path: a whole item reads its compiled role.
+        let mut cropped: [usize; FUSED_LAYOUT_INLINE_RANK];
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
                 let layout = layout as usize;
                 let (dims, strides) = layouts.inactive_role(layout)?;
                 let (dims, shift, _) = match band {
-                    Some(band) => crop_dims(dims, strides, &[], band, &mut cropped)?,
+                    Some(band) => {
+                        cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+                        crop_dims(dims, strides, &[], band, &mut cropped)?
+                    }
                     None => (dims, 0, 0),
                 };
                 let zero = [D::zero()];
@@ -400,6 +410,7 @@ where
                 let (role, elements, dst_shift, src_shift) = match band {
                     None => (role, layouts.entry(dst_layout).element_count, 0, 0),
                     Some(band) => {
+                        cropped = [0; FUSED_LAYOUT_INLINE_RANK];
                         let (dims, dst_shift, src_shift) = crop_dims(
                             role.dims(),
                             role.dst_strides(),
@@ -437,6 +448,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn scatter(
         &self,
         _: &mut (),
@@ -453,10 +465,11 @@ where
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
         let role = layouts.role(column.dst_layout)?;
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped: [usize; FUSED_LAYOUT_INLINE_RANK];
         let (role, elements, dst_shift, src_shift) = match band {
             None => (role, layouts.entry(column.dst_layout).element_count, 0, 0),
             Some(band) => {
+                cropped = [0; FUSED_LAYOUT_INLINE_RANK];
                 let (dims, dst_shift, src_shift) = crop_dims(
                     role.dims(),
                     role.dst_strides(),

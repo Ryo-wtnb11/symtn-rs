@@ -342,7 +342,7 @@ impl<T: Copy> TreeTransformStructure<T> {
             return Err(shared_payload_mismatch());
         }
         let recoupling_plan = compile_recoupling_plan(&blocks)?;
-        let mut parallel_schedule =
+        let (mut parallel_schedule, mut roles) =
             compile_parallel_schedule(&blocks, &inactive_dst_layouts, &layouts, &recoupling_plan)?;
         let physical_overwrite_len = compile_physical_overwrite_coverage(
             &blocks,
@@ -355,8 +355,14 @@ impl<T: Copy> TreeTransformStructure<T> {
         )?;
         // Every structural proof above read the raw table; the retained
         // table keeps only the compiled roles replay executes.
-        let layouts = layouts.finish(&blocks, &inactive_dst_layouts)?;
-        parallel_schedule.record_bands_and_widths(&blocks, &layouts)?;
+        let layouts = layouts.finish(
+            &blocks,
+            &inactive_dst_layouts,
+            |entry, offset, dims, strides, planned| {
+                parallel_schedule.record_role(&mut roles, entry, offset, dims, strides, planned)
+            },
+        )?;
+        parallel_schedule.finish_roles(roles, &blocks, &layouts, &recoupling_plan)?;
 
         Ok(Self::from_replay_core(
             Arc::new(TreeTransformReplay {

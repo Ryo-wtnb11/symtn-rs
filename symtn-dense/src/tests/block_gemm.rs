@@ -625,7 +625,7 @@ fn gemm_grant_follows_faer_batch_decision() {
     let job = batch_job((64, 64, 64), (0, 0, 0));
     let plan = gemm::Geometry::new(&job, [MatrixOp::Identity; 2])
         .unwrap()
-        .plan::<f64>()
+        .plan::<f64>(false)
         .unwrap();
     assert_eq!(plan.report().algorithm, tcontract::Algorithm::Faer);
     let work = gemm::work::<f64>(&job);
@@ -706,11 +706,11 @@ mod plan_cache {
     fn hit_equals_rebuild<T: Scalar + PlanScalar + Default>() {
         let cache = cache(1 << 26);
         for at in cases() {
-            let cold = cached_plan::<T>(&cache, at).unwrap();
-            let (hit, built) = builds(|| cached_plan::<T>(&cache, at).unwrap());
+            let cold = cached_plan::<T>(&cache, at, false).unwrap();
+            let (hit, built) = builds(|| cached_plan::<T>(&cache, at, false).unwrap());
             assert_eq!(built, 0, "{at:?}: a repeat is a hit");
             assert!(Arc::ptr_eq(&cold, &hit), "{at:?}");
-            let rebuilt = at.plan::<T>().unwrap();
+            let rebuilt = at.plan::<T>(false).unwrap();
             assert_eq!(hit.report().algorithm, rebuilt.report().algorithm);
             assert_eq!(execute(&hit, &at), execute(&rebuilt, &at), "{at:?}");
         }
@@ -729,7 +729,7 @@ mod plan_cache {
         // What: the lowered GEMM always has nonempty m, n and k roles, so
         // tcontract never plans it Elementwise (all-batch); small geometries
         // plan Faer, and `Complex64` above the Faer volume limit Packed.
-        let algorithm = |at: Geometry| at.plan::<Complex64>().unwrap().report().algorithm;
+        let algorithm = |at: Geometry| at.plan::<Complex64>(false).unwrap().report().algorithm;
         for at in cases() {
             let want = if at.mkn == [64, 64, 64] {
                 Algorithm::Packed
@@ -738,7 +738,7 @@ mod plan_cache {
             };
             assert_eq!(algorithm(at), want, "{at:?}");
             assert_eq!(
-                at.plan::<f64>().unwrap().report().algorithm,
+                at.plan::<f64>(false).unwrap().report().algorithm,
                 Algorithm::Faer
             );
         }
@@ -752,7 +752,7 @@ mod plan_cache {
     fn every_key_field_separates_entries() {
         let cache = cache(1 << 24);
         let base = geometry((3, 4, 2), [MatrixOp::Identity; 2]);
-        let first = cached_plan::<f64>(&cache, base).unwrap();
+        let first = cached_plan::<f64>(&cache, base, false).unwrap();
         let mut padded_d = base;
         padded_d.strides[2] = [1, 4];
         let variants = [
@@ -786,14 +786,14 @@ mod plan_cache {
         };
         for (what, at) in variants {
             check(what, &|| {
-                !Arc::ptr_eq(&cached_plan::<f64>(&cache, at).unwrap(), &first)
+                !Arc::ptr_eq(&cached_plan::<f64>(&cache, at, false).unwrap(), &first)
             });
         }
-        check("dtype", &|| cached_plan::<f32>(&cache, base).is_ok());
+        check("dtype", &|| cached_plan::<f32>(&cache, base, false).is_ok());
         // Adjoint and Transpose lower to the same strides; only the
         // conjugation flag tells the plans apart.
         let transposed = geometry((3, 4, 2), [MatrixOp::Transpose, MatrixOp::Transpose]);
-        let plain = cached_plan::<Complex64>(&cache, transposed).unwrap();
+        let plain = cached_plan::<Complex64>(&cache, transposed, false).unwrap();
         misses.set(misses.get() + 1);
         charged.set(cache.info().charged_bytes());
         for (what, ops) in [
@@ -803,7 +803,10 @@ mod plan_cache {
             let at = geometry((3, 4, 2), ops);
             assert_eq!(at.strides, transposed.strides, "{what}: premise");
             check(what, &|| {
-                !Arc::ptr_eq(&cached_plan::<Complex64>(&cache, at).unwrap(), &plain)
+                !Arc::ptr_eq(
+                    &cached_plan::<Complex64>(&cache, at, false).unwrap(),
+                    &plain,
+                )
             });
         }
         let info = cache.info();
@@ -814,16 +817,36 @@ mod plan_cache {
     }
 
     #[test]
+    fn the_plan_class_separates_entries_only_where_the_default_bounds_faer() {
+        // What: a Complex64 geometry above tcontract's default Faer bound
+        // plans Packed in the Shared class and Faer in the Serial class, as
+        // tenferro-cpu's one-slot config does, and the classes are two
+        // entries; f64 has no bound, so both classes are one entry.
+        let cache = cache(1 << 26);
+        let at = geometry((64, 64, 64), [MatrixOp::Identity; 2]);
+        let shared = cached_plan::<Complex64>(&cache, at, false).unwrap();
+        let serial = cached_plan::<Complex64>(&cache, at, true).unwrap();
+        assert_eq!(shared.report().algorithm, Algorithm::Packed);
+        assert_eq!(serial.report().algorithm, Algorithm::Faer);
+        assert_eq!(cache.info().entries(), 2);
+        let shared = cached_plan::<f64>(&cache, at, false).unwrap();
+        let (serial, built) = builds(|| cached_plan::<f64>(&cache, at, true).unwrap());
+        assert!(Arc::ptr_eq(&shared, &serial));
+        assert_eq!(built, 0);
+        assert_eq!(cache.info().entries(), 3);
+    }
+
+    #[test]
     fn a_disabled_or_rejecting_cache_builds_every_lookup_with_the_same_result() {
         let at = geometry((64, 64, 64), [MatrixOp::Adjoint, MatrixOp::Identity]);
-        let resident = cached_plan::<Complex64>(&cache(1 << 26), at).unwrap();
+        let resident = cached_plan::<Complex64>(&cache(1 << 26), at, false).unwrap();
         let want = execute(&resident, &at);
         // Budget 0 admits nothing; 4 KiB admits at most 2 KiB, below one
         // plan's charge.
         for budget in [0, 4096] {
             let cache = cache(budget);
             for lookup in 1..=2 {
-                let (plan, built) = builds(|| cached_plan::<Complex64>(&cache, at).unwrap());
+                let (plan, built) = builds(|| cached_plan::<Complex64>(&cache, at, false).unwrap());
                 assert_eq!(built, 1, "budget {budget}: lookup {lookup} builds");
                 assert_eq!(execute(&plan, &at), want, "budget {budget}");
             }
@@ -852,7 +875,7 @@ mod plan_cache {
                 .map(|_| {
                     scope.spawn(|| {
                         start.wait();
-                        builds(|| cached_plan::<Complex64>(&cache, at).unwrap())
+                        builds(|| cached_plan::<Complex64>(&cache, at, false).unwrap())
                     })
                 })
                 .collect();
@@ -875,14 +898,14 @@ mod plan_cache {
     fn a_cleared_cache_rebuilds_the_same_plan() {
         let cache = cache(1 << 26);
         let at = geometry((5, 3, 4), [MatrixOp::Adjoint, MatrixOp::Transpose]);
-        let before = cached_plan::<Complex32>(&cache, at).unwrap();
+        let before = cached_plan::<Complex32>(&cache, at, false).unwrap();
         ErasedStructureCacheControl::clear(&cache);
         let info = cache.info();
         assert_eq!(
             (info.entries(), info.charged_bytes(), info.misses()),
             (0, 0, 0)
         );
-        let (after, built) = builds(|| cached_plan::<Complex32>(&cache, at).unwrap());
+        let (after, built) = builds(|| cached_plan::<Complex32>(&cache, at, false).unwrap());
         // What: the clear dropped the entry (a held plan stays valid), and
         // the rebuild computes the same values.
         assert_eq!(built, 1);

@@ -167,6 +167,67 @@ fn a_destination_that_does_not_cover_the_job_is_refused_unwritten() {
     assert!(matches!(outcome, Some(Err(DenseError::Backend { .. }))));
 }
 
+/// The Shared- and Serial-class plan lookups of one lane-GEMM entry on
+/// `engine` for `jobs` of `dtype`.
+fn class_lookups(engine: &mut CpuEngine, dtype: DenseDType, jobs: &[LaneGemmShape]) -> [usize; 2] {
+    let recording = crate::probe::record();
+    DefaultDenseExecutor::new()
+        .with_lane_gemms(engine, dtype, jobs, &mut |_, _| {})
+        .unwrap();
+    [
+        recording.get(crate::probe::Event::GemmSharedPlanLookup),
+        recording.get(crate::probe::Event::GemmSerialPlanLookup),
+    ]
+}
+
+/// Lane jobs of three distinct geometries, one repeated.
+fn class_jobs() -> (Vec<LaneGemmShape>, usize) {
+    (
+        vec![
+            shape(2, 3, 2),
+            shape(64, 64, 64),
+            shape(2, 3, 2),
+            shape(1, 2, 3),
+        ],
+        3,
+    )
+}
+
+#[test]
+fn a_one_slot_engine_resolves_only_the_serial_plan_class() {
+    // What: an engine of one slot runs every lane on one slot, so its entry
+    // looks up each distinct geometry's Serial class once and no Shared
+    // class for Complex64, whose classes differ; for f64 the two classes
+    // are one, looked up once per geometry.
+    let (jobs, geometries) = class_jobs();
+    let mut engine = CpuEngine::serial();
+    assert_eq!(
+        class_lookups(&mut engine, DenseDType::C64, &jobs),
+        [0, geometries]
+    );
+    assert_eq!(
+        class_lookups(&mut engine, DenseDType::F64, &jobs),
+        [geometries, 0]
+    );
+}
+
+#[test]
+fn a_wide_engine_resolves_both_classes_only_where_they_differ() {
+    // What: on a two-slot engine a lane may hold one or two slots, so a
+    // Complex64 entry looks up both classes of each distinct geometry once,
+    // and an f64 entry, whose classes are one, only the Shared class.
+    let (jobs, geometries) = class_jobs();
+    let mut engine = CpuEngine::new(crate::Pool::builder().threads(2).build().unwrap());
+    assert_eq!(
+        class_lookups(&mut engine, DenseDType::C64, &jobs),
+        [geometries, geometries]
+    );
+    assert_eq!(
+        class_lookups(&mut engine, DenseDType::F64, &jobs),
+        [geometries, 0]
+    );
+}
+
 struct NoLanes;
 
 impl DenseExecutor for NoLanes {

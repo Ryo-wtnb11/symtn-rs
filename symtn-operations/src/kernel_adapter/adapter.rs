@@ -36,8 +36,10 @@ pub(crate) mod sealed {
         memo: [core::cell::Cell<Option<GateScan>>; 2],
     }
 
-    #[derive(Clone, Copy)]
-    struct GateScan {
+    /// One token shape's thresholds: plain `Copy` data, so a scan taken on
+    /// the calling thread can seed a gate on a worker ([`LeafGate::seeded`]).
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) struct GateScan {
         budget: core::num::NonZeroUsize,
         team: bool,
         /// The smallest count that widens past one worker.
@@ -55,6 +57,37 @@ pub(crate) mod sealed {
                 bound,
                 memo: [core::cell::Cell::new(None), core::cell::Cell::new(None)],
             }
+        }
+
+        /// A gate for roles of at most `bound` elements that already holds
+        /// `scan`, taken by a gate of the same `bound` ([`Self::scan_for`]).
+        /// It answers a query on `scan`'s token shape without scanning; on
+        /// any other shape (another budget or team authority) the memo check
+        /// misses and it scans as a fresh gate would, so a seed changes the
+        /// cost of an answer, never the answer.
+        ///
+        /// Why a seed rather than a shared gate: a gate is `!Sync`, while the
+        /// scan is plain data a worker can copy.
+        pub(crate) fn seeded(bound: usize, scan: GateScan) -> Self {
+            Self {
+                bound,
+                memo: [
+                    core::cell::Cell::new(Some(scan)),
+                    core::cell::Cell::new(None),
+                ],
+            }
+        }
+
+        /// The scan of `exec`'s token shape: this gate's memo of it, or a
+        /// scan taken now (and kept). `exec` is not serial.
+        pub(crate) fn scan_for(&self, exec: &crate::host_pool::Exec<'_>) -> GateScan {
+            self.thresholds(exec)
+        }
+
+        /// Whether `scan` was taken on `exec`'s token shape, so a gate seeded
+        /// with it answers `exec` from its memo.
+        pub(crate) fn scan_matches(scan: &GateScan, exec: &crate::host_pool::Exec<'_>) -> bool {
+            scan.budget == exec.budget() && scan.team == exec.carries_team()
         }
 
         /// The smallest element count up to `bound` (inside the token's exact

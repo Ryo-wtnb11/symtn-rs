@@ -594,7 +594,11 @@ impl RawLayoutTable {
     }
 
     /// Bakes every replayed role into an exactly sized arena and returns the
-    /// retained table; the raw geometry is dropped with `self`.
+    /// retained table; the raw geometry is dropped with `self`. Every baked
+    /// destination role (Single, scatter column, inactive) is also handed to
+    /// `destination` as `(entry, offset, dims, dst_strides, planned)`, with
+    /// `planned` its element count when it carries a plan and zero
+    /// otherwise, so the schedule records bands without another pass.
     ///
     /// Why two normalization passes: the arena is charged by capacity, and
     /// reserving `max(rank, 1)` per role charged 24N bytes even when a role
@@ -605,6 +609,7 @@ impl RawLayoutTable {
         mut self,
         blocks: &[TreeTransformBlock],
         inactive: &[usize],
+        mut destination: impl FnMut(usize, isize, &[usize], &[isize], usize),
     ) -> Result<TreeTransformLayoutTable, OperationError> {
         let mut scratch = FusedLayoutScratch::default();
         let (mut two_sided, mut one_sided, mut planned) = (0usize, 0usize, 0usize);
@@ -634,6 +639,7 @@ impl RawLayoutTable {
                 )?;
             }
             let mut plan = 0;
+            let mut planned = 0;
             if kind.is_planned(fused) {
                 table.plans.push(
                     UpdatePlan::compile(fused.dims(), fused.dst_strides(), fused.src_strides())
@@ -641,9 +647,17 @@ impl RawLayoutTable {
                 );
                 plan = u32::try_from(table.plans.len())
                     .map_err(|_| OperationError::ElementCountOverflow)?;
-                table.max_planned_elements = table
-                    .max_planned_elements
-                    .max(fused.dims().iter().product());
+                planned = fused.dims().iter().product();
+                table.max_planned_elements = table.max_planned_elements.max(planned);
+            }
+            if !matches!(kind, RoleKind::Pack) {
+                destination(
+                    entry,
+                    table.entries[entry].offset,
+                    fused.dims(),
+                    fused.dst_strides(),
+                    planned,
+                );
             }
             let start = u32::try_from(table.fused_dims.len())
                 .map_err(|_| OperationError::ElementCountOverflow)?;

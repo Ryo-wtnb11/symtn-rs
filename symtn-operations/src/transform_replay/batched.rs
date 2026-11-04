@@ -304,6 +304,38 @@ pub(super) fn whole_width(
     elements: usize,
 ) -> usize {
     let budget = exec.budget().get();
+    if levels.len() != 2 * (budget + 1) {
+        levels.clear();
+        // One allocation for both halves.
+        levels.reserve_exact(2 * (budget + 1));
+        levels.resize(2 * (budget + 1), 0);
+        reset_levels(levels);
+    }
+    width_from_levels(exec, gate, levels, elements)
+}
+
+/// Unknown width transitions for a token of `levels.len() / 2 - 1` slots
+/// (see [`whole_width`]): every count reaches one worker, nothing else is
+/// known.
+pub(super) fn reset_levels(levels: &mut [usize]) {
+    let (reach, miss) = levels.split_at_mut(levels.len() / 2);
+    reach.fill(usize::MAX);
+    miss.fill(0);
+    if let Some(one) = reach.get_mut(1) {
+        *one = 0;
+    }
+}
+
+/// [`whole_width`] on width knowledge `levels` of exactly `2 (B + 1)`
+/// entries for `exec`'s budget `B` (one table per token shape, as a lane
+/// placement keeps them).
+pub(super) fn width_from_levels(
+    exec: &Exec<'_>,
+    gate: &LeafGate,
+    levels: &mut [usize],
+    elements: usize,
+) -> usize {
+    let budget = exec.budget().get();
     match gate.decided(exec, elements) {
         (Some(false), _) => return 1,
         (_, Some(true)) => return budget,
@@ -312,13 +344,7 @@ pub(super) fn whole_width(
     if gate.exact_end(exec).is_none_or(|exact| elements > exact) {
         return LeafGate::width(exec, elements);
     }
-    if levels.len() != 2 * (budget + 1) {
-        levels.clear();
-        levels.resize(budget + 1, usize::MAX);
-        levels.resize(2 * (budget + 1), 0);
-        // Every count reaches one worker.
-        levels[1] = 0;
-    }
+    debug_assert_eq!(levels.len(), 2 * (budget + 1));
     let (reach, miss) = levels.split_at_mut(budget + 1);
     // Both lists are nondecreasing in `k`: the largest width the count is
     // known to reach, and the smallest it is known to miss.
@@ -1068,6 +1094,12 @@ where
         .chunk_scatter_groups
         .sort_unstable_by_key(|&group| (schedule.scatter_groups[group].component, group));
     workspace.chunk_units.clear();
+    // At most one unit per group and per component, and the sentinel.
+    let units = workspace
+        .chunk_scatter_groups
+        .len()
+        .min(schedule.component_count());
+    workspace.chunk_units.reserve(units + 1);
     let mut weight = 0usize;
     for (position, &group) in workspace.chunk_scatter_groups.iter().enumerate() {
         let replay = &schedule.scatter_groups[group];
@@ -1191,6 +1223,9 @@ where
                     ..
                 } = &mut *workspace;
                 chunk_units.clear();
+                // Every chunk's units are at most one per component plus
+                // the sentinel, so this one reservation serves the call.
+                chunk_units.reserve(schedule.component_count() + 1);
                 let mut weight = 0usize;
                 for component in 0..schedule.component_count() {
                     let entry = &schedule.components[component];

@@ -18,7 +18,7 @@ use symtn_core::{
     ErasedStructureCacheControl, StructureCache, StructureCacheInfo, StructureCacheKind,
 };
 use tcontract::api::{CSpec, DType, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
-use tcontract::{Algorithm, Plan, PlanConfig, SliceAccumulationSource};
+use tcontract::{Algorithm, FaerLimit, Plan, PlanConfig, SliceAccumulationSource};
 use tcontract_exec::batch::batch_decision_within;
 use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
@@ -69,8 +69,22 @@ impl Geometry {
         })
     }
 
-    pub(crate) fn plan<T: Scalar>(&self) -> tcontract::Result<Plan<T>> {
-        Plan::from_problem(self.problem::<T>()?, &PlanConfig::default())
+    /// The plan of the Serial class (`serial`, for a one-slot token) or the
+    /// Shared class (any wider token), as tenferro-cpu's
+    /// `contraction.rs:plan_config` configures its own: tcontract's default
+    /// Faer bound sends a large `Complex64` geometry to its packed driver,
+    /// which at one slot is slower than faer, so the Serial class lifts the
+    /// bound; wider tokens keep the default, where the packed driver can win.
+    pub(crate) fn plan<T: Scalar>(&self, serial: bool) -> tcontract::Result<Plan<T>> {
+        let config = if serial {
+            PlanConfig {
+                faer_limit: FaerLimit::NONE,
+                ..PlanConfig::default()
+            }
+        } else {
+            PlanConfig::default()
+        };
+        Plan::from_problem(self.problem::<T>()?, &config)
     }
 
     /// The job's column-major GEMM problem: the one every provider's plan
@@ -93,15 +107,24 @@ impl Geometry {
 }
 
 /// The complete key of a cached plan: a plan is a pure function of its
-/// problem and config, and the labels, the in-place accumulation mode and
-/// `PlanConfig::default()` are fixed by [`Geometry::plan`], so the scalar
-/// type and the geometry determine it. The provider is a build choice and
-/// the hardware model is fixed for the process, so neither varies within one
-/// cache.
+/// problem and config, and the labels and the in-place accumulation mode are
+/// fixed by [`Geometry::plan`], whose config is fixed by its class, so the
+/// scalar type, the geometry and the class determine it. `serial` is
+/// normalized by [`serial_class`]: a dtype the default config does not bound
+/// plans both classes alike and keeps one entry. The provider is a build
+/// choice and the hardware model is fixed for the process, so neither varies
+/// within one cache.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct GemmPlanKey {
     dtype: DType,
     geometry: Geometry,
+    serial: bool,
+}
+
+/// Whether the Serial class of `dtype` plans differently from the Shared
+/// one: only when tcontract's default config bounds the dtype's Faer route.
+pub(crate) fn serial_class(dtype: DType, serial: bool) -> bool {
+    serial && FaerLimit::default().get(dtype).is_some()
 }
 
 type ErasedPlan = dyn Any + Send + Sync;
@@ -172,8 +195,9 @@ fn gemm_plans() -> &'static GemmPlanCache {
     })
 }
 
-/// The plan of `geometry` at scalar type `T` from `cache`, built and offered
-/// for admission on a miss. A rejected or unadmitted build is returned
+/// The plan of `geometry` at scalar type `T` and class `serial` (see
+/// [`Geometry::plan`]) from `cache`, built and offered for admission on a
+/// miss. A rejected or unadmitted build is returned
 /// uncached, so a budget of zero builds per lookup with the same plan.
 ///
 /// Why single-flight here, unlike the transformer caches: a plan build is
@@ -183,14 +207,26 @@ fn gemm_plans() -> &'static GemmPlanCache {
 pub(crate) fn cached_plan<T: Scalar>(
     cache: &GemmPlanCache,
     geometry: Geometry,
+    serial: bool,
 ) -> tcontract::Result<Arc<Plan<T>>> {
+    let serial = serial_class(T::STORAGE, serial);
     let key = GemmPlanKey {
         dtype: T::STORAGE,
         geometry,
+        serial,
     };
+    #[cfg(test)]
+    crate::probe::add(
+        if serial {
+            crate::probe::Event::GemmSerialPlanLookup
+        } else {
+            crate::probe::Event::GemmSharedPlanLookup
+        },
+        1,
+    );
     let epoch = symtn_core::core_reset_epoch();
     let plan = cache.get_or_try_build(&key, epoch, || {
-        let plan: Arc<ErasedPlan> = Arc::new(geometry.plan::<T>()?);
+        let plan: Arc<ErasedPlan> = Arc::new(geometry.plan::<T>(serial)?);
         #[cfg(test)]
         crate::probe::add(crate::probe::Event::GemmPlanBuild, 1);
         Ok::<_, tcontract::Error>((plan, charge::<T>(&key)))
@@ -264,10 +300,28 @@ fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
         .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"))
 }
 
+/// Geometry `index`'s plan for a token of `budget` slots: its Serial class
+/// at one slot when the call resolved one (`serial` is empty otherwise: an
+/// unbounded dtype, or a one-slot engine whose `shared` already holds the
+/// Serial class), its Shared class otherwise.
+fn class_plan<'p>(
+    shared: &'p [Arc<ErasedPlan>],
+    serial: &'p [Arc<ErasedPlan>],
+    index: usize,
+    budget: usize,
+) -> &'p Arc<ErasedPlan> {
+    if budget == 1 && !serial.is_empty() {
+        &serial[index]
+    } else {
+        &shared[index]
+    }
+}
+
 /// One call's blocks: each job's operands, its plan and the scalars.
 struct GemmBlocks<'a, T> {
     jobs: &'a [DenseGemmBatchJob],
     plans: &'a [Arc<ErasedPlan>],
+    serial_plans: &'a [Arc<ErasedPlan>],
     lhs: &'a [T],
     rhs: &'a [T],
     alpha: T,
@@ -312,7 +366,9 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
-        let plan = plan_of::<T>(self.plans, *plan);
+        let plan = class_plan(self.plans, self.serial_plans, *plan, exec.budget())
+            .downcast_ref::<Plan<T>>()
+            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
         plan.execute_slices_accum(
             &mut exec,
             self.alpha,
@@ -337,6 +393,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
 struct FreshGemmBlocks<'r, 'a, T> {
     jobs: &'r [DenseGemmBatchJob],
     plans: &'r [Arc<ErasedPlan>],
+    serial_plans: &'r [Arc<ErasedPlan>],
     lhs: &'r [T],
     rhs: &'r [T],
     alpha: T,
@@ -381,7 +438,9 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
         let job = &self.jobs[index];
-        let plan = plan_of::<T>(self.plans, *plan);
+        let plan = class_plan(self.plans, self.serial_plans, *plan, exec.budget())
+            .downcast_ref::<Plan<T>>()
+            .unwrap_or_else(|| unreachable!("the key's dtype fixes the plan type"));
         *written = plan
             .execute_uninit_slices(
                 &mut exec,
@@ -416,7 +475,12 @@ pub(crate) struct GemmScratch {
     geometries: HashMap<Geometry, usize>,
     slots: Vec<(usize, &'static mut [u8])>,
     fresh_slots: FreshSlots<'static, u8>,
+    /// Each geometry's plan: its Shared class, or on a one-slot engine its
+    /// Serial class.
     plans: Vec<Arc<ErasedPlan>>,
+    /// Each geometry's Serial class beside its Shared one, for a dtype whose
+    /// classes differ on an engine wider than one slot; empty otherwise.
+    serial_plans: Vec<Arc<ErasedPlan>>,
     lanes: LaneScratch,
 }
 
@@ -447,8 +511,7 @@ impl GemmScratch {
                 &mut [MaybeUninit<u8>],
                 &mut [u8],
             )>()),
-            self.plans
-                .capacity()
+            (self.plans.capacity() + self.serial_plans.capacity())
                 .saturating_mul(size_of::<Arc<ErasedPlan>>()),
             self.lanes.retained_bytes(),
         ]
@@ -532,6 +595,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         geometries,
         slots: kept_slots,
         plans,
+        serial_plans,
         lanes,
         ..
     } = scratch;
@@ -552,9 +616,16 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     }
 
     slots.reserve(jobs.len());
-    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
-        slots.push((plan, &mut [][..]))
-    })?;
+    let one_slot = cpu.num_threads() == 1;
+    index_plans::<T>(
+        geometries,
+        plans,
+        serial_plans,
+        jobs,
+        ops,
+        one_slot,
+        |plan| slots.push((plan, &mut [][..])),
+    )?;
 
     let lhs = &lhs.data()[lhs.offset()..lhs.offset() + lhs_len];
     let rhs = &rhs.data()[rhs.offset()..rhs.offset() + rhs_len];
@@ -578,6 +649,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     let blocks = GemmBlocks {
         jobs,
         plans,
+        serial_plans,
         lhs,
         rhs,
         alpha,
@@ -587,6 +659,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
     *kept_slots = recycle(slots);
     plans.clear();
+    serial_plans.clear();
     result
 }
 
@@ -594,37 +667,68 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
 pub(crate) type FreshSlots<'a, T> = Vec<(usize, &'a mut [MaybeUninit<T>], &'a mut [T])>;
 
 /// Indexes the distinct geometries of `jobs` in order of first use, looks
-/// each one's plan up once in the geometry-plan cache, and passes every
+/// each one's plans up once in the geometry-plan cache, and passes every
 /// job's plan index to `slot`, in job order.
+///
+/// The classes looked up are those the engine can execute: on a one-slot
+/// engine (`one_slot`) every token has one slot, so only the Serial class,
+/// into `plans`; otherwise the Shared class into `plans` and, for a dtype
+/// whose classes differ ([`serial_class`]), the Serial class into `serial`
+/// (a lane narrowed to one slot of a wide engine runs it). Cost: one cache
+/// lookup per distinct geometry, two for a bounded dtype on a wide engine.
+#[allow(clippy::too_many_arguments)]
 fn index_plans<'j, T: Scalar>(
     geometries: &mut HashMap<Geometry, usize>,
     plans: &mut Vec<Arc<ErasedPlan>>,
+    serial: &mut Vec<Arc<ErasedPlan>>,
     jobs: impl IntoIterator<Item = &'j DenseGemmBatchJob>,
     ops: [MatrixOp; 2],
+    one_slot: bool,
     slot: impl FnMut(usize),
 ) -> Result<(), DenseError> {
-    index_job_plans::<T>(geometries, plans, jobs.into_iter().copied(), ops, slot)
+    index_job_plans::<T>(
+        geometries,
+        plans,
+        serial,
+        jobs.into_iter().copied(),
+        ops,
+        one_slot,
+        slot,
+    )
 }
 
 /// [`index_plans`] over jobs produced by value.
+#[allow(clippy::too_many_arguments)]
 fn index_job_plans<T: Scalar>(
     geometries: &mut HashMap<Geometry, usize>,
     plans: &mut Vec<Arc<ErasedPlan>>,
+    serial: &mut Vec<Arc<ErasedPlan>>,
     jobs: impl Iterator<Item = DenseGemmBatchJob>,
     ops: [MatrixOp; 2],
+    one_slot: bool,
     mut slot: impl FnMut(usize),
 ) -> Result<(), DenseError> {
     geometries.clear();
     plans.clear();
+    serial.clear();
+    let both = !one_slot && serial_class(T::STORAGE, true);
+    if both {
+        // Sized once from the jobs, as `plans` is by its callers.
+        serial.reserve(jobs.size_hint().0.max(plans.capacity()));
+    }
     for (index, job) in jobs.enumerate() {
         let geometry = Geometry::new(&job, ops)?;
         let next = geometries.len();
         let plan = *geometries.entry(geometry).or_insert(next);
         if plan == plans.len() {
-            plans.push(
-                cached_plan::<T>(gemm_plans(), geometry)
-                    .map_err(|err| grouped_error(format!("job {index}: {err}")))?,
-            );
+            let lookup = |class: bool| {
+                cached_plan::<T>(gemm_plans(), geometry, class)
+                    .map_err(|err| grouped_error(format!("job {index}: {err}")))
+            };
+            plans.push(lookup(one_slot)?);
+            if both {
+                serial.push(lookup(true)?);
+            }
             #[cfg(test)]
             crate::probe::add(crate::probe::Event::GemmPlanLookup, 1);
         }
@@ -661,18 +765,27 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         order,
         geometries,
         plans,
+        serial_plans,
         lanes,
         ..
     } = scratch;
     slots.reserve(jobs.len());
-    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
-        slots.push((plan, &mut [][..], &mut [][..]))
-    })?;
+    let one_slot = cpu.num_threads() == 1;
+    index_plans::<T>(
+        geometries,
+        plans,
+        serial_plans,
+        jobs,
+        ops,
+        one_slot,
+        |plan| slots.push((plan, &mut [][..], &mut [][..])),
+    )?;
     split_fresh_segments(parts.segments, jobs, order, |j, piece| slots[j].1 = piece)?;
 
     let blocks = FreshGemmBlocks {
         jobs,
         plans,
+        serial_plans,
         lhs: &lhs.data()[lhs.offset()..lhs.offset() + lhs_len],
         rhs: &rhs.data()[rhs.offset()..rhs.offset() + rhs_len],
         alpha,
@@ -685,6 +798,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         }
     }
     plans.clear();
+    serial_plans.clear();
     scratch.keep_fresh_slots(slots);
     result
 }
@@ -705,6 +819,7 @@ pub(crate) fn with_lane_gemms(
         order,
         geometries,
         plans,
+        serial_plans,
         ..
     } = scratch;
     // `order` holds each job's plan index for the call. Each table is
@@ -726,23 +841,27 @@ pub(crate) fn with_lane_gemms(
         cols: job.n,
     });
     let identity = [MatrixOp::Identity; 2];
+    // A one-slot engine hands every lane one slot, so it resolves only the
+    // Serial class; a wider one resolves what its lanes of any width run.
+    let one_slot = cpu.num_threads() == 1;
+    macro_rules! resolve {
+        ($t:ty) => {
+            index_job_plans::<$t>(
+                geometries,
+                plans,
+                serial_plans,
+                geometry,
+                identity,
+                one_slot,
+                |p| order.push(p),
+            )
+        };
+    }
     let resolved = match dtype {
-        crate::DenseDType::F32 => {
-            index_job_plans::<f32>(geometries, plans, geometry, identity, |p| order.push(p))
-        }
-        crate::DenseDType::F64 => {
-            index_job_plans::<f64>(geometries, plans, geometry, identity, |p| order.push(p))
-        }
-        crate::DenseDType::C32 => {
-            index_job_plans::<num_complex::Complex32>(geometries, plans, geometry, identity, |p| {
-                order.push(p)
-            })
-        }
-        crate::DenseDType::C64 => {
-            index_job_plans::<num_complex::Complex64>(geometries, plans, geometry, identity, |p| {
-                order.push(p)
-            })
-        }
+        crate::DenseDType::F32 => resolve!(f32),
+        crate::DenseDType::F64 => resolve!(f64),
+        crate::DenseDType::C32 => resolve!(num_complex::Complex32),
+        crate::DenseDType::C64 => resolve!(num_complex::Complex64),
         other => Err(DenseError::Unsupported {
             op: crate::lane_gemm::LANE_GEMM_OP,
             message: format!("no GEMM of dtype {other:?}"),
@@ -754,6 +873,7 @@ pub(crate) fn with_lane_gemms(
                 jobs,
                 plan_of_job: order,
                 plans,
+                serial_plans,
                 dtype,
                 workspace: exec.workspace(),
                 policy: *exec.batch_policy(),
@@ -764,6 +884,7 @@ pub(crate) fn with_lane_gemms(
         .map_err(|err| crate::tenferro_adapter::tenferro_error(crate::lane_gemm::LANE_GEMM_OP, err))
     });
     plans.clear();
+    serial_plans.clear();
     entered
 }
 
@@ -771,6 +892,7 @@ struct NativeLaneGemms<'r, 'w> {
     jobs: &'r [crate::LaneGemmShape],
     plan_of_job: &'r [usize],
     plans: &'r [Arc<ErasedPlan>],
+    serial_plans: &'r [Arc<ErasedPlan>],
     dtype: crate::DenseDType,
     workspace: Option<&'w dyn tcontract_exec::WorkspaceProvider>,
     policy: tcontract_exec::BatchPolicy,
@@ -785,7 +907,8 @@ impl NativeLaneGemms<'_, '_> {
         one: T,
         (lhs, rhs, destination): (&[T], &[T], &'d mut [MaybeUninit<T>]),
     ) -> Result<&'d mut [T], DenseError> {
-        let plan = self.plans[self.plan_of_job[job]]
+        let budget = token.budget().get();
+        let plan = class_plan(self.plans, self.serial_plans, self.plan_of_job[job], budget)
             .downcast_ref::<Plan<T>>()
             .ok_or(DenseError::DTypeMismatch {
                 op: crate::lane_gemm::LANE_GEMM_OP,
@@ -814,7 +937,10 @@ impl NativeLaneGemms<'_, '_> {
         job: usize,
         width: core::num::NonZeroUsize,
     ) -> Duration {
-        let Some(plan) = self.plans[self.plan_of_job[job]].downcast_ref::<Plan<T>>() else {
+        // The class a token of `width` slots runs (see `run_typed`).
+        let budget = width.get().min(token.budget().get());
+        let plan = class_plan(self.plans, self.serial_plans, self.plan_of_job[job], budget);
+        let Some(plan) = plan.downcast_ref::<Plan<T>>() else {
             return Duration::MAX;
         };
         let shape = self.jobs[job];
@@ -834,7 +960,6 @@ impl NativeLaneGemms<'_, '_> {
         if exec.batch_policy().strategy != tcontract_exec::BatchStrategy::Auto {
             return serial;
         }
-        let budget = width.get().min(exec.budget());
         let granted = grant(plan, work, &exec, budget, serial);
         super::schedule::item_time(&exec, serial, granted)
     }

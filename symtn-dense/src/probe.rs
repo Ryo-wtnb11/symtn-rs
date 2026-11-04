@@ -24,9 +24,14 @@ pub(crate) enum Event {
     /// The native block GEMM kernel prepared one geometry's `tcontract::Plan`
     /// (a geometry-plan cache miss).
     GemmPlanBuild,
+    /// One geometry-plan cache lookup of the Shared plan class.
+    GemmSharedPlanLookup,
+    /// One geometry-plan cache lookup of the Serial plan class (a dtype
+    /// whose classes differ).
+    GemmSerialPlanLookup,
 }
 
-const EVENTS: usize = Event::GemmPlanBuild as usize + 1;
+const EVENTS: usize = Event::GemmSerialPlanLookup as usize + 1;
 
 #[derive(Default)]
 struct Probe {

@@ -172,6 +172,14 @@ impl<T> TreeTransformReplay<T> {
                 self.parallel_schedule.scatter_groups.capacity(),
                 core::mem::size_of::<TreeTransformScatterGroupReplay>(),
             ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.one_slot_order.capacity(),
+                core::mem::size_of::<OneSlotStep>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.component_class.capacity(),
+                core::mem::size_of::<u32>(),
+            ))
     }
 }
 
@@ -813,6 +821,7 @@ mod tests {
                     matrix: 0,
                 }],
                 &[],
+                |_, _, _, _, _| {},
             )
             .unwrap();
         let pack = table.role(1).unwrap();

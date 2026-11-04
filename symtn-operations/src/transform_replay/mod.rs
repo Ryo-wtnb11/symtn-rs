@@ -346,6 +346,17 @@ pub struct HostTreeTransformWorkspace<T> {
     // its GEMM shapes (O(groups)) and its band pieces (O(atoms + lanes)).
     #[cfg(feature = "tenferro")]
     lane_placements: Vec<lanes::LanePlacement>,
+    // Its per-class placements (O(classes)), its split's reduced-width
+    // times per (class, width), and its admission scans per token shape
+    // with their width knowledge (O(shapes x engine width)).
+    #[cfg(feature = "tenferro")]
+    lane_classes: Vec<Option<lanes::ClassPlacement>>,
+    #[cfg(feature = "tenferro")]
+    lane_class_widths: std::collections::HashMap<(u32, u32), core::time::Duration>,
+    #[cfg(feature = "tenferro")]
+    lane_scans: Vec<lanes::ShapeScan>,
+    #[cfg(feature = "tenferro")]
+    lane_scan_levels: Vec<usize>,
     #[cfg(feature = "tenferro")]
     lane_parts: Vec<lanes::LanePart>,
     #[cfg(feature = "tenferro")]
@@ -390,6 +401,14 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_units: Vec::new(),
             #[cfg(feature = "tenferro")]
             lane_placements: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_classes: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_class_widths: std::collections::HashMap::new(),
+            #[cfg(feature = "tenferro")]
+            lane_scans: Vec::new(),
+            #[cfg(feature = "tenferro")]
+            lane_scan_levels: Vec::new(),
             #[cfg(feature = "tenferro")]
             lane_parts: Vec::new(),
             #[cfg(feature = "tenferro")]
@@ -452,9 +471,27 @@ impl<T> HostTreeTransformWorkspace<T> {
         #[cfg(feature = "tenferro")]
         {
             let bytes = |capacity: usize, item: usize| capacity.saturating_mul(item);
+            // A hash table holds about 8/7 buckets per entry of capacity,
+            // each with one control byte.
+            let buckets = match self.lane_class_widths.capacity() {
+                0 => 0,
+                capacity => (capacity.saturating_mul(8) / 7).max(1).next_power_of_two(),
+            };
             bytes(
                 self.lane_placements.capacity(),
                 std::mem::size_of::<lanes::LanePlacement>(),
+            ) + bytes(
+                self.lane_classes.capacity(),
+                std::mem::size_of::<Option<lanes::ClassPlacement>>(),
+            ) + bytes(
+                buckets,
+                std::mem::size_of::<((u32, u32), core::time::Duration)>() + 1,
+            ) + bytes(
+                self.lane_scans.capacity(),
+                std::mem::size_of::<lanes::ShapeScan>(),
+            ) + bytes(
+                self.lane_scan_levels.capacity(),
+                std::mem::size_of::<usize>(),
             ) + bytes(
                 self.lane_parts.capacity(),
                 std::mem::size_of::<lanes::LanePart>(),

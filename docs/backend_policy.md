@@ -25,7 +25,13 @@ engine; a `Runtime` is not tied to a device.
 On the native provider a Host GEMM batch that is neither one job nor one
 affine run, with or without transposed or adjoint operands, runs on symtn's
 block GEMM kernel: one `tcontract::Plan` per distinct block geometry (scalar
-type, extents, effective strides, conjugation). The plans live in the
+type, extents, effective strides, conjugation) and plan class. As in
+tenferro-cpu's own contraction plans, a token of one slot runs the Serial
+class, whose config lifts tcontract's default Faer bound (only `Complex64`
+has one), and a wider token the Shared class with the default config; a
+dtype without a bound has one class. A one-slot engine looks up only the
+Serial class; a wider one looks up the Shared class and, for `Complex64`,
+the Serial class too, for lanes narrowed to one slot. The plans live in the
 process-global structure cache `StructureCacheKind::GemmPlans`, shared by
 every call, `Runtime`, engine and prepared workspace: a warm call, eager or
 prepared, of any member count, looks each geometry up once and prepares no
@@ -255,7 +261,16 @@ its band units) that minimises its modeled time: strided's copy estimate of
 the elements it moves over `w`, plus `1 + 2g` sections of `w`-wide dispatch,
 plus the dense provider's own time for each GEMM at `w` (its serial
 estimate, over the width its plan would take under `Auto`; a forced batch
-policy is not modeled and leaves the GEMM's time serial). Components that
+policy is not modeled and leaves the GEMM's time serial). An overwrite of a
+component that is one Single with a compiled plan and no Multi group runs
+it whole on that plan when Strided widens the role on the `w`-slot token,
+and is modeled as one section of Strided's own width `w'` there
+(`estimate / w' + dispatch(w')`); accumulations, planless roles and every
+other component are banded. Components with equal moved elements, band
+units, that eligibility and Multi job shapes form one cost class, whose
+search runs once per call. The gate scans that admission needs are taken
+once per call and token shape the placement queries, and seed the gates of
+the lanes that run those components. Components that
 take all of `B` run alone on the whole token first, in address order; the
 rest split recursively over their serial times on at most the sum of their
 widths, when that split is cheaper than running them one after another on
@@ -267,11 +282,14 @@ and any other atom (a non-canonical injective layout, single-element blocks)
 is one indivisible unit; contiguous runs of units balanced by the elements
 they move go to the component's slots, and every stage writes each band from
 the same slot. Pack and GEMM write scratch, so they use the component's
-whole share. A replay with one worker runs every component in order on the
-whole destination. Retained scratch: one packed source buffer and one
+whole share. A replay with one worker runs on the whole destination in
+source block order: inactive blocks first, then each Single of a
+component without Multi groups at its block, and each component with Multi
+groups once, whole, at its first block. Retained scratch: one packed source buffer and one
 packed destination region per concurrently running lane, the per-call placement tables
-(O(components + lanes)), the GEMM shapes (O(groups)) and the band pieces
-(O(atoms + lanes)), allocated once per call by an eager call's call-local
+(O(components + classes + lanes)), the admission scans with their width
+knowledge (O(token shapes x workers)), the GEMM shapes (O(groups)) and the
+band pieces (O(atoms + lanes)), allocated once per call by an eager call's call-local
 workspace and kept by a reused one (and reported in its retained bytes).
 Profiling reports this route's work as one interval, `fused_lanes`, from the
 call into the dense lane-GEMM entry to its return, packed-scratch

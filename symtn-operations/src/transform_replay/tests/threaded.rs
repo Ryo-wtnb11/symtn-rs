@@ -739,15 +739,19 @@ fn joint_components_own_every_writer_of_their_atoms() {
     assert_eq!(atoms(1), [(6, 2)]);
     assert_eq!(atoms(2), [(8, 4)]);
     let kinds = |component: usize| {
-        schedule
+        let mut kinds = schedule
             .component_direct(component)
             .iter()
             .map(|item| match *item {
                 crate::transform_structure::TreeTransformDirectItem::Inactive { .. } => "inactive",
                 crate::transform_structure::TreeTransformDirectItem::Single { .. } => "single",
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        kinds.sort_unstable();
+        kinds
     };
+    // Items of one atom are in no particular order: they write disjoint
+    // elements.
     assert_eq!(kinds(0), ["inactive", "single"]);
     assert_eq!(kinds(1), ["single"]);
     assert!(kinds(2).is_empty());
@@ -1347,7 +1351,7 @@ fn only_components_that_use_every_worker_run_on_the_whole_token() {
         expected[at] = 1.5 * source[at];
     }
     let mut kernels = ObservedKernels::recording();
-    let budgets = std::sync::Arc::clone(&kernels.copy_budgets);
+    let budgets = std::sync::Arc::clone(&kernels.write_budgets);
     let mut destination = vec![f64::NAN; len];
     pool.install(|engine| {
         tree_transform_structure_overwrite_with_structural_recoupling_raw(
@@ -1470,7 +1474,7 @@ fn a_split_uses_no_more_lanes_than_its_components_can() {
 /// The smallest count whose copy Strided gives a width satisfying `holds` on
 /// a `threads`-worker test pool, by doubling then bisection (the predicates
 /// used here are monotone on the pool's ordinary cost row).
-fn first_count(threads: usize, holds: impl Fn(usize) -> bool) -> usize {
+pub(super) fn first_count(threads: usize, holds: impl Fn(usize) -> bool) -> usize {
     use strided_kernel::execution::{parallel_width, KernelClass};
     crate::host_pool::test_pool(threads).with_exec(|exec| {
         let meets = |n| holds(parallel_width(&exec, KernelClass::Copy, n).get());

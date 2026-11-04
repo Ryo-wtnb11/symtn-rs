@@ -9,6 +9,8 @@ use symtn_dense::{
 
 mod compile_validation;
 mod destination_scales;
+#[cfg(feature = "tenferro")]
+mod lanes;
 mod overwrite;
 mod profile;
 mod threaded;

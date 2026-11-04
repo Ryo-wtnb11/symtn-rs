@@ -21,9 +21,9 @@ pub(crate) struct ObservedKernels<F = fn(KernelCall)> {
     inner: StridedHostKernelAdapter,
     observe: F,
     pub(crate) calls: Vec<KernelCall>,
-    /// `(elements, token budget)` of every copy, shared by every clone a
-    /// threaded replay hands its workers.
-    pub(crate) copy_budgets: std::sync::Arc<std::sync::Mutex<Vec<(usize, usize)>>>,
+    /// `(elements, token budget)` of every elementwise write (copy, add,
+    /// axpby), shared by every clone a threaded replay hands its workers.
+    pub(crate) write_budgets: std::sync::Arc<std::sync::Mutex<Vec<(usize, usize)>>>,
 }
 
 impl ObservedKernels {
@@ -38,13 +38,20 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
             inner: StridedHostKernelAdapter::default(),
             observe,
             calls: Vec::new(),
-            copy_budgets: Default::default(),
+            write_budgets: Default::default(),
         }
     }
 
     fn record(&mut self, call: KernelCall) {
         self.calls.push(call);
         (self.observe)(call);
+    }
+
+    fn write(&self, shape: &[usize], exec: &crate::host_pool::Exec<'_>) {
+        self.write_budgets
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .push((shape.iter().product(), exec.budget().get()));
     }
 
     pub(crate) fn count(&self, call: KernelCall) -> usize {
@@ -97,6 +104,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Add);
+        self.write(shape, &exec);
         self.inner.add_strided_baked(
             exec,
             zero_strides,
@@ -131,6 +139,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Axpby);
+        self.write(shape, &exec);
         self.inner.axpby_strided_baked(
             exec,
             dst_data,
@@ -163,10 +172,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::CopyScale { dst_offset });
-        self.copy_budgets
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push((shape.iter().product(), exec.budget().get()));
+        self.write(shape, &exec);
         self.inner.copy_scale_strided_baked(
             exec,
             dst_data,
