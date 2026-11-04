@@ -1437,8 +1437,17 @@ where
     /// compact SVD. Every coupled-sector block must be at least as tall as it
     /// is wide. [`Self::right_polar`] handles wide blocks.
     ///
-    /// Dense-input cost is `O(sum_c m_c * n_c * min(m_c, n_c))` plus sectorwise
-    /// composition. An owned compact diagonal stores both factors
+    /// `p` is unique. `w` is unique only when every coupled-sector block has
+    /// full column rank; otherwise it is one valid isometry, which may differ
+    /// by provider or engine width.
+    ///
+    /// Dense-input cost per coupled-sector block of `m_c x n_c` is its compact
+    /// SVD plus the products `w = U V^H` (`m_c n_c^2`) and `p`
+    /// (`n_c^3`, a full product where MatrixAlgebraKit uses a Hermitian
+    /// rank-k update of half the work), `O(sum_c m_c * n_c * min(m_c, n_c))`
+    /// in all. On the native provider the blocks run as one batch on the
+    /// engine's lanes, each lane holding one block's SVD factors at a time,
+    /// and write `w` and `p` straight into the outputs. An owned compact diagonal stores both factors
     /// compactly; use [`Self::materialize`] for dense buffers. A lazy
     /// adjoint runs the opposite decomposition on its owned parent and returns
     /// detached owned factors without materializing the receiver. Checked factors
@@ -1492,7 +1501,8 @@ where
     /// `p : codomain(self) <- codomain(self)` is positive semidefinite and
     /// `wh` lives on the input space as a coisometry
     /// (`wh * wh^H = id` on the codomain). Every coupled-sector block must be
-    /// at least as wide as it is tall. Factor spaces are stated above;
+    /// at least as wide as it is tall. `p` is unique; `wh` only when every
+    /// block has full row rank. Factor spaces are stated above;
     /// [`Self::left_polar`] describes the corresponding storage routes, lazy
     /// input handling, and cost. Checked factors use the source provider
     /// instance, and a failure returns no factors.

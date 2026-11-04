@@ -25,21 +25,41 @@ impl SectorLanding {
         write: impl FnOnce(&mut [D]) -> Result<(), OperationError>,
     ) -> Result<(), OperationError> {
         let destination = &mut output_data[output.range()];
-        let Some((rows, cols)) = &self.reorder else {
+        if self.reorder.is_none() {
             return write(destination);
-        };
+        }
         scratch.clear();
         scratch.resize(destination.len(), D::zero());
         write(scratch)?;
-        reorder_inverse_solution(
-            scratch,
-            output.rows(),
-            destination,
-            output.rows(),
-            rows,
-            cols,
-        );
+        self.land(scratch, destination, output);
         Ok(())
+    }
+
+    /// Whether this sector's result is staged and reordered rather than
+    /// written in place.
+    pub(super) fn reorders(&self) -> bool {
+        self.reorder.is_some()
+    }
+
+    /// Copies the `staged` result, in the input sector's basis order, by
+    /// tree extent into `destination`, the output region `output`'s data; a
+    /// sector that lands in place has nothing to copy.
+    pub(super) fn land<D: Copy>(
+        &self,
+        staged: &[D],
+        destination: &mut [D],
+        output: &CoupledSectorRegion,
+    ) {
+        if let Some((rows, cols)) = &self.reorder {
+            reorder_inverse_solution(
+                staged,
+                output.rows(),
+                destination,
+                output.rows(),
+                rows,
+                cols,
+            );
+        }
     }
 }
 

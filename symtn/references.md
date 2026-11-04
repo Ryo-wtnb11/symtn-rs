@@ -106,6 +106,7 @@ upstream location (the note says why).
 | `typed::TensorMap::isomorphism` | TensorKit | 0.17.0 | `tensors/linalg.jl:102-109` | also TK `id(V)` (75-82) as `isomorphism(V, V)` and `unitary` (129-132), whose extra Euclidean check every symtn provider satisfies |
 | `typed::TensorMap::left_null` | MatrixAlgebraKit | 0.6.9 | `interface/orthnull.jl:167-244` | typed facade |
 | `typed::TensorMap::left_polar` | MatrixAlgebraKit | 0.6.9 | `interface/polar.jl:3-20` | typed facade; TK factor-space glue on the typed `left_polar` rows |
+| `typed::TensorMap::left_polar` | MatrixAlgebraKit | 0.6.9 | `implementations/polar.jl:59-70`, `:87-95` | per-block `PolarViaSVD`: `svd_compact!`, `W = U Vᴴ`, `sqrt(S)` scaling of `Vᴴ`, `P = _mul_herm!(√S Vᴴ)'` (`herk`/`syrk` for BLAS scalars; symtn a full product, projected Hermitian); symtn's SVD phase gauge is not applied, as it cancels in both factors |
 | `typed::TensorMap::lq_compact` | MatrixAlgebraKit | 0.6.9 | `interface/lq.jl:22-43` | typed facade; TK diagonal fast-path divergence on the typed `lq_compact` row |
 | `typed::TensorMap::lq_full` | MatrixAlgebraKit | 0.6.9 | `interface/lq.jl:3-20` | typed facade |
 | `typed::TensorMap::map_diagonal` | TensorKit | 0.17.0 | `tensors/diagonal.jl:384-390` | `DiagonalTensorMap($f.(d.data), d.domain)` with the caller's `f`; compact diagonals only |
@@ -117,6 +118,7 @@ upstream location (the note says why).
 | `typed::TensorMap::repartition` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:464-474` | typed facade |
 | `typed::TensorMap::right_null` | MatrixAlgebraKit | 0.6.9 | `interface/orthnull.jl:246-323` | typed facade |
 | `typed::TensorMap::right_polar` | MatrixAlgebraKit | 0.6.9 | `interface/polar.jl:22-40` | typed facade; TK factor-space glue on the typed `right_polar` row |
+| `typed::TensorMap::right_polar` | MatrixAlgebraKit | 0.6.9 | `implementations/polar.jl:71-82`, `:87-95` | per-block `PolarViaSVD` mirrored: `Wᴴ = U Vᴴ`, `sqrt(S)` scaling of `U`, `P = _mul_herm!(U √S)` |
 | `typed::TensorMap::scale` | TensorKit | 0.17.0 | `tensors/vectorinterface.jl:24-27` | `VectorInterface.scale`, behind `α * t` |
 | `typed::TensorMap::space` | TensorKit | 0.17.0 | `tensors/abstracttensor.jl:196-201` | `space(t, i)` flat-leg convention (domain legs dualized) |
 | `typed::TensorMap::svd_compact` | MatrixAlgebraKit | 0.6.9 | `interface/svd.jl:23-42` | typed facade |

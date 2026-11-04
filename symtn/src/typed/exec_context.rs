@@ -36,7 +36,7 @@ impl ExecOptions {
 /// receive: a grouped GEMM batch (not one GEMM or one strided run for the
 /// destination form the core writes), a grouped recoupling batch of a tree
 /// transform (a serial replay submits each Multi block alone), and an SVD,
-/// Hermitian eigen or general-eigenvalue batch of two or more blocks
+/// Hermitian eigen, general-eigenvalue or polar batch of two or more blocks
 /// participate. A
 /// participating phase refuses a non-default selection with a typed dense
 /// `Unsupported` error before the call writes, uploads or submits anything on
