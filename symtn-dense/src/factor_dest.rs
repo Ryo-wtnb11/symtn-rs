@@ -311,12 +311,13 @@ pub(crate) trait Element: Copy {
     /// The compact payload of a validated destination of this scalar,
     /// `None` for another dtype.
     fn compact<'b>(write: &'b mut DenseWrite<'_>) -> Option<&'b mut [Self]>;
+    fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
     fn into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError>;
     fn spectrum(tensor: &DenseTensor) -> Result<&[Self::Spectrum], DenseError>;
 }
 
 macro_rules! element {
-    ($ty:ty, $real:ty, $variant:ident, $into_vec:ident, $spectrum:ident,
+    ($ty:ty, $real:ty, $variant:ident, $slice:ident, $into_vec:ident, $spectrum:ident,
      |$c:ident| $conj:expr, |$r:ident| $re:expr, |$x:ident, $s:ident| $scale:expr) => {
         impl Element for $ty {
             type Spectrum = $real;
@@ -351,6 +352,9 @@ macro_rules! element {
                     _ => None,
                 }
             }
+            fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
+                tensor.$slice()
+            }
             fn into_vec(tensor: DenseTensor) -> Result<Vec<Self>, DenseError> {
                 tensor.$into_vec()
             }
@@ -365,6 +369,7 @@ element!(
     f32,
     f32,
     F32,
+    as_f32_slice,
     into_f32_vec,
     as_f32_slice,
     |v| v,
@@ -375,6 +380,7 @@ element!(
     f64,
     f64,
     F64,
+    as_f64_slice,
     into_f64_vec,
     as_f64_slice,
     |v| v,
@@ -385,6 +391,7 @@ element!(
     Complex32,
     f32,
     C32,
+    as_c32_slice,
     into_c32_vec,
     as_f32_slice,
     |v| Complex32::conj(&v),
@@ -395,6 +402,7 @@ element!(
     Complex64,
     f64,
     C64,
+    as_c64_slice,
     into_c64_vec,
     as_f64_slice,
     |v| Complex64::conj(&v),
@@ -679,12 +687,13 @@ pub(crate) fn polar_direction(left: bool, [m, n]: [usize; 2]) -> Result<(), Dens
 }
 
 /// One owned SVD output of shape `expected`, checked as `svd_into` checks
-/// it (dtype, then shape and length).
+/// it: the borrowed dtype, then shape and length, and only then the
+/// consuming transfer, so a malformed output carries the same error as the
+/// per-matrix check.
 fn owned_factor<T: Element>(tensor: DenseTensor, expected: &[usize]) -> Result<Vec<T>, DenseError> {
-    let shape = tensor.shape().to_vec();
-    let data = T::into_vec(tensor)?;
-    check_contiguous_output("svd_into", data.len(), &shape, expected)?;
-    Ok(data)
+    let len = T::slice(&tensor)?.len();
+    check_contiguous_output("svd_into", len, tensor.shape(), expected)?;
+    T::into_vec(tensor)
 }
 
 /// [`factorize_batch_into_composite`] of one floating input of rank two or

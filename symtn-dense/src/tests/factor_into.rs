@@ -365,14 +365,15 @@ mod native {
 
     /// The allocation calls of one native batch of `blocks` copies of an
     /// `8 x 8` input of `T` on four threads split into two lanes: the
-    /// lanes' buffer setups (summed once per lane) and every block's solve,
-    /// provider call included, observed at their own sites on the lane
-    /// threads; scheduler and route metadata are outside both.
+    /// lanes' buffer setups (summed once per lane), every block's solve
+    /// outside its dependency products (provider call included), and the
+    /// products' calls summed over the blocks, observed at their own sites
+    /// on the lane threads; scheduler and route metadata are outside all.
     fn owner_calls<T: Elem>(
         op: DenseFactorization,
         placement: FactorPlacement,
         blocks: usize,
-    ) -> (usize, u64, Vec<Option<u64>>) {
+    ) -> (usize, u64, Vec<Option<u64>>, u64) {
         use crate::block_kernel::factor::owners;
         let split = tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Split {
             lanes: std::num::NonZeroUsize::new(2).unwrap(),
@@ -413,6 +414,7 @@ mod native {
             lanes.len(),
             lanes.values().sum(),
             records.iter().map(|record| record.solve).collect(),
+            records.iter().map(|record| record.products).sum(),
         )
     }
 
@@ -421,7 +423,10 @@ mod native {
     /// allocated per lane, never per block: no block's solve allocates
     /// (provider call included), and a batch of twice the blocks at the
     /// same width sets its lanes up with exactly as many allocation calls;
-    /// for every scalar, op, and the adjoint placement.
+    /// for every scalar, op, and the adjoint placement. A polar job's
+    /// products allocate nothing either where tcontract has its native GEMM
+    /// kernels; elsewhere faer may allocate a packing buffer per product
+    /// (tcontract-rs#162), which is the dependency's, not a symtn owner.
     fn owners_do_not_grow<T: Elem>() {
         let cases = [
             (DenseFactorization::Qr, FactorPlacement::AsComputed),
@@ -434,16 +439,12 @@ mod native {
             (DenseFactorization::RightPolar, FactorPlacement::AsComputed),
         ];
         for (op, placement) in cases {
-            let (small_lanes, small_setup, small_solves) = owner_calls::<T>(op, placement, 4);
-            let (large_lanes, large_setup, large_solves) = owner_calls::<T>(op, placement, 8);
+            let (small_lanes, small_setup, small_solves, small_products) =
+                owner_calls::<T>(op, placement, 4);
+            let (large_lanes, large_setup, large_solves, large_products) =
+                owner_calls::<T>(op, placement, 8);
             assert_eq!((small_lanes, large_lanes), (2, 2), "{op:?} {placement:?}");
             assert_eq!(small_setup, large_setup, "{op:?} {placement:?} lane setup");
-            // A polar job's products allocate faer's packing buffer where
-            // tcontract has no native GEMM kernel (tcontract-rs#162); only
-            // the per-lane owners are symtn's there.
-            if op.destination_only() && !native_gemm_kernel() {
-                continue;
-            }
             assert!(
                 small_solves
                     .iter()
@@ -451,6 +452,13 @@ mod native {
                     .all(|&calls| calls == Some(0)),
                 "{op:?} {placement:?} solves: {small_solves:?} {large_solves:?}"
             );
+            if native_gemm_kernel() {
+                assert_eq!(
+                    (small_products, large_products),
+                    (0, 0),
+                    "{op:?} {placement:?} products"
+                );
+            }
         }
     }
 
@@ -1393,5 +1401,95 @@ fn blas_refuses_a_lane_allocation_for_polar_batches_before_any_write() {
         assert!(buffers
             .iter()
             .all(|b| b.factors.iter().flatten().all(|&value| value == 7.0)));
+    }
+}
+
+/// An executor whose SVD returns the factors of its input cast to `f32`.
+struct F32Svd;
+
+impl DenseExecutor for F32Svd {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let DenseRead::F64(view) = input else {
+            unreachable!("the fixture factors f64 inputs")
+        };
+        let data: Vec<f32> = view.data().iter().map(|&value| value as f32).collect();
+        let cast = DenseRead::F32(DenseView::new(&data, view.shape(), view.strides(), 0)?);
+        DefaultDenseExecutor::new().svd(engine, cast)
+    }
+
+    fn qr(&mut self, _: &mut dyn Engine, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        unreachable!("polar solves no QR")
+    }
+
+    fn eigh(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        unreachable!("polar solves no eigh")
+    }
+
+    fn dot_general_into(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseWrite<'_>,
+        _: DenseRead<'_>,
+        _: DenseRead<'_>,
+        _: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        panic!("a malformed SVD output stops the input before its products")
+    }
+}
+
+/// Purpose: a custom executor's polar SVD factors of the wrong dtype are
+/// that input's `Output` failure with the per-matrix check's own typed
+/// error (the borrowed slice access of the expected scalar), for both
+/// directions.
+#[test]
+fn polar_composite_reports_a_wrong_dtype_factor_as_the_borrowed_check() {
+    let engine = &mut CpuEngine::serial();
+    let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
+    for op in [
+        DenseFactorization::LeftPolar,
+        DenseFactorization::RightPolar,
+    ] {
+        let shape = if op == DenseFactorization::LeftPolar {
+            [3, 2]
+        } else {
+            [2, 3]
+        };
+        let layout = strides(&shape);
+        let inputs = [DenseRead::F64(
+            DenseView::new(&data, &shape, &layout, 0).unwrap(),
+        )];
+        let mut buffers: Buffers<f64> = Buffers::new(
+            op,
+            dest_shapes(op, &shape, FactorPlacement::AsComputed),
+            7.0,
+        );
+        let mut dests = vec![buffers.dest(op, FactorPlacement::AsComputed)];
+        let mut delivered = Vec::new();
+        F32Svd
+            .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |index, _, outcome| {
+                delivered.push((index, outcome));
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            delivered,
+            vec![(
+                0,
+                Err(FactorFailure::Output(DenseError::DTypeMismatch {
+                    op: "DenseTensor::as_f64_slice",
+                    expected: DenseDType::F64,
+                    actual: DenseDType::F32,
+                }))
+            )],
+            "{op:?}"
+        );
     }
 }

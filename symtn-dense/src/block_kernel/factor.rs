@@ -1498,13 +1498,15 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
         let (w, p) = (slot::<T>(w), slot::<T>(p));
         for item in 0..batch {
             let (u, vh) = (&u[item * m * k..][..m * k], &vh[item * k * n..][..k * n]);
-            T::gemm(
-                w_plan.as_ref(),
-                exec,
-                u,
-                vh,
-                &mut w[item * m * n..][..m * n],
-            )
+            product(|| {
+                T::gemm(
+                    w_plan.as_ref(),
+                    exec,
+                    u,
+                    vh,
+                    &mut w[item * m * n..][..m * n],
+                )
+            })
             .map_err(JobError::Gemm)?;
         }
         scale_polar_factor(LEFT, [m, n], batch, |index| s[index].real(), u, vh);
@@ -1516,11 +1518,20 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
                 &u[item * m * k..][..m * k]
             };
             let p = &mut p[item * order * order..][..order * order];
-            T::gemm(p_plan.as_ref(), exec, x, x, p).map_err(JobError::Gemm)?;
+            product(|| T::gemm(p_plan.as_ref(), exec, x, x, p)).map_err(JobError::Gemm)?;
         }
         project_hermitian_items(p, order);
         Ok(())
     }
+}
+
+/// Runs one dependency product of a destination job; tests count its
+/// allocations apart from the job's own owners.
+fn product<R>(f: impl FnOnce() -> R) -> R {
+    #[cfg(test)]
+    return owners::product(f);
+    #[cfg(not(test))]
+    f()
 }
 
 /// One lane's typed scratch per scalar, set up once with the lane.
@@ -1718,7 +1729,7 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         #[cfg(test)]
         let outcome = {
             let (outcome, solve_allocs) = owners::measured(solve);
-            owners::record(input, id, setup, solve_allocs);
+            owners::record(input, id, setup, solve_allocs, owners::take_products());
             outcome
         };
         #[cfg(not(test))]
@@ -1729,7 +1740,8 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
 }
 
 /// Test-only observation of the destination batch's allocation owners: each
-/// lane's buffer setup and each block's solve (provider call included),
+/// lane's buffer setup and each block's solve (provider call included), and
+/// apart from the solve the allocations of a job's dependency products,
 /// measured on the thread that runs them and kept by input payload address.
 #[cfg(test)]
 pub(crate) mod owners {
@@ -1739,25 +1751,55 @@ pub(crate) mod owners {
     use crate::DenseRead;
 
     /// One solved block: its input's payload address, its lane setup's id
-    /// and allocation calls, and the allocation calls inside its solve.
+    /// and allocation calls, the allocation calls inside its solve outside
+    /// its products, and those inside its products.
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct Record {
         pub(crate) input: usize,
         pub(crate) lane: usize,
         pub(crate) setup: Option<u64>,
         pub(crate) solve: Option<u64>,
+        pub(crate) products: u64,
     }
 
     static RECORDS: Mutex<Vec<Record>> = Mutex::new(Vec::new());
 
-    /// `f`'s allocation calls on this thread, `None` inside another
-    /// measurement window, which a nested count would reset.
+    thread_local! {
+        /// Calls counted before each product of the window in flight, and
+        /// the calls inside those products.
+        static OUTSIDE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        static PRODUCTS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    /// `f`'s allocation calls on this thread outside the products it runs
+    /// ([`product`]), `None` inside another measurement window, which a
+    /// nested count would reset.
     pub(super) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
         if counting_alloc::active() {
             return (f(), None);
         }
+        OUTSIDE.set(0);
+        PRODUCTS.set(0);
         let (value, allocs) = counting_alloc::measure(f);
-        (value, Some(allocs.calls))
+        (value, Some(allocs.calls + OUTSIDE.take()))
+    }
+
+    /// Runs one dependency product inside a [`measured`] window, counting
+    /// its allocations apart from the window's own.
+    pub(super) fn product<T>(f: impl FnOnce() -> T) -> T {
+        if !counting_alloc::active() {
+            return f();
+        }
+        OUTSIDE.set(OUTSIDE.get() + counting_alloc::stop().calls);
+        let (value, allocs) = counting_alloc::measure(f);
+        PRODUCTS.set(PRODUCTS.get() + allocs.calls);
+        counting_alloc::start();
+        value
+    }
+
+    /// The product calls counted since the last [`measured`] window began.
+    pub(super) fn take_products() -> u64 {
+        PRODUCTS.take()
     }
 
     pub(super) fn address(input: DenseRead<'_>) -> usize {
@@ -1772,7 +1814,13 @@ pub(crate) mod owners {
         }
     }
 
-    pub(super) fn record(input: usize, lane: usize, setup: Option<u64>, solve: Option<u64>) {
+    pub(super) fn record(
+        input: usize,
+        lane: usize,
+        setup: Option<u64>,
+        solve: Option<u64>,
+        products: u64,
+    ) {
         RECORDS
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1781,6 +1829,7 @@ pub(crate) mod owners {
                 lane,
                 setup,
                 solve,
+                products,
             });
     }
 
