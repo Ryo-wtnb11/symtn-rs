@@ -1,6 +1,5 @@
 use num_complex::{Complex32, Complex64};
 
-use crate::factor_dest::factorize_batch_into_owned;
 use crate::fresh::{dispatch_fresh, fresh_serial, FRESH_OP};
 use crate::{
     DenseDType, DenseDotConfig, DenseError, DenseFreshSegments, DenseRead, DenseScalar,
@@ -99,6 +98,49 @@ pub enum DenseFactorization {
     /// [`DenseExecutor::qr_into`] on `[X I_m]` when `m > n` and keeps its
     /// `Q`'s last `m - n` columns, and solves nothing when `m <= n`.
     QrNull,
+    /// Left polar decomposition `X = W P` of an `m x n` input with `m >= n`
+    /// (MatrixAlgebraKit `left_polar!` via `PolarViaSVD`): `[W, P]` of shapes
+    /// `[m, n, b..]` and `[n, n, b..]`, `W` with orthonormal columns and `P`
+    /// Hermitian positive semidefinite. From the compact SVD `X = U S Vh`:
+    /// `W = U Vh` and `P = (sqrt(S) Vh)^H (sqrt(S) Vh)`, projected exactly
+    /// Hermitian. `P` is unique; `W` is unique only when `X` has full column
+    /// rank and may otherwise differ by provider or lane width. Destination
+    /// form only ([`DenseExecutor::factorize_batch_into`]); an input with
+    /// `m < n` is refused. The default calls [`DenseExecutor::svd`] and then
+    /// [`DenseExecutor::dot_general_into`] twice, straight into the
+    /// destinations.
+    LeftPolar,
+    /// Right polar decomposition `X = P Wh` of an `m x n` input with
+    /// `n >= m` (MatrixAlgebraKit `right_polar!`): `[P, Wh]` of shapes
+    /// `[m, m, b..]` and `[m, n, b..]`, `Wh` with orthonormal rows and
+    /// `P = (U sqrt(S)) (U sqrt(S))^H`, otherwise as [`Self::LeftPolar`]
+    /// (`Wh` unique only for full row rank); an input with `n < m` is
+    /// refused.
+    RightPolar,
+}
+
+impl DenseFactorization {
+    /// Whether `self` has only a destination form, which the owned
+    /// [`DenseExecutor::factorize_batch`] refuses.
+    pub(crate) fn destination_only(self) -> bool {
+        matches!(self, Self::LeftPolar | Self::RightPolar)
+    }
+}
+
+/// The owned batch's refusal of a destination-only `op`.
+pub(crate) fn refuse_destination_only(op: DenseFactorization) -> Result<(), DenseError> {
+    if op.destination_only() {
+        return Err(destination_only_error(op));
+    }
+    Ok(())
+}
+
+/// The owned batch's error for the destination-only `op`.
+pub(crate) fn destination_only_error(op: DenseFactorization) -> DenseError {
+    DenseError::Unsupported {
+        op: "factorize_batch",
+        message: format!("{op:?} has only a destination form"),
+    }
 }
 
 mod sealed {
@@ -182,6 +224,10 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// a fixed admission cost overrides this to pay it once per batch; one
     /// may solve the inputs concurrently on the engine's lanes before
     /// delivering their outcomes in order.
+    ///
+    /// A destination-only `op` ([`DenseFactorization::LeftPolar`],
+    /// [`DenseFactorization::RightPolar`]) is [`DenseError::Unsupported`]
+    /// before any solve.
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,
@@ -189,6 +235,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         inputs: &[DenseRead<'_>],
         sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
+        refuse_destination_only(op)?;
         let mut lq = AdjointQrLq::for_inputs(inputs);
         for (index, &input) in inputs.iter().enumerate() {
             let outcome = match op {
@@ -202,6 +249,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::Lq => lq.factor(input, |adjoint| self.qr(engine, adjoint)),
                 DenseFactorization::QrFull => full_qr_by_qr_into(self, engine, input, false),
                 DenseFactorization::QrNull => full_qr_by_qr_into(self, engine, input, true),
+                DenseFactorization::LeftPolar | DenseFactorization::RightPolar => {
+                    unreachable!("destination-only ops are refused above")
+                }
             };
             sink(index, outcome)?;
         }
@@ -212,8 +262,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// null basis, compact SVD or Hermitian eigendecomposition `op` with each
     /// input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
-    /// shapes, dtypes and [`crate::FactorPlacement`]); any other `op` is
-    /// [`DenseError::Unsupported`].
+    /// shapes, dtypes and [`crate::FactorPlacement`]), and the
+    /// destination-only left and right polar decompositions; any other `op`
+    /// is [`DenseError::Unsupported`].
     ///
     /// Every destination is validated before any input is solved or any
     /// destination written: the count, each destination's outputs, then
@@ -232,9 +283,14 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// The default runs [`Self::factorize_batch`] and copies each delivered
     /// `Ok` outcome into its destination (after the output checks the
     /// matrix-algebra caller makes) before calling `sink`, so an executor
-    /// keeps exactly its own owned calls, scopes and stopping points. An
-    /// executor that solves the inputs on lanes may write the destinations
-    /// directly and deliver every outcome after the lanes join.
+    /// keeps exactly its own owned calls, scopes and stopping points. The
+    /// polar decompositions, which have no owned form, instead run per
+    /// input [`Self::svd`] (its outputs checked as `svd_into` checks them, a
+    /// mismatch [`FactorFailure::Output`]) and two
+    /// [`Self::dot_general_into`] calls writing the destinations directly,
+    /// then call `sink` before the next input is solved. An executor that
+    /// solves the inputs on lanes may write the destinations directly and
+    /// deliver every outcome after the lanes join.
     #[expect(
         clippy::type_complexity,
         reason = "the sink's index, destination and tagged outcome are the documented delivery contract"
@@ -251,7 +307,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
             Result<(), FactorFailure>,
         ) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
-        factorize_batch_into_owned(self, engine, op, inputs, dests, sink)
+        crate::factor_dest::factorize_batch_into_default(self, engine, op, inputs, dests, sink)
     }
 
     /// Whether this executor supports native full SVD for every [`DenseOwned`]

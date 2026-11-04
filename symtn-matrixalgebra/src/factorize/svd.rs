@@ -680,106 +680,6 @@ where
     svd_compact_factors_dyn_with_gauge(engine, dense, input, CompactSvdGauge::AdjointLeft)
 }
 
-pub(super) struct CompactSvdNumericalStage<D> {
-    pub(super) rows: usize,
-    pub(super) cols: usize,
-    pub(super) rank: usize,
-    pub(super) u: Vec<D>,
-    pub(super) singular_values: Vec<f64>,
-    pub(super) vt: Vec<D>,
-}
-
-pub(super) fn compact_svd_numerical_stage<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    matrix: &[D],
-    rows: usize,
-    cols: usize,
-) -> Result<CompactSvdNumericalStage<D>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    compact_svd_stage(
-        engine,
-        dense,
-        matrix,
-        rows,
-        cols,
-        CompactSvdGauge::Left,
-        |_u, _vt| {
-            #[cfg(test)]
-            crate::probe::checked_svd_stage(_u, _vt);
-        },
-    )
-}
-
-/// Compact SVD of one coupled-sector matrix in `gauge`; an empty sector makes
-/// no dense call. `observe` sees the gauged `u` and `vt`.
-pub(super) fn compact_svd_stage<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    matrix: &[D],
-    rows: usize,
-    cols: usize,
-    gauge: CompactSvdGauge,
-    observe: impl FnOnce(&[D], &[D]),
-) -> Result<CompactSvdNumericalStage<D>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let rank = rows.min(cols);
-    if rank == 0 {
-        return Ok(CompactSvdNumericalStage {
-            rows,
-            cols,
-            rank,
-            u: Vec::new(),
-            singular_values: Vec::new(),
-            vt: Vec::new(),
-        });
-    }
-    let (u, singular_values, vt) = compact_svd_owned(engine, dense, matrix, rows, cols)?;
-    Ok(gauged_compact_svd_stage(
-        rows,
-        cols,
-        (u, singular_values, vt),
-        Some(gauge),
-        observe,
-    ))
-}
-
-/// One solved sector's stage in `gauge` (`None` keeps the solver's gauge);
-/// `observe` sees the gauged `u` and `vt`.
-fn gauged_compact_svd_stage<D: FactorScalar>(
-    rows: usize,
-    cols: usize,
-    (mut u, singular_values, mut vt): (Vec<D>, Vec<f64>, Vec<D>),
-    gauge: Option<CompactSvdGauge>,
-    observe: impl FnOnce(&[D], &[D]),
-) -> CompactSvdNumericalStage<D> {
-    let rank = rows.min(cols);
-    match gauge {
-        Some(CompactSvdGauge::Left) => {
-            svd_compact_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank)
-        }
-        Some(CompactSvdGauge::AdjointLeft) => {
-            svd_compact_adjoint_gauge(&mut u, rows, rows, &mut vt, rank, cols, rank)
-        }
-        None => {}
-    }
-    observe(&u, &vt);
-    CompactSvdNumericalStage {
-        rows,
-        cols,
-        rank,
-        u,
-        singular_values,
-        vt,
-    }
-}
-
 /// One sector of [`compact_svd_sectors_staged`]: its gauged factors, in
 /// place in the batch's storage at `u_range`/`vt_range` (the whole
 /// per-sector factor under [`SvdStorage::PerSector`]), and its spectrum.
@@ -1013,22 +913,6 @@ where
         }
     }
     Ok(StagedSvdFactors::Packed { u, vt })
-}
-
-#[cfg(test)]
-pub(crate) fn compact_svd_numerical_stage_lengths_for_test<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    matrix: &[D],
-    rows: usize,
-    cols: usize,
-) -> Result<(usize, usize, usize), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let stage = compact_svd_numerical_stage(engine, dense, matrix, rows, cols)?;
-    Ok((stage.u.len(), stage.singular_values.len(), stage.vt.len()))
 }
 
 #[derive(Clone, Copy)]
@@ -2358,33 +2242,6 @@ pub(super) fn unit_phase<D: FactorScalar>(value: Complex64, norm_sqr: f64) -> (D
     } else {
         (D::from_complex64(value / norm_sqr.sqrt()), true)
     }
-}
-
-/// Compact SVD owns U and Vt, while S remains the host-side spectrum used by
-/// the existing truncation and diagonal construction paths.
-#[expect(
-    clippy::type_complexity,
-    reason = "the dense SVD ownership boundary returns its documented U, S, Vt tuple"
-)]
-pub(super) fn compact_svd_owned<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    input: &[D],
-    rows: usize,
-    cols: usize,
-) -> Result<(Vec<D>, Vec<f64>, Vec<D>), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let input_shape = [rows, cols];
-    let input_strides = [1usize, rows];
-    let input_view =
-        DenseView::new(input, &input_shape, &input_strides, 0).map_err(OperationError::Dense)?;
-    let outputs = dense
-        .svd(engine, D::dense_read(input_view))
-        .map_err(OperationError::Dense)?;
-    compact_svd_outputs(outputs, rows, cols)
 }
 
 #[expect(
