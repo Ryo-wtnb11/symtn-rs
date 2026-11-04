@@ -2,7 +2,8 @@
 //! validation before any solve; the compatibility default's delivery,
 //! failure provenance and owned dispatch; the native lanes' destination
 //! writes against the native owned batch, placed; and the destination-only
-//! polar decompositions against their laws.
+//! polar decompositions and Hermitian exponential against their laws and
+//! closed forms.
 
 use super::*;
 use crate::{FactorDest, FactorFailure, FactorPlacement};
@@ -99,6 +100,7 @@ fn dest_shapes(
         DenseFactorization::QrNull => [with(&[m, m - k]), vec![], vec![]],
         DenseFactorization::LeftPolar => [with(&[m, n]), with(&[n, n]), vec![]],
         DenseFactorization::RightPolar => [with(&[m, m]), with(&[m, n]), vec![]],
+        DenseFactorization::ExpViaEigh => [with(&[m, m]), vec![], vec![]],
         _ => unreachable!(),
     }
 }
@@ -126,6 +128,7 @@ impl<T: Elem> Buffers<T> {
                         | DenseFactorization::QrNull
                         | DenseFactorization::LeftPolar
                         | DenseFactorization::RightPolar
+                        | DenseFactorization::ExpViaEigh
                 ) {
                     0
                 } else {
@@ -163,7 +166,9 @@ impl<T: Elem> Buffers<T> {
                 Some(T::write(view(a, 1))),
                 None,
             ],
-            DenseFactorization::QrNull => [Some(T::write(view(a, 0))), None, None],
+            DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => {
+                [Some(T::write(view(a, 0))), None, None]
+            }
             _ => [Some(T::write(view(a, 0))), Some(T::write(view(b, 1))), None],
         };
         FactorDest::new(outputs, placement)
@@ -178,7 +183,9 @@ impl<T: Elem> Buffers<T> {
                 vec![factor(&self.factors[0]), spectrum, factor(&self.factors[1])]
             }
             DenseFactorization::Eigh => vec![spectrum, factor(&self.factors[0])],
-            DenseFactorization::QrNull => vec![factor(&self.factors[0])],
+            DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => {
+                vec![factor(&self.factors[0])]
+            }
             _ => vec![factor(&self.factors[0]), factor(&self.factors[1])],
         }
     }
@@ -380,7 +387,11 @@ mod native {
         });
         let mut engine = engine(4, split);
         let shape = [8usize, 8];
-        let item = input_data::<T>(&shape, op == DenseFactorization::Eigh, 1);
+        let hermitian = matches!(
+            op,
+            DenseFactorization::Eigh | DenseFactorization::ExpViaEigh
+        );
+        let item = input_data::<T>(&shape, hermitian, 1);
         let data: Vec<T> = (0..blocks).flat_map(|_| item.iter().copied()).collect();
         let layout = strides(&shape);
         let inputs: Vec<_> = data
@@ -423,8 +434,8 @@ mod native {
     /// allocated per lane, never per block: no block's solve allocates
     /// (provider call included), and a batch of twice the blocks at the
     /// same width sets its lanes up with exactly as many allocation calls;
-    /// for every scalar, op, and the adjoint placement. A polar job's
-    /// products allocate nothing either where tcontract has its native GEMM
+    /// for every scalar, op, and the adjoint placement. A polar or
+    /// exponential job's products allocate nothing either where tcontract has its native GEMM
     /// kernels; elsewhere faer may allocate a packing buffer per product
     /// (tcontract-rs#162), which is the dependency's, not a symtn owner.
     fn owners_do_not_grow<T: Elem>() {
@@ -437,6 +448,7 @@ mod native {
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
             (DenseFactorization::LeftPolar, FactorPlacement::AsComputed),
             (DenseFactorization::RightPolar, FactorPlacement::AsComputed),
+            (DenseFactorization::ExpViaEigh, FactorPlacement::AsComputed),
         ];
         for (op, placement) in cases {
             let (small_lanes, small_setup, small_solves, small_products) =
@@ -843,7 +855,8 @@ fn refuses_invalid_destinations(op: DenseFactorization) {
 }
 
 /// Ops and placements without a destination form: adjoint eigh, LQ, full
-/// QR, null basis and polar, and values-only eigh.
+/// QR, null basis, polar and the Hermitian exponential, and values-only
+/// eigh.
 fn no_destination_form() {
     let engine = &mut CpuEngine::serial();
     let square = [2.0_f64, 0.0, 0.0, 3.0];
@@ -875,6 +888,7 @@ fn no_destination_form() {
         DenseFactorization::QrNull,
         DenseFactorization::LeftPolar,
         DenseFactorization::RightPolar,
+        DenseFactorization::ExpViaEigh,
     ] {
         let mut buffers: Buffers<f64> = Buffers::new(
             op,
@@ -1135,9 +1149,20 @@ fn assert_polar_item(
 /// Each delivered input's index and outcome, in delivery order.
 type Delivered = Vec<(usize, Result<(), FactorFailure>)>;
 
-/// One polar batch of `op` over `shapes` with `data` on `engine`, each
+/// One destination batch of `op` over `shapes` with `data` on `engine`, each
 /// outcome delivered to the returned list, the destinations returned.
-fn run_polar<T: Elem>(
+fn run_batch_into<T: Elem>(
+    engine: &mut dyn Engine,
+    op: DenseFactorization,
+    shapes: &[Vec<usize>],
+    data: &[Vec<T>],
+) -> (Delivered, Vec<Buffers<T>>) {
+    run_batch_into_on(&mut DefaultDenseExecutor::new(), engine, op, shapes, data)
+}
+
+/// [`run_batch_into`] on `executor`.
+fn run_batch_into_on<T: Elem>(
+    executor: &mut dyn DenseExecutor,
     engine: &mut dyn Engine,
     op: DenseFactorization,
     shapes: &[Vec<usize>],
@@ -1170,7 +1195,7 @@ fn run_polar<T: Elem>(
         .map(|b| b.dest(op, FactorPlacement::AsComputed))
         .collect();
     let mut delivered = Vec::new();
-    DefaultDenseExecutor::new()
+    executor
         .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |index, _, outcome| {
             delivered.push((index, outcome));
             Ok(())
@@ -1217,7 +1242,7 @@ fn polar_laws<T: Elem>(tol: f64) {
             .enumerate()
             .map(|(seed, shape)| input_data::<T>(shape, false, seed + 1))
             .collect();
-        let (delivered, buffers) = run_polar(engine, op, &shapes, &data);
+        let (delivered, buffers) = run_batch_into(engine, op, &shapes, &data);
         assert_eq!(
             delivered,
             (0..shapes.len()).map(|i| (i, Ok(()))).collect::<Vec<_>>(),
@@ -1258,7 +1283,7 @@ fn polar_laws<T: Elem>(tol: f64) {
             matmul(&p0, &r, [2, 2, 2])
         };
         let a: Vec<T> = a.into_iter().map(T::make).collect();
-        let (_, buffers) = run_polar(engine, op, &[vec![2, 2]], &[a]);
+        let (_, buffers) = run_batch_into(engine, op, &[vec![2, 2]], &[a]);
         let outputs = buffers[0].widened(op);
         let (w, p) = if left {
             (&outputs[0], &outputs[1])
@@ -1308,7 +1333,7 @@ fn polar_refuses_without_a_destination_and_per_input() {
         let rank_error = DefaultDenseExecutor::new()
             .svd(engine, rank_one)
             .unwrap_err();
-        let (delivered, _) = run_polar(engine, op, &shapes, &data);
+        let (delivered, _) = run_batch_into(engine, op, &shapes, &data);
         let direction = |outcome: &Result<(), FactorFailure>| {
             matches!(
                 outcome,
@@ -1348,24 +1373,26 @@ fn polar_refuses_without_a_destination_and_per_input() {
 }
 
 /// Purpose: the BLAS provider, which has no lane allocator, refuses a
-/// non-default lane allocation for a polar batch of two or more inputs
-/// with a typed `Unsupported` before any solve or write.
+/// non-default lane allocation for a polar or Hermitian exponential batch of
+/// two or more inputs with a typed `Unsupported` before any solve or write.
 #[cfg(feature = "cpu-blas-core")]
 #[test]
-fn blas_refuses_a_lane_allocation_for_polar_batches_before_any_write() {
+fn blas_refuses_a_lane_allocation_for_destination_only_batches_before_any_write() {
     let engine = &mut CpuEngine::serial();
-    let data = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 7.0];
+    let data = [1.0_f64, 2.0, 2.0, 4.0, 5.0, 7.0];
     for op in [
         DenseFactorization::LeftPolar,
         DenseFactorization::RightPolar,
+        DenseFactorization::ExpViaEigh,
     ] {
-        let shape = if op == DenseFactorization::LeftPolar {
-            [3, 2]
-        } else {
-            [2, 3]
+        let shape = match op {
+            DenseFactorization::LeftPolar => [3, 2],
+            DenseFactorization::RightPolar => [2, 3],
+            _ => [2, 2],
         };
+        let data = &data[..shape[0] * shape[1]];
         let layout = strides(&shape);
-        let input = || DenseRead::F64(DenseView::new(&data, &shape, &layout, 0).unwrap());
+        let input = || DenseRead::F64(DenseView::new(data, &shape, &layout, 0).unwrap());
         let inputs = [input(), input()];
         let mut buffers: Vec<Buffers<f64>> = (0..2)
             .map(|_| {
@@ -1492,4 +1519,300 @@ fn polar_composite_reports_a_wrong_dtype_factor_as_the_borrowed_check() {
             "{op:?}"
         );
     }
+}
+
+/// An executor that keeps the default destination batch, so the Hermitian
+/// exponential runs its composite: the default executor's `eigh` (its first
+/// eigenvalue replaced by NaN with `nan_value`) and products, counted.
+#[derive(Default)]
+struct CompositeExp {
+    nan_value: bool,
+    products: usize,
+}
+
+impl DenseExecutor for CompositeExp {
+    fn svd(
+        &mut self,
+        _: &mut dyn Engine,
+        _: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        unreachable!("the exponential solves no SVD")
+    }
+
+    fn qr(&mut self, _: &mut dyn Engine, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
+        unreachable!("the exponential solves no QR")
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let mut outputs = DefaultDenseExecutor::new().eigh(engine, input)?;
+        if self.nan_value {
+            let mut values = outputs[0].as_f64_slice()?.to_vec();
+            values[0] = f64::NAN;
+            outputs[0] = DenseTensor::host_col_major(outputs[0].shape().to_vec(), values)?;
+        }
+        Ok(outputs)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        out: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.products += 1;
+        DefaultDenseExecutor::new().dot_general_into(engine, out, lhs, rhs, config)
+    }
+}
+
+/// `exp` of the Hermitian `[[a, conj(b)], [b, a]]`, column-major:
+/// `e^a [[cosh |b|, conj(b)/|b| sinh |b|], [b/|b| sinh |b|, cosh |b|]]`.
+fn exp_two_by_two(a: f64, b: Complex64) -> Vec<Complex64> {
+    let r = b.norm();
+    let (cosh, sinh) = (a.exp() * r.cosh(), a.exp() * r.sinh());
+    let phase = b / r;
+    vec![
+        Complex64::new(cosh, 0.0),
+        phase * sinh,
+        phase.conj() * sinh,
+        Complex64::new(cosh, 0.0),
+    ]
+}
+
+/// The exact Hermitian structure of each column-major `n x n` item: the
+/// lower triangle the upper one's adjoint, the diagonal real.
+fn assert_exactly_hermitian(data: &[Complex64], n: usize, what: &str) {
+    for item in data.chunks_exact(n * n) {
+        for col in 0..n {
+            for row in 0..n {
+                assert_eq!(
+                    item[row + n * col],
+                    item[col + n * row].conj(),
+                    "{what}: ({row}, {col})"
+                );
+            }
+        }
+    }
+}
+
+/// Purpose: the Hermitian exponential's destinations hold the closed form
+/// on the default executor and on the per-matrix composite, for every
+/// scalar: `[[a, conj(b)], [b, a]]` (hand formula above), a diagonal
+/// `3 x 3`, a two-item trailing batch, `1 x 1`, exactly Hermitian; empty
+/// extents deliver success.
+fn exp_closed_form<T: Elem>(tol: f64) {
+    let engine = &mut CpuEngine::serial();
+    let widen = |values: &[T]| values.iter().map(|&v| v.to_c64()).collect::<Vec<_>>();
+    let make = |values: &[Complex64]| values.iter().map(|&v| T::make(v)).collect::<Vec<_>>();
+    let (a, b) = (0.25, Complex64::new(0.3, 0.4));
+    let pair = make(&[Complex64::new(a, 0.0), b, b.conj(), Complex64::new(a, 0.0)]);
+    // A real scalar keeps `b`'s real part only.
+    let b = widen(&pair)[1];
+    let real = |v: f64| Complex64::new(v, 0.0);
+    let diagonal = |values: &[f64]| {
+        let n = values.len();
+        let mut out = vec![real(0.0); n * n];
+        for (i, &v) in values.iter().enumerate() {
+            out[i * (n + 1)] = real(v);
+        }
+        out
+    };
+    let exp_diagonal =
+        |values: &[f64]| diagonal(&values.iter().map(|v| v.exp()).collect::<Vec<_>>());
+    let cases: Vec<(Vec<usize>, Vec<T>, Vec<Complex64>)> = vec![
+        (vec![2, 2], pair.clone(), exp_two_by_two(a, b)),
+        (
+            vec![3, 3],
+            make(&diagonal(&[-1.0, 0.5, 2.0])),
+            exp_diagonal(&[-1.0, 0.5, 2.0]),
+        ),
+        (
+            vec![2, 2, 2],
+            [pair.clone(), make(&diagonal(&[1.0, -2.0]))].concat(),
+            [exp_two_by_two(a, b), exp_diagonal(&[1.0, -2.0])].concat(),
+        ),
+        (
+            vec![1, 1],
+            make(&[real(-0.75)]),
+            vec![real((-0.75_f64).exp())],
+        ),
+        (vec![0, 0], vec![], vec![]),
+        (vec![2, 2, 0], vec![], vec![]),
+    ];
+    let shapes: Vec<_> = cases.iter().map(|case| case.0.clone()).collect();
+    let data: Vec<_> = cases.iter().map(|case| case.1.clone()).collect();
+    let op = DenseFactorization::ExpViaEigh;
+    for composite in [false, true] {
+        let (delivered, buffers) = if composite {
+            run_batch_into_on(&mut CompositeExp::default(), engine, op, &shapes, &data)
+        } else {
+            run_batch_into(engine, op, &shapes, &data)
+        };
+        assert_eq!(
+            delivered,
+            (0..shapes.len()).map(|i| (i, Ok(()))).collect::<Vec<_>>(),
+            "composite {composite}"
+        );
+        for ((shape, _, expected), buffers) in cases.iter().zip(&buffers) {
+            let what = format!("composite {composite} {shape:?}");
+            let exp = &buffers.widened(op)[0];
+            assert_matrix_close(&exp[..expected.len()], expected, tol, &what);
+            if !expected.is_empty() {
+                assert_exactly_hermitian(exp, shape[0], &what);
+            }
+        }
+    }
+}
+
+#[test]
+fn exp_destinations_hold_the_closed_form() {
+    exp_closed_form::<f32>(1.0e-5);
+    exp_closed_form::<f64>(1.0e-13);
+    exp_closed_form::<Complex32>(1.0e-5);
+    exp_closed_form::<Complex64>(1.0e-13);
+}
+
+/// Purpose: the Hermitian exponential is finite wherever the result is
+/// representable, even where `exp` of an eigenvalue alone overflows:
+/// `[[355, 355], [355, 355]]` has eigenvalues `0` and `710`, and every
+/// entry of its exponential is `(e^710 ± 1) / 2 = e^(710 - ln 2)` to double
+/// precision, on the default executor and on the composite.
+#[test]
+fn exp_is_finite_where_only_the_eigenvalue_exponential_overflows() {
+    let engine = &mut CpuEngine::serial();
+    let op = DenseFactorization::ExpViaEigh;
+    let shapes = [vec![2, 2]];
+    let data = [vec![355.0_f64; 4]];
+    let expected = vec![Complex64::new((710.0 - std::f64::consts::LN_2).exp(), 0.0); 4];
+    for composite in [false, true] {
+        let (delivered, buffers) = if composite {
+            run_batch_into_on(&mut CompositeExp::default(), engine, op, &shapes, &data)
+        } else {
+            run_batch_into(engine, op, &shapes, &data)
+        };
+        assert_eq!(delivered, vec![(0, Ok(()))], "composite {composite}");
+        assert_matrix_close(
+            &buffers[0].widened(op)[0],
+            &expected,
+            1.0e-12,
+            &format!("composite {composite}"),
+        );
+    }
+}
+
+/// Purpose: the Hermitian exponential has only a destination form, and each
+/// input's refusal is its own `Solver` outcome: the owned batch of either
+/// executor refuses it with `Unsupported` before any solve; in a destination
+/// batch a rank-one input carries the eigensolver's own refusal and a
+/// non-square input its squareness refusal even when it is empty, while the
+/// inputs around them succeed; an empty batch delivers nothing.
+#[test]
+fn exp_refuses_without_a_destination_and_per_input() {
+    let engine = &mut CpuEngine::serial();
+    let op = DenseFactorization::ExpViaEigh;
+    let good = [1.0_f64, 2.0, 2.0, 4.0, 5.0, 7.0];
+    let shapes = [vec![2, 2], vec![4], vec![2, 3], vec![0, 3], vec![2, 2]];
+    let data: Vec<Vec<f64>> = shapes
+        .iter()
+        .map(|shape| good[..shape.iter().product::<usize>()].to_vec())
+        .collect();
+    let refusal = |engine: &mut dyn Engine, shape: &[usize], data: &[f64]| {
+        let layout = strides(shape);
+        let input = DenseRead::F64(DenseView::new(data, shape, &layout, 0).unwrap());
+        DefaultDenseExecutor::new().eigh(engine, input).unwrap_err()
+    };
+    let expected: Vec<_> = (0..shapes.len())
+        .map(|i| {
+            if shapes[i] == [2, 2] {
+                (i, Ok(()))
+            } else {
+                (
+                    i,
+                    Err(FactorFailure::Solver(refusal(engine, &shapes[i], &data[i]))),
+                )
+            }
+        })
+        .collect();
+    for executor in [
+        &mut DefaultDenseExecutor::new() as &mut dyn DenseExecutor,
+        &mut CompositeExp::default(),
+    ] {
+        let (delivered, _) = run_batch_into_on(executor, engine, op, &shapes, &data);
+        assert_eq!(delivered, expected);
+        let (delivered, _) = run_batch_into_on(executor, engine, op, &[], &[] as &[Vec<f64>]);
+        assert!(delivered.is_empty());
+    }
+
+    let input = DenseRead::F64(DenseView::new(&good[..4], &[2, 2], &[1, 2], 0).unwrap());
+    for executor in [
+        &mut DefaultDenseExecutor::new() as &mut dyn DenseExecutor,
+        &mut CompositeExp::default(),
+    ] {
+        let error = factorize_all(executor, engine, op, &[input]).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                DenseError::Unsupported {
+                    op: "factorize_batch",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+}
+
+/// The eigenvalue check's failure: symtn's own `NumericalFailure`.
+fn eigenvalue_check_failure() -> FactorFailure {
+    FactorFailure::Output(DenseError::NumericalFailure {
+        backend: crate::DenseBackend::Tenferro,
+        op: crate::EIGH_EIGENVALUE_CHECK,
+        message: "eigenvalues must be finite".to_string(),
+    })
+}
+
+/// Purpose: the composite's nonfinite eigenvalue is that input's `Output`
+/// failure from symtn's eigenvalue check, reported before any product.
+#[test]
+fn exp_composite_tags_a_nonfinite_eigenvalue_as_an_output_failure() {
+    let engine = &mut CpuEngine::serial();
+    let mut executor = CompositeExp {
+        nan_value: true,
+        ..CompositeExp::default()
+    };
+    let (delivered, _) = run_batch_into_on(
+        &mut executor,
+        engine,
+        DenseFactorization::ExpViaEigh,
+        &[vec![2, 2]],
+        &[vec![1.0_f64, 0.5, 0.5, 2.0]],
+    );
+    assert_eq!(delivered, vec![(0, Err(eigenvalue_check_failure()))]);
+    assert_eq!(executor.products, 0);
+}
+
+/// Purpose: on the native provider a finite Hermitian input whose largest
+/// eigenvalue overflows (`[[M, M], [M, M]]`, `M = f64::MAX / sqrt(2)`, so
+/// `2 M = inf`) is that input's `Output` failure from symtn's eigenvalue
+/// check, not a provider error, and the input after it still succeeds.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn native_exp_tags_an_overflowing_eigenvalue_as_an_output_failure() {
+    let engine = &mut CpuEngine::serial();
+    let m = f64::MAX / std::f64::consts::SQRT_2;
+    let (delivered, _) = run_batch_into(
+        engine,
+        DenseFactorization::ExpViaEigh,
+        &[vec![2, 2], vec![2, 2]],
+        &[vec![m; 4], vec![1.0, 0.5, 0.5, 2.0]],
+    );
+    assert_eq!(
+        delivered,
+        vec![(0, Err(eigenvalue_check_failure())), (1, Ok(()))]
+    );
 }

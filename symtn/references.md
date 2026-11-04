@@ -95,6 +95,7 @@ upstream location (the note says why).
 | `typed::TensorMap::exp` | TensorKit | 0.17.0 | `tensors/linalg.jl:44` | `exp` copies, then calls `exp!` |
 | `typed::TensorMap::exp` | TensorKit | 0.17.0 | `tensors/linalg.jl:420-427` | `exp!`: `domain == codomain` check, per-block dense exponential |
 | `typed::TensorMap::exp` | TensorKit | 0.17.0 | `tensors/diagonal.jl:383-390` | compact arm: `exp(::DiagonalTensorMap)` is unconditionally elementwise |
+| `typed::TensorMap::exp` | MatrixAlgebraKit | 0.6.9 | `implementations/exponential.jl:73-91` | Hermitian arm per block: `MatrixFunctionViaEigh`, `exp(A) = Y Yᴴ` with `Y = V exp(D/2)` (MAK's real branch, `syrk`; symtn uses it for every scalar as a full product, then `copytri`), so a representable result is finite where `exp(D)` alone overflows; route selection stays TensorKit 0.17.0's |
 | `typed::TensorMap::flip` | TensorKit | 0.17.0 | `tensors/indexmanipulations.jl:8-29` | |
 | `typed::TensorMap::flip` | TensorKit | 0.17.0 | `fusiontrees/braiding_manipulations.jl:384-413` | per-leg Z-isomorphism phase (χ, θ) of the fusion-tree `flip` |
 | `typed::TensorMap::from_subblock_fn` | TensorKit | 0.17.0 | `tensors/tensor.jl` | divergence: no TK counterpart (name-only row — no single defensible range); TK's constructor surface is `undef`/`zeros`/`ones` (283-318) and the rand family (320-408) |

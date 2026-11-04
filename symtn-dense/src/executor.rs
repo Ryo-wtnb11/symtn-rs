@@ -117,13 +117,27 @@ pub enum DenseFactorization {
     /// (`Wh` unique only for full row rank); an input with `n < m` is
     /// refused.
     RightPolar,
+    /// Exponential of a Hermitian `n x n` input (MatrixAlgebraKit
+    /// `exponential!` via `MatrixFunctionViaEigh`): `[exp]` of shape
+    /// `[n, n, b..]`, exactly Hermitian. From the Hermitian eigendecomposition
+    /// `X = V D V^H` (the provider reads one triangle, as for
+    /// [`Self::Eigh`]): `exp(X) = Y Y^H` with `Y = V exp(D / 2)`, so a result
+    /// is finite whenever it is representable, even where `exp(D)` alone
+    /// would overflow. A nonfinite eigenvalue is the input's
+    /// [`FactorFailure::Output`] (`NumericalFailure` with op
+    /// [`crate::EIGH_EIGENVALUE_CHECK`]) and skips the product. Destination
+    /// form only ([`DenseExecutor::factorize_batch_into`]); a non-square
+    /// input is refused. The default calls [`DenseExecutor::eigh`] and then
+    /// [`DenseExecutor::dot_general_into`] once, straight into the
+    /// destination.
+    ExpViaEigh,
 }
 
 impl DenseFactorization {
     /// Whether `self` has only a destination form, which the owned
     /// [`DenseExecutor::factorize_batch`] refuses.
     pub(crate) fn destination_only(self) -> bool {
-        matches!(self, Self::LeftPolar | Self::RightPolar)
+        matches!(self, Self::LeftPolar | Self::RightPolar | Self::ExpViaEigh)
     }
 }
 
@@ -226,8 +240,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// delivering their outcomes in order.
     ///
     /// A destination-only `op` ([`DenseFactorization::LeftPolar`],
-    /// [`DenseFactorization::RightPolar`]) is [`DenseError::Unsupported`]
-    /// before any solve.
+    /// [`DenseFactorization::RightPolar`], [`DenseFactorization::ExpViaEigh`])
+    /// is [`DenseError::Unsupported`] before any solve.
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,
@@ -249,7 +263,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::Lq => lq.factor(input, |adjoint| self.qr(engine, adjoint)),
                 DenseFactorization::QrFull => full_qr_by_qr_into(self, engine, input, false),
                 DenseFactorization::QrNull => full_qr_by_qr_into(self, engine, input, true),
-                DenseFactorization::LeftPolar | DenseFactorization::RightPolar => {
+                DenseFactorization::LeftPolar
+                | DenseFactorization::RightPolar
+                | DenseFactorization::ExpViaEigh => {
                     unreachable!("destination-only ops are refused above")
                 }
             };
@@ -263,8 +279,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
     /// shapes, dtypes and [`crate::FactorPlacement`]), and the
-    /// destination-only left and right polar decompositions; any other `op`
-    /// is [`DenseError::Unsupported`].
+    /// destination-only left and right polar decompositions and Hermitian
+    /// exponential; any other `op` is [`DenseError::Unsupported`].
     ///
     /// Every destination is validated before any input is solved or any
     /// destination written: the count, each destination's outputs, then
@@ -288,9 +304,12 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// input [`Self::svd`] (its outputs checked as `svd_into` checks them, a
     /// mismatch [`FactorFailure::Output`]) and two
     /// [`Self::dot_general_into`] calls writing the destinations directly,
-    /// then call `sink` before the next input is solved. An executor that
-    /// solves the inputs on lanes may write the destinations directly and
-    /// deliver every outcome after the lanes join.
+    /// then call `sink` before the next input is solved; the Hermitian
+    /// exponential likewise runs [`Self::eigh`] (checked as `eigh_into`
+    /// checks it, then its eigenvalues' finiteness, each a
+    /// [`FactorFailure::Output`]) and one [`Self::dot_general_into`]. An
+    /// executor that solves the inputs on lanes may write the destinations
+    /// directly and deliver every outcome after the lanes join.
     #[expect(
         clippy::type_complexity,
         reason = "the sink's index, destination and tagged outcome are the documented delivery contract"

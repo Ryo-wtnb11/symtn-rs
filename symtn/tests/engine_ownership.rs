@@ -117,10 +117,10 @@ fn one_configuration_repeats_its_bits_at_every_width() {
 }
 
 /// The eigh, eigh-values, svd-values, pinv, qr, trace, general eig, lq,
-/// full qr, left null space and left polar outputs of `t`, as one payload
-/// each, so a width that splits the block scheduler differently shows in
-/// any of them.
-fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 11] {
+/// full qr, left null space, left polar and Hermitian exp outputs of `t`, as
+/// one payload each, so a width that splits the block scheduler differently
+/// shows in any of them.
+fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 12] {
     let adjoint = t.adjoint(engine).unwrap();
     let gram = t.compose(engine, &adjoint).unwrap();
     let eigh = gram
@@ -212,6 +212,13 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
     let LeftPolar { w, p } = t.left_polar(engine, &[0, 1], &[2]).unwrap();
     let mut polar_out = w.dense_data().unwrap().to_vec();
     polar_out.extend_from_slice(p.dense_data().unwrap());
+    // The gram is Hermitian, so its exponential takes the spectral route.
+    let exp_out = gram
+        .exp(engine, &[0, 1], &[2, 3])
+        .unwrap()
+        .dense_data()
+        .unwrap()
+        .to_vec();
     [
         eigh_out,
         eigh_vals_out,
@@ -224,6 +231,7 @@ fn other_ops(engine: &mut dyn Engine, t: &TensorMap<U1Su2, f64>) -> [Vec<f64>; 1
         qr_full_out,
         null_out,
         polar_out,
+        exp_out,
     ]
 }
 
@@ -248,6 +256,7 @@ fn factorizations_and_trace_agree_across_widths() {
         "qr_full",
         "left_null",
         "left_polar",
+        "exp",
     ];
     for ((name, serial), wide) in names.into_iter().zip(&serial).zip(&wide) {
         numerics::assert_slices_close(&format!("{name} width 4 vs 1"), wide, serial, 64);

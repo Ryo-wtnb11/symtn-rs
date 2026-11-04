@@ -2,7 +2,7 @@
 //! ([`crate::DenseExecutor::factorize_batch_into`]): their validation, the
 //! placement of a factorization's outputs into them, the compatibility
 //! route through the owned batch, and the per-matrix composite of the
-//! destination-only polar decompositions.
+//! destination-only polar decompositions and Hermitian exponential.
 
 use num_complex::{Complex32, Complex64};
 
@@ -24,8 +24,8 @@ pub enum FactorPlacement {
     /// spectrum unchanged. QR of `A` is placed as the LQ of `A^H`
     /// (`l = R^H`, `q = Q^H`); the compact SVD of `A` as the compact SVD of
     /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`). Hermitian eigendecompositions,
-    /// LQ, full QR, the QR null basis and the polar decompositions refuse
-    /// it.
+    /// LQ, full QR, the QR null basis, the polar decompositions and the
+    /// Hermitian exponential refuse it.
     Adjoint,
 }
 
@@ -37,8 +37,32 @@ pub enum FactorFailure {
     /// reported this error for the input.
     Solver(DenseError),
     /// The solver returned, but its outputs do not fit the destination (a
-    /// custom executor's owned outputs of the wrong count, dtype or shape).
+    /// custom executor's owned outputs of the wrong count, dtype or shape),
+    /// or fail the op's own output check (the Hermitian exponential's
+    /// finite-eigenvalue check, [`EIGH_EIGENVALUE_CHECK`]).
     Output(DenseError),
+}
+
+/// The `op` of symtn's own Hermitian eigenvalue check, so a caller can tell
+/// it from an executor's `NumericalFailure` by matching it exactly.
+#[doc(hidden)]
+pub const EIGH_EIGENVALUE_CHECK: &str = "eigh eigenvalue check";
+
+/// The finite-eigenvalue check of an admitted finite input's Hermitian
+/// eigendecomposition: a nonfinite eigenvalue is the eigensolver's numerical
+/// failure, not a misuse ([`EIGH_EIGENVALUE_CHECK`]).
+#[doc(hidden)]
+pub fn finite_eigenvalues<R: Into<f64>>(
+    values: impl IntoIterator<Item = R>,
+) -> Result<(), DenseError> {
+    if values.into_iter().all(|value| value.into().is_finite()) {
+        return Ok(());
+    }
+    Err(DenseError::NumericalFailure {
+        backend: crate::DenseBackend::Tenferro,
+        op: EIGH_EIGENVALUE_CHECK,
+        message: "eigenvalues must be finite".to_string(),
+    })
 }
 
 impl FactorFailure {
@@ -53,7 +77,8 @@ impl FactorFailure {
 /// The destinations of one input of a batched factorization, in the op's
 /// owned output order: `Qr` and `QrFull` `[q, r, -]`, `QrNull` `[n, -, -]`,
 /// `Lq` `[l, q, -]`, `Svd` `[u, s, vt]`, `Eigh` `[values, vectors, -]`,
-/// `LeftPolar` `[w, p, -]`, `RightPolar` `[p, wh, -]` (`-` is `None`).
+/// `LeftPolar` `[w, p, -]`, `RightPolar` `[p, wh, -]`, `ExpViaEigh`
+/// `[exp, -, -]` (`-` is `None`).
 ///
 /// Each factor view has the input's dtype and each spectrum (`s`, eigh
 /// `values`) the input's real counterpart (`f32` for `f32`/`c32`, `f64` for
@@ -65,8 +90,9 @@ impl FactorFailure {
 /// `[k, n, b..]`; full QR is `[m, m, b..]`, `[m, n, b..]` and the QR null
 /// basis `[m, m - k, b..]`; SVD adds `s` of shape
 /// `[k, b..]` between them; eigh of `n x n` is `[n, b..]`, `[n, n, b..]`;
-/// left polar is `[m, n, b..]`, `[n, n, b..]` and right polar
-/// `[m, m, b..]`, `[m, n, b..]`.
+/// left polar is `[m, n, b..]`, `[n, n, b..]`, right polar
+/// `[m, m, b..]`, `[m, n, b..]` and the Hermitian exponential of `n x n`
+/// `[n, n, b..]`.
 #[derive(Debug)]
 pub struct FactorDest<'a> {
     pub(crate) outputs: [Option<DenseWrite<'a>>; 3],
@@ -94,7 +120,7 @@ const ENTRY: &str = "factorize_batch_into";
 /// without a destination form.
 fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
     match op {
-        DenseFactorization::QrNull => Ok(1),
+        DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => Ok(1),
         DenseFactorization::Qr
         | DenseFactorization::Lq
         | DenseFactorization::QrFull
@@ -115,7 +141,7 @@ fn output_label(op: DenseFactorization) -> &'static str {
         DenseFactorization::Svd
         | DenseFactorization::LeftPolar
         | DenseFactorization::RightPolar => "svd_into",
-        DenseFactorization::Eigh => "eigh_into",
+        DenseFactorization::Eigh | DenseFactorization::ExpViaEigh => "eigh_into",
         DenseFactorization::Lq => "lq",
         _ => "qr_into",
     }
@@ -152,6 +178,7 @@ fn head(
         (DenseFactorization::LeftPolar, _, _) => ([n, n], 2),
         (DenseFactorization::RightPolar, 0, _) => ([m, m], 2),
         (DenseFactorization::RightPolar, _, _) => ([m, n], 2),
+        (DenseFactorization::ExpViaEigh, _, _) => ([m, m], 2),
         (_, 0, false) => ([m, k], 2),
         (_, 0, true) => ([n, k], 2),
         (_, _, false) => ([k, n], 2),
@@ -255,6 +282,7 @@ pub(crate) fn validate(
                 | DenseFactorization::QrNull
                 | DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
+                | DenseFactorization::ExpViaEigh
         ) && dest.placement == FactorPlacement::Adjoint
         {
             return Err(DenseError::Unsupported {
@@ -269,7 +297,11 @@ pub(crate) fn validate(
         let [m, n, batch @ ..] = input.shape() else {
             continue;
         };
-        if op == DenseFactorization::Eigh && m != n {
+        if matches!(
+            op,
+            DenseFactorization::Eigh | DenseFactorization::ExpViaEigh
+        ) && m != n
+        {
             continue;
         }
         for (index, output) in dest.outputs[..arity].iter().enumerate() {
@@ -291,10 +323,11 @@ pub(crate) fn validate(
 }
 
 /// A scalar a destination holds: its conjugate, the arithmetic of the polar
-/// post-processing, and its dtype-erased views and owned outputs.
+/// and exponential post-processing, and its dtype-erased views and owned
+/// outputs.
 pub(crate) trait Element: Copy {
     /// The real counterpart, in which a spectrum is published.
-    type Spectrum: Copy;
+    type Spectrum: Copy + Into<f64>;
     fn conj(self) -> Self;
     /// The real part.
     #[cfg_attr(
@@ -304,6 +337,10 @@ pub(crate) trait Element: Copy {
     fn real(self) -> Self::Spectrum;
     /// `self * sqrt(sigma)`.
     fn scale_by_sqrt(self, sigma: Self::Spectrum) -> Self;
+    /// `self * exp(lambda / 2)`.
+    fn scale_by_half_exp(self, lambda: Self::Spectrum) -> Self;
+    /// The real part, as this scalar.
+    fn real_part(self) -> Self;
     /// `(self + other^H) / 2`.
     fn hermitian_mean(self, other: Self) -> Self;
     fn read(view: DenseView<'_, Self>) -> DenseRead<'_>;
@@ -318,7 +355,8 @@ pub(crate) trait Element: Copy {
 
 macro_rules! element {
     ($ty:ty, $real:ty, $variant:ident, $slice:ident, $into_vec:ident, $spectrum:ident,
-     |$c:ident| $conj:expr, |$r:ident| $re:expr, |$x:ident, $s:ident| $scale:expr) => {
+     |$c:ident| $conj:expr, |$r:ident| $re:expr, |$p:ident| $part:expr,
+     |$x:ident, $s:ident| $scale:expr) => {
         impl Element for $ty {
             type Spectrum = $real;
             fn conj(self) -> Self {
@@ -332,6 +370,14 @@ macro_rules! element {
             fn scale_by_sqrt(self, sigma: $real) -> Self {
                 let ($x, $s) = (self, sigma.sqrt());
                 $scale
+            }
+            fn scale_by_half_exp(self, lambda: $real) -> Self {
+                let ($x, $s) = (self, (lambda / 2.0).exp());
+                $scale
+            }
+            fn real_part(self) -> Self {
+                let $p = self;
+                $part
             }
             fn hermitian_mean(self, other: Self) -> Self {
                 let sum = self + Element::conj(other);
@@ -374,6 +420,7 @@ element!(
     as_f32_slice,
     |v| v,
     |v| v,
+    |v| v,
     |x, s| x * s
 );
 element!(
@@ -383,6 +430,7 @@ element!(
     as_f64_slice,
     into_f64_vec,
     as_f64_slice,
+    |v| v,
     |v| v,
     |v| v,
     |x, s| x * s
@@ -396,6 +444,7 @@ element!(
     as_f32_slice,
     |v| Complex32::conj(&v),
     |v| v.re,
+    |v| Complex32::new(v.re, 0.0),
     |x, s| x * s
 );
 element!(
@@ -407,6 +456,7 @@ element!(
     as_f64_slice,
     |v| Complex64::conj(&v),
     |v| v.re,
+    |v| Complex64::new(v.re, 0.0),
     |x, s| x * s
 );
 
@@ -616,14 +666,20 @@ fn factorize_batch_into_owned<E: DenseExecutor + ?Sized>(
     }
 }
 
-/// The polar decompositions over validated `dests`, one input after another
-/// through the executor's per-matrix entries: [`DenseExecutor::svd`], the
-/// `W` product, the `sqrt(S)` scaling of the owned `Vh` (left) or `U`
-/// (right) in place, the `P` product reading that scaled factor, and the
-/// Hermitian projection of `P`, both products written straight into the
-/// destination; `sink(i, ..)` runs before input `i + 1` is solved. An `svd`
-/// or product failure is [`FactorFailure::Solver`], owned SVD outputs that
-/// do not fit (`svd_into`'s checks) [`FactorFailure::Output`].
+/// The destination-only ops over validated `dests`, one input after another
+/// through the executor's per-matrix entries, every product written straight
+/// into the destination; `sink(i, ..)` runs before input `i + 1` is solved.
+///
+/// - Polar: [`DenseExecutor::svd`], the `W` product, the `sqrt(S)` scaling
+///   of the owned `Vh` (left) or `U` (right) in place, the `P` product
+///   reading that scaled factor, and the Hermitian projection of `P`.
+/// - Hermitian exponential: [`DenseExecutor::eigh`], the finite-eigenvalue
+///   check, the `exp(lambda / 2)` column scaling of the owned `V` in place,
+///   the product `exp = Y Y^H` of that scaled factor, and `copytri`.
+///
+/// A solver or product failure is [`FactorFailure::Solver`]; owned outputs
+/// that do not fit (`svd_into`'s or `eigh_into`'s checks) and a nonfinite
+/// eigenvalue are [`FactorFailure::Output`].
 pub(crate) fn factorize_batch_into_composite<E: DenseExecutor + ?Sized>(
     executor: &mut E,
     engine: &mut dyn Engine,
@@ -632,39 +688,73 @@ pub(crate) fn factorize_batch_into_composite<E: DenseExecutor + ?Sized>(
     dests: &mut [FactorDest<'_>],
     sink: &mut FactorSink<'_>,
 ) -> Result<(), DenseError> {
-    let left = op == DenseFactorization::LeftPolar;
     for (index, (&input, dest)) in inputs.iter().zip(dests.iter_mut()).enumerate() {
+        let shape = input.shape();
         let outcome = match input {
-            DenseRead::F32(view) if view.shape().len() >= 2 => {
-                polar_into::<_, f32>(executor, engine, left, input, view.shape(), dest)
+            DenseRead::F32(_) if shape.len() >= 2 => {
+                composite_into::<_, f32>(executor, engine, op, input, shape, dest)
             }
-            DenseRead::F64(view) if view.shape().len() >= 2 => {
-                polar_into::<_, f64>(executor, engine, left, input, view.shape(), dest)
+            DenseRead::F64(_) if shape.len() >= 2 => {
+                composite_into::<_, f64>(executor, engine, op, input, shape, dest)
             }
-            DenseRead::C32(view) if view.shape().len() >= 2 => {
-                polar_into::<_, Complex32>(executor, engine, left, input, view.shape(), dest)
+            DenseRead::C32(_) if shape.len() >= 2 => {
+                composite_into::<_, Complex32>(executor, engine, op, input, shape, dest)
             }
-            DenseRead::C64(view) if view.shape().len() >= 2 => {
-                polar_into::<_, Complex64>(executor, engine, left, input, view.shape(), dest)
+            DenseRead::C64(_) if shape.len() >= 2 => {
+                composite_into::<_, Complex64>(executor, engine, op, input, shape, dest)
             }
-            // The SVD owns the refusal of a rank or dtype it cannot factor.
-            other => executor
-                .svd(engine, other)
-                .map_err(FactorFailure::Solver)
-                .and_then(|_| {
-                    Err(FactorFailure::Output(DenseError::Unsupported {
-                        op: "svd_into",
-                        message: format!(
-                            "polar input of dtype {:?} and rank {}",
-                            other.dtype(),
-                            other.shape().len()
-                        ),
-                    }))
-                }),
+            other => provider_refusal(executor, engine, op, other),
         };
         sink(index, dest, outcome)?;
     }
     Ok(())
+}
+
+/// The outcome of an input the composite cannot factor (a rank, dtype or,
+/// for the exponential, non-square shape): the provider entry owns its
+/// refusal, which is [`FactorFailure::Solver`]; an entry that accepts it
+/// anyway leaves outputs the composite cannot place.
+fn provider_refusal<E: DenseExecutor + ?Sized>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    op: DenseFactorization,
+    input: DenseRead<'_>,
+) -> Result<(), FactorFailure> {
+    let (solved, label) = if op == DenseFactorization::ExpViaEigh {
+        (executor.eigh(engine, input), "eigh_into")
+    } else {
+        (executor.svd(engine, input), "svd_into")
+    };
+    solved.map_err(FactorFailure::Solver).and_then(|_| {
+        Err(FactorFailure::Output(DenseError::Unsupported {
+            op: label,
+            message: format!(
+                "{op:?} input of dtype {:?} and shape {:?}",
+                input.dtype(),
+                input.shape()
+            ),
+        }))
+    })
+}
+
+/// [`factorize_batch_into_composite`] of one floating input of rank two or
+/// more and `shape`.
+fn composite_into<E: DenseExecutor + ?Sized, T: Element>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    op: DenseFactorization,
+    input: DenseRead<'_>,
+    shape: &[usize],
+    dest: &mut FactorDest<'_>,
+) -> Result<(), FactorFailure> {
+    if op != DenseFactorization::ExpViaEigh {
+        let left = op == DenseFactorization::LeftPolar;
+        return polar_into::<_, T>(executor, engine, left, input, shape, dest);
+    }
+    if shape[0] != shape[1] {
+        return provider_refusal(executor, engine, op, input);
+    }
+    exp_into::<_, T>(executor, engine, input, shape, dest)
 }
 
 /// The refusal of a polar input in the wrong direction: left polar needs
@@ -686,14 +776,30 @@ pub(crate) fn polar_direction(left: bool, [m, n]: [usize; 2]) -> Result<(), Dens
     })
 }
 
-/// One owned SVD output of shape `expected`, checked as `svd_into` checks
-/// it: the borrowed dtype, then shape and length, and only then the
-/// consuming transfer, so a malformed output carries the same error as the
-/// per-matrix check.
-fn owned_factor<T: Element>(tensor: DenseTensor, expected: &[usize]) -> Result<Vec<T>, DenseError> {
+/// One owned output of shape `expected`, checked as the per-matrix entry
+/// `label` checks it: the borrowed dtype, then shape and length, and only
+/// then the consuming transfer, so a malformed output carries the same error
+/// as the per-matrix check.
+fn owned_factor<T: Element>(
+    tensor: DenseTensor,
+    expected: &[usize],
+    label: &'static str,
+) -> Result<Vec<T>, DenseError> {
     let len = T::slice(&tensor)?.len();
-    check_contiguous_output("svd_into", len, tensor.shape(), expected)?;
+    check_contiguous_output(label, len, tensor.shape(), expected)?;
     T::into_vec(tensor)
+}
+
+/// One owned spectrum of shape `expected`, checked as the per-matrix entry
+/// `label` checks it (dtype, then shape and length).
+fn owned_spectrum<'t, T: Element>(
+    tensor: &'t DenseTensor,
+    expected: &[usize],
+    label: &'static str,
+) -> Result<&'t [T::Spectrum], DenseError> {
+    let values = T::spectrum(tensor)?;
+    check_contiguous_output(label, values.len(), tensor.shape(), expected)?;
+    Ok(values)
 }
 
 /// [`factorize_batch_into_composite`] of one floating input of rank two or
@@ -718,19 +824,10 @@ fn polar_into<E: DenseExecutor + ?Sized, T: Element>(
         .try_into()
         .map_err(|outputs: Vec<_>| arity_mismatch("svd_into", 3, outputs.len()))
         .map_err(FactorFailure::Output)?;
-    let mut u = owned_factor::<T>(u, &dims(m, k)).map_err(FactorFailure::Output)?;
-    let sigma = T::spectrum(&s)
-        .and_then(|sigma| {
-            check_contiguous_output(
-                "svd_into",
-                sigma.len(),
-                s.shape(),
-                &[&[k][..], batch].concat(),
-            )
-            .map(|_| sigma)
-        })
+    let mut u = owned_factor::<T>(u, &dims(m, k), "svd_into").map_err(FactorFailure::Output)?;
+    let sigma = owned_spectrum::<T>(&s, &[&[k][..], batch].concat(), "svd_into")
         .map_err(FactorFailure::Output)?;
-    let mut vh = owned_factor::<T>(vh, &dims(k, n)).map_err(FactorFailure::Output)?;
+    let mut vh = owned_factor::<T>(vh, &dims(k, n), "svd_into").map_err(FactorFailure::Output)?;
     // A nonempty view's element count fits, so its batch product does.
     let items = batch.iter().product::<usize>();
     let [first, second, _] = &mut dest.outputs;
@@ -800,6 +897,57 @@ fn polar_into<E: DenseExecutor + ?Sized, T: Element>(
     Ok(())
 }
 
+/// [`factorize_batch_into_composite`] of one floating square input of rank
+/// two or more and `shape`.
+fn exp_into<E: DenseExecutor + ?Sized, T: Element>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+    shape: &[usize],
+    dest: &mut FactorDest<'_>,
+) -> Result<(), FactorFailure> {
+    let (n, batch) = (shape[0], &shape[2..]);
+    if shape.contains(&0) {
+        return Ok(());
+    }
+    let outputs = executor
+        .eigh(engine, input)
+        .map_err(FactorFailure::Solver)?;
+    let [values, vectors]: [DenseTensor; 2] = outputs
+        .try_into()
+        .map_err(|outputs: Vec<_>| arity_mismatch("eigh_into", 2, outputs.len()))
+        .map_err(FactorFailure::Output)?;
+    let lambda = owned_spectrum::<T>(&values, &[&[n][..], batch].concat(), "eigh_into")
+        .map_err(FactorFailure::Output)?;
+    let mut x = owned_factor::<T>(vectors, &[&[n, n][..], batch].concat(), "eigh_into")
+        .map_err(FactorFailure::Output)?;
+    finite_eigenvalues(lambda.iter().copied()).map_err(FactorFailure::Output)?;
+    // A nonempty view's element count fits, so its batch product does.
+    let items = batch.iter().product::<usize>();
+    scale_exp_factor(n, items, |index| lambda[index], &mut x);
+    let out = dest.outputs[0]
+        .as_mut()
+        .and_then(T::compact)
+        .expect("validation checked the destination dtype");
+    let gram = DenseDotConfig::matmul().with_conjugation(false, true);
+    let (layout, adjoint) = ([[n, n], [1, n]], [[n, n], [n, 1]]);
+    for item in 0..items {
+        let x = &x[item * n * n..][..n * n];
+        let out = &mut out[item * n * n..][..n * n];
+        composite_product(
+            executor,
+            engine,
+            out,
+            &layout,
+            (x, &layout),
+            (x, &adjoint),
+            &gram,
+        )?;
+    }
+    copytri_items(out, n);
+    Ok(())
+}
+
 /// One product of the composite into the column-major `out`, each operand
 /// a whole slice with its `[shape, strides]`.
 fn composite_product<E: DenseExecutor + ?Sized, T: Element>(
@@ -849,6 +997,43 @@ pub(crate) fn scale_polar_factor<T: Element>(
                 for value in &mut u[m * col..m * (col + 1)] {
                     *value = value.scale_by_sqrt(sigma);
                 }
+            }
+        }
+    }
+}
+
+/// Scales each item's `n x n` eigenvectors `x` column by column by
+/// `exp(lambda(i) / 2)` in place, `i` the eigenvalue's index over the whole
+/// batch: `Y = V exp(D / 2)`, the factor of `exp(X) = Y Y^H`.
+pub(crate) fn scale_exp_factor<T: Element>(
+    n: usize,
+    items: usize,
+    lambda: impl Fn(usize) -> T::Spectrum,
+    x: &mut [T],
+) {
+    for item in 0..items {
+        let x = &mut x[item * n * n..][..n * n];
+        for col in 0..n {
+            let lambda = lambda(item * n + col);
+            for value in &mut x[n * col..n * (col + 1)] {
+                *value = value.scale_by_half_exp(lambda);
+            }
+        }
+    }
+}
+
+/// Makes each column-major `n x n` item of `data` exactly Hermitian as
+/// LAPACK `copytri` (`'U'`, conjugating) publishes it: the upper triangle
+/// kept, the diagonal its real part, the lower triangle its adjoint.
+pub(crate) fn copytri_items<T: Element>(data: &mut [T], n: usize) {
+    if n == 0 {
+        return;
+    }
+    for item in data.chunks_exact_mut(n * n) {
+        for col in 0..n {
+            item[col + n * col] = item[col + n * col].real_part();
+            for row in 0..col {
+                item[col + n * row] = item[row + n * col].conj();
             }
         }
     }
