@@ -25,6 +25,16 @@
 //! polar job composes the provider's SVD with two products on the lane's
 //! context, a Hermitian exponential job the provider's eigh with one, their
 //! geometry plans resolved before the lanes.
+//!
+//! A single-matrix block's lane model is its provider's own width decision
+//! ([`grant`]) over its serial time. A composite job (polar, Hermitian
+//! exponential) is priced per sequential stage ([`FactorInto::COMPOSITE`]):
+//! its factorization at the work model's rate with [`grant`] on that
+//! factorization's own estimates, and each product at tcontract's GEMM rate
+//! with [`gemm::grant`] on the plan the batch resolved; its serial time is
+//! the stages' sum and its time on a lane the sum of each stage's time at
+//! its own width. The smaller serial passes (scaling, the finite check, the
+//! Hermitian projection) are not priced.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -34,13 +44,13 @@ use std::time::Duration;
 
 use num_complex::{Complex32, Complex64};
 use strided_view::RawStridedRef;
-use tcontract_exec::Exec;
+use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
 
 use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::gemm::{self, ErasedPlan, Geometry};
-use super::schedule::{self, GrantKey, LaneJobs};
+use super::schedule::{self, Grant, GrantKey, LaneJobs, STAGES};
 use crate::factor_dest::{
     adjoint_items, compact_mut, copytri_items, map_transposed_items, polar_direction,
     project_hermitian_items, scale_exp_factor, scale_polar_factor, Element, FactorSink,
@@ -477,9 +487,10 @@ impl<const LEFT: bool> Factor for Polar<LEFT> {
     const ENTRY: &'static str = Svd::ENTRY;
     const OP: tlinalg::Op = Svd::OP;
 
-    // The SVD's estimates plus the two products' weighted work, which a team
-    // inside the item can also use. A scheduling model: each SVD and product
-    // still decides its own width within the lane.
+    // The SVD's estimates plus the two products' weighted work: the item's
+    // whole weighted work, which the batch decision's query reads. The lane
+    // model prices the SVD and each product as its own stage
+    // (`FactorInto::COMPOSITE`).
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
         let [total, payback] = Svd::estimates::<T>(m, n);
         let (m, n) = (m as f64, n as f64);
@@ -708,6 +719,17 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
     /// The geometry plan of `geometry` at this scalar.
     fn plan(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError>;
 
+    /// [`gemm::grant`] of a product of weighted work `work` and serial time
+    /// `serial` with `plan` (from [`Self::plan`]) on a lane of `budget`
+    /// slots of `exec`.
+    fn product_grant(
+        plan: &ErasedPlan,
+        work: f64,
+        exec: &Exec<'_>,
+        budget: usize,
+        serial: Duration,
+    ) -> usize;
+
     /// `d = a b` with `plan` (from [`Self::plan`]) on `exec`.
     fn gemm(
         plan: &ErasedPlan,
@@ -759,6 +781,16 @@ macro_rules! scalar {
 
             fn plan(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError> {
                 gemm::erased_plan::<$ty>(geometry)
+            }
+
+            fn product_grant(
+                plan: &ErasedPlan,
+                work: f64,
+                exec: &Exec<'_>,
+                budget: usize,
+                serial: Duration,
+            ) -> usize {
+                gemm::erased_grant::<$ty>(plan, work, exec, budget, serial)
             }
 
             fn gemm(
@@ -909,12 +941,12 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
         F::SEARCHED && single_item::<F>(job.input).is_some()
     }
 
-    fn grant(&self, _: usize, job: &Job<'a>, exec: &Exec<'_>, budget: usize, _: Duration) -> usize {
-        single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item))
+    fn grant(&self, _: usize, job: &Job<'a>, exec: &Exec<'_>, budget: usize, _: Duration) -> Grant {
+        schedule::single(single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item)))
     }
 
     fn grant_key(&self, _: usize, job: &Job<'a>) -> GrantKey {
-        single_item::<F>(job.input).map_or([0; 2], |item| item.map(f64::to_bits))
+        item_key(single_item::<F>(job.input))
     }
 
     // A block's error is its own outcome, not the driver's: the caller
@@ -1043,6 +1075,18 @@ fn batch_on<F: Factor>(
 /// A [`Factor`] with a destination form: its provider workspace query and
 /// its initialized-destination entry.
 pub(crate) trait FactorInto: Factor {
+    /// Nonzero for a composite job, the provider's factorization followed by
+    /// the products of [`Self::geometries`], each a stage the lane model
+    /// prices on its own; distinct per composite op, it tags the job's grant
+    /// key. Zero for a single-stage factorization.
+    const COMPOSITE: u64 = 0;
+
+    /// A composite job's factorization stage alone: tlinalg's (total,
+    /// payback) estimates of one `m x n` item (see [`Factor::estimates`]).
+    fn stage_estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        Self::estimates::<T>(m, n)
+    }
+
     /// tlinalg's workspace bytes for `batch` items of `dims` on `exec`.
     fn workspace<T: Scalar>(
         dims: [usize; 2],
@@ -1463,6 +1507,12 @@ impl FactorInto for Eigh {
 }
 
 impl<const LEFT: bool> FactorInto for Polar<LEFT> {
+    const COMPOSITE: u64 = if LEFT { 2 } else { 3 };
+
+    fn stage_estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
+        Svd::estimates::<T>(m, n)
+    }
+
     fn workspace<T: Scalar>(
         [m, n]: [usize; 2],
         batch: usize,
@@ -1562,6 +1612,12 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
 }
 
 impl FactorInto for ExpViaEigh {
+    const COMPOSITE: u64 = 1;
+
+    fn stage_estimates<T: tlinalg::FaerScalar>(n: usize, m: usize) -> [f64; 2] {
+        Eigh::estimates::<T>(n, m)
+    }
+
     fn workspace<T: Scalar>(
         dims: [usize; 2],
         batch: usize,
@@ -1751,6 +1807,15 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         work::<F>(job.input)
     }
 
+    fn serial(&self, _: usize, job: &Self::Job, model: &WorkModel, work: f64) -> Duration {
+        match stages::<F>(job, model, None) {
+            Some(stages) => stages
+                .iter()
+                .fold(Duration::ZERO, |sum, &(time, _)| sum.saturating_add(time)),
+            None => driver::cost(OpKind::Factorization, work, model),
+        }
+    }
+
     fn modeled(&self, _: usize, job: &Self::Job) -> bool {
         F::SEARCHED && single_item::<F>(job.input).is_some()
     }
@@ -1762,12 +1827,45 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         exec: &Exec<'_>,
         budget: usize,
         _: Duration,
-    ) -> usize {
-        single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item))
+    ) -> Grant {
+        let model = &exec.batch_policy().model;
+        match stages::<F>(job, model, Some((exec, budget))) {
+            Some(stages) => stages.map(|(_, width)| width),
+            None => schedule::single(
+                single_item::<F>(job.input).map_or(1, |item| grant(exec, budget, item)),
+            ),
+        }
     }
 
+    fn item(
+        &self,
+        _: usize,
+        job: &Self::Job,
+        exec: &Exec<'_>,
+        serial: Duration,
+        grant: Grant,
+    ) -> Duration {
+        match stages::<F>(job, &exec.batch_policy().model, None) {
+            Some(stages) => {
+                stages
+                    .iter()
+                    .zip(grant)
+                    .fold(Duration::ZERO, |sum, (&(time, _), width)| {
+                        sum.saturating_add(schedule::item_time(exec, time, width))
+                    })
+            }
+            None => schedule::item_time(exec, serial, grant[0]),
+        }
+    }
+
+    // A composite job's stages are a function of its op, its scalar and its
+    // extents, given the context: its estimates, product geometries and
+    // plans (a plan is a pure function of scalar and geometry).
     fn grant_key(&self, _: usize, job: &Self::Job) -> GrantKey {
-        single_item::<F>(job.input).map_or([0; 2], |item| item.map(f64::to_bits))
+        match (F::COMPOSITE, job.input.shape()) {
+            (0, _) | (_, [] | [_]) => item_key(single_item::<F>(job.input)),
+            (op, &[m, n, ..]) => [m as u64, n as u64, (op << 2) | dtype_tag(job.input)],
+        }
     }
 
     // A block's error is its own outcome, not the driver's: the caller
@@ -1785,7 +1883,12 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         }
         let sizing = job.sizing.take();
         #[cfg(test)]
-        let (setup, id, input) = (lane.setup_allocs, lane.id, owners::address(job.input));
+        let (setup, id, input, width) = (
+            lane.setup_allocs,
+            lane.id,
+            owners::address(job.input),
+            exec.budget(),
+        );
         let plans = &job.plans;
         let solve = || match job.input {
             DenseRead::F32(view) => factor_into_typed::<F, _>(
@@ -1829,7 +1932,13 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         #[cfg(test)]
         let outcome = {
             let (outcome, solve_allocs) = owners::measured(solve);
-            owners::record(input, id, setup, solve_allocs, owners::take_products());
+            owners::record(
+                input,
+                (id, width),
+                setup,
+                solve_allocs,
+                owners::take_products(),
+            );
             outcome
         };
         #[cfg(not(test))]
@@ -1850,13 +1959,15 @@ pub(crate) mod owners {
     use crate::tests::counting_alloc;
     use crate::DenseRead;
 
-    /// One solved block: its input's payload address, its lane setup's id
-    /// and allocation calls, the allocation calls inside its solve outside
-    /// its products, and those inside its products.
+    /// One solved block: its input's payload address, its lane setup's id,
+    /// its lane's reserved width and its setup's allocation calls, the
+    /// allocation calls inside its solve outside its products, and those
+    /// inside its products.
     #[derive(Clone, Copy, Debug)]
     pub(crate) struct Record {
         pub(crate) input: usize,
         pub(crate) lane: usize,
+        pub(crate) width: usize,
         pub(crate) setup: Option<u64>,
         pub(crate) solve: Option<u64>,
         pub(crate) products: u64,
@@ -1916,7 +2027,7 @@ pub(crate) mod owners {
 
     pub(super) fn record(
         input: usize,
-        lane: usize,
+        (lane, width): (usize, usize),
         setup: Option<u64>,
         solve: Option<u64>,
         products: u64,
@@ -1927,6 +2038,7 @@ pub(crate) mod owners {
             .push(Record {
                 input,
                 lane,
+                width,
                 setup,
                 solve,
                 products,
@@ -2263,6 +2375,84 @@ pub(crate) fn grant(exec: &Exec<'_>, budget: usize, [total, payback]: [f64; 2]) 
     width(total).min(width(payback))
 }
 
+/// A single-stage factorization's grant key: its (total, payback) estimates
+/// by bits, zero for an input without one; the last word, zero, keeps it
+/// apart from every composite key.
+fn item_key(item: Option<[f64; 2]>) -> GrantKey {
+    let [total, payback] = item.map_or([0; 2], |item| item.map(f64::to_bits));
+    [total, payback, 0]
+}
+
+/// `input`'s scalar, among the provider's.
+fn dtype_tag(input: DenseRead<'_>) -> u64 {
+    match input {
+        DenseRead::F32(_) => 0,
+        DenseRead::F64(_) => 1,
+        DenseRead::C32(_) => 2,
+        _ => 3,
+    }
+}
+
+/// A composite job's sequential stages (see [`FactorInto::COMPOSITE`]),
+/// `None` for a single-stage `F` or an input the provider refuses: its
+/// factorization, then each product the batch resolved a plan for, each
+/// with its serial time over every batch item under `model` and, given a
+/// `lane` of `budget` slots of `exec`, its provider's width there for one
+/// item (one slot otherwise). A product without a plan belongs to a job that
+/// runs no solve; it is priced as absent (no time, one slot).
+fn stages<F: FactorInto>(
+    job: &IntoJob<'_, '_, '_>,
+    model: &WorkModel,
+    lane: Option<(&Exec<'_>, usize)>,
+) -> Option<[(Duration, usize); STAGES]> {
+    if F::COMPOSITE == 0 {
+        return None;
+    }
+    let shape = job.input.shape();
+    match job.input {
+        DenseRead::F32(_) => stages_of::<F, f32>(shape, &job.plans, model, lane),
+        DenseRead::F64(_) => stages_of::<F, f64>(shape, &job.plans, model, lane),
+        DenseRead::C32(_) => stages_of::<F, Complex32>(shape, &job.plans, model, lane),
+        DenseRead::C64(_) => stages_of::<F, Complex64>(shape, &job.plans, model, lane),
+        _ => None,
+    }
+}
+
+/// [`stages`] at scalar `T`.
+fn stages_of<F: FactorInto, T: Scalar>(
+    shape: &[usize],
+    plans: &Plans,
+    model: &WorkModel,
+    lane: Option<(&Exec<'_>, usize)>,
+) -> Option<[(Duration, usize); STAGES]> {
+    let [m, n, ref batch @ ..] = *shape else {
+        return None;
+    };
+    let items: f64 = batch.iter().map(|&b| b as f64).product();
+    let estimates = F::stage_estimates::<T>(m, n);
+    let mut stages = [(Duration::ZERO, 1); STAGES];
+    stages[0] = (
+        driver::cost(OpKind::Factorization, estimates[0] * items, model),
+        lane.map_or(1, |(exec, budget)| grant(exec, budget, estimates)),
+    );
+    let geometries = F::geometries([m, n]).unwrap_or([None, None]);
+    for ((stage, geometry), plan) in stages[1..].iter_mut().zip(geometries).zip(plans) {
+        let (Some(geometry), Some(plan)) = (geometry, plan) else {
+            continue;
+        };
+        let [rows, inner, cols] = geometry.mkn.map(|extent| extent as f64);
+        let work = T::COMPLEX_WEIGHT * (rows * inner * cols);
+        let time = driver::cost(OpKind::Gemm, work * items, model);
+        *stage = (
+            time,
+            lane.map_or(1, |(exec, budget)| {
+                T::product_grant(plan.as_ref(), work, exec, budget, time)
+            }),
+        );
+    }
+    Some(stages)
+}
+
 /// The checks the per-matrix entry makes before it enters the engine: the
 /// tenferro view, then the provider's dtype set.
 fn preflight<F: Factor>(input: DenseRead<'_>) -> Result<StrideVec, DenseError> {
@@ -2456,7 +2646,7 @@ mod tests {
             exec: &Exec<'_>,
             budget: usize,
             serial: Duration,
-        ) -> usize {
+        ) -> Grant {
             self.0.grant(index, job, exec, budget, serial)
         }
 
@@ -2641,6 +2831,134 @@ mod tests {
                 );
             }
             assert_eq!(setups.len(), lanes, "{lanes} lane(s)");
+        }
+    }
+
+    /// One composite job of `F` on `input`, the batch's plans resolved, as the
+    /// lane model sees it on four slots of flat 100 ns dispatch at one
+    /// multiply-add per ns and no item overhead: its serial time, its stage
+    /// widths and modeled time on a four-slot lane, and its stage widths on a
+    /// one-slot lane.
+    fn composite_model<F: FactorInto>(input: DenseRead<'_>) -> (Duration, Grant, Duration, Grant) {
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::flat(Duration::from_nanos(100));
+        let pool = Pool::builder()
+            .threads(4)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let mut engine =
+            CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
+        let mut dest = FactorDest::new([None, None, None], FactorPlacement::AsComputed);
+        let mut jobs = vec![IntoJob {
+            input,
+            strides: preflight::<F>(input).unwrap(),
+            dest: &mut dest,
+            plans: [None, None],
+            sizing: None,
+            outcome: None,
+            lane_seen: (0, 0),
+        }];
+        resolve_plans::<F>(&mut jobs);
+        let (op, job) = (IntoBlocks::<F>(PhantomData), &jobs[0]);
+        engine
+            .with_linalg_pool(|exec, _| {
+                let serial = op.serial(0, job, &model, op.work(0, job));
+                let wide = op.grant(0, job, exec, 4, serial);
+                let item = op.item(0, job, exec, serial, wide);
+                Ok((serial, wide, item, op.grant(0, job, exec, 1, serial)))
+            })
+            .unwrap()
+    }
+
+    /// Purpose: a composite job's lane model is the sum of its sequential
+    /// stages, each priced by its own provider at its own width: the
+    /// factorization at the work model's rate with tlinalg's width for its
+    /// own estimates, each product at tcontract's GEMM rate with its resolved
+    /// plan's width, each parallel stage paying its own dispatch, the serial
+    /// time the stages' sum, and a job whose every stage is serial at the
+    /// full width costing that sum. Four slots of flat 100 ns dispatch (a
+    /// stage pays from 300 ns), one multiply-add per ns, so a factorization
+    /// of total work `t` and payback `p` takes `t` ns and every slot when
+    /// `p >= 300`, and a product of weighted work `w` takes
+    /// `2 w ns_per_flop` ns and every slot when that time is at least
+    /// 300 ns (its item time, `w` ns, is then larger):
+    /// - `exp` f64 `60 x 60`: eigh `60^3 = 216000`, payback `129.6` (serial);
+    ///   product `Y Y^H` of work `216000` (parallel);
+    /// - `exp` c64 `60 x 60`: eigh `4 * 216000`, payback `518.4` (parallel);
+    ///   the product four times the f64 work (parallel), two dispatches;
+    /// - left polar f64 `200 x 16`: SVD `200 * 16 * 16 = 51200`, payback
+    ///   `30.72` (serial); `W = U Vh` of work `200 * 16 * 16` (parallel);
+    ///   `P = X^H X` of work `16^3` (serial at either host rate, under 300
+    ///   ns);
+    /// - right polar c64 `16 x 200`: SVD `4 * 51200`, payback `122.88`
+    ///   (serial); `W` of work `4 * 16 * 16 * 200` and `P = X X^H` of work
+    ///   `4 * 16^3` (both parallel), the left orientation's `n x n` product
+    ///   would be `4 * 200 * 16 * 200`;
+    /// - `exp` f64 `8 x 8`: eigh `512`, product `512` (both serial).
+    ///
+    /// On a one-slot lane every stage is serial.
+    #[test]
+    fn composite_jobs_cost_each_stage_at_its_own_width() {
+        use crate::DenseView;
+        let npf = tcontract::ns_per_flop();
+        let ns = |x: f64| Duration::from_secs_f64(x * 1e-9);
+        let gemm = |work: f64| ns(2.0 * work * npf);
+        let d = Duration::from_nanos(100);
+        let real = vec![0.0_f64; 3600];
+        let complex = vec![Complex64::new(0.0, 0.0); 3600];
+        let f64_of = |shape: &'static [usize], strides: &'static [usize]| {
+            DenseRead::F64(DenseView::new(&real[..shape[0] * shape[1]], shape, strides, 0).unwrap())
+        };
+        let c64_of = |shape: &'static [usize], strides: &'static [usize]| {
+            DenseRead::C64(
+                DenseView::new(&complex[..shape[0] * shape[1]], shape, strides, 0).unwrap(),
+            )
+        };
+        let rows = [
+            (
+                composite_model::<ExpViaEigh>(f64_of(&[60, 60], &[1, 60])),
+                (
+                    ns(216000.0) + gemm(216000.0),
+                    [1, 4, 1],
+                    ns(216000.0) + gemm(216000.0) / 4 + d,
+                ),
+            ),
+            (
+                composite_model::<ExpViaEigh>(c64_of(&[60, 60], &[1, 60])),
+                (
+                    ns(864000.0) + gemm(864000.0),
+                    [4, 4, 1],
+                    ns(864000.0) / 4 + d + gemm(864000.0) / 4 + d,
+                ),
+            ),
+            (
+                composite_model::<Polar<true>>(f64_of(&[200, 16], &[1, 200])),
+                (
+                    ns(51200.0) + gemm(51200.0) + gemm(4096.0),
+                    [1, 4, 1],
+                    ns(51200.0) + gemm(51200.0) / 4 + d + gemm(4096.0),
+                ),
+            ),
+            (
+                composite_model::<Polar<false>>(c64_of(&[16, 200], &[1, 16])),
+                (
+                    ns(204800.0) + gemm(204800.0) + gemm(16384.0),
+                    [1, 4, 4],
+                    ns(204800.0) + gemm(204800.0) / 4 + d + gemm(16384.0) / 4 + d,
+                ),
+            ),
+            (
+                composite_model::<ExpViaEigh>(f64_of(&[8, 8], &[1, 8])),
+                (ns(512.0) + gemm(512.0), [1, 1, 1], ns(512.0) + gemm(512.0)),
+            ),
+        ];
+        for (row, ((serial, wide, item, narrow), expected)) in rows.into_iter().enumerate() {
+            assert_eq!((serial, wide, item), expected, "row {row}");
+            assert_eq!(narrow, [1; STAGES], "row {row}");
         }
     }
 

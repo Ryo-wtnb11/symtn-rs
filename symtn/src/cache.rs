@@ -31,7 +31,9 @@
 //!   factorization (other than QR) batches per schedule input (kernel kind,
 //!   budget, batch
 //!   policy, mean work, team, dispatch costs, per-block serial times and
-//!   grant inputs), [`StructureCacheKind::LaneAllocations`],
+//!   grant inputs; a polar or Hermitian `exp` block's are its op, scalar and
+//!   extents, which fix its per-stage model),
+//!   [`StructureCacheKind::LaneAllocations`],
 //!   on the native CPU provider, so a repeated batch on a fresh executor
 //!   skips the lane search. Neither TensorKit nor QSpace has a model-based
 //!   lane search or a cache of its result.

@@ -1,14 +1,23 @@
-//! The block kernels' one lane driver: a kernel describes one block's work
-//! and execution ([`BlockOp`]); the driver enters the kernel's guarded engine
-//! entry, turns the work into times with the one cost function, allocates the
-//! lanes and runs every block, returning the lowest-indexed failure.
+//! The block kernels' one lane driver: a kernel describes one block's work,
+//! model and execution ([`BlockOp`]); the driver enters the kernel's guarded
+//! engine entry, turns the work into times with the one cost function (a
+//! composite block summing its stages', see [`BlockOp::serial`]), allocates
+//! the lanes under the kernel's model and runs every block, returning the
+//! lowest-indexed failure.
+//!
+//! The model reaches the search along one path: [`BlockOp::serial`] gives
+//! the driver's per-block times, and [`BlockOp::grant`] with
+//! [`BlockOp::item`] the stage widths and modeled time at every lane width
+//! that both the equal-share and the reservation candidates score with and
+//! the reservation widens by. The weighted work ([`BlockOp::work`]) feeds
+//! only the batch decision's query.
 
 use std::time::Duration;
 
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::schedule::{self, AllocationScratch, GrantKey, LaneJobs};
+use super::schedule::{self, AllocationScratch, Grant, GrantKey, JobModel, LaneJobs};
 use crate::tenferro_adapter::{lane_allocation_unsupported, tenferro_error};
 use crate::{DenseError, LaneAllocation};
 
@@ -25,7 +34,9 @@ pub(crate) enum Entry {
 
 /// The dependency whose own model turns a block's work into time, and the
 /// family of its grant: the lane-allocation cache keys it, so two kinds never
-/// share an allocation.
+/// share an allocation. A composite factorization job is of the
+/// factorization kind; its products are priced at the GEMM rate within it
+/// (see [`BlockOp::serial`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
@@ -61,8 +72,16 @@ pub(crate) trait BlockOp: Sync {
     /// The `DenseError` label of a refused entry.
     const LABEL: &'static str;
 
-    /// The block's weighted multiply-adds, as its provider estimates them.
+    /// The block's weighted multiply-adds, as its provider estimates them:
+    /// the batch decision's mean work, not a time.
     fn work(&self, index: usize, job: &Self::Job) -> f64;
+
+    /// Block `index`'s serial time, from its weighted work `work`: the
+    /// kind's [`cost`], or for a composite block of sequential stages the
+    /// saturating sum of its stages' own costs.
+    fn serial(&self, _: usize, _: &Self::Job, model: &WorkModel, work: f64) -> Duration {
+        cost(Self::KIND, work, model)
+    }
 
     /// Whether [`grant`](Self::grant) models block `index`'s provider
     /// width. A batch holding a block it does not model keeps the baseline
@@ -71,11 +90,12 @@ pub(crate) trait BlockOp: Sync {
         true
     }
 
-    /// The width block `index`'s provider takes on a lane of `budget`
+    /// The widths block `index`'s stages take on a lane of `budget`
     /// reserved slots of `exec`, for a block of serial time `serial`: the
-    /// scheduler's model of that provider's own width decision, composed from
-    /// the provider's public decisions. Consulted only for a batch whose
-    /// every block is [`modeled`](Self::modeled).
+    /// scheduler's model of each stage provider's own width decision,
+    /// composed from that provider's public decisions
+    /// ([`schedule::single`] for a single-stage block). Consulted only for a
+    /// batch whose every block is [`modeled`](Self::modeled).
     fn grant(
         &self,
         index: usize,
@@ -83,7 +103,21 @@ pub(crate) trait BlockOp: Sync {
         exec: &Exec<'_>,
         budget: usize,
         serial: Duration,
-    ) -> usize;
+    ) -> Grant;
+
+    /// Block `index`'s modeled time on a lane where its stages take `grant`
+    /// (see [`schedule::item_time`]): a composite block sums its stages'
+    /// times at their own widths, each parallel stage with its own dispatch.
+    fn item(
+        &self,
+        _: usize,
+        _: &Self::Job,
+        exec: &Exec<'_>,
+        serial: Duration,
+        grant: Grant,
+    ) -> Duration {
+        schedule::item_time(exec, serial, grant[0])
+    }
 
     /// What block `index`'s [`grant`](Self::grant) depends on besides its
     /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
@@ -169,7 +203,7 @@ fn on_lanes<B: BlockOp>(
         .extend(jobs.iter().enumerate().map(|(index, job)| {
             let work = op.work(index, job);
             total_work += work;
-            cost(B::KIND, work, &model)
+            op.serial(index, job, &model, work)
         }));
     // A batch the search would place (two or more modeled blocks) refuses a
     // selection a forced policy overrides, before any block runs, rather than
@@ -198,8 +232,10 @@ fn on_lanes<B: BlockOp>(
             .iter()
             .enumerate()
             .all(|(index, job)| op.modeled(index, job));
-    let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
-        op.grant(j, &jobs[j], shared, budget, serial)
+    let grant = modeled.then_some(Modeled {
+        op,
+        jobs,
+        exec: shared,
     });
     let allocation = schedule::allocate_in(
         shared,
@@ -221,4 +257,21 @@ fn on_lanes<B: BlockOp>(
     // A refused lane split is the engine's typed failure under this kernel's
     // label, like a refused entry.
     result.map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
+}
+
+/// A kernel's blocks as the scheduler's [`JobModel`].
+struct Modeled<'a, 'e, B: BlockOp> {
+    op: &'a B,
+    jobs: &'a [B::Job],
+    exec: &'a Exec<'e>,
+}
+
+impl<B: BlockOp> JobModel for Modeled<'_, '_, B> {
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant {
+        self.op.grant(j, &self.jobs[j], self.exec, width, serial)
+    }
+
+    fn item(&self, exec: &Exec<'_>, j: usize, serial: Duration, grant: Grant) -> Duration {
+        self.op.item(j, &self.jobs[j], exec, serial, grant)
+    }
 }

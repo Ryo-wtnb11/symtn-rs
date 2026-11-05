@@ -654,12 +654,12 @@ impl BlockOp for PanicsAt {
         1.0
     }
 
-    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> usize {
-        1
+    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> schedule::Grant {
+        schedule::single(1)
     }
 
     fn grant_key(&self, _: usize, _: &()) -> schedule::GrantKey {
-        [0; 2]
+        [0; 3]
     }
 
     fn run(&self, index: usize, _: &mut (), (): &mut (), _: Exec<'_>) -> Result<(), DenseError> {

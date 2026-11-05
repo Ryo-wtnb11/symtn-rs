@@ -1816,3 +1816,160 @@ fn native_exp_tags_an_overflowing_eigenvalue_as_an_output_failure() {
         vec![(0, Err(eigenvalue_check_failure())), (1, Ok(()))]
     );
 }
+
+/// The reserved lane width each input of `shapes` (of scalar `T`, Hermitian
+/// for the exponential) runs on through the default executor's destination
+/// entry with `selector`, on `threads` slots of flat 100 ns dispatch at one
+/// multiply-add per ns and no item overhead; every input succeeds.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+fn destination_widths<T: Elem>(
+    op: DenseFactorization,
+    selector: crate::LaneAllocation,
+    threads: usize,
+    shapes: &[&[usize]],
+) -> Vec<usize> {
+    use crate::block_kernel::factor::owners;
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let row = WidthCosts::flat(std::time::Duration::from_nanos(100));
+    let pool = crate::Pool::builder()
+        .threads(threads)
+        .dispatch_costs(DispatchCosts::new(row, row, row))
+        .build()
+        .unwrap();
+    let model = tcontract_exec::WorkModel::default()
+        .with_muladds_per_ns(1.0)
+        .with_item_overhead_ns(0.0);
+    let mut engine = CpuEngine::new(pool)
+        .with_batch_policy(tcontract_exec::BatchPolicy::default().with_model(model));
+    let hermitian = op == DenseFactorization::ExpViaEigh;
+    let lens: Vec<usize> = shapes.iter().map(|shape| shape.iter().product()).collect();
+    let data: Vec<T> = shapes
+        .iter()
+        .enumerate()
+        .flat_map(|(seed, shape)| input_data::<T>(shape, hermitian, seed))
+        .collect();
+    let layouts: Vec<_> = shapes.iter().map(|shape| strides(shape)).collect();
+    let mut rest = &data[..];
+    let inputs: Vec<_> = shapes
+        .iter()
+        .zip(&layouts)
+        .zip(&lens)
+        .map(|((shape, layout), &len)| {
+            let (item, tail) = rest.split_at(len);
+            rest = tail;
+            T::read(DenseView::new(item, shape, layout, 0).unwrap())
+        })
+        .collect();
+    let mut buffers: Vec<Buffers<T>> = shapes
+        .iter()
+        .map(|shape| Buffers::new(op, dest_shapes(op, shape, FactorPlacement::AsComputed), 0.0))
+        .collect();
+    let mut dests: Vec<_> = buffers
+        .iter_mut()
+        .map(|b| b.dest(op, FactorPlacement::AsComputed))
+        .collect();
+    let mut executor = DefaultDenseExecutor::new();
+    executor.set_lane_allocation(selector);
+    let mark = owners::mark();
+    executor
+        .factorize_batch_into(
+            &mut engine,
+            op,
+            &inputs,
+            &mut dests,
+            &mut |_, _, outcome| outcome.map_err(FactorFailure::into_error),
+        )
+        .unwrap();
+    let start = data.as_ptr() as usize;
+    let size = std::mem::size_of::<T>();
+    let records = owners::within(mark, start..start + size * data.len());
+    assert_eq!(records.len(), shapes.len());
+    let mut offsets = Vec::new();
+    let mut offset = 0;
+    for &len in &lens {
+        offsets.push(start + offset * size);
+        offset += len;
+    }
+    offsets
+        .iter()
+        .map(|address| records.iter().find(|r| r.input == *address).unwrap().width)
+        .collect()
+}
+
+/// Purpose: the destination entry's polar and Hermitian `exp` batches are
+/// placed under the per-stage model, by both the equal-share and the
+/// reservation candidates. Flat 100 ns dispatch (a stage pays from 300 ns),
+/// one multiply-add per ns, so a factorization of work `t` takes `t` ns and
+/// pays a team only when its payback `6e-4 t` reaches 300 ns, while a
+/// product of work `w` takes `2 w ns_per_flop` ns (37 or 64 ns per 1000 at
+/// either host rate) and widens from about 8100 multiply-adds:
+/// - `exp` f64, `60 x 60` and three `16 x 16`, four slots: the large eigh
+///   (216000 ns, payback 129.6) stays serial and only its product `P`
+///   (8 to 14 us) widens, so it costs `216000 + P / w + 100` ns at `w` slots;
+///   the small jobs are serial (about 4.3 us). Three equal lanes `2, 1, 1`
+///   score `216100 + P / 2`, below the one-slot baseline (`216000 + P`),
+///   two lanes (equal) and one four-slot lane (`216100 + P / 4 + 12.8 us`),
+///   and the reservation, whose least passing target puts every job on one
+///   four-slot lane. Whole-job pricing instead credits the large job
+///   `432000 / w + 100` ns and each small one `8192 / w + 100`, so one
+///   four-slot lane (114.5 us) wins.
+/// - `exp` c64, `60 x 60` and `32 x 32`, eight slots: both stages of the
+///   large job widen (two dispatches) and the small job's eigh stays serial,
+///   so two four-slot lanes beat one eight-slot lane by the small job's
+///   serial eigh (131 us), and the reservation, which can only widen the
+///   large job's lane, scores no lower; whole-job pricing credits both jobs
+///   linearly and keeps them on one eight-slot lane.
+/// - left polar f64, `200 x 16` and three `16 x 8`: the large SVD (51200 ns,
+///   payback 30.7) stays serial, `W` widens and `P` (`16^3`) is serial, so
+///   the placement is the first case's; right polar f64 on the transposed
+///   shapes has the same stages with `P = X X^H` of `16^3`.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn composite_destination_batches_are_placed_by_their_stages() {
+    use crate::LaneAllocation::{EqualShare, Moldable};
+    for selector in [Moldable, EqualShare] {
+        let small: &[usize] = &[16, 16];
+        assert_eq!(
+            destination_widths::<f64>(
+                DenseFactorization::ExpViaEigh,
+                selector,
+                4,
+                &[&[60, 60], small, small, small]
+            ),
+            [2, 1, 1, 1],
+            "{selector:?}"
+        );
+        assert_eq!(
+            destination_widths::<Complex64>(
+                DenseFactorization::ExpViaEigh,
+                selector,
+                8,
+                &[&[60, 60], &[32, 32]]
+            ),
+            [4, 4],
+            "{selector:?}"
+        );
+        let tall: &[usize] = &[16, 8];
+        assert_eq!(
+            destination_widths::<f64>(
+                DenseFactorization::LeftPolar,
+                selector,
+                4,
+                &[&[200, 16], tall, tall, tall]
+            ),
+            [2, 1, 1, 1],
+            "{selector:?}"
+        );
+        let wide: &[usize] = &[8, 16];
+        assert_eq!(
+            destination_widths::<f64>(
+                DenseFactorization::RightPolar,
+                selector,
+                4,
+                &[&[16, 200], wide, wide, wide]
+            ),
+            [2, 1, 1, 1],
+            "{selector:?}"
+        );
+    }
+}

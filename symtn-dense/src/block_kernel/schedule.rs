@@ -18,7 +18,10 @@
 //! [`LaneAllocation::Moldable`]; [`LaneAllocation::EqualShare`] scores the
 //! baseline and the equal shares alone. A job's modeled time in a lane is its serial time when its provider
 //! would run it on one thread there, otherwise its share of that time over
-//! the provider's granted width plus the token's dispatch cost at that width.
+//! the provider's granted width plus the token's dispatch cost at that width;
+//! a composite job of sequential stages (see [`JobModel`]) sums that time
+//! over its stages, each at its own provider's width, and its serial time is
+//! its stages' sum.
 //! The granted width is itself an estimate composed from the provider's
 //! public decisions (for a Packed GEMM plan an optimistic upper bound on its
 //! grid), and the model has no sublinear speedup, so a lower score is a
@@ -28,7 +31,8 @@
 //! is returned.
 //!
 //! The search costs `O(J log J + G S + G' sum(W) + L0 J' + P J log L0)`,
-//! counting the provider queries' width scans. Jobs with equal serial times
+//! counting the provider queries' width scans (a composite job's query asks
+//! each of its at most [`STAGES`] stage providers once). Jobs with equal serial times
 //! and grant keys share their grants, so only one of each of the G distinct
 //! (time, key) groups is queried: once at the full S, and, for the G' groups
 //! widened there, once per distinct equal-share width during the sweep (W,
@@ -45,7 +49,8 @@
 //! query per width up to S (`O(S^3)` with the width scans), an
 //! `O(S^2 log S)` sort and binary search of its targets, and one placement
 //! of `O(J (R + log S))` steps for its R < S reserved lanes, querying each
-//! widened (time, key) group once per reserved width it evaluates.
+//! widened (time, key) group once per reserved width it evaluates, and
+//! widens a reserved lane while some stage's grant still grows.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -164,7 +169,51 @@ impl AllocationScratch {
 /// times get equal grants at every width. Every op of one kind that reaches
 /// the process-global [`lane_allocations`] cache must give different grant
 /// inputs different keys.
-pub(crate) type GrantKey = [u64; 2];
+pub(crate) type GrantKey = [u64; 3];
+
+/// The most sequential stages one job's model prices: a factorization and
+/// its two products (a polar decomposition).
+pub(crate) const STAGES: usize = 3;
+
+/// The widths a job's sequential stages take on one lane, in stage order: a
+/// single-stage job's provider width first, the unused stages at one slot.
+/// A stage's width never grows as the lane narrows (see [`Columns::begin`]).
+pub(crate) type Grant = [usize; STAGES];
+
+/// `width` as the grant of a single-stage job.
+pub(crate) fn single(width: usize) -> Grant {
+    let mut grant = [1; STAGES];
+    grant[0] = width;
+    grant
+}
+
+/// Whether some stage of `wider` takes more slots than in `narrower`.
+fn grows(wider: Grant, narrower: Grant) -> bool {
+    wider.iter().zip(&narrower).any(|(a, b)| a > b)
+}
+
+/// The scheduler's model of each job: the widths its stages' providers take
+/// on a lane, and its modeled time there. Single-stage closures
+/// `grant(j, serial, w) -> width` are models with [`item_time`]'s time.
+pub(crate) trait JobModel {
+    /// The stage widths job `j` of serial time `serial` takes on a lane of
+    /// `width` reserved slots.
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant;
+
+    /// Job `j`'s modeled time on a lane where its stages take `grant`: its
+    /// serial time `serial` when every stage takes one slot.
+    fn item(&self, exec: &Exec<'_>, j: usize, serial: Duration, grant: Grant) -> Duration;
+}
+
+impl<F: Fn(usize, Duration, usize) -> usize> JobModel for F {
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant {
+        single(self(j, serial, width))
+    }
+
+    fn item(&self, exec: &Exec<'_>, _: usize, serial: Duration, grant: Grant) -> Duration {
+        item_time(exec, serial, grant[0])
+    }
+}
 
 /// Everything a searched allocation is a function of, as the
 /// [`StructureCacheKind::LaneAllocations`] cache keys it.
@@ -176,11 +225,16 @@ pub(crate) type GrantKey = [u64; 2];
 /// grant and every item time read only those), whether the token carries a
 /// team (the Faer grant's item parallelism), the jobs' serial times in
 /// canonical order (the slot count, the order, the placements and the
-/// scores), their grant keys (every other grant input) and the op kind,
-/// which fixes the grant function: every GEMM block op grants through
-/// `gemm::grant` (keys: the plan's algorithm and the work) and every
-/// factorization through `factor::grant` (keys: the item's total and payback
-/// work), so equal keys of different kinds never share an allocation, and
+/// scores), their grant keys (every other input of the job's complete
+/// item-time curve and stage widths) and the op kind, which fixes the model:
+/// every GEMM block op grants through `gemm::grant` (keys: the plan's
+/// algorithm and the work, last word zero); a single-stage factorization
+/// through `factor::grant` (keys: the item's total and payback work, last
+/// word zero), and a composite factorization job per stage, its
+/// factorization through `factor::grant` and each product through
+/// `gemm::grant` on its plan (keys: its extents and a nonzero tag of its op
+/// and scalar, which fix its stages' estimates, geometries and plans), so
+/// equal keys of different kinds or models never share an allocation, and
 /// the selected [`LaneAllocation`], which fixes the candidates scored.
 /// Floats are keyed by their bits, so equality is reflexive and a
 /// differently signed zero only searches again.
@@ -411,7 +465,7 @@ pub(crate) fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> A
     allocate_in(
         exec,
         times,
-        (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 2]),
+        (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 3]),
         mean_work,
         &mut AllocationScratch::default(),
         &LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0),
@@ -461,15 +515,15 @@ pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration], mean_work: f64) ->
 /// `BatchQuery`, while `times` feed `width_for`, so neither is converted
 /// twice), with its tables drawn from `scratch`.
 ///
-/// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
-/// `w` reserved slots, `key(j)` its other inputs (see [`GrantKey`]) and
-/// `family` the op kind whose grant function `grant` is;
+/// `model` gives the widths job `j`'s stages take in a lane of `w` reserved
+/// slots and its modeled time there (see [`JobModel`]), `key(j)` its other
+/// inputs (see [`GrantKey`]) and `family` the op kind whose model `model` is;
 /// Auto scores the candidates `selector` admits with it (under
 /// [`LaneAllocation::EqualShare`], the baseline and the equal shares only,
 /// without the large-job reservation) (see the module documentation), and
 /// takes a searched allocation from `cache` when one was computed from the
 /// same inputs (see [`LaneAllocationKey`]), offering each new search for
-/// admission. Without a grant, and under a forced strategy, the baseline
+/// admission. Without a model, and under a forced strategy, the baseline
 /// placement is returned and no candidate is scored; `key` is then not
 /// called.
 ///
@@ -483,13 +537,13 @@ pub(crate) fn allocate_in(
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
-    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+    model: Option<impl JobModel>,
 ) -> Allocation {
     // The keys are staged only where a search can run, so a serial context
     // retains nothing for them and reads no grant input.
     let mut keys = std::mem::take(&mut scratch.keys);
     keys.clear();
-    if grant.is_some() && searchable(exec, times, mean_work) {
+    if model.is_some() && searchable(exec, times, mean_work) {
         keys.extend((0..times.len()).map(key));
     }
     let allocation = allocate_with(
@@ -499,7 +553,7 @@ pub(crate) fn allocate_in(
         mean_work,
         scratch,
         cache,
-        grant,
+        model,
     );
     scratch.keys = keys;
     allocation
@@ -512,13 +566,13 @@ fn allocate_with(
     mean_work: f64,
     scratch: &mut AllocationScratch,
     cache: &LaneAllocationCache,
-    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+    model: Option<impl JobModel>,
 ) -> Allocation {
     let jobs = times.len();
     let budget = exec.budget();
     let pool = std::mem::take(&mut scratch.lanes);
     // The keys are staged only where a search can run.
-    let query = (grant.is_some()
+    let query = (model.is_some()
         && exec.batch_policy().strategy == BatchStrategy::Auto
         && !keys.is_empty())
     .then_some(LaneAllocationQuery {
@@ -600,11 +654,13 @@ fn allocate_with(
         lane.jobs.sort_unstable();
         lane.budget = slots / lanes + usize::from(k < slots % lanes);
     }
-    if let (BatchStrategy::Auto, Some(grant)) = (exec.batch_policy().strategy, grant) {
-        let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
+    if let (BatchStrategy::Auto, Some(model)) = (exec.batch_policy().strategy, model) {
+        let grant = |j: usize, width: usize| model.grant(j, times[j], width);
+        let item_of = |j: usize, grant: Grant| model.item(exec, j, times[j], grant);
+        let fill = |j: usize, width: usize| item_of(j, grant(j, width));
         let mut columns = std::mem::take(&mut scratch.columns);
         let mut narrow = std::mem::take(&mut scratch.narrow);
-        columns.begin(times, keys, |j| grant(j, times[j], slots) > 1);
+        columns.begin(times, keys, |j| grows(grant(j, slots), [1; STAGES]));
         columns.prepare((slots, lanes), &fill);
         let baseline = assigned
             .iter()
@@ -634,14 +690,12 @@ fn allocate_with(
         if selector == LaneAllocation::Moldable {
             let mut moldable = std::mem::take(&mut scratch.moldable);
             let candidate = std::mem::take(&mut moldable.lanes);
-            let provider = |r: usize, width: usize| grant(r, times[r], width);
-            let item_of = |serial: Duration, width: usize| item_time(exec, serial, width);
             let (candidate, score) = moldable.place(
                 (slots, lanes),
                 &order,
                 times,
                 &columns,
-                (&item_of, &provider),
+                (&item_of, &grant),
                 candidate,
                 &mut scratch.spare,
             );
@@ -751,7 +805,10 @@ impl Columns {
     /// and a Packed plan's is its narrowed width (`packed_auto`, one item,
     /// no lanes), both width rules within that smaller ceiling. Hence a
     /// grant of one at S is one at every share, and such a job's item time is
-    /// its serial time at every candidate width.
+    /// its serial time at every candidate width. A composite job's stages are
+    /// each one such grant, so a job whose every stage is one at S is serial
+    /// at every share, its item time the sum of its stages' serial times,
+    /// which is its serial time.
     fn begin(&mut self, times: &[Duration], keys: &[GrantKey], widens: impl Fn(usize) -> bool) {
         self.width = [0; 2];
         for column in &mut self.items {
@@ -889,8 +946,8 @@ struct Moldable {
 
 /// The grants the reservation queried, each at most once per
 /// (representative, width), in dense tables, so their capacities are their
-/// whole allocation. A zero cell is not yet queried (no width rule grants
-/// zero slots; such a grant would only be queried again).
+/// whole allocation. A cell whose first stage is zero is not yet queried (no
+/// width rule grants zero slots; such a grant would only be queried again).
 #[derive(Debug, Default)]
 struct Grants {
     /// S, the length of a `heavy` row.
@@ -901,11 +958,11 @@ struct Grants {
     heavy_rows: usize,
     tail_rows: usize,
     /// The jobs above the mean load: every width `1..=S`, row-major.
-    heavy: Vec<usize>,
+    heavy: Vec<Grant>,
     /// Each width's column of `tail`, or `usize::MAX`.
     column: Vec<usize>,
     /// The other widened jobs, column-major over the widths they meet.
-    tail: Vec<usize>,
+    tail: Vec<Grant>,
 }
 
 impl Grants {
@@ -932,24 +989,25 @@ impl Grants {
             }
         }
         self.heavy.clear();
-        self.heavy.resize(self.heavy_rows * slots, 0);
+        self.heavy.resize(self.heavy_rows * slots, [0; STAGES]);
         self.column.clear();
         self.column.resize(slots + 1, usize::MAX);
         self.tail.clear();
     }
 
-    /// Job `j`'s grant at `width <= S`: one slot for a job the provider keeps
-    /// serial at S (see [`Columns::begin`]), otherwise its representative's
-    /// grant, queried with `query(representative, width)` on first use.
+    /// Job `j`'s grant at `width <= S`: one slot per stage for a job whose
+    /// providers keep every stage serial at S (see [`Columns::begin`]),
+    /// otherwise its representative's grant, queried with
+    /// `query(representative, width)` on first use.
     fn get(
         &mut self,
         columns: &Columns,
         j: usize,
         width: usize,
-        query: &impl Fn(usize, usize) -> usize,
-    ) -> usize {
+        query: &impl Fn(usize, usize) -> Grant,
+    ) -> Grant {
         if !columns.widens[j] {
-            return 1;
+            return [1; STAGES];
         }
         let r = columns.rep[j];
         let row = self.row[r];
@@ -958,22 +1016,31 @@ impl Grants {
         } else {
             if self.column[width] == usize::MAX {
                 self.column[width] = self.tail.len() / self.tail_rows;
-                self.tail.resize(self.tail.len() + self.tail_rows, 0);
+                self.tail
+                    .resize(self.tail.len() + self.tail_rows, [0; STAGES]);
             }
             &mut self.tail[self.column[width] * self.tail_rows + row - self.heavy_rows]
         };
-        if *cell == 0 {
+        if cell[0] == 0 {
             *cell = query(r, width);
         }
         *cell
     }
 
     fn retained_bytes(&self) -> usize {
-        [&self.row, &self.heavy, &self.column, &self.tail]
+        use std::mem::size_of;
+        [&self.row, &self.column]
             .into_iter()
             .map(Vec::capacity)
             .fold(0, usize::saturating_add)
-            .saturating_mul(std::mem::size_of::<usize>())
+            .saturating_mul(size_of::<usize>())
+            .saturating_add(
+                [&self.heavy, &self.tail]
+                    .into_iter()
+                    .map(Vec::capacity)
+                    .fold(0, usize::saturating_add)
+                    .saturating_mul(size_of::<Grant>()),
+            )
     }
 }
 
@@ -990,10 +1057,10 @@ impl Moldable {
     /// over `slots`, and returns the lanes with the modeled makespan, or no
     /// score when more than `cap` lanes hold jobs (the batch decision's lane
     /// count, which the candidate must not exceed). `query(r, w)` is the
-    /// provider's width for representative job `r` (see `columns`) on a lane
-    /// of `w` slots, queried at most once per pair, and `item_of(t, q)` the
-    /// modeled time of a job of serial time `t` granted `q` slots; `lanes` is
-    /// empty on entry.
+    /// stage widths of representative job `r` (see `columns`) on a lane of
+    /// `w` slots, queried at most once per pair, and `item_of(j, q)` the
+    /// modeled time of job `j` under stage widths `q`; `lanes` is empty on
+    /// entry.
     ///
     /// 1. The target's lower bound is `LB = max(ceil(sum t / S), max_j
     ///    min_w item(j, w))`. Only jobs above the mean load can raise the
@@ -1008,8 +1075,8 @@ impl Moldable {
     ///    slots become one-slot lanes, and every other job, largest first,
     ///    goes to the lane minimising `(load + item, jobs, lane)`.
     /// 4. Empty one-slot lanes are dropped, and their slots widen the
-    ///    reserved lanes, largest job first, while that job's grant still
-    ///    grows. Any slot left stays idle.
+    ///    reserved lanes, largest job first, while some stage of that job's
+    ///    grant still grows. Any slot left stays idle.
     ///
     /// The score is the completed placement's, not the target: a passing
     /// target does not prove that the tail fits under it.
@@ -1021,8 +1088,8 @@ impl Moldable {
         times: &[Duration],
         columns: &Columns,
         (item_of, query): (
-            &impl Fn(Duration, usize) -> Duration,
-            &impl Fn(usize, usize) -> usize,
+            &impl Fn(usize, Grant) -> Duration,
+            &impl Fn(usize, usize) -> Grant,
         ),
         mut lanes: Vec<Lane>,
         spare: &mut Vec<Lane>,
@@ -1036,7 +1103,7 @@ impl Moldable {
             ..
         } = self;
         let grant = |g: &mut Grants, j: usize, w: usize| g.get(columns, j, w, query);
-        let item = |g: &mut Grants, j: usize, w: usize| item_of(times[j], grant(g, j, w));
+        let item = |g: &mut Grants, j: usize, w: usize| item_of(j, grant(g, j, w));
         let total = times
             .iter()
             .fold(0u128, |sum, t| sum.saturating_add(t.as_nanos()));
@@ -1143,7 +1210,12 @@ impl Moldable {
             return (lanes, None);
         }
         for (lane, &j) in lanes.iter_mut().zip(order).take(reserved) {
-            while idle > 0 && grant(grants, j, lane.budget + 1) > grant(grants, j, lane.budget) {
+            while idle > 0
+                && grows(
+                    grant(grants, j, lane.budget + 1),
+                    grant(grants, j, lane.budget),
+                )
+            {
                 lane.budget += 1;
                 idle -= 1;
             }
@@ -1657,7 +1729,7 @@ mod tests {
                 let a = allocate_in(
                     exec,
                     &t,
-                    (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 2]),
+                    (OpKind::Gemm, LaneAllocation::Moldable, |_| [0; 3]),
                     1e6,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -1718,7 +1790,7 @@ mod tests {
                 Ok(allocate_in(
                     exec,
                     times,
-                    (OpKind::Gemm, selector, |_| [0; 2]),
+                    (OpKind::Gemm, selector, |_| [0; 3]),
                     mean_work,
                     &mut AllocationScratch::default(),
                     &uncached(),
@@ -2052,7 +2124,7 @@ mod tests {
             (nanos(&[40000, 100, 100, 101]), 1),
             (nanos(&[100, 100, 1000, 2000]), 2),
         ];
-        let keys = [[0; 2]; 4];
+        let keys = [[0; 3]; 4];
         let model = WorkModel::default()
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
@@ -2136,8 +2208,8 @@ mod tests {
         };
         let mut engine = flat(6, BatchPolicy::default(), 100);
         let t = nanos(&[9000, 9000, 9000, 4000, 4000, 4000, 100, 100, 100]);
-        let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0]).collect();
-        let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0]).collect();
+        let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0, 0]).collect();
+        let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0, 0]).collect();
         let (shared, few) = run(&mut engine, &t, &grouped);
         let (separate, all) = run(&mut engine, &t, &distinct);
         assert_eq!(shared, separate);
@@ -2146,7 +2218,7 @@ mod tests {
 
         let tiny: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
         let times: std::collections::BTreeSet<u64> = tiny.iter().copied().collect();
-        let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 2]; 200]);
+        let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 3]; 200]);
         assert_eq!(count, times.len());
     }
 
@@ -2161,7 +2233,7 @@ mod tests {
     #[test]
     fn unchanged_inputs_hit_and_any_change_searches() {
         let t = nanos(&[40000, 100, 100, 100]);
-        let keys = [[0; 2]; 4];
+        let keys = [[0; 3]; 4];
         let model = WorkModel::default()
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
@@ -2206,7 +2278,7 @@ mod tests {
         other_time[3] = Duration::from_nanos(101);
         assert!(on(&mut base, &other_time, &keys, 10075.0).1);
         let mut other_key = keys;
-        other_key[2] = [1, 0];
+        other_key[2] = [1, 0, 0];
         assert!(on(&mut base, &t, &other_key, 10075.0).1);
         assert!(on(&mut base, &t, &keys, 10076.0).1);
         let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
@@ -2219,7 +2291,7 @@ mod tests {
         assert!(on(&mut base, &t, &keys, 10075.0).1);
         let work: Vec<GrantKey> = [40000.0_f64, 100.0, 100.0, 100.0]
             .iter()
-            .map(|&w| [w.to_bits(), (w * 6e-4).to_bits()])
+            .map(|&w| [w.to_bits(), (w * 6e-4).to_bits(), 0])
             .collect();
         assert!(on(&mut base, &t, &work, 10075.0).1);
         assert!(!on(&mut base, &t, &work, 10075.0).1);
@@ -2273,7 +2345,7 @@ mod tests {
             .with_muladds_per_ns(1.0)
             .with_item_overhead_ns(0.0);
         let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
-        let keys = [[0; 2]; 4];
+        let keys = [[0; 3]; 4];
         let bounded = cache(4096);
         let tiny = cache(64);
         engine
@@ -2331,7 +2403,7 @@ mod tests {
                 let exec: &Exec<'_> = exec;
                 let key = |_| {
                     keys.set(keys.get() + 1);
-                    [0; 2]
+                    [0; 3]
                 };
                 let grant = |_, t: Duration, w| {
                     grants.set(grants.get() + 1);

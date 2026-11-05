@@ -144,22 +144,30 @@ that brings it under the target, fit in the thread count; it gives each such
 block that lane, makes the remaining threads one-thread lanes, places the
 other blocks largest first on the lane where they finish earliest, then
 widens the reserved lanes with the threads of unused one-thread lanes while
-the provider's width still grows. It is discarded when more than `L0` of its
+some stage's provider width still grows. It is discarded when more than `L0` of its
 lanes hold blocks, and it is scored as placed, since a block below the
 target can still finish above it. The model charges a block its
 serial time where the provider would run it on one thread in that lane,
 otherwise its time over the provider's granted width plus the engine's
-dispatch cost at that width. The granted width is an estimate composed from
+dispatch cost at that width. A composite block (a polar decomposition or a
+Hermitian `exp`) is charged per sequential stage: its factorization (SVD or
+EIGH) and each product, each its own serial time (the factorization's under
+the engine's work model, a product's at tcontract's GEMM rate) over its own
+provider's width plus its own dispatch cost, summed; its serial time is the
+stages' sum, and both the equal-share and the reservation candidates score
+it so. The granted width is an estimate composed from
 the provider's public decisions (for a packed GEMM plan an optimistic upper
 bound on its grid), and the model has no sublinear speedup, so the choice is
 a scheduling estimate, not a promise of a faster run. The search queries the
 provider width of each group of blocks with the same estimated time and the
 same grant inputs (for GEMM, the plan's algorithm and the work; for a
-factorization, its total and payback work) once, at the
+factorization, its total and payback work; for a composite block, its op,
+scalar and extents, which fix every stage) once, at the
 full thread count; only the groups the provider widens there are queried
 again, once per distinct share width during the sweep (rebuilding the winning
 placement may repeat up to two widths), since a block the provider keeps
-serial at the full count stays serial at every narrower share; a lane count
+serial at the full count (every stage serial, for a composite block) stays
+serial at every narrower share; a lane count
 whose proved lower bound on its score is not below the best score so far is
 not placed. The reservation queries each such group at most once per width
 it evaluates: every width up to the thread count for the (fewer than
