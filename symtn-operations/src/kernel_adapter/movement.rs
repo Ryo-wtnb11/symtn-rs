@@ -145,13 +145,80 @@ pub(crate) fn span<S, A, T>(
                 action.element(slot, value);
             }
         } else {
-            // Why the bound stays `usize`: a zero-stride extent may exceed
-            // `isize::MAX`, which a signed range end would wrap.
-            for position in 0..len {
-                let position = position as isize;
-                let dst_position = (dst_base + position * inner_dst) as usize;
-                let src_position = (src_base + position * inner_src) as usize;
-                action.element(&mut dst[dst_position], src[src_position]);
+            // Why iterators over once-validated runs rather than indexing
+            // `base + position * stride`: the indexed loop bound-checks both
+            // operands on every element and keeps their lengths live in the
+            // caller's register budget. Slicing each operand's run once
+            // validates its first and last offsets, and `step_by` then walks
+            // it with no per-element check.
+            //
+            // The offset `position * stride` of the run's last element; a
+            // value no slice reaches when it overflows, so slicing panics.
+            let last = len - 1;
+            let reach = |base: isize, stride: isize| {
+                isize::try_from(last)
+                    .ok()
+                    .and_then(|last| last.checked_mul(stride))
+                    .and_then(|offset| base.checked_add(offset))
+                    .unwrap_or(isize::MAX)
+            };
+            if inner_dst == 0 {
+                // A repeated destination: the source order is the update
+                // order, so the run keeps `position` ascending.
+                let slot = &mut dst[dst_base as usize];
+                if inner_src == 0 {
+                    let value = src[src_base as usize];
+                    // Why the bound stays `usize`: a zero-stride extent may
+                    // exceed `isize::MAX`.
+                    for _ in 0..len {
+                        action.element(slot, value);
+                    }
+                } else if inner_src > 0 {
+                    let run = &src[src_base as usize..=reach(src_base, inner_src) as usize];
+                    for &value in run.iter().step_by(inner_src as usize) {
+                        action.element(slot, value);
+                    }
+                } else {
+                    let run = &src[reach(src_base, inner_src) as usize..=src_base as usize];
+                    for &value in run.iter().rev().step_by(inner_src.unsigned_abs()) {
+                        action.element(slot, value);
+                    }
+                }
+            } else {
+                // Distinct destination slots: each is written once per run,
+                // so the run may be walked from its lowest destination
+                // offset, with the source stepping the opposite way when the
+                // destination stride is negative.
+                let (dst_low, dst_step, src_first, src_step) = if inner_dst > 0 {
+                    (dst_base, inner_dst, src_base, inner_src)
+                } else {
+                    (
+                        reach(dst_base, inner_dst),
+                        -inner_dst,
+                        reach(src_base, inner_src),
+                        -inner_src,
+                    )
+                };
+                let slots = dst[dst_low as usize..=reach(dst_low, dst_step) as usize]
+                    .iter_mut()
+                    .step_by(dst_step as usize);
+                if src_step == 0 {
+                    let value = src[src_first as usize];
+                    for slot in slots {
+                        action.element(slot, value);
+                    }
+                } else if src_step > 0 {
+                    let run = &src[src_first as usize..=reach(src_first, src_step) as usize];
+                    for (slot, &value) in slots.zip(run.iter().step_by(src_step as usize)) {
+                        action.element(slot, value);
+                    }
+                } else {
+                    let run = &src[reach(src_first, src_step) as usize..=src_first as usize];
+                    let values = run.iter().rev().step_by(src_step.unsigned_abs());
+                    for (slot, &value) in slots.zip(values) {
+                        action.element(slot, value);
+                    }
+                }
             }
         }
         let mut axis = 1;
