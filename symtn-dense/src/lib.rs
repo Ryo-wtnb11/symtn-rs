@@ -51,6 +51,12 @@ mod block_kernel {
     #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
     pub(crate) mod schedule;
 }
+// The one placement and runner of independent block jobs. No operation
+// consumes it yet, so only its tests reach it, and they do not charge the
+// workspace tables.
+#[cfg(feature = "tenferro")]
+#[allow(dead_code)]
+mod lanes;
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]
