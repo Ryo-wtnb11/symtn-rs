@@ -835,7 +835,7 @@ where
     }
 
     /// The structural coefficient stays in its own type; see
-    /// [`with_transform_map!`].
+    /// `with_transform_map!`.
     #[allow(clippy::too_many_arguments)]
     fn transform_strided_baked<C>(
         &mut self,
