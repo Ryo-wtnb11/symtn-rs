@@ -1455,7 +1455,7 @@ fn overflowing_eigh_outputs(order: usize) -> Vec<DenseTensor> {
 /// EIGH solve ran inside it. Values-only EIGH and the general eig entries
 /// reach the real solver.
 #[derive(Default)]
-struct NonFiniteFirstEighRefusingScope {
+pub(super) struct NonFiniteFirstEighRefusingScope {
     eigh_calls: usize,
 }
 

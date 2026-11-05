@@ -1623,8 +1623,13 @@ where
     /// Any endomorphism, of any dtype. Multiplicity-free tensors retain the
     /// original two dense routes:
     ///
-    /// - **Hermitian blocks** take the spectral function `V exp(D) Vᴴ` of the
-    ///   Hermitian eigendecomposition.
+    /// - **Hermitian blocks** take the spectral function of the Hermitian
+    ///   eigendecomposition `A = V D Vᴴ` in MatrixAlgebraKit's
+    ///   `MatrixFunctionViaEigh` form `exp(A) = Y Yᴴ` with `Y = V exp(D/2)`,
+    ///   made exactly Hermitian. The result is therefore finite wherever it is
+    ///   representable, even where `exp` of an eigenvalue alone overflows
+    ///   (`[[355, 355], [355, 355]]`, eigenvalues `0` and `710`, has the finite
+    ///   entries `(e^710 ± 1) / 2`).
     /// - **Everything else** takes blockwise scaling-and-squaring Padé [13/13]
     ///   (Higham 2005). Non-normal, defective and complex non-Hermitian blocks
     ///   are all in domain; nothing is symmetrized.
@@ -1646,15 +1651,24 @@ where
     /// - [`Error::Operation`] when the input is not an endomorphism
     ///   (`codomain != domain`), when a general block holds a nonfinite entry,
     ///   when a general block's column 1-norm overflows to infinity although
-    ///   every entry is finite, or when the backend fails. Nothing is published
+    ///   every entry is finite, when a Hermitian block's eigendecomposition
+    ///   returns a nonfinite eigenvalue, or when the backend fails; the first
+    ///   failing coupled sector's error is returned. Nothing is published
     ///   unless every coupled sector succeeded.
-    /// - [`Error::Core`] / [`Error::FusionAlgebra`] from the multiplicity-free
-    ///   Hermitian composition route.
+    /// - [`Error::Core`] / [`Error::FusionAlgebra`] only from building the
+    ///   output space or materializing a lazy adjoint, before any block is
+    ///   exponentiated; neither dense route (Hermitian or Padé) composes
+    ///   tensors or raises them. Leg-role errors are those of [`Self::svd_compact`]'s *Leg roles*.
     ///
     /// # Complexity
     ///
-    /// Dense input is `O(Σ_c n_c³)`: multiplicity-free Hermitian blocks use one
-    /// eigendecomposition plus a composition; all general blocks, including
+    /// Dense input is `O(Σ_c n_c³)`: Hermitian blocks use one
+    /// eigendecomposition plus the product `Y Yᴴ` (`n_c³`, a full product
+    /// where MatrixAlgebraKit's real branch uses a symmetric rank-k update of
+    /// half the work). On the native provider the blocks run as one batch on
+    /// the engine's lanes, each lane holding one block's eigenvectors and
+    /// eigenvalues (`n_c² + n_c` elements) at a time, and write straight into
+    /// the output. All general blocks, including
     /// checked-Generic, use six GEMMs, one solve and the necessary Padé
     /// squarings per sector with `O(max_c n_c²)` workspace. Coupled sectors are
     /// never mixed. A dense lazy adjoint builds one operation-local logical

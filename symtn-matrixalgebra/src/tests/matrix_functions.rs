@@ -2410,3 +2410,50 @@ fn inv_propagates_unsupported_solve_without_svd_fallback() {
         })
     ));
 }
+
+#[test]
+fn hermitian_exp_checks_each_sector_before_the_next_solve_inside_its_scope() {
+    // What: on an executor that keeps the default destination batch, sector
+    // 0's eigenvalues are checked before sector 1 is solved, all inside the
+    // one linear-algebra scope, whose own refusal takes precedence over the
+    // body's error.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    let mut dense =
+        ScriptedExecutor::<crate::tests::eigh_eig::NonFiniteFirstEighRefusingScope>::default();
+
+    let error = exp(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        OperationError::Dense(scope_refusal("scope after sector 0"))
+    );
+}
+
+#[test]
+fn hermitian_exp_returns_the_first_failure_in_sector_order_whatever_its_tag() {
+    // What: a forwarded destination batch's tagged outcomes reach the
+    // operation in sector order and the first failure is its error: an
+    // early eigenvalue-check failure is not overridden by a later solver
+    // failure, nor the reverse.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_hermitian();
+    for (output_first, expected) in [
+        (true, injected_output_failure()),
+        (false, injected_solver_failure()),
+    ] {
+        let mut dense = ScriptedExecutor::new(TaggedDelivery { output_first });
+        let error = exp(
+            engine,
+            &mut dense,
+            &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+        )
+        .unwrap_err();
+        assert_eq!(error, OperationError::Dense(expected), "{output_first}");
+    }
+}

@@ -23,7 +23,8 @@
 //! finishes; a tall full QR or null basis goes through tlinalg's compact
 //! Householder kernel, whose own workspace is still allocated per block. A
 //! polar job composes the provider's SVD with two products on the lane's
-//! context, their geometry plans resolved before the lanes.
+//! context, a Hermitian exponential job the provider's eigh with one, their
+//! geometry plans resolved before the lanes.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -41,8 +42,8 @@ use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
 use super::gemm::{self, ErasedPlan, Geometry};
 use super::schedule::{self, GrantKey, LaneJobs};
 use crate::factor_dest::{
-    adjoint_items, compact_mut, map_transposed_items, polar_direction, project_hermitian_items,
-    scale_polar_factor, Element, FactorSink,
+    adjoint_items, compact_mut, copytri_items, map_transposed_items, polar_direction,
+    project_hermitian_items, scale_exp_factor, scale_polar_factor, Element, FactorSink,
 };
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
@@ -501,6 +502,40 @@ impl<const LEFT: bool> Factor for Polar<LEFT> {
     }
 }
 
+/// Hermitian exponential (MatrixAlgebraKit `exponential!` via
+/// `MatrixFunctionViaEigh`): `[exp]` of shape `[n, n, b..]`. Destination
+/// form only: one job runs the Hermitian eigendecomposition into lane
+/// scratch, checks its eigenvalues are finite, scales `V`'s columns by
+/// `exp(lambda / 2)`, writes `exp = Y Y^H` of that scaled `Y` and makes it
+/// exactly Hermitian (`copytri`).
+pub(crate) struct ExpViaEigh;
+
+impl Factor for ExpViaEigh {
+    const ENTRY: &'static str = Eigh::ENTRY;
+    const OP: tlinalg::Op = Eigh::OP;
+    const SQUARE: bool = true;
+
+    // The eigendecomposition's estimates plus the product's weighted work
+    // (see `Polar::estimates`).
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, m: usize) -> [f64; 2] {
+        let [total, payback] = Eigh::estimates::<T>(n, m);
+        let n = n as f64;
+        let product = T::COMPLEX_WEIGHT * n * n * n;
+        [total + product, payback + product]
+    }
+
+    fn factor<T: Scalar>(
+        _: Option<RawStridedRef<'_, T>>,
+        _: [usize; 2],
+        _: &[usize],
+        _: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        Err(crate::executor::destination_only_error(
+            crate::DenseFactorization::ExpViaEigh,
+        ))
+    }
+}
+
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
 /// (real) and `[n, n, b..]`.
 pub(crate) struct Eigh;
@@ -955,7 +990,9 @@ pub(crate) fn factorize(
         Op::Lq => factorize_batch::<Lq>(engine, allocation, inputs, sink),
         Op::QrFull => factorize_batch::<QrFull>(engine, allocation, inputs, sink),
         Op::QrNull => factorize_batch::<QrNull>(engine, allocation, inputs, sink),
-        Op::LeftPolar | Op::RightPolar => Err(crate::executor::destination_only_error(op)),
+        Op::LeftPolar | Op::RightPolar | Op::ExpViaEigh => {
+            Err(crate::executor::destination_only_error(op))
+        }
     }
 }
 
@@ -1072,7 +1109,6 @@ pub(crate) enum JobError {
     /// A product of the job's composition.
     Gemm(DenseError),
     /// A check of the job's outputs.
-    #[expect(dead_code, reason = "no destination job checks its outputs yet")]
     Output(DenseError),
 }
 
@@ -1521,6 +1557,70 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
             product(|| T::gemm(p_plan.as_ref(), exec, x, x, p)).map_err(JobError::Gemm)?;
         }
         project_hermitian_items(p, order);
+        Ok(())
+    }
+}
+
+impl FactorInto for ExpViaEigh {
+    fn workspace<T: Scalar>(
+        dims: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        Eigh::workspace::<T>(dims, batch, exec)
+    }
+
+    // `V` and the `Self`-typed spectrum of the eigendecomposition.
+    fn scratch_len<T: Scalar>([n, _]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
+        (n * n + n) * batch
+    }
+
+    // `exp = Y Y^H`, the adjoint operand `Y` itself read transposed and
+    // conjugated.
+    fn geometries([n, _]: [usize; 2]) -> Result<[Option<Geometry>; 2], DenseError> {
+        let job = DenseGemmBatchJob {
+            dst_offset: 0,
+            lhs_offset: 0,
+            rhs_offset: 0,
+            rows: n,
+            contracted: n,
+            cols: n,
+        };
+        let product = Geometry::new(&job, [MatrixOp::Identity, MatrixOp::Adjoint])?;
+        Ok([Some(product), None])
+    }
+
+    // A nonfinite eigenvalue stops the job before its scaling; the
+    // destination receives only `exp`.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [n, _]: [usize; 2],
+        batch: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        scratch: &mut [T],
+        _: &mut Vec<T>,
+        plans: &Plans,
+        exec: &mut Exec<'_>,
+    ) -> Result<(), JobError> {
+        let (vectors, rest) = scratch.split_at_mut(n * n * batch);
+        let values = &mut rest[..n * batch];
+        tlinalg::eigh::eigh_into_init(Self::OP, raw, values, vectors, workspace, exec)?;
+        let [Some(plan), None] = plans else {
+            unreachable!("the batch resolved every admitted job's plan")
+        };
+        let lambda = |index: usize| values[index].real();
+        crate::factor_dest::finite_eigenvalues((0..n * batch).map(lambda))
+            .map_err(JobError::Output)?;
+        scale_exp_factor(n, batch, lambda, vectors);
+        let out = slot::<T>(&mut outputs[0]);
+        for item in 0..batch {
+            let y = &vectors[item * n * n..][..n * n];
+            let out = &mut out[item * n * n..][..n * n];
+            product(|| T::gemm(plan.as_ref(), exec, y, y, out)).map_err(JobError::Gemm)?;
+        }
+        copytri_items(out, n);
         Ok(())
     }
 }
@@ -1978,6 +2078,9 @@ pub(crate) fn factorize_into(
         }
         Op::RightPolar => {
             factorize_into_batch::<Polar<false>>(engine, allocation, inputs, dests, sink)
+        }
+        Op::ExpViaEigh => {
+            factorize_into_batch::<ExpViaEigh>(engine, allocation, inputs, dests, sink)
         }
         _ => unreachable!("validation admits the ops with a destination form only"),
     }

@@ -1,8 +1,6 @@
 //! Polar decomposition tests.
 
 use super::*;
-use crate::tests::scripted_executor::BatchIntoSink;
-use symtn_dense::{FactorDest, FactorFailure};
 
 #[test]
 #[expect(
@@ -705,52 +703,6 @@ fn polar_checks_each_sector_before_the_next_solve_inside_its_scope() {
     );
 }
 
-/// Forwards the destination batch to the native executor and replaces its
-/// two delivered outcomes: an output failure first, a solver failure second,
-/// or the reverse.
-struct TaggedPolarDelivery {
-    output_first: bool,
-}
-
-fn polar_output_failure() -> DenseError {
-    DenseError::NumericalFailure {
-        backend: DenseBackend::Tenferro,
-        op: "injected output check",
-        message: "injected output failure".to_string(),
-    }
-}
-
-fn polar_solver_failure() -> DenseError {
-    DenseError::Backend {
-        backend: DenseBackend::Tenferro,
-        op: "injected solver",
-        message: "injected solver failure".to_string(),
-    }
-}
-
-impl Observer for TaggedPolarDelivery {
-    fn script(script: &mut Script) {
-        script.set(Op::FactorizeBatchInto, Action::Forward);
-    }
-
-    fn batch_into_outcome(
-        &mut self,
-        index: usize,
-        dest: &mut FactorDest<'_>,
-        _: Result<(), FactorFailure>,
-        sink: &mut BatchIntoSink<'_>,
-    ) -> Result<(), DenseError> {
-        let output = Err(FactorFailure::Output(polar_output_failure()));
-        let solver = Err(FactorFailure::Solver(polar_solver_failure()));
-        let outcome = if (index == 0) == self.output_first {
-            output
-        } else {
-            solver
-        };
-        sink(index, dest, outcome)
-    }
-}
-
 #[test]
 fn polar_returns_the_first_failure_in_sector_order_whatever_its_tag() {
     // What: a forwarded destination batch's tagged outcomes reach the
@@ -760,10 +712,10 @@ fn polar_returns_the_first_failure_in_sector_order_whatever_its_tag() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = two_sector_tall();
     for (output_first, expected) in [
-        (true, polar_output_failure()),
-        (false, polar_solver_failure()),
+        (true, injected_output_failure()),
+        (false, injected_solver_failure()),
     ] {
-        let mut dense = ScriptedExecutor::new(TaggedPolarDelivery { output_first });
+        let mut dense = ScriptedExecutor::new(TaggedDelivery { output_first });
         let error = left_polar(
             engine,
             &mut dense,

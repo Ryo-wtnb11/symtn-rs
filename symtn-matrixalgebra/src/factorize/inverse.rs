@@ -715,6 +715,61 @@ where
         + Send,
 {
     let source_space = input.space().space();
+    let SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    } = square_sector_routes(input, &output_space)?;
+    let max_order = (0..matrices.len())
+        .map(|index| matrices.get(index).map(|matrix| matrix.rows))
+        .try_fold(0, |largest, rows| rows.map(|rows| largest.max(rows)))?;
+    let mut state = init(max_order)?;
+    // One admitted dense scope spans every sector's kernel.
+    let output_data = in_linalg_scope(engine, dense, |dense, engine| {
+        let mut output_data = vec![D::zero(); output_len];
+        let mut scratch = Vec::new();
+        for (index, landing) in landings.iter().enumerate() {
+            let matrix = matrices.get(index)?;
+            let order = matrix.rows;
+            if order == 0 {
+                continue;
+            }
+            landing.write(
+                &mut output_data,
+                &output_regions[landing.output],
+                &mut scratch,
+                |output| apply(dense, engine, &mut state, matrix.data, order, output),
+            )?;
+        }
+        Ok(output_data)
+    })?;
+
+    BoundDynFactor::from_bound(
+        output_space,
+        output_data,
+        source_space.nout(),
+        source_space.nin(),
+    )
+}
+
+/// A square matrix function's validated routes: the canonical output
+/// regions and length, the input's sector matrices and where each lands.
+struct SquareSectorRoutes<'a, D> {
+    output_regions: Arc<[CoupledSectorRegion]>,
+    output_len: usize,
+    matrices: InputMatricizations<'a, D>,
+    landings: Vec<SectorLanding>,
+}
+
+/// The routes of a square matrix function of `input` into `output_space`,
+/// which must preserve the input's hom space with canonical coupled-sector
+/// storage; the input's row and column stackings must coincide.
+fn square_sector_routes<'a, R, D: FactorScalar>(
+    input: &BoundDynamicTensorRef<'a, R, D>,
+    output_space: &BoundDynamicFusionMapSpace<R>,
+) -> Result<SquareSectorRoutes<'a, D>, OperationError> {
+    let source_space = input.space().space();
     if source_space.homspace() != output_space.space().homspace() {
         return Err(OperationError::SpaceMismatch {
             message: "matrix function output must preserve the input homspace",
@@ -742,29 +797,110 @@ where
         FactorSide::Left,
         FactorSide::Right,
     ))?;
-    let max_order = (0..matrices.len())
-        .map(|index| matrices.get(index).map(|matrix| matrix.rows))
-        .try_fold(0, |largest, rows| rows.map(|rows| largest.max(rows)))?;
-    let mut state = init(max_order)?;
-    // One admitted dense scope spans every sector's kernel.
-    let output_data = in_linalg_scope(engine, dense, |dense, engine| {
-        let mut output_data = vec![D::zero(); output_len];
-        let mut scratch = Vec::new();
-        for (index, landing) in landings.iter().enumerate() {
-            let matrix = matrices.get(index)?;
-            let order = matrix.rows;
-            if order == 0 {
-                continue;
-            }
-            landing.write(
-                &mut output_data,
-                &output_regions[landing.output],
-                &mut scratch,
-                |output| apply(dense, engine, &mut state, matrix.data, order, output),
-            )?;
-        }
-        Ok(output_data)
-    })?;
+    Ok(SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    })
+}
+
+/// The exponential of a Hermitian endomorphism (MatrixAlgebraKit
+/// `exponential!` via `MatrixFunctionViaEigh`), every coupled sector of
+/// nonzero order one input of a [`DenseFactorization::ExpViaEigh`]
+/// destination batch writing the output region in place (a packed input
+/// whose tree order differs from the output is staged per sector and lands
+/// by tree extent after delivery). One scope spans the batch, and the first
+/// failure in sector order is the error.
+///
+/// The caller admits the endomorphism and its Hermiticity.
+pub(crate) fn exp_via_eigh_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    input: &BoundDynamicTensorRef<'_, R, D>,
+    output_space: BoundDynamicFusionMapSpace<R>,
+) -> Result<BoundDynFactor<R, D>, OperationError>
+where
+    E: DenseExecutor + ?Sized,
+    D: FactorScalar,
+{
+    let source_space = input.space().space();
+    let SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    } = square_sector_routes(input, &output_space)?;
+    let (_, blocks) = sector_blocks(&matrices)?;
+    let solved: Vec<usize> = (0..blocks.len())
+        .filter(|&index| blocks[index].1 > 0)
+        .collect();
+    let solved_blocks: Vec<_> = solved.iter().map(|&index| blocks[index]).collect();
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
+    // Why allocator zeroing rather than uninitialized outputs: the
+    // destinations are safe initialized views, and the zero pages of a large
+    // output are first touched by the lane that writes them.
+    let mut output_data = zeroed_payload::<D>(output_len);
+    {
+        let ranges: Vec<_> = landings
+            .iter()
+            .map(|landing| output_regions[landing.output].range())
+            .collect();
+        let mut slices = split_ranges(&mut output_data, &ranges)?;
+        let mut staged: Vec<_> = solved
+            .iter()
+            .map(|&index| {
+                if landings[index].reorders() {
+                    zeroed_payload::<D>(slices[index].len())
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        let dest_layouts: Vec<_> = solved_blocks
+            .iter()
+            .map(|&(_, order, _)| matrix_layout(order, order))
+            .collect();
+        let mut dests = solved
+            .iter()
+            .zip(staged.iter_mut())
+            .zip(&dest_layouts)
+            .map(|((&index, stage), layout)| {
+                let output = if landings[index].reorders() {
+                    stage.as_mut_slice()
+                } else {
+                    std::mem::take(&mut slices[index])
+                };
+                Ok(FactorDest::new(
+                    [Some(dest_write(output, layout)?), None, None],
+                    symtn_dense::FactorPlacement::AsComputed,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        in_linalg_scope(engine, dense, |dense, engine| {
+            factorize_batch_into_staged(
+                engine,
+                dense,
+                DenseFactorization::ExpViaEigh,
+                &inputs,
+                &mut dests,
+                |index, dest, outcome| {
+                    outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                    let landing = &landings[solved[index]];
+                    if landing.reorders() {
+                        let staged = dest_data::<D>(&mut dest.outputs_mut()[0], "exp")?;
+                        landing.land(
+                            staged,
+                            slices[solved[index]],
+                            &output_regions[landing.output],
+                        );
+                    }
+                    Ok(())
+                },
+            )
+        })?;
+    }
 
     BoundDynFactor::from_bound(
         output_space,

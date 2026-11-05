@@ -1271,8 +1271,8 @@ impl DenseExecutor for DefaultDenseExecutor {
     }
 
     // The BLAS provider keeps the trait default's routes (the owned
-    // `factorize_batch` placed, and the polar composite of per-matrix
-    // calls), admitting its lane allocation first: the composite has no
+    // `factorize_batch` placed, and the polar and exponential composites
+    // of per-matrix calls), admitting its lane allocation first: the composite has no
     // owned batch whose admission would refuse it.
     #[cfg(not(any(
         feature = "provider-inject",
@@ -2486,7 +2486,9 @@ fn factorize_batch_serial(
         DenseFactorization::QrFull | DenseFactorization::QrNull => {
             unreachable!("full QR and its null basis run through `qr_into` (`factorize_batch`)")
         }
-        DenseFactorization::LeftPolar | DenseFactorization::RightPolar => {
+        DenseFactorization::LeftPolar
+        | DenseFactorization::RightPolar
+        | DenseFactorization::ExpViaEigh => {
             unreachable!("`factorize_batch` refuses the destination-only ops")
         }
     };
@@ -2502,7 +2504,9 @@ fn factorize_batch_serial(
                 | DenseFactorization::Lq
                 | DenseFactorization::QrFull
                 | DenseFactorization::QrNull => input.qr_read(exec).map(|(q, r)| vec![q, r]),
-                DenseFactorization::LeftPolar | DenseFactorization::RightPolar => {
+                DenseFactorization::LeftPolar
+                | DenseFactorization::RightPolar
+                | DenseFactorization::ExpViaEigh => {
                     unreachable!("`factorize_batch` refuses the destination-only ops")
                 }
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),

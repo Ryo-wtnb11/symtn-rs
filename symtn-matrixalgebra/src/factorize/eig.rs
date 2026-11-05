@@ -1345,32 +1345,6 @@ where
     Ok(eigenvalues)
 }
 
-pub(crate) fn compact_eigh_owned<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    input: &[D],
-    order: usize,
-) -> Result<(Vec<f64>, Vec<D>), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let (values, vectors) = compact_eigh_outputs(engine, dense, input, order)?;
-    eigh_pair_owned(values, vectors, order)
-}
-
-/// The owned real values and eigenvectors of one `order x order` solve,
-/// shape checked.
-fn eigh_pair_owned<D: FactorScalar>(
-    values: DenseTensor,
-    vectors: DenseTensor,
-    order: usize,
-) -> Result<(Vec<f64>, Vec<D>), OperationError> {
-    let values = compact_real_spectrum_owned::<D>(values, &[order], "eigh_into")?;
-    let vectors = compact_factor_output_owned::<D>(vectors, &[order, order], "eigh_into")?;
-    Ok((values, vectors))
-}
-
 /// An eigh entry's `(values, vectors)`, arity checked.
 fn eigh_output_pair(
     outputs: Vec<DenseTensor>,
@@ -1683,10 +1657,8 @@ where
         .all(|matrix| hermitian_matrix_contents(&matrix.data, matrix.rows, exp_route_tol)))
 }
 
-/// The `op` of symtn's own Hermitian eigenvalue check, so a caller can tell
-/// it from an executor's `NumericalFailure` by matching it exactly.
 #[doc(hidden)]
-pub const EIGH_EIGENVALUE_CHECK: &str = "eigh eigenvalue check";
+pub use symtn_dense::EIGH_EIGENVALUE_CHECK;
 
 /// The `op` of symtn's own general eigenvalue check.
 const EIG_EIGENVALUE_CHECK: &str = "eig eigenvalue check";
@@ -1703,11 +1675,7 @@ pub(super) fn invalid_eigenvalues(op: &'static str) -> OperationError {
 }
 
 pub(crate) fn validate_real_eigenvalues(values: &[f64]) -> Result<(), OperationError> {
-    if values.iter().all(|value| value.is_finite()) {
-        Ok(())
-    } else {
-        Err(invalid_eigenvalues(EIGH_EIGENVALUE_CHECK))
-    }
+    symtn_dense::finite_eigenvalues(values.iter().copied()).map_err(OperationError::Dense)
 }
 
 #[cfg(test)]

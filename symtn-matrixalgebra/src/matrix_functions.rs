@@ -7,7 +7,7 @@ use std::hash::Hash;
 
 #[cfg(test)]
 use symtn_core::MultiplicityFreeRigidSymbols;
-use symtn_dense::{DenseDotConfig, DenseExecutor, DenseView, DenseViewMut, Engine};
+use symtn_dense::{DenseExecutor, DenseView, DenseViewMut, Engine};
 use symtn_tensors::OperationError;
 #[cfg(test)]
 use symtn_tensors::{
@@ -16,10 +16,10 @@ use symtn_tensors::{
 };
 
 use crate::factorize::{
-    compact_eigh_owned, inverse_by_sector_dyn_into, is_hermitian_endomorphism_dyn,
+    exp_via_eigh_dyn_into, inverse_by_sector_dyn_into, is_hermitian_endomorphism_dyn,
     map_square_sectors_dyn_into, pinv_adjoint_by_sector_dyn_into, pinv_by_sector_dyn_into,
-    solve_left_by_sector_dyn_into, validate_real_eigenvalues, BoundDynFactor,
-    BoundDynamicTensorRef, EndomorphismFamily, FactorScalar,
+    solve_left_by_sector_dyn_into, BoundDynFactor, BoundDynamicTensorRef, EndomorphismFamily,
+    FactorScalar,
 };
 #[cfg(test)]
 use crate::factorize::{typed_from_bound_factor, BoundTensorMap, BoundTensorMapRef};
@@ -55,12 +55,24 @@ where
 /// The threshold picks an algorithm, not eigh's admission tolerance, and is
 /// not user-configurable.
 ///
+/// The Hermitian route is MatrixAlgebraKit's `MatrixFunctionViaEigh`
+/// (`implementations/exponential.jl:73-91`) with its real branch's
+/// half-exponent product for every scalar: `exp(A) = Y Yᴴ` with
+/// `Y = V exp(D/2)`, made exactly Hermitian. Every coupled sector is one input
+/// of a [`symtn_dense::DenseFactorization::ExpViaEigh`] destination batch, so
+/// the result is finite wherever it is representable, even where `exp` of an
+/// eigenvalue alone overflows.
+///
 /// # Errors
 ///
 /// - [`OperationError::SpaceMismatch`] for a non-endomorphism or an output
 ///   whose hom space differs, and
 ///   [`OperationError::UnsupportedTensorContractScope`] for an output layout
 ///   without canonical coupled-sector storage;
+/// - on the Hermitian route, the eigensolver's error, or a
+///   [`symtn_dense::DenseError::NumericalFailure`] with op
+///   [`crate::seam::EIGH_EIGENVALUE_CHECK`] for a nonfinite eigenvalue, the
+///   first in sector order;
 /// - see [`exp_pade13_sector`] for the Padé route's value errors; nonfinite
 ///   input is never Hermitian, so it always reaches that route.
 #[doc(hidden)]
@@ -79,102 +91,19 @@ where
     EndomorphismFamily::Exp.require_endomorphism(input.space().space().homspace())?;
     // Asked directly rather than inferred from a failed EIGH, so a backend
     // failure is never mistaken for non-hermiticity.
-    let spectral = is_hermitian_endomorphism_dyn(input)?;
+    if is_hermitian_endomorphism_dyn(input)? {
+        return exp_via_eigh_dyn_into(engine, dense, input, output_space);
+    }
     map_square_sectors_dyn_into(
         engine,
         dense,
         input,
         output_space,
-        |order| ExpWorkspace::new(order, spectral),
-        |dense, engine, workspace, source, order, output| match workspace {
-            ExpWorkspace::Spectral { scaled } => {
-                exp_spectral_sector(engine, dense, scaled, source, order, output)
-            }
-            ExpWorkspace::Pade(workspace) => {
-                exp_pade13_sector(engine, dense, workspace, source, order, output)
-            }
+        Pade13Workspace::new,
+        |dense, engine, workspace, source, order, output| {
+            exp_pade13_sector(engine, dense, workspace, source, order, output)
         },
     )
-}
-
-/// Scratch of the route [`exp_direct_into_dyn`] chose, sized once to the
-/// largest coupled sector.
-enum ExpWorkspace<D> {
-    /// `V exp(D)` of the sector in flight.
-    Spectral {
-        scaled: Vec<D>,
-    },
-    Pade(Box<Pade13Workspace<D>>),
-}
-
-impl<D: FactorScalar> ExpWorkspace<D> {
-    fn new(order: usize, spectral: bool) -> Result<Self, OperationError> {
-        if !spectral {
-            return Pade13Workspace::new(order).map(|workspace| Self::Pade(Box::new(workspace)));
-        }
-        let elements = order
-            .checked_mul(order)
-            .ok_or(OperationError::ElementCountOverflow)?;
-        Ok(Self::Spectral {
-            scaled: vec![D::zero(); elements],
-        })
-    }
-}
-
-/// One Hermitian coupled sector of [`exp_direct_into_dyn`]: Julia's
-/// `exp(::Hermitian)` (stdlib v1.11 `symmetric.jl:708-722`) followed by
-/// `exp!`'s `copytri!(…, 'U', true)` (`dense.jl:680`). The eigenvector order
-/// and phase gauge cancel in `V exp(D) Vᴴ`, so neither is applied.
-fn exp_spectral_sector<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    scaled: &mut [D],
-    source: &[D],
-    order: usize,
-    output: &mut [D],
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let (values, vectors) = compact_eigh_owned(engine, dense, &source[..order * order], order)?;
-    validate_real_eigenvalues(&values)?;
-    // Fold exp(D) into a column scaling of V rather than a diagonal GEMM
-    // operand (issue #46).
-    for (column, &value) in values.iter().enumerate() {
-        let factor = D::from_real(value.exp());
-        for row in 0..order {
-            scaled[row + order * column] = vectors[row + order * column] * factor;
-        }
-    }
-    let shape = [order, order];
-    let strides = [1usize, order];
-    let adjoint_strides = [order, 1usize];
-    let lhs = DenseView::new(&scaled[..order * order], &shape, &strides, 0)
-        .map_err(OperationError::Dense)?;
-    let rhs =
-        DenseView::new(&vectors, &shape, &adjoint_strides, 0).map_err(OperationError::Dense)?;
-    let destination =
-        DenseViewMut::new(output, &shape, &strides, 0).map_err(OperationError::Dense)?;
-    dense
-        .dot_general_into(
-            engine,
-            D::dense_write(destination),
-            D::dense_read(lhs),
-            D::dense_read(rhs),
-            &DenseDotConfig::matmul().with_conjugation(false, true),
-        )
-        .map_err(OperationError::Dense)?;
-    // Exactly Hermitian, as Julia publishes it: the upper triangle is kept,
-    // the lower one is its adjoint and the diagonal is real.
-    for column in 0..order {
-        let diagonal = column + order * column;
-        output[diagonal] = D::from_real(output[diagonal].widen_complex().re);
-        for row in 0..column {
-            output[column + order * row] = FactorScalar::adjoint(output[row + order * column]);
-        }
-    }
-    Ok(())
 }
 
 /// Higham's `theta_13`: the largest `||A||_1` for which the [13/13] Padé

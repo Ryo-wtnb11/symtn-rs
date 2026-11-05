@@ -212,8 +212,8 @@ report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Compact QR, compact
-LQ, full QR, the `left_null` basis, compact SVD, full EIGH and the left and
-right polar decompositions run through
+LQ, full QR, the `left_null` basis, compact SVD, full EIGH, the left and
+right polar decompositions and the Hermitian `exp` run through
 `DenseExecutor::factorize_batch_into`: the
 operation allocates each output once (the final packed factor for a
 direct-region or Checked Generic canonical output, otherwise one packed
@@ -257,7 +257,18 @@ scratch, writes `P = X^H X` (or `X X^H`) and makes it exactly Hermitian; both
 products run on the lane's context with geometry plans resolved before the
 lanes. The `P` product is a full GEMM, twice the multiply-adds of the
 `herk`/`syrk` MatrixAlgebraKit calls. `P` is unique; `W` is unique only for a
-full-rank block and otherwise may differ by provider or lane width.
+full-rank block and otherwise may differ by provider or lane width. A native
+Hermitian `exp` job of an `n x n` block (MatrixAlgebraKit's
+`MatrixFunctionViaEigh`) solves the eigendecomposition into its lane's typed
+scratch (`V` and the spectrum, `(n^2 + n)` elements per item), checks the
+eigenvalues are finite (a nonfinite one is that block's error and skips the
+rest), scales `V`'s columns by `exp(lambda / 2)` in that scratch, writes
+`exp = Y Y^H` of the scaled `Y` into its destination and makes it exactly
+Hermitian (`copytri`); the product runs on the lane's context with its plan
+resolved before the lanes. It is a full GEMM, twice the multiply-adds of the
+`syrk` MatrixAlgebraKit's real branch calls (its complex branch is a general
+GEMM too). The half exponent keeps a representable result finite where
+`exp(lambda)` alone overflows.
 Values-only SVD and EIGH
 and general eigenvalues keep one provider workspace and fresh outputs per
 block (tlinalg has no initialized destination form for them). The
@@ -275,9 +286,10 @@ largest block and factored with QR). The polar decompositions have no owned
 form (`factorize_batch` refuses them); the default instead runs, per block,
 one `svd` and two `dot_general_into` calls writing the destinations, the
 `sqrt(S)` scaling applied in place to the owned factor, and checks the block
-before the next one is solved. The BLAS provider refuses a non-default lane
-allocation for a polar batch of two or more blocks before any solve, as it
-does for its owned batches.
+before the next one is solved; the Hermitian `exp` likewise runs one `eigh`,
+the eigenvalue check and one `dot_general_into` per block. The BLAS provider
+refuses a non-default lane allocation for a polar or Hermitian `exp` batch of
+two or more blocks before any solve, as it does for its owned batches.
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not
@@ -324,7 +336,8 @@ a grouped recoupling GEMM batch of a tree transform (the parallel replay
 submits the Multi blocks in chunks of its worker count, a member replay all
 members' blocks at once; a serial replay submits each Multi block alone, which
 does not search), and an SVD, values-only SVD, Hermitian eigen (full and
-values-only), general-eigenvalue or polar batch of two or more blocks. It is applied on every
+values-only), general-eigenvalue, polar or Hermitian `exp` batch of two or
+more blocks. It is applied on every
 call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
 workspace or a network's pooled workspace kept from an earlier call; a
 workspace never keeps an earlier call's allocation. Other phases run as
