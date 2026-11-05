@@ -103,7 +103,7 @@ where
         R: TypedSectorAdmission,
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.restrict_leg_impl(engine, legs)
     }
 
@@ -214,7 +214,7 @@ where
         R: TypedSectorAdmission,
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.embed_leg_impl(engine, axis, selection)
     }
 

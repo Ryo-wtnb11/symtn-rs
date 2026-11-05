@@ -40,24 +40,6 @@ pub enum DenseOwned {
     C64(Vec<Complex64>),
 }
 
-/// How the block scheduler places a batch of independent dense blocks on an
-/// engine's lanes when the engine's batch policy is `Auto`.
-///
-/// Every variant is legal and deterministic for one complete configuration
-/// (provider, engine width, batch policy and work model, inputs); different
-/// variants may place the blocks differently and so round differently.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum LaneAllocation {
-    /// The lowest modeled time among the equal-share placements and a
-    /// large-block reservation on uneven lanes.
-    #[default]
-    Moldable,
-    /// The lowest modeled time among the equal-share placements only: every
-    /// lane reserves an equal share of the slots.
-    EqualShare,
-}
-
 /// The per-matrix factorization a [`DenseExecutor::factorize_batch`] issues.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -910,41 +892,6 @@ pub(crate) fn single_strided_batch(jobs: &[DenseGemmBatchJob], runs: &[usize]) -
                 .checked_sub(jobs[0].dst_offset)
                 .zip(jobs[0].rows.checked_mul(jobs[0].cols))
                 .is_some_and(|(dst_step, block)| dst_step >= block)
-}
-
-/// Whether the batch of `jobs` in `runs` (with operand ops `ops`) is placed
-/// by the block scheduler's lane search, the phase a [`crate::LaneAllocation`]
-/// selects for: two or more jobs that the executor's route does not submit
-/// as one strided call. An initialized destination (`fresh == false`) takes
-/// the strided call for one self-disjoint affine run (see
-/// [`single_strided_batch`]); a fresh destination needs that run gapless
-/// (each output right after the previous one, so the run is one contiguous
-/// segment) with nonzero blocks. An op-bearing run with a zero extent is not
-/// strided. The views the facade's packed batches pass always admit the
-/// strided layout of such a run (their extents are the jobs' compact matrix
-/// bounds). Unstable plumbing for symtn's capability admission, which decides
-/// participation from a plan's batches before any write.
-#[doc(hidden)]
-pub fn batch_searches_lanes(
-    jobs: &[DenseGemmBatchJob],
-    runs: &[usize],
-    ops: [MatrixOp; 2],
-    fresh: bool,
-) -> bool {
-    if jobs.len() < 2 {
-        return false;
-    }
-    let extents = ops == [MatrixOp::Identity; 2]
-        || jobs[0].rows != 0 && jobs[0].contracted != 0 && jobs[0].cols != 0;
-    let strided = if fresh {
-        let block = jobs[0].rows.checked_mul(jobs[0].cols);
-        strided_batch_run_len(jobs, 0) == jobs.len()
-            && block.is_some_and(|block| block != 0)
-            && jobs[1].dst_offset.checked_sub(jobs[0].dst_offset) == block
-    } else {
-        single_strided_batch(jobs, runs)
-    };
-    !(strided && extents)
 }
 
 /// Writes [`strided_batch_runs`] into caller-owned scratch.

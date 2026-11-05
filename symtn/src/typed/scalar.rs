@@ -556,7 +556,7 @@ where
         &self,
         cx: &mut (impl ExecContext + ?Sized),
     ) -> Result<PhysicalDense<D>, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.to_physical_dense_impl(engine)
     }
 
@@ -603,7 +603,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         physical: &PhysicalDense<D>,
     ) -> Result<Self, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.project_physical_dense_impl(engine, physical)
     }
 

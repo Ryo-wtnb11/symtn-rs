@@ -394,13 +394,8 @@ impl Network {
         R::Mode: NetworkModeDispatch<R, D>,
         D: TensorScalar,
     {
-        let (engine, options) = cx.parts();
-        self.execute_symmetric_sliced_impl(
-            &mut crate::Borrowed { engine, options },
-            tensors,
-            plan,
-            measured_payload_ceiling,
-        )
+        let engine = cx.engine();
+        self.execute_symmetric_sliced_impl(engine, tensors, plan, measured_payload_ceiling)
     }
 
     #[expect(
@@ -409,7 +404,7 @@ impl Network {
     )]
     fn execute_symmetric_sliced_impl<R, D>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D>],
         plan: SymmetricSlicedPlan,
         measured_payload_ceiling: usize,

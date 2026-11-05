@@ -11,12 +11,11 @@ quantum-dimension weights, matching the full tensor's Frobenius product.
 Only `similar` allocates a payload.
 
 The vector context (`Vector::Context`) is `dyn ExecContext`: the caller's
-execution context, the same one every symtn operation takes (an engine, or a
-`Configured` engine with execution options). Pass `&mut engine` (or
-`&mut configured`) as the first argument of each solver and of
+execution context, the same one every symtn operation takes (its engine).
+Pass `&mut engine` as the first argument of each solver and of
 `Workspace::with_capacity`; krylov forwards that one borrow to every vector
-operation and to the linear map, so the operations the map composes run
-with the caller's options. symtn neither creates nor stores an engine, so
+operation and to the linear map, so the operations the map composes run on
+the caller's engine. symtn neither creates nor stores an engine, so
 the solver runs on the caller's engine and threads.
 
 For `eigsolve`, `exponentiate`, `linsolve` and Arnoldi solvers, a linear map
@@ -46,8 +45,8 @@ See the [adapter and example](../symtn/src/krylov.rs) and
 - The final binary must link LAPACK for krylov's small dense problems, via a
   `blas-*` feature or an application-linked provider. Default `cpu-faer`
   links none; a missing provider is a link error. Linking one yourself keeps
-  the native dense provider (and its lane allocation) for the tensor
+  the native dense provider for the tensor
   operations, for example on macOS
   `RUSTFLAGS="-l framework=Accelerate" cargo test -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::`,
   as the macOS nightly job does; a `blas-*` feature selects the BLAS dense
-  provider instead, which refuses a non-default lane allocation.
+  provider instead.

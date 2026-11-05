@@ -122,7 +122,6 @@ where
     /// dense replay of the densified spectrum with the same structure.
     fn transform_bond_spectrum(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
         operation: &TreeTransformOperation,
@@ -135,7 +134,6 @@ where
     /// hold a lazy adjoint.
     fn try_lazy_adjoint_transform<S: TransformExec<R, D>>(
         _engine: &mut dyn Engine,
-        _options: ExecOptions,
         _tensor: &TensorMap<R, D, S>,
         _operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, D, S>>, Self::FacadeError> {
@@ -147,7 +145,6 @@ where
     /// adjoint never reaches it: `try_lazy_adjoint_transform` takes it first.
     fn transform<S: TransformExec<R, D>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>;
@@ -164,7 +161,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn transform_into<S: TransformExec<R, D>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         source: &TensorMap<R, D, S>,
         destination: &mut TensorMap<R, D, S>,
         alpha: D,
@@ -200,7 +196,6 @@ where
 {
     fn transform_bond_spectrum(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<Self>],
         operation: &TreeTransformOperation,
@@ -209,14 +204,12 @@ where
 
     fn try_lazy_adjoint<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self, S>,
         operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, Self, S>>, Error>;
 
     fn transform<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
@@ -224,7 +217,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn transform_into<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         source: &TensorMap<R, Self, S>,
         destination: &mut TensorMap<R, Self, S>,
         alpha: Self,
@@ -239,7 +231,6 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
 {
     fn contract<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
@@ -249,7 +240,6 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
     #[allow(clippy::too_many_arguments)]
     fn contract_into<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
@@ -261,7 +251,6 @@ pub(super) trait MultiplicityFreeContractExecution<R: TypedSectorAdmission>:
 
     fn compose<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>;
@@ -380,7 +369,6 @@ where
     /// ([`TensorMap::planar_contract`]) instead of the ordinary one.
     fn contract<S: ContractExec<R, D>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -396,7 +384,6 @@ where
     #[allow(clippy::too_many_arguments)]
     fn contract_into<S: ContractExec<R, D>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
         spec: &ContractSpec<'_>,
@@ -410,7 +397,6 @@ where
     /// payload, into a fresh destination payload of their storage.
     fn compose<S: ContractExec<R, D>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, D, S>,
         rhs: &TensorMap<R, D, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>;
@@ -542,14 +528,12 @@ where
 {
     fn insert_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError>;
 
     fn remove_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError>;
@@ -566,20 +550,18 @@ where
 {
     fn insert_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        tensor.insert_unit_multiplicity_free(engine, options, insertion)
+        tensor.insert_unit_multiplicity_free(engine, insertion)
     }
 
     fn remove_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        tensor.remove_unit_multiplicity_free(engine, options, axis)
+        tensor.remove_unit_multiplicity_free(engine, axis)
     }
 }
 
@@ -593,19 +575,17 @@ where
 {
     fn insert_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         insertion: UnitLegInsertion,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        generic_insert_unit(engine, options, tensor, insertion)
+        generic_insert_unit(engine, tensor, insertion)
     }
 
     fn remove_unit(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, D>,
         axis: usize,
     ) -> Result<TensorMap<R, D>, Self::FacadeError> {
-        generic_remove_unit(engine, options, tensor, axis)
+        generic_remove_unit(engine, tensor, axis)
     }
 }

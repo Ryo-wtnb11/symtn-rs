@@ -459,7 +459,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         pairs: &[(usize, usize)],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.trace_pairs_impl(engine, pairs)
     }
 
@@ -536,7 +536,7 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.trace_pairs_into_impl(engine, pairs, destination, alpha, beta)
     }
 
@@ -603,7 +603,6 @@ where
 #[allow(private_bounds)]
 fn contract_owned_multiplicity_free<'a, R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     lhs: &'a TensorMap<R, D, S>,
     rhs: &'a TensorMap<R, D, S>,
     request: impl FnOnce(
@@ -638,17 +637,16 @@ where
         symtn_tensors::CoreRoute::Hit(core) => (None, core),
         symtn_tensors::CoreRoute::Miss(miss) => {
             let mut lease = crate::runtime::ContextLease::new();
-            let resolution = D::lane(lease.context(options))?
+            let resolution = D::lane(lease.context())?
                 .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?;
             (Some(lease), resolution)
         }
     };
-    options.admit(engine, |engine| resolution.searches_lanes(engine, true))?;
     let data = S::contract_owned(
         engine,
         EXEC,
         ContractReplay::new::<MultiplicityFreeTreeLane>(
-            (lease, options),
+            lease,
             &resolution,
             (staged.destination(), staged.destination_len()),
             (lhs_operand, rhs_operand),
@@ -662,7 +660,6 @@ where
 #[allow(private_bounds)]
 fn contract_multiplicity_free<R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
@@ -677,7 +674,7 @@ where
     let output_axes = spec.output_axes();
     #[cfg(test)]
     super::probe::hit(super::probe::Event::ContractSeamCall);
-    contract_owned_multiplicity_free(engine, options, lhs, rhs, |lhs, rhs| {
+    contract_owned_multiplicity_free(engine, lhs, rhs, |lhs, rhs| {
         contract_request(lhs, rhs, spec, &output_axes, planar)
     })
 }
@@ -690,7 +687,6 @@ where
 #[allow(clippy::too_many_arguments)]
 fn contract_into_multiplicity_free<R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     lhs: &TensorMap<R, D, S>,
     rhs: &TensorMap<R, D, S>,
     spec: &ContractSpec<'_>,
@@ -713,7 +709,7 @@ where
 {
     let output_axes = spec.output_axes();
     let mut lease = crate::runtime::ContextLease::new();
-    D::lane(lease.context(options))?;
+    D::lane(lease.context())?;
     let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
     let mut staged = symtn_tensors::StagedContract::multiplicity_free(
         (
@@ -732,15 +728,14 @@ where
     let destination = destination_storage_mut(destination)?;
     let resolution = match staged.try_core::<S::Caps>()? {
         symtn_tensors::CoreRoute::Hit(core) => core,
-        symtn_tensors::CoreRoute::Miss(miss) => D::lane(lease.context(options))?
+        symtn_tensors::CoreRoute::Miss(miss) => D::lane(lease.context())?
             .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?,
     };
-    options.admit(engine, |engine| resolution.searches_lanes(engine, false))?;
     S::contract_into(
         engine,
         EXEC,
         ContractReplay::new::<MultiplicityFreeTreeLane>(
-            (Some(lease), options),
+            Some(lease),
             &resolution,
             (staged.destination(), staged.destination_len()),
             (lhs_operand, rhs_operand),
@@ -769,18 +764,16 @@ where
 {
     fn contract<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
         planar: Option<&symtn_tensors::PlanarContractOrders>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_multiplicity_free(engine, options, lhs, rhs, spec, planar)
+        contract_multiplicity_free(engine, lhs, rhs, spec, planar)
     }
 
     fn contract_into<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
         spec: &ContractSpec<'_>,
@@ -789,26 +782,15 @@ where
         alpha: Self,
         beta: Self,
     ) -> Result<(), Error> {
-        contract_into_multiplicity_free(
-            engine,
-            options,
-            lhs,
-            rhs,
-            spec,
-            planar,
-            destination,
-            alpha,
-            beta,
-        )
+        contract_into_multiplicity_free(engine, lhs, rhs, spec, planar, destination, alpha, beta)
     }
 
     fn compose<S: ContractExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &TensorMap<R, Self, S>,
         rhs: &TensorMap<R, Self, S>,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        contract_owned_multiplicity_free(engine, options, lhs, rhs, |_, _| {
+        contract_owned_multiplicity_free(engine, lhs, rhs, |_, _| {
             symtn_tensors::ContractRequest::Compose
         })
     }

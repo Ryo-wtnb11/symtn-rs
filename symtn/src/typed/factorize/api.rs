@@ -79,15 +79,14 @@ where
         rhs_rows: &[usize],
         rhs_cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.solve_impl(engine, options, rows, cols, rhs, rhs_rows, rhs_cols)
+        let engine = cx.engine();
+        self.solve_impl(engine, rows, cols, rhs, rhs_rows, rhs_cols)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn solve_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
         rhs: impl Into<TensorRef<'a, R, D>>,
@@ -105,9 +104,9 @@ where
         if !self.axes_are_identity(rows, cols) || !rhs.axes_are_identity(rhs_rows, rhs_cols) {
             rhs.refuse_borrowed_view("solve")?;
         }
-        self.with_leg_roles(engine, options, rows, cols, |lhs, engine| {
-            rhs.with_leg_roles(engine, options, rhs_rows, rhs_cols, |right, engine| {
-                lhs.factor_solve(engine, options, right)
+        self.with_leg_roles(engine, rows, cols, |lhs, engine| {
+            rhs.with_leg_roles(engine, rhs_rows, rhs_cols, |right, engine| {
+                lhs.factor_solve(engine, right)
             })
         })
     }
@@ -186,21 +185,18 @@ where
         cols: &[usize],
         rcond: f64,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.pinv_impl(engine, options, rows, cols, rcond)
+        let engine = cx.engine();
+        self.pinv_impl(engine, rows, cols, rcond)
     }
 
     fn pinv_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
         rcond: f64,
     ) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_pinv(engine, options, rcond)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_pinv(engine, rcond))
     }
 }
 
@@ -292,19 +288,18 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Qr<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.qr_compact_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.qr_compact_impl(engine, rows, cols)
     }
 
     fn qr_compact_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Qr<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            S::qr_compact(engine, options, EXEC, t)
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::qr_compact(engine, EXEC, t)
         })
     }
 
@@ -408,19 +403,18 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Svd<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.svd_compact_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.svd_compact_impl(engine, rows, cols)
     }
 
     fn svd_compact_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Svd<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            S::svd_compact(engine, options, EXEC, t)
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::svd_compact(engine, EXEC, t)
         })
     }
 
@@ -532,20 +526,19 @@ where
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.eigh_full_impl(engine, options, rows, cols, hermitian_tol)
+        let engine = cx.engine();
+        self.eigh_full_impl(engine, rows, cols, hermitian_tol)
     }
 
     fn eigh_full_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            S::eigh_full(engine, options, EXEC, t, hermitian_tol)
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            S::eigh_full(engine, EXEC, t, hermitian_tol)
         })
     }
 }
@@ -605,20 +598,17 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Svd<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.svd_full_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.svd_full_impl(engine, rows, cols)
     }
 
     fn svd_full_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Svd<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_svd_full(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_svd_full(engine))
     }
 }
 
@@ -674,19 +664,18 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Lq<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.lq_compact_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.lq_compact_impl(engine, rows, cols)
     }
 
     fn lq_compact_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Lq<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_lq(engine, options,
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_lq(engine,
                 FactorOp::LqCompact,
                 |engine, lease, source| {
                     symtn_matrixalgebra::seam::lq_compact_from_source::<R::Mode, _, _, _, _>(engine,
@@ -763,7 +752,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         f: impl Fn(D) -> D,
     ) -> Result<Self, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.map_diagonal_impl(engine, f)
     }
 
@@ -818,28 +807,22 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Qr<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.qr_full_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.qr_full_impl(engine, rows, cols)
     }
 
     fn qr_full_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Qr<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_qr(
-                engine,
-                options,
-                FactorOp::QrFull,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::qr_full_from_source::<R::Mode, _, _, _, _>(
-                        engine, lease, source,
-                    )
-                },
-            )
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_qr(engine, FactorOp::QrFull, |engine, lease, source| {
+                symtn_matrixalgebra::seam::qr_full_from_source::<R::Mode, _, _, _, _>(
+                    engine, lease, source,
+                )
+            })
         })
     }
 }
@@ -872,21 +855,19 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Lq<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.lq_full_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.lq_full_impl(engine, rows, cols)
     }
 
     fn lq_full_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Lq<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
             t.factor_lq(
                 engine,
-                options,
                 FactorOp::LqFull,
                 |engine, lease, source| {
                     symtn_matrixalgebra::seam::lq_full_from_source::<R::Mode, _, _, _, _>(
@@ -939,28 +920,22 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.svd_vals_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.svd_vals_impl(engine, rows, cols)
     }
 
     fn svd_vals_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_values(
-                engine,
-                options,
-                FactorOp::SvdVals,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::svd_vals_from_source::<R::Mode, _, _, _, _>(
-                        engine, lease, source,
-                    )
-                },
-            )
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::SvdVals, |engine, lease, source| {
+                symtn_matrixalgebra::seam::svd_vals_from_source::<R::Mode, _, _, _, _>(
+                    engine, lease, source,
+                )
+            })
         })
     }
 }
@@ -998,32 +973,26 @@ where
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.eigh_vals_impl(engine, options, rows, cols, hermitian_tol)
+        let engine = cx.engine();
+        self.eigh_vals_impl(engine, rows, cols, hermitian_tol)
     }
 
     fn eigh_vals_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_values(
-                engine,
-                options,
-                FactorOp::EighVals,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::eigh_vals_from_source::<R::Mode, _, _, _, _>(
-                        engine,
-                        lease,
-                        source,
-                        hermitian_tol,
-                    )
-                },
-            )
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::EighVals, |engine, lease, source| {
+                symtn_matrixalgebra::seam::eigh_vals_from_source::<R::Mode, _, _, _, _>(
+                    engine,
+                    lease,
+                    source,
+                    hermitian_tol,
+                )
+            })
         })
     }
 }
@@ -1063,31 +1032,25 @@ where
         Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, num_complex::Complex64>>,
         FacadeError<R>,
     > {
-        let (engine, options) = cx.parts();
-        self.eig_vals_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.eig_vals_impl(engine, rows, cols)
     }
 
     fn eig_vals_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<
         Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, num_complex::Complex64>>,
         FacadeError<R>,
     > {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_values(
-                engine,
-                options,
-                FactorOp::EigVals,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::eig_vals_from_source::<R::Mode, _, _, _, _>(
-                        engine, lease, source,
-                    )
-                },
-            )
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_values(engine, FactorOp::EigVals, |engine, lease, source| {
+                symtn_matrixalgebra::seam::eig_vals_from_source::<R::Mode, _, _, _, _>(
+                    engine, lease, source,
+                )
+            })
         })
     }
 }
@@ -1160,20 +1123,17 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Eig<TensorMap<R, <D as FactorScalar>::Eig>>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.eig_full_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.eig_full_impl(engine, rows, cols)
     }
 
     fn eig_full_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Eig<TensorMap<R, <D as FactorScalar>::Eig>>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_eig_full(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_eig_full(engine))
     }
 }
 
@@ -1280,22 +1240,21 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.left_null_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.left_null_impl(engine, rows, cols)
     }
 
     fn left_null_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_null(engine, options,
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
+            t.factor_null(engine,
                 FactorOp::LeftNull,
                 |parent, engine| {
-                    parent.factor_null(engine, options,
+                    parent.factor_null(engine,
                         FactorOp::RightNull,
                         |_, _| {
                             // A lazy adjoint's parent is owned, so it is
@@ -1377,26 +1336,23 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.right_null_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.right_null_impl(engine, rows, cols)
     }
 
     fn right_null_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
+        self.with_leg_roles(engine, rows, cols, |t, engine| {
             t.factor_null(
                 engine,
-                options,
                 FactorOp::RightNull,
                 |parent, engine| {
                     parent.factor_null(
                         engine,
-                        options,
                         FactorOp::LeftNull,
                         |_, _| {
                             // A lazy adjoint's parent is owned, so it is
@@ -1479,20 +1435,17 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<LeftPolar<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.left_polar_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.left_polar_impl(engine, rows, cols)
     }
 
     fn left_polar_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<LeftPolar<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_left_polar(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_left_polar(engine))
     }
 
     /// Returns the right polar decomposition `self = p * wh` as a
@@ -1516,20 +1469,17 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<RightPolar<Self>, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.right_polar_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.right_polar_impl(engine, rows, cols)
     }
 
     fn right_polar_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<RightPolar<Self>, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_right_polar(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_right_polar(engine))
     }
 }
 
@@ -1591,20 +1541,17 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.inv_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.inv_impl(engine, rows, cols)
     }
 
     fn inv_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_inv(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_inv(engine))
     }
 }
 
@@ -1700,19 +1647,16 @@ where
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.exp_impl(engine, options, rows, cols)
+        let engine = cx.engine();
+        self.exp_impl(engine, rows, cols)
     }
 
     fn exp_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        self.with_leg_roles(engine, options, rows, cols, |t, engine| {
-            t.factor_exp(engine, options)
-        })
+        self.with_leg_roles(engine, rows, cols, |t, engine| t.factor_exp(engine))
     }
 }

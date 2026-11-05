@@ -1,6 +1,6 @@
 //! Stable semantic persistence for the public typed Host representation.
 
-use crate::typed::{ExecContext, ExecOptions, Invocation};
+use crate::typed::ExecContext;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -1642,7 +1642,6 @@ where
 
 fn build_adjoint<R, D, C>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     parent: TensorMap<R, D>,
 ) -> Result<TensorMap<R, D>, DecodeError<C, FacadeError<R>>>
 where
@@ -1650,9 +1649,7 @@ where
     R::Mode: TypedAdjointSpace<R>,
     D: TensorScalar,
 {
-    let tensor = parent
-        .adjoint(&mut Invocation::new(engine, options))
-        .map_err(DecodeError::Facade)?;
+    let tensor = parent.adjoint(&mut *engine).map_err(DecodeError::Facade)?;
     if !matches!(tensor.repr, TypedTensorRepr::Adjoint(_)) {
         return Err(DecodeError::InvalidFormat(
             "lazy-adjoint record is not lazy for this provider mode".to_string(),
@@ -1663,7 +1660,6 @@ where
 
 fn decode_tensor<R, D, C>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     runtime: &Runtime,
     bytes: &[u8],
     limits: DecodeLimits,
@@ -1692,7 +1688,7 @@ where
             parent_blocks,
         } => {
             let parent = build_dense(runtime, &provider, parent_space, parent_blocks, limits)?;
-            build_adjoint(engine, options, parent)
+            build_adjoint(engine, parent)
         }
     }
 }
@@ -1825,7 +1821,7 @@ where
     where
         C: TypedPersistenceCodec<R>,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::from_bytes_with_impl(engine, bytes, limits, codec)
     }
 
@@ -1896,13 +1892,12 @@ macro_rules! tensor_persistence_impl {
             where
                 C: TypedPersistenceCodec<R>,
             {
-                let (engine, options) = cx.parts();
-                Self::from_bytes_with_impl(engine, options, runtime, bytes, limits, codec)
+                let engine = cx.engine();
+                Self::from_bytes_with_impl(engine, runtime, bytes, limits, codec)
             }
 
             fn from_bytes_with_impl<C>(
                 engine: &mut dyn Engine,
-                options: ExecOptions,
                 runtime: &Runtime,
                 bytes: &[u8],
                 limits: DecodeLimits,
@@ -1911,7 +1906,7 @@ macro_rules! tensor_persistence_impl {
             where
                 C: TypedPersistenceCodec<R>,
             {
-                decode_tensor(engine, options, runtime, bytes, limits, codec)
+                decode_tensor(engine, runtime, bytes, limits, codec)
             }
         }
     };

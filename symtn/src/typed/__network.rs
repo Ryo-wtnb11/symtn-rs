@@ -32,7 +32,7 @@ pub fn cuda_engine_device<R, D: CudaPayload>(
     cx: &mut (impl ExecContext + ?Sized),
     tensors: &[&TensorMap<R, D, CudaStorage<D>>],
 ) -> Result<usize, Error> {
-    let (engine, _) = cx.parts();
+    let engine = cx.engine();
     cuda_engine_device_impl(engine, tensors)
 }
 
@@ -142,7 +142,7 @@ where
     R: TypedSectorAdmission,
     D: TensorScalar,
 {
-    let (engine, _) = cx.parts();
+    let engine = cx.engine();
     network_scatter_add_assign_impl(engine, destination, source, ranges)
 }
 

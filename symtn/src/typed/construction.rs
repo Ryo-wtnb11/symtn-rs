@@ -114,7 +114,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::zeros_impl(engine, runtime, codomain, domain)
     }
 
@@ -167,7 +167,7 @@ where
         F: FnMut(&BlockFusionTrees<R::Sector>, &[usize]) -> D,
         R: 'a,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::from_subblock_fn_impl(engine, runtime, codomain, domain, fill)
     }
 
@@ -243,7 +243,7 @@ where
         Domain: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::rand_with_seed_impl(engine, runtime, codomain, domain, seed)
     }
 
@@ -395,7 +395,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::isomorphism_impl(engine, runtime, codomain, domain)
     }
 
@@ -447,7 +447,7 @@ where
         M: IntoIterator<Item = &'a GradedSpace<R>>,
         R: 'a,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::isometry_impl(engine, runtime, codomain, domain)
     }
 
@@ -480,19 +480,13 @@ where
     /// zero, independently of non-finite source values. A lazy adjoint zeros
     /// its canonical parent and stays a lazy adjoint.
     pub fn zeros_like(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.zeros_like_impl(engine, options)
+        let engine = cx.engine();
+        self.zeros_like_impl(engine)
     }
 
-    fn zeros_like_impl(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<Self, FacadeError<R>> {
+    fn zeros_like_impl(&self, engine: &mut dyn Engine) -> Result<Self, FacadeError<R>> {
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self
-                .parent_of(view)
-                .zeros_like(&mut Invocation::new(engine, options))?;
+            let parent = self.parent_of(view).zeros_like(&mut *engine)?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         if let Some(spectrum) = self.spectrum() {

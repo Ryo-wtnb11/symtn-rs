@@ -54,8 +54,8 @@ jobs:
         working-directory: symtn
       # The krylov feature on the native dense provider: Accelerate supplies
       # only krylov's small dense LAPACK solves, so the solver's map runs the
-      # native block kernels and their lane-allocation search. Push/PR CI
-      # runs krylov on OpenBLAS, which has no lane allocator.
+      # native block kernels and their lane placement. Push/PR CI runs krylov
+      # on OpenBLAS.
       - name: Run krylov tests on the native provider
         run: "cargo test --locked -p symtn --no-default-features --features krylov,cpu-faer --test serial krylov_vector::"
         working-directory: symtn

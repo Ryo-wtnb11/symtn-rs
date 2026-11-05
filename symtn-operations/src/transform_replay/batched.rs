@@ -27,63 +27,6 @@ pub(super) fn effective_tree_transform_threads(
         .min(runnable)
 }
 
-/// Whether replaying `structure` over `members` members on `engine` submits
-/// a recoupling GEMM batch the dense executor places by its lane search
-/// ([`symtn_dense::batch_searches_lanes`]). It mirrors the replay's own
-/// submissions: one member at a serial width submits each Multi block alone;
-/// at a parallel width the compiled jobs go in chunks of the effective worker
-/// count; a member replay submits every member's jobs as one batch. The
-/// effective width is the replays' own rule over the destination length.
-/// Unstable plumbing for symtn's lane-allocation admission, which decides
-/// participation before any write.
-#[doc(hidden)]
-pub fn tree_transform_searches_lanes<C: Copy>(
-    engine: &mut dyn Engine,
-    structure: &TreeTransformStructure<C>,
-    members: usize,
-) -> bool {
-    let jobs = structure.recoupling_plan().jobs();
-    let identity = [symtn_dense::MatrixOp::Identity; 2];
-    if jobs.is_empty() {
-        return false;
-    }
-    if members > 1 {
-        let dst_len = structure.recoupling_plan().destination_len();
-        let src_len = structure.recoupling_plan().source_len();
-        let expanded: Vec<DenseGemmBatchJob> = jobs
-            .iter()
-            .flat_map(|job| {
-                (0..members).map(move |member| DenseGemmBatchJob {
-                    dst_offset: member * dst_len + job.dst_offset,
-                    lhs_offset: member * src_len + job.lhs_offset,
-                    ..*job
-                })
-            })
-            .collect();
-        let runs = symtn_dense::strided_batch_runs(&expanded);
-        return symtn_dense::batch_searches_lanes(&expanded, &runs, identity, false);
-    }
-    let Ok(requested) = structure
-        .dst_structure()
-        .required_len()
-        .map_err(|_| ())
-        .and_then(|len| crate::host_pool::copy_width(engine, len).map_err(|_| ()))
-    else {
-        return false;
-    };
-    let threads =
-        effective_tree_transform_threads(engine, structure.parallel_schedule(), requested);
-    threads > 1
-        && jobs.chunks(threads).any(|chunk| {
-            symtn_dense::batch_searches_lanes(
-                chunk,
-                &symtn_dense::strided_batch_runs(chunk),
-                identity,
-                false,
-            )
-        })
-}
-
 /// Runs a replay phase with the operation's whole engine token, however
 /// many workers the phase splits its items over: an unsplit phase still
 /// hands its leaves the full token, whose own cost rule decides whether one

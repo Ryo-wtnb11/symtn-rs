@@ -300,9 +300,7 @@ fn assert_eig_uses_a_cold_logical_copy(
     };
 
     // Positive control: the probe sees an implicit materialization.
-    let _ = lazy
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
-        .unwrap();
+    let _ = lazy.materialized_tensor_uncached(engine).unwrap();
 }
 
 #[test]
@@ -463,7 +461,7 @@ fn exp_of_a_near_hermitian_adjoint_uses_the_logical_orientation_and_stays_cold()
         .unwrap()
         .adjoint(engine)
         .unwrap()
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
+        .materialized_tensor_uncached(engine)
         .unwrap();
     let lazy = parent.adjoint(engine).unwrap();
     let actual = lazy.exp(engine, &[0], &[1]).unwrap();
@@ -1094,12 +1092,8 @@ where
             5,
             "the SU(3) μ=2 fixture has five nonempty coupled-sector solve routes"
         );
-        let lhs_oracle = lhs
-            .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
-            .unwrap();
-        let rhs_oracle = right
-            .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
-            .unwrap();
+        let lhs_oracle = lhs.materialized_tensor_uncached(engine).unwrap();
+        let rhs_oracle = right.materialized_tensor_uncached(engine).unwrap();
         let reconstructed = lhs_oracle.compose(engine, &solution).unwrap();
         assert!(reconstructed
             .dense_data()

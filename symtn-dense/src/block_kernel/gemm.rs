@@ -1,5 +1,5 @@
 //! The native block GEMM kernel: a batch of disjoint column-major GEMMs, one
-//! tcontract `Plan` per distinct geometry, run on the shared scheduler.
+//! tcontract `Plan` per distinct geometry, run on the shared lane driver.
 //!
 //! TensorKit (`mul!` per matched sector) and QSpace (`contractDATA_group`)
 //! set up each block GEMM per call. A tcontract plan is immutable data of its
@@ -12,22 +12,19 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
 use symtn_core::{
     ErasedStructureCacheControl, StructureCache, StructureCacheInfo, StructureCacheKind,
 };
 use tcontract::api::{CSpec, DType, Labels, LayoutSpec, Op, OperandSpec, Problem, Scalar};
-use tcontract::{Algorithm, Plan, PlanConfig, SliceAccumulationSource};
-use tcontract_exec::batch::batch_decision_within;
-use tcontract_exec::{BatchQuery, Exec};
+use tcontract::{Plan, PlanConfig, SliceAccumulationSource};
+use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use super::schedule::{GrantKey, LaneJobs};
+use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
 use crate::fresh::{split_fresh_segments, FreshParts};
+use crate::lanes::{Estimate, LaneTables};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
-use crate::LaneAllocation;
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -250,57 +247,6 @@ pub(crate) fn work<T: Scalar>(job: &DenseGemmBatchJob) -> f64 {
     job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
 }
 
-/// The width `plan` hands faer or its packed grid for a job of weighted work
-/// `work` and serial time `serial` on a lane of `budget` slots of `exec`.
-///
-/// Composed from the plan's own two public decisions: under Auto the plan
-/// first narrows its context to `width_for` over its serial estimate (one
-/// section); a Faer plan then limits faer to the batch decision of its one
-/// item (`count = 1`: a block plan is rank 2 with no batch mode), asked with
-/// the faer route's capabilities and the caller's work model. A Packed plan's
-/// final grid comes from a private partition, so its grant is the public
-/// balanced-lanes decision within the narrowed context, an upper bound on that
-/// grid. Faer's item work and its one section match this crate's `work` and
-/// `1` by value, not by an upstream contract; they are re-checked on each
-/// tcontract release. A forced strategy never reaches the scheduler's model.
-///
-/// Why the result is an estimate even where the composition matches the
-/// plan: `serial` is integer nanoseconds and the plan re-normalizes it from
-/// its own floating estimate, so near a payoff boundary of an extreme
-/// estimate the two may round to different sides.
-pub(crate) fn grant<T: Scalar>(
-    plan: &Plan<T>,
-    work: f64,
-    exec: &Exec<'_>,
-    budget: usize,
-    serial: Duration,
-) -> usize {
-    let narrowed = exec.width_for_within(budget, serial.as_nanos() as f64, 1);
-    let query = BatchQuery::new(1, work);
-    let query = match plan.report().algorithm {
-        Algorithm::Faer => query
-            .with_item_parallel(exec.token_ref().carries_team())
-            .with_outer_only_when_item_serial(true)
-            .with_item_sections(1),
-        Algorithm::Packed => query.with_balanced_lanes(true).with_item_parallel(true),
-        // No rank-2 block plan is elementwise; the narrowed context bounds any
-        // other algorithm's width.
-        _ => return narrowed,
-    };
-    batch_decision_within(exec.batch_policy(), exec, narrowed, &query).item_threads
-}
-
-/// The inputs of [`grant`] besides the serial time and the context: the
-/// plan's algorithm and the job's work (the time is derived from the work).
-fn grant_key<T: Scalar>(plan: &Plan<T>, work: f64) -> GrantKey {
-    let algorithm = match plan.report().algorithm {
-        Algorithm::Faer => 1,
-        Algorithm::Packed => 2,
-        _ => 3,
-    };
-    [algorithm, work.to_bits()]
-}
-
 fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
     plans[index]
         .downcast_ref::<Plan<T>>()
@@ -322,34 +268,18 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     /// The job's plan index and its destination slice.
     type Job = (usize, &'a mut [T]);
     const ENTRY: Entry = Entry::Contraction;
-    const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
-
-    fn work(&self, index: usize, _: &Self::Job) -> f64 {
-        work::<T>(&self.jobs[index])
+    fn estimate(&self, index: usize, _: &Self::Job, model: &WorkModel) -> Estimate {
+        Estimate {
+            serial: driver::cost(OpKind::Gemm, work::<T>(&self.jobs[index]), model),
+            payback: None,
+            sections: 1,
+        }
     }
 
-    fn grant(
-        &self,
-        index: usize,
-        (plan, _): &Self::Job,
-        exec: &Exec<'_>,
-        budget: usize,
-        serial: Duration,
-    ) -> usize {
-        let work = work::<T>(&self.jobs[index]);
-        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
-    }
-
-    fn grant_key(&self, index: usize, (plan, _): &Self::Job) -> GrantKey {
-        grant_key(
-            plan_of::<T>(self.plans, *plan),
-            work::<T>(&self.jobs[index]),
-        )
-    }
+    fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
 
     fn run(
         &self,
@@ -395,34 +325,18 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     /// written.
     type Job = (usize, &'a mut [MaybeUninit<T>], &'a mut [T]);
     const ENTRY: Entry = Entry::Contraction;
-    const KIND: OpKind = OpKind::Gemm;
     const LABEL: &'static str = "grouped_gemm";
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
-
-    fn work(&self, index: usize, _: &Self::Job) -> f64 {
-        work::<T>(&self.jobs[index])
+    fn estimate(&self, index: usize, _: &Self::Job, model: &WorkModel) -> Estimate {
+        Estimate {
+            serial: driver::cost(OpKind::Gemm, work::<T>(&self.jobs[index]), model),
+            payback: None,
+            sections: 1,
+        }
     }
 
-    fn grant(
-        &self,
-        index: usize,
-        (plan, _, _): &Self::Job,
-        exec: &Exec<'_>,
-        budget: usize,
-        serial: Duration,
-    ) -> usize {
-        let work = work::<T>(&self.jobs[index]);
-        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
-    }
-
-    fn grant_key(&self, index: usize, (plan, _, _): &Self::Job) -> GrantKey {
-        grant_key(
-            plan_of::<T>(self.plans, *plan),
-            work::<T>(&self.jobs[index]),
-        )
-    }
+    fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
 
     fn run(
         &self,
@@ -457,8 +371,11 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
 /// The kernel's per-call staging: the destination order, the geometry index,
 /// the per-job plan slots, the plan handles and the lane driver's staging.
 /// An owner that submits repeatedly (an executor of a prepared workspace)
-/// keeps one, so a warm submission reuses every capacity and allocates
-/// nothing; an eager executor's scratch lives for its one call. Holds no
+/// keeps one, so a warm submission reuses every capacity: on a serial engine
+/// it allocates nothing. On a pooled engine the lane runner also creates one
+/// std mutex per lane per call, which on Apple targets allocates on its
+/// first lock (a disclosed residual, see `lanes`). An eager executor's
+/// scratch lives for its one call. Holds no
 /// plan between calls: the handles are released when a call ends, and the
 /// geometry-plan cache alone retains plans.
 #[derive(Debug, Default)]
@@ -468,7 +385,7 @@ pub(crate) struct GemmScratch {
     slots: Vec<(usize, &'static mut [u8])>,
     fresh_slots: FreshSlots<'static, u8>,
     plans: Vec<Arc<ErasedPlan>>,
-    lanes: LaneScratch,
+    lanes: LaneTables,
 }
 
 impl GemmScratch {
@@ -568,7 +485,6 @@ pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
-    allocation: LaneAllocation,
     output: &mut DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -635,7 +551,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         beta,
         source,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     *kept_slots = recycle(slots);
     plans.clear();
     result
@@ -687,7 +603,6 @@ fn index_plans<T: Scalar>(
 pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
-    allocation: LaneAllocation,
     parts: FreshParts<'_, 'a, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -718,7 +633,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         alpha,
         destination: PhantomData,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     if result.is_ok() {
         for (j, (_, _, written)) in slots.iter_mut().enumerate() {
             (parts.written)(j, std::mem::take(written));

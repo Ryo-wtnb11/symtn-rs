@@ -106,10 +106,8 @@ operations. Per-method bounds remain authoritative; see the
 ## Parallel execution
 
 Every numerical operation takes the caller's execution context
-(`cx: &mut (impl ExecContext + ?Sized)`): an engine (`&mut CpuEngine`,
-`&mut dyn Engine`), which runs with the default execution options, or a
-`Configured` engine that carries `ExecOptions` (the lane allocation, below)
-for the calls it is passed to. A `CpuEngine::serial()` runs on the calling
+(`cx: &mut (impl ExecContext + ?Sized)`), which is the caller's engine
+(`&mut CpuEngine`, `&mut dyn Engine`). A `CpuEngine::serial()` runs on the calling
 thread; `CpuEngine::new(pool)` runs on a caller-owned `Pool` of threads. The
 engine owns the threads and the dense provider's resources an operation uses:
 its thread team, its buffer pool and its provider scratch. symtn stores no
@@ -121,89 +119,48 @@ the `Runtime`.
 Host parallelism is the engine's own decision. Dense kernels split work by
 Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
-provider's block GEMM kernel (recoupling, block-wise contraction) takes its
-thread count from the engine's cost rule over the batch's estimated serial
-time (Tenferro's own per-flop model), and its lane count is at most the
-engine's batch decision, so the work model's fan-out limits are never
-exceeded. Each lane reserves a nonzero share of those threads, the shares
-summing to at most the thread count, and each block runs on a context of
-exactly its lane's share; a thread no lane reserves stays idle for the call.
-Which placements the kernel scores is the call's `LaneAllocation`: the
-default `Moldable` scores every candidate below, and `EqualShare` scores the
-baseline and the equal-share placements only, without the large-block
-reservation.
-A batch of a few large blocks gives each lane several threads, and a batch
-of many small blocks runs one thread per lane. The kernel scores the
-baseline placement (equal shares over `L0 = min(threads, blocks, decision
-lanes)` lanes, blocks largest first on the lane of least accumulated serial
-time), an equal-share placement for every lane count from `L0` down to one,
-and a large-block reservation under one model, and keeps the lowest score;
-ties keep the baseline, then the equal shares. The reservation finds the
-least target time at which the blocks above it, each on the narrowest lane
-that brings it under the target, fit in the thread count; it gives each such
-block that lane, makes the remaining threads one-thread lanes, places the
-other blocks largest first on the lane where they finish earliest, then
-widens the reserved lanes with the threads of unused one-thread lanes while
-the provider's width still grows. It is discarded when more than `L0` of its
-lanes hold blocks, and it is scored as placed, since a block below the
-target can still finish above it. The model charges a block its
-serial time where the provider would run it on one thread in that lane,
-otherwise its time over the provider's granted width plus the engine's
-dispatch cost at that width. The granted width is an estimate composed from
-the provider's public decisions (for a packed GEMM plan an optimistic upper
-bound on its grid), and the model has no sublinear speedup, so the choice is
-a scheduling estimate, not a promise of a faster run. The search queries the
-provider width of each group of blocks with the same estimated time and the
-same grant inputs (for GEMM, the plan's algorithm and the work; for a
-factorization, its total and payback work) once, at the
-full thread count; only the groups the provider widens there are queried
-again, once per distinct share width during the sweep (rebuilding the winning
-placement may repeat up to two widths), since a block the provider keeps
-serial at the full count stays serial at every narrower share; a lane count
-whose proved lower bound on its score is not below the best score so far is
-not placed. The reservation queries each such group at most once per width
-it evaluates: every width up to the thread count for the (fewer than
-thread-count) blocks above the mean load, and the reserved lanes' widths for
-the others. Each searched allocation is kept in the process-global structure
-cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
-function of (the kernel's kind, GEMM or factorization, which fixes the grant;
-the call's lane allocation, which fixes the candidates; the engine's budget, work model, team and dispatch cost at every width, the
-mean work, and each block's serial time and grant inputs), so a
-batch already searched, on any executor including an eager call's fresh one,
-rebuilds its lanes without a query. Each entry is charged its inline key and
-entry, the entry overhead, and its per-block, per-width and per-lane slices;
-with a budget of zero every call searches, with the same allocation. Prepared
-`ContractPlan`/`ComposePlan` workspaces of any member count run their grouped
-core batches the same way. The native provider's compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR, the QR null
-basis of `left_null`, Hermitian
-eigendecomposition (full and values-only) and general eigenvalues over a
-tensor's sector blocks run on the same lanes, through the same lane driver as the GEMM kernel
-(inside the engine's guarded linalg entry rather than its contraction entry):
-each block's cost is the provider's work estimate (SVD `m n min(m, n)`, QR
-`m n k - k^3/3` with `k = min(m, n)`, LQ that of its transpose's QR, a
-tall full QR or null basis tlinalg's Householder factor `m n k` plus its
-reflector application `m c k` onto `c` target columns, EIGH and EIG values tlinalg's `n^3`, four times that
-for complex scalars) under the engine's work model, and each
-block's factorization gets its faer width from the engine's cost rule within
-its lane's share, so a small block takes no width the engine would not grant
-it. A batch whose every input is one matrix (batch product one) takes the
-same search, except for the QR family (compact and full QR, LQ, the null
-basis), with each block's granted width composed as tlinalg decides it
-for one item under `Auto`: the engine's cost rule over the total work's time,
-capped at the width the provider's payback work (`estimate_payback_work`,
-the part of the estimate a team inside the item can pay back; for general
-eigenvalues it is the whole estimate, so the cap is inert) pays for, and one
-thread on a token without a team. The serial times stay the work model's
-estimates, which run low for SVD; no correction is applied, so the choice
-remains a scheduling estimate. QR-family batches keep the baseline placement over
-`L0` lanes, without the search: the model credits a granted width with a
-linear speedup that faer's QR does not deliver at the widths QR's payback
-share admits, and on few large QR blocks the searched placement ran slower
-than the baseline. A batch holding an input whose batch product is not one
-(including zero) keeps the baseline placement as well: tlinalg runs such an
-input through its multi-item route (a batch gate, its own lanes and a
-per-item cap), which its public queries do not expose. Every block runs up to the first one refused before the engine is entered
+provider's grouped block GEMMs (recoupling, block-wise contraction) and its
+block factorizations over a tensor's sector blocks (compact SVD, values-only
+SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR, the QR null basis
+of `left_null`, Hermitian eigendecomposition full and values-only, general
+eigenvalues, the polar decompositions and the Hermitian `exp`) are placed by
+one routine and run by one lane runner (the factorizations inside the
+engine's guarded linalg entry, the GEMMs inside its contraction entry).
+Each block is one provider job with the provider's own serial estimate:
+tcontract's per-flop rate over the block's `2 m k n` flops (four times that
+for complex scalars) for a GEMM, tlinalg's work estimate under the engine's
+work model for a factorization (SVD `m n min(m, n)`, QR `m n k - k^3/3` with
+`k = min(m, n)`, LQ that of its transpose's QR, a tall full QR or null basis
+tlinalg's Householder factor plus its reflector application, EIGH and EIG
+values `n^3`; a polar decomposition or Hermitian `exp` adds its products).
+Its width is the provider's own public rule, threadteam's `width_for` over
+that estimate with one section. A composite, whose one body makes several
+provider calls (a polar decomposition one SVD and two products per item, a
+Hermitian `exp` one EIGH and one product per item, a tall full QR or null
+basis a factor and a reflector application), is instead priced as one
+aggregate envelope: its summed estimate over that many sections, each charged
+one dispatch, an approximation rather than a per-call model; for a single matrix (batch product one)
+it is capped at the width its payback estimate (`estimate_payback_work`)
+pays for, as tlinalg caps a batch of one, while an input of several matrices
+is one intact job whose estimate is the per-item work times the items, with
+no cap, tlinalg routing the items inside the offer. With `B` threads and
+`B_eff = min(B, sum of the widths)`, each block is allotted
+`min(width, floor(B_eff E / E_total))` threads; a block allotted two or more
+gets a lane of its own, the remaining threads become one-thread lanes, and
+every other block goes, in block order, to the lane on which it would
+finish first. The lanes are kept only when their modeled time (the slowest
+lane plus the engine's dispatch cost for the outer fork; each block modeled
+as its estimate over its width plus that width's dispatch cost, a linear
+speedup) beats running every block on all `B` threads one after another,
+and their total estimate pays for the fork; otherwise the blocks run that
+way. A block then runs on its lane's context limited to `min(share,
+width)`. Placement is integer arithmetic, recomputed per call without a
+cache or a sort, so it is a scheduling estimate, not a promise of a faster
+run. A forced batch policy (`Inner`, `Outer`, `Split`, `Sequential`) computes
+no width: its batch decision is authoritative, each block running at its
+lane's whole share (`Inner`: every block on the whole engine). Prepared
+`ContractPlan`/`ComposePlan` workspaces of any member count run their
+grouped core batches the same way. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view), and keeps its own outcome; the
 outcomes, then that refusal, reach the operation in block order, where the
 same per-sector checks as a block-by-block loop run on each, so the error
@@ -287,9 +244,7 @@ form (`factorize_batch` refuses them); the default instead runs, per block,
 one `svd` and two `dot_general_into` calls writing the destinations, the
 `sqrt(S)` scaling applied in place to the owned factor, and checks the block
 before the next one is solved; the Hermitian `exp` likewise runs one `eigh`,
-the eigenvalue check and one `dot_general_into` per block. The BLAS provider
-refuses a non-default lane allocation for a polar or Hermitian `exp` batch of
-two or more blocks before any solve, as it does for its owned batches.
+the eigenvalue check and one `dot_general_into` per block.
 The full general eigendecomposition goes through the same batch but solves
 each sector with Tenferro's per-matrix entry on the whole engine, checking
 it before the next solve: its unit-norm eigenvector normalization is not
@@ -319,56 +274,10 @@ of its elements) gives the share more than one worker. Accumulating updates
 layout exceeds Strided's inline fused rank of eight keep one worker per
 block. Results are bit-identical for one
 configuration (provider, build, engine width, batch policy and work model,
-lane allocation, inputs), whether the lane allocation is searched or taken
-from the cache; no promise is made across widths, providers or lane
-allocations, which agree within rounding. BLAS-internal threads remain
-separate.
-
-### Lane allocation
-
-A call's `LaneAllocation` (from its `ExecContext`; `Moldable` unless a
-`Configured` context selects another) applies to every phase of the call
-that searches a block placement, judged on the batch the executor will
-actually receive: a grouped GEMM batch of a contraction (two or more blocks
-that are not one strided submission: into an initialized destination, one
-self-disjoint affine run; into a fresh owned output, one gapless affine run),
-a grouped recoupling GEMM batch of a tree transform (the parallel replay
-submits the Multi blocks in chunks of its worker count, a member replay all
-members' blocks at once; a serial replay submits each Multi block alone, which
-does not search), and an SVD, values-only SVD, Hermitian eigen (full and
-values-only), general-eigenvalue, polar or Hermitian `exp` batch of two or
-more blocks. It is applied on every
-call, including to the lanes a prepared `ContractPlan`/`ComposePlan`
-workspace or a network's pooled workspace kept from an earlier call; a
-workspace never keeps an earlier call's allocation. Other phases run as
-with the default: a single GEMM and an admitted affine strided GEMM run
-(which do not search), transforms that submit no grouped recoupling batch
-(unique fusion, a serial replay, one Multi block per chunk, compact
-diagonals, lazy adjoints), QR and LQ (baseline placement), solves,
-the full general eigendecomposition, the prepared batched `EighFullPlan`,
-and operations without dense blocks (norms, linear combinations,
-transfers).
-
-The default lane allocation adds no restriction. Another allocation needs
-the native provider's CPU engine under the `Auto` batch policy, the only
-configuration that searches. On a CPU engine, participation is decided per
-phase from the call's plan (its GEMM batches, the destination form its core
-writes, and the recoupling batches its transforms submit at the engine's
-replay width) before the call writes a destination, and a participating phase is refused with
-`OperationError::Dense(DenseError::Unsupported { op: "lane_allocation", .. })`
-when the build links a BLAS provider (which has no lane allocator for its
-grouped GEMM and factorization routes) or when the engine's batch policy is
-forced (`Inner`, `Outer`, `Split`, `Sequential`), which fixes the placement
-itself: symtn does not override the engine's policy, and does not silently
-run another placement than the one requested. A factorization batch, whose
-outputs are fresh, is refused when it would run. A CUDA engine has no lane
-allocator and no Host fallback: a contraction, transform, prepared plan or
-compact SVD/eigh call with another allocation is refused before any upload
-or submission. On the native provider under `Auto`, a call that has nothing
-to search (one block, or one thread) runs as with the default. A
-factorization whose leg roles need a permute with a grouped recoupling batch
-first is refused for that permute even when its own dense stage ignores the
-allocation.
+inputs). No promise is made across widths or providers: a provider GEMM may
+reduce in another order at another width (faer's matrix-vector route splits
+the contraction over its threads), so results agree within rounding.
+BLAS-internal threads remain separate.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
 An eager operation builds its execution scratch (tree-transform and

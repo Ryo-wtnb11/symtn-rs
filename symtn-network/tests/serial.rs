@@ -17,7 +17,6 @@ mod numerics;
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
 
 mod intermediate_orientation_cost;
-mod lane_allocation_forwarding;
 mod output_partition_passes;
 mod preflight_allocations;
 

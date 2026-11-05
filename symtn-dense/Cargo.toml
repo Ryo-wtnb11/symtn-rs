@@ -100,3 +100,8 @@ path = "tests/integration.rs"
 [[test]]
 name = "serial"
 path = "tests/serial.rs"
+
+# Its own binary: the warm allocation count is taken on every thread.
+[[test]]
+name = "warm_lane_allocations"
+path = "tests/warm_lane_allocations.rs"

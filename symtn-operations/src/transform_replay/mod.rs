@@ -45,7 +45,6 @@ mod owned;
 #[cfg(test)]
 mod tests;
 
-pub use batched::tree_transform_searches_lanes;
 use batched::*;
 use coefficients::*;
 pub use entry::*;

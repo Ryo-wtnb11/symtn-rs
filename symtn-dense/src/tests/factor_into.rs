@@ -602,8 +602,7 @@ mod native {
                 &mut broken,
                 &crate::tests::block_svd::PanicsAt(0),
                 &mut [(); 2],
-                &mut crate::block_kernel::driver::LaneScratch::default(),
-                crate::LaneAllocation::Moldable,
+                &mut crate::lanes::LaneTables::default(),
             )
         }));
         assert!(unwound.is_err() && broken.is_broken());
@@ -1369,65 +1368,6 @@ fn polar_refuses_without_a_destination_and_per_input() {
                 "{op:?}: {error:?}"
             );
         }
-    }
-}
-
-/// Purpose: the BLAS provider, which has no lane allocator, refuses a
-/// non-default lane allocation for a polar or Hermitian exponential batch of
-/// two or more inputs with a typed `Unsupported` before any solve or write.
-#[cfg(feature = "cpu-blas-core")]
-#[test]
-fn blas_refuses_a_lane_allocation_for_destination_only_batches_before_any_write() {
-    let engine = &mut CpuEngine::serial();
-    let data = [1.0_f64, 2.0, 2.0, 4.0, 5.0, 7.0];
-    for op in [
-        DenseFactorization::LeftPolar,
-        DenseFactorization::RightPolar,
-        DenseFactorization::ExpViaEigh,
-    ] {
-        let shape = match op {
-            DenseFactorization::LeftPolar => [3, 2],
-            DenseFactorization::RightPolar => [2, 3],
-            _ => [2, 2],
-        };
-        let data = &data[..shape[0] * shape[1]];
-        let layout = strides(&shape);
-        let input = || DenseRead::F64(DenseView::new(data, &shape, &layout, 0).unwrap());
-        let inputs = [input(), input()];
-        let mut buffers: Vec<Buffers<f64>> = (0..2)
-            .map(|_| {
-                Buffers::new(
-                    op,
-                    dest_shapes(op, &shape, FactorPlacement::AsComputed),
-                    7.0,
-                )
-            })
-            .collect();
-        let mut dests: Vec<_> = buffers
-            .iter_mut()
-            .map(|b| b.dest(op, FactorPlacement::AsComputed))
-            .collect();
-        let mut executor = DefaultDenseExecutor::new();
-        executor.set_lane_allocation(crate::LaneAllocation::EqualShare);
-        let error = executor
-            .factorize_batch_into(engine, op, &inputs, &mut dests, &mut |_, _, _| {
-                panic!("a refused batch delivers nothing")
-            })
-            .unwrap_err();
-        drop(dests);
-        assert!(
-            matches!(
-                error,
-                DenseError::Unsupported {
-                    op: "lane_allocation",
-                    ..
-                }
-            ),
-            "{op:?}: {error:?}"
-        );
-        assert!(buffers
-            .iter()
-            .all(|b| b.factors.iter().flatten().all(|&value| value == 7.0)));
     }
 }
 

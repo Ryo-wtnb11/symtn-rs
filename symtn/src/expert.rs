@@ -36,10 +36,10 @@ pub use symtn_tensors::{TreeTransformOperation, TreeTransformOperationKind};
 use crate::sector::{
     CheckedFusionAlgebra, MultiplicityFreeRigidSymbols, SectorCodec, TypedSectorAdmission,
 };
+use crate::typed::ExecContext;
 use crate::typed::{
     Error, FacadeError, SectorSpectrum, TensorMap, TensorScalar, TypedTensorRootDispatch,
 };
-use crate::typed::{ExecContext, ExecOptions};
 use symtn_dense::Engine;
 
 /// Returns the compact diagonal spectrum without materializing dense data.
@@ -60,7 +60,7 @@ where
     R::Mode: TypedTensorRootDispatch<R>,
     D: TensorScalar,
 {
-    let (engine, _) = cx.parts();
+    let engine = cx.engine();
     diagonal_spectrum_impl(engine, tensor)
 }
 
@@ -96,13 +96,12 @@ where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: TensorScalar,
 {
-    let (engine, options) = cx.parts();
-    is_diagonal_impl(engine, options, tensor, tol)
+    let engine = cx.engine();
+    is_diagonal_impl(engine, tensor, tol)
 }
 
 fn is_diagonal_impl<R, D>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     tensor: &TensorMap<R, D>,
     tol: f64,
 ) -> Result<bool, Error>
@@ -110,5 +109,5 @@ where
     R: MultiplicityFreeRigidSymbols + CheckedFusionAlgebra + SectorCodec,
     D: TensorScalar,
 {
-    tensor.is_diagonal(engine, options, tol)
+    tensor.is_diagonal(engine, tol)
 }

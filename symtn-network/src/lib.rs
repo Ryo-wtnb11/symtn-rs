@@ -106,8 +106,7 @@ pub use tree::ContractionTree;
 /// `@tensor`: `contract!(&mut engine, [i; k] := a[i; j] * b[j; k])?`.
 ///
 /// The first argument is the caller's execution context (any `&mut`
-/// expression that [`Network::contract`] accepts: an engine, or a
-/// [`symtn::typed::Configured`] engine with execution options), evaluated
+/// expression that [`Network::contract`] accepts, such as an engine), evaluated
 /// once; the contraction and any scalar readback run on it. It is [`Network::new`] plus [`Network::contract`], nothing more: each call
 /// site builds its `Network` once (in a `static`), and every call contracts
 /// the operands through the Runtime's plan cache, on Host and CUDA operands
@@ -167,20 +166,6 @@ pub use tree::ContractionTree;
 /// # }
 /// ```
 pub use symtn_macros::contract;
-
-/// One call's engine and options, borrowed: the context a network call hands
-/// to the tensor operations it composes, so each step runs with the caller's
-/// options rather than an engine's defaults.
-struct Borrowed<'a> {
-    engine: &'a mut dyn symtn::typed::Engine,
-    options: symtn::typed::ExecOptions,
-}
-
-impl symtn::typed::ExecContext for Borrowed<'_> {
-    fn parts(&mut self) -> (&mut dyn symtn::typed::Engine, symtn::typed::ExecOptions) {
-        (&mut *self.engine, self.options)
-    }
-}
 
 /// The workspace tolerance rule for arithmetic test comparisons
 /// (`docs/testing_numerics.md`).

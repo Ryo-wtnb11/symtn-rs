@@ -25,7 +25,6 @@ use std::any::{Any, TypeId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use symtn::typed::ExecContext;
 
 use lru::LruCache;
 use symtn::expert::TensorStorage;
@@ -465,7 +464,7 @@ impl CachedPlan {
     /// which decided the operand count and admission before the lookup.
     pub(crate) fn execute<R, D, S>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, S>],
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
     where
@@ -1472,7 +1471,6 @@ mod tests {
     use std::time::Duration;
     use symtn::sector::{SU2FusionRule, U1FusionRule};
     use symtn::typed::Complex64;
-    use symtn::typed::ExecContext;
     use symtn::typed::{ContractSpec, GradedSpace, TensorMap};
 
     #[cfg(feature = "cotengra-python")]
@@ -1519,14 +1517,14 @@ mod tests {
         }
     }
 
-    type Call<'a> = &'a dyn Fn(&mut dyn ExecContext) -> Result<(), String>;
+    type Call<'a> = &'a dyn Fn(&mut dyn symtn::typed::Engine) -> Result<(), String>;
 
     /// `reject` is rejected on the plan-cache miss, topology-hit and
     /// alias-hit paths of the `Network::contract` call that `accept` publishes,
     /// leaving [`CacheState`] and `extra` (device transfers) unchanged, with
     /// one error on every path, which is returned.
     fn assert_rejected_before_the_lookup<X: PartialEq + std::fmt::Debug>(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         runtime: &symtn::typed::Runtime,
         what: &str,
         accept: Call<'_>,
@@ -1541,7 +1539,7 @@ mod tests {
                     .clear();
             })
         };
-        let rejected = |engine: &mut dyn ExecContext, path: &str| {
+        let rejected = |engine: &mut dyn symtn::typed::Engine, path: &str| {
             let before = (cache_state(runtime), extra());
             let error = reject(engine).expect_err(what);
             assert_eq!((cache_state(runtime), extra()), before, "{what}: {path}");
@@ -1579,7 +1577,7 @@ mod tests {
     /// `[i; k] = a[i, j;] * b[j, k;]`. Each is one topology for every
     /// provider and storage, so a probe operand meets the plan a U(1) operand
     /// of the same leg dimensions published.
-    fn pair<T>(engine: &mut dyn ExecContext, a: &T, b: &T) -> Result<(), String>
+    fn pair<T>(engine: &mut dyn symtn::typed::Engine, a: &T, b: &T) -> Result<(), String>
     where
         T: crate::NetworkOperand,
         T::Error: std::fmt::Display,
@@ -1597,7 +1595,7 @@ mod tests {
         .map_err(|error| error.to_string())
     }
 
-    fn codomain_pair<T>(engine: &mut dyn ExecContext, a: &T, b: &T) -> Result<(), String>
+    fn codomain_pair<T>(engine: &mut dyn symtn::typed::Engine, a: &T, b: &T) -> Result<(), String>
     where
         T: crate::NetworkOperand,
         T::Error: std::fmt::Display,
@@ -1636,7 +1634,7 @@ mod tests {
         TensorMap<crate::braiding_probe::RealBraidingProbe<ANYONIC>, f64>;
 
     fn rejections(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         runtime: &symtn::typed::Runtime,
     ) -> Rejections<TensorMap<U1FusionRule, f64>, ProbeMap<true>> {
         use crate::braiding_probe::{ProbeSector, RealBraidingProbe};
@@ -1675,7 +1673,7 @@ mod tests {
         assert_eq!(x_flag.dim().unwrap(), x_dual.dim().unwrap());
         let p =
             GradedSpace::try_new(Arc::new(RealBraidingProbe::<true>), [(ProbeSector, 2)]).unwrap();
-        let u1 = |engine: &mut dyn ExecContext,
+        let u1 = |engine: &mut dyn symtn::typed::Engine,
                   codomain: &[&GradedSpace<U1FusionRule>],
                   domain: &[&GradedSpace<U1FusionRule>],
                   seed| {
@@ -1688,7 +1686,7 @@ mod tests {
             )
             .unwrap()
         };
-        let probe = |engine: &mut dyn ExecContext, rank: usize, seed| {
+        let probe = |engine: &mut dyn symtn::typed::Engine, rank: usize, seed| {
             TensorMap::rand_with_seed(engine, runtime, vec![&p; rank], vec![&p; rank], seed)
                 .unwrap()
         };
@@ -1761,15 +1759,16 @@ mod tests {
         for (what, accept, reject, split, rank) in [
             (
                 "split 1 on codomain rank 2",
-                &(|engine: &mut dyn ExecContext| pair(engine, &o.a, &o.b)) as Call<'_>,
-                &(|engine: &mut dyn ExecContext| pair(engine, &o.cc_a, &o.cc_b)) as Call<'_>,
+                &(|engine: &mut dyn symtn::typed::Engine| pair(engine, &o.a, &o.b)) as Call<'_>,
+                &(|engine: &mut dyn symtn::typed::Engine| pair(engine, &o.cc_a, &o.cc_b))
+                    as Call<'_>,
                 1,
                 2,
             ),
             (
                 "split 2 on codomain rank 1",
-                &|engine: &mut dyn ExecContext| codomain_pair(engine, &o.cc_a, &o.cc_b),
-                &|engine: &mut dyn ExecContext| codomain_pair(engine, &o.a, &o.b),
+                &|engine: &mut dyn symtn::typed::Engine| codomain_pair(engine, &o.cc_a, &o.cc_b),
+                &|engine: &mut dyn symtn::typed::Engine| codomain_pair(engine, &o.a, &o.b),
                 2,
                 1,
             ),
@@ -1799,33 +1798,35 @@ mod tests {
         let runtime = symtn::typed::Runtime::builder().build().unwrap();
         let o = rejections(engine, &runtime);
         let none = || ();
-        let accept_pair = |engine: &mut dyn ExecContext| pair(engine, &o.a, &o.b);
+        let accept_pair = |engine: &mut dyn symtn::typed::Engine| pair(engine, &o.a, &o.b);
         let accept_codomain =
-            |engine: &mut dyn ExecContext| codomain_pair(engine, &o.cc_a, &o.cc_b);
+            |engine: &mut dyn symtn::typed::Engine| codomain_pair(engine, &o.cc_a, &o.cc_b);
         for (what, accept, reject, label) in [
             (
                 "degeneracy",
                 &accept_codomain as Call<'_>,
-                &(|engine: &mut dyn ExecContext| codomain_pair(engine, &o.cc_a, &o.cc_degeneracy))
-                    as Call<'_>,
+                &(|engine: &mut dyn symtn::typed::Engine| {
+                    codomain_pair(engine, &o.cc_a, &o.cc_degeneracy)
+                }) as Call<'_>,
                 "j",
             ),
             (
                 "undualised flag",
                 &accept_codomain,
-                &|engine: &mut dyn ExecContext| codomain_pair(engine, &o.cc_a, &o.cc_flag),
+                &|engine: &mut dyn symtn::typed::Engine| codomain_pair(engine, &o.cc_a, &o.cc_flag),
                 "j",
             ),
             (
                 "sector",
                 &accept_pair as Call<'_>,
-                &(|engine: &mut dyn ExecContext| pair(engine, &o.a, &o.b_sector)) as Call<'_>,
+                &(|engine: &mut dyn symtn::typed::Engine| pair(engine, &o.a, &o.b_sector))
+                    as Call<'_>,
                 "j",
             ),
             (
                 "duality",
                 &accept_pair,
-                &|engine: &mut dyn ExecContext| pair(engine, &o.a, &o.b_dual),
+                &|engine: &mut dyn symtn::typed::Engine| pair(engine, &o.a, &o.b_dual),
                 "j",
             ),
         ] {
@@ -1858,7 +1859,7 @@ mod tests {
             &runtime,
             "non-symmetric",
             &accept_pair,
-            &|engine: &mut dyn ExecContext| pair(engine, &o.probe_a, &o.probe_b),
+            &|engine: &mut dyn symtn::typed::Engine| pair(engine, &o.probe_a, &o.probe_b),
             &none,
         );
         assert_eq!(error, contract_error, "non-symmetric");
@@ -1890,8 +1891,8 @@ mod tests {
             lift(&h.cc_flag),
         );
         let transfers = symtn::expert::cuda_transfer_stats;
-        let accept_pair = |e: &mut dyn ExecContext| pair(e, &a, &b);
-        let accept_codomain = |e: &mut dyn ExecContext| codomain_pair(e, &cc_a, &cc_b);
+        let accept_pair = |e: &mut dyn symtn::typed::Engine| pair(e, &a, &b);
+        let accept_codomain = |e: &mut dyn symtn::typed::Engine| codomain_pair(e, &cc_a, &cc_b);
         // Warm the engine so lazily created state is not attributed to the
         // rejected calls.
         accept_pair(cuda).unwrap();
@@ -1899,31 +1900,32 @@ mod tests {
             (
                 "degeneracy",
                 &accept_codomain as Call<'_>,
-                &(|e: &mut dyn ExecContext| codomain_pair(e, &cc_a, &cc_degeneracy)) as Call<'_>,
+                &(|e: &mut dyn symtn::typed::Engine| codomain_pair(e, &cc_a, &cc_degeneracy))
+                    as Call<'_>,
                 codomain_pair(engine, &h.cc_a, &h.cc_degeneracy),
             ),
             (
                 "undualised flag",
                 &accept_codomain,
-                &|e: &mut dyn ExecContext| codomain_pair(e, &cc_a, &cc_flag),
+                &|e: &mut dyn symtn::typed::Engine| codomain_pair(e, &cc_a, &cc_flag),
                 codomain_pair(engine, &h.cc_a, &h.cc_flag),
             ),
             (
                 "sector",
                 &accept_pair,
-                &(|e: &mut dyn ExecContext| pair(e, &a, &b_sector)) as Call<'_>,
+                &(|e: &mut dyn symtn::typed::Engine| pair(e, &a, &b_sector)) as Call<'_>,
                 pair(engine, &h.a, &h.b_sector),
             ),
             (
                 "duality",
                 &accept_pair,
-                &|e: &mut dyn ExecContext| pair(e, &a, &b_dual),
+                &|e: &mut dyn symtn::typed::Engine| pair(e, &a, &b_dual),
                 pair(engine, &h.a, &h.b_dual),
             ),
             (
                 "non-symmetric",
                 &accept_pair,
-                &|e: &mut dyn ExecContext| pair(e, &probe_a, &probe_b),
+                &|e: &mut dyn symtn::typed::Engine| pair(e, &probe_a, &probe_b),
                 pair(engine, &h.probe_a, &h.probe_b),
             ),
         ] {

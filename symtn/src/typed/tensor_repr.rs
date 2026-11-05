@@ -806,14 +806,13 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         source: impl Into<TensorRef<'a, R, D>>,
     ) -> Result<Self, Error> {
-        let (engine, options) = cx.parts();
-        self.absorb_impl(engine, options, source)
+        let engine = cx.engine();
+        self.absorb_impl(engine, source)
     }
 
     fn absorb_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         source: impl Into<TensorRef<'a, R, D>>,
     ) -> Result<Self, Error> {
         let source = source.into().operand()?;
@@ -862,8 +861,8 @@ where
             }
         }
         // A lazy input still takes an operation-local dense payload.
-        let destination = self.materialized_tensor_uncached(engine, options)?;
-        let source = source.materialized_tensor_uncached(engine, options)?;
+        let destination = self.materialized_tensor_uncached(engine)?;
+        let source = source.materialized_tensor_uncached(engine)?;
         let destination_body = destination
             .owned_body()
             .expect("uncached materialization is owned");
@@ -1006,13 +1005,12 @@ where
     fn convert_payload<E>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         convert: impl Fn(D) -> E,
     ) -> Result<TensorMap<R, E>, Error> {
         let body = match &self.repr {
             TypedTensorRepr::Owned(body) => body.convert_payload(convert),
             TypedTensorRepr::Adjoint(_) => self
-                .materialized_tensor_uncached(engine, options)?
+                .materialized_tensor_uncached(engine)?
                 .owned_body()
                 .expect("uncached materialization is owned")
                 .convert_payload(convert),
@@ -1192,18 +1190,14 @@ where
     where
         D: PayloadConversion<To>,
     {
-        let (engine, options) = cx.parts();
-        self.convert_impl(engine, options)
+        let engine = cx.engine();
+        self.convert_impl(engine)
     }
 
-    fn convert_impl<To>(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<TensorMap<R, To>, Error>
+    fn convert_impl<To>(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, To>, Error>
     where
         D: PayloadConversion<To>,
     {
-        self.convert_payload(engine, options, PayloadConversion::convert_value)
+        self.convert_payload(engine, PayloadConversion::convert_value)
     }
 }

@@ -266,7 +266,7 @@ where
     /// so a failed call on a new engine keeps nothing of the old one, and
     /// again after parked destinations are re-attached. A Host workspace
     /// keeps everything (a CPU engine owns every Host buffer).
-    fn drop_foreign_device_state(&mut self, engine: &mut dyn ExecContext)
+    fn drop_foreign_device_state(&mut self, engine: &mut dyn symtn::typed::Engine)
     where
         R: TypedSectorAdmission,
         R::Mode: NetworkModeDispatch<R, D, S>,
@@ -411,7 +411,7 @@ impl PlannedNetwork {
 /// the same step, and schedules are produced only by `compile_schedule`.
 #[cfg(feature = "cuda")]
 pub(super) fn cuda_operand_admission<R, D>(
-    engine: &mut dyn ExecContext,
+    engine: &mut dyn symtn::typed::Engine,
     tensors: &[&TensorMap<R, D, CudaStorage<D>>],
     contracts: bool,
 ) -> Result<(), Error>
@@ -488,13 +488,13 @@ impl PlannedNetwork {
         D: TensorScalar,
         S: NetworkOperandStorage<R, D>,
     {
-        let (engine, options) = cx.parts();
-        self.execute_impl(&mut crate::Borrowed { engine, options }, tensors, workspace)
+        let engine = cx.engine();
+        self.execute_impl(engine, tensors, workspace)
     }
 
     fn execute_impl<R, D, S>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -522,7 +522,7 @@ impl PlannedNetwork {
     /// [`Network::contract`] before its plan lookup.
     pub(crate) fn execute_admitted<R, D, S>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
     ) -> Result<TensorMap<R, D, S>, FacadeError<R>>
@@ -543,7 +543,7 @@ impl PlannedNetwork {
 
     pub(super) fn execute_with_workspace_meter<R, D, S>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, S>],
         workspace: &mut NetworkExecutionWorkspace<R, D, S>,
         mut meter: Option<&mut PayloadMeter>,

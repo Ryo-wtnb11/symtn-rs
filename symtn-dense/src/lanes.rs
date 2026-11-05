@@ -11,10 +11,11 @@
 //! # Placement under `Auto`
 //!
 //! Every stage gets the provider's own public width rule, threadteam's
-//! `width_for` over its serial estimate with one section; a single-item
+//! `width_for` over its serial estimate with its section count `s`
+//! ([`Estimate::sections`], one for a provider call); a single-item
 //! factorization's width is further capped by the width its payback estimate
 //! pays for ([`Estimate::payback`]). The job width `w_j` is the widest stage.
-//! A stage of width `x` is modelled as `E` at one slot and `E / x + D(x)`
+//! A stage of width `x` is modelled as `E` at one slot and `E / x + s D(x)`
 //! above, with `D` the token's dispatch cost: a linear-speedup approximation,
 //! not a provider curve. A job's time on a share `a` sums its stages at
 //! `min(a, w_k)`, grouped by stage width.
@@ -72,6 +73,10 @@ use tenferro_cpu::threadteam;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StageKind {
     /// A symtn-owned data movement section (pack, scatter, direct copies).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tree replays consume the barrier form")
+    )]
     Movement,
     /// One provider call (a GEMM, a factorization). The barrier form hands it
     /// to the engine between rounds.
@@ -87,6 +92,12 @@ pub struct Estimate {
     /// width as tlinalg caps a batch of one; `None` for every other stage,
     /// including a multi-item factorization's intact envelope.
     pub payback: Option<Duration>,
+    /// The parallel sections the stage opens (at least one): its width is
+    /// queried with this count and each of them is priced one dispatch.
+    /// A provider call is one; a composite that runs several provider calls
+    /// in one body counts them, an aggregate envelope approximation of
+    /// those calls, not a per-call model.
+    pub sections: u32,
 }
 
 /// Which runner the placement is scored for, fixed by the executor before
@@ -97,6 +108,10 @@ pub enum Form {
     Native,
     /// Provider stages are handed to the engine between rounds
     /// ([`run_barrier`]).
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the tree replays consume the barrier form")
+    )]
     Barrier,
 }
 
@@ -228,6 +243,7 @@ struct PlaceScratch {
     costs: Vec<u128>,
     /// Every stage's serial estimate in ns and kind, flat in job order.
     stage_ns: Vec<u128>,
+    sections: Vec<u32>,
     kinds: Vec<StageKind>,
     /// Per job: E_j, w_j and the allotment a_j.
     job_ns: Vec<u128>,
@@ -258,7 +274,8 @@ struct PlaceScratch {
     share_slot: Vec<usize>,
     distinct: Vec<usize>,
     distinct_time: Vec<u128>,
-    /// One job's time summary: `(w, sum E, count)` per distinct stage width,
+    /// One job's time summary: `(w, sum E, sum of sections)` per distinct
+    /// stage width,
     /// indexed through `bucket_of` (by width, `usize::MAX` if none).
     bucket_of: Vec<usize>,
     buckets: Vec<(usize, u128, u128)>,
@@ -292,6 +309,11 @@ impl PlaceScratch {
                 .capacity()
                 .saturating_mul(std::mem::size_of::<StageKind>()),
         )
+        .saturating_add(
+            self.sections
+                .capacity()
+                .saturating_mul(std::mem::size_of::<u32>()),
+        )
         .saturating_add(memo_bytes(self.memo_capacity))
         .saturating_add(
             self.memo_keys
@@ -319,12 +341,14 @@ impl PlaceScratch {
         }
     }
 
-    /// `t_k(x)` of a stage of `e` ns.
-    fn stage_time(&self, e: u128, x: usize) -> u128 {
+    /// `t_k(x)` of stage `k`.
+    fn stage_time(&self, k: usize, x: usize) -> u128 {
+        let e = self.stage_ns[k];
         if x < 2 {
             e
         } else {
-            (e / x as u128).saturating_add(self.costs[x])
+            (e / x as u128)
+                .saturating_add(u128::from(self.sections[k]).saturating_mul(self.costs[x]))
         }
     }
 
@@ -332,7 +356,8 @@ impl PlaceScratch {
     fn summarize(&mut self, starts: &[usize], widths: &[usize], j: usize) {
         self.buckets.clear();
         let range = starts[j]..starts[j + 1];
-        for (&w, &e) in widths[range.clone()].iter().zip(&self.stage_ns[range]) {
+        for k in range {
+            let (w, e, sections) = (widths[k], self.stage_ns[k], self.sections[k]);
             let slot = match self.bucket_of[w] {
                 usize::MAX => {
                     self.bucket_of[w] = self.buckets.len();
@@ -343,7 +368,7 @@ impl PlaceScratch {
             };
             let bucket = &mut self.buckets[slot];
             bucket.1 = bucket.1.saturating_add(e);
-            bucket.2 += 1;
+            bucket.2 += u128::from(sections);
         }
         for &(w, _, _) in &self.buckets {
             self.bucket_of[w] = usize::MAX;
@@ -422,6 +447,7 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
         cheapest = cheapest.min(cost);
     }
     scratch.stage_ns.clear();
+    scratch.sections.clear();
     scratch.kinds.clear();
     scratch.job_ns.clear();
     scratch.job_width.clear();
@@ -438,15 +464,16 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
                 .payback
                 .map_or(estimate.serial, |p| p.max(estimate.serial));
             // No width pays below `PAYS` sections of the cheapest dispatch.
-            let w = if !threadteam::pays_at(largest, 1, cheapest) {
+            let sections = estimate.sections.max(1);
+            let w = if !threadteam::pays_at(largest, sections, cheapest) {
                 1
             } else {
                 let w = *scratch.memo.entry(estimate).or_insert_with(|| {
                     scratch.memo_keys.push(estimate);
-                    let w = token.width_for(estimate.serial, 1);
+                    let w = token.width_for(estimate.serial, sections);
                     estimate
                         .payback
-                        .map_or(w, |p| w.min(token.width_for(p, 1)))
+                        .map_or(w, |p| w.min(token.width_for(p, sections)))
                         .get()
                 });
                 scratch.memo_capacity = scratch.memo_capacity.max(scratch.memo.capacity());
@@ -455,6 +482,7 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
             let e = ns(estimate.serial);
             placement.widths.push(w);
             scratch.stage_ns.push(e);
+            scratch.sections.push(sections);
             scratch.kinds.push(jobs.kind(j, k));
             e_j = e_j.saturating_add(e);
             w_j = w_j.max(w);
@@ -584,11 +612,10 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
                 scratch.summarize(&placement.stage_starts, &placement.widths, j);
                 scratch.job_time(budget)
             }
-            Form::Barrier => {
-                (placement.stage_starts[j]..placement.stage_starts[j + 1]).fold(0u128, |t, k| {
-                    t.saturating_add(scratch.stage_time(scratch.stage_ns[k], placement.widths[k]))
-                })
-            }
+            Form::Barrier => (placement.stage_starts[j]..placement.stage_starts[j + 1])
+                .fold(0u128, |t, k| {
+                    t.saturating_add(scratch.stage_time(k, placement.widths[k]))
+                }),
         };
         sequential_time = sequential_time.saturating_add(t);
     }
@@ -699,15 +726,15 @@ fn barrier_time(placement: &Placement, scratch: &mut PlaceScratch) -> u128 {
         let (mut round, mut movement, mut trailing) = (0usize, 0u128, false);
         for &j in placement.jobs(l) {
             for k in placement.stage_starts[j]..placement.stage_starts[j + 1] {
-                let (e, w) = (scratch.stage_ns[k], placement.widths[k]);
+                let w = placement.widths[k];
                 match scratch.kinds[k] {
                     StageKind::Movement => {
-                        movement = movement.saturating_add(scratch.stage_time(e, share.min(w)));
+                        movement = movement.saturating_add(scratch.stage_time(k, share.min(w)));
                         trailing = true;
                     }
                     StageKind::Provider => {
                         raise(&mut scratch.round_max, round, movement);
-                        serialized = serialized.saturating_add(scratch.stage_time(e, w));
+                        serialized = serialized.saturating_add(scratch.stage_time(k, w));
                         (round, movement, trailing) = (round + 1, 0, false);
                     }
                 }
@@ -758,6 +785,10 @@ pub trait Work: Jobs + Sync {
 /// The engine side of the barrier form: the caller owns the engine and
 /// enters it once per round, and submits each pending provider stage on the
 /// engine's whole offer between rounds.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the tree replays consume the barrier form")
+)]
 pub trait Barrier<W: Work + ?Sized> {
     /// A refused engine entry.
     type Refused;
@@ -828,6 +859,10 @@ impl RunScratch {
             .collect();
         if refs.len() < count {
             refs.resize_with(count, Vec::new);
+        }
+        // Each lane's vector reserved exactly, so a cold call grows each once.
+        for (l, lane) in refs.iter_mut().take(count).enumerate() {
+            lane.reserve(placement.jobs(l).len());
         }
         for (j, state) in states.iter_mut().enumerate() {
             refs[placement.lane_of[j]].push((j, state));
@@ -997,6 +1032,10 @@ pub fn run_native<W: Work>(
 /// # Panics
 ///
 /// As [`run_native`].
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "the tree replays consume the barrier form")
+)]
 pub fn run_barrier<W: Work, H: Barrier<W>>(
     host: &mut H,
     work: &W,

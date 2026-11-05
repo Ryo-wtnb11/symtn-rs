@@ -11,9 +11,6 @@
 //!   only.
 //! - A prepared workspace follows the engine of each call: an output it
 //!   retained for one engine is dropped, not reused, on another.
-//! - A CUDA engine has no lane allocator: a non-default lane allocation is
-//!   refused before any transfer or submission, eager and prepared alike,
-//!   and the retained workspace then serves a valid call.
 //!
 //! Run with `cargo test -p symtn --no-default-features --features cuda,cpu-faer
 //! --test integration cuda_engine_ownership:: -- --ignored` on a CUDA host.
@@ -25,9 +22,8 @@ use std::sync::Arc;
 use symtn::expert::cuda_transfer_stats;
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::{
-    ComposePlan, Configured, ContractPlan, ContractSpec, CpuEngine, CudaStorage, Direction,
-    EighFullPlan, Engine, GradedSpace, HermitianTol, LaneAllocation, Runtime, StackedTensorMap,
-    TensorMap,
+    ComposePlan, ContractPlan, ContractSpec, CpuEngine, CudaStorage, Direction, EighFullPlan,
+    Engine, GradedSpace, HermitianTol, Runtime, StackedTensorMap, TensorMap,
 };
 
 use crate::prepared::eigh::hermitian_members;
@@ -97,85 +93,6 @@ fn a_cpu_engine_is_refused_on_device_tensors_before_any_transfer() {
     assert_shortcuts_refused(engine, &lhs);
     assert_eq!(cuda_transfer_stats(), stats, "nothing reached the device");
     assert_eq!(bits(cuda, &destination), before);
-}
-
-/// The typed refusal of a lane allocation the engine has no allocator for.
-fn lane_allocation_refused<T>(result: Result<T, symtn::typed::Error>) -> bool {
-    matches!(
-        result,
-        Err(symtn::typed::Error::Operation(error)) if matches!(
-            *error,
-            symtn::typed::OperationError::Dense(symtn::expert::DenseError::Unsupported {
-                op: "lane_allocation",
-                ..
-            })
-        )
-    )
-}
-
-#[test]
-#[ignore = "requires a real CUDA device"]
-fn a_lane_allocation_is_refused_on_a_cuda_engine_before_any_device_work() {
-    let engine = &mut CpuEngine::serial();
-    let mut cx = Configured::new(crate::common::cuda_engine())
-        .with_lane_allocation(LaneAllocation::EqualShare);
-    let runtime = Runtime::builder().build().unwrap();
-    let lhs = fixture(engine, &runtime, 1.0).to_cuda(&mut cx).unwrap();
-    let rhs = fixture(engine, &runtime, 2.0).to_cuda(&mut cx).unwrap();
-    let mut destination = fixture(engine, &runtime, 3.0).to_cuda(&mut cx).unwrap();
-    let before = bits(cx.engine_mut(), &destination);
-    let (v, w) = u1_legs();
-    let lhs_s = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&v, &v], &[&w], MEMBERS, 1))
-        .unwrap()
-        .to_cuda(&mut cx)
-        .unwrap();
-    let rhs_s = StackedTensorMap::pack(&members::<_, f64>(&runtime, &[&w], &[&v], MEMBERS, 2))
-        .unwrap()
-        .to_cuda(&mut cx)
-        .unwrap();
-    let spec = ContractSpec {
-        lhs: &[2],
-        rhs: &[0],
-        codomain: &[0, 1],
-        domain: &[2],
-    };
-    let plan = ContractPlan::new(cx.engine_mut(), &lhs_s, &rhs_s, &spec).unwrap();
-    let mut cold = plan.workspace().unwrap();
-    let mut retained = plan.workspace().unwrap();
-    plan.execute(cx.engine_mut(), &lhs_s, &rhs_s, &mut retained)
-        .unwrap();
-    let mut target = retained.take_output().unwrap();
-
-    let stats = cuda_transfer_stats();
-    assert!(lane_allocation_refused(lhs.contract_into(
-        &mut cx,
-        &rhs,
-        &SPEC,
-        &mut destination,
-        1.0,
-        1.0
-    )));
-    assert!(lane_allocation_refused(lhs.contract(&mut cx, &rhs, &SPEC)));
-    assert!(lane_allocation_refused(lhs.permute(&mut cx, &[1], &[0])));
-    assert!(lane_allocation_refused(lhs.svd_compact(
-        &mut cx,
-        &[0],
-        &[1]
-    )));
-    assert!(lane_allocation_refused(
-        plan.execute(&mut cx, &lhs_s, &rhs_s, &mut cold)
-    ));
-    assert!(lane_allocation_refused(plan.execute_into(
-        &mut cx,
-        &lhs_s,
-        &rhs_s,
-        &mut target,
-        &mut retained
-    )));
-    assert_eq!(cuda_transfer_stats(), stats, "nothing reached the device");
-    assert_eq!(bits(cx.engine_mut(), &destination), before);
-    plan.execute_into(cx.engine_mut(), &lhs_s, &rhs_s, &mut target, &mut retained)
-        .unwrap();
 }
 
 #[test]

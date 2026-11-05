@@ -709,25 +709,6 @@ pub fn direct_slice_mut<T>(
 }
 
 impl<C> FusionBlockContractPlan<C> {
-    /// Whether one replay submits a GEMM batch the dense executor places by
-    /// its lane search ([`symtn_dense::batch_searches_lanes`]): a direct
-    /// coefficient batch the executor does not run as one strided call, for
-    /// a fresh owned destination ([`Self::execute_owned`], `fresh`) or an
-    /// initialized one. Irregular groups submit one job each. Unstable
-    /// plumbing for symtn's lane-allocation admission.
-    #[doc(hidden)]
-    pub fn searches_lanes(&self, fresh: bool) -> bool {
-        let ops = [self.lhs_op, self.rhs_op];
-        self.direct_calls.iter().any(|call| {
-            symtn_dense::batch_searches_lanes(
-                &self.direct_batch[call.jobs.clone()],
-                &self.direct_batch_runs[call.runs.clone()],
-                ops,
-                fresh,
-            )
-        })
-    }
-
     /// Initialises the destination blocks no job writes (see
     /// [`ContractDestinationInit`]). `zero_strides` is the caller's reusable
     /// stride scratch for the zero-source assignment.

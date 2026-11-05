@@ -425,7 +425,7 @@ fn fibonacci_complex_lane_reuses_nonreal_structural_plan() {
         vec![Complex64::new(0.0, 0.0); destination.space().required_len().unwrap()];
     let mut lease = crate::runtime::ContextLease::new();
     let context = lease
-        .context(crate::typed::ExecOptions::default())
+        .context()
         .complex_multiplicity_free_lane()
         .tree_context_mut();
 

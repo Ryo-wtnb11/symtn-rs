@@ -14,7 +14,7 @@ pub trait NetworkOperand: network_operand_sealed::Sealed + Sized {
 
     #[doc(hidden)]
     fn contract_network(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         network: &Network,
         tensors: &[&Self],
     ) -> Result<Self, Self::Error>;
@@ -60,13 +60,13 @@ impl Network {
         cx: &mut (impl ExecContext + ?Sized),
         tensors: &[&T],
     ) -> Result<T, T::Error> {
-        let (engine, options) = cx.parts();
-        self.contract_impl(&mut crate::Borrowed { engine, options }, tensors)
+        let engine = cx.engine();
+        self.contract_impl(engine, tensors)
     }
 
     fn contract_impl<T: NetworkOperand>(
         &self,
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&T],
     ) -> Result<T, T::Error> {
         T::contract_network(engine, self, tensors)
@@ -125,7 +125,7 @@ where
     D: TensorScalar,
 {
     fn admit_operands(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>>;
@@ -138,7 +138,7 @@ where
     D: TensorScalar + Send + Sync + 'static,
 {
     fn admit_operands(
-        _engine: &mut dyn ExecContext,
+        _engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D>],
         contracts: bool,
     ) -> Result<(), FacadeError<R>> {
@@ -159,7 +159,7 @@ where
     D: CudaPayload,
 {
     fn admit_operands(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         tensors: &[&TensorMap<R, D, Self>],
         contracts: bool,
     ) -> Result<(), Error> {
@@ -190,7 +190,7 @@ where
     type Error = FacadeError<R>;
 
     fn contract_network(
-        engine: &mut dyn ExecContext,
+        engine: &mut dyn symtn::typed::Engine,
         network: &Network,
         tensors: &[&Self],
     ) -> Result<Self, Self::Error> {

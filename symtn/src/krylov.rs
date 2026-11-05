@@ -12,13 +12,11 @@
 //! # The context is the caller's execution context
 //!
 //! [`Vector::Context`] is [`dyn ExecContext`](crate::typed::ExecContext), the
-//! execution context every other symtn operation takes: a plain engine, or a
-//! [`Configured`](crate::typed::Configured) engine with execution options.
-//! The caller passes `&mut engine` (or `&mut configured`) to each solver and
-//! workspace constructor; krylov forwards that one borrow to every vector
-//! operation and to the linear map, which therefore receives the context as
-//! its first argument instead of capturing it, and runs the operations it
-//! composes with the caller's options. symtn creates and stores no engine of its own: the solver runs on the
+//! execution context every other symtn operation takes: the caller's engine.
+//! The caller passes `&mut engine` to each solver and workspace constructor;
+//! krylov forwards that one borrow to every vector operation and to the
+//! linear map, which therefore receives the context as its first argument
+//! instead of capturing it. symtn creates and stores no engine of its own: the solver runs on the
 //! caller's threads, and an engine that cannot run Host operations (a CUDA
 //! engine, a broken pool) is refused with the same typed error as any other
 //! Host value operation, as `krylov::Error::Vector`.

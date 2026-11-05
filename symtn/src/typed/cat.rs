@@ -79,7 +79,7 @@ where
         other: impl Into<TensorRef<'a, R, D>>,
         side: Side,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.cat_impl(engine, other, side)
     }
 

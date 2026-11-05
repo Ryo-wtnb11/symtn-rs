@@ -50,7 +50,6 @@ mod identity_adjoint_borrow_allocations;
 mod inner_norm_allocations;
 mod into_admission_matrix;
 mod krylov_vector;
-mod lane_allocation_selection;
 mod lazy_adjoint_contract_allocations;
 mod lazy_adjoint_factorization_allocations;
 mod permute_overwrite_allocations;

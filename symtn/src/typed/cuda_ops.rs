@@ -612,11 +612,8 @@ where
         + SectorCodec,
     D: CudaFactorizationPayload,
 {
-    // QR batches keep the baseline placement on Host: no lane allocation
-    // applies to them.
     fn qr_compact(
         engine: &mut dyn Engine,
-        _: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Qr<TensorMap<R, D, Self>>, Error> {
@@ -625,22 +622,18 @@ where
 
     fn svd_compact(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Svd<TensorMap<R, D, Self>>, Error> {
-        options.admit(engine, |_| false)?;
         t.svd_compact_matrix(engine)
     }
 
     fn eigh_full(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<TensorMap<R, D, Self>>, Error> {
-        options.admit(engine, |_| false)?;
         t.eigh_full_matrix(engine, hermitian_tol)
     }
 

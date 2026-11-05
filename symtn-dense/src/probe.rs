@@ -26,9 +26,11 @@ pub(crate) enum Event {
     GemmPlanBuild,
     /// The LQ default wrote one input's adjoint into its scratch.
     LqAdjointStaging,
+    /// The lanes the block lane driver placed one batch on.
+    BlockLanes,
 }
 
-const EVENTS: usize = Event::LqAdjointStaging as usize + 1;
+const EVENTS: usize = Event::BlockLanes as usize + 1;
 
 #[derive(Default)]
 struct Probe {

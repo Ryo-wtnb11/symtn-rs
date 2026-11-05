@@ -48,6 +48,7 @@ fn serial(ns: u64) -> Estimate {
     Estimate {
         serial: Duration::from_nanos(ns),
         payback: None,
+        sections: 1,
     }
 }
 
@@ -55,6 +56,7 @@ fn capped(ns: u64, payback: u64) -> Estimate {
     Estimate {
         serial: Duration::from_nanos(ns),
         payback: Some(Duration::from_nanos(payback)),
+        sections: 1,
     }
 }
 
@@ -418,7 +420,7 @@ fn forced_inner_offers_every_provider_stage_the_whole_budget() {
 #[cfg(any(feature = "cpu-faer", feature = "cpu-blas-core"))]
 #[test]
 fn a_multi_item_factorization_is_offered_its_envelope_width() {
-    use crate::block_kernel::schedule::{estimate, work_model_ns};
+    use crate::block_kernel::driver::{estimate, work_model_ns};
     let model = CpuEngine::serial().batch_policy().model;
     let item = |work| estimate(work_model_ns(&model, work));
     let envelope = item(2.0 * tlinalg::svd::estimate_work::<f64>(12, 6));
@@ -432,6 +434,7 @@ fn a_multi_item_factorization_is_offered_its_envelope_width() {
         Estimate {
             serial: envelope,
             payback: None,
+            sections: 1,
         },
     )]]);
     let mut engine = engine(6, BatchPolicy::default(), row(d));
