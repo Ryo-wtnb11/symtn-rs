@@ -140,22 +140,7 @@ impl<T> TreeTransformReplay<T> {
                 self.recoupling_plan.jobs.capacity(),
                 core::mem::size_of::<DenseGemmBatchJob>(),
             ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.singles.capacity(),
-                core::mem::size_of::<u32>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.pack_columns.capacity(),
-                core::mem::size_of::<TreeTransformPackReplay>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.scatter_columns.capacity(),
-                core::mem::size_of::<TreeTransformScatterReplay>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.scatter_groups.capacity(),
-                core::mem::size_of::<TreeTransformScatterGroupReplay>(),
-            ))
+            .saturating_add(self.parallel_schedule.retained_bytes())
     }
 }
 
