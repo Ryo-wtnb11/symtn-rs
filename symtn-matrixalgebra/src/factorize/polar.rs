@@ -309,9 +309,8 @@ where
 /// `authority` admits the direction over every logical coupled sector and
 /// builds `P`'s space. Every sector of nonzero rank is one input of a
 /// [`DenseFactorization::LeftPolar`] / [`DenseFactorization::RightPolar`]
-/// destination batch writing the output regions in place (a packed input
-/// whose tree order differs from the output is staged per sector and lands
-/// by tree extent after delivery). One scope spans the batch.
+/// destination batch writing the output regions in place. One scope spans the
+/// batch.
 fn polar_dense<A, E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -394,9 +393,9 @@ where
     let solved_blocks: Vec<_> = solved.iter().map(|&index| blocks[index]).collect();
     let mut layouts = Vec::new();
     let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
-    let (op, label) = match direction {
-        PolarDirection::Left => (DenseFactorization::LeftPolar, "left_polar"),
-        PolarDirection::Right => (DenseFactorization::RightPolar, "right_polar"),
+    let op = match direction {
+        PolarDirection::Left => DenseFactorization::LeftPolar,
+        PolarDirection::Right => DenseFactorization::RightPolar,
     };
     // Why allocator zeroing rather than uninitialized outputs: the
     // destinations are safe initialized views, and the zero pages of a large
@@ -412,23 +411,6 @@ where
         };
         let mut w_slices = split_ranges(&mut w_data, &range_of(&w_landings, &w_regions))?;
         let mut p_slices = split_ranges(&mut p_data, &range_of(&p_landings, &p_regions))?;
-        // A reordered landing is written into its own staging slot and
-        // copied into the published region after delivery (the fallback of
-        // a packed input whose tree order differs from the output's).
-        let staging = |landings: &[SectorLanding], slices: &[&mut [D]]| {
-            solved
-                .iter()
-                .map(|&index| {
-                    if landings[index].reorders() {
-                        zeroed_payload::<D>(slices[index].len())
-                    } else {
-                        Vec::new()
-                    }
-                })
-                .collect::<Vec<_>>()
-        };
-        let mut w_staged = staging(&w_landings, &w_slices);
-        let mut p_staged = staging(&p_landings, &p_slices);
         let dest_layouts = solved_blocks
             .iter()
             .map(|&(_, rows, cols)| {
@@ -441,19 +423,10 @@ where
             .collect::<Vec<_>>();
         let mut dests = solved
             .iter()
-            .zip(w_staged.iter_mut().zip(p_staged.iter_mut()))
             .zip(&dest_layouts)
-            .map(|((&index, (w_stage, p_stage)), [w_layout, p_layout])| {
-                let w = if w_landings[index].reorders() {
-                    w_stage.as_mut_slice()
-                } else {
-                    std::mem::take(&mut w_slices[index])
-                };
-                let p = if p_landings[index].reorders() {
-                    p_stage.as_mut_slice()
-                } else {
-                    std::mem::take(&mut p_slices[index])
-                };
+            .map(|(&index, [w_layout, p_layout])| {
+                let w = std::mem::take(&mut w_slices[index]);
+                let p = std::mem::take(&mut p_slices[index]);
                 let (w, p) = (dest_write(w, w_layout)?, dest_write(p, p_layout)?);
                 let outputs = match direction {
                     PolarDirection::Left => [Some(w), Some(p), None],
@@ -469,34 +442,12 @@ where
         // once, and the scope's own refusal takes precedence over the
         // batch's error.
         in_linalg_scope(engine, dense, |dense, engine| {
-            factorize_batch_into_staged(
-                engine,
-                dense,
-                op,
-                &inputs,
-                &mut dests,
-                |index, dest, outcome| {
-                    // The first failure of any kind, in sector order, is the
-                    // operation's error.
-                    outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
-                    let sector = solved[index];
-                    let [first, second, _] = dest.outputs_mut();
-                    let (w, p) = match direction {
-                        PolarDirection::Left => (first, second),
-                        PolarDirection::Right => (second, first),
-                    };
-                    for (landing, regions, slices, output) in [
-                        (&w_landings[sector], &w_regions, &mut w_slices, w),
-                        (&p_landings[sector], &p_regions, &mut p_slices, p),
-                    ] {
-                        if landing.reorders() {
-                            let staged = dest_data::<D>(output, label)?;
-                            landing.land(staged, slices[sector], &regions[landing.output]);
-                        }
-                    }
-                    Ok(())
-                },
-            )
+            factorize_batch_into_staged(engine, dense, op, &inputs, &mut dests, |_, _, outcome| {
+                // The first failure of any kind, in sector order, is the
+                // operation's error.
+                outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                Ok(())
+            })
         })?;
     }
 

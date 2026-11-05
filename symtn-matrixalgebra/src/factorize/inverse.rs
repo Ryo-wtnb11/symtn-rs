@@ -349,7 +349,6 @@ where
     ))?;
 
     let mut output_data = vec![D::zero(); output_len];
-    let mut scratch = Vec::new();
     // One scope spans both passes: the staged SVDs (the cutoff is global) and
     // the per-sector reconstruction GEMMs.
     in_linalg_scope(engine, dense, |dense, engine| {
@@ -403,32 +402,26 @@ where
                     FactorPlacement::Direct => (cols, rows, vt, [rank, 1], u, [rows, 1], true),
                     FactorPlacement::Adjoint => (rows, cols, u, [1, rows], vt, [1, rank], false),
                 };
-            landing.write(
-                &mut output_data,
-                &output_regions[landing.output],
-                &mut scratch,
-                |output| {
-                    let output_shape = [out_rows, out_cols];
-                    let output_strides = [1, out_rows];
-                    let left_shape = [out_rows, rank];
-                    let right_shape = [rank, out_cols];
-                    let output_view = DenseViewMut::new(output, &output_shape, &output_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    let left_view = DenseView::new(left, &left_shape, &left_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    let right_view = DenseView::new(right, &right_shape, &right_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    dense
-                        .dot_general_into(
-                            engine,
-                            D::dense_write(output_view),
-                            D::dense_read(left_view),
-                            D::dense_read(right_view),
-                            &DenseDotConfig::matmul().with_conjugation(conjugate, conjugate),
-                        )
-                        .map_err(OperationError::Dense)
-                },
-            )?;
+            let output = &mut output_data[output_regions[landing.output].range()];
+            let output_shape = [out_rows, out_cols];
+            let output_strides = [1, out_rows];
+            let left_shape = [out_rows, rank];
+            let right_shape = [rank, out_cols];
+            let output_view = DenseViewMut::new(output, &output_shape, &output_strides, 0)
+                .map_err(OperationError::Dense)?;
+            let left_view = DenseView::new(left, &left_shape, &left_strides, 0)
+                .map_err(OperationError::Dense)?;
+            let right_view = DenseView::new(right, &right_shape, &right_strides, 0)
+                .map_err(OperationError::Dense)?;
+            dense
+                .dot_general_into(
+                    engine,
+                    D::dense_write(output_view),
+                    D::dense_read(left_view),
+                    D::dense_read(right_view),
+                    &DenseDotConfig::matmul().with_conjugation(conjugate, conjugate),
+                )
+                .map_err(OperationError::Dense)?;
         }
         Ok(())
     })?;
@@ -674,11 +667,9 @@ where
 /// sector.
 ///
 /// That bound is the kernel's own. It is also the whole of the scratch on a
-/// canonical region layout whose trees the output lists in the same order:
-/// the blocks are read and written in place. A packed input matricizes
-/// *every* sector up front and so costs `O(Σ_c n_c²)` on top of it, and a
-/// sector whose tree order differs from the output's lands through one
-/// `O(max_c n_c²)` staging buffer.
+/// canonical region layout: the blocks are read and written in place. A
+/// packed input matricizes *every* sector up front and so costs
+/// `O(Σ_c n_c²)` on top of it.
 ///
 /// `apply(dense, state, source, n, out)` reads the column-major `n x n` block at
 /// `source` and writes its image into the column-major `n x n` `out`; one
@@ -728,19 +719,14 @@ where
     // One admitted dense scope spans every sector's kernel.
     let output_data = in_linalg_scope(engine, dense, |dense, engine| {
         let mut output_data = vec![D::zero(); output_len];
-        let mut scratch = Vec::new();
         for (index, landing) in landings.iter().enumerate() {
             let matrix = matrices.get(index)?;
             let order = matrix.rows;
             if order == 0 {
                 continue;
             }
-            landing.write(
-                &mut output_data,
-                &output_regions[landing.output],
-                &mut scratch,
-                |output| apply(dense, engine, &mut state, matrix.data, order, output),
-            )?;
+            let output = &mut output_data[output_regions[landing.output].range()];
+            apply(dense, engine, &mut state, matrix.data, order, output)?;
         }
         Ok(output_data)
     })?;
@@ -808,10 +794,8 @@ fn square_sector_routes<'a, R, D: FactorScalar>(
 /// The exponential of a Hermitian endomorphism (MatrixAlgebraKit
 /// `exponential!` via `MatrixFunctionViaEigh`), every coupled sector of
 /// nonzero order one input of a [`DenseFactorization::ExpViaEigh`]
-/// destination batch writing the output region in place (a packed input
-/// whose tree order differs from the output is staged per sector and lands
-/// by tree extent after delivery). One scope spans the batch, and the first
-/// failure in sector order is the error.
+/// destination batch writing the output region in place. One scope spans the
+/// batch, and the first failure in sector order is the error.
 ///
 /// The caller admits the endomorphism and its Hermiticity.
 pub(crate) fn exp_via_eigh_dyn_into<E, R, D>(
@@ -848,32 +832,20 @@ where
             .map(|landing| output_regions[landing.output].range())
             .collect();
         let mut slices = split_ranges(&mut output_data, &ranges)?;
-        let mut staged: Vec<_> = solved
-            .iter()
-            .map(|&index| {
-                if landings[index].reorders() {
-                    zeroed_payload::<D>(slices[index].len())
-                } else {
-                    Vec::new()
-                }
-            })
-            .collect();
         let dest_layouts: Vec<_> = solved_blocks
             .iter()
             .map(|&(_, order, _)| matrix_layout(order, order))
             .collect();
         let mut dests = solved
             .iter()
-            .zip(staged.iter_mut())
             .zip(&dest_layouts)
-            .map(|((&index, stage), layout)| {
-                let output = if landings[index].reorders() {
-                    stage.as_mut_slice()
-                } else {
-                    std::mem::take(&mut slices[index])
-                };
+            .map(|(&index, layout)| {
                 Ok(FactorDest::new(
-                    [Some(dest_write(output, layout)?), None, None],
+                    [
+                        Some(dest_write(std::mem::take(&mut slices[index]), layout)?),
+                        None,
+                        None,
+                    ],
                     symtn_dense::FactorPlacement::AsComputed,
                 ))
             })
@@ -885,17 +857,8 @@ where
                 DenseFactorization::ExpViaEigh,
                 &inputs,
                 &mut dests,
-                |index, dest, outcome| {
+                |_, _, outcome| {
                     outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
-                    let landing = &landings[solved[index]];
-                    if landing.reorders() {
-                        let staged = dest_data::<D>(&mut dest.outputs_mut()[0], "exp")?;
-                        landing.land(
-                            staged,
-                            slices[solved[index]],
-                            &output_regions[landing.output],
-                        );
-                    }
                     Ok(())
                 },
             )
@@ -1037,6 +1000,61 @@ pub(super) fn compile_inverse_matrix_routes<D>(
         });
     }
     Ok(routes)
+}
+
+/// Maps every tree of `side` of `matrix` onto its extent in `output`, which
+/// must list each of those trees once with the same degeneracy shape.
+fn compile_basis_extents<M: SectorGeometry>(
+    matrix: &M,
+    side: FactorSide,
+    output: &[CoupledTreeExtent],
+) -> Result<Vec<InverseBasisExtent>, OperationError> {
+    let output_by_tree = output
+        .iter()
+        .enumerate()
+        .map(|(index, extent)| (extent.tree(), index))
+        .collect::<FxHashMap<_, _>>();
+    if output_by_tree.len() != output.len() {
+        return Err(OperationError::SpaceMismatch {
+            message: "inverse output contains a duplicate tree basis",
+        });
+    }
+    let mut used = vec![false; output.len()];
+    let count = matrix.tree_count(side);
+    let mut extents = Vec::with_capacity(count);
+    for index in 0..count {
+        let Some(source) = matrix.tree(side, index) else {
+            break;
+        };
+        let output_index =
+            output_by_tree
+                .get(source.tree)
+                .copied()
+                .ok_or(OperationError::SpaceMismatch {
+                    message: "inverse output is missing a source tree basis",
+                })?;
+        let output_extent = &output[output_index];
+        if source.shape != output_extent.shape() {
+            return Err(OperationError::SpaceMismatch {
+                message: "inverse output tree basis has an unexpected shape",
+            });
+        }
+        let extent = output_extent
+            .extent()
+            .map_err(OperationError::from_core_preserving_context)?;
+        used[output_index] = true;
+        extents.push(InverseBasisExtent {
+            source_offset: source.offset,
+            output_offset: output_extent.offset(),
+            extent,
+        });
+    }
+    if used.iter().any(|used| !used) {
+        return Err(OperationError::SpaceMismatch {
+            message: "inverse output contains a tree basis absent from the source",
+        });
+    }
+    Ok(extents)
 }
 
 pub(super) fn identity_workspace<D: FactorScalar>(order: usize) -> Result<Vec<D>, OperationError> {
