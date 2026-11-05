@@ -69,6 +69,8 @@ pub use executor::{
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
     LaneAllocation, MatrixOp,
 };
+#[doc(hidden)]
+pub use factor_dest::{finite_eigenvalues, EIGH_EIGENVALUE_CHECK};
 pub use factor_dest::{FactorDest, FactorFailure, FactorPlacement};
 #[doc(hidden)]
 pub use fresh::DenseFreshSegments;

@@ -302,14 +302,15 @@ where
 }
 
 /// The one dense polar kernel, `(W, P)` per coupled sector from its compact
-/// SVD (MatrixAlgebraKit 0.6.8 `implementations/polar.jl` `left_polar!` /
+/// SVD (MatrixAlgebraKit 0.6.9 `implementations/polar.jl` `left_polar!` /
 /// `right_polar!(::PolarViaSVD)`): `W = U Vh` and `P = (sqrt(S) Vh)ᴴ (sqrt(S)
 /// Vh)` (left) or `(U sqrt(S)) (U sqrt(S))ᴴ` (right), projected Hermitian.
 ///
 /// `authority` admits the direction over every logical coupled sector and
-/// builds `P`'s space; the GEMMs write the output regions in place (a packed
-/// input whose tree order differs from the output lands by tree extent).
-/// One scope spans the per-sector SVDs and products.
+/// builds `P`'s space. Every sector of nonzero rank is one input of a
+/// [`DenseFactorization::LeftPolar`] / [`DenseFactorization::RightPolar`]
+/// destination batch writing the output regions in place. One scope spans the
+/// batch.
 fn polar_dense<A, E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -383,186 +384,76 @@ where
     })?;
     require_finite_factor_input(input.data().iter().copied(), FactorFamily::Polar)?;
 
-    // Why one sector at a time, unlike pinv: polar has no cross-sector
-    // cutoff, so only the sector in flight needs its SVD (TensorKit/MAK's
-    // working set is the largest block); the outputs are still published
-    // only after every sector succeeded.
-    let (w_data, p_data) = in_linalg_scope(engine, dense, |dense, engine| {
-        // Why zeroed rather than uninitialized: the GEMM destinations are
-        // safe initialized views, and every region is then overwritten once.
-        let mut w_data = vec![D::zero(); w_len];
-        let mut p_data = vec![D::zero(); p_len];
-        let mut scratch = Vec::new();
-        // Built once: a GEMM configuration owns its axis lists.
-        let w_config = DenseDotConfig::matmul();
-        let p_config = match direction {
-            PolarDirection::Left => DenseDotConfig::matmul().with_conjugation(true, false),
-            PolarDirection::Right => DenseDotConfig::matmul().with_conjugation(false, true),
+    // Every sector with a nonzero rank is one input of one destination
+    // batch; a sector of rank zero has empty factors and is not solved.
+    let (_, blocks) = sector_blocks(&matrices)?;
+    let solved: Vec<usize> = (0..blocks.len())
+        .filter(|&index| blocks[index].1.min(blocks[index].2) > 0)
+        .collect();
+    let solved_blocks: Vec<_> = solved.iter().map(|&index| blocks[index]).collect();
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
+    let op = match direction {
+        PolarDirection::Left => DenseFactorization::LeftPolar,
+        PolarDirection::Right => DenseFactorization::RightPolar,
+    };
+    // Why allocator zeroing rather than uninitialized outputs: the
+    // destinations are safe initialized views, and the zero pages of a large
+    // output are first touched by the lane that writes them.
+    let mut w_data = zeroed_payload::<D>(w_len);
+    let mut p_data = zeroed_payload::<D>(p_len);
+    {
+        let range_of = |landings: &[SectorLanding], regions: &[CoupledSectorRegion]| {
+            landings
+                .iter()
+                .map(|landing| regions[landing.output].range())
+                .collect::<Vec<_>>()
         };
-        for (index, (w, p)) in w_landings.iter().zip(&p_landings).enumerate() {
-            let matrix = matrices.get(index)?;
-            let mut stage =
-                compact_svd_numerical_stage(engine, dense, matrix.data, matrix.rows, matrix.cols)?;
-            // `W` reads the unscaled factors, so it precedes `P`.
-            w.write(&mut w_data, &w_regions[w.output], &mut scratch, |w| {
-                polar_isometry(engine, dense, &stage, &w_config, w)
-            })?;
-            p.write(&mut p_data, &p_regions[p.output], &mut scratch, |p| {
-                polar_positive(engine, dense, &mut stage, direction, &p_config, p)
-            })?;
-        }
-        Ok((w_data, p_data))
-    })?;
+        let mut w_slices = split_ranges(&mut w_data, &range_of(&w_landings, &w_regions))?;
+        let mut p_slices = split_ranges(&mut p_data, &range_of(&p_landings, &p_regions))?;
+        let dest_layouts = solved_blocks
+            .iter()
+            .map(|&(_, rows, cols)| {
+                let (w, p) = match direction {
+                    PolarDirection::Left => (matrix_layout(rows, cols), matrix_layout(cols, cols)),
+                    PolarDirection::Right => (matrix_layout(rows, cols), matrix_layout(rows, rows)),
+                };
+                [w, p]
+            })
+            .collect::<Vec<_>>();
+        let mut dests = solved
+            .iter()
+            .zip(&dest_layouts)
+            .map(|(&index, [w_layout, p_layout])| {
+                let w = std::mem::take(&mut w_slices[index]);
+                let p = std::mem::take(&mut p_slices[index]);
+                let (w, p) = (dest_write(w, w_layout)?, dest_write(p, p_layout)?);
+                let outputs = match direction {
+                    PolarDirection::Left => [Some(w), Some(p), None],
+                    PolarDirection::Right => [Some(p), Some(w), None],
+                };
+                Ok(FactorDest::new(
+                    outputs,
+                    symtn_dense::FactorPlacement::AsComputed,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        // Why one scope around the batch: the backend admits its dense work
+        // once, and the scope's own refusal takes precedence over the
+        // batch's error.
+        in_linalg_scope(engine, dense, |dense, engine| {
+            factorize_batch_into_staged(engine, dense, op, &inputs, &mut dests, |_, _, outcome| {
+                // The first failure of any kind, in sector order, is the
+                // operation's error.
+                outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                Ok(())
+            })
+        })?;
+    }
 
     let w = BoundDynFactor::from_bound(w_space, w_data, source_space.nout(), source_space.nin())?;
     let p = BoundDynFactor::from_bound(p_space, p_data, p_nout, p_nout)?;
     Ok((w, p))
-}
-
-pub(super) fn project_hermitian_col_major<D: FactorScalar>(matrix: &mut [D], n: usize) {
-    let half = D::from_real(0.5);
-    for col in 0..n {
-        for row in 0..=col {
-            let value =
-                (matrix[row + n * col] + FactorScalar::adjoint(matrix[col + n * row])) * half;
-            matrix[row + n * col] = value;
-            matrix[col + n * row] = FactorScalar::adjoint(value);
-        }
-    }
-}
-
-/// `W = U Vh` into the column-major `rows x cols` destination `w`.
-fn polar_isometry<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    stage: &CompactSvdNumericalStage<D>,
-    config: &DenseDotConfig,
-    w: &mut [D],
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let CompactSvdNumericalStage {
-        rows,
-        cols,
-        rank,
-        u,
-        vt,
-        ..
-    } = stage;
-    let w_shape = [*rows, *cols];
-    let w_strides = [1, *rows];
-    let u_shape = [*rows, *rank];
-    let u_strides = [1, *rows];
-    let vt_shape = [*rank, *cols];
-    let vt_strides = [1, *rank];
-    let w_view = DenseViewMut::new(w, &w_shape, &w_strides, 0).map_err(OperationError::Dense)?;
-    let u_view = DenseView::new(u, &u_shape, &u_strides, 0).map_err(OperationError::Dense)?;
-    let vt_view = DenseView::new(vt, &vt_shape, &vt_strides, 0).map_err(OperationError::Dense)?;
-    dense
-        .dot_general_into(
-            engine,
-            D::dense_write(w_view),
-            D::dense_read(u_view),
-            D::dense_read(vt_view),
-            config,
-        )
-        .map_err(OperationError::Dense)
-}
-
-/// `P` into the column-major square destination `p`; the `sqrt(S)` scaling
-/// is applied in place to the staged factor, which is not read again.
-/// `config` is the matmul conjugating the `direction`'s adjoint operand.
-fn polar_positive<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    stage: &mut CompactSvdNumericalStage<D>,
-    direction: PolarDirection,
-    config: &DenseDotConfig,
-    p: &mut [D],
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let CompactSvdNumericalStage {
-        rows,
-        cols,
-        rank,
-        u,
-        singular_values,
-        vt,
-    } = stage;
-    let (rows, cols, rank) = (&*rows, &*cols, &*rank);
-    let p_order = match direction {
-        PolarDirection::Left => *cols,
-        PolarDirection::Right => *rows,
-    };
-    let x = match direction {
-        PolarDirection::Left => vt,
-        PolarDirection::Right => u,
-    };
-    match direction {
-        PolarDirection::Left => {
-            for (row, sigma) in singular_values.iter().copied().enumerate() {
-                let scale = D::from_real(sigma.sqrt());
-                for col in 0..*cols {
-                    x[row + rank * col] = x[row + rank * col] * scale;
-                }
-            }
-        }
-        PolarDirection::Right => {
-            for (col, sigma) in singular_values.iter().copied().enumerate() {
-                let scale = D::from_real(sigma.sqrt());
-                for row in 0..*rows {
-                    x[row + rows * col] = x[row + rows * col] * scale;
-                }
-            }
-        }
-    }
-    let p_shape = [p_order, p_order];
-    let p_strides = [1, p_order];
-    let p_view = DenseViewMut::new(p, &p_shape, &p_strides, 0).map_err(OperationError::Dense)?;
-    match direction {
-        PolarDirection::Left => {
-            let xh_shape = [*cols, *rank];
-            let xh_strides = [*rank, 1];
-            let x_shape = [*rank, *cols];
-            let x_strides = [1, *rank];
-            let xh = DenseView::new(x, &xh_shape, &xh_strides, 0).map_err(OperationError::Dense)?;
-            let x = DenseView::new(x, &x_shape, &x_strides, 0).map_err(OperationError::Dense)?;
-            dense
-                .dot_general_into(
-                    engine,
-                    D::dense_write(p_view),
-                    D::dense_read(xh),
-                    D::dense_read(x),
-                    config,
-                )
-                .map_err(OperationError::Dense)?;
-        }
-        PolarDirection::Right => {
-            let x_shape = [*rows, *rank];
-            let x_strides = [1, *rows];
-            let xh_shape = [*rank, *rows];
-            let xh_strides = [*rows, 1];
-            let x_view =
-                DenseView::new(x, &x_shape, &x_strides, 0).map_err(OperationError::Dense)?;
-            let xh = DenseView::new(x, &xh_shape, &xh_strides, 0).map_err(OperationError::Dense)?;
-            dense
-                .dot_general_into(
-                    engine,
-                    D::dense_write(p_view),
-                    D::dense_read(x_view),
-                    D::dense_read(xh),
-                    config,
-                )
-                .map_err(OperationError::Dense)?;
-        }
-    }
-    project_hermitian_col_major(p, p_order);
-    Ok(())
 }
 
 #[derive(Clone, Copy)]

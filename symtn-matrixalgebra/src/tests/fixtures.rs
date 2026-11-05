@@ -947,3 +947,49 @@ pub(super) fn scope_refusal(op: &'static str) -> DenseError {
         message: "scope refused at exit".to_string(),
     }
 }
+
+/// Forwards the destination batch to the native executor and replaces its
+/// two delivered outcomes: an output failure first, a solver failure second,
+/// or the reverse.
+pub(super) struct TaggedDelivery {
+    pub(super) output_first: bool,
+}
+
+pub(super) fn injected_output_failure() -> DenseError {
+    DenseError::NumericalFailure {
+        backend: DenseBackend::Tenferro,
+        op: "injected output check",
+        message: "injected output failure".to_string(),
+    }
+}
+
+pub(super) fn injected_solver_failure() -> DenseError {
+    DenseError::Backend {
+        backend: DenseBackend::Tenferro,
+        op: "injected solver",
+        message: "injected solver failure".to_string(),
+    }
+}
+
+impl Observer for TaggedDelivery {
+    fn script(script: &mut Script) {
+        script.set(Op::FactorizeBatchInto, Action::Forward);
+    }
+
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut symtn_dense::FactorDest<'_>,
+        _: Result<(), symtn_dense::FactorFailure>,
+        sink: &mut crate::tests::scripted_executor::BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        let output = Err(symtn_dense::FactorFailure::Output(injected_output_failure()));
+        let solver = Err(symtn_dense::FactorFailure::Solver(injected_solver_failure()));
+        let outcome = if (index == 0) == self.output_first {
+            output
+        } else {
+            solver
+        };
+        sink(index, dest, outcome)
+    }
+}

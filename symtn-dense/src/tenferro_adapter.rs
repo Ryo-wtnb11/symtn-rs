@@ -151,6 +151,30 @@ impl DefaultDenseExecutor {
         self.lane_allocation = allocation;
     }
 
+    /// Refuses this executor's lane allocation for a batch of `op` over
+    /// `inputs` that would search one on a route without a lane allocator
+    /// (the serial per-block factorizations of the BLAS provider), before
+    /// any solve or write.
+    #[cfg(not(any(
+        feature = "provider-inject",
+        all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
+    )))]
+    fn admit_batch_allocation(
+        &self,
+        op: crate::DenseFactorization,
+        inputs: &[DenseRead<'_>],
+    ) -> Result<(), DenseError> {
+        if self.lane_allocation != crate::LaneAllocation::Moldable
+            && searched(op)
+            && inputs.len() >= 2
+        {
+            return Err(lane_allocation_unsupported(
+                "the serial per-block factorization route has no lane allocator",
+            ));
+        }
+        Ok(())
+    }
+
     /// Bytes of reusable call scratch this executor keeps between calls (the
     /// block GEMM kernel's staging, or a BLAS build's grouped job list), a
     /// conservative charge of their capacities. It holds no plan: GEMM plans
@@ -1213,6 +1237,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         inputs: &[DenseRead<'_>],
         sink: &mut dyn FnMut(usize, Result<Vec<DenseTensor>, DenseError>) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
+        crate::executor::refuse_destination_only(op)?;
         if inputs.is_empty() {
             return Ok(());
         }
@@ -1226,14 +1251,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         );
         #[cfg(not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))))]
         {
-            if self.lane_allocation != crate::LaneAllocation::Moldable
-                && searched(op)
-                && inputs.len() >= 2
-            {
-                return Err(lane_allocation_unsupported(
-                    "the serial per-block factorization route has no lane allocator",
-                ));
-            }
+            self.admit_batch_allocation(op, inputs)?;
             if matches!(
                 op,
                 crate::DenseFactorization::QrFull | crate::DenseFactorization::QrNull
@@ -1252,10 +1270,33 @@ impl DenseExecutor for DefaultDenseExecutor {
         }
     }
 
+    // The BLAS provider keeps the trait default's routes (the owned
+    // `factorize_batch` placed, and the polar and exponential composites
+    // of per-matrix calls), admitting its lane allocation first: the composite has no
+    // owned batch whose admission would refuse it.
+    #[cfg(not(any(
+        feature = "provider-inject",
+        all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
+    )))]
+    fn factorize_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        op: crate::DenseFactorization,
+        inputs: &[DenseRead<'_>],
+        dests: &mut [crate::FactorDest<'_>],
+        sink: &mut dyn FnMut(
+            usize,
+            &mut crate::FactorDest<'_>,
+            Result<(), crate::FactorFailure>,
+        ) -> Result<(), DenseError>,
+    ) -> Result<(), DenseError> {
+        crate::factor_dest::validate(op, inputs, dests)?;
+        self.admit_batch_allocation(op, inputs)?;
+        crate::factor_dest::factorize_batch_into_validated(self, engine, op, inputs, dests, sink)
+    }
+
     // The native provider writes each block's factors into its destination
-    // on the lanes; every other provider keeps the trait default, which
-    // places the owned per-matrix outputs of `factorize_batch` (BLAS has no
-    // destination form).
+    // on the lanes.
     #[cfg(all(
         feature = "cpu-faer",
         not(feature = "cpu-blas-core"),
@@ -2473,6 +2514,11 @@ fn factorize_batch_serial(
         DenseFactorization::QrFull | DenseFactorization::QrNull => {
             unreachable!("full QR and its null basis run through `qr_into` (`factorize_batch`)")
         }
+        DenseFactorization::LeftPolar
+        | DenseFactorization::RightPolar
+        | DenseFactorization::ExpViaEigh => {
+            unreachable!("`factorize_batch` refuses the destination-only ops")
+        }
     };
     let mut lq = crate::executor::AdjointQrLq::for_inputs(inputs);
     let solve =
@@ -2486,6 +2532,11 @@ fn factorize_batch_serial(
                 | DenseFactorization::Lq
                 | DenseFactorization::QrFull
                 | DenseFactorization::QrNull => input.qr_read(exec).map(|(q, r)| vec![q, r]),
+                DenseFactorization::LeftPolar
+                | DenseFactorization::RightPolar
+                | DenseFactorization::ExpViaEigh => {
+                    unreachable!("`factorize_batch` refuses the destination-only ops")
+                }
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
                 DenseFactorization::EighVals => input.eigvalsh_read(exec).map(|w| vec![w]),
                 DenseFactorization::SvdVals => input.svdvals_read(exec).map(|s| vec![s]),

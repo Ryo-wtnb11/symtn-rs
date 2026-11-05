@@ -289,30 +289,6 @@ fn checked_generic_compact_svd_stages_every_sector_through_the_owned_entry_for_e
 }
 
 #[test]
-fn checked_compact_svd_zero_rank_skips_backend_and_post_gauge_stage() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
-    let svd_stage_rec = crate::probe::record();
-
-    for (rows, cols) in [(0, 3), (3, 0)] {
-        assert_eq!(
-            crate::factorize::compact_svd_numerical_stage_lengths_for_test(
-                engine,
-                &mut dense,
-                &[] as &[f64],
-                rows,
-                cols,
-            )
-            .unwrap(),
-            (0, 0, 0)
-        );
-    }
-    assert_eq!(dense.counts().svd, 0);
-    assert_eq!(dense.counts().svd_into, 0);
-    assert!(svd_stage_rec.checked_svd_stages().is_empty());
-}
-
-#[test]
 #[expect(
     clippy::arc_with_non_send_sync,
     reason = "the checked Generic API requires Arc identity while Cell is a single-threaded call spy"

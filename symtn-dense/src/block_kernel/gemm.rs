@@ -131,7 +131,7 @@ pub(crate) fn serial_class(dtype: DType, serial: bool) -> bool {
     serial && FaerLimit::default().get(dtype).is_some()
 }
 
-type ErasedPlan = dyn Any + Send + Sync;
+pub(crate) type ErasedPlan = dyn Any + Send + Sync;
 
 pub(crate) type GemmPlanCache = StructureCache<GemmPlanKey, ErasedPlan>;
 
@@ -238,6 +238,49 @@ pub(crate) fn cached_plan<T: Scalar>(
     Ok(plan
         .downcast::<Plan<T>>()
         .unwrap_or_else(|_| unreachable!("the key's dtype fixes the plan type")))
+}
+
+/// The plan of `geometry` at scalar type `T` from the process-global
+/// geometry-plan cache, type-erased for a caller whose jobs are not generic
+/// over the scalar.
+#[cfg_attr(
+    not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
+    allow(dead_code)
+)]
+pub(crate) fn erased_plan<T: Scalar>(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError> {
+    let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), geometry)
+        .map_err(|err| grouped_error(format!("plan: {err}")))?;
+    Ok(plan)
+}
+
+/// `d = alpha a b` (each operand as `plan`'s geometry lays it out,
+/// conjugated as it records) on `exec`; `plan` came from [`erased_plan`] at
+/// `T`. No prior value of `d` is read.
+#[cfg_attr(
+    not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
+    allow(dead_code)
+)]
+pub(crate) fn execute_erased<T: Scalar + Default>(
+    plan: &ErasedPlan,
+    exec: &mut Exec<'_>,
+    alpha: T,
+    a: &[T],
+    b: &[T],
+    d: &mut [T],
+) -> Result<(), DenseError> {
+    let plan = plan
+        .downcast_ref::<Plan<T>>()
+        .unwrap_or_else(|| unreachable!("the caller resolved the plan at this scalar"));
+    plan.execute_slices_accum(
+        exec,
+        alpha,
+        (a, 0),
+        (b, 0),
+        T::default(),
+        SliceAccumulationSource::Absent,
+        (d, 0),
+    )
+    .map_err(|err| grouped_error(err.to_string()))
 }
 
 /// A job's weighted work: `m k n` multiply-adds, four times that for a

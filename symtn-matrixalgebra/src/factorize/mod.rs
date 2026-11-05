@@ -23,8 +23,9 @@ use symtn_dense::{
 use symtn_core::{CheckedGenericAdmissionMode, MultiplicityFreeAdmissionMode};
 pub use symtn_tensors::BoundDynamicTensorRef;
 use symtn_tensors::{
-    BoundDynamicFusionMapSpace, CoefficientAlgebra, DenseBlockScalar, DenseRecouplingScalar,
-    DynamicFusionMapSpace, RigidCoefficientAlgebra, ValidatedDynamicFusionLayout,
+    zeroed_payload, BoundDynamicFusionMapSpace, CoefficientAlgebra, DenseBlockScalar,
+    DenseRecouplingScalar, DynamicFusionMapSpace, RigidCoefficientAlgebra,
+    ValidatedDynamicFusionLayout, ZeroBytes,
 };
 
 use crate::results::{LeftPolar, Lq, Qr, RightPolar, Svd};

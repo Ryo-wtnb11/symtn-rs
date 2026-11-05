@@ -349,7 +349,6 @@ where
     ))?;
 
     let mut output_data = vec![D::zero(); output_len];
-    let mut scratch = Vec::new();
     // One scope spans both passes: the staged SVDs (the cutoff is global) and
     // the per-sector reconstruction GEMMs.
     in_linalg_scope(engine, dense, |dense, engine| {
@@ -403,32 +402,26 @@ where
                     FactorPlacement::Direct => (cols, rows, vt, [rank, 1], u, [rows, 1], true),
                     FactorPlacement::Adjoint => (rows, cols, u, [1, rows], vt, [1, rank], false),
                 };
-            landing.write(
-                &mut output_data,
-                &output_regions[landing.output],
-                &mut scratch,
-                |output| {
-                    let output_shape = [out_rows, out_cols];
-                    let output_strides = [1, out_rows];
-                    let left_shape = [out_rows, rank];
-                    let right_shape = [rank, out_cols];
-                    let output_view = DenseViewMut::new(output, &output_shape, &output_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    let left_view = DenseView::new(left, &left_shape, &left_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    let right_view = DenseView::new(right, &right_shape, &right_strides, 0)
-                        .map_err(OperationError::Dense)?;
-                    dense
-                        .dot_general_into(
-                            engine,
-                            D::dense_write(output_view),
-                            D::dense_read(left_view),
-                            D::dense_read(right_view),
-                            &DenseDotConfig::matmul().with_conjugation(conjugate, conjugate),
-                        )
-                        .map_err(OperationError::Dense)
-                },
-            )?;
+            let output = &mut output_data[output_regions[landing.output].range()];
+            let output_shape = [out_rows, out_cols];
+            let output_strides = [1, out_rows];
+            let left_shape = [out_rows, rank];
+            let right_shape = [rank, out_cols];
+            let output_view = DenseViewMut::new(output, &output_shape, &output_strides, 0)
+                .map_err(OperationError::Dense)?;
+            let left_view = DenseView::new(left, &left_shape, &left_strides, 0)
+                .map_err(OperationError::Dense)?;
+            let right_view = DenseView::new(right, &right_shape, &right_strides, 0)
+                .map_err(OperationError::Dense)?;
+            dense
+                .dot_general_into(
+                    engine,
+                    D::dense_write(output_view),
+                    D::dense_read(left_view),
+                    D::dense_read(right_view),
+                    &DenseDotConfig::matmul().with_conjugation(conjugate, conjugate),
+                )
+                .map_err(OperationError::Dense)?;
         }
         Ok(())
     })?;
@@ -674,11 +667,9 @@ where
 /// sector.
 ///
 /// That bound is the kernel's own. It is also the whole of the scratch on a
-/// canonical region layout whose trees the output lists in the same order:
-/// the blocks are read and written in place. A packed input matricizes
-/// *every* sector up front and so costs `O(Σ_c n_c²)` on top of it, and a
-/// sector whose tree order differs from the output's lands through one
-/// `O(max_c n_c²)` staging buffer.
+/// canonical region layout: the blocks are read and written in place. A
+/// packed input matricizes *every* sector up front and so costs
+/// `O(Σ_c n_c²)` on top of it.
 ///
 /// `apply(dense, state, source, n, out)` reads the column-major `n x n` block at
 /// `source` and writes its image into the column-major `n x n` `out`; one
@@ -715,6 +706,56 @@ where
         + Send,
 {
     let source_space = input.space().space();
+    let SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    } = square_sector_routes(input, &output_space)?;
+    let max_order = (0..matrices.len())
+        .map(|index| matrices.get(index).map(|matrix| matrix.rows))
+        .try_fold(0, |largest, rows| rows.map(|rows| largest.max(rows)))?;
+    let mut state = init(max_order)?;
+    // One admitted dense scope spans every sector's kernel.
+    let output_data = in_linalg_scope(engine, dense, |dense, engine| {
+        let mut output_data = vec![D::zero(); output_len];
+        for (index, landing) in landings.iter().enumerate() {
+            let matrix = matrices.get(index)?;
+            let order = matrix.rows;
+            if order == 0 {
+                continue;
+            }
+            let output = &mut output_data[output_regions[landing.output].range()];
+            apply(dense, engine, &mut state, matrix.data, order, output)?;
+        }
+        Ok(output_data)
+    })?;
+
+    BoundDynFactor::from_bound(
+        output_space,
+        output_data,
+        source_space.nout(),
+        source_space.nin(),
+    )
+}
+
+/// A square matrix function's validated routes: the canonical output
+/// regions and length, the input's sector matrices and where each lands.
+struct SquareSectorRoutes<'a, D> {
+    output_regions: Arc<[CoupledSectorRegion]>,
+    output_len: usize,
+    matrices: InputMatricizations<'a, D>,
+    landings: Vec<SectorLanding>,
+}
+
+/// The routes of a square matrix function of `input` into `output_space`,
+/// which must preserve the input's hom space with canonical coupled-sector
+/// storage; the input's row and column stackings must coincide.
+fn square_sector_routes<'a, R, D: FactorScalar>(
+    input: &BoundDynamicTensorRef<'a, R, D>,
+    output_space: &BoundDynamicFusionMapSpace<R>,
+) -> Result<SquareSectorRoutes<'a, D>, OperationError> {
+    let source_space = input.space().space();
     if source_space.homspace() != output_space.space().homspace() {
         return Err(OperationError::SpaceMismatch {
             message: "matrix function output must preserve the input homspace",
@@ -742,29 +783,87 @@ where
         FactorSide::Left,
         FactorSide::Right,
     ))?;
-    let max_order = (0..matrices.len())
-        .map(|index| matrices.get(index).map(|matrix| matrix.rows))
-        .try_fold(0, |largest, rows| rows.map(|rows| largest.max(rows)))?;
-    let mut state = init(max_order)?;
-    // One admitted dense scope spans every sector's kernel.
-    let output_data = in_linalg_scope(engine, dense, |dense, engine| {
-        let mut output_data = vec![D::zero(); output_len];
-        let mut scratch = Vec::new();
-        for (index, landing) in landings.iter().enumerate() {
-            let matrix = matrices.get(index)?;
-            let order = matrix.rows;
-            if order == 0 {
-                continue;
-            }
-            landing.write(
-                &mut output_data,
-                &output_regions[landing.output],
-                &mut scratch,
-                |output| apply(dense, engine, &mut state, matrix.data, order, output),
-            )?;
-        }
-        Ok(output_data)
-    })?;
+    Ok(SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    })
+}
+
+/// The exponential of a Hermitian endomorphism (MatrixAlgebraKit
+/// `exponential!` via `MatrixFunctionViaEigh`), every coupled sector of
+/// nonzero order one input of a [`DenseFactorization::ExpViaEigh`]
+/// destination batch writing the output region in place. One scope spans the
+/// batch, and the first failure in sector order is the error.
+///
+/// The caller admits the endomorphism and its Hermiticity.
+pub(crate) fn exp_via_eigh_dyn_into<E, R, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    input: &BoundDynamicTensorRef<'_, R, D>,
+    output_space: BoundDynamicFusionMapSpace<R>,
+) -> Result<BoundDynFactor<R, D>, OperationError>
+where
+    E: DenseExecutor + ?Sized,
+    D: FactorScalar,
+{
+    let source_space = input.space().space();
+    let SquareSectorRoutes {
+        output_regions,
+        output_len,
+        matrices,
+        landings,
+    } = square_sector_routes(input, &output_space)?;
+    let (_, blocks) = sector_blocks(&matrices)?;
+    let solved: Vec<usize> = (0..blocks.len())
+        .filter(|&index| blocks[index].1 > 0)
+        .collect();
+    let solved_blocks: Vec<_> = solved.iter().map(|&index| blocks[index]).collect();
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
+    // Why allocator zeroing rather than uninitialized outputs: the
+    // destinations are safe initialized views, and the zero pages of a large
+    // output are first touched by the lane that writes them.
+    let mut output_data = zeroed_payload::<D>(output_len);
+    {
+        let ranges: Vec<_> = landings
+            .iter()
+            .map(|landing| output_regions[landing.output].range())
+            .collect();
+        let mut slices = split_ranges(&mut output_data, &ranges)?;
+        let dest_layouts: Vec<_> = solved_blocks
+            .iter()
+            .map(|&(_, order, _)| matrix_layout(order, order))
+            .collect();
+        let mut dests = solved
+            .iter()
+            .zip(&dest_layouts)
+            .map(|(&index, layout)| {
+                Ok(FactorDest::new(
+                    [
+                        Some(dest_write(std::mem::take(&mut slices[index]), layout)?),
+                        None,
+                        None,
+                    ],
+                    symtn_dense::FactorPlacement::AsComputed,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        in_linalg_scope(engine, dense, |dense, engine| {
+            factorize_batch_into_staged(
+                engine,
+                dense,
+                DenseFactorization::ExpViaEigh,
+                &inputs,
+                &mut dests,
+                |_, _, outcome| {
+                    outcome.map_err(|failure| OperationError::Dense(failure.into_error()))?;
+                    Ok(())
+                },
+            )
+        })?;
+    }
 
     BoundDynFactor::from_bound(
         output_space,
@@ -901,6 +1000,61 @@ pub(super) fn compile_inverse_matrix_routes<D>(
         });
     }
     Ok(routes)
+}
+
+/// Maps every tree of `side` of `matrix` onto its extent in `output`, which
+/// must list each of those trees once with the same degeneracy shape.
+fn compile_basis_extents<M: SectorGeometry>(
+    matrix: &M,
+    side: FactorSide,
+    output: &[CoupledTreeExtent],
+) -> Result<Vec<InverseBasisExtent>, OperationError> {
+    let output_by_tree = output
+        .iter()
+        .enumerate()
+        .map(|(index, extent)| (extent.tree(), index))
+        .collect::<FxHashMap<_, _>>();
+    if output_by_tree.len() != output.len() {
+        return Err(OperationError::SpaceMismatch {
+            message: "inverse output contains a duplicate tree basis",
+        });
+    }
+    let mut used = vec![false; output.len()];
+    let count = matrix.tree_count(side);
+    let mut extents = Vec::with_capacity(count);
+    for index in 0..count {
+        let Some(source) = matrix.tree(side, index) else {
+            break;
+        };
+        let output_index =
+            output_by_tree
+                .get(source.tree)
+                .copied()
+                .ok_or(OperationError::SpaceMismatch {
+                    message: "inverse output is missing a source tree basis",
+                })?;
+        let output_extent = &output[output_index];
+        if source.shape != output_extent.shape() {
+            return Err(OperationError::SpaceMismatch {
+                message: "inverse output tree basis has an unexpected shape",
+            });
+        }
+        let extent = output_extent
+            .extent()
+            .map_err(OperationError::from_core_preserving_context)?;
+        used[output_index] = true;
+        extents.push(InverseBasisExtent {
+            source_offset: source.offset,
+            output_offset: output_extent.offset(),
+            extent,
+        });
+    }
+    if used.iter().any(|used| !used) {
+        return Err(OperationError::SpaceMismatch {
+            message: "inverse output contains a tree basis absent from the source",
+        });
+    }
+    Ok(extents)
 }
 
 pub(super) fn identity_workspace<D: FactorScalar>(order: usize) -> Result<Vec<D>, OperationError> {

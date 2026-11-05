@@ -638,3 +638,90 @@ fn polar_validates_every_sector_before_direct_or_fallback_svd_execution() {
     ));
     assert_eq!(dense.counts().svd, 0);
 }
+
+/// Two U(1) sectors of shapes `3 x 2` and `2 x 2`: tall in every sector.
+fn two_sector_tall() -> TestTensor<f64> {
+    u1_cross_space_map::<f64>(&[(0, 3), (1, 2)], &[(0, 2), (1, 2)])
+}
+
+/// A stateful executor: its first SVD returns factors of the wrong shape,
+/// and every linear-algebra scope refuses at exit, telling whether a second
+/// SVD ran inside it.
+#[derive(Default)]
+struct MalformedFirstSvdRefusingScope {
+    svd_calls: usize,
+}
+
+impl Observer for MalformedFirstSvdRefusingScope {
+    fn call(&mut self, call: Call<'_, '_>) -> Option<Reply> {
+        if let Call::Read(Op::Svd, _) = call {
+            self.svd_calls += 1;
+            if self.svd_calls == 1 {
+                // The SVD of a `2 x 2` matrix for the `3 x 2` sector.
+                let data = [1.0, 2.0, 3.0, 5.0];
+                let input = DenseRead::F64(
+                    symtn_dense::DenseView::new(&data, &[2, 2], &[1, 2], 0).unwrap(),
+                );
+                return Some(
+                    symtn_dense::DefaultDenseExecutor::new()
+                        .svd(&mut symtn_dense::CpuEngine::serial(), input),
+                );
+            }
+        }
+        None
+    }
+
+    fn scope_exit(&mut self, counts: Counts) -> Result<(), DenseError> {
+        Err(scope_refusal(if counts.svd >= 2 {
+            "scope after sector 1"
+        } else {
+            "scope after sector 0"
+        }))
+    }
+}
+
+#[test]
+fn polar_checks_each_sector_before_the_next_solve_inside_its_scope() {
+    // What: on an executor that keeps the default destination batch, sector
+    // 0's SVD outputs are checked before sector 1 is solved, all inside the
+    // one linear-algebra scope, whose own refusal takes precedence over the
+    // body's error.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_tall();
+    let mut dense = ScriptedExecutor::<MalformedFirstSvdRefusingScope>::default();
+
+    let error = left_polar(
+        engine,
+        &mut dense,
+        &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+    )
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        OperationError::Dense(scope_refusal("scope after sector 0"))
+    );
+}
+
+#[test]
+fn polar_returns_the_first_failure_in_sector_order_whatever_its_tag() {
+    // What: a forwarded destination batch's tagged outcomes reach the
+    // operation in sector order and the first failure is its error: an
+    // early malformed output is not overridden by a later solver failure,
+    // nor the reverse.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = two_sector_tall();
+    for (output_first, expected) in [
+        (true, injected_output_failure()),
+        (false, injected_solver_failure()),
+    ] {
+        let mut dense = ScriptedExecutor::new(TaggedDelivery { output_first });
+        let error = left_polar(
+            engine,
+            &mut dense,
+            &bound_tensor_ref!(Arc::new(U1FusionRule), &tensor),
+        )
+        .unwrap_err();
+        assert_eq!(error, OperationError::Dense(expected), "{output_first}");
+    }
+}

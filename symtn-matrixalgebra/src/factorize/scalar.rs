@@ -1,9 +1,10 @@
 use super::*;
 
 /// Scalar contract for the factorization layer: dense-executor I/O plus the
-/// adjoint and real-embedding used by the factor builders. Implemented for
-/// the double-precision real and complex scalars.
-pub trait FactorScalar: DenseRecouplingScalar {
+/// adjoint and real-embedding used by the factor builders, and allocator
+/// zeroing of its outputs ([`ZeroBytes`]). Implemented for the single- and
+/// double-precision real and complex scalars.
+pub trait FactorScalar: DenseRecouplingScalar + ZeroBytes {
     /// Output scalar of the general (non-Hermitian) eigendecomposition.
     type Eig: FactorScalar;
     /// Real scalar used by singular-value/eigenvalue outputs.
