@@ -20,7 +20,9 @@ use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
 use crate::kernel_adapter::sealed::LeafGate;
-use crate::kernel_adapter::{admitted_plan, planned_write_uninit, write_fused_uninit};
+use crate::kernel_adapter::{
+    admitted_plan, copy_fused_uninit, planned_write_uninit, write_fused_uninit,
+};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::scalar::scale_value;
 use crate::storage_scratch::TreeTransformScratchBuffers;

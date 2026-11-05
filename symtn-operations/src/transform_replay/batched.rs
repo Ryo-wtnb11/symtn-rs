@@ -2,26 +2,32 @@ use super::*;
 use core::ops::Range;
 use core::time::Duration;
 
-pub(super) fn effective_tree_transform_threads(
+/// The replay's effective width: the requested count, at most the engine's
+/// workers and the structure's runnable units. Only a width above one reads
+/// (and on first use builds) the multi-slot schedule.
+pub(super) fn effective_tree_transform_threads<C: Copy>(
     engine: &mut dyn Engine,
-    schedule: &TreeTransformParallelSchedule,
+    task: TreeTransformTaskView<'_, C>,
     requested: usize,
-) -> usize {
-    let runnable = schedule.band_units.max(schedule.pack_columns.len()).max(1);
-    let requested = requested.max(1);
-
+) -> Result<usize, OperationError> {
     // Why answer before reading the engine width: a serial replay needs no
     // engine lookup at all.
-    if requested == 1 || runnable == 1 {
-        return 1;
+    if requested <= 1 {
+        return Ok(1);
     }
-
     // Why not trust the requested count: the caller's engine cannot execute
     // more workers than it has, and scratch for phantom workers turns a harmless
     // large hint into an allocation overflow before any replay begins.
-    requested
-        .min(crate::host_pool::threads(engine))
-        .min(runnable)
+    let threads = requested.min(crate::host_pool::threads(engine));
+    if threads <= 1 {
+        return Ok(1);
+    }
+    let runnable = task
+        .lanes()?
+        .band_units
+        .max(task.parallel_schedule().pack_columns.len())
+        .max(1);
+    Ok(threads.min(runnable))
 }
 
 /// Whether a replay with `dense` runs on the lane route: its components'
@@ -95,8 +101,12 @@ pub fn tree_transform_searches_lanes<C: Copy>(
     else {
         return false;
     };
-    let threads =
-        effective_tree_transform_threads(engine, structure.parallel_schedule(), requested);
+    let Ok(threads) = structure
+        .task_view()
+        .and_then(|task| effective_tree_transform_threads(engine, task, requested))
+    else {
+        return false;
+    };
     threads > 1
         && jobs.chunks(threads).any(|chunk| {
             symtn_dense::batch_searches_lanes(
@@ -1093,6 +1103,7 @@ where
     workspace
         .chunk_scatter_groups
         .sort_unstable_by_key(|&group| (schedule.scatter_groups[group].component, group));
+    let lanes = task.lanes()?;
     workspace.chunk_units.clear();
     // At most one unit per group and per component, and the sentinel.
     let units = workspace
@@ -1103,6 +1114,7 @@ where
     let mut weight = 0usize;
     for (position, &group) in workspace.chunk_scatter_groups.iter().enumerate() {
         let replay = &schedule.scatter_groups[group];
+        let widest = lanes.group_widest[group];
         let group_weight = chunk[group - first_group]
             .rows
             .saturating_mul(replay.columns.len());
@@ -1110,14 +1122,14 @@ where
             Some(unit) if unit.component == replay.component => {
                 unit.groups.1 = position + 1;
                 unit.weight = unit.weight.saturating_add(group_weight);
-                unit.widest = unit.widest.max(replay.widest);
+                unit.widest = unit.widest.max(widest);
             }
             _ => workspace.chunk_units.push(ScatterUnit {
                 groups: (position, position + 1),
                 component: replay.component,
                 weight: group_weight,
                 weight_before: weight,
-                widest: replay.widest,
+                widest,
                 width: 1,
             }),
         }
@@ -1227,6 +1239,7 @@ where
                 // the sentinel, so this one reservation serves the call.
                 chunk_units.reserve(schedule.component_count() + 1);
                 let mut weight = 0usize;
+                let lanes = task.lanes()?;
                 for component in 0..schedule.component_count() {
                     let entry = &schedule.components[component];
                     if entry.direct_weight == 0 {
@@ -1237,7 +1250,7 @@ where
                         component: component as u32,
                         weight: entry.direct_weight,
                         weight_before: weight,
-                        widest: entry.widest_direct,
+                        widest: lanes.components[component].widest_direct,
                         width: 1,
                     });
                     weight = weight.saturating_add(entry.direct_weight);

@@ -301,7 +301,7 @@ where
         src_data.len(),
     )?;
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(engine, schedule, threads);
+    let threads = effective_tree_transform_threads(engine, task, threads)?;
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
     checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;
@@ -503,7 +503,7 @@ where
     )?;
 
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(engine, schedule, threads);
+    let threads = effective_tree_transform_threads(engine, task, threads)?;
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
     checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;

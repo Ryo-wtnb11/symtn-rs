@@ -348,7 +348,10 @@ and is modeled as one section of Strided's own width `w'` there
 it was offered; accumulations, planless roles and every
 other component are banded. Components with equal moved elements, band
 units, that eligibility and Multi job shapes form one cost class, whose
-search runs once per call. The placement asks Strided's width directly and
+search runs once per call. The bands, band units, whole-plan eligibility
+and cost classes are built from the compiled structure on its first replay
+with more than one slot and kept with it; a one-slot replay never builds
+them, and the structure's retained charge counts them from the start. The placement asks Strided's width directly and
 scans no admission gate; each writer's gate lives on the thread that runs
 it: the alone tier's components share one gate on the calling thread, which
 scans the whole token at most once, and each split lane builds its own on

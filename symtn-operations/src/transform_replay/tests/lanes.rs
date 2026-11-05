@@ -14,6 +14,13 @@ fn lanes() -> DefaultDenseExecutor {
     DefaultDenseExecutor::new()
 }
 
+/// The multi-slot schedule of `transform`, built on first use.
+fn lane_schedule(
+    transform: &TreeTransformStructure<f64>,
+) -> &crate::transform_structure::TreeTransformLaneSchedule {
+    transform.task_view().unwrap().lanes().unwrap()
+}
+
 /// `blocks` Singles `b -> b` of scale two over a canonical U(1) layout of
 /// `blocks` charges, one `degeneracy x degeneracy` block each: separately
 /// compiled roles of equal geometry, each its own component.
@@ -52,7 +59,7 @@ fn wide_equal_singles() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
     let (structure, transform) = equal_singles(9, degeneracy);
     let schedule = transform.parallel_schedule();
     assert_eq!(schedule.component_count(), 9);
-    assert!(schedule.components[..9]
+    assert!(lane_schedule(&transform).components[..9]
         .iter()
         .all(|component| component.planned_single));
     assert_eq!(transform.layouts().retained_plan_count(), 9);
@@ -257,9 +264,10 @@ fn equal_cost_inputs_share_a_class_and_unequal_ones_do_not() {
     let (_, transform) = class_fixture();
     let schedule = transform.parallel_schedule();
     assert_eq!(schedule.component_count(), 6);
-    let class = &schedule.component_class;
+    let lanes = lane_schedule(&transform);
+    let class = &lanes.component_class;
     let distinct = class.iter().collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(schedule.class_count, 4);
+    assert_eq!(lanes.class_count, 4);
     assert_eq!(distinct.len(), 4);
     assert_eq!(class[0], class[1]);
     assert_eq!(class[3], class[4]);
@@ -363,6 +371,7 @@ fn class_placement_equals_the_per_component_placement() {
         class_fixture().1,
     ] {
         let schedule = transform.parallel_schedule();
+        let lanes_of = lane_schedule(&transform);
         let jobs = transform.recoupling_plan().jobs();
         let shapes = jobs
             .iter()
@@ -398,6 +407,7 @@ fn class_placement_equals_the_per_component_placement() {
                         &mut token,
                         gemms,
                         schedule,
+                        lanes_of,
                         budget,
                         &group_sizes,
                         admission,
@@ -407,9 +417,11 @@ fn class_placement_equals_the_per_component_placement() {
                     assert_eq!(placements.len(), schedule.component_count());
                     for (component, placed) in placements.iter().enumerate() {
                         let mut time = |width| {
-                            component_time(&mut token, gemms, schedule, component, width, admission)
+                            component_time(
+                                &mut token, gemms, schedule, lanes_of, component, width, admission,
+                            )
                         };
-                        let cap = budget.min(schedule.components[component].units).max(1);
+                        let cap = budget.min(lanes_of.components[component].units).max(1);
                         let (serial, _) = time(1);
                         let (mut width, mut timed) = (1, serial);
                         let mut candidate = 2;
@@ -574,7 +586,7 @@ fn accumulations_and_planless_roles_stay_banded() {
     let large = first_count(4, |width| width == 4);
     let (dst, src, planless) = planless_bandable_single(large.div_ceil(256).max(2));
     assert_eq!(planless.layouts().retained_plan_count(), 0);
-    assert!(planless.parallel_schedule().atoms[0].bandable());
+    assert!(lane_schedule(&planless).bands[0].bandable());
     let total = dst.required_len().unwrap();
     let overwritten = pieces(&mut pool, &planless, &dst, &src, None);
     assert!(overwritten.len() > 1);
@@ -620,6 +632,47 @@ fn a_wide_accumulation_of_planned_singles_matches_the_oracle() {
         )
     });
     assert_eq!(accumulated, expected);
+}
+
+#[test]
+fn only_a_multi_slot_replay_builds_the_multi_slot_schedule() {
+    // What: a one-slot replay of a compiled structure leaves its multi-slot
+    // schedule unbuilt; the first replay on two slots builds it; the
+    // structure's retained charge is the same before and after, and both
+    // replays write the dense oracle; the built schedule retains exactly
+    // the bytes charged for it.
+    let (structure, transform) = equal_singles(4, 8);
+    let len = structure.required_len().unwrap();
+    let source = source(len);
+    let expected = source.iter().map(|v| 2.0 * v).collect::<Vec<_>>();
+    let charged = transform.charged_payload_bytes();
+    let built = || transform.parallel_schedule().lanes.get().is_some();
+    for (threads, built_after) in [(1, false), (2, true)] {
+        let mut overwritten = vec![f64::NAN; len];
+        crate::host_pool::test_pool(threads).install(|engine| {
+            initialized(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut overwritten,
+                &source,
+                None,
+                threads,
+            )
+        });
+        assert_eq!(overwritten, expected, "{threads} slots");
+        assert_eq!(built(), built_after, "{threads} slots");
+        assert_eq!(transform.charged_payload_bytes(), charged);
+    }
+    let schedule = transform.parallel_schedule();
+    let lanes = schedule.lanes.get().unwrap();
+    let retained = lanes.bands.capacity() * core::mem::size_of_val(&lanes.bands[0])
+        + lanes.components.capacity() * core::mem::size_of_val(&lanes.components[0])
+        + lanes.group_widest.capacity() * core::mem::size_of::<usize>()
+        + lanes.component_class.capacity() * core::mem::size_of::<u32>();
+    assert_eq!(retained, schedule.lane_bytes());
 }
 
 #[test]
@@ -719,7 +772,7 @@ fn a_single_strided_runs_narrower_than_the_token_leaves_the_alone_tier() {
         (parallel_width(&half, KernelClass::Copy, role).get(), whole)
     });
     assert_eq!(widths, (4, 6));
-    assert!(transform.parallel_schedule().components[..2]
+    assert!(lane_schedule(&transform).components[..2]
         .iter()
         .all(|component| component.planned_single));
 

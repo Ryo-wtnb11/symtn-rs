@@ -52,7 +52,7 @@ where
     debug_assert!(core::ptr::eq(proof.structure, structure));
     let task = structure.task_view()?;
     let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(engine, schedule, threads);
+    let threads = effective_tree_transform_threads(engine, task, threads)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
     }
@@ -112,11 +112,13 @@ where
 /// band crop) into uninitialised `dst` at `dst_offset` from `src` at
 /// `src_offset`.
 ///
-/// Why forced inlining down to the span kernel (with [`write_role_uninit`],
-/// `write_fused_uninit`, `for_each_fused_span`, `apply_fused_pair_slices`):
-/// the owned writer then carries its own kernel instance per (dtype,
-/// element op), as the initialised leaf does; left to the inliner, the
-/// chain runs out of line and its per-item cost depends on that choice.
+/// Why forced inlining down to the element loop (with [`write_role_uninit`],
+/// [`copy_role_uninit`], `write_fused_uninit`, `copy_fused_uninit` and
+/// their inlined walk): the owned writer then carries its own kernel
+/// instance per (dtype, element op), as the initialised leaf does; left to
+/// the inliner, the chain runs out of line and its per-item cost depends on
+/// that choice. The initialised adapter calls the same walk out of line
+/// (`apply_fused_pair_slices`), where its loop state stays in registers.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_uninit_layout_from_source<D, C>(
@@ -146,6 +148,19 @@ where
 {
     // The element op is chosen once per block, with the structural coefficient
     // still in its own type; see `TransformScale`.
+    if scale.is_identity() && !conjugate {
+        return copy_role_uninit(
+            exec,
+            gate,
+            role,
+            elements,
+            dst,
+            src,
+            dst_offset,
+            src_offset,
+            fused_index,
+        );
+    }
     if scale.is_identity() {
         return write_role_uninit(
             exec,
@@ -236,6 +251,32 @@ where
     }
 }
 
+/// [`write_role_uninit`] of the identity element op, whose baked walk copies
+/// each contiguous span as one slice ([`copy_fused_uninit`]).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn copy_role_uninit<D>(
+    exec: Exec<'_>,
+    gate: &LeafGate,
+    role: crate::BakedFusedLayout<'_>,
+    elements: usize,
+    dst: &mut [MaybeUninit<D>],
+    src: &[D],
+    dst_offset: isize,
+    src_offset: isize,
+    fused_index: &mut [usize],
+) -> Result<(), OperationError>
+where
+    D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
+{
+    match admitted_plan(role, elements, &exec, gate) {
+        Some(plan) => {
+            planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, |v| v)
+        }
+        None => copy_fused_uninit(role, dst, src, dst_offset, src_offset, fused_index),
+    }
+}
+
 /// One scatter column's role (`role`, of `elements` elements, possibly a
 /// band crop) into uninitialised `dst` at `dst_offset` from `packed` at
 /// `packed_offset`, scaled by `alpha`.
@@ -263,7 +304,7 @@ where
     // fused walk over `packed` starting at `src_offset` reproduces the
     // column-major gather `packed[src_offset + linear]`.
     if alpha.is_one() {
-        write_role_uninit(
+        copy_role_uninit(
             exec,
             gate,
             role,
@@ -273,7 +314,6 @@ where
             dst_offset,
             src_offset,
             fused_index,
-            |v| v,
         )
     } else {
         write_role_uninit(
@@ -790,7 +830,10 @@ mod owned_overwrite_tests {
 
         for mut pool in [pool(3), crate::host_pool::eager_test_pool(3)] {
             assert_eq!(
-                pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
+                pool.install(|engine| {
+                    effective_tree_transform_threads(engine, transform.task_view().unwrap(), 3)
+                        .unwrap()
+                }),
                 3
             );
 
@@ -933,7 +976,9 @@ mod owned_overwrite_tests {
         let mut pool = pool(3);
         assert_eq!(schedule.component_count(), 1);
         assert_eq!(
-            pool.install(|engine| effective_tree_transform_threads(engine, schedule, 3)),
+            pool.install(|engine| {
+                effective_tree_transform_threads(engine, transform.task_view().unwrap(), 3).unwrap()
+            }),
             3
         );
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

@@ -6,7 +6,7 @@
 
 use super::writers::{Band, DestinationWriter, ReplayParts};
 use super::*;
-use crate::transform_structure::{OneSlotStep, TreeTransformDirectItem};
+use crate::transform_structure::{OneSlotStep, TreeTransformDirectItem, TreeTransformLaneSchedule};
 use core::num::NonZeroUsize;
 use core::ops::Range;
 use core::time::Duration;
@@ -62,7 +62,7 @@ pub(super) struct Piece<'a, T> {
 pub(super) type ClassPlacement = LanePlacement;
 
 /// A lane placement's admission rule for components that may run whole
-/// on their plan ([`TreeTransformJointComponent::planned_single`]): only an
+/// on their plan ([`crate::transform_structure::TreeTransformLaneComponent::planned_single`]): only an
 /// overwrite may. The width such a component takes is Strided's own copy
 /// width on the queried token ([`LeafGate::width`]), asked directly: the
 /// placement scans no gate, and each writer's gate lives on the thread that
@@ -81,8 +81,8 @@ impl Admission {
 
     /// Whether component `component` may run whole on its plan in this
     /// call, before the width question.
-    fn eligible(&self, schedule: &TreeTransformParallelSchedule, component: usize) -> bool {
-        self.overwrites && schedule.components[component].planned_single
+    fn eligible(&self, lanes: &TreeTransformLaneSchedule, component: usize) -> bool {
+        self.overwrites && lanes.components[component].planned_single
     }
 }
 
@@ -221,6 +221,8 @@ struct Lanes<'a, W, D, C> {
     gate_bound: usize,
     /// Whether the writer overwrites ([`DestinationWriter::overwrites`]).
     overwrites: bool,
+    /// The multi-slot schedule; a one-slot replay has none.
+    lanes: Option<&'a TreeTransformLaneSchedule>,
 }
 
 /// A component's destination: the whole destination of a one-lane replay,
@@ -320,6 +322,7 @@ where
             rank,
             gate_bound: layouts.max_planned_elements(),
             overwrites: writer.overwrites(),
+            lanes: None,
         };
         let gate = LeafGate::new(lanes.gate_bound);
         let exec = token.limit(NonZeroUsize::MIN);
@@ -355,7 +358,8 @@ where
         return Ok(());
     }
 
-    // Placement.
+    // Placement, on the multi-slot schedule (built here on first use).
+    let lane_schedule = task.lanes()?;
     let mut placements = core::mem::take(&mut workspace.lane_placements);
     let mut classes = core::mem::take(&mut workspace.lane_classes);
     let mut class_widths = core::mem::take(&mut workspace.lane_class_widths);
@@ -364,6 +368,7 @@ where
         &mut token,
         gemms,
         schedule,
+        lane_schedule,
         budget,
         &group_sizes,
         admission,
@@ -413,10 +418,19 @@ where
             if width == 1 {
                 return placements[component].serial;
             }
-            let class = schedule.component_class[component];
+            let class = lane_schedule.component_class[component];
             let (token, memo) = &mut *cell.borrow_mut();
             *memo.entry((class, width as u32)).or_insert_with(|| {
-                component_time(token, gemms, schedule, component, width, admission).0
+                component_time(
+                    token,
+                    gemms,
+                    schedule,
+                    lane_schedule,
+                    component,
+                    width,
+                    admission,
+                )
+                .0
             })
         };
         if split_time(
@@ -529,6 +543,7 @@ where
             rank,
             gate_bound: layouts.max_planned_elements(),
             overwrites: writer.overwrites(),
+            lanes: Some(lane_schedule),
         };
         let result = (|| {
             // The alone tier runs on the calling thread: one gate scans the
@@ -589,7 +604,7 @@ where
 
 /// Every component's [`LanePlacement`] into `placements` (see
 /// [`lane_replay`]), evaluated once per cost class
-/// ([`TreeTransformParallelSchedule::component_class`]): a class's members
+/// ([`TreeTransformLaneSchedule::component_class`]): a class's members
 /// have equal modeled times at every width and, having equal job-shape
 /// multisets, equal packed scratch maxima, so the first member's search and
 /// its `O(g_q)` scratch fold serve them all. Cost: O(C) plus, per class
@@ -601,6 +616,7 @@ pub(super) fn place_components(
     token: &mut LaneToken<'_>,
     gemms: &dyn LaneGemms,
     schedule: &TreeTransformParallelSchedule,
+    lanes: &TreeTransformLaneSchedule,
     budget: usize,
     group_sizes: &impl Fn(usize) -> (usize, usize),
     admission: Admission,
@@ -613,18 +629,20 @@ pub(super) fn place_components(
     placements.clear();
     placements.reserve_exact(components);
     classes.clear();
-    classes.resize(schedule.class_count, None);
+    classes.resize(lanes.class_count, None);
     for component in 0..components {
-        let class = &mut classes[schedule.component_class[component] as usize];
+        let class = &mut classes[lanes.component_class[component] as usize];
         let placement = *class.get_or_insert_with(|| {
             let (source, destination) = group_sizes(component);
-            let cap = budget.min(schedule.components[component].units).max(1);
-            let (serial, _) = component_time(token, gemms, schedule, component, 1, admission);
+            let cap = budget.min(lanes.components[component].units).max(1);
+            let (serial, _) =
+                component_time(token, gemms, schedule, lanes, component, 1, admission);
             let (mut width, mut timed) = (1, serial);
             let mut candidate = 2;
             while candidate <= cap {
-                let (time, occupied) =
-                    component_time(token, gemms, schedule, component, candidate, admission);
+                let (time, occupied) = component_time(
+                    token, gemms, schedule, lanes, component, candidate, admission,
+                );
                 if time < timed {
                     (width, timed) = (occupied, time);
                 }
@@ -671,6 +689,7 @@ pub(super) fn component_time(
     token: &mut LaneToken<'_>,
     gemms: &dyn LaneGemms,
     schedule: &TreeTransformParallelSchedule,
+    lanes: &TreeTransformLaneSchedule,
     component: usize,
     width: usize,
     admission: Admission,
@@ -678,7 +697,7 @@ pub(super) fn component_time(
     let groups = schedule.component_group_list(component);
     let moved = schedule.components[component].moved;
     let estimate = strided_kernel::execution::KernelClass::Copy.estimate(moved);
-    if width >= 2 && admission.eligible(schedule, component) {
+    if width >= 2 && admission.eligible(lanes, component) {
         let exec = granted_width(token.reborrow(), width);
         let whole = LeafGate::width(&exec, moved);
         if let Some(whole) = NonZeroUsize::new(whole).filter(|whole| whole.get() > 1) {
@@ -1021,7 +1040,7 @@ where
         exec: &Exec<'_>,
         gate: &LeafGate,
     ) -> Option<TreeTransformDirectItem> {
-        if !self.overwrites || !self.schedule.components[component].planned_single {
+        if !self.overwrites || !self.lanes?.components[component].planned_single {
             return None;
         }
         let [item @ TreeTransformDirectItem::Single { block, .. }] =
@@ -1173,6 +1192,12 @@ where
         pieces: &mut [Option<Piece<'a, T>>],
     ) -> Result<usize, OperationError> {
         let atoms = &self.schedule.atoms;
+        let bands = &self
+            .lanes
+            .ok_or(OperationError::InvalidArgument {
+                message: "a banded tree transform component needs its multi-slot schedule",
+            })?
+            .bands;
         let range = self.schedule.component_atoms(component);
         let total = atoms[range.clone()]
             .iter()
@@ -1195,7 +1220,8 @@ where
         for slot in range {
             let atom = atoms[slot];
             let data = core::mem::take(&mut slots[slot - base]);
-            if !atom.bandable() {
+            let band = bands[slot];
+            if !band.bandable() {
                 push(Piece {
                     slot: slot as u32,
                     sub: sub_of(before) as u32,
@@ -1206,9 +1232,9 @@ where
                 before += atom.weight as u128;
                 continue;
             }
-            let extent = atom.band_extent;
+            let extent = band.extent;
             let unit = (atom.weight / extent) as u128;
-            let stride = atom.band_stride;
+            let stride = band.stride;
             let mut rest = data;
             let mut k0 = 0usize;
             while k0 < extent {

@@ -240,15 +240,20 @@ pub(crate) fn cached_plan<T: Scalar>(
         .unwrap_or_else(|_| unreachable!("the key's dtype fixes the plan type")))
 }
 
-/// The plan of `geometry` at scalar type `T` from the process-global
-/// geometry-plan cache, type-erased for a caller whose jobs are not generic
-/// over the scalar.
+/// The Shared-class plan of `geometry` at scalar type `T` from the
+/// process-global geometry-plan cache, type-erased for a caller whose jobs
+/// are not generic over the scalar.
+///
+/// Why the Shared class only: its callers (factorization products) resolve
+/// plans before their lanes exist, so the slot count a product will run on
+/// is unknown here; the Shared class is valid on every token, while the
+/// Serial class only lifts a performance bound on one slot.
 #[cfg_attr(
     not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
     allow(dead_code)
 )]
 pub(crate) fn erased_plan<T: Scalar>(geometry: Geometry) -> Result<Arc<ErasedPlan>, DenseError> {
-    let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), geometry)
+    let plan: Arc<ErasedPlan> = cached_plan::<T>(gemm_plans(), geometry, false)
         .map_err(|err| grouped_error(format!("plan: {err}")))?;
     Ok(plan)
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use symtn_core::BlockStructure;
 
+use crate::transform_structure::{TreeTransformLaneSchedule, TreeTransformParallelSchedule};
 use crate::{
     OperationError, TreeTransformBlock, TreeTransformLayoutTable, TreeTransformRecouplingPlan,
     TreeTransformStructure,
@@ -99,6 +100,21 @@ impl<'a, C: Copy> TreeTransformTaskView<'a, C> {
     }
 
     #[inline]
+    pub(crate) fn parallel_schedule(self) -> &'a TreeTransformParallelSchedule {
+        self.structure.parallel_schedule()
+    }
+
+    /// The multi-slot schedule of the structure, built on first use
+    /// ([`TreeTransformParallelSchedule::lanes`]).
+    pub(crate) fn lanes(self) -> Result<&'a TreeTransformLaneSchedule, OperationError> {
+        let structure = self.structure;
+        self.parallel_schedule().lanes(
+            structure.blocks(),
+            structure.layouts(),
+            structure.recoupling_plan(),
+        )
+    }
+
     pub(crate) fn recoupling_plan(self) -> &'a TreeTransformRecouplingPlan {
         self.structure.recoupling_plan()
     }

@@ -1080,10 +1080,12 @@ fn banded_components_write_each_band_from_one_slot_in_every_stage() {
     .unwrap();
     let schedule = transform.parallel_schedule();
     assert_eq!(schedule.component_count(), 1);
+    let lanes = transform.task_view().unwrap().lanes().unwrap();
     let bands = schedule
         .atoms
         .iter()
-        .map(|atom| (atom.lo, atom.band_stride, atom.band_extent))
+        .zip(&lanes.bands)
+        .map(|(atom, band)| (atom.lo, band.stride, band.extent))
         .collect::<Vec<_>>();
     // The second atom's block fuses with its packed column to one axis.
     assert_eq!(bands, [(0, 4, 6), (24, 1, 12)]);
@@ -1159,11 +1161,11 @@ fn banded_components_write_each_band_from_one_slot_in_every_stage() {
         .unwrap()
     };
     let bandable = |transform: &TreeTransformStructure<f64>| {
-        transform
-            .parallel_schedule()
-            .atoms
+        let lanes = transform.task_view().unwrap().lanes().unwrap();
+        lanes
+            .bands
             .iter()
-            .map(|atom| atom.bandable())
+            .map(|band| band.bandable())
             .collect::<Vec<_>>()
     };
     assert_eq!(bandable(&single(vec![1, 1], vec![1, 2])), [false]);
@@ -1210,7 +1212,8 @@ fn component_replay_matches_the_block_oracle_at_odd_and_even_widths() {
         let mut pool = crate::host_pool::test_pool(threads);
         assert!(
             pool.install(|engine| {
-                effective_tree_transform_threads(engine, transform.parallel_schedule(), threads)
+                effective_tree_transform_threads(engine, transform.task_view().unwrap(), threads)
+                    .unwrap()
             }) == threads
         );
         let mut overwritten = vec![f64::NAN; 60];

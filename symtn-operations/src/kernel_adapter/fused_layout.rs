@@ -407,7 +407,7 @@ where
             message: "fused traversal scratch is shorter than the normalized rank",
         });
     };
-    apply_fused_pair_slices(
+    apply_fused_pair_spans(
         dst,
         src,
         dims,
@@ -422,6 +422,72 @@ where
         map,
     );
     Ok(())
+}
+
+/// [`write_fused_uninit`] of the identity element op: a contiguous span is
+/// one slice copy, a strided one is written element by element.
+///
+/// Why a separate walk rather than an identity closure: an identity loop
+/// becomes a block copy only when the compiler recognizes the idiom in the
+/// instance that inlines it; the owned lane writer's instance kept an
+/// element loop. The slice copy states the block copy directly.
+#[inline(always)]
+pub(crate) fn copy_fused_uninit<D: Copy>(
+    baked: BakedFusedLayout<'_>,
+    dst: &mut [core::mem::MaybeUninit<D>],
+    src: &[D],
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+) -> Result<(), OperationError> {
+    let dims = baked.dims();
+    let Some(index) = index.get_mut(..dims.len()) else {
+        return Err(OperationError::InvalidArgument {
+            message: "fused traversal scratch is shorter than the normalized rank",
+        });
+    };
+    for_each_fused_span(
+        dims,
+        baked.dst_strides(),
+        baked.src_strides(),
+        dst_offset,
+        src_offset,
+        index,
+        |dst_base, src_base, inner_len, inner_dst, inner_src| {
+            if inner_dst == 1 && inner_src == 1 {
+                let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+                dst[dst_start..dst_start + inner_len]
+                    .write_copy_of_slice(&src[src_start..src_start + inner_len]);
+            } else {
+                copy_strided_span(
+                    dst, src, dst_base, src_base, inner_len, inner_dst, inner_src,
+                );
+            }
+        },
+    );
+    Ok(())
+}
+
+/// One strided span of [`copy_fused_uninit`].
+///
+/// Why out of line: inlined into the owned lane writer, the element loop
+/// keeps its strides and bounds in stack slots; as its own function it
+/// keeps them in registers, and a span is long enough to pay one call.
+#[inline(never)]
+fn copy_strided_span<D: Copy>(
+    dst: &mut [core::mem::MaybeUninit<D>],
+    src: &[D],
+    dst_base: isize,
+    src_base: isize,
+    len: usize,
+    dst_stride: isize,
+    src_stride: isize,
+) {
+    for position in 0..len {
+        let dst_position = (dst_base + position as isize * dst_stride) as usize;
+        let src_position = (src_base + position as isize * src_stride) as usize;
+        dst[dst_position].write(src[src_position]);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -460,9 +526,48 @@ where
     Ok(())
 }
 
-#[inline(always)]
+#[inline(never)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_fused_pair_slices<Dst, T, Apply, ElementOp>(
+    dst_data: &mut [Dst],
+    src_data: &[T],
+    dims: &[usize],
+    dst_strides: &[isize],
+    src_strides: &[isize],
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+    apply: Apply,
+    op: ElementOp,
+) where
+    T: Copy,
+    Apply: Fn(&mut Dst, T),
+    ElementOp: Fn(T) -> T,
+{
+    apply_fused_pair_spans(
+        dst_data,
+        src_data,
+        dims,
+        dst_strides,
+        src_strides,
+        dst_offset,
+        src_offset,
+        index,
+        apply,
+        op,
+    )
+}
+
+/// [`apply_fused_pair_slices`], always inlined into its caller.
+///
+/// Why two entries to one walk: the owned writer forces the walk into its
+/// own instance (see `owned::write_uninit_layout_from_source`), while every
+/// other caller (the initialised adapter's large functions among them)
+/// calls it out of line through [`apply_fused_pair_slices`], where its loop
+/// state stays in registers.
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn apply_fused_pair_spans<Dst, T, Apply, ElementOp>(
     dst_data: &mut [Dst],
     src_data: &[T],
     dims: &[usize],

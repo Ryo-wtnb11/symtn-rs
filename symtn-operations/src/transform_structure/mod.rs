@@ -176,10 +176,9 @@ impl<T> TreeTransformReplay<T> {
                 self.parallel_schedule.one_slot_order.capacity(),
                 core::mem::size_of::<OneSlotStep>(),
             ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.component_class.capacity(),
-                core::mem::size_of::<u32>(),
-            ))
+            // The multi-slot part at the exact size it takes once built,
+            // whether built yet or not.
+            .saturating_add(self.parallel_schedule.lane_bytes())
     }
 }
 
