@@ -111,6 +111,13 @@ where
 /// One Single block's role (`role`, of `elements` elements, possibly a
 /// band crop) into uninitialised `dst` at `dst_offset` from `src` at
 /// `src_offset`.
+///
+/// Why forced inlining down to the span kernel (with [`write_role_uninit`],
+/// `write_fused_uninit`, `for_each_fused_span`, `apply_fused_pair_slices`):
+/// the owned writer then carries its own kernel instance per (dtype,
+/// element op), as the initialised leaf does; left to the inliner, the
+/// chain runs out of line and its per-item cost depends on that choice.
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_uninit_layout_from_source<D, C>(
     exec: Exec<'_>,
@@ -205,6 +212,7 @@ where
 
 /// Writes one role into uninitialized memory: its compiled plan across
 /// `exec` when [`admitted_plan`] admits one, the baked walk otherwise.
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn write_role_uninit<D, F>(
     exec: Exec<'_>,

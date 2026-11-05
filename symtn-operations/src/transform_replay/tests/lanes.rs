@@ -1,11 +1,11 @@
 //! The lane route's placement: the one-slot iteration in source block
 //! order, the cost classes, and Singles that run whole on their compiled
-//! plan with gates seeded from the placement's scans.
+//! plan with each writer's own gate.
 
 use super::threaded::first_count;
 use super::*;
 use crate::kernel_adapter::observed::ObservedKernels;
-use crate::kernel_adapter::sealed::{LeafGate, GATE_SCANS};
+use crate::kernel_adapter::sealed::GATE_SCANS;
 use crate::transform_replay::lanes::{component_time, place_components, Admission, LanePlacement};
 
 /// The lane route: the native executor, whose lane GEMMs a BLAS provider
@@ -372,7 +372,6 @@ fn class_placement_equals_the_per_component_placement() {
                 n: job.cols,
             })
             .collect::<Vec<_>>();
-        let bound = transform.layouts().max_planned_elements();
         let group_sizes = |component: usize| {
             schedule.component_group_list(component).iter().fold(
                 (0usize, 0usize),
@@ -393,8 +392,7 @@ fn class_placement_equals_the_per_component_placement() {
                 &shapes,
                 &mut |mut token, gemms| {
                     let budget = THREADS.min(token.budget().get());
-                    let (mut scans, mut levels) = (Vec::new(), Vec::new());
-                    let mut admission = Admission::new(true, bound, &mut scans, &mut levels);
+                    let admission = Admission::new(true);
                     let (mut classes, mut placements) = (Vec::new(), Vec::new());
                     place_components(
                         &mut token,
@@ -402,30 +400,23 @@ fn class_placement_equals_the_per_component_placement() {
                         schedule,
                         budget,
                         &group_sizes,
-                        &mut admission,
+                        admission,
                         &mut classes,
                         &mut placements,
                     );
                     assert_eq!(placements.len(), schedule.component_count());
                     for (component, placed) in placements.iter().enumerate() {
                         let mut time = |width| {
-                            component_time(
-                                &mut token,
-                                gemms,
-                                schedule,
-                                component,
-                                width,
-                                &mut admission,
-                            )
+                            component_time(&mut token, gemms, schedule, component, width, admission)
                         };
                         let cap = budget.min(schedule.components[component].units).max(1);
-                        let serial = time(1);
+                        let (serial, _) = time(1);
                         let (mut width, mut timed) = (1, serial);
                         let mut candidate = 2;
                         while candidate <= cap {
-                            let at = time(candidate);
+                            let (at, occupied) = time(candidate);
                             if at < timed {
-                                (width, timed) = (candidate, at);
+                                (width, timed) = (occupied, at);
                             }
                             if candidate == cap {
                                 break;
@@ -451,22 +442,6 @@ fn class_placement_equals_the_per_component_placement() {
             .unwrap();
         assert!(checked);
     }
-}
-
-/// The dyadic candidate widths a placement evaluates for a component of
-/// `units` band units on `budget` slots, past width one.
-fn candidates(budget: usize, units: usize) -> Vec<usize> {
-    let cap = budget.min(units).max(1);
-    let mut widths = Vec::new();
-    let mut candidate = 2;
-    while candidate <= cap {
-        widths.push(candidate);
-        if candidate == cap {
-            break;
-        }
-        candidate = (candidate * 2).min(cap);
-    }
-    widths
 }
 
 #[test]
@@ -658,17 +633,15 @@ fn a_wide_accumulation_of_planned_singles_matches_the_oracle() {
     ),
     ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
 )]
-fn equal_geometry_roles_share_one_scan_per_queried_token_shape() {
+fn whole_token_singles_take_one_gate_scan_on_the_calling_thread() {
     // What: nine separately compiled equal-geometry Singles, each run whole
-    // on its own plan across the whole token, cost one gate scan per token
-    // shape the placement queries (its candidate widths, every component
-    // alone on the whole token), not one per component, and the seeded
-    // writers scan nothing more, for the initialised and the owned writer;
-    // the values are the dense oracle.
+    // on its own plan across the whole token (the alone tier), take exactly
+    // one gate scan on the calling thread for the whole call: the placement
+    // scans nothing and the alone tier's components share one gate, for the
+    // initialised and the owned writer; the values are the dense oracle.
     let (structure, transform) = wide_equal_singles();
     let len = structure.required_len().unwrap();
     let role = len / 9;
-    let shapes = candidates(4, transform.parallel_schedule().components[0].units).len();
     let source = source(len);
     let expected = source.iter().map(|v| 2.0 * v).collect::<Vec<_>>();
     let mut pool = crate::host_pool::test_pool(4);
@@ -698,43 +671,82 @@ fn equal_geometry_roles_share_one_scan_per_queried_token_shape() {
     });
     assert_eq!(overwritten, expected);
     assert_eq!(*writes.lock().unwrap(), vec![(role, 4); 9]);
-    assert_eq!(initialized_scans, shapes);
+    assert_eq!(initialized_scans, 1);
 
     let mut written = Vec::new();
     let owned_scans = scans(&mut || {
         written = pool.install(|engine| owned(engine, &transform, &structure, 1, &source, 2.0, 4));
     });
     assert_eq!(written, source.iter().map(|v| 4.0 * v).collect::<Vec<_>>());
-    assert_eq!(owned_scans, shapes);
+    assert_eq!(owned_scans, 1);
 }
 
 #[test]
-fn a_seeded_gate_answers_as_a_fresh_one_and_rescans_another_shape() {
-    // What: a gate seeded with one token shape's scan answers `widens` and
-    // `decided` there exactly as a fresh gate does, on both sides of each
-    // threshold, without scanning; on a narrower token it scans once and
-    // answers as a fresh gate on that token.
-    let two = first_count(4, |width| width > 1);
-    let full = first_count(4, |width| width == 4);
-    let bound = 4 * full;
-    let counts = [0, 1, two - 1, two, two + 1, full - 1, full, full + 1, bound];
-    crate::host_pool::test_pool(4).with_exec(|mut exec| {
-        let scan = LeafGate::new(bound).scan_for(&exec);
-        let seeded = LeafGate::seeded(bound, scan);
-        let before = GATE_SCANS.with(|scans| scans.get());
-        let answers =
-            counts.map(|count| (seeded.decided(&exec, count), seeded.widens(&exec, count)));
-        assert_eq!(GATE_SCANS.with(|scans| scans.get()), before);
-        let fresh = LeafGate::new(bound);
-        let want = counts.map(|count| (fresh.decided(&exec, count), fresh.widens(&exec, count)));
-        assert_eq!(answers, want);
-
-        let narrowed = granted_width(exec.reborrow(), 2);
-        let narrow_fresh = LeafGate::new(bound);
-        let want = counts.map(|count| narrow_fresh.widens(&narrowed, count));
-        let before = GATE_SCANS.with(|scans| scans.get());
-        let got = counts.map(|count| seeded.widens(&narrowed, count));
-        assert_eq!(GATE_SCANS.with(|scans| scans.get()) - before, 1);
-        assert_eq!(got, want);
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "lane GEMMs are the native provider's; a BLAS provider runs the staged route"
+)]
+fn a_single_strided_runs_narrower_than_the_token_leaves_the_alone_tier() {
+    // What: two separately compiled equal-geometry planned Singles on an
+    // eight-worker pool whose dispatch costs make Strided copy each block
+    // on six workers of the whole token (and on all four of a half token)
+    // occupy six slots, not the eight they were offered: neither runs alone
+    // on the whole token, each runs whole on its own plan on a narrower
+    // lane, and the values are the dense oracle.
+    use std::time::Duration;
+    use strided_kernel::execution::{parallel_width, KernelClass};
+    use tenferro_cpu::threadteam::WidthCosts;
+    const THREADS: usize = 8;
+    let row = WidthCosts::from_anchors(&[
+        (2, Duration::from_nanos(100)),
+        (6, Duration::from_nanos(100)),
+        (7, Duration::from_millis(10)),
+        (8, Duration::from_millis(10)),
+    ])
+    .unwrap();
+    let mut pool = crate::host_pool::test_pool_with_costs(THREADS, row);
+    let (structure, transform) = equal_singles(2, 256);
+    let role = structure.required_len().unwrap() / 2;
+    let widths = pool.with_exec(|mut exec| {
+        let whole = parallel_width(&exec, KernelClass::Copy, role).get();
+        let half = granted_width(exec.reborrow(), THREADS / 2);
+        (parallel_width(&half, KernelClass::Copy, role).get(), whole)
     });
+    assert_eq!(widths, (4, 6));
+    assert!(transform.parallel_schedule().components[..2]
+        .iter()
+        .all(|component| component.planned_single));
+
+    let source = source(2 * role);
+    let mut kernels = ObservedKernels::recording();
+    let writes = Arc::clone(&kernels.write_budgets);
+    let mut overwritten = vec![f64::NAN; 2 * role];
+    pool.install(|engine| {
+        initialized(
+            engine,
+            &mut kernels,
+            &transform,
+            &structure,
+            &structure,
+            &mut overwritten,
+            &source,
+            None,
+            THREADS,
+        )
+    });
+    assert_eq!(
+        overwritten,
+        source.iter().map(|v| 2.0 * v).collect::<Vec<_>>()
+    );
+    let writes = writes.lock().unwrap().clone();
+    assert_eq!(writes.len(), 2);
+    assert!(writes
+        .iter()
+        .all(|&(elements, budget)| elements == role && budget < THREADS));
 }

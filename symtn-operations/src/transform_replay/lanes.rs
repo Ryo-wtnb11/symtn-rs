@@ -6,7 +6,6 @@
 
 use super::writers::{Band, DestinationWriter, ReplayParts};
 use super::*;
-use crate::kernel_adapter::sealed::GateScan;
 use crate::transform_structure::{OneSlotStep, TreeTransformDirectItem};
 use core::num::NonZeroUsize;
 use core::ops::Range;
@@ -62,52 +61,22 @@ pub(super) struct Piece<'a, T> {
 /// multisets also give equal packed scratch maxima.
 pub(super) type ClassPlacement = LanePlacement;
 
-/// One token shape a lane placement queried: its gate scan (keyed by budget
-/// and team authority) and where its width knowledge starts in the call's
-/// level arena (`2 (budget + 1)` entries, see [`whole_width`]).
+/// A lane placement's admission rule for components that may run whole
+/// on their plan ([`TreeTransformJointComponent::planned_single`]): only an
+/// overwrite may. The width such a component takes is Strided's own copy
+/// width on the queried token ([`LeafGate::width`]), asked directly: the
+/// placement scans no gate, and each writer's gate lives on the thread that
+/// runs it (one caller gate for the alone tier, one per split leaf).
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ShapeScan {
-    scan: GateScan,
-    levels: usize,
-}
-
-/// A lane placement's admission knowledge for components that may run whole
-/// on their plan ([`TreeTransformJointComponent::planned_single`]): one
-/// scan per distinct token shape the placement queries (candidate widths,
-/// reduced split widths, final grants), each taken at most once per call
-/// and reused on every revisit, with that shape's width answers beside it.
-/// The workers' gates are seeded from the same list ([`seed`]).
-///
-/// Cost: a lookup scans the list, so R queries over S shapes cost O(R S)
-/// comparisons at worst (S is at most the distinct widths the placement
-/// asks, O(log B) candidates plus the split's reduced widths); each new
-/// shape initialises `2 (budget + 1)` levels, O(Σ_shapes budget) per call.
-pub(super) struct Admission<'w> {
-    /// Whether the call's writer overwrites: only then may a component run
-    /// whole on its plan.
+pub(super) struct Admission {
+    /// Whether the call's writer overwrites.
     overwrites: bool,
-    /// The call's gate bound.
-    bound: usize,
-    scans: &'w mut Vec<ShapeScan>,
-    levels: &'w mut Vec<usize>,
 }
 
-impl<'w> Admission<'w> {
-    /// Admission for one call, its lists emptied (capacity kept).
-    pub(super) fn new(
-        overwrites: bool,
-        bound: usize,
-        scans: &'w mut Vec<ShapeScan>,
-        levels: &'w mut Vec<usize>,
-    ) -> Self {
-        scans.clear();
-        levels.clear();
-        Self {
-            overwrites,
-            bound,
-            scans,
-            levels,
-        }
+impl Admission {
+    /// Admission for one call of a writer that `overwrites` or not.
+    pub(super) fn new(overwrites: bool) -> Self {
+        Self { overwrites }
     }
 
     /// Whether component `component` may run whole on its plan in this
@@ -115,61 +84,6 @@ impl<'w> Admission<'w> {
     fn eligible(&self, schedule: &TreeTransformParallelSchedule, component: usize) -> bool {
         self.overwrites && schedule.components[component].planned_single
     }
-
-    /// The list entry of `exec`'s token shape (not serial), scanned now on
-    /// its first query of the call.
-    fn entry(&mut self, exec: &Exec<'_>) -> ShapeScan {
-        if let Some(entry) = self
-            .scans
-            .iter()
-            .find(|entry| LeafGate::scan_matches(&entry.scan, exec))
-        {
-            return *entry;
-        }
-        let entry = ShapeScan {
-            scan: LeafGate::new(self.bound).scan_for(exec),
-            levels: self.levels.len(),
-        };
-        let len = 2 * (exec.budget().get() + 1);
-        self.levels.resize(entry.levels + len, 0);
-        reset_levels(&mut self.levels[entry.levels..]);
-        self.scans.push(entry);
-        entry
-    }
-
-    /// Strided's own copy width for `elements` on `exec` (the width the
-    /// role's `UpdatePlan` takes there), from the shape's scan and width
-    /// knowledge: O(1) where the scan decides it, otherwise at most one
-    /// Strided search per distinct undecided count of the shape.
-    fn width(&mut self, exec: &Exec<'_>, elements: usize) -> usize {
-        if exec.is_serial() {
-            return 1;
-        }
-        let entry = self.entry(exec);
-        let gate = LeafGate::seeded(self.bound, entry.scan);
-        let len = 2 * (exec.budget().get() + 1);
-        width_from_levels(
-            exec,
-            &gate,
-            &mut self.levels[entry.levels..entry.levels + len],
-            elements,
-        )
-    }
-}
-
-/// A gate for `exec` seeded from the placement's scan of its token shape,
-/// or a fresh one when the placement did not query that shape (a serial
-/// token asks no scan).
-fn seed(scans: &[ShapeScan], bound: usize, exec: &Exec<'_>) -> LeafGate {
-    if !exec.is_serial() {
-        if let Some(entry) = scans
-            .iter()
-            .find(|entry| LeafGate::scan_matches(&entry.scan, exec))
-        {
-            return LeafGate::seeded(bound, entry.scan);
-        }
-    }
-    LeafGate::new(bound)
 }
 
 /// The layout of an [`Piece`], for the workspace to keep the piece list's
@@ -207,22 +121,25 @@ fn dense_dtype<D: DenseRecouplingScalar>() -> DenseDType {
 /// `w`-wide section (none at one slot), plus the dense backend's own time
 /// of each of its `g_c` GEMMs at `w` ([`LaneGemms::time`]); an overwrite
 /// of a planned Single that Strided widens on `w` slots runs whole on its
-/// plan instead and costs one section of Strided's width there
+/// plan instead and costs one section of Strided's width `w'` there, and
+/// then occupies `width_c = w'` slots, not the `w` it was offered
 /// ([`component_time`]). The search runs once per cost class
 /// ([`place_components`]). Components with `width_c = B` run alone on the
-/// whole token, banded at `B` (or whole on their plan), in index order; the
+/// whole token, banded at `B` (or whole on their plan), in index order,
+/// under one gate on the calling thread; the
 /// rest split recursively by [`balanced_boundary`] over their
 /// serial times with [`crate::host_pool::lane_share`] shares, on
 /// `min(B, Σ width_c)` slots, when that split is cheaper than running them
 /// one after another on the whole token ([`split_time`] with the same
 /// times); a lane runs its components one after another, each banded at
-/// `min(lane slots, width_c)`. Cost: O(C) plus O(Σ_q (1 + g_q) log B) time
-/// evaluations over the classes `q`, the split's reduced widths once per
-/// (class, width), one gate scan per token shape queried, O(R S)
-/// worst-case lookups for R admission queries over S shapes and
-/// O(Σ_shapes budget) level initialisation ([`Admission`]),
+/// `min(lane slots, width_c)`, under the lane's own gate. Cost: O(C) plus
+/// O(Σ_q (1 + g_q) log B) time evaluations over the classes `q` (each
+/// Θ(B) dispatch-cost reads, an admitted class's Strided width search
+/// included), the split's reduced widths once per (class, width),
 /// O(components + lanes log components) for the split, no allocation once
-/// the workspace is warm.
+/// the workspace is warm. Gate scans happen in the writers: at most one on
+/// the calling thread for the alone tier, and one per split
+/// leaf and token shape it runs, on the worker that runs it.
 ///
 /// One budget slot runs [`TreeTransformParallelSchedule::one_slot_order`]
 /// on the whole destination instead.
@@ -304,8 +221,6 @@ struct Lanes<'a, W, D, C> {
     gate_bound: usize,
     /// Whether the writer overwrites ([`DestinationWriter::overwrites`]).
     overwrites: bool,
-    /// The placement's token-shape scans, which seed every gate.
-    seeds: &'a [ShapeScan],
 }
 
 /// A component's destination: the whole destination of a one-lane replay,
@@ -405,7 +320,6 @@ where
             rank,
             gate_bound: layouts.max_planned_elements(),
             overwrites: writer.overwrites(),
-            seeds: &[],
         };
         let gate = LeafGate::new(lanes.gate_bound);
         let exec = token.limit(NonZeroUsize::MIN);
@@ -445,21 +359,14 @@ where
     let mut placements = core::mem::take(&mut workspace.lane_placements);
     let mut classes = core::mem::take(&mut workspace.lane_classes);
     let mut class_widths = core::mem::take(&mut workspace.lane_class_widths);
-    let mut scans = core::mem::take(&mut workspace.lane_scans);
-    let mut scan_levels = core::mem::take(&mut workspace.lane_scan_levels);
-    let mut admission = Admission::new(
-        writer.overwrites(),
-        layouts.max_planned_elements(),
-        &mut scans,
-        &mut scan_levels,
-    );
+    let admission = Admission::new(writer.overwrites());
     place_components(
         &mut token,
         gemms,
         schedule,
         budget,
         &group_sizes,
-        &mut admission,
+        admission,
         &mut classes,
         &mut placements,
     );
@@ -495,7 +402,7 @@ where
             sum.saturating_add(placements[parts[part].component as usize].timed)
         });
         class_widths.clear();
-        let cell = core::cell::RefCell::new((token.reborrow(), &mut admission, &mut class_widths));
+        let cell = core::cell::RefCell::new((token.reborrow(), &mut class_widths));
         // A reduced width is evaluated once per (class, width) of the call.
         let time = |part: usize, at: usize| {
             let width = width_of(part).min(at).max(1);
@@ -507,9 +414,9 @@ where
                 return placements[component].serial;
             }
             let class = schedule.component_class[component];
-            let (token, admission, memo) = &mut *cell.borrow_mut();
+            let (token, memo) = &mut *cell.borrow_mut();
             *memo.entry((class, width as u32)).or_insert_with(|| {
-                component_time(token, gemms, schedule, component, width, admission)
+                component_time(token, gemms, schedule, component, width, admission).0
             })
         };
         if split_time(
@@ -535,22 +442,6 @@ where
             &|part| parts[part].serial_before,
             &mut leaves,
         );
-    }
-    // Every final grant of a component that may run whole has its shape's
-    // scan in the list, so its worker's seeded gate scans nothing.
-    for (component, placement) in placements.iter().enumerate() {
-        if placement.width == budget && admission.eligible(schedule, component) {
-            admission.entry(&granted_width(token.reborrow(), budget));
-        }
-    }
-    for leaf in leaves.iter() {
-        for part in &parts[leaf.parts.0..leaf.parts.1] {
-            let component = part.component as usize;
-            let grant = placements[component].width.min(leaf.budget);
-            if grant >= 2 && admission.eligible(schedule, component) {
-                admission.entry(&granted_width(token.reborrow(), grant));
-            }
-        }
     }
     let atoms_of = |component: usize| schedule.component_atoms(component).len();
     let (mut source_before, mut destination_before, mut pieces_before) = (0usize, 0usize, 0usize);
@@ -638,9 +529,11 @@ where
             rank,
             gate_bound: layouts.max_planned_elements(),
             overwrites: writer.overwrites(),
-            seeds: &scans,
         };
         let result = (|| {
+            // The alone tier runs on the calling thread: one gate scans the
+            // whole token at most once for all of its components.
+            let gate = LeafGate::new(lanes.gate_bound);
             for (component, placement) in placements.iter().enumerate() {
                 if placement.width != budget {
                     continue;
@@ -649,6 +542,7 @@ where
                     component,
                     budget,
                     token.reborrow(),
+                    &gate,
                     &mut Target::Atoms(&mut slots[..], 0),
                     match lane_sources[..lanes_listed].first_mut() {
                         Some(buffer) => buffer,
@@ -688,8 +582,6 @@ where
     workspace.lane_placements = placements;
     workspace.lane_classes = classes;
     workspace.lane_class_widths = class_widths;
-    workspace.lane_scans = scans;
-    workspace.lane_scan_levels = scan_levels;
     workspace.lane_parts = parts;
     workspace.lane_leaves = leaves;
     result
@@ -703,7 +595,7 @@ where
 /// its `O(g_q)` scratch fold serve them all. Cost: O(C) plus, per class
 /// `q`, `O(g_q)` and `(1 + g_q)` time evaluations at each of its O(log B)
 /// candidate widths, each a dense `time` query of Θ(B) dispatch-cost reads
-/// (plus the admission lookups of [`Admission`]).
+/// (an admitted class adds one Strided width search of the same order).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn place_components(
     token: &mut LaneToken<'_>,
@@ -711,7 +603,7 @@ pub(super) fn place_components(
     schedule: &TreeTransformParallelSchedule,
     budget: usize,
     group_sizes: &impl Fn(usize) -> (usize, usize),
-    admission: &mut Admission<'_>,
+    admission: Admission,
     classes: &mut Vec<Option<ClassPlacement>>,
     placements: &mut Vec<LanePlacement>,
 ) {
@@ -727,13 +619,14 @@ pub(super) fn place_components(
         let placement = *class.get_or_insert_with(|| {
             let (source, destination) = group_sizes(component);
             let cap = budget.min(schedule.components[component].units).max(1);
-            let serial = component_time(token, gemms, schedule, component, 1, admission);
+            let (serial, _) = component_time(token, gemms, schedule, component, 1, admission);
             let (mut width, mut timed) = (1, serial);
             let mut candidate = 2;
             while candidate <= cap {
-                let time = component_time(token, gemms, schedule, component, candidate, admission);
+                let (time, occupied) =
+                    component_time(token, gemms, schedule, component, candidate, admission);
                 if time < timed {
-                    (width, timed) = (candidate, time);
+                    (width, timed) = (occupied, time);
                 }
                 if candidate == cap {
                     break;
@@ -761,29 +654,37 @@ fn nanos(duration: Duration) -> usize {
     usize::try_from(duration.as_nanos()).unwrap_or(usize::MAX)
 }
 
-/// `time_c(width)` of component `component` (see [`lane_replay`]).
+/// `time_c(width)` of component `component` (see [`lane_replay`]) and the
+/// slots it occupies there.
 ///
 /// A component that may run whole on its plan ([`Admission::eligible`])
 /// and whose role Strided widens on the `width`-slot token runs as one
 /// section of Strided's own width `w'` there, so it costs
-/// `estimate / w' + dispatch(w')`; every other one is banded.
+/// `estimate / w' + dispatch(w')` and occupies `w'` slots; every other one
+/// is banded over all `width`.
+///
+/// Why the occupied width and not the offered one: a component recorded at
+/// the offered `width = B` while Strided runs it on `w' < B` would sit in
+/// the alone tier, one after another on `w'` of `B` slots, and never enter
+/// the split comparison that values it with this same time.
 pub(super) fn component_time(
     token: &mut LaneToken<'_>,
     gemms: &dyn LaneGemms,
     schedule: &TreeTransformParallelSchedule,
     component: usize,
     width: usize,
-    admission: &mut Admission<'_>,
-) -> Duration {
+    admission: Admission,
+) -> (Duration, usize) {
     let groups = schedule.component_group_list(component);
     let moved = schedule.components[component].moved;
     let estimate = strided_kernel::execution::KernelClass::Copy.estimate(moved);
     if width >= 2 && admission.eligible(schedule, component) {
         let exec = granted_width(token.reborrow(), width);
-        let whole = admission.width(&exec, moved);
+        let whole = LeafGate::width(&exec, moved);
         if let Some(whole) = NonZeroUsize::new(whole).filter(|whole| whole.get() > 1) {
-            return (estimate / u32::try_from(whole.get()).unwrap_or(u32::MAX))
+            let time = (estimate / u32::try_from(whole.get()).unwrap_or(u32::MAX))
                 .saturating_add(exec.dispatch_cost(whole));
+            return (time, whole.get());
         }
     }
     let width = NonZeroUsize::new(width).unwrap_or(NonZeroUsize::MIN);
@@ -795,9 +696,10 @@ pub(super) fn component_time(
         (estimate / u32::try_from(width.get()).unwrap_or(u32::MAX))
             .saturating_add(token.dispatch_cost(width).saturating_mul(sections))
     };
-    groups.iter().fold(movement, |time, &group| {
+    let time = groups.iter().fold(movement, |time, &group| {
         time.saturating_add(gemms.time(token, group as usize, width))
-    })
+    });
+    (time, width.get())
 }
 
 /// The split tier's lanes, in order: the recursion of [`Lanes::run_split`].
@@ -883,6 +785,9 @@ where
                 None => &mut unused,
             };
             let mut exec = exec;
+            // The lane's own gate, on the thread that runs it: it scans only
+            // the lane's token shapes.
+            let gate = LeafGate::new(self.gate_bound);
             for part in range {
                 let component = parts[part].component as usize;
                 let width = placements[component].width.min(budget).max(1);
@@ -890,6 +795,7 @@ where
                     component,
                     width,
                     exec.reborrow(),
+                    &gate,
                     &mut Target::Atoms(&mut *slots, slot_base),
                     &mut *source,
                     &mut *destination,
@@ -964,13 +870,16 @@ where
     }
 
     /// Component `component` on `width` slots of `exec` (which holds at
-    /// least that many): whole items on one slot, banded otherwise.
+    /// least that many): whole items on one slot, banded otherwise. `gate`
+    /// is the calling thread's; a banded sub-slot on another worker builds
+    /// its own.
     #[allow(clippy::too_many_arguments)]
     fn run_component<'a, T>(
         &self,
         component: usize,
         width: usize,
         exec: Exec<'_>,
+        gate: &LeafGate,
         target: &mut Target<'_, 'a, T>,
         source: &mut HostScratchBuffer<D>,
         destination: &mut [MaybeUninit<D>],
@@ -983,7 +892,6 @@ where
     {
         if width <= 1 {
             let mut kernels = self.writer.kernels();
-            let gate = self.gate(&exec);
             return self.run_narrow(
                 component,
                 granted_width(exec, 1),
@@ -993,12 +901,11 @@ where
                 &mut fused[..self.rank],
                 &mut kernels,
                 &mut Vec::new(),
-                &gate,
+                gate,
             );
         }
         let mut exec = granted_width(exec, width);
-        let gate = self.gate(&exec);
-        if let Some(item) = self.whole_single(component, &exec, &gate) {
+        if let Some(item) = self.whole_single(component, &exec, gate) {
             // One stage, one item: the admitted plan partitions the role
             // over the token itself, deterministically for its width.
             let (dst, dst_start) = target.at(self.schedule, item.slot());
@@ -1011,7 +918,7 @@ where
                 dst_start,
                 None,
                 exec,
-                &gate,
+                gate,
                 &mut fused[..self.rank],
             );
         }
@@ -1034,7 +941,7 @@ where
             &|pieces, index, exec| {
                 let mut kernels = self.writer.kernels();
                 let mut zero_strides = Vec::new();
-                let gate = self.gate(&exec);
+                let gate = LeafGate::new(self.gate_bound);
                 let mut exec = exec;
                 for piece in pieces.iter_mut().flatten() {
                     let first = direct.partition_point(|item| item.slot() < piece.slot);
@@ -1073,7 +980,7 @@ where
                 &|pieces, index, exec| {
                     let mut kernels = self.writer.kernels();
                     let mut zero_strides = Vec::new();
-                    let gate = self.gate(&exec);
+                    let gate = LeafGate::new(self.gate_bound);
                     let mut exec = exec;
                     for piece in pieces.iter_mut().flatten() {
                         let first = columns.partition_point(|column| column.slot < piece.slot);
@@ -1101,11 +1008,6 @@ where
             )?;
         }
         Ok(())
-    }
-
-    /// A gate for `exec`, seeded from the placement's scan of its shape.
-    fn gate(&self, exec: &Exec<'_>) -> LeafGate {
-        seed(self.seeds, self.gate_bound, exec)
     }
 
     /// Component `component`'s one Single when it runs whole on `exec`:

@@ -821,7 +821,6 @@ mod tests {
                     matrix: 0,
                 }],
                 &[],
-                |_, _, _, _, _| {},
             )
             .unwrap();
         let pack = table.role(1).unwrap();

@@ -594,41 +594,26 @@ impl RawLayoutTable {
     }
 
     /// Bakes every replayed role into an exactly sized arena and returns the
-    /// retained table; the raw geometry is dropped with `self`. Every baked
-    /// destination role (Single, scatter column, inactive) is also handed to
-    /// `destination` as `(entry, offset, dims, dst_strides, planned)`, with
-    /// `planned` its element count when it carries a plan and zero
-    /// otherwise, so the schedule records bands without another pass.
+    /// retained table; the raw geometry is dropped with `self`.
     ///
-    /// Why two normalization passes: the arena is charged by capacity, and
-    /// reserving `max(rank, 1)` per role charged 24N bytes even when a role
-    /// fuses to f < N axes. Counting first reserves exactly Σf without a
-    /// growth reallocation; the extra pass costs O(N²) compares per role at
-    /// compile and allocates nothing.
+    /// Why one normalization pass and a shrink: the arena is charged by
+    /// capacity, and a role fuses to f <= N axes. Every fused rank is at most
+    /// its raw rank (rank 0 normalizes to one axis and grows the arena
+    /// instead), so the raw shapes bound the arena and the entries bound the
+    /// plans; reserving those once and shrinking each vector to its length
+    /// after the pass keeps the charge exact without a counting pass.
     pub(super) fn finish(
         mut self,
         blocks: &[TreeTransformBlock],
         inactive: &[usize],
-        mut destination: impl FnMut(usize, isize, &[usize], &[isize], usize),
     ) -> Result<TreeTransformLayoutTable, OperationError> {
         let mut scratch = FusedLayoutScratch::default();
-        let (mut two_sided, mut one_sided, mut planned) = (0usize, 0usize, 0usize);
-        self.for_each_role(blocks, inactive, &mut scratch, |_, kind, fused| {
-            let total = if kind.is_paired() {
-                &mut two_sided
-            } else {
-                &mut one_sided
-            };
-            *total = total.saturating_add(fused.dims().len());
-            planned += usize::from(kind.is_planned(fused));
-            Ok(())
-        })?;
-        let all = two_sided.saturating_add(one_sided);
         let mut table = core::mem::take(&mut self.table);
-        table.fused_dims.reserve_exact(all);
-        table.fused_dst_strides.reserve_exact(all);
-        table.fused_src_strides.reserve_exact(two_sided);
-        table.plans.reserve_exact(planned);
+        let bound = self.shapes.len();
+        table.fused_dims.reserve_exact(bound);
+        table.fused_dst_strides.reserve_exact(bound);
+        table.fused_src_strides.reserve_exact(bound);
+        table.plans.reserve_exact(table.entries.len());
         self.for_each_role(blocks, inactive, &mut scratch, |entry, kind, fused| {
             let paired = kind.is_paired();
             if paired {
@@ -639,7 +624,6 @@ impl RawLayoutTable {
                 )?;
             }
             let mut plan = 0;
-            let mut planned = 0;
             if kind.is_planned(fused) {
                 table.plans.push(
                     UpdatePlan::compile(fused.dims(), fused.dst_strides(), fused.src_strides())
@@ -647,17 +631,8 @@ impl RawLayoutTable {
                 );
                 plan = u32::try_from(table.plans.len())
                     .map_err(|_| OperationError::ElementCountOverflow)?;
-                planned = fused.dims().iter().product();
+                let planned = fused.dims().iter().product();
                 table.max_planned_elements = table.max_planned_elements.max(planned);
-            }
-            if !matches!(kind, RoleKind::Pack) {
-                destination(
-                    entry,
-                    table.entries[entry].offset,
-                    fused.dims(),
-                    fused.dst_strides(),
-                    planned,
-                );
             }
             let start = u32::try_from(table.fused_dims.len())
                 .map_err(|_| OperationError::ElementCountOverflow)?;
@@ -679,9 +654,10 @@ impl RawLayoutTable {
             table.entries[entry].role = RoleSlot { start, rank, plan };
             Ok(())
         })?;
-        debug_assert_eq!(table.fused_src_strides.len(), two_sided);
-        debug_assert_eq!(table.fused_dims.len(), all);
-        debug_assert_eq!(table.plans.len(), planned);
+        table.fused_dims.shrink_to_fit();
+        table.fused_dst_strides.shrink_to_fit();
+        table.fused_src_strides.shrink_to_fit();
+        table.plans.shrink_to_fit();
         Ok(table)
     }
 }

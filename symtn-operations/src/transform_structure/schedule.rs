@@ -166,31 +166,6 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub class_count: usize,
 }
 
-/// Where a destination entry's compiled role is recorded during
-/// [`RawLayoutTable::finish`](super::layout_table): its atom slot and the
-/// owner whose widest planned size it raises.
-#[derive(Clone, Copy, Debug)]
-pub(super) enum RoleOwner {
-    /// Not a written destination (a source, or an empty layout).
-    None,
-    /// A Single of component `component`.
-    Single { slot: u32, component: u32 },
-    /// A scatter column of Multi group `group`.
-    Column { slot: u32, group: u32 },
-    /// An inactive destination.
-    Inactive { slot: u32 },
-}
-
-/// What the schedule learns from the compiled destination roles: each
-/// entry's owner, and per atom `None` until its first item, then
-/// `Some(Some((S, E)))` while every item agrees on one band, `Some(None)`
-/// once one does not.
-#[derive(Debug, Default)]
-pub(super) struct RoleRecord {
-    owners: Vec<RoleOwner>,
-    bands: Vec<Option<Option<(usize, usize)>>>,
-}
-
 impl TreeTransformParallelSchedule {
     /// Joint components.
     #[inline]
@@ -219,11 +194,10 @@ impl TreeTransformParallelSchedule {
             ..self.components[component + 1].group_start as usize]
     }
 
-    /// Records one compiled destination role (entry `entry` at `offset`,
-    /// baked `(dims, strides)`, `planned` elements when it carries a plan,
-    /// zero otherwise) into its atom's bandability and its owner's widest
-    /// planned size. Called by [`RawLayoutTable::finish`] for every role it
-    /// bakes, so no second pass over the items reads the table. O(rank).
+    /// Completes the schedule from the retained layout table: each atom's
+    /// band and each component's band units, the widest planned Single of
+    /// each component and planned scatter column of each group, which
+    /// components may run whole on their plan, and the cost classes.
     ///
     /// An atom is bandable when every item's baked layout has the same
     /// outermost (largest destination stride) dimension, of stride `S > 0`
@@ -232,78 +206,93 @@ impl TreeTransformParallelSchedule {
     /// `o - lo + Σ_{j < outer} (dim_j - 1) stride_j < S` for item offset `o`
     /// and atom start `lo`. Then band `k` holds exactly the item elements of
     /// outer index `k`, at `[lo + k S, lo + (k + 1) S)` cut at the atom's
-    /// end, for every item alike.
-    pub(super) fn record_role(
-        &mut self,
-        record: &mut RoleRecord,
-        entry: usize,
-        offset: isize,
-        dims: &[usize],
-        strides: &[isize],
-        planned: usize,
-    ) {
-        let slot = match record.owners.get(entry).copied() {
-            None | Some(RoleOwner::None) => return,
-            Some(RoleOwner::Single { slot, component }) => {
-                let widest = &mut self.components[component as usize].widest_direct;
-                *widest = (*widest).max(planned);
-                slot
-            }
-            Some(RoleOwner::Column { slot, group }) => {
-                let widest = &mut self.scatter_groups[group as usize].widest;
-                *widest = (*widest).max(planned);
-                slot
-            }
-            Some(RoleOwner::Inactive { slot }) => slot,
-        };
-        let band = item_band(self.atoms[slot as usize].lo, offset, dims, strides);
-        let state = &mut record.bands[slot as usize];
-        *state = Some(match *state {
-            None => band,
-            Some(previous) => previous.filter(|&previous| Some(previous) == band),
-        });
-    }
-
-    /// Completes the schedule once every role is recorded: each atom's band
-    /// and each component's band units; which components may run whole on
-    /// their plan; and the cost classes. O(I + K log K) for I items and the
-    /// class keys' total length K = Σ_c (1 + g_c).
+    /// end, for every item alike. Every destination role of the atom takes
+    /// part: a Single's and a scatter column's two-sided role, and an
+    /// inactive layout's one-sided role (which plans nothing).
+    ///
+    /// O(I r + K log K) for I items of fused rank at most r and the class
+    /// keys' total length K = Σ_c (1 + g_c), with O(atoms) band state.
     pub(super) fn finish_roles(
         &mut self,
-        record: RoleRecord,
         blocks: &[TreeTransformBlock],
         layouts: &TreeTransformLayoutTable,
         recoupling_plan: &TreeTransformRecouplingPlan,
     ) -> Result<(), OperationError> {
-        for (atom, band) in self.atoms.iter_mut().zip(record.bands) {
+        // Per atom `None` until its first item, then `Some(Some((S, E)))`
+        // while every item agrees on one band, `Some(None)` once one does not.
+        let mut bands: Vec<Option<Option<(usize, usize)>>> = vec![None; self.atoms.len()];
+        let atoms = &self.atoms;
+        let mut record = |slot: u32, entry: usize, dims: &[usize], strides: &[isize]| {
+            let offset = layouts.entry(entry).offset;
+            let band = item_band(atoms[slot as usize].lo, offset, dims, strides);
+            let state = &mut bands[slot as usize];
+            *state = Some(match *state {
+                None => band,
+                Some(previous) => previous.filter(|&previous| Some(previous) == band),
+            });
+        };
+        let planned = |role: &BakedFusedLayout<'_>| {
+            if role.plan.is_some() {
+                role.dims.iter().product()
+            } else {
+                0
+            }
+        };
+        let component_count = self.components.len().saturating_sub(1);
+        for component in 0..component_count {
+            let (start, end) = (
+                self.components[component].direct_start as usize,
+                self.components[component + 1].direct_start as usize,
+            );
+            let mut widest = 0usize;
+            let mut planned_single = false;
+            for &item in &self.direct[start..end] {
+                match item {
+                    TreeTransformDirectItem::Single { block, slot } => {
+                        let TreeTransformBlock::Single { dst_layout, .. } = blocks[block as usize]
+                        else {
+                            return Err(OperationError::InvalidArgument {
+                                message: "tree transform direct item names a non-Single block",
+                            });
+                        };
+                        let role = layouts.role(dst_layout)?;
+                        record(slot, dst_layout, role.dims, role.dst_strides);
+                        widest = widest.max(planned(&role));
+                        planned_single = role.plan.is_some();
+                    }
+                    TreeTransformDirectItem::Inactive { layout, slot } => {
+                        let (dims, strides) = layouts.inactive_role(layout as usize)?;
+                        record(slot, layout as usize, dims, strides);
+                    }
+                }
+            }
+            let groupless = self.components[component].group_start
+                == self.components[component + 1].group_start;
+            let entry = &mut self.components[component];
+            entry.widest_direct = widest;
+            entry.planned_single = planned_single && end - start == 1 && groupless;
+        }
+        for group in &mut self.scatter_groups {
+            let mut widest = 0usize;
+            for column in &self.scatter_columns[group.columns.clone()] {
+                let role = layouts.role(column.dst_layout)?;
+                record(column.slot, column.dst_layout, role.dims, role.dst_strides);
+                widest = widest.max(planned(&role));
+            }
+            group.widest = widest;
+        }
+        for (atom, band) in self.atoms.iter_mut().zip(bands) {
             let (stride, extent) = band.flatten().unwrap_or((0, 1));
             atom.band_stride = stride;
             atom.band_extent = extent;
         }
-        let component_count = self.component_count();
         let mut total = 0usize;
         for component in 0..component_count {
             let units = self.atoms[self.component_atoms(component)]
                 .iter()
                 .try_fold(0usize, |units, atom| units.checked_add(atom.band_extent))
                 .ok_or(OperationError::ElementCountOverflow)?;
-            let planned_single = match *self.component_direct(component) {
-                [TreeTransformDirectItem::Single { block, .. }]
-                    if self.component_group_list(component).is_empty() =>
-                {
-                    let TreeTransformBlock::Single { dst_layout, .. } = blocks[block as usize]
-                    else {
-                        return Err(OperationError::InvalidArgument {
-                            message: "tree transform direct item names a non-Single block",
-                        });
-                    };
-                    layouts.role(dst_layout)?.plan.is_some()
-                }
-                _ => false,
-            };
-            let entry = &mut self.components[component];
-            entry.units = units;
-            entry.planned_single = planned_single;
+            self.components[component].units = units;
             total = total
                 .checked_add(units)
                 .ok_or(OperationError::ElementCountOverflow)?;
@@ -316,7 +305,8 @@ impl TreeTransformParallelSchedule {
     /// Numbers the components' cost classes: one class per distinct
     /// `(planned_single, moved, units, sorted Multi job shapes)`. These fix
     /// a component's modeled time at every width (see `lanes.rs`), so a
-    /// placement evaluates each class once. O(K log K) for K = Σ_c (1 + g_c).
+    /// placement evaluates each class once. O(K log K) for K = Σ_c (1 + g_c),
+    /// each key built once.
     fn record_cost_classes(&mut self, recoupling_plan: &TreeTransformRecouplingPlan) {
         let component_count = self.component_count();
         let jobs = recoupling_plan.jobs();
@@ -331,24 +321,29 @@ impl TreeTransformParallelSchedule {
         for component in 0..component_count {
             shapes[self.component_groups_range(component)].sort_unstable();
         }
-        let key = |component: usize| {
-            let entry = &self.components[component];
-            (
-                entry.planned_single,
-                entry.moved,
-                entry.units,
-                &shapes[self.component_groups_range(component)],
-            )
-        };
-        let mut order = (0..component_count).collect::<Vec<_>>();
-        order.sort_unstable_by(|&left, &right| key(left).cmp(&key(right)));
+        // Each key built once, then sorted with its component.
+        let mut keys = (0..component_count)
+            .map(|component| {
+                let entry = &self.components[component];
+                (
+                    (
+                        entry.planned_single,
+                        entry.moved,
+                        entry.units,
+                        &shapes[self.component_groups_range(component)],
+                    ),
+                    component,
+                )
+            })
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
         let mut classes = vec![0u32; component_count];
         let mut count = 0usize;
-        for (position, &component) in order.iter().enumerate() {
-            if position > 0 && key(order[position - 1]) != key(component) {
+        for (position, (key, component)) in keys.iter().enumerate() {
+            if position > 0 && keys[position - 1].0 != *key {
                 count += 1;
             }
-            classes[component] = count as u32;
+            classes[*component] = count as u32;
         }
         self.class_count = if component_count == 0 { 0 } else { count + 1 };
         self.component_class = classes;
@@ -364,7 +359,7 @@ impl TreeTransformParallelSchedule {
 
 /// The band `(S, E)` of one item with baked layout `(dims, strides)` at
 /// offset `offset` in the atom starting at `lo`, or `None` when the item
-/// cannot be banded (see [`TreeTransformParallelSchedule::record_role`]).
+/// cannot be banded (see [`TreeTransformParallelSchedule::finish_roles`]).
 fn item_band(
     lo: isize,
     offset: isize,
@@ -433,9 +428,9 @@ impl TreeTransformRecouplingPlan {
 /// Multi group, inactive layout) of each atom, and numbers the components by
 /// their first atom. O(I log I + B) time and O(I) retained metadata for I
 /// intervals and B blocks: one sort, one sweep, a union-find and counting
-/// passes, no element enumeration. The returned [`RoleRecord`] maps each
-/// destination entry to its owner for [`TreeTransformParallelSchedule::
-/// record_role`].
+/// passes, no element enumeration. Bands, units, planned sizes and classes
+/// follow from the retained layout table
+/// ([`TreeTransformParallelSchedule::finish_roles`]).
 ///
 /// Why components rather than one bounding slice per owner: canonical
 /// coupled-sector blocks interleave, so an owner's intervals can lie in
@@ -446,7 +441,7 @@ pub(super) fn compile_parallel_schedule(
     inactive_dst_layouts: &[usize],
     layouts: &RawLayoutTable,
     recoupling_plan: &TreeTransformRecouplingPlan,
-) -> Result<(TreeTransformParallelSchedule, RoleRecord), OperationError> {
+) -> Result<TreeTransformParallelSchedule, OperationError> {
     let single_block_count = blocks
         .iter()
         .filter(|block| matches!(block, TreeTransformBlock::Single { .. }))
@@ -455,14 +450,30 @@ pub(super) fn compile_parallel_schedule(
     let mut packed_column_count = 0usize;
     let mut scattered_column_count = 0usize;
 
-    let mut pack_columns = Vec::new();
-    let mut scatter_columns = Vec::new();
-    let mut scatter_groups = Vec::new();
+    // Every count is known from the plan and the block list, so no table
+    // grows while it is built.
+    let (packed_total, scattered_total) =
+        recoupling_plan
+            .jobs()
+            .iter()
+            .fold((0usize, 0usize), |(packed, scattered), job| {
+                (
+                    packed.saturating_add(job.contracted),
+                    scattered.saturating_add(job.cols),
+                )
+            });
+    let mut pack_columns = Vec::with_capacity(packed_total);
+    let mut scatter_columns = Vec::with_capacity(scattered_total);
+    let mut scatter_groups = Vec::with_capacity(groups);
     // Every destination interval: `(lo, hi, owner, item)`. Owners are the
     // groups `0..G`, then the Singles, then the inactive layouts; `item`
     // indexes `scatter_columns` for a group's interval and is the block or
     // layout otherwise.
-    let mut intervals: Vec<(isize, isize, u32, u32)> = Vec::new();
+    let mut intervals: Vec<(isize, isize, u32, u32)> = Vec::with_capacity(
+        scattered_total
+            .saturating_add(single_block_count)
+            .saturating_add(inactive_dst_layouts.len()),
+    );
     for (group, (block_index, job)) in recoupling_plan.entries().enumerate() {
         let TreeTransformBlock::Multi {
             dst_layout_start,
@@ -573,18 +584,15 @@ pub(super) fn compile_parallel_schedule(
         }
     }
     if intervals.is_empty() {
-        return Ok((
-            TreeTransformParallelSchedule {
-                pack_columns,
-                scatter_columns,
-                scatter_groups,
-                single_block_count,
-                packed_column_count,
-                scattered_column_count,
-                ..Default::default()
-            },
-            RoleRecord::default(),
-        ));
+        return Ok(TreeTransformParallelSchedule {
+            pack_columns,
+            scatter_columns,
+            scatter_groups,
+            single_block_count,
+            packed_column_count,
+            scattered_column_count,
+            ..Default::default()
+        });
     }
     // Why the order is total: compilation rejects aliased destinations and
     // drops empty ones, so no two intervals start at one element.
@@ -594,7 +602,7 @@ pub(super) fn compile_parallel_schedule(
     // union of every owner writing into the same atom.
     let mut parent = (0..checked_u32(owners)?).collect::<Vec<u32>>();
     let mut interval_atom = Vec::with_capacity(intervals.len());
-    let mut bounds: Vec<(isize, isize, u32)> = Vec::new();
+    let mut bounds: Vec<(isize, isize, u32)> = Vec::with_capacity(intervals.len());
     for &(lo, hi, owner, _) in &intervals {
         match bounds.last_mut() {
             Some((_, atom_hi, first)) if lo <= *atom_hi => {
@@ -654,30 +662,26 @@ pub(super) fn compile_parallel_schedule(
     let address_order = atom_slot.clone();
 
     // Items: their atom slot and weight, the components' direct items (in
-    // address order) and moved elements, and each destination entry's owner.
+    // address order) and moved elements.
     let mut moved = vec![0usize; components_len];
     let mut direct_weight = vec![0usize; components_len];
-    let mut items: Vec<(u32, TreeTransformDirectItem)> = Vec::new();
-    let mut owners_of = vec![RoleOwner::None; layouts.entries().len()];
+    let mut items: Vec<(u32, TreeTransformDirectItem)> = Vec::with_capacity(intervals.len());
     for (&(_, _, owner, item), &atom) in intervals.iter().zip(&interval_atom) {
         let slot = atom_slot[atom as usize];
         let component = atom_component[atom as usize];
         let (layout, direct) = if (owner as usize) < groups {
             let column = &mut scatter_columns[item as usize];
             column.slot = slot;
-            owners_of[column.dst_layout] = RoleOwner::Column { slot, group: owner };
             (column.dst_layout, None)
         } else if (owner as usize) < single_owners {
             let TreeTransformBlock::Single { dst_layout, .. } = blocks[item as usize] else {
                 unreachable!("Single owners name Single blocks");
             };
-            owners_of[dst_layout] = RoleOwner::Single { slot, component };
             (
                 dst_layout,
                 Some(TreeTransformDirectItem::Single { block: item, slot }),
             )
         } else {
-            owners_of[item as usize] = RoleOwner::Inactive { slot };
             (
                 item as usize,
                 Some(TreeTransformDirectItem::Inactive { layout: item, slot }),
@@ -771,30 +775,23 @@ pub(super) fn compile_parallel_schedule(
             planned_single: false,
         })
         .collect();
-    let bands = vec![None; atoms.len()];
-    Ok((
-        TreeTransformParallelSchedule {
-            atoms,
-            address_order,
-            components,
-            direct,
-            component_groups,
-            pack_columns,
-            scatter_columns,
-            scatter_groups,
-            single_block_count,
-            packed_column_count,
-            scattered_column_count,
-            band_units: 0,
-            one_slot_order,
-            component_class: Vec::new(),
-            class_count: 0,
-        },
-        RoleRecord {
-            owners: owners_of,
-            bands,
-        },
-    ))
+    Ok(TreeTransformParallelSchedule {
+        atoms,
+        address_order,
+        components,
+        direct,
+        component_groups,
+        pack_columns,
+        scatter_columns,
+        scatter_groups,
+        single_block_count,
+        packed_column_count,
+        scattered_column_count,
+        band_units: 0,
+        one_slot_order,
+        component_class: Vec::new(),
+        class_count: 0,
+    })
 }
 
 /// [`TreeTransformParallelSchedule::one_slot_order`] by one counting pass

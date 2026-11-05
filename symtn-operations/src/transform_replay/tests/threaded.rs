@@ -1053,7 +1053,9 @@ fn banded_components_write_each_band_from_one_slot_in_every_stage() {
     // included, is written from one thread by both the Single and the
     // scatter, three threads in all, and the values are the dense oracle.
     // A unit-row-and-column atom and the injective `[3, 2]` / `[2, 3]`
-    // layout, whose inner reach leaves its first slab, stay indivisible.
+    // layout, whose inner reach leaves its first slab, stay indivisible, as
+    // does an atom whose Single and inactive block disagree on the outer
+    // extent.
     let key = |sector| BlockKey::ordinal(sector);
     let dst = Arc::new(
         BlockStructure::from_blocks_with_rank(
@@ -1166,6 +1168,24 @@ fn banded_components_write_each_band_from_one_slot_in_every_stage() {
     };
     assert_eq!(bandable(&single(vec![1, 1], vec![1, 2])), [false]);
     assert_eq!(bandable(&single(vec![3, 2], vec![2, 3])), [false]);
+    // A Single `{0, 4, 8}` and an inactive block `{2, 6}` share one atom
+    // with outer extents 3 and 2, so the atom stays indivisible.
+    let dst = BlockStructure::from_blocks_with_rank(
+        2,
+        vec![
+            BlockSpec::with_key(key(0), vec![1, 3], vec![1, 4], 0).unwrap(),
+            BlockSpec::with_key(key(1), vec![1, 2], vec![1, 4], 2).unwrap(),
+        ],
+    )
+    .unwrap();
+    let src = BlockStructure::packed_column_major(2, vec![vec![1, 3]]).unwrap();
+    let with_inactive = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+    )
+    .unwrap();
+    assert_eq!(bandable(&with_inactive), [false]);
 }
 
 #[test]

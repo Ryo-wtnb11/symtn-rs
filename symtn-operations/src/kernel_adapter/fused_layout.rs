@@ -330,6 +330,7 @@ pub(crate) fn normalize_fused_layout(
     Ok(())
 }
 
+#[inline(always)]
 pub(crate) fn for_each_fused_span<F>(
     dims: &[usize],
     dst_strides: &[isize],
@@ -384,6 +385,7 @@ pub(crate) fn for_each_fused_span<F>(
 /// contiguous runs — the *set* of visited (dst, src) offsets is unchanged, and
 /// there is no read-after-write within a single writer (`src` is a disjoint,
 /// fully-initialized slice). The caller supplies runtime-length traversal scratch.
+#[inline(always)]
 pub(crate) fn write_fused_uninit<D, F>(
     baked: BakedFusedLayout<'_>,
     dst: &mut [core::mem::MaybeUninit<D>],
@@ -458,6 +460,7 @@ where
     Ok(())
 }
 
+#[inline(always)]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_fused_pair_slices<Dst, T, Apply, ElementOp>(
     dst_data: &mut [Dst],

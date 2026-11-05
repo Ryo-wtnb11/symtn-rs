@@ -359,17 +359,12 @@ pub struct HostTreeTransformWorkspace<T> {
     // its GEMM shapes (O(groups)) and its band pieces (O(atoms + lanes)).
     #[cfg(feature = "tenferro")]
     lane_placements: Vec<lanes::LanePlacement>,
-    // Its per-class placements (O(classes)), its split's reduced-width
-    // times per (class, width), and its admission scans per token shape
-    // with their width knowledge (O(shapes x engine width)).
+    // Its per-class placements (O(classes)) and its split's reduced-width
+    // times per (class, width).
     #[cfg(feature = "tenferro")]
     lane_classes: Vec<Option<lanes::ClassPlacement>>,
     #[cfg(feature = "tenferro")]
     lane_class_widths: std::collections::HashMap<(u32, u32), core::time::Duration>,
-    #[cfg(feature = "tenferro")]
-    lane_scans: Vec<lanes::ShapeScan>,
-    #[cfg(feature = "tenferro")]
-    lane_scan_levels: Vec<usize>,
     #[cfg(feature = "tenferro")]
     lane_parts: Vec<lanes::LanePart>,
     #[cfg(feature = "tenferro")]
@@ -418,10 +413,6 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             lane_classes: Vec::new(),
             #[cfg(feature = "tenferro")]
             lane_class_widths: std::collections::HashMap::new(),
-            #[cfg(feature = "tenferro")]
-            lane_scans: Vec::new(),
-            #[cfg(feature = "tenferro")]
-            lane_scan_levels: Vec::new(),
             #[cfg(feature = "tenferro")]
             lane_parts: Vec::new(),
             #[cfg(feature = "tenferro")]
@@ -505,14 +496,6 @@ impl<T> HostTreeTransformWorkspace<T> {
                 self.lane_classes.capacity(),
                 std::mem::size_of::<Option<lanes::ClassPlacement>>(),
             ) + class_widths
-                + bytes(
-                    self.lane_scans.capacity(),
-                    std::mem::size_of::<lanes::ShapeScan>(),
-                )
-                + bytes(
-                    self.lane_scan_levels.capacity(),
-                    std::mem::size_of::<usize>(),
-                )
                 + bytes(
                     self.lane_parts.capacity(),
                     std::mem::size_of::<lanes::LanePart>(),

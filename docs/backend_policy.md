@@ -315,14 +315,15 @@ policy is not modeled and leaves the GEMM's time serial). An overwrite of a
 component that is one Single with a compiled plan and no Multi group runs
 it whole on that plan when Strided widens the role on the `w`-slot token,
 and is modeled as one section of Strided's own width `w'` there
-(`estimate / w' + dispatch(w')`); accumulations, planless roles and every
+(`estimate / w' + dispatch(w')`), occupying `w'` slots rather than the `w`
+it was offered; accumulations, planless roles and every
 other component are banded. Components with equal moved elements, band
 units, that eligibility and Multi job shapes form one cost class, whose
-search runs once per call. The gate scans that admission needs are taken
-once per call and token shape the placement queries, and seed the gates of
-the lanes that run those components; finding a shape scans the call's
-short list of shapes (at most one per distinct width the placement asks),
-and each new shape initialises width knowledge of O(workers). Components that
+search runs once per call. The placement asks Strided's width directly and
+scans no admission gate; each writer's gate lives on the thread that runs
+it: the alone tier's components share one gate on the calling thread, which
+scans the whole token at most once, and each split lane builds its own on
+its worker, scanning only that lane's token. Components that
 take all of `B` run alone on the whole token first, in address order; the
 rest split recursively over their serial times on at most the sum of their
 widths, when that split is cheaper than running them one after another on
@@ -339,8 +340,7 @@ source block order: inactive blocks first, then each Single of a
 component without Multi groups at its block, and each component with Multi
 groups once, whole, at its first block. Retained scratch: one packed source buffer and one
 packed destination region per concurrently running lane, the per-call placement tables
-(O(components + classes + lanes)), the admission scans with their width
-knowledge (O(token shapes x workers)), the GEMM shapes (O(groups)) and the
+(O(components + classes + lanes)), the GEMM shapes (O(groups)) and the
 band pieces (O(atoms + lanes)), allocated once per call by an eager call's call-local
 workspace and kept by a reused one (and reported in its retained bytes).
 Profiling reports this route's work as one interval, `fused_lanes`, from the
