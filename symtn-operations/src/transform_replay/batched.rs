@@ -1,4 +1,5 @@
 use super::*;
+use crate::kernel_adapter::movement::with_conjugation;
 
 pub(super) fn effective_tree_transform_threads(
     engine: &mut dyn Engine,
@@ -241,18 +242,20 @@ where
             .source_mut()
             .overwrite_with_columns(source_len, |mut writer| {
                 crate::host_pool::with_exec(engine, |_| {
-                    for src_index in 0..src_count {
-                        let entry = src_layout_start + src_index;
-                        writer.write_column(
-                            src_index * element_count,
-                            layouts.role(entry)?,
-                            src_data,
-                            layouts.entry(entry).offset,
-                            fused_indices.as_mut_slice(),
-                            |value: D| value.maybe_conj(storage_conjugate),
-                        )?;
-                    }
-                    Ok(())
+                    with_conjugation!(D, storage_conjugate, |map| {
+                        for src_index in 0..src_count {
+                            let entry = src_layout_start + src_index;
+                            writer.write_column(
+                                src_index * element_count,
+                                layouts.role(entry)?,
+                                src_data,
+                                layouts.entry(entry).offset,
+                                fused_indices.as_mut_slice(),
+                                map,
+                            )?;
+                        }
+                        Ok(())
+                    })
                 })
             })?;
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
@@ -344,16 +347,18 @@ where
     }
     if threads <= 1 || items.len() == 1 {
         let fused_index = &mut fused_indices[..max_fused_rank];
-        for item in items {
-            packed.write_column(
-                item.packed_offset - packed_start,
-                layouts.role(item.src_layout)?,
-                src_data,
-                layouts.entry(item.src_layout).offset,
-                fused_index,
-                |value: D| value.maybe_conj(storage_conjugate),
-            )?;
-        }
+        with_conjugation!(D, storage_conjugate, |map| {
+            for item in items {
+                packed.write_column(
+                    item.packed_offset - packed_start,
+                    layouts.role(item.src_layout)?,
+                    src_data,
+                    layouts.entry(item.src_layout).offset,
+                    fused_index,
+                    map,
+                )?;
+            }
+        });
         return Ok(());
     }
 
@@ -441,7 +446,7 @@ where
             };
             let dst_offset = dst.offset - dst_start;
             let src_offset = layouts.entry(src_layout).offset;
-            if mode.overwrites() {
+            if mode.overwrites() && !exec.is_serial() {
                 if let Some(plan) = admitted_plan(role, dst.element_count, &exec, &gate) {
                     if let Some(result) = kernels.planned_transform(
                         exec.reborrow(),
@@ -595,7 +600,7 @@ where
             let offset = dst.offset - dst_start;
             let packed_offset = offset_to_isize(item.packed_offset - packed_start)?;
             let column_alpha = alpha.at(dst.offset);
-            if mode.overwrites() {
+            if mode.overwrites() && !exec.is_serial() {
                 if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
                     if let Some(result) = kernels.planned_scatter(
                         exec.reborrow(),

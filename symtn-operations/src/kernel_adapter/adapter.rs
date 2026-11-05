@@ -1,3 +1,6 @@
+use super::movement::{
+    span, with_payload_map, with_transform_map, Accumulate, Axpby, Init, Update, Write,
+};
 use super::*;
 use strided_kernel::UpdatePlan;
 
@@ -95,7 +98,6 @@ pub(crate) mod sealed {
         /// what can still differ between its tokens; the calling thread fixes
         /// the remaining dispatch kind. The gate is not `Sync`, so a forked
         /// worker builds its own.
-        #[inline]
         pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
             if exec.is_serial() {
                 return false;
@@ -198,7 +200,8 @@ pub(crate) mod sealed {
                 + Mul<T, Output = T>
                 + PartialEq
                 + Zero
-                + One,
+                + One
+                + ConjugateValue,
         {
             None
         }
@@ -528,9 +531,12 @@ impl StridedHostKernelAdapter {
         )
     }
 
-    #[inline]
+    /// [`span`] under `update` over `baked`, or over `shape` normalized into
+    /// this adapter's scratch, with the caller's traversal `index` or this
+    /// adapter's own. Each caller passes a closure of its own macro arm, so
+    /// every instance has one call site (see the movement module).
     #[allow(clippy::too_many_arguments)]
-    fn fused_pair_baked_dispatch<T, Apply, ElementOp>(
+    fn walk<T, F>(
         &mut self,
         index: Option<&mut [usize]>,
         baked: Option<BakedFusedLayout<'_>>,
@@ -541,156 +547,69 @@ impl StridedHostKernelAdapter {
         src_strides: &[isize],
         dst_offset: isize,
         src_offset: isize,
-        apply: Apply,
-        op: ElementOp,
+        update: Update<T>,
+        map: F,
     ) -> Result<(), OperationError>
     where
-        T: Copy,
-        Apply: Fn(&mut T, T),
-        ElementOp: Fn(T) -> T,
+        T: Copy + Add<T, Output = T> + Mul<T, Output = T>,
+        F: Fn(T) -> T,
     {
-        match index {
-            Some(index) => fused_pair_baked_with_index(
-                &mut self.scratch.layout,
-                baked,
-                index,
-                dst_data,
-                src_data,
-                shape,
-                dst_strides,
-                src_strides,
-                dst_offset,
-                src_offset,
-                apply,
-                op,
-            ),
-            None => fused_pair_baked(
-                &mut self.scratch,
-                baked,
-                dst_data,
-                src_data,
-                shape,
-                dst_strides,
-                src_strides,
-                dst_offset,
-                src_offset,
-                apply,
-                op,
-            ),
-        }
-    }
-
-    /// The structural-coefficient element op, chosen once per block.
-    ///
-    /// The three source forms are TensorKit's: no scale at all for `One()`, a
-    /// componentwise `payload * sectorscalar` for a real coefficient, and a
-    /// payload-type multiply only when `α` has already been folded in.
-    #[allow(clippy::too_many_arguments)]
-    fn transform_strided_baked_impl<T, C>(
-        &mut self,
-        dst_data: &mut [T],
-        src_data: &[T],
-        shape: &[usize],
-        dst_strides: &[isize],
-        src_strides: &[isize],
-        dst_offset: isize,
-        src_offset: isize,
-        source_conjugate: bool,
-        scale: TransformScale<T, C>,
-        beta: Option<T>,
-        baked: Option<BakedFusedLayout<'_>>,
-        index: Option<&mut [usize]>,
-    ) -> Result<(), OperationError>
-    where
-        C: Copy,
-        T: Copy
-            + Add<T, Output = T>
-            + Mul<T, Output = T>
-            + PartialEq
-            + Zero
-            + One
-            + ConjugateValue
-            + RecouplingCoefficientAction<C>
-            + Send
-            + Sync,
-    {
-        validate_strided_ranks(shape, dst_strides, src_strides)?;
-        macro_rules! run {
-            ($op:expr) => {{
-                let op = $op;
-                match beta {
-                    None => self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        |dst: &mut T, value| *dst = value,
-                        op,
-                    ),
-                    Some(beta) if beta.is_zero() => self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        |dst: &mut T, value| *dst = value,
-                        op,
-                    ),
-                    Some(beta) if beta.is_one() => self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        |dst: &mut T, value| *dst = *dst + value,
-                        op,
-                    ),
-                    Some(beta) => self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        move |dst: &mut T, value| *dst = beta * *dst + value,
-                        op,
-                    ),
-                }
-            }};
-        }
-        if scale.is_identity() {
-            return run!(move |value: T| value.maybe_conj(source_conjugate));
-        }
-        // A zero `α * coeff` is VectorInterface's `zero(x) * α`, whatever
-        // the source holds; see `TransformScale::scale`.
-        if scale.is_zero() {
-            let zero = scale.apply(T::zero());
-            return run!(move |_: T| zero);
-        }
-        match scale {
-            TransformScale::Structural(coefficient) => run!(move |value: T| value
-                .maybe_conj(source_conjugate)
-                .scale_by_coefficient(coefficient)),
-            TransformScale::Data(alpha) => {
-                run!(move |value: T| alpha * value.maybe_conj(source_conjugate))
+        let StridedKernelScratch {
+            layout: scratch,
+            index: own_index,
+        } = &mut self.scratch;
+        let layout = match baked {
+            Some(baked) => baked,
+            None => {
+                normalize_fused_layout(shape, dst_strides, src_strides, scratch)?;
+                BakedFusedLayout::from_compiled_normalized_slices(
+                    scratch.dims(),
+                    scratch.dst_strides(),
+                    scratch.src_strides(),
+                    None,
+                )
             }
+        };
+        let rank = layout.dims().len();
+        let index = match index {
+            Some(index) => {
+                let Some(index) = index.get_mut(..rank) else {
+                    return Err(OperationError::InvalidArgument {
+                        message: "fused traversal scratch is shorter than the normalized rank",
+                    });
+                };
+                index
+            }
+            None => {
+                own_index.resize(rank, 0);
+                own_index.as_mut_slice()
+            }
+        };
+        let (dst, src) = (dst_data, src_data);
+        match update {
+            Update::Overwrite => {
+                span::<Init, _, T>(dst, src, layout, dst_offset, src_offset, index, &Write(map));
+            }
+            Update::Accumulate => span::<Init, _, T>(
+                dst,
+                src,
+                layout,
+                dst_offset,
+                src_offset,
+                index,
+                &Accumulate(map),
+            ),
+            Update::Axpby(beta) => span::<Init, _, T>(
+                dst,
+                src,
+                layout,
+                dst_offset,
+                src_offset,
+                index,
+                &Axpby { beta, map },
+            ),
         }
+        Ok(())
     }
 }
 
@@ -721,32 +640,11 @@ impl sealed::Sealed for StridedHostKernelAdapter {
             + ConjugateValue
             + RecouplingCoefficientAction<C>,
     {
-        macro_rules! run {
-            ($op:expr) => {
-                planned_overwrite(
-                    plan, role, dst_data, src_data, dst_offset, src_offset, exec, $op,
-                )
-            };
-        }
-        // The element ops of `transform_strided_baked_impl`, arm for arm.
-        Some(if scale.is_identity() {
-            run!(move |value: T| value.maybe_conj(source_conjugate))
-        } else if scale.is_zero() {
-            let zero = scale.apply(T::zero());
-            run!(move |_: T| zero)
-        } else {
-            match scale {
-                TransformScale::Structural(coefficient) => {
-                    let coefficient = &coefficient;
-                    run!(move |value: T| value
-                        .maybe_conj(source_conjugate)
-                        .scale_by_coefficient(*coefficient))
-                }
-                TransformScale::Data(alpha) => {
-                    run!(move |value: T| alpha * value.maybe_conj(source_conjugate))
-                }
-            }
-        })
+        Some(with_transform_map!(T, scale, source_conjugate, |map| {
+            planned_overwrite(
+                plan, role, dst_data, src_data, dst_offset, src_offset, exec, map,
+            )
+        }))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -762,31 +660,28 @@ impl sealed::Sealed for StridedHostKernelAdapter {
         alpha: T,
     ) -> Option<Result<(), OperationError>>
     where
-        T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
+        T: Copy
+            + Send
+            + Sync
+            + Add<T, Output = T>
+            + Mul<T, Output = T>
+            + PartialEq
+            + Zero
+            + One
+            + ConjugateValue,
     {
-        macro_rules! run {
-            ($op:expr) => {
-                planned_overwrite(
-                    plan,
-                    role,
-                    dst_data,
-                    packed,
-                    dst_offset,
-                    packed_offset,
-                    exec,
-                    $op,
-                )
-            };
-        }
-        // The element ops of `copy_scale_strided_baked`, arm for arm.
-        Some(if alpha.is_one() {
-            run!(|value: T| value)
-        } else if alpha.is_zero() {
-            let zero = T::zero() * alpha;
-            run!(move |_: T| zero)
-        } else {
-            run!(move |value: T| alpha * value)
-        })
+        Some(with_payload_map!(T, alpha, false, |map| {
+            planned_overwrite(
+                plan,
+                role,
+                dst_data,
+                packed,
+                dst_offset,
+                packed_offset,
+                exec,
+                map,
+            )
+        }))
     }
 }
 
@@ -821,39 +716,24 @@ where
     ) -> Result<(), OperationError> {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         if beta.is_zero() || beta.is_one() {
-            let assign = beta.is_zero();
-            macro_rules! run {
-                ($op:expr) => {
-                    self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        move |dst: &mut T, value| {
-                            if assign {
-                                *dst = value;
-                            } else {
-                                *dst = *dst + value;
-                            }
-                        },
-                        $op,
-                    )
-                };
-            }
-            // Why the identity and zero arms: see `copy_scale_strided_baked`.
-            if alpha.is_one() {
-                run!(move |value: T| value.maybe_conj(source_conjugate))?;
-            } else if alpha.is_zero() {
-                let zero = T::zero() * alpha;
-                run!(move |_: T| zero)?;
+            let update = if beta.is_zero() {
+                Update::Overwrite
             } else {
-                run!(move |value: T| alpha * value.maybe_conj(source_conjugate))?;
-            }
+                Update::Accumulate
+            };
+            with_payload_map!(T, alpha, source_conjugate, |map| self.walk(
+                index,
+                baked,
+                dst_data,
+                src_data,
+                shape,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                update,
+                map,
+            ))?;
             zero_strides.clear();
             return Ok(());
         }
@@ -890,39 +770,24 @@ where
     ) -> Result<(), OperationError> {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
         if beta.is_zero() || beta.is_one() {
-            let assign = beta.is_zero();
-            macro_rules! run {
-                ($op:expr) => {
-                    self.fused_pair_baked_dispatch(
-                        index,
-                        baked,
-                        dst_data,
-                        src_data,
-                        shape,
-                        dst_strides,
-                        src_strides,
-                        dst_offset,
-                        src_offset,
-                        move |dst: &mut T, value| {
-                            if assign {
-                                *dst = value;
-                            } else {
-                                *dst = *dst + value;
-                            }
-                        },
-                        $op,
-                    )
-                };
-            }
-            // Why the identity and zero arms: see `copy_scale_strided_baked`.
-            if alpha.is_one() {
-                return run!(|value: T| value);
-            }
-            if alpha.is_zero() {
-                let zero = T::zero() * alpha;
-                return run!(move |_: T| zero);
-            }
-            return run!(move |value: T| alpha * value);
+            let update = if beta.is_zero() {
+                Update::Overwrite
+            } else {
+                Update::Accumulate
+            };
+            return with_payload_map!(T, alpha, false, |map| self.walk(
+                index,
+                baked,
+                dst_data,
+                src_data,
+                shape,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                update,
+                map,
+            ));
         }
         axpby_raw_strided_kernel_trusted(
             exec,
@@ -954,37 +819,23 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         validate_strided_ranks(shape, dst_strides, src_strides)?;
-        macro_rules! run {
-            ($op:expr) => {
-                self.fused_pair_baked_dispatch(
-                    index,
-                    baked,
-                    dst_data,
-                    src_data,
-                    shape,
-                    dst_strides,
-                    src_strides,
-                    dst_offset,
-                    src_offset,
-                    |dst: &mut T, value| *dst = value,
-                    $op,
-                )
-            };
-        }
-        // Why the identity arm: `1 * (inf + 0i)` is `inf + NaN i`, so a pack or
-        // scatter at alpha = 1 must copy rather than multiply. Why the zero
-        // arm: VectorInterface's `scale(x, 0) = zero(x) * 0`, never
-        // `0 * inf = NaN`, so a zero scale does not read the source.
-        if alpha.is_one() {
-            return run!(move |value: T| value.maybe_conj(source_conjugate));
-        }
-        if alpha.is_zero() {
-            let zero = T::zero() * alpha;
-            return run!(move |_: T| zero);
-        }
-        run!(move |value: T| alpha * value.maybe_conj(source_conjugate))
+        with_payload_map!(T, alpha, source_conjugate, |map| self.walk(
+            index,
+            baked,
+            dst_data,
+            src_data,
+            shape,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            Update::Overwrite,
+            map,
+        ))
     }
 
+    /// The structural coefficient stays in its own type; see
+    /// [`with_transform_map!`].
     #[allow(clippy::too_many_arguments)]
     fn transform_strided_baked<C>(
         &mut self,
@@ -1007,7 +858,21 @@ where
         C: Copy,
         T: RecouplingCoefficientAction<C> + One + PartialEq,
     {
-        let result = self.transform_strided_baked_impl(
+        // Why no closure around the body: it would be a separate function
+        // holding the whole walk, called once per role.
+        if let Err(error) = validate_strided_ranks(shape, dst_strides, src_strides) {
+            zero_strides.clear();
+            return Err(error);
+        }
+        let update = match beta {
+            None => Update::Overwrite,
+            Some(beta) if beta.is_zero() => Update::Overwrite,
+            Some(beta) if beta.is_one() => Update::Accumulate,
+            Some(beta) => Update::Axpby(beta),
+        };
+        let result = with_transform_map!(T, scale, source_conjugate, |map| self.walk(
+            index,
+            baked,
             dst_data,
             src_data,
             shape,
@@ -1015,12 +880,9 @@ where
             src_strides,
             dst_offset,
             src_offset,
-            source_conjugate,
-            scale,
-            beta,
-            baked,
-            index,
-        );
+            update,
+            map,
+        ));
         zero_strides.clear();
         result
     }

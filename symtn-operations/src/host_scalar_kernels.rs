@@ -9,8 +9,9 @@ use strided_kernel::{
 
 use smallvec::SmallVec;
 
+use crate::kernel_adapter::movement::{span, with_conjugation, Accumulate, Axpby, Init, Write};
 use crate::kernel_adapter::{
-    apply_fused_pair_slices, normalize_fused_layout, FusedLayoutScratch, FUSED_LAYOUT_INLINE_RANK,
+    normalize_fused_layout, BakedFusedLayout, FusedLayoutScratch, FUSED_LAYOUT_INLINE_RANK,
 };
 use crate::scalar::scale_value;
 use crate::strided::error as strided_error;
@@ -1088,36 +1089,78 @@ where
     }
     index.clear();
     index.resize(dims.len(), 0);
-    let op = move |value: T| value.maybe_conj(source_conjugate);
-    macro_rules! run {
-        ($apply:expr) => {
-            apply_fused_pair_slices(
-                dst_data,
-                src_data,
-                dims,
-                dst_strides,
-                src_strides,
-                dst_offset,
-                src_offset,
-                index,
-                $apply,
-                op,
-            )
-        };
-    }
-    match action {
-        RawStridedAction::Copy => run!(|dst: &mut T, value| *dst = value),
-        RawStridedAction::CopyScale { alpha } => {
-            run!(move |dst: &mut T, value| *dst = scale_value(value, alpha))
-        }
-        RawStridedAction::Axpy { alpha } => {
-            run!(move |dst: &mut T, value| *dst = *dst + scale_value(value, alpha))
-        }
-        RawStridedAction::Axpby { alpha, beta } => {
-            run!(move |dst: &mut T, value| *dst = beta * *dst + scale_value(value, alpha))
-        }
-    }
+    raw_action_span(
+        action,
+        source_conjugate,
+        dst_data,
+        src_data,
+        BakedFusedLayout::from_compiled_normalized_slices(dims, dst_strides, src_strides, None),
+        dst_offset,
+        src_offset,
+        index,
+    );
     Ok(())
+}
+
+/// `action` on `op(src)` (conjugation when `conjugate`) over one normalized
+/// layout, on the span leaf, with the scalar kernels' arithmetic: a bit-exact
+/// copy for [`RawStridedAction::Copy`], [`scale_value`] otherwise.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn raw_action_span<T>(
+    action: RawStridedAction<T>,
+    conjugate: bool,
+    dst_data: &mut [T],
+    src_data: &[T],
+    layout: BakedFusedLayout<'_>,
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+) where
+    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue,
+{
+    let (dst, src) = (dst_data, src_data);
+    let scaled = move |alpha: T| move |value: T| scale_value(value.maybe_conj(conjugate), alpha);
+    match action {
+        RawStridedAction::Copy => with_conjugation!(T, conjugate, |map| span::<Init, _, T>(
+            dst,
+            src,
+            layout,
+            dst_offset,
+            src_offset,
+            index,
+            &Write(map),
+        )),
+        RawStridedAction::CopyScale { alpha } => span::<Init, _, T>(
+            dst,
+            src,
+            layout,
+            dst_offset,
+            src_offset,
+            index,
+            &Write(scaled(alpha)),
+        ),
+        RawStridedAction::Axpy { alpha } => span::<Init, _, T>(
+            dst,
+            src,
+            layout,
+            dst_offset,
+            src_offset,
+            index,
+            &Accumulate(scaled(alpha)),
+        ),
+        RawStridedAction::Axpby { alpha, beta } => span::<Init, _, T>(
+            dst,
+            src,
+            layout,
+            dst_offset,
+            src_offset,
+            index,
+            &Axpby {
+                beta,
+                map: scaled(alpha),
+            },
+        ),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

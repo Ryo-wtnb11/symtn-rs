@@ -320,48 +320,33 @@ where
     right
 }
 
-fn layout_linear_offset(
-    mut linear: usize,
-    shape: &[usize],
-    strides: &[isize],
-    base: isize,
-) -> Result<usize, OperationError> {
-    let mut offset = base;
-    for (&dim, &stride) in shape.iter().zip(strides) {
-        let coordinate = if dim == 0 { 0 } else { linear % dim };
-        if let Some(quotient) = linear.checked_div(dim) {
-            linear = quotient;
-        }
-        let coordinate =
-            isize::try_from(coordinate).map_err(|_| OperationError::ElementCountOverflow)?;
-        offset = offset
-            .checked_add(
-                coordinate
-                    .checked_mul(stride)
-                    .ok_or_else(|| OperationError::ElementCountOverflow)?,
-            )
-            .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    }
-    usize::try_from(offset).map_err(|_| OperationError::OffsetOverflow { value: usize::MAX })
-}
-
-// Why-not fuse the zero writer: it has no paired source view, and a pure
-// permute — the deg=1 U(1) owned-path regime this optimization targets — always
-// touches every destination block, so `inactive_destination_layouts` is empty
-// and this writer never runs on the hot path. It walks the inactive entry's
-// compiled one-sided role, which addresses the same element set as the raw
-// block, on the per-element odometer (issue #232, condition 2).
+/// Zeros one inactive destination entry over its compiled one-sided role,
+/// which addresses exactly the raw block's elements, as a copy of one zero
+/// at source stride zero.
 fn write_uninit_layout_zero<D: Zero + Copy>(
     layouts: &TreeTransformLayoutTable,
     layout_index: usize,
     dst: &mut [MaybeUninit<D>],
 ) -> Result<(), OperationError> {
     let (dims, strides) = layouts.inactive_role(layout_index)?;
-    let layout = layouts.entry(layout_index);
-    for linear in 0..layout.element_count {
-        let index = layout_linear_offset(linear, dims, strides, layout.offset)?;
-        dst[index].write(D::zero());
-    }
+    let zero_strides: smallvec::SmallVec<[isize; FUSED_LAYOUT_INLINE_RANK]> =
+        smallvec::SmallVec::from_elem(0, dims.len());
+    let mut index: smallvec::SmallVec<[usize; FUSED_LAYOUT_INLINE_RANK]> =
+        smallvec::SmallVec::from_elem(0, dims.len());
+    span::<Uninit, _, D>(
+        dst,
+        &[D::zero()],
+        crate::BakedFusedLayout::from_compiled_normalized_slices(
+            dims,
+            strides,
+            &zero_strides,
+            None,
+        ),
+        layouts.entry(layout_index).offset,
+        0,
+        &mut index,
+        &Write(|value: D| value),
+    );
     Ok(())
 }
 
@@ -394,105 +379,26 @@ where
         + RecouplingCoefficientAction<C>,
     C: Copy + Sync,
 {
-    // The element op is chosen once per block, with the structural coefficient
-    // still in its own type; see `TransformScale`.
-    if scale.is_identity() {
-        return write_uninit_layout_mapped(
-            exec,
-            gate,
-            layouts,
-            dst_index,
-            src_index,
-            dst,
-            dst_start,
-            src,
-            fused_index,
-            move |value: D| value.maybe_conj(conjugate),
-        );
-    }
-    if scale.is_zero() {
-        let zero = scale.apply(D::zero());
-        return write_uninit_layout_mapped(
-            exec,
-            gate,
-            layouts,
-            dst_index,
-            src_index,
-            dst,
-            dst_start,
-            src,
-            fused_index,
-            move |_: D| zero,
-        );
-    }
-    match scale {
-        TransformScale::Structural(coefficient) => {
-            let coefficient = &coefficient;
-            write_uninit_layout_mapped(
-                exec,
-                gate,
-                layouts,
-                dst_index,
-                src_index,
-                dst,
-                dst_start,
-                src,
-                fused_index,
-                move |value: D| {
-                    value
-                        .maybe_conj(conjugate)
-                        .scale_by_coefficient(*coefficient)
-                },
-            )
-        }
-        TransformScale::Data(scale) => write_uninit_layout_mapped(
-            exec,
-            gate,
-            layouts,
-            dst_index,
-            src_index,
-            dst,
-            dst_start,
-            src,
-            fused_index,
-            move |value: D| scale * value.maybe_conj(conjugate),
-        ),
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_uninit_layout_mapped<D, F>(
-    exec: Exec<'_>,
-    gate: &LeafGate,
-    layouts: &TreeTransformLayoutTable,
-    dst_index: usize,
-    src_index: usize,
-    dst: &mut [MaybeUninit<D>],
-    dst_start: isize,
-    src: &[D],
-    fused_index: &mut [usize],
-    map: F,
-) -> Result<(), OperationError>
-where
-    D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
-    F: Fn(D) -> D + Send + Sync,
-{
-    write_role_uninit(
+    let role = layouts.role(dst_index)?;
+    let elements = layouts.entry(dst_index).element_count;
+    let dst_offset = layouts.entry(dst_index).offset - dst_start;
+    let src_offset = layouts.entry(src_index).offset;
+    with_transform_map!(D, scale, conjugate, |map| write_role_uninit(
         exec,
         gate,
-        layouts.role(dst_index)?,
-        layouts.entry(dst_index).element_count,
+        role,
+        elements,
         dst,
         src,
-        layouts.entry(dst_index).offset - dst_start,
-        layouts.entry(src_index).offset,
+        dst_offset,
+        src_offset,
         fused_index,
         map,
-    )
+    ))
 }
 
 /// Writes one role into uninitialized memory: its compiled plan across
-/// `exec` when [`admitted_plan`] admits one, the baked walk otherwise.
+/// `exec` when [`admitted_plan`] admits one, the span leaf otherwise.
 #[allow(clippy::too_many_arguments)]
 fn write_role_uninit<D, F>(
     exec: Exec<'_>,
@@ -510,12 +416,27 @@ where
     D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
     F: Fn(D) -> D + Send + Sync,
 {
-    match admitted_plan(role, elements, &exec, gate) {
-        Some(plan) => planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map),
-        None => write_fused_uninit(role, dst, src, dst_offset, src_offset, fused_index, map),
+    // Why test the token here: a serial token never widens, and this check
+    // inlines where the admission query is an out-of-line call per role.
+    if !exec.is_serial() {
+        if let Some(plan) = admitted_plan(role, elements, &exec, gate) {
+            return planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map);
+        }
     }
+    let Some(index) = fused_index.get_mut(..role.dims().len()) else {
+        return Err(OperationError::InvalidArgument {
+            message: "fused traversal scratch is shorter than the normalized rank",
+        });
+    };
+    span::<Uninit, _, D>(dst, src, role, dst_offset, src_offset, index, &Write(map));
+    Ok(())
 }
 
+/// One scatter column from `packed` into uninitialized memory. A zero alpha
+/// gives an exact zero even where the recoupling GEMM left a NaN in
+/// `packed`, as TensorKit's scatter `tensoradd!` does. The scatter role bakes
+/// src = packed (column-major) strides, so the walk over `packed` from
+/// `packed_offset` is the column-major gather `packed[packed_offset + linear]`.
 #[allow(clippy::too_many_arguments)]
 fn write_uninit_layout_from_packed<D>(
     exec: Exec<'_>,
@@ -530,46 +451,24 @@ fn write_uninit_layout_from_packed<D>(
     fused_index: &mut [usize],
 ) -> Result<(), OperationError>
 where
-    D: Copy + Send + Sync + Mul<D, Output = D> + Zero + One + PartialEq,
+    D: Copy + Send + Sync + Mul<D, Output = D> + Zero + One + PartialEq + ConjugateValue,
 {
-    // Why the identity arm: `1 * (inf + 0i)` is `inf + NaN i`, so the scatter
-    // must copy rather than multiply when the caller's alpha is one. A zero
-    // alpha gives `scale_value`'s exact zero even where the recoupling GEMM
-    // left a NaN in `packed`, as TensorKit's scatter `tensoradd!` does.
-    // The scatter role bakes src = packed (column-major) strides, so the
-    // fused walk over `packed` starting at `packed_offset` reproduces the
-    // column-major gather `packed[packed_offset + linear]`.
     let role = layouts.role(dst_index)?;
     let elements = layouts.entry(dst_index).element_count;
     let dst_offset = layouts.entry(dst_index).offset - dst_start;
     let src_offset = offset_to_isize(packed_offset)?;
-    if alpha.is_one() {
-        write_role_uninit(
-            exec,
-            gate,
-            role,
-            elements,
-            dst,
-            packed,
-            dst_offset,
-            src_offset,
-            fused_index,
-            |v| v,
-        )
-    } else {
-        write_role_uninit(
-            exec,
-            gate,
-            role,
-            elements,
-            dst,
-            packed,
-            dst_offset,
-            src_offset,
-            fused_index,
-            move |value| scale_value(value, alpha),
-        )
-    }
+    with_payload_map!(D, alpha, false, |map| write_role_uninit(
+        exec,
+        gate,
+        role,
+        elements,
+        dst,
+        packed,
+        dst_offset,
+        src_offset,
+        fused_index,
+        map,
+    ))
 }
 
 #[cfg(test)]

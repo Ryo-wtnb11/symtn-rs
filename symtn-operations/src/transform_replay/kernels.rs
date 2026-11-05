@@ -60,7 +60,6 @@ where
 /// One Single block of compiled replay on the caller's token share: the
 /// adapter's planned overwrite when `gate` (built from that share) widens the
 /// block, the strided kernel otherwise.
-#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
@@ -96,7 +95,9 @@ where
     let dst = layouts.entry(dst_index);
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
-    if mode.overwrites() {
+    // Why test the token here: a serial token never widens, and this check
+    // inlines where the admission query is an out-of-line call per role.
+    if mode.overwrites() && !exec.is_serial() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
             if let Some(result) = kernels.planned_transform(
                 exec.reborrow(),
@@ -414,7 +415,6 @@ where
 /// One recoupling scatter column of compiled replay on the caller's token
 /// share: the adapter's planned overwrite when `gate` (built from that share)
 /// widens the column, the strided scatter otherwise.
-#[inline]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
@@ -432,12 +432,22 @@ pub(super) fn scatter_column_on_token<A, T>(
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<T>,
-    T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
+    T: Copy
+        + Send
+        + Sync
+        + Add<T, Output = T>
+        + Mul<T, Output = T>
+        + PartialEq
+        + Zero
+        + One
+        + ConjugateValue,
 {
     let role = layouts.role(entry_index)?;
     let dst = layouts.entry(entry_index);
     let packed_offset = offset_to_isize(packed_offset)?;
-    if mode.overwrites() {
+    // Why test the token here: a serial token never widens, and this check
+    // inlines where the admission query is an out-of-line call per role.
+    if mode.overwrites() && !exec.is_serial() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
             if let Some(result) = kernels.planned_scatter(
                 exec.reborrow(),
@@ -504,7 +514,6 @@ where
 }
 
 /// A scatter column's strided kernel over its resolved role and offsets.
-#[inline]
 #[allow(clippy::too_many_arguments)]
 fn scatter_role<A, T>(
     exec: crate::host_pool::Exec<'_>,

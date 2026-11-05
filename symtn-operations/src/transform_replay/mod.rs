@@ -19,10 +19,10 @@ use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
+use crate::kernel_adapter::movement::{span, with_payload_map, with_transform_map, Uninit, Write};
 use crate::kernel_adapter::sealed::LeafGate;
-use crate::kernel_adapter::{admitted_plan, planned_write_uninit, write_fused_uninit};
+use crate::kernel_adapter::{admitted_plan, planned_write_uninit, FUSED_LAYOUT_INLINE_RANK};
 use crate::owned_overwrite_buffer::initialize_owned;
-use crate::scalar::scale_value;
 use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;

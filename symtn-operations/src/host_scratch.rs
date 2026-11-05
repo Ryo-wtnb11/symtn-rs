@@ -1,7 +1,8 @@
 use core::mem::MaybeUninit;
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::kernel_adapter::{write_fused_uninit, BakedFusedLayout};
+use crate::kernel_adapter::movement::{span, Uninit, Write};
+use crate::kernel_adapter::BakedFusedLayout;
 use crate::storage_scratch::SamePlacementScratchAllocator;
 use crate::OperationError;
 use symtn_core::{HostReadableStorage, HostWritableStorage, Placement, TensorStorage};
@@ -176,21 +177,28 @@ impl<T: Copy> PackColumnWriter<'_, T> {
         index: &mut [usize],
         map: impl Fn(T) -> T,
     ) -> Result<(), OperationError> {
-        let end = dense_run_len(layout.dims(), layout.dst_strides())
+        let Some(end) = dense_run_len(layout.dims(), layout.dst_strides())
             .and_then(|len| self.cursor.checked_add(len))
             .filter(|&end| offset == self.cursor && end <= self.slots.len())
-            .ok_or(OperationError::InvalidArgument {
+        else {
+            return Err(OperationError::InvalidArgument {
                 message: "pack column is not the next dense run of its scratch",
-            })?;
-        write_fused_uninit(
-            layout,
+            });
+        };
+        let Some(index) = index.get_mut(..layout.dims().len()) else {
+            return Err(OperationError::InvalidArgument {
+                message: "fused traversal scratch is shorter than the normalized rank",
+            });
+        };
+        span::<Uninit, _, T>(
             &mut self.slots[self.cursor..end],
             src,
+            layout,
             0,
             src_offset,
             index,
-            map,
-        )?;
+            &Write(map),
+        );
         self.written.fetch_add(end - self.cursor, Ordering::Relaxed);
         self.cursor = end;
         Ok(())
