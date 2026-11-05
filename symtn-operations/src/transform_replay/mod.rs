@@ -3,7 +3,7 @@ use core::ops::{Add, Mul};
 use std::sync::{Arc, Weak};
 
 #[cfg(not(test))]
-use crate::host_pool::join as pool_join;
+use crate::host_pool::join_split as pool_join;
 use crate::host_pool::Exec;
 #[cfg(test)]
 use allocation_oracle::join as pool_join;
@@ -27,8 +27,7 @@ use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
 use crate::transform_structure::{
-    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterGroupReplay,
-    TreeTransformScatterReplay,
+    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterReplay,
 };
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
@@ -68,6 +67,9 @@ mod allocation_oracle {
     static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
     static JOINS: AtomicUsize = AtomicUsize::new(0);
+    // Joins whose token holds two slots or more, so the two sides run as
+    // separate tasks; a one-slot join runs both inline.
+    static DISPATCHED_JOINS: AtomicUsize = AtomicUsize::new(0);
     static SESSION: Mutex<()> = Mutex::new(());
 
     struct CountingAllocator;
@@ -137,6 +139,7 @@ mod allocation_oracle {
         ALLOCATIONS.store(0, Ordering::Relaxed);
         ALLOCATED_BYTES.store(0, Ordering::Relaxed);
         JOINS.store(0, Ordering::Relaxed);
+        DISPATCHED_JOINS.store(0, Ordering::Relaxed);
         let result = action();
         let allocations = ALLOCATIONS.load(Ordering::Relaxed);
         drop(session);
@@ -155,8 +158,13 @@ mod allocation_oracle {
         JOINS.load(Ordering::Relaxed)
     }
 
+    pub(super) fn dispatched_joins() -> usize {
+        DISPATCHED_JOINS.load(Ordering::Relaxed)
+    }
+
     pub(super) fn join<A, B, RA, RB>(
         exec: crate::host_pool::Exec<'_>,
+        lanes: Option<(usize, usize)>,
         left: A,
         right: B,
     ) -> (RA, RB)
@@ -169,10 +177,14 @@ mod allocation_oracle {
         let measured = is_measured();
         if measured {
             JOINS.fetch_add(1, Ordering::Relaxed);
+            if exec.budget().get() >= 2 {
+                DISPATCHED_JOINS.fetch_add(1, Ordering::Relaxed);
+            }
         }
         let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
-        let result = crate::host_pool::join(
+        let result = crate::host_pool::join_split(
             exec,
+            lanes,
             |exec| {
                 let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
                 let result = left(exec);
@@ -324,6 +336,16 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     chunk_scatter_groups: Vec<usize>,
+    chunk_units: Vec<ScatterUnit>,
+    // The atoms a threaded Single split runs (all but the wide ones).
+    narrow_atoms: Vec<NarrowAtom>,
+    // What one call has learned of the whole token's width transitions
+    // (`whole_width`), O(engine width), cleared at the start of every
+    // threaded replay.
+    width_levels: Vec<usize>,
+    // Capacity of the per-call atom slice list of component-owned scatter
+    // (`take_atom_slices`); always empty between calls.
+    atom_slices: Vec<&'static [u8]>,
     // The calling lane's fused index, one entry per fused axis; inline up to
     // eight, the rank metadata width, so a fresh per-call workspace allocates
     // none. Forked lanes below that rank keep their own (`LaneIndex`).
@@ -347,6 +369,10 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
+            chunk_units: Vec::new(),
+            narrow_atoms: Vec::new(),
+            width_levels: Vec::new(),
+            atom_slices: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
@@ -384,7 +410,26 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.member_ranges.capacity(),
             std::mem::size_of::<(usize, usize)>(),
-        )
+        ) + bytes(
+            self.chunk_units.capacity(),
+            std::mem::size_of::<ScatterUnit>(),
+        ) + bytes(self.width_levels.capacity(), std::mem::size_of::<usize>())
+            + bytes(
+                self.narrow_atoms.capacity(),
+                std::mem::size_of::<NarrowAtom>(),
+            )
+            + bytes(self.atom_slices.capacity(), std::mem::size_of::<&[u8]>())
+    }
+
+    /// The kept atom-slice capacity, emptied, for slices of `T` borrowed
+    /// for one replay.
+    fn take_atom_slices<'a, U>(&mut self) -> Vec<&'a mut [U]> {
+        recycle(std::mem::take(&mut self.atom_slices))
+    }
+
+    /// Returns [`Self::take_atom_slices`]'s capacity.
+    fn keep_atom_slices<U>(&mut self, slices: Vec<&mut [U]>) {
+        self.atom_slices = recycle(slices);
     }
 
     /// Coefficient packs this workspace has converted: a warm replay of the
@@ -458,6 +503,18 @@ impl<T> HostTreeTransformWorkspace<T> {
         }
         Ok(())
     }
+}
+
+/// `vec`'s allocation, emptied, for elements of another lifetime or type of
+/// the same layout.
+///
+/// Why not a transmute: replay forbids unsafe code. std collects a mapped
+/// `vec::IntoIter` in place when the layouts match; that is an optimization,
+/// not a documented guarantee, so the warm replay allocation tests pin it (a
+/// regression would reallocate, never misbehave).
+fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
+    vec.clear();
+    vec.into_iter().map(|_| unreachable!("emptied")).collect()
 }
 
 /// Sizes one pack buffer to `len` zero-initialised elements.
@@ -564,7 +621,7 @@ mod allocation_oracle_tests {
     /// any measured scope: building an engine and its first fork allocate.
     fn two_slots() -> TestPool {
         let mut engine = crate::host_pool::test_pool(2);
-        engine.with_exec(|exec| allocation_oracle::join(exec, |_| (), |_| ()));
+        engine.with_exec(|exec| allocation_oracle::join(exec, None, |_| (), |_| ()));
         engine
     }
 
@@ -578,6 +635,7 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
+                        None,
                         |_| assert!(allocation_oracle::is_measured()),
                         |_| assert!(allocation_oracle::is_measured()),
                     )
@@ -595,6 +653,7 @@ mod allocation_oracle_tests {
         engine.with_exec(|exec| {
             allocation_oracle::join(
                 exec,
+                None,
                 |_| assert!(!allocation_oracle::is_measured()),
                 |_| assert!(!allocation_oracle::is_measured()),
             )
@@ -610,9 +669,11 @@ mod allocation_oracle_tests {
                 engine.with_exec(|exec| {
                     allocation_oracle::join(
                         exec,
+                        None,
                         |exec| {
                             allocation_oracle::join(
                                 exec,
+                                None,
                                 |_| assert!(allocation_oracle::is_measured()),
                                 |_| assert!(allocation_oracle::is_measured()),
                             );
@@ -665,6 +726,7 @@ mod allocation_oracle_tests {
                     engine.with_exec(|exec| {
                         replay_join(
                             exec,
+                            None,
                             |_| panic!("expected replay join panic"),
                             |_| assert!(allocation_oracle::is_measured()),
                         )

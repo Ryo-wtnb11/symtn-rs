@@ -60,6 +60,8 @@ where
     // One gate for every unsplit block list on the calling thread; forked
     // leaves build their own.
     let gate = LeafGate::new(layouts.max_planned_elements());
+    // The width table belongs to this call's engine and token.
+    workspace.width_levels.clear();
     workspace.prepare_fused_indices(threads, max_fused_rank)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
@@ -80,26 +82,28 @@ where
             profile.strided_kernel += start.elapsed();
         }
         let blocks = structure.blocks();
-        // Singles split on the schedule's slice-disjoint boundaries exactly as
-        // `replay_single_blocks` does; a non-disjoint schedule stays serial.
-        let singles_threads = if schedule.singles_slice_disjoint {
-            threads
-        } else {
-            1
-        };
+        // Singles run over their ownership atoms in the initialised parallel
+        // replay's two tiers; one atom stays on the calling lane.
         let start = profile.as_ref().map(|_| std::time::Instant::now());
+        let HostTreeTransformWorkspace {
+            fused_indices,
+            narrow_atoms,
+            width_levels,
+            ..
+        } = &mut *workspace;
         replay_region(engine, |exec| {
-            split_join_uninit(
-                &schedule.singles,
+            replay_single_phase(
+                schedule,
+                narrow_atoms,
+                width_levels,
                 dst_data,
-                0,
-                workspace.fused_indices.as_mut_slice(),
+                fused_indices.as_mut_slice(),
                 max_fused_rank,
-                singles_threads,
+                threads,
                 exec,
-                &|&item| layouts.destination_lo(scheduled_single(blocks, item)?.0),
-                Some(&gate),
+                &gate,
                 layouts.max_planned_elements(),
+                true,
                 &|items, dst, dst_start, fused_index, mut exec, gate| {
                     for &item in items {
                         let (dst_layout, src_layout, coefficient) = scheduled_single(blocks, item)?;
@@ -138,50 +142,102 @@ where
         }
         let chunk_size = threads.max(1);
         reserve_multi_chunk_scratch(workspace, recoupling_plan.jobs(), chunk_size)?;
+        let mut target = ScatterTarget::new(
+            workspace,
+            schedule,
+            threads,
+            recoupling_plan.jobs().len(),
+            dst_data,
+        )?;
         let mut pack_cursor = 0;
-        for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
-            let (destination_start, scatter_slice_disjoint) = replay_multi_chunk(
-                engine,
-                dense,
-                workspace,
-                task,
-                schedule,
-                chunk_index * chunk_size,
-                chunk,
-                &mut pack_cursor,
-                src_data,
-                threads,
-                profile.as_deref_mut(),
-            )?;
-            let packed = workspace.packed.destination().as_slice();
-            let scatter_columns = &schedule.scatter_columns;
-            let scatter_groups = &schedule.scatter_groups;
-            // Groups split on their ordered destination ranges exactly as
-            // `replay_scatter_groups` does; columns inside a group stay serial.
-            let scatter_threads = if scatter_slice_disjoint { threads } else { 1 };
-            let start = profile.as_ref().map(|_| std::time::Instant::now());
-            replay_region(engine, |exec| {
-                split_join_uninit(
-                    &workspace.chunk_scatter_groups,
-                    dst_data,
-                    0,
-                    workspace.fused_indices.as_mut_slice(),
-                    max_fused_rank,
-                    scatter_threads,
-                    exec,
-                    &|&group| Ok(scatter_columns[scatter_groups[group].columns.start].dst_lo),
-                    Some(&gate),
-                    layouts.max_planned_elements(),
-                    &|groups, dst, dst_start, fused_index, mut exec, gate| {
-                        for &group in groups {
+        // Why a closure: an error still returns the atom-list capacity to
+        // the workspace before it propagates.
+        let mut replay_chunks = || -> Result<(), OperationError> {
+            for (chunk_index, chunk) in recoupling_plan.jobs().chunks(chunk_size).enumerate() {
+                let destination_start = replay_multi_chunk(
+                    engine,
+                    dense,
+                    workspace,
+                    task,
+                    schedule,
+                    chunk_index * chunk_size,
+                    chunk,
+                    &mut pack_cursor,
+                    src_data,
+                    threads,
+                    matches!(target, ScatterTarget::Atoms(_)),
+                    profile.as_deref_mut(),
+                )?;
+                let HostTreeTransformWorkspace {
+                    packed,
+                    fused_indices,
+                    chunk_scatter_groups,
+                    chunk_units,
+                    width_levels,
+                    ..
+                } = &mut *workspace;
+                let packed = packed.destination().as_slice();
+                let scatter_columns = &schedule.scatter_columns;
+                let scatter_groups = &schedule.scatter_groups;
+                let start = profile.as_ref().map(|_| std::time::Instant::now());
+                match &mut target {
+                    ScatterTarget::Atoms(slots) => {
+                        let leaf = |units: &[ScatterUnit],
+                                    slots: &mut [&mut [MaybeUninit<D>]],
+                                    slot_base: usize,
+                                    fused_index: &mut [usize],
+                                    mut exec: Exec<'_>,
+                                    gate: &LeafGate| {
+                            for unit in units {
+                                for &group in unit.groups(chunk_scatter_groups) {
+                                    for item in
+                                        &scatter_columns[scatter_groups[group].columns.clone()]
+                                    {
+                                        write_uninit_layout_from_packed(
+                                            exec.reborrow(),
+                                            gate,
+                                            layouts,
+                                            item.dst_layout,
+                                            &mut *slots[item.slot as usize - slot_base],
+                                            atom_start(layouts, item)?,
+                                            packed,
+                                            item.packed_offset - destination_start,
+                                            alpha,
+                                            &mut *fused_index,
+                                        )?;
+                                    }
+                                }
+                            }
+                            Ok(())
+                        };
+                        replay_region(engine, |exec| {
+                            scatter_chunk_components(
+                                chunk_units,
+                                width_levels,
+                                &schedule.component_slots,
+                                slots,
+                                fused_indices.as_mut_slice(),
+                                max_fused_rank,
+                                threads,
+                                exec,
+                                &gate,
+                                layouts.max_planned_elements(),
+                                true,
+                                &leaf,
+                            )
+                        })??
+                    }
+                    ScatterTarget::Whole(dst) => replay_region(engine, |mut exec| {
+                        let fused_index = &mut fused_indices[..max_fused_rank];
+                        for &group in chunk_scatter_groups.iter() {
                             for item in &scatter_columns[scatter_groups[group].columns.clone()] {
                                 write_uninit_layout_from_packed(
                                     exec.reborrow(),
-                                    gate,
+                                    &gate,
                                     layouts,
                                     item.dst_layout,
                                     dst,
-                                    dst_start,
+                                    0,
                                     packed,
                                     item.packed_offset - destination_start,
                                     alpha,
@@ -189,15 +245,19 @@ where
                                 )?;
                             }
                         }
-                        Ok(())
-                    },
-                )
-            })??;
-            if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-                profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
-                profile.multi_scatter += start.elapsed();
+                        Ok::<(), OperationError>(())
+                    })??,
+                }
+                if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+                    profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
+                    profile.multi_scatter += start.elapsed();
+                }
             }
-        }
+            Ok(())
+        };
+        let replayed = replay_chunks();
+        target.finish(workspace);
+        replayed?;
         debug_assert_eq!(pack_cursor, schedule.pack_columns.len());
         Ok(())
     })?;
@@ -205,119 +265,6 @@ where
         profile.total += start.elapsed();
     }
     Ok(Some(output))
-}
-
-/// Recursive `replay_join` over an uninitialised destination, mirroring the
-/// split tree of `replay_single_blocks` / `replay_scatter_groups`: `items`
-/// are sorted by destination offset and `dst_lo(item)` is the absolute start
-/// of each item's destination range; `leaf` writes `items` into `dst`, whose
-/// first element is absolute offset `dst_start`, using one worker's traversal
-/// scratch and that worker's share of `exec`. An unsplit list (`threads` of
-/// one) keeps the whole of `exec` for the blocks it visits in turn.
-///
-/// No `unsafe` is needed here: `split_at_mut` at `dst_lo(items[middle])`
-/// yields two non-overlapping `&mut [MaybeUninit<D>]`, which the compiler
-/// proves independent. The callers pass `threads > 1` only when the compiled
-/// schedule proved the items' destination ranges pairwise slice-disjoint
-/// (`singles_slice_disjoint` / `scatter_groups[i].slice_disjoint` plus the
-/// per-chunk group ordering check), so the boundary lies inside `dst` and no
-/// item of one half touches the other half. Each leaf writes only its own
-/// half; full coverage of the buffer is the caller's `PhysicalOverwriteProof`,
-/// and `initialize_owned` exposes the initialised length only after every
-/// join has returned `Ok`.
-#[allow(clippy::too_many_arguments)]
-fn split_join_uninit<I, D>(
-    items: &[I],
-    dst: &mut [MaybeUninit<D>],
-    dst_start: isize,
-    fused_indices: &mut [usize],
-    max_fused_rank: usize,
-    threads: usize,
-    exec: Exec<'_>,
-    dst_lo: &(impl Fn(&I) -> Result<isize, OperationError> + Sync),
-    gate: Option<&LeafGate>,
-    gate_bound: usize,
-    leaf: &(impl Fn(
-        &[I],
-        &mut [MaybeUninit<D>],
-        isize,
-        &mut [usize],
-        Exec<'_>,
-        &LeafGate,
-    ) -> Result<(), OperationError>
-          + Sync),
-) -> Result<(), OperationError>
-where
-    I: Sync,
-    D: Send + Sync,
-{
-    if items.is_empty() {
-        return Ok(());
-    }
-    if threads <= 1 || items.len() == 1 {
-        let own_gate;
-        let gate = match gate {
-            Some(gate) => gate,
-            None => {
-                own_gate = LeafGate::new(gate_bound);
-                &own_gate
-            }
-        };
-        return leaf(
-            items,
-            dst,
-            dst_start,
-            &mut fused_indices[..max_fused_rank],
-            exec,
-            gate,
-        );
-    }
-
-    let middle = parallel_split(items.len(), threads);
-    let boundary = dst_lo(&items[middle])?;
-    let split =
-        usize::try_from(boundary - dst_start).map_err(|_| OperationError::ElementCountOverflow)?;
-    let (left_data, right_data) = dst.split_at_mut(split);
-    let (left_items, right_items) = items.split_at(middle);
-    let left_threads = threads / 2;
-    let right_threads = threads - left_threads;
-    let (left_indices, mut right_indices) =
-        split_lane_indices(fused_indices, left_threads, threads, max_fused_rank);
-    let (left, right) = replay_join(
-        exec,
-        |exec| {
-            split_join_uninit(
-                left_items,
-                left_data,
-                dst_start,
-                left_indices,
-                max_fused_rank,
-                left_threads,
-                exec,
-                dst_lo,
-                None,
-                gate_bound,
-                leaf,
-            )
-        },
-        |exec| {
-            split_join_uninit(
-                right_items,
-                right_data,
-                boundary,
-                right_indices.get(),
-                max_fused_rank,
-                right_threads,
-                exec,
-                dst_lo,
-                None,
-                gate_bound,
-                leaf,
-            )
-        },
-    );
-    left?;
-    right
 }
 
 fn layout_linear_offset(
@@ -1058,16 +1005,13 @@ mod owned_overwrite_tests {
     fn owned_writer_under_the_parallel_schedule_is_bit_identical_to_serial() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         // What: with a multi-worker budget the owned writer splits the
-        // uninitialised destination on the compiled slice-disjoint boundaries
-        // and produces exactly the serial owned bytes for real and complex
+        // uninitialised destination over its ownership components and
+        // produces exactly the serial owned bytes for real and complex
         // data, which in turn equal the initialised overwrite oracle.
         let (structure, transform, source) = mixed_fixture();
         let schedule = transform.parallel_schedule();
-        assert!(schedule.singles_slice_disjoint);
-        assert!(schedule
-            .scatter_groups
-            .iter()
-            .all(|group| group.slice_disjoint));
+        assert_eq!(schedule.single_component_count(), 3);
+        assert_eq!(schedule.scatter_component_count(), 2);
         assert_eq!(schedule.singles.len(), 3);
         assert_eq!(schedule.pack_columns.len(), 5);
 
@@ -1215,6 +1159,37 @@ mod owned_overwrite_tests {
             .unwrap()
             .unwrap();
         assert_eq!(actual, source.map(|value| -3.0 * value));
+    }
+
+    #[test]
+    fn serial_owned_replay_keeps_no_component_scratch() {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        // What: a serial owned replay of several Multi components builds no
+        // ownership split, so a fresh workspace keeps no component scratch.
+        let (structure, transform) = crate::transform_replay::tests::su2_interleaved_fixture();
+        assert!(transform.parallel_schedule().scatter_component_count() > 1);
+        let source = (1..=60).map(f64::from).collect::<Vec<_>>();
+        let mut workspace = TreeTransformWorkspace::default();
+        let owned = try_tree_transform_structure_overwrite_owned_raw(
+            engine,
+            &mut DefaultDenseExecutor::new(),
+            &mut workspace,
+            &transform,
+            &structure,
+            &structure,
+            2,
+            &source,
+            1.0,
+            1,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            owned,
+            Some(crate::transform_replay::tests::su2_oracle(&source, 1.0))
+        );
+        assert_eq!(workspace.chunk_units.capacity(), 0);
+        assert_eq!(workspace.atom_slices.capacity(), 0);
     }
 
     struct FailingGemm;

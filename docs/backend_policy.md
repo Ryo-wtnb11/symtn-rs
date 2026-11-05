@@ -308,10 +308,61 @@ the vendor library. A backend-free Host region
 placement token; a replay forks over the engine's width only when the
 engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
 destination length against the pool's dispatch cost) admits the parallel
-section. A serial engine never forks. Inside a tree-transform replay, each
-Single block and recoupling scatter column keeps the token share of the
-worker that visits it, the whole token when the replay cannot split its
-blocks (one block, or blocks whose destination ranges interleave). An
+section. A serial engine never forks. A tree-transform replay, initialized
+or owned, splits its Single blocks and, after each chunk's GEMM, its
+recoupling scatter columns over ownership components compiled with the
+transform: blocks whose destination ranges overlap (canonical coupled-sector
+blocks interleave) share an atom, and a component is the set of atoms its
+blocks write, a Multi block's columns always together, so one component can
+own several separated atoms. An overwrite first runs each wide component
+(one whose largest planned block Strided's own rule, `parallel_width` for a
+copy of its elements, would give every worker of the whole token) alone on
+the whole token, one after another (every component is asked; the largest
+one's answer stands for the rest only where the cost rule is provably
+monotone, below); every other component splits and widens within the share
+its lane is granted. A Single phase, or a chunk of recoupling scatter, whose
+moved elements Strided's rule would give one worker runs inline on the
+token instead of splitting. A split separates lanes from the workers they
+share: it shares `W`, at most the sum of its components' own widths (and at
+most the token), among `L`, at most the replay's worker count, of lanes, and
+a lane left holding a single component holds no more workers than Strided's
+width for that component's largest planned block (a lane holding several
+components keeps its share). The replay learns these widths from Strided's
+own answers once per call: a width it has already learned, or one that
+what it learned decides, costs no further search, so identical chunks
+repeat no search, while each new undecided count asks Strided once. An
+overwrite's split runs only when it is cheaper than running the same
+components one after another on the whole token, each at its own width:
+both sides cost a component by the objective Strided's width minimises (the
+serial copy estimate of its moved elements over the width it runs at, plus
+the token's dispatch cost of a section that wide), the split runs a
+component at its width capped by its lane's share, and the split costs its
+slowest lane plus one two-wide section per fork on the way to it
+(O(components + `L` log components) per decision, no allocation);
+otherwise the components run sequentially on the whole token. An
+accumulating phase moves each block on one worker, so its split loses
+nothing to the whole token and skips this comparison.
+Each split hands the left `⌊L/2⌋` of `L` lanes the components whose
+destination elements are closest to that fraction of the total, never
+dividing a component, and runs that side on `⌊W·⌊L/2⌋/L⌋` workers (at least
+one, leaving at least one), the right side on the rest. The Multi pack's
+column split instead halves its token evenly at each fork, and a half that
+reaches one slot runs its remaining columns inline. A split of the scatter
+phase lists its atoms and each chunk's components, and every Single split lists the atoms it splits;
+learning widths keeps O(engine width) more. This metadata (O(atoms + chunk
+groups + engine width)) is allocated once per call by an eager call's
+call-local workspace and kept by a reused workspace (and reported in its
+retained bytes); a serial or one-component phase, and an inline Single
+phase, lists nothing (an inline phase may still learn a width). Whether a
+component is wide is one comparison against the smallest element count
+Strided's rule gives every worker, which the replay finds once for the
+whole token and once for the latest narrower lane token it asks about; a
+count so large that
+threadteam's rounded cost comparison is no longer provably monotone (the
+estimate plus the largest dispatch cost reaching `2^51 / w^2` ns) asks
+Strided directly instead. Inside the replay each Single block
+and scatter column keeps the token share of the worker that visits it, the
+whole token when its phase has one component. An
 overwrite of such a block runs on that share through the block's retained
 Strided plan when Strided's own rule (`execution::parallel_width` for a copy
 of its elements) gives the share more than one worker. Accumulating updates

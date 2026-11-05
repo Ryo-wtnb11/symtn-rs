@@ -145,6 +145,10 @@ impl<T> TreeTransformReplay<T> {
                 core::mem::size_of::<u32>(),
             ))
             .saturating_add(vector_bytes(
+                self.parallel_schedule.single_atoms.capacity(),
+                core::mem::size_of::<TreeTransformSingleAtom>(),
+            ))
+            .saturating_add(vector_bytes(
                 self.parallel_schedule.pack_columns.capacity(),
                 core::mem::size_of::<TreeTransformPackReplay>(),
             ))
@@ -155,6 +159,14 @@ impl<T> TreeTransformReplay<T> {
             .saturating_add(vector_bytes(
                 self.parallel_schedule.scatter_groups.capacity(),
                 core::mem::size_of::<TreeTransformScatterGroupReplay>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.scatter_atoms.capacity(),
+                core::mem::size_of::<TreeTransformScatterAtom>(),
+            ))
+            .saturating_add(vector_bytes(
+                self.parallel_schedule.component_slots.capacity(),
+                core::mem::size_of::<u32>(),
             ))
     }
 }
@@ -627,6 +639,8 @@ mod tests {
         };
         assert_eq!(layouts.plans.capacity(), planned);
         assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
+        // Two disjoint Single atoms and the sentinel.
+        assert_eq!(compiled.parallel_schedule().single_atoms.capacity(), 3);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
             (&[4usize][..], &[1isize][..])
@@ -648,6 +662,18 @@ mod tests {
             .plans
             .reserve_exact(1);
         assert!(compiled.charged_payload_bytes() > charged);
+        let charged = compiled.charged_payload_bytes();
+        let schedule = &mut Arc::get_mut(&mut compiled.core).unwrap().parallel_schedule;
+        schedule.single_atoms.reserve_exact(4);
+        schedule.scatter_atoms.reserve_exact(1);
+        schedule.component_slots.reserve_exact(1);
+        assert!(
+            compiled.charged_payload_bytes()
+                >= charged
+                    + 4 * core::mem::size_of::<TreeTransformSingleAtom>()
+                    + core::mem::size_of::<TreeTransformScatterAtom>()
+                    + core::mem::size_of::<u32>()
+        );
 
         // Tiny interleaved roles, whose copy Strided estimates at zero time,
         // retain no plan: `B` two-element blocks at stride `B` and offset `b`.
