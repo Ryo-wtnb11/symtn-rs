@@ -66,17 +66,14 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use tcontract_exec::{BatchQuery, BatchStrategy, Exec};
+pub use tcontract_exec::{BatchPolicy, Exec};
+use tcontract_exec::{BatchQuery, BatchStrategy};
 use tenferro_cpu::threadteam;
 
 /// What one stage of a job is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StageKind {
     /// A symtn-owned data movement section (pack, scatter, direct copies).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the tree replays consume the barrier form")
-    )]
     Movement,
     /// One provider call (a GEMM, a factorization). The barrier form hands it
     /// to the engine between rounds.
@@ -108,10 +105,6 @@ pub enum Form {
     Native,
     /// Provider stages are handed to the engine between rounds
     /// ([`run_barrier`]).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the tree replays consume the barrier form")
-    )]
     Barrier,
 }
 
@@ -662,6 +655,18 @@ fn place_forced(
     compact(placement, scratch, count);
 }
 
+/// Places each of `count` jobs alone on a lane of one slot, reading no
+/// estimate: the fan-out of a caller whose partition into jobs is already
+/// its placement. Every stage then runs at one slot.
+pub fn place_each(count: usize, tables: &mut LaneTables) {
+    let placement = &mut tables.placement;
+    placement.clear();
+    placement.shares.resize(count, 1);
+    placement.lane_starts.extend(0..=count);
+    placement.lane_jobs.extend(0..count);
+    placement.lane_of.extend(0..count);
+}
+
 /// The lane of least accumulated time, ties to the lowest, popped from
 /// `heap`, which holds one current entry per lane; the caller pushes the lane
 /// back with its new time.
@@ -785,10 +790,6 @@ pub trait Work: Jobs + Sync {
 /// The engine side of the barrier form: the caller owns the engine and
 /// enters it once per round, and submits each pending provider stage on the
 /// engine's whole offer between rounds.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the tree replays consume the barrier form")
-)]
 pub trait Barrier<W: Work + ?Sized> {
     /// A refused engine entry.
     type Refused;
@@ -1032,10 +1033,6 @@ pub fn run_native<W: Work>(
 /// # Panics
 ///
 /// As [`run_native`].
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the tree replays consume the barrier form")
-)]
 pub fn run_barrier<W: Work, H: Barrier<W>>(
     host: &mut H,
     work: &W,

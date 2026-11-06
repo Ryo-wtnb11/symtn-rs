@@ -50,10 +50,10 @@ mod block_kernel {
     pub(crate) mod factor;
 }
 // The one placement and runner of independent block jobs, which the block
-// kernels run on.
+// kernels and the cold tree compile run on.
 #[cfg(feature = "tenferro")]
-#[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
-mod lanes;
+#[doc(hidden)]
+pub mod lanes;
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]

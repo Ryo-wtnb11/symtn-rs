@@ -1,8 +1,8 @@
 //! Export firewall for `symtn-dense`.
 //!
-//! Pins the exact names `lib.rs` re-exports, under every feature combination
-//! at once, so adding or removing one fails here and is reviewed as an API
-//! change. `DensePlacement` (one variant, `Host`, with four accessors that
+//! Pins the exact names `lib.rs` re-exports and its one public module
+//! (`lanes`), under every feature combination at once, so adding or removing
+//! one fails here and is reviewed as an API change. `DensePlacement` (one variant, `Host`, with four accessors that
 //! always returned it), the `CUTENSOR_PLAN_BYTES` estimate and the test-only
 //! `cuda_is_hermitian_region` were removed from this surface.
 //!
@@ -15,7 +15,12 @@ use crate::export_scan::reexports;
 
 /// Leaf names re-exported by `pub use` in `source`.
 fn exported_names(source: &str) -> Result<BTreeSet<String>, String> {
-    let exports = reexports(source)?.without_modules()?;
+    let exports = reexports(source)?;
+    // The one public module: the `#[doc(hidden)]` lane runner that
+    // symtn-operations and symtn-tensors drive their block jobs through.
+    if let Some(module) = exports.modules.iter().find(|module| *module != "lanes") {
+        return Err(format!("lib.rs gained a `pub mod {module}`"));
+    }
     Ok(exports.names.into_keys().collect())
 }
 
