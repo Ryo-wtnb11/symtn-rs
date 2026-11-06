@@ -64,7 +64,6 @@ where
     }
     let writer = OwnedWriter {
         task: ReplayParts::new(task),
-        src: src_data,
         alpha,
     };
     let output = initialize_owned::<D, OperationError>(proof.required_len, |dst_data| {

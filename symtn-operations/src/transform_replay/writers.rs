@@ -152,12 +152,15 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// run on a compiled plan.
     fn overwrites(&self) -> bool;
 
+    /// The write of direct item `item` from the replayed source `src` (one
+    /// member's, in a member replay).
     #[allow(clippy::too_many_arguments)]
     fn direct(
         &self,
         kernels: &mut Self::Kernels,
         zero_strides: &mut Vec<isize>,
         item: TreeTransformDirectItem,
+        src: &[D],
         dst: &mut [T],
         dst_start: isize,
         band: Option<Band>,
@@ -188,7 +191,6 @@ pub(super) trait DestinationWriter<T, D>: Sync {
 pub(super) struct InitializedWriter<'a, A, D, C> {
     pub prototype: A,
     pub task: ReplayParts<'a, C>,
-    pub src: &'a [D],
     pub alpha: DestinationAlpha<'a, D, C>,
     pub mode: DestinationMode<D>,
 }
@@ -214,6 +216,7 @@ where
         kernels: &mut A,
         zero_strides: &mut Vec<isize>,
         item: TreeTransformDirectItem,
+        src: &[D],
         dst: &mut [D],
         dst_start: isize,
         band: Option<Band>,
@@ -270,7 +273,7 @@ where
                         self.task.storage_conjugate,
                         dst,
                         dst_start,
-                        self.src,
+                        src,
                         alpha,
                         self.mode,
                     );
@@ -281,7 +284,7 @@ where
                     exec,
                     zero_strides,
                     dst,
-                    self.src,
+                    src,
                     baked.dims(),
                     baked.dst_strides(),
                     baked.src_strides(),
@@ -355,7 +358,6 @@ where
 /// overwrite mode; every element its items address is written once.
 pub(super) struct OwnedWriter<'a, D, C> {
     pub task: ReplayParts<'a, C>,
-    pub src: &'a [D],
     pub alpha: D,
 }
 
@@ -377,6 +379,7 @@ where
         _: &mut (),
         _: &mut Vec<isize>,
         item: TreeTransformDirectItem,
+        src: &[D],
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
         band: Option<Band>,
@@ -424,7 +427,7 @@ where
                         role,
                         elements,
                         dst,
-                        self.src,
+                        src,
                         layouts.entry(dst_layout).offset - dst_start + dst_shift,
                         layouts.entry(src_layout).offset + src_shift,
                         index,

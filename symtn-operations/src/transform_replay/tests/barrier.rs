@@ -10,77 +10,6 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 use super::super::writers::ReplayParts;
 
-/// A custom executor on the default batch entry and without lane GEMMs,
-/// forwarding to the built-in executor: each single GEMM records its
-/// coefficients' first value (the fixture's group label) and fails when
-/// that label is in `fail`.
-#[derive(Default)]
-struct Forwarding {
-    inner: DefaultDenseExecutor,
-    fail: Vec<usize>,
-    attempts: Vec<usize>,
-}
-
-impl DenseExecutor for Forwarding {
-    fn svd(
-        &mut self,
-        engine: &mut dyn Engine,
-        input: DenseRead<'_>,
-    ) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.svd(engine, input)
-    }
-
-    fn qr(
-        &mut self,
-        engine: &mut dyn Engine,
-        input: DenseRead<'_>,
-    ) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.qr(engine, input)
-    }
-
-    fn eigh(
-        &mut self,
-        engine: &mut dyn Engine,
-        input: DenseRead<'_>,
-    ) -> Result<Vec<DenseTensor>, DenseError> {
-        self.inner.eigh(engine, input)
-    }
-
-    fn dot_general_into(
-        &mut self,
-        engine: &mut dyn Engine,
-        output: DenseWrite<'_>,
-        lhs: DenseRead<'_>,
-        rhs: DenseRead<'_>,
-        config: &DenseDotConfig,
-    ) -> Result<(), DenseError> {
-        self.inner
-            .dot_general_into(engine, output, lhs, rhs, config)
-    }
-
-    fn matmul_axpby_into(
-        &mut self,
-        engine: &mut dyn Engine,
-        output: DenseWrite<'_>,
-        lhs: DenseRead<'_>,
-        rhs: DenseRead<'_>,
-        alpha: DenseScalar,
-        beta: DenseScalar,
-    ) -> Result<(), DenseError> {
-        if let DenseRead::F64(view) = &rhs {
-            if let Some(&label) = view.data().get(view.offset()) {
-                let label = label as usize;
-                self.attempts.push(label);
-                if self.fail.contains(&label) {
-                    return Err(injected(label));
-                }
-            }
-        }
-        self.inner
-            .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
-    }
-}
-
 fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
     crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
 }
@@ -226,7 +155,6 @@ fn every_destination_element_has_one_writer_in_the_barrier_form() {
     let mut marks = vec![Mark::default(); len];
     let recorder = Recorder {
         parts: ReplayParts::new(task),
-        src: &source,
     };
     let ran = super::super::lanes::barrier_replay(
         &mut engine,
@@ -238,6 +166,7 @@ fn every_destination_element_has_one_writer_in_the_barrier_form() {
         &source,
         &recorder,
         None,
+        1,
     )
     .unwrap();
     assert!(ran, "placement left the lane runner");
@@ -268,35 +197,6 @@ fn every_destination_element_has_one_writer_in_the_barrier_form() {
         .map(|at| marks[at].worker)
         .collect::<Vec<_>>();
     assert!(injective.iter().all(|w| w.is_some() && *w == injective[0]));
-}
-
-/// Two Multi groups `1` and `2` share the interleaved atom `[0, 63]` (one
-/// component of two GEMMs) and group `3` owns `[64, 95]` (a component of
-/// one); each group's label is its coefficients' first value. Blocks of 32
-/// elements keep every stage's estimate nonzero, so forced lanes spread the
-/// components.
-fn two_lane_fixture() -> (
-    Arc<BlockStructure>,
-    Arc<BlockStructure>,
-    TreeTransformStructure<f64>,
-) {
-    let dst = Arc::new(custom_structure(vec![
-        block(0, 32, 2, 0),
-        block(1, 32, 2, 1),
-        block(2, 32, 1, 64),
-    ]));
-    let src = Arc::new(BlockStructure::packed_column_major(1, vec![vec![32]; 6]).unwrap());
-    let transform = TreeTransformStructure::compile_structures(
-        &dst,
-        &src,
-        &[
-            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, -1.0]),
-            TreeTransformBlockSpec::multi(vec![1], vec![2, 3], vec![2.0, 1.0]),
-            TreeTransformBlockSpec::multi(vec![2], vec![4, 5], vec![3.0, 1.0]),
-        ],
-    )
-    .unwrap();
-    (dst, src, transform)
 }
 
 /// What: component 0's second GEMM (`e0`) and component 1's only GEMM
@@ -356,15 +256,16 @@ fn a_barrier_failure_ends_only_its_component_and_the_lowest_wins() {
         if one_worker {
             // Plan order through the first failing job, nothing after it.
             let first = label.iter().position(|l| [e0, e1].contains(l)).unwrap();
-            assert_eq!(dense.attempts, label[..=first], "{what}");
+            assert_eq!(dense.attempts(), label[..=first], "{what}");
             assert_eq!(group_of(error), format!("group {}", label[first]), "{what}");
         } else {
             assert_eq!(group_of(error), format!("group {e0}"), "{what}");
             for failed in [e0, e1] {
-                let tries = dense.attempts.iter().filter(|&&l| l == failed).count();
+                let tries = dense.attempts().iter().filter(|&&l| l == failed).count();
                 assert_eq!(tries, 1, "{what}, group {failed} retried");
             }
-            let at = |label| dense.attempts.iter().position(|&l| l == label);
+            let attempts = dense.attempts();
+            let at = |label| attempts.iter().position(|&l| l == label);
             assert!(at(e1).unwrap() < at(e0).unwrap(), "{what}");
         }
     }

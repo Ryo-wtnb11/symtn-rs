@@ -8,7 +8,8 @@
 //! allocates no more than one of few, as does a general-`beta` update of
 //! many such blocks in Multi groups. The barrier form (a custom executor
 //! without lane GEMMs, each GEMM handed to the engine between rounds) keeps
-//! the same contract.
+//! the same contract, as does a member replay of several members, each
+//! (member, component) pair one job.
 //!
 //! Its own test binary with one test, so the shared counting allocator's
 //! process-wide measurement sees only that test. That the fixture really runs on four
@@ -35,8 +36,8 @@ use symtn_dense::{
     DenseScalar, DenseTensor, DenseWrite, Engine, Pool,
 };
 use symtn_operations::{
-    DenseTreeTransformOperations, TreeTransformBackend, TreeTransformBlockSpec,
-    TreeTransformStructure, TreeTransformWorkspace,
+    tree_transform_members_overwrite_raw, DenseTreeTransformOperations, StridedHostKernelAdapter,
+    TreeTransformBackend, TreeTransformBlockSpec, TreeTransformStructure, TreeTransformWorkspace,
 };
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
@@ -273,6 +274,58 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         assert_eq!(
             after_large, warm,
             "a large barrier call grows the small one's"
+        );
+    } else {
+        assert_eq!(warm, 0);
+        assert_eq!(after_large, 0);
+    }
+
+    // Member replays on the same four lanes: three members of the small
+    // fixture, two of the large, three of the small.
+    let mut workspace = TreeTransformWorkspace::default();
+    let mut dense = DefaultDenseExecutor::new();
+    let mut kernels = StridedHostKernelAdapter::default();
+    let batches = [(&small, 3usize), (&large, 2)];
+    let mut buffers = batches
+        .iter()
+        .map(|&((structure, _, source), members)| {
+            let source = source.repeat(members);
+            (
+                vec![0.0; members * structure.required_len().unwrap()],
+                source,
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut members = |which: usize| {
+        let ((structure, transform, _), members) = batches[which];
+        let (destination, source) = &mut buffers[which];
+        counting_alloc::measure_process(|| {
+            tree_transform_members_overwrite_raw(
+                engine,
+                &mut kernels,
+                &mut dense,
+                &mut workspace,
+                transform,
+                structure,
+                structure,
+                destination,
+                source,
+                members,
+                &[],
+            )
+            .unwrap()
+        })
+        .1
+    };
+    members(0);
+    let warm = members(0);
+    members(1);
+    let after_large = members(0);
+    if cfg!(target_vendor = "apple") {
+        assert_eq!(members(0), warm, "warm member calls grow");
+        assert_eq!(
+            after_large, warm,
+            "a large member call grows the small one's"
         );
     } else {
         assert_eq!(warm, 0);

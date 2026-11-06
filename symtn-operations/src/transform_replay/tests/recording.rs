@@ -1,9 +1,10 @@
-//! The recording writer and the fixtures the native and barrier lane
-//! replay tests share.
+//! The recording writer, the forwarding executor and the fixtures the lane
+//! replay tests (native, barrier and member) share.
 
 use super::*;
 use crate::kernel_adapter::movement::{Store, Write};
 use crate::transform_structure::TreeTransformDirectItem;
+use std::sync::Mutex;
 use std::thread::ThreadId;
 
 use super::super::writers::{crop_role, inactive_role, DestinationWriter, ReplayParts};
@@ -31,7 +32,6 @@ impl Store<f64> for Record {
 /// whole or cropped to a band, and records who wrote each.
 pub(super) struct Recorder<'a> {
     pub(super) parts: ReplayParts<'a, f64>,
-    pub(super) src: &'a [f64],
 }
 
 impl DestinationWriter<Mark, f64> for Recorder<'_> {
@@ -48,6 +48,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         _: &mut (),
         _: &mut Vec<isize>,
         item: TreeTransformDirectItem,
+        src: &[f64],
         dst: &mut [Mark],
         dst_start: isize,
         band: Option<super::super::writers::Band>,
@@ -78,7 +79,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
                 };
                 span::<Record, _, f64>(
                     dst,
-                    self.src,
+                    src,
                     role,
                     layouts.entry(dst_layout).offset - dst_start + dst_shift,
                     layouts.entry(src_layout).offset + src_shift,
@@ -202,6 +203,190 @@ pub(super) fn injected(group: usize) -> DenseError {
         op: "spy",
         message: format!("group {group}"),
     }
+}
+
+/// A custom executor on the default batch entry forwarding to the built-in
+/// executor, without lane GEMMs unless `lanes`: each GEMM (single product
+/// or lane GEMM) records its label and fails when that label is in `fail`.
+/// The label is the coefficients' first value (the fixture's group label)
+/// plus ten times the member, read as the packed source's first value over
+/// [`MEMBER_SPAN`] (the fixtures give member `b` the source values
+/// `b MEMBER_SPAN + 1, ...`).
+#[derive(Default)]
+pub(super) struct Forwarding {
+    pub(super) inner: DefaultDenseExecutor,
+    pub(super) lanes: bool,
+    pub(super) fail: Vec<usize>,
+    pub(super) attempts: Mutex<Vec<usize>>,
+}
+
+/// The source value span of one member in the failure fixtures.
+pub(super) const MEMBER_SPAN: f64 = 1000.0;
+
+impl Forwarding {
+    /// The labels attempted, in submission order (lane GEMMs in completion
+    /// order).
+    pub(super) fn attempts(&self) -> Vec<usize> {
+        self.attempts.lock().unwrap().clone()
+    }
+
+    /// Records the GEMM over `lhs` and `rhs` and fails it when its label is
+    /// in `fail`.
+    fn attempt(&self, lhs: Option<f64>, rhs: Option<f64>) -> Result<(), DenseError> {
+        let Some(label) = rhs else {
+            return Ok(());
+        };
+        let member = lhs.map_or(0, |value| (value / MEMBER_SPAN) as usize);
+        let label = label as usize + 10 * member;
+        self.attempts.lock().unwrap().push(label);
+        if self.fail.contains(&label) {
+            return Err(injected(label));
+        }
+        Ok(())
+    }
+}
+
+fn first(read: &DenseRead<'_>) -> Option<f64> {
+    match read {
+        DenseRead::F64(view) => view.data().get(view.offset()).copied(),
+        _ => None,
+    }
+}
+
+impl DenseExecutor for Forwarding {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.eigh(engine, input)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.inner
+            .dot_general_into(engine, output, lhs, rhs, config)
+    }
+
+    fn matmul_axpby_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        alpha: DenseScalar,
+        beta: DenseScalar,
+    ) -> Result<(), DenseError> {
+        self.attempt(first(&lhs), first(&rhs))?;
+        self.inner
+            .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
+    }
+
+    fn supports_lane_gemms(&self) -> bool {
+        self.lanes
+    }
+
+    fn with_lane_gemms(
+        &mut self,
+        engine: &mut dyn Engine,
+        dtype: symtn_dense::DenseDType,
+        jobs: &[symtn_dense::lanes::LaneGemmShape],
+        body: &mut symtn_dense::lanes::LaneGemmBody<'_>,
+    ) -> Result<(), DenseError> {
+        let Self {
+            inner,
+            fail,
+            attempts,
+            ..
+        } = self;
+        let spy = Forwarding {
+            fail: core::mem::take(fail),
+            attempts: Mutex::new(core::mem::take(attempts.get_mut().unwrap())),
+            ..Forwarding::default()
+        };
+        let entered = inner.with_lane_gemms(engine, dtype, jobs, &mut |exec, gemms| {
+            body(exec, &Labelled { gemms, spy: &spy })
+        });
+        *fail = spy.fail;
+        *attempts.get_mut().unwrap() = spy.attempts.into_inner().unwrap();
+        entered
+    }
+}
+
+/// Lane GEMMs labelled and failed as [`Forwarding`]'s products are.
+struct Labelled<'a> {
+    gemms: &'a dyn symtn_dense::lanes::LaneGemms,
+    spy: &'a Forwarding,
+}
+
+impl symtn_dense::lanes::LaneGemms for Labelled<'_> {
+    fn run(
+        &self,
+        exec: symtn_dense::lanes::Exec<'_>,
+        job: usize,
+        io: symtn_dense::lanes::LaneGemmIo<'_>,
+    ) -> Result<(), DenseError> {
+        if let symtn_dense::lanes::LaneGemmIo::F64 { lhs, rhs, .. } = &io {
+            self.spy
+                .attempt(lhs.first().copied(), rhs.first().copied())?;
+        }
+        self.gemms.run(exec, job, io)
+    }
+
+    fn estimate(&self, job: usize) -> symtn_dense::lanes::Estimate {
+        self.gemms.estimate(job)
+    }
+}
+
+/// Two Multi groups `1` and `2` share the interleaved atom `[0, 63]` (one
+/// component of two GEMMs) and group `3` owns `[64, 95]` (a component of
+/// one); each group's label is its coefficients' first value. Blocks of 32
+/// elements keep every stage's estimate nonzero, so forced lanes spread the
+/// components.
+pub(super) fn two_lane_fixture() -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let dst = Arc::new(custom_structure(vec![
+        block(0, 32, 2, 0),
+        block(1, 32, 2, 1),
+        block(2, 32, 1, 64),
+    ]));
+    let src = Arc::new(BlockStructure::packed_column_major(1, vec![vec![32]; 6]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, -1.0]),
+            TreeTransformBlockSpec::multi(vec![1], vec![2, 3], vec![2.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![2], vec![4, 5], vec![3.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    (dst, src, transform)
 }
 
 /// The group message of an injected error.

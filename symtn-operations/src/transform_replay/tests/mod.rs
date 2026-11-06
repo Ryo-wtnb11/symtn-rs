@@ -24,6 +24,8 @@ mod destination_scales;
     ))
 ))]
 mod lanes;
+#[cfg(feature = "tenferro")]
+mod members;
 mod overwrite;
 mod profile;
 #[cfg(feature = "tenferro")]

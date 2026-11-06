@@ -1,9 +1,12 @@
 //! Tree replays on the lane runner ([`symtn_dense::lanes`]).
 //!
-//! Every joint component of the compiled schedule is one job: it owns its
-//! atoms of the destination for the whole call, so each destination element
-//! has one writer. Its stages are `Direct` (its inactive layouts and
-//! Singles), then for each of its Multi groups in recoupling-plan order
+//! Every joint component of the compiled schedule, in every member of a
+//! member replay, is one job: it owns its atoms of its member's destination
+//! for the whole call, so each destination element has one writer. Job
+//! `member * components + component` is that member's component; an
+//! ordinary replay is the one-member case, whose jobs are its components.
+//! (One worker orders a member batch differently: plan job outer, member
+//! inner.) Its stages are `Direct` (its inactive layouts and Singles), then for each of its Multi groups in recoupling-plan order
 //! `Pack`, `Gemm` and `Scatter`. Placement prices each stage by its provider
 //! estimate (Strided's copy estimate of the elements a movement stage moves,
 //! dense's own GEMM estimate) and runs it at its selected width `x`:
@@ -222,10 +225,10 @@ fn dense_dtype<D: DenseRecouplingScalar>() -> DenseDType {
 /// resolves to one lane of one slot: that is one worker, which keeps the
 /// source order of the one-worker replay.
 ///
-/// Errors follow the runner: every component is attempted, a component
-/// stops at its own first failing stage, and the lowest-indexed failing
-/// component's error is returned; an initialized destination may then be
-/// partly written. A refused entry writes nothing.
+/// Errors follow the runner: every job is attempted, a job stops at its own
+/// first failing stage, and the lowest-indexed failing job's error is
+/// returned; an initialized destination may then be partly written. A
+/// refused entry writes nothing.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn lane_replay<E, W, T, D, C>(
     engine: &mut dyn Engine,
@@ -237,6 +240,7 @@ pub(super) fn lane_replay<E, W, T, D, C>(
     src: &[D],
     writer: &W,
     profile: Option<&mut TreeTransformReplayProfile>,
+    members: usize,
 ) -> Result<bool, OperationError>
 where
     E: DenseExecutor,
@@ -273,6 +277,7 @@ where
             writer,
             src,
             coefficient_scratch,
+            members,
         );
         outcome = Some(replay.run(
             Runner::<E, D>::Native(exec),
@@ -288,7 +293,7 @@ where
         message: "the lane GEMM entry returned without running its body",
     }))?;
     if let (true, Some(profile), Some(start)) = (ran, profile, start) {
-        record_lanes(profile, task, schedule, start.elapsed());
+        record_lanes(profile, task, schedule, members, start.elapsed());
     }
     Ok(ran)
 }
@@ -319,6 +324,7 @@ pub(super) fn barrier_replay<E, W, T, D, C>(
     src: &[D],
     writer: &W,
     profile: Option<&mut TreeTransformReplayProfile>,
+    members: usize,
 ) -> Result<bool, OperationError>
 where
     E: DenseExecutor,
@@ -340,7 +346,15 @@ where
         components,
         ..
     } = scratch;
-    let replay = Replay::new(task, schedule, None, writer, src, coefficient_scratch);
+    let replay = Replay::new(
+        task,
+        schedule,
+        None,
+        writer,
+        src,
+        coefficient_scratch,
+        members,
+    );
     let mut host = EngineGemms {
         engine,
         dense,
@@ -358,7 +372,7 @@ where
         dst,
     )?;
     if let (true, Some(profile), Some(start)) = (ran, profile, start) {
-        record_lanes(profile, task, schedule, start.elapsed());
+        record_lanes(profile, task, schedule, members, start.elapsed());
         let matmul = host.matmul.unwrap_or_default();
         profile.multi_dense_matmul_call += matmul;
         profile.multi_matmul_total += matmul;
@@ -372,13 +386,14 @@ fn record_lanes<C: Copy>(
     profile: &mut TreeTransformReplayProfile,
     task: TreeTransformTaskView<'_, C>,
     schedule: &TreeTransformParallelSchedule,
+    members: usize,
     elapsed: core::time::Duration,
 ) {
     profile.fused_lanes += elapsed;
-    profile.single_blocks += schedule.single_block_count;
-    profile.multi_blocks += task.recoupling_plan().jobs().len();
-    profile.packed_columns += schedule.packed_column_count;
-    profile.scattered_columns += schedule.scattered_column_count;
+    profile.single_blocks += members * schedule.single_block_count;
+    profile.multi_blocks += members * task.recoupling_plan().jobs().len();
+    profile.packed_columns += members * schedule.packed_column_count;
+    profile.scattered_columns += members * schedule.scattered_column_count;
 }
 
 fn lane_gemm_shape(job: &DenseGemmBatchJob) -> LaneGemmShape {
@@ -419,6 +434,22 @@ struct Replay<'a, W, D, C> {
     src: &'a [D],
     coefficients: &'a [D],
     rank: usize,
+    /// The members replayed, each `member_src` source elements long.
+    members: usize,
+    member_src: usize,
+}
+
+impl<'a, W, D, C> Replay<'a, W, D, C> {
+    /// The member and component of job `job`.
+    fn job(&self, job: usize) -> (usize, usize) {
+        let components = self.schedule.component_count();
+        (job / components, job % components)
+    }
+
+    /// Member `member`'s source.
+    fn source(&self, member: usize) -> &'a [D] {
+        &self.src[member * self.member_src..][..self.member_src]
+    }
 }
 
 impl<'a, W, D, C> Replay<'a, W, D, C>
@@ -434,6 +465,7 @@ where
         writer: &'a W,
         src: &'a [D],
         coefficients: &'a [D],
+        members: usize,
     ) -> Self {
         Self {
             parts: ReplayParts::new(task),
@@ -443,6 +475,8 @@ where
             src,
             coefficients,
             rank: task.layouts().max_fused_rank(),
+            members,
+            member_src: src.len() / members,
         }
     }
 
@@ -492,8 +526,8 @@ where
                 placement
                     .jobs(l)
                     .iter()
-                    .fold((0usize, 0usize), |(source, destination), &c| {
-                        let component = &schedule.components[c];
+                    .fold((0usize, 0usize), |(source, destination), &job| {
+                        let component = &schedule.components[self.job(job).1];
                         (
                             source.max(component.packed_source),
                             destination.max(component.packed_destination),
@@ -510,14 +544,16 @@ where
         }
 
         let mut atoms: Vec<&mut [T]> = recycle(core::mem::take(atoms_kept));
-        let result = split_atoms(&mut atoms, schedule, dst).and_then(|()| {
+        let result = split_atoms(&mut atoms, schedule, dst, self.members).and_then(|()| {
             let mut components: Vec<&mut [&mut [T]]> = recycle(core::mem::take(components_kept));
             let mut rest = &mut atoms[..];
-            for c in 0..schedule.component_count() {
-                let (own, tail) =
-                    core::mem::take(&mut rest).split_at_mut(schedule.component_atoms(c).len());
-                components.push(own);
-                rest = tail;
+            for _ in 0..self.members {
+                for c in 0..schedule.component_count() {
+                    let (own, tail) =
+                        core::mem::take(&mut rest).split_at_mut(schedule.component_atoms(c).len());
+                    components.push(own);
+                    rest = tail;
+                }
             }
             let work = TreeWork {
                 replay: self,
@@ -552,16 +588,35 @@ fn oversized() -> OperationError {
     }
 }
 
-/// `dst` split into the schedule's joint atoms, held in slot order (so each
-/// component's atoms are one contiguous run), in `atoms`' emptied capacity.
-/// O(atoms).
+/// Each of the `members` equal members of `dst` split into the schedule's
+/// joint atoms, held member after member in slot order (so each
+/// component's atoms in a member are one contiguous run), in `atoms`'
+/// emptied capacity. O(members atoms).
 fn split_atoms<'d, T>(
     atoms: &mut Vec<&'d mut [T]>,
     schedule: &TreeTransformParallelSchedule,
     dst: &'d mut [T],
+    members: usize,
 ) -> Result<(), OperationError> {
+    let count = schedule.atoms.len();
     atoms.clear();
-    atoms.resize_with(schedule.atoms.len(), Default::default);
+    atoms.resize_with(members * count, Default::default);
+    let member_len = dst.len() / members;
+    let mut members_rest = dst;
+    for member in atoms.chunks_mut(count.max(1)).take(members) {
+        let (own, tail) = core::mem::take(&mut members_rest).split_at_mut(member_len);
+        members_rest = tail;
+        split_member(member, schedule, own)?;
+    }
+    Ok(())
+}
+
+/// One member's `dst` split into the schedule's atoms, by slot.
+fn split_member<'d, T>(
+    atoms: &mut [&'d mut [T]],
+    schedule: &TreeTransformParallelSchedule,
+    dst: &'d mut [T],
+) -> Result<(), OperationError> {
     let outside = || OperationError::InvalidArgument {
         message: "tree transform atom lies outside the destination",
     };
@@ -593,8 +648,8 @@ fn split_atoms<'d, T>(
 /// What a component's movement stage writes.
 #[derive(Clone, Copy)]
 enum Movement<'p, D> {
-    /// Its inactive layouts and Singles.
-    Direct,
+    /// Its inactive layouts and Singles, from its member's source `src`.
+    Direct { src: &'p [D] },
     /// Group `group`'s scatter columns from its packed destination.
     Scatter { group: usize, packed: &'p [D] },
 }
@@ -622,11 +677,12 @@ where
     C: Copy,
 {
     fn count(&self) -> usize {
-        self.replay.schedule.component_count()
+        self.replay.members * self.replay.schedule.component_count()
     }
 
     fn stages(&self, job: usize) -> usize {
-        1 + 3 * self.replay.schedule.component_group_list(job).len()
+        let (_, component) = self.replay.job(job);
+        1 + 3 * self.replay.schedule.component_group_list(component).len()
     }
 
     fn kind(&self, _: usize, stage: usize) -> StageKind {
@@ -639,10 +695,11 @@ where
 
     fn estimate(&self, job: usize, stage: usize) -> Estimate {
         let schedule = self.replay.schedule;
+        let (_, component) = self.replay.job(job);
         if stage == 0 {
-            return copy(schedule.components[job].direct_weight);
+            return copy(schedule.components[component].direct_weight);
         }
-        let group = schedule.component_group_list(job)[(stage - 1) / 3] as usize;
+        let group = schedule.component_group_list(component)[(stage - 1) / 3] as usize;
         let shape = &self.replay.parts.plan.jobs()[group];
         match (stage - 1) % 3 {
             0 => copy(shape.rows.saturating_mul(shape.contracted)),
@@ -683,14 +740,17 @@ where
             subs,
             packs,
         } = lane;
+        let (member, component) = replay.job(job);
         if stage == 0 {
-            return replay.movement(job, Movement::Direct, atoms, pieces, subs, index, exec);
+            let src = replay.source(member);
+            let direct = Movement::Direct { src };
+            return replay.movement(component, direct, atoms, pieces, subs, index, exec);
         }
-        let group = replay.schedule.component_group_list(job)[(stage - 1) / 3] as usize;
+        let group = replay.schedule.component_group_list(component)[(stage - 1) / 3] as usize;
         let shape = &replay.parts.plan.jobs()[group];
         let packed = shape.rows * shape.cols;
         match (stage - 1) % 3 {
-            0 => replay.pack(group, source, packs, index, exec),
+            0 => replay.pack(group, replay.source(member), source, packs, index, exec),
             1 => {
                 // The barrier form submits its GEMMs between rounds.
                 let gemms = replay.gemms.ok_or(OperationError::InvalidArgument {
@@ -709,7 +769,7 @@ where
             _ => {
                 let packed = destination.get(..packed).ok_or(scratch_short())?;
                 replay.movement(
-                    job,
+                    component,
                     Movement::Scatter { group, packed },
                     atoms,
                     pieces,
@@ -761,7 +821,8 @@ where
         lane: &mut TreeLane<D>,
     ) -> Result<(), OperationError> {
         let start = self.matmul.map(|_| std::time::Instant::now());
-        let group = self.schedule.component_group_list(job)[(stage - 1) / 3] as usize;
+        let component = job % self.schedule.component_count();
+        let group = self.schedule.component_group_list(component)[(stage - 1) / 3] as usize;
         let shape = &self.jobs[group];
         let (rows, k, n) = (shape.rows, shape.contracted, shape.cols);
         let (lhs_shape, rhs_shape, dst_shape) = ([rows, k], [k, n], [rows, n]);
@@ -848,7 +909,7 @@ where
     {
         let schedule = self.schedule;
         let empty = match movement {
-            Movement::Direct => schedule.component_direct(component).is_empty(),
+            Movement::Direct { .. } => schedule.component_direct(component).is_empty(),
             Movement::Scatter { group, .. } => schedule.scatter_groups[group].columns.is_empty(),
         };
         if empty {
@@ -940,7 +1001,7 @@ where
         let mut zero_strides = Vec::new();
         for piece in pieces {
             match movement {
-                Movement::Direct => {
+                Movement::Direct { src } => {
                     let direct = schedule.component_direct(component);
                     let first = direct.partition_point(|item| item.slot() < piece.slot);
                     for &item in direct[first..]
@@ -951,6 +1012,7 @@ where
                             &mut kernels,
                             &mut zero_strides,
                             item,
+                            src,
                             piece.data,
                             piece.start,
                             piece.band,
@@ -1077,11 +1139,12 @@ where
         Ok(())
     }
 
-    /// Group `group`'s pack into `source` on `exec`: one flat fork over
+    /// Group `group`'s pack of `src` into `source` on `exec`: one flat fork over
     /// `min(width, columns)` contiguous column ranges, inline at one.
     fn pack(
         &self,
         group: usize,
+        src: &[D],
         source: &mut HostScratchBuffer<D>,
         packs: &mut Vec<PackCell<'static, u8>>,
         index: &mut [usize],
@@ -1094,7 +1157,7 @@ where
         let parts = token.budget().get().min(columns.len());
         source.overwrite_with_columns(len, |mut writer| {
             if parts <= 1 {
-                return self.pack_columns(&mut writer, columns, job.lhs_offset, index);
+                return self.pack_columns(&mut writer, columns, job.lhs_offset, src, index);
             }
             let mut cells: Vec<PackCell<'_, D>> = recycle(core::mem::take(packs));
             let mut indices = &mut index[..parts * self.rank];
@@ -1129,7 +1192,7 @@ where
                     result,
                 }) = cell.as_mut()
                 {
-                    *result = self.pack_columns(writer, columns, *start, index);
+                    *result = self.pack_columns(writer, columns, *start, src, index);
                 }
             });
             let mut first = Ok(());
@@ -1152,6 +1215,7 @@ where
         writer: &mut PackColumnWriter<'_, D>,
         columns: &[TreeTransformPackReplay],
         start: usize,
+        src: &[D],
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
@@ -1160,7 +1224,7 @@ where
                 writer.write_column(
                     column.packed_offset - start,
                     layouts.role(column.src_layout)?,
-                    self.src,
+                    src,
                     layouts.entry(column.src_layout).offset,
                     index,
                     map,

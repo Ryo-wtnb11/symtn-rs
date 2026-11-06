@@ -200,7 +200,6 @@ fn record(
     let mut marks = vec![Mark::default(); len];
     let recorder = Recorder {
         parts: ReplayParts::new(task),
-        src: source,
     };
     let ran = super::super::lanes::lane_replay(
         engine,
@@ -212,6 +211,7 @@ fn record(
         source,
         &recorder,
         None,
+        1,
     )
     .unwrap();
     assert!(ran, "placement left the lane runner");

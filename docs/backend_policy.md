@@ -265,7 +265,11 @@ A tree-transform replay on an engine wider than one runs on the same
 placement and lane runner. Each joint component of the
 compiled transform (the Singles, Multi groups and inactive blocks whose
 destination intervals overlap, which own those intervals together) is one
-job, so every destination element has one writer. Its stages are its direct
+job, so every destination element has one writer; a fixed-stride member
+batch (several members of one transform) makes each (member, component)
+pair a job, job `member * components + component`, after admitting every
+member's ranges before any write (an ordinary replay is the one-member
+case). Its stages are its direct
 writes (inactive blocks, then Singles), and per Multi group a pack, a GEMM
 and a scatter; a movement stage is estimated by Strided's copy estimate of
 the elements it moves, a GEMM by the same estimate as a block GEMM, and each
@@ -285,14 +289,16 @@ in which every lane runs its stages up to its next GEMM; between rounds each
 pending GEMM is submitted alone, in lane order, through the executor's
 `matmul_axpby_into` (`alpha = 1`, `beta = 0`) on the whole engine, so a
 vendor BLAS uses its own threads, not the lane's share; placement scores
-those GEMMs serialized at that width. Every component runs even after
-another fails (a failed GEMM submission fails its own component and is not
-retried), and the lowest-indexed failing component's error is returned, on
-either provider. On one worker (a serial engine, or a placement of one lane
+those GEMMs serialized at that width. Every job runs even after another
+fails (a failed GEMM submission fails its own job and is not retried), and
+the lowest-indexed failing job's error is returned, on either provider. On one worker (a serial engine, or a placement of one lane
 of one slot, such as a forced `Sequential` policy on a wider engine), the
 replay runs in source order: inactive blocks, Singles, then each Multi
 group's pack, GEMM on the engine and scatter, stopping at the first
-failure. Accumulating updates
+failure; a member batch on one worker moves all its members at once (the
+member axis one more strided dimension of each move) around one dense
+submission of every member's GEMMs, ordered plan job outer, member inner,
+and returns the first failure in that order. Accumulating updates
 (`beta` neither zero nor absent), and blocks whose normalized layout exceeds
 Strided's inline fused rank of eight, are never written through a Strided
 plan. The cold compile of a tree transform fans its staged groups out over

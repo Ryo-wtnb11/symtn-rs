@@ -398,7 +398,6 @@ where
     let writer = InitializedWriter {
         prototype: kernels.clone(),
         task: writers::ReplayParts::new(task),
-        src: src_data,
         alpha,
         mode,
     };

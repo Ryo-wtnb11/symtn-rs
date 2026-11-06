@@ -51,6 +51,7 @@ where
                 src,
                 writer,
                 profile.as_deref_mut(),
+                1,
             )? {
                 return Ok(());
             }
@@ -108,6 +109,7 @@ where
                 kernels,
                 zero_strides,
                 TreeTransformDirectItem::Inactive { layout, slot: 0 },
+                src,
                 dst,
                 0,
                 None,
@@ -130,6 +132,7 @@ where
                 kernels,
                 zero_strides,
                 TreeTransformDirectItem::Single { block, slot: 0 },
+                src,
                 dst,
                 0,
                 None,
