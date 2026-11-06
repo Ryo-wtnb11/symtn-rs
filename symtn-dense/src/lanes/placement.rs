@@ -4,14 +4,18 @@ use super::*;
 pub(super) struct PlaceScratch {
     /// `D(k)` in ns at index k, for `2 <= k <= B`.
     costs: Vec<u128>,
-    /// Every stage's serial estimate in ns and kind, flat in job order.
+    /// Every stage's serial estimate in ns, sections, kind and scored width
+    /// (one for a stage that does not widen), flat in job order.
     stage_ns: Vec<u128>,
     sections: Vec<u32>,
     kinds: Vec<StageKind>,
-    /// Per job: E_j, w_j and the allotment a_j.
+    scored: Vec<usize>,
+    /// Per job: E_j, its widest scored stage w_j and its reserved allotment.
     job_ns: Vec<u128>,
     job_width: Vec<usize>,
     allot: Vec<usize>,
+    /// The jobs by descending estimate, then ascending index.
+    order: Vec<usize>,
     /// The width of each distinct widening estimate, and this call's keys.
     ///
     /// Why the map is emptied key by key rather than cleared: `clear` resets
@@ -31,33 +35,43 @@ pub(super) struct PlaceScratch {
     /// Per lane: accumulated time and job count.
     tau: Vec<u128>,
     count: Vec<usize>,
-    pub(super) heap: BinaryHeap<Reverse<(u128, usize)>>,
+    /// Lanes by `(load, jobs, lane)`, one entry per lane.
+    pub(super) heap: BinaryHeap<Reverse<(u128, usize, usize)>>,
+    /// Per job, its time on an equal-share candidate's narrow and wide
+    /// shares.
+    at: Vec<[u128; 2]>,
     /// The index of each distinct lane share (by share, `usize::MAX` if
     /// none), the distinct shares and a queued job's time on each.
     share_slot: Vec<usize>,
     distinct: Vec<usize>,
     distinct_time: Vec<u128>,
-    /// One job's time summary: `(w, sum E, sum of sections)` per distinct
-    /// stage width,
-    /// indexed through `bucket_of` (by width, `usize::MAX` if none).
+    /// Every job's time summary, `(w, sum E, sum of sections)` per distinct
+    /// scored stage width, job `j`'s from `bucket_starts[j]`; `bucket_of`
+    /// indexes one job's buckets by width while they are built
+    /// (`usize::MAX` if none).
     bucket_of: Vec<usize>,
+    bucket_starts: Vec<usize>,
     buckets: Vec<(usize, u128, u128)>,
     /// The barrier walk's slowest movement per round.
     round_max: Vec<u128>,
+    /// The baseline's and the one-lane candidate's scores, when scored.
     #[cfg(test)]
-    pub(super) scores: Option<(u128, u128)>,
+    pub(super) scores: (Option<u128>, Option<u128>),
 }
 
 impl PlaceScratch {
     pub(super) fn retained_bytes(&self) -> usize {
         let wide = std::mem::size_of::<u128>();
         words(
-            self.job_width.capacity()
+            self.scored.capacity()
+                + self.job_width.capacity()
                 + self.allot.capacity()
+                + self.order.capacity()
                 + self.count.capacity()
                 + self.share_slot.capacity()
                 + self.distinct.capacity()
-                + self.bucket_of.capacity(),
+                + self.bucket_of.capacity()
+                + self.bucket_starts.capacity(),
         )
         .saturating_add(wide.saturating_mul(
             self.costs.capacity()
@@ -65,7 +79,8 @@ impl PlaceScratch {
                 + self.job_ns.capacity()
                 + self.tau.capacity()
                 + self.distinct_time.capacity()
-                + self.round_max.capacity(),
+                + self.round_max.capacity()
+                + 2 * self.at.capacity(),
         ))
         .saturating_add(
             self.kinds
@@ -83,11 +98,11 @@ impl PlaceScratch {
                 .capacity()
                 .saturating_mul(std::mem::size_of::<Estimate>()),
         )
-        .saturating_add(
-            self.heap
-                .capacity()
-                .saturating_mul(std::mem::size_of::<(u128, usize)>()),
-        )
+        .saturating_add(self.heap.capacity().saturating_mul(std::mem::size_of::<(
+            u128,
+            usize,
+            usize,
+        )>()))
         .saturating_add(self.buckets.capacity().saturating_mul(std::mem::size_of::<(
             usize,
             u128,
@@ -115,40 +130,59 @@ impl PlaceScratch {
         }
     }
 
-    /// Fills `buckets` with job `j`'s time summary from `widths`.
-    fn summarize(&mut self, starts: &[usize], widths: &[usize], j: usize) {
+    /// Builds every job's time summary from the scored stage widths.
+    fn summarize(&mut self, starts: &[usize], budget: usize) {
+        self.bucket_of.clear();
+        self.bucket_of.resize(budget + 1, usize::MAX);
         self.buckets.clear();
-        let range = starts[j]..starts[j + 1];
-        for k in range {
-            let (w, e, sections) = (widths[k], self.stage_ns[k], self.sections[k]);
-            let slot = match self.bucket_of[w] {
-                usize::MAX => {
-                    self.bucket_of[w] = self.buckets.len();
-                    self.buckets.push((w, 0, 0));
-                    self.buckets.len() - 1
-                }
-                slot => slot,
-            };
-            let bucket = &mut self.buckets[slot];
-            bucket.1 = bucket.1.saturating_add(e);
-            bucket.2 += u128::from(sections);
+        self.bucket_starts.clear();
+        for j in 0..starts.len() - 1 {
+            let first = self.buckets.len();
+            self.bucket_starts.push(first);
+            for k in starts[j]..starts[j + 1] {
+                let (w, e, sections) = (self.scored[k], self.stage_ns[k], self.sections[k]);
+                let slot = match self.bucket_of[w] {
+                    usize::MAX => {
+                        self.bucket_of[w] = self.buckets.len();
+                        self.buckets.push((w, 0, 0));
+                        self.buckets.len() - 1
+                    }
+                    slot => slot,
+                };
+                let bucket = &mut self.buckets[slot];
+                bucket.1 = bucket.1.saturating_add(e);
+                bucket.2 += u128::from(sections);
+            }
+            for &(w, _, _) in &self.buckets[first..] {
+                self.bucket_of[w] = usize::MAX;
+            }
         }
-        for &(w, _, _) in &self.buckets {
-            self.bucket_of[w] = usize::MAX;
+        self.bucket_starts.push(self.buckets.len());
+    }
+
+    /// Fills `at` with every job's time on `narrow` and `narrow + 1` slots,
+    /// an equal-share candidate's two shares.
+    fn share_times(&mut self, count: usize, narrow: usize) {
+        self.at.clear();
+        for j in 0..count {
+            let at = [self.job_time(j, narrow), self.job_time(j, narrow + 1)];
+            self.at.push(at);
         }
     }
 
-    /// The summarized job's time on a share of `a` slots.
-    fn job_time(&self, a: usize) -> u128 {
-        self.buckets.iter().fold(0u128, |sum, &(w, e, n)| {
-            let x = a.min(w);
-            let t = if x < 2 {
-                e
-            } else {
-                (e / x as u128).saturating_add(n.saturating_mul(self.costs[x]))
-            };
-            sum.saturating_add(t)
-        })
+    /// Job `j`'s time on a share of `a` slots.
+    fn job_time(&self, j: usize, a: usize) -> u128 {
+        self.buckets[self.bucket_starts[j]..self.bucket_starts[j + 1]]
+            .iter()
+            .fold(0u128, |sum, &(w, e, n)| {
+                let x = a.min(w);
+                let t = if x < 2 {
+                    e
+                } else {
+                    (e / x as u128).saturating_add(n.saturating_mul(self.costs[x]))
+                };
+                sum.saturating_add(t)
+            })
     }
 }
 
@@ -176,6 +210,15 @@ fn duration(ns: u128) -> Duration {
     Duration::from_nanos(u64::try_from(ns).unwrap_or(u64::MAX))
 }
 
+/// The lanes one `Auto` candidate builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Candidate {
+    /// This many lanes of equal shares, filled largest job first.
+    Equal(usize),
+    /// Dedicated lanes for wide jobs plus one-slot lanes.
+    Reserved,
+}
+
 /// Places `jobs` on `exec`'s budget for the runner of `form`, into
 /// `tables` (see the module documentation).
 pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTables) {
@@ -185,7 +228,7 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
     placement.clear();
     #[cfg(test)]
     {
-        scratch.scores = None;
+        scratch.scores = (None, None);
     }
     let count = jobs.count();
     if count == 0 {
@@ -212,6 +255,7 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
     scratch.stage_ns.clear();
     scratch.sections.clear();
     scratch.kinds.clear();
+    scratch.scored.clear();
     scratch.job_ns.clear();
     scratch.job_width.clear();
     // Empty after every completed call (`memo_keys`); this clear only costs
@@ -226,10 +270,14 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
             let largest = estimate
                 .payback
                 .map_or(estimate.serial, |p| p.max(estimate.serial));
-            // No width pays below `PAYS` sections of the cheapest dispatch.
             let sections = estimate.sections.max(1);
-            let w = if !threadteam::pays_at(largest, sections, cheapest) {
-                1
+            // A stage that does not widen is scored at one slot and offered
+            // its lane's whole share, which the provider's own rule divides.
+            let (offered, scored) = if !estimate.widen {
+                (budget, 1)
+            } else if !threadteam::pays_at(largest, sections, cheapest) {
+                // No width pays below `PAYS` sections of the cheapest dispatch.
+                (1, 1)
             } else {
                 let w = *scratch.memo.entry(estimate).or_insert_with(|| {
                     scratch.memo_keys.push(estimate);
@@ -240,15 +288,16 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
                         .get()
                 });
                 scratch.memo_capacity = scratch.memo_capacity.max(scratch.memo.capacity());
-                w
+                (w, w)
             };
             let e = ns(estimate.serial);
-            placement.widths.push(w);
+            placement.widths.push(offered);
+            scratch.scored.push(scored);
             scratch.stage_ns.push(e);
             scratch.sections.push(sections);
             scratch.kinds.push(jobs.kind(j, k));
             e_j = e_j.saturating_add(e);
-            w_j = w_j.max(w);
+            w_j = w_j.max(scored);
         }
         scratch.job_ns.push(e_j);
         scratch.job_width.push(w_j);
@@ -257,52 +306,194 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
     for key in scratch.memo_keys.drain(..) {
         scratch.memo.remove(&key);
     }
-    let wide: usize = (0..count)
-        .filter(|&j| scratch.job_ns[j] > 0)
-        .map(|j| scratch.job_width[j])
-        .fold(0, usize::saturating_add);
-    let b_eff = budget.min(wide);
-    if b_eff <= 1 || count == 1 {
-        return placement.sequential(budget, count);
-    }
 
-    // Allot.
+    // Admission: the whole call's estimate decides the slots it uses.
+    let total = scratch
+        .job_ns
+        .iter()
+        .fold(0u128, |sum, &e| sum.saturating_add(e));
+    let slots = token.width_for(duration(total), 1).get();
+    let baseline = slots.min(count);
+    if baseline <= 1 {
+        return placement.sequential(slots, count);
+    }
+    scratch.summarize(&placement.stage_starts, budget);
+    scratch.order.clear();
+    scratch.order.extend(0..count);
+    let job_ns = &scratch.job_ns;
+    scratch
+        .order
+        .sort_unstable_by_key(|&j| (Reverse(job_ns[j]), j));
+
+    // Candidates: the baseline's equal shares, every smaller lane count, then
+    // the reservation; a later one replaces the best only by scoring strictly
+    // lower, so ties keep the baseline, then the larger lane count.
+    let fork_pays = |lanes: usize| {
+        lanes < 2 || NonZeroUsize::new(lanes).is_some_and(|l| token.pays(duration(total), 1, l))
+    };
+    let mut best: Option<(u128, Candidate)> = None;
+    let mut built = None;
+    for lanes in (1..=baseline).rev() {
+        if !fork_pays(lanes) {
+            continue;
+        }
+        scratch.share_times(count, slots / lanes);
+        if let (Form::Native, Some((score, _))) = (form, best) {
+            if equal_bound(scratch, slots, lanes) >= score {
+                continue;
+            }
+        }
+        equal_lanes(placement, scratch, count, slots, lanes);
+        let score = lanes_score(form, placement, scratch);
+        #[cfg(test)]
+        {
+            if lanes == baseline {
+                scratch.scores.0 = Some(score);
+            }
+            if lanes == 1 {
+                scratch.scores.1 = Some(score);
+            }
+        }
+        built = Some(Candidate::Equal(lanes));
+        if best.is_none_or(|(b, _)| score < b) {
+            best = Some((score, Candidate::Equal(lanes)));
+        }
+    }
+    if reserved_lanes(placement, scratch, count, slots, baseline) {
+        built = Some(Candidate::Reserved);
+        let score = lanes_score(form, placement, scratch);
+        if fork_pays(placement.lanes()) && best.is_none_or(|(b, _)| score < b) {
+            best = Some((score, Candidate::Reserved));
+        }
+    }
+    // One lane always pays, so a candidate was scored.
+    let chosen = best.map_or(Candidate::Equal(1), |(_, c)| c);
+    if built != Some(chosen) {
+        match chosen {
+            Candidate::Equal(lanes) => {
+                scratch.share_times(count, slots / lanes);
+                equal_lanes(placement, scratch, count, slots, lanes);
+            }
+            Candidate::Reserved => {
+                reserved_lanes(placement, scratch, count, slots, baseline);
+            }
+        }
+    }
+}
+
+/// The score of the lanes in `placement` under `form`'s runner.
+fn lanes_score(form: Form, placement: &Placement, scratch: &mut PlaceScratch) -> u128 {
+    match form {
+        Form::Native => scratch
+            .tau
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .saturating_add(scratch.dispatch(placement.lanes())),
+        Form::Barrier => barrier_time(placement, scratch),
+    }
+}
+
+/// A lower bound of the native score of `lanes` equal shares from `at`:
+/// every job takes at least the smaller of its two share times, so the
+/// slowest lane takes at least the largest of those and at least their mean.
+fn equal_bound(scratch: &PlaceScratch, slots: usize, lanes: usize) -> u128 {
+    let uneven = !slots.is_multiple_of(lanes);
+    let (largest, sum) = scratch
+        .at
+        .iter()
+        .map(|&[narrow, wide]| if uneven { narrow.min(wide) } else { narrow })
+        .fold((0u128, 0u128), |(largest, sum), m| {
+            (largest.max(m), sum.saturating_add(m))
+        });
+    largest
+        .max(sum.div_ceil(lanes as u128))
+        .saturating_add(scratch.dispatch(lanes))
+}
+
+/// `lanes` lanes of equal shares of `slots` (the remainder one slot each to
+/// the lowest lanes), filled by the longest-processing-time rule: jobs by
+/// descending estimate, then index, each to the lane of least modeled load,
+/// then fewest jobs, then lowest index. Job times come from `scratch.at`.
+fn equal_lanes(
+    placement: &mut Placement,
+    scratch: &mut PlaceScratch,
+    count: usize,
+    slots: usize,
+    lanes: usize,
+) {
+    placement.clear_lanes();
+    let (narrow, extra) = (slots / lanes, slots % lanes);
+    placement
+        .shares
+        .extend((0..lanes).map(|l| narrow + usize::from(l < extra)));
+    placement.lane_of.resize(count, usize::MAX);
+    scratch.tau.clear();
+    scratch.tau.resize(lanes, 0);
+    scratch.heap.clear();
+    scratch.heap.extend((0..lanes).map(|l| Reverse((0, 0, l))));
+    for i in 0..count {
+        let j = scratch.order[i];
+        // `lanes >= 1` seeds the heap, which keeps one entry per lane.
+        let Some(Reverse((load, jobs, l))) = scratch.heap.pop() else {
+            unreachable!("one heap entry per lane")
+        };
+        let t = load.saturating_add(scratch.at[j][usize::from(l < extra)]);
+        scratch.tau[l] = t;
+        scratch.heap.push(Reverse((t, jobs + 1, l)));
+        placement.lane_of[j] = l;
+    }
+    compact(placement, scratch, count);
+}
+
+/// The reservation candidate, an intentional heuristic rather than main's
+/// moldable search: each job is allotted `a_j = min(w_j, floor(slots E_j /
+/// E_tot))`; a job with `a_j >= 2` gets a lane of its own and the rest of
+/// the slots become one-slot lanes, at most `cap` lanes in all; every other
+/// job goes in source order to the lane on which it would finish first
+/// (ties to the lowest lane). False, with nothing built, when the dedicated
+/// lanes alone exceed `cap`.
+fn reserved_lanes(
+    placement: &mut Placement,
+    scratch: &mut PlaceScratch,
+    count: usize,
+    slots: usize,
+    cap: usize,
+) -> bool {
     let total = scratch
         .job_ns
         .iter()
         .fold(0u128, |sum, &e| sum.saturating_add(e));
     scratch.allot.clear();
     scratch.allot.extend((0..count).map(|j| {
-        let proportional = (b_eff as u128).saturating_mul(scratch.job_ns[j]) / total.max(1);
+        let proportional = (slots as u128).saturating_mul(scratch.job_ns[j]) / total.max(1);
         scratch.job_width[j].min(usize::try_from(proportional).unwrap_or(usize::MAX))
     }));
-
-    // Lanes: dedicated ones in source order, then the one-slot lanes.
-    placement.lane_of.clear();
+    let dedicated = scratch.allot.iter().filter(|&&a| a >= 2).count();
+    if dedicated > cap {
+        return false;
+    }
+    placement.clear_lanes();
     placement.lane_of.resize(count, usize::MAX);
     scratch.tau.clear();
-    scratch.buckets.clear();
-    scratch.bucket_of.clear();
-    scratch.bucket_of.resize(budget + 1, usize::MAX);
-    let mut dedicated = 0;
+    let mut reserved = 0;
     for j in 0..count {
         let a = scratch.allot[j];
         if a >= 2 {
             placement.lane_of[j] = placement.shares.len();
             placement.shares.push(a);
-            scratch.summarize(&placement.stage_starts, &placement.widths, j);
-            let t = scratch.job_time(a);
-            scratch.tau.push(t);
-            dedicated += a;
+            scratch.tau.push(scratch.job_time(j, a));
+            reserved += a;
         }
     }
-    for _ in dedicated..b_eff {
+    for _ in 0..(slots - reserved).min(cap - dedicated) {
         placement.shares.push(1);
         scratch.tau.push(0);
     }
     let lanes = placement.shares.len();
     scratch.share_slot.clear();
-    scratch.share_slot.resize(budget + 1, usize::MAX);
+    scratch.share_slot.resize(slots + 1, usize::MAX);
     scratch.distinct.clear();
     for &share in &placement.shares {
         if scratch.share_slot[share] == usize::MAX {
@@ -325,18 +516,17 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
                 scratch.heap.clear();
                 scratch
                     .heap
-                    .extend((0..lanes).map(|l| Reverse((scratch.tau[l], l))));
+                    .extend((0..lanes).map(|l| Reverse((scratch.tau[l], 0, l))));
                 stale = false;
             }
             let lane = least_lane(&mut scratch.heap);
             scratch.tau[lane] = scratch.tau[lane].saturating_add(scratch.job_ns[j]);
-            scratch.heap.push(Reverse((scratch.tau[lane], lane)));
+            scratch.heap.push(Reverse((scratch.tau[lane], 0, lane)));
             lane
         } else {
-            scratch.summarize(&placement.stage_starts, &placement.widths, j);
             scratch.distinct_time.clear();
             for d in 0..scratch.distinct.len() {
-                let t = scratch.job_time(scratch.distinct[d]);
+                let t = scratch.job_time(j, scratch.distinct[d]);
                 scratch.distinct_time.push(t);
             }
             let finish = |l: usize| {
@@ -353,43 +543,7 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
         placement.lane_of[j] = lane;
     }
     compact(placement, scratch, count);
-
-    // Choose.
-    let lanes = placement.lanes();
-    let lanes_time = match form {
-        Form::Native => scratch
-            .tau
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(0)
-            .saturating_add(scratch.dispatch(lanes)),
-        Form::Barrier => barrier_time(placement, scratch),
-    };
-    // Each form prices Sequential by its lanes' rounding rule: the native job
-    // summary, the barrier's per-stage walk.
-    let mut sequential_time = 0u128;
-    for j in 0..count {
-        let t = match form {
-            Form::Native => {
-                scratch.summarize(&placement.stage_starts, &placement.widths, j);
-                scratch.job_time(budget)
-            }
-            Form::Barrier => (placement.stage_starts[j]..placement.stage_starts[j + 1])
-                .fold(0u128, |t, k| {
-                    t.saturating_add(scratch.stage_time(k, placement.widths[k]))
-                }),
-        };
-        sequential_time = sequential_time.saturating_add(t);
-    }
-    #[cfg(test)]
-    {
-        scratch.scores = Some((lanes_time, sequential_time));
-    }
-    let pays = NonZeroUsize::new(lanes).is_some_and(|l| token.pays(duration(total), 1, l));
-    if !(lanes_time < sequential_time && pays) {
-        placement.sequential(budget, count);
-    }
+    true
 }
 
 /// A forced policy's placement: its batch decision, authoritative.
@@ -412,7 +566,7 @@ fn place_forced(
     scratch.heap.clear();
     scratch
         .heap
-        .extend((0..decision.lanes).map(|l| Reverse((0, l))));
+        .extend((0..decision.lanes).map(|l| Reverse((0, 0, l))));
     for j in 0..count {
         let e_j = (0..jobs.stages(j)).fold(0u128, |sum, k| {
             sum.saturating_add(ns(jobs.estimate(j, k).serial))
@@ -420,7 +574,7 @@ fn place_forced(
         let lane = least_lane(&mut scratch.heap);
         scratch.tau[lane] = scratch.tau[lane].saturating_add(e_j);
         placement.lane_of[j] = lane;
-        scratch.heap.push(Reverse((scratch.tau[lane], lane)));
+        scratch.heap.push(Reverse((scratch.tau[lane], 0, lane)));
     }
     compact(placement, scratch, count);
 }
@@ -438,11 +592,11 @@ pub fn place_each(count: usize, tables: &mut LaneTables) {
 }
 
 /// The lane of least accumulated time, ties to the lowest, popped from
-/// `heap`, which holds one current entry per lane; the caller pushes the lane
-/// back with its new time.
-fn least_lane(heap: &mut BinaryHeap<Reverse<(u128, usize)>>) -> usize {
+/// `heap`, which holds one current entry per lane (with a zero job count);
+/// the caller pushes the lane back with its new time.
+fn least_lane(heap: &mut BinaryHeap<Reverse<(u128, usize, usize)>>) -> usize {
     // A placement has at least one lane, so the heap is never empty here.
-    heap.pop().map_or(0, |Reverse((_, l))| l)
+    heap.pop().map_or(0, |Reverse((_, _, l))| l)
 }
 
 /// Drops the empty lanes of `placement.shares` (with their `tau`) and builds
@@ -490,7 +644,7 @@ fn compact(placement: &mut Placement, scratch: &mut PlaceScratch, count: usize) 
 
 /// The barrier form's lanes score: per round the slowest lane's movement,
 /// every provider stage serialized at its whole-engine width, and one outer
-/// fork per round the runner enters.
+/// fork per round the runner enters (none for one lane).
 fn barrier_time(placement: &Placement, scratch: &mut PlaceScratch) -> u128 {
     scratch.round_max.clear();
     let (mut serialized, mut rounds) = (0u128, 0usize);
@@ -501,7 +655,7 @@ fn barrier_time(placement: &Placement, scratch: &mut PlaceScratch) -> u128 {
         let (mut round, mut movement, mut trailing) = (0usize, 0u128, false);
         for &j in placement.jobs(l) {
             for k in placement.stage_starts[j]..placement.stage_starts[j + 1] {
-                let w = placement.widths[k];
+                let w = scratch.scored[k];
                 match scratch.kinds[k] {
                     StageKind::Movement => {
                         movement = movement.saturating_add(scratch.stage_time(k, share.min(w)));

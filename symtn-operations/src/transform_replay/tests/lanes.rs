@@ -86,6 +86,7 @@ impl LaneGemms for SpyGemms<'_> {
                 serial,
                 payback: None,
                 sections: 1,
+                widen: true,
             },
             None => self.inner.estimate(job),
         }
@@ -194,6 +195,19 @@ fn record(
     len: usize,
     source: &[f64],
 ) -> (Vec<Mark>, TreeTransformWorkspace<f64>) {
+    let (ran, marks, workspace) = try_record(engine, dense, transform, len, source);
+    assert!(ran, "placement left the lane runner");
+    (marks, workspace)
+}
+
+/// [`record`], also returning whether placement kept the lane runner.
+fn try_record(
+    engine: &mut dyn Engine,
+    dense: &mut Spy,
+    transform: &TreeTransformStructure<f64>,
+    len: usize,
+    source: &[f64],
+) -> (bool, Vec<Mark>, TreeTransformWorkspace<f64>) {
     let task = transform.task_view().unwrap();
     let mut workspace = TreeTransformWorkspace::default();
     ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
@@ -214,8 +228,7 @@ fn record(
         1,
     )
     .unwrap();
-    assert!(ran, "placement left the lane runner");
-    (marks, workspace)
+    (ran, marks, workspace)
 }
 
 /// What: on a four-worker engine, every destination element is written
@@ -234,27 +247,20 @@ fn every_destination_element_has_one_writer() {
     assert_one_writer_per_element(&blocks, &marks);
 }
 
-/// What: a lone bandable component whose movement and GEMM estimates pay
-/// for no parallel section runs every stage at one slot, so one worker,
-/// the calling thread, writes the whole destination at budgets six and
-/// eight.
+/// What: a lone bandable component whose total estimate pays for no
+/// parallel section is admitted on one slot, so it leaves the lane runner
+/// for the one-worker replay at budgets six and eight.
 #[test]
-fn cheap_stages_of_one_component_run_on_one_slot() {
-    let (blocks, dst, _, transform) = interleaved_bandable(false);
+fn a_call_whose_total_pays_for_no_section_leaves_the_lane_runner() {
+    let (_, dst, _, transform) = interleaved_bandable(false);
     assert_eq!(transform.parallel_schedule().component_count(), 1);
     let len = dst.required_len().unwrap();
     let source = (0..len).map(|v| v as f64).collect::<Vec<_>>();
     for budget in [6, 8] {
         let mut engine = costed_engine(budget, 60);
         let mut dense = Spy::new(&transform);
-        let (marks, _) = record(&mut engine, &mut dense, &transform, len, &source);
-        let caller = Some(std::thread::current().id());
-        for &(offset, dims, strides) in &blocks {
-            for at in addresses(offset, &dims, &strides) {
-                assert_eq!(marks[at].worker, caller, "budget {budget}, element {at}");
-            }
-        }
-        assert!(dense.budgets().iter().all(|&(_, offered)| offered == 1));
+        let (ran, _, _) = try_record(&mut engine, &mut dense, &transform, len, &source);
+        assert!(!ran, "budget {budget}");
     }
 }
 
@@ -566,4 +572,94 @@ fn the_warm_allocation_fixture_runs_on_four_lanes() {
         workspace.lanes.placement().lanes(),
         transform.parallel_schedule().component_count().min(threads)
     );
+}
+
+/// One component of two interleaved `[512, 2]` Singles, one atom of two
+/// band units whose Direct estimate pays for a section of six parts and not
+/// of two at dispatch costs of 1 us at two slots and 1 ns from four; replays
+/// it through the recording writer on six slots under `strategy` and returns
+/// the marks and the first lane's share.
+fn two_band_component(strategy: CpuBatchStrategy) -> (Vec<Mark>, usize) {
+    let rows = 512;
+    let blocks = [
+        (0, [rows, 2], [1, 2 * rows]),
+        (rows, [rows, 2], [1, 2 * rows]),
+    ];
+    let dst = Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            2,
+            blocks
+                .iter()
+                .enumerate()
+                .map(|(key, &(offset, dims, strides))| {
+                    BlockSpec::with_key(
+                        BlockKey::ordinal(key),
+                        dims.to_vec(),
+                        strides.to_vec(),
+                        offset,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        )
+        .unwrap(),
+    );
+    let src =
+        Arc::new(BlockStructure::packed_column_major(2, [vec![rows, 2], vec![rows, 2]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, 1.0),
+            TreeTransformBlockSpec::single(1, 1, 1.0),
+        ],
+    )
+    .unwrap();
+    let schedule = transform.parallel_schedule();
+    assert_eq!(
+        (schedule.component_count(), schedule.components[0].units),
+        (1, 2)
+    );
+    let estimate = KernelClass::Copy.estimate(4 * rows);
+    assert!(
+        estimate >= Duration::from_nanos(3) && estimate < Duration::from_nanos(3000),
+        "fixture premise: {estimate:?} pays at width six, not two"
+    );
+    let costs = WidthCosts::new([1000, 1, 1].map(Duration::from_nanos));
+    let mut engine = CpuEngine::new(
+        Pool::builder()
+            .threads(6)
+            .dispatch_costs(DispatchCosts::new(costs, costs, costs))
+            .build()
+            .unwrap(),
+    )
+    .with_batch_policy(CpuBatchPolicy::new(strategy));
+    let len = dst.required_len().unwrap();
+    let source = (0..len).map(|v| v as f64).collect::<Vec<_>>();
+    let mut dense = Spy::new(&transform);
+    let (marks, workspace) = record(&mut engine, &mut dense, &transform, len, &source);
+    (marks, workspace.lanes.placement().share(0))
+}
+
+/// What: under `Auto`, the two-band component takes width six, and its
+/// Direct stage, capped to two bands, a section its estimate does not pay
+/// for, runs inline: the calling thread writes every element once.
+#[test]
+fn a_band_fork_that_does_not_pay_at_its_part_count_runs_inline() {
+    let (marks, share) = two_band_component(CpuBatchStrategy::Auto);
+    assert_eq!(share, 6);
+    let caller = Some(std::thread::current().id());
+    assert!(marks
+        .iter()
+        .all(|mark| mark.writes == 1 && mark.worker == caller));
+}
+
+/// What: a forced `Inner` keeps the two-band component's fork whatever it
+/// costs: its two bands are written by two workers, each element once.
+#[test]
+fn a_forced_policy_keeps_its_band_fork() {
+    let (marks, _) = two_band_component(CpuBatchStrategy::Inner);
+    assert!(marks.iter().all(|mark| mark.writes == 1));
+    let workers: std::collections::HashSet<_> = marks.iter().map(|mark| mark.worker).collect();
+    assert_eq!(workers.len(), 2);
 }

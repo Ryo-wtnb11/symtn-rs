@@ -25,6 +25,10 @@
 //!   the runner's barrier form ([`barrier_replay`]), handed to the engine
 //!   between rounds as one `matmul_axpby_into` on the whole engine.
 //!
+//! The bands and pack ranges first cap the selected width; under `Auto` the
+//! actual-fork pays check may then choose inline execution; a forced policy
+//! keeps its parts.
+//!
 //! Each lane keeps grow-only scratch (a packed source buffer, an initialized
 //! packed destination, traversal indices and the band tables), retained in
 //! the replay workspace with the runner's tables; both forms use the same.
@@ -641,6 +645,7 @@ fn copy(elements: usize) -> Estimate {
         serial: KernelClass::Copy.estimate(elements),
         payback: None,
         sections: 1,
+        widen: true,
     }
 }
 
@@ -717,13 +722,27 @@ where
         if stage == 0 {
             let src = replay.source(member);
             let direct = Movement::Direct { src };
-            return replay.movement(component, direct, atoms, pieces, subs, index, exec);
+            let estimate = self.estimate(job, stage);
+            return replay.movement(
+                component, direct, atoms, pieces, subs, index, estimate, exec,
+            );
         }
         let group = replay.schedule.component_group_list(component)[(stage - 1) / 3] as usize;
         let shape = &replay.parts.plan.jobs()[group];
         let packed = shape.rows * shape.cols;
         match (stage - 1) % 3 {
-            0 => replay.pack(group, replay.source(member), source, packs, index, exec),
+            0 => {
+                let estimate = self.estimate(job, stage);
+                replay.pack(
+                    group,
+                    replay.source(member),
+                    source,
+                    packs,
+                    index,
+                    estimate,
+                    exec,
+                )
+            }
             1 => {
                 // The barrier form submits its GEMMs between rounds.
                 let gemms = replay.gemms.ok_or(OperationError::InvalidArgument {
@@ -748,6 +767,7 @@ where
                     pieces,
                     subs,
                     index,
+                    self.estimate(job, stage),
                     exec,
                 )
             }

@@ -90,25 +90,25 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 fn profiled_multi_attributes_recoupling_to_its_route() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
     for threads in [1, 2] {
-        let mut pool = crate::host_pool::test_pool(threads);
+        // A forced `Inner` keeps the tiny call on the lanes, which `Auto`
+        // admits on one slot.
+        let mut engine = super::recording::engine(threads, tenferro_cpu::CpuBatchStrategy::Inner);
         let mut dst = vec![f64::NAN; 3];
         let mut profile = TreeTransformReplayProfile::default();
-        pool.install(|engine| {
-            tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
-                engine,
-                &mut StridedHostKernelAdapter::default(),
-                &mut DefaultDenseExecutor::new(),
-                &mut TreeTransformWorkspace::default(),
-                &structure,
-                &dst_structure,
-                &src_structure,
-                &mut dst,
-                &[3.0, 4.0],
-                2.0,
-                &[],
-                &mut profile,
-            )
-        })
+        tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
+            &mut engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &structure,
+            &dst_structure,
+            &src_structure,
+            &mut dst,
+            &[3.0, 4.0],
+            2.0,
+            &[],
+            &mut profile,
+        )
         .unwrap();
 
         assert_eq!(dst, [6.0, 8.0, 0.0]);

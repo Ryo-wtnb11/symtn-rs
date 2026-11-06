@@ -71,6 +71,17 @@ pub(crate) trait Factor {
     /// extents and strides swapped, no copy) instead of the item itself.
     const TRANSPOSED: bool = false;
 
+    /// Whether placement may credit a single-matrix call with the linear
+    /// speedup of the width its estimates pay for (`lanes::Estimate::widen`):
+    /// true only where the provider's inner parallelism is searched by its
+    /// own width rule over these estimates (SVD and Hermitian
+    /// eigendecompositions); false for the QR family, general eigenvalues
+    /// and composites, whose provider paths do not deliver that speedup and
+    /// keep their whole lane share without a modeled credit. An input of
+    /// several matrices never widens: tlinalg routes its items inside the
+    /// offer.
+    const WIDENS: bool;
+
     /// tlinalg's work estimates for one `m x n` item of scalar `T`, in
     /// weighted multiply-adds: its total work and the part a team inside the
     /// item can pay back (`estimate_work`, `estimate_payback_work`).
@@ -100,6 +111,7 @@ pub(crate) trait Factor {
 pub(crate) struct Svd;
 
 impl Factor for Svd {
+    const WIDENS: bool = true;
     const ENTRY: &'static str = "svd_read";
     const OP: tlinalg::Op = tlinalg::Op::Svd;
 
@@ -133,6 +145,7 @@ impl Factor for Svd {
 pub(crate) struct Qr;
 
 impl Factor for Qr {
+    const WIDENS: bool = false;
     const ENTRY: &'static str = "qr_read";
     const OP: tlinalg::Op = tlinalg::Op::Qr;
 
@@ -171,6 +184,7 @@ impl Factor for Qr {
 pub(crate) struct Lq;
 
 impl Factor for Lq {
+    const WIDENS: bool = false;
     const ENTRY: &'static str = Qr::ENTRY;
     const OP: tlinalg::Op = Qr::OP;
     const TRANSPOSED: bool = true;
@@ -222,6 +236,7 @@ fn transpose_items<T: Copy>(data: &[T], rows: usize, cols: usize) -> Vec<T> {
 pub(crate) struct QrFull;
 
 impl Factor for QrFull {
+    const WIDENS: bool = false;
     // A tall block factors, then applies its reflectors; a wide or square
     // one is one compact QR.
     fn sections(m: usize, n: usize, _: usize) -> u32 {
@@ -283,6 +298,7 @@ impl Factor for QrFull {
 pub(crate) struct QrNull;
 
 impl Factor for QrNull {
+    const WIDENS: bool = false;
     // Only a tall block has a null complement to factor and apply onto.
     fn sections(m: usize, n: usize, _: usize) -> u32 {
         if m > n {
@@ -487,6 +503,7 @@ fn owned_householder<T: Scalar>(
 pub(crate) struct Polar<const LEFT: bool>;
 
 impl<const LEFT: bool> Factor for Polar<LEFT> {
+    const WIDENS: bool = false;
     // One batched SVD, then the `W` and `P` products of every item.
     fn sections(_: usize, _: usize, items: usize) -> u32 {
         u32::try_from(items)
@@ -532,6 +549,7 @@ impl<const LEFT: bool> Factor for Polar<LEFT> {
 pub(crate) struct ExpViaEigh;
 
 impl Factor for ExpViaEigh {
+    const WIDENS: bool = false;
     // One batched EIGH, then the product of every item.
     fn sections(_: usize, _: usize, items: usize) -> u32 {
         u32::try_from(items).unwrap_or(u32::MAX).saturating_add(1)
@@ -567,6 +585,7 @@ impl Factor for ExpViaEigh {
 pub(crate) struct Eigh;
 
 impl Factor for Eigh {
+    const WIDENS: bool = true;
     const ENTRY: &'static str = "eigh_read";
     const OP: tlinalg::Op = tlinalg::Op::Eigh;
     const SQUARE: bool = true;
@@ -598,6 +617,7 @@ impl Factor for Eigh {
 pub(crate) struct EighVals;
 
 impl Factor for EighVals {
+    const WIDENS: bool = true;
     const ENTRY: &'static str = "eigh_values";
     const OP: tlinalg::Op = tlinalg::Op::EighValues;
     const SQUARE: bool = true;
@@ -630,6 +650,7 @@ impl Factor for EighVals {
 pub(crate) struct SvdVals;
 
 impl Factor for SvdVals {
+    const WIDENS: bool = true;
     const ENTRY: &'static str = "svd_values";
     const OP: tlinalg::Op = tlinalg::Op::SvdValues;
 
@@ -662,6 +683,7 @@ impl Factor for SvdVals {
 pub(crate) struct EigVals;
 
 impl Factor for EigVals {
+    const WIDENS: bool = false;
     const ENTRY: &'static str = "eig_values";
     const OP: tlinalg::Op = tlinalg::Op::EigValues;
     const SQUARE: bool = true;
@@ -2220,8 +2242,9 @@ fn item_estimates<F: Factor>(input: DenseRead<'_>) -> Option<([f64; 2], f64, u32
 
 /// `F`'s provider stage estimate for `input` under `model`: a single item's
 /// serial time with its payback time, which caps its width as tlinalg caps a
-/// batch of one; for several items one intact envelope (per-item work times
-/// items) with no payback cap, tlinalg routing the batch inside its offer.
+/// batch of one, widening as `F::WIDENS` says; for several items one intact
+/// envelope (per-item work times items) with no payback cap that does not
+/// widen, tlinalg routing the batch inside its offer.
 /// A composite (polar, `exp`, a tall full QR or null basis) is priced as one
 /// aggregate envelope of its summed estimates over its provider calls'
 /// section count, an approximation, not a per-call model. An input the
@@ -2233,16 +2256,19 @@ fn estimate<F: Factor>(input: DenseRead<'_>, model: &WorkModel) -> Estimate {
             serial: time(total),
             payback: Some(time(payback)),
             sections,
+            widen: F::WIDENS,
         },
         Some(([total, _], items, sections)) => Estimate {
             serial: time(total * items),
             payback: None,
             sections,
+            widen: false,
         },
         None => Estimate {
             serial: Duration::ZERO,
             payback: None,
             sections: 1,
+            widen: true,
         },
     }
 }
@@ -2620,46 +2646,29 @@ mod tests {
         }
     }
 
-    /// Purpose: every factorization, the QR family included, is offered the
-    /// width its provider estimates give it: a single matrix the smaller of
-    /// tlinalg's total and payback widths, a batched input (here two items)
-    /// the width of its whole envelope with no payback cap. Each input is
-    /// its own batch, so it runs alone on the whole budget.
+    /// Purpose: only a single-matrix call of a widening factorization is
+    /// offered the width its estimates pay for, the smaller of tlinalg's
+    /// total and payback widths; every other input runs alone on its whole
+    /// admitted share, the width its total estimate pays for over one
+    /// section, whatever payback or section count it carries: a single QR,
+    /// a batched SVD (two items), a left polar and a tall full QR. A wide
+    /// null basis solves nothing and estimates no work: one slot.
     #[test]
-    fn each_factorization_is_offered_its_estimated_width() {
+    fn only_widening_single_matrices_are_offered_their_estimated_width() {
         let single = |[total, payback]: [f64; 2]| rule(6, total).min(rule(6, payback));
         let svd = Svd::estimates::<f64>(79, 79);
-        let qr = Qr::estimates::<f64>(79, 79);
-        assert_eq!(offered::<Svd>(6, &[&[79, 79]]), [single(svd)]);
-        assert_eq!(offered::<Qr>(6, &[&[79, 79]]), [single(qr)]);
-        assert_eq!(offered::<Svd>(6, &[&[79, 79, 2]]), [rule(6, 2.0 * svd[0])]);
-        // The fixture separates the two rules.
-        assert!(single(svd) < rule(6, 2.0 * svd[0]));
-        assert!(single(qr) > 1);
-    }
-
-    /// Purpose: a composite is priced over its provider calls' section count:
-    /// a `6 x 6` left polar (one SVD and two products, three sections) and a
-    /// tall `8 x 4` full QR (factor and reflector application, two) are each
-    /// offered the width their summed estimates pay for over that many
-    /// sections, here one slot where a single section would take all six;
-    /// a wide full QR is one compact QR, one section; a wide null basis
-    /// solves nothing and estimates no work.
-    #[test]
-    fn composites_are_priced_over_their_provider_calls() {
+        let qr = Qr::estimates::<f64>(30, 30);
         let polar = Polar::<true>::estimates::<f64>(6, 6);
         let tall = QrFull::estimates::<f64>(8, 4);
-        let wide = QrFull::estimates::<f64>(4, 8);
-        let over = |[total, payback]: [f64; 2], sections| {
-            rule_over(6, total, sections).min(rule_over(6, payback, sections))
-        };
-        assert_eq!(offered::<Polar<true>>(6, &[&[6, 6]]), [over(polar, 3)]);
-        assert_eq!(offered::<QrFull>(6, &[&[8, 4]]), [over(tall, 2)]);
-        assert_eq!(offered::<QrFull>(6, &[&[4, 8]]), [over(wide, 1)]);
-        // A wide null basis is empty: no work, one slot.
+        assert_eq!(offered::<Svd>(6, &[&[79, 79]]), [single(svd)]);
+        assert_eq!(offered::<Qr>(6, &[&[30, 30]]), [rule(6, qr[0])]);
+        assert_eq!(offered::<Svd>(6, &[&[79, 79, 2]]), [rule(6, 2.0 * svd[0])]);
+        assert_eq!(offered::<Polar<true>>(6, &[&[6, 6]]), [rule(6, polar[0])]);
+        assert_eq!(offered::<QrFull>(6, &[&[8, 4]]), [rule(6, tall[0])]);
         assert_eq!(offered::<QrNull>(6, &[&[12, 24]]), [1]);
-        // The fixture separates the counts.
-        assert!(over(polar, 3) < over(polar, 1));
-        assert!(over(tall, 2) < over(tall, 1));
+        // The fixture separates the widening rule from the whole share.
+        assert!(single(svd) < rule(6, svd[0]));
+        assert!(single(qr) < rule(6, qr[0]));
+        assert!(rule_over(6, polar[0], 3) < rule(6, polar[0]));
     }
 }

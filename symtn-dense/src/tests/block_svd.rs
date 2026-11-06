@@ -596,6 +596,7 @@ impl BlockOp for Records {
             serial: Duration::from_secs(1),
             payback: None,
             sections: 1,
+            widen: true,
         }
     }
 
@@ -652,6 +653,7 @@ impl BlockOp for PanicsAt {
             serial: Duration::from_nanos(1),
             payback: None,
             sections: 1,
+            widen: true,
         }
     }
 

@@ -134,30 +134,38 @@ work model for a factorization (SVD `m n min(m, n)`, QR `m n k - k^3/3` with
 tlinalg's Householder factor plus its reflector application, EIGH and EIG
 values `n^3`; a polar decomposition or Hermitian `exp` adds its products).
 Its width is the provider's own public rule, threadteam's `width_for` over
-that estimate with one section. A composite, whose one body makes several
-provider calls (a polar decomposition one SVD and two products per item, a
-Hermitian `exp` one EIGH and one product per item, a tall full QR or null
-basis a factor and a reflector application), is instead priced as one
-aggregate envelope: its summed estimate over that many sections, each charged
-one dispatch, an approximation rather than a per-call model; for a single matrix (batch product one)
-it is capped at the width its payback estimate (`estimate_payback_work`)
-pays for, as tlinalg caps a batch of one, while an input of several matrices
-is one intact job whose estimate is the per-item work times the items, with
-no cap, tlinalg routing the items inside the offer. With `B` threads and
-`B_eff = min(B, sum of the widths)`, each block is allotted
-`min(width, floor(B_eff E / E_total))` threads; a block allotted two or more
-gets a lane of its own, the remaining threads become one-thread lanes, and
-every other block goes, in block order, to the lane on which it would
-finish first. The lanes are kept only when their modeled time (the slowest
-lane plus the engine's dispatch cost for the outer fork; each block modeled
-as its estimate over its width plus that width's dispatch cost, a linear
-speedup) beats running every block on all `B` threads one after another,
-and their total estimate pays for the fork; otherwise the blocks run that
-way. A block then runs on its lane's context limited to `min(share,
-width)`. Placement is integer arithmetic, recomputed per call without a
-cache or a sort, so it is a scheduling estimate, not a promise of a faster
-run. A forced batch policy (`Inner`, `Outer`, `Split`, `Sequential`) computes
-no width: its batch decision is authoritative, each block running at its
+that estimate with one section, when the block widens: a single matrix of
+the compact SVD, values-only SVD, Hermitian eigendecomposition or its
+values, and every GEMM. A single matrix is capped at the width its payback
+estimate (`estimate_payback_work`) pays for, as tlinalg caps a batch of one.
+An input of several matrices is one intact job whose estimate is the
+per-item work times the items, with no cap, tlinalg routing the items inside
+the offer. A composite, whose one body makes several provider calls (a polar
+decomposition one SVD and two products per item, a Hermitian `exp` one EIGH
+and one product per item, a tall full QR or null basis a factor and a
+reflector application), is priced as one aggregate envelope: its summed
+estimate, an approximation rather than a per-call model. Blocks that do not
+widen (compact QR and LQ, full QR, the null basis, general eigenvalues, the
+polar decompositions, `exp`, and every input of several matrices) are
+modeled at one thread, since their providers are not known to speed up at
+the widths the linear model would grant; they still run on their lane's
+whole share, which the provider's own rule divides. The call admits
+`slots = width_for(E_total)` of the engine's `B` threads, and the baseline
+is `min(slots, blocks)` lanes of equal shares (the remainder one thread each
+to the lowest lanes), filled largest block first, each to the lane of least
+modeled load. Every smaller lane count with equal shares, down to one lane
+of all `slots` threads, and one reservation (a heuristic: a block allotted
+`min(width, floor(slots E / E_total)) >= 2` threads gets a lane of its own,
+the rest of the threads become one-thread lanes, at most the baseline's lane
+count in all) replace the baseline only when their modeled time (the
+slowest lane plus the engine's dispatch cost for the outer fork; each block
+modeled as its estimate over its width plus that width's dispatch cost, a
+linear speedup) is strictly lower and their total estimate pays for the
+fork. A block then runs on its lane's context limited to `min(share,
+width)` (its whole share when it does not widen). Placement is integer arithmetic, recomputed per call without a
+cache, so it is a scheduling estimate, not a promise of a faster run. A
+forced batch policy (`Inner`, `Outer`, `Split`, `Sequential`) computes no
+width: its batch decision is authoritative, each block running at its
 lane's whole share (`Inner`: every block on the whole engine). Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their
 grouped core batches the same way. Every block runs up to the first one refused before the engine is entered
@@ -273,7 +281,11 @@ case). Its stages are its direct writes (its inactive blocks and Singles,
 in destination address order), and per Multi group a pack, a GEMM and a
 scatter; a movement stage is estimated by Strided's copy estimate of
 the elements it moves, a GEMM by the same estimate as a block GEMM, and each
-stage runs at its own selected width. A movement stage of width two or more
+stage runs at its own selected width. The bands and pack ranges first cap
+the selected width; under `Auto` the actual-fork pays check (the stage's
+estimate against a section of that many parts on the lane's own token, the
+one that forks) may then choose inline execution; a forced policy keeps its
+parts. A movement stage of width two or more
 splits its component over that many sub-slots of the component's band units
 (the outer slabs of atoms whose items share one, whole atoms otherwise) in
 one flat fork; at width one, or for an overwrite of a component whose one

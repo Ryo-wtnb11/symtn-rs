@@ -32,6 +32,28 @@ pub(super) struct PackSlot<'c, X> {
 
 pub(super) type PackCell<'c, X> = RwLock<Option<PackSlot<'c, X>>>;
 
+/// The parts a movement fork opens once its bands or pack ranges have capped
+/// the selected width to `parts`: under `Auto`, one (inline) when the
+/// stage's `estimate` does not pay for a section of `parts` participants on
+/// `token`, the token and thread that fork; a forced policy keeps its parts.
+fn fork_parts(
+    token: &tenferro_cpu::threadteam::Exec<'_>,
+    policy: &lanes::BatchPolicy,
+    estimate: lanes::Estimate,
+    parts: usize,
+) -> usize {
+    match core::num::NonZeroUsize::new(parts) {
+        Some(width)
+            if parts > 1
+                && policy.strategy == tenferro_cpu::CpuBatchStrategy::Auto
+                && !token.pays(estimate.serial, estimate.sections.max(1), width) =>
+        {
+            1
+        }
+        _ => parts,
+    }
+}
+
 impl<W, D, C> Replay<'_, W, D, C>
 where
     W: Sync,
@@ -72,6 +94,7 @@ where
         pieces: &mut Vec<Piece<'static, u8>>,
         subs: &mut Vec<SubCell<'static, 'static, u8>>,
         index: &mut [usize],
+        estimate: lanes::Estimate,
         exec: lanes::Exec<'_>,
     ) -> Result<(), OperationError>
     where
@@ -86,12 +109,14 @@ where
         if empty {
             return Ok(());
         }
+        let policy = *exec.batch_policy();
         let token = exec.into_token();
         let width = token.budget().get();
         let bands = if self.writer.overwrites() && self.whole_single(component, &token) {
             1
         } else {
-            width.min(schedule.components[component].units).max(1)
+            let bands = width.min(schedule.components[component].units).max(1);
+            fork_parts(&token, &policy, estimate, bands)
         };
         let mut list: Vec<Piece<'_, T>> = recycle(core::mem::take(pieces));
         let result = self
@@ -311,7 +336,11 @@ where
     }
 
     /// Group `group`'s pack of `src` into `source` on `exec`: one flat fork over
-    /// `min(width, columns)` contiguous column ranges, inline at one.
+    /// `min(width, columns)` contiguous column ranges. The pack ranges first
+    /// cap the selected width; under `Auto` the actual-fork pays check
+    /// ([`fork_parts`]) may then choose inline execution; a forced policy
+    /// keeps its parts.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn pack(
         &self,
         group: usize,
@@ -319,13 +348,16 @@ where
         source: &mut HostScratchBuffer<D>,
         packs: &mut Vec<PackCell<'static, u8>>,
         index: &mut [usize],
+        estimate: lanes::Estimate,
         exec: lanes::Exec<'_>,
     ) -> Result<(), OperationError> {
         let job = &self.parts.plan.jobs()[group];
         let len = job.rows * job.contracted;
         let columns = &self.schedule.pack_columns[self.schedule.scatter_groups[group].pack.clone()];
+        let policy = *exec.batch_policy();
         let token = exec.into_token();
         let parts = token.budget().get().min(columns.len());
+        let parts = fork_parts(&token, &policy, estimate, parts);
         source.overwrite_with_columns(len, |mut writer| {
             if parts <= 1 {
                 return self.pack_columns(&mut writer, columns, job.lhs_offset, src, index);
@@ -403,5 +435,50 @@ where
             }
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tenferro_cpu::threadteam::{self, DispatchCosts, WidthCosts};
+    use tenferro_cpu::Pool;
+
+    use super::{fork_parts, lanes};
+
+    /// What: the check reads the cost row of the token that forks: a 200 ns
+    /// section pays for two parts on a token held outside the pool (1 ns)
+    /// and not on one held by a pool worker (1000 ns), where it runs inline.
+    #[test]
+    fn a_fork_is_checked_on_the_cost_row_of_the_token_that_forks() {
+        let (cheap, dear) = (
+            WidthCosts::flat(Duration::from_nanos(1)),
+            WidthCosts::flat(Duration::from_nanos(1000)),
+        );
+        let pool = Pool::builder()
+            .threads(2)
+            .dispatch_costs(DispatchCosts::new(dear, dear, cheap))
+            .build()
+            .unwrap();
+        let policy = lanes::BatchPolicy::default();
+        let estimate = lanes::Estimate {
+            serial: Duration::from_nanos(200),
+            payback: None,
+            sections: 1,
+            widen: true,
+        };
+        let root = threadteam::Exec::new(&pool, 2).unwrap();
+        assert_eq!(fork_parts(&root, &policy, estimate, 2), 2);
+        let inner = std::sync::Mutex::new(Vec::new());
+        // A fresh two-slot token on each worker: its row is the pool's own.
+        root.fork(2, |_, _| {
+            let token = threadteam::Exec::new(&pool, 2).unwrap();
+            inner
+                .lock()
+                .unwrap()
+                .push(fork_parts(&token, &policy, estimate, 2));
+        });
+        assert_eq!(inner.into_inner().unwrap(), [1, 1]);
     }
 }

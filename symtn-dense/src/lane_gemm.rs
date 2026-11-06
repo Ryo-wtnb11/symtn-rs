@@ -78,6 +78,7 @@ pub(crate) fn gemm_stage_estimate(
         serial: driver::cost(OpKind::Gemm, work, model),
         payback: None,
         sections: 1,
+        widen: true,
     }
 }
 

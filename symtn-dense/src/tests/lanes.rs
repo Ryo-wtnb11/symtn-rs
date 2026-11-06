@@ -49,6 +49,7 @@ fn serial(ns: u64) -> Estimate {
         serial: Duration::from_nanos(ns),
         payback: None,
         sections: 1,
+        widen: true,
     }
 }
 
@@ -57,6 +58,7 @@ fn capped(ns: u64, payback: u64) -> Estimate {
         serial: Duration::from_nanos(ns),
         payback: Some(Duration::from_nanos(payback)),
         sections: 1,
+        widen: true,
     }
 }
 
@@ -193,12 +195,12 @@ fn placement_is_deterministic() {
 }
 
 #[test]
-fn zero_estimates_run_sequential_and_empty_places_nothing() {
+fn zero_estimates_run_on_one_slot_and_empty_places_nothing() {
     let mut engine = engine(8, BatchPolicy::default(), row(60));
     on(&mut engine, 8, |exec| {
         let zero = Batch::new(vec![vec![(P, serial(0))]; 3]);
         let p = placed(&exec, &zero, Form::Native);
-        assert_eq!((p.lanes(), p.share(0), p.jobs(0)), (1, 8, &[0, 1, 2][..]));
+        assert_eq!((p.lanes(), p.share(0), p.jobs(0)), (1, 1, &[0, 1, 2][..]));
         assert!((0..3).all(|j| p.selected(j, 0, 8) == 1));
         assert_eq!(placed(&exec, &Batch::new(vec![]), Form::Native).lanes(), 0);
     });
@@ -227,11 +229,11 @@ fn as_run(p: &Placement, batch: &Batch) -> (Vec<Vec<usize>>, Option<Vec<usize>>,
     (lanes, shares, widths)
 }
 
-/// Above `S*`, the sum over nonzero jobs of their widest unrestricted stage
-/// query (serial or payback), every stage width and hence the whole
-/// placement is fixed: placing on any budget in `[S*, P]` gives the same
-/// lanes, shares and stage widths in both forms. A Sequential placement's
-/// share is the budget itself, so only what runs is compared.
+/// Above both `S*`, the sum over nonzero jobs of their widest unrestricted
+/// stage query (serial or payback), and the unrestricted query of the total
+/// estimate (the admitted slots), every stage width, the admission and
+/// hence the whole placement are fixed: placing on any budget from there to
+/// the pool gives the same lanes, shares and stage widths in both forms.
 #[test]
 fn placement_is_identical_on_every_budget_from_saturation_to_the_pool() {
     let pool = 112;
@@ -265,7 +267,10 @@ fn placement_is_identical_on_every_budget_from_saturation_to_the_pool() {
                     .max()
                     .unwrap()
             })
-            .sum();
+            .sum::<usize>()
+            .max(rule(
+                batch.jobs.iter().flatten().map(|(_, e)| e.serial).sum(),
+            ));
         assert!(saturation < pool, "fixture saturates below the pool");
         for form in [Form::Native, Form::Barrier] {
             let mut at = |budget| on(&mut engine, budget, |exec| placed(&exec, &batch, form));
@@ -296,11 +301,10 @@ fn the_placement_queue_holds_one_entry_per_lane() {
     });
 }
 
-/// Native job times divide each width bucket's summed estimate once, for the
-/// lanes and the Sequential score alike: jobs `[180, 180]` and `[185, 185]`
-/// (width 6) on six slots at a flat 60 ns take lanes of 2 and 3 slots,
-/// `360/2 + 120 = 300` and `370/3 + 120 = 243`, scoring `300 + 60 = 360`,
-/// against `(360/6 + 120) + (370/6 + 120) = 361` sequential.
+/// Native job times divide each width bucket's summed estimate once: jobs
+/// `[180, 180]` and `[185, 185]` (width 6) on six admitted slots at a flat
+/// 60 ns take two lanes of 3 slots, `360/3 + 120 = 240` and `370/3 + 120 =
+/// 243` (per stage it would be 242), scoring `243 + 60 = 303`.
 #[test]
 fn native_candidates_share_the_bucket_rounding() {
     let batch = Batch::new(vec![
@@ -311,10 +315,183 @@ fn native_candidates_share_the_bucket_rounding() {
     on(&mut engine, 6, |exec| {
         let mut tables = LaneTables::default();
         place(&exec, &batch, Form::Native, &mut tables);
-        assert_eq!(tables.scores(), Some((360, 361)));
+        assert_eq!(tables.scores().0, Some(303));
         let p = tables.placement();
-        assert_eq!((p.lanes(), p.share(0), p.share(1)), (2, 2, 3));
+        assert_eq!((p.lanes(), p.share(0), p.share(1)), (2, 3, 3));
     });
+}
+
+/// The call admits `width_for(E_tot, 1)` slots, not the sum of its jobs'
+/// widths: eight 200 ns GEMMs on sixteen slots (each alone would take six)
+/// admit thirteen, the baseline's eight lanes of equal shares `[2, 2, 2, 2,
+/// 2, 1, 1, 1]` (the remainder to the lowest lanes), one job each, scoring
+/// `200 + D(8)`; no fewer lanes score lower.
+#[test]
+fn admission_caps_the_call_at_the_width_its_total_pays_for() {
+    let costs = row(60);
+    let slots = threadteam::width_for_by(
+        Duration::from_nanos(8 * 200),
+        1,
+        NonZeroUsize::new(16).unwrap(),
+        |k| costs.at(k),
+    )
+    .get();
+    assert_eq!(slots, 13, "fixture premise");
+    let batch = Batch::new(vec![vec![(P, serial(200))]; 8]);
+    let mut engine = engine(16, BatchPolicy::default(), costs);
+    let p = on(&mut engine, 16, |exec| placed(&exec, &batch, Form::Native));
+    let shares: Vec<usize> = (0..p.lanes()).map(|l| p.share(l)).collect();
+    assert_eq!(shares, [2, 2, 2, 2, 2, 1, 1, 1]);
+    assert!((0..p.lanes()).all(|l| p.jobs(l).len() == 1));
+}
+
+/// Jobs that do not widen, of estimates `[100, 700, 300, 500, 200]` on two
+/// admitted slots, fill the baseline's two one-slot lanes largest first:
+/// 700 and 500 open the lanes, 300 joins 500, 200 joins 700 and 100 joins
+/// 800, so lane 0 holds `[1, 4]` and lane 1 `[0, 2, 3]` (each 900). The
+/// reservation's source-order fill, `[0, 2, 3]` and `[1, 4]`, ties at the
+/// same score, and the tie keeps the baseline.
+#[test]
+fn the_baseline_fills_largest_first_and_keeps_its_ties() {
+    let flat = |ns| Estimate {
+        widen: false,
+        ..serial(ns)
+    };
+    let batch = Batch::new(
+        [100, 700, 300, 500, 200]
+            .into_iter()
+            .map(|ns| vec![(P, flat(ns))])
+            .collect(),
+    );
+    let mut engine = engine(2, BatchPolicy::default(), row(60));
+    let p = on(&mut engine, 2, |exec| placed(&exec, &batch, Form::Native));
+    assert_eq!(
+        (0..p.lanes())
+            .map(|l| p.jobs(l).to_vec())
+            .collect::<Vec<_>>(),
+        [vec![1, 4], vec![0, 2, 3]]
+    );
+}
+
+/// A lane count strictly between the baseline and one wins: four 600 ns
+/// GEMMs on six admitted slots at a flat 60 ns score 660 on the baseline's
+/// four lanes `[2, 2, 1, 1]`, 780 on three, 580 on two lanes of 3 and 640 on
+/// one; the reservation's four one-slot lanes score 660. Two lanes win, each
+/// with two jobs, largest first, ties to the lowest lane.
+#[test]
+fn an_intermediate_lane_count_beats_both_endpoints() {
+    let batch = Batch::new(vec![vec![(P, serial(600))]; 4]);
+    let mut engine = engine(6, BatchPolicy::default(), row(60));
+    let p = on(&mut engine, 6, |exec| placed(&exec, &batch, Form::Native));
+    let lanes: Vec<_> = (0..p.lanes())
+        .map(|l| (p.share(l), p.jobs(l).to_vec()))
+        .collect();
+    assert_eq!(lanes, [(3, vec![0, 2]), (3, vec![1, 3])]);
+}
+
+/// The native sweep never skips a better equal-share candidate: over every
+/// two- to four-job batch of one-stage GEMMs drawn from five estimates, on
+/// budgets two to seven and flat, nonmonotone and uneven cost rows, the
+/// chosen lanes score no more than any admissible equal-share candidate,
+/// both computed here from the model (per-job widths by threadteam's rule,
+/// largest-first fill, slowest lane plus `D(L)`).
+#[test]
+fn the_pruned_sweep_scores_no_worse_than_every_equal_share_candidate() {
+    let estimates = [50u64, 200, 600, 1500, 4000];
+    let rows = [
+        row(60),
+        WidthCosts::new([100, 1, 1].map(Duration::from_nanos)),
+        WidthCosts::new([10, 200, 30].map(Duration::from_nanos)),
+    ];
+    for costs in rows {
+        let d = |x: usize| costs.at(NonZeroUsize::new(x).unwrap()).as_nanos() as u64;
+        let mut engine = engine(7, BatchPolicy::default(), costs);
+        for budget in 2..=7 {
+            let width = |e: u64| {
+                threadteam::width_for_by(
+                    Duration::from_nanos(e),
+                    1,
+                    NonZeroUsize::new(budget).unwrap(),
+                    |k| costs.at(k),
+                )
+                .get()
+            };
+            let time = |e: u64, a: usize| {
+                let x = a.min(width(e));
+                if x < 2 {
+                    e
+                } else {
+                    e / x as u64 + d(x)
+                }
+            };
+            for count in 2..=4u32 {
+                for code in 0..5usize.pow(count) {
+                    let e: Vec<u64> = (0..count)
+                        .map(|i| estimates[code / 5usize.pow(i) % 5])
+                        .collect();
+                    let total: u64 = e.iter().sum();
+                    let slots = width(total);
+                    let mut oracle = u64::MAX;
+                    for lanes in 1..=slots.min(e.len()) {
+                        if lanes >= 2
+                            && !threadteam::pays_at(
+                                Duration::from_nanos(total),
+                                1,
+                                costs.at(NonZeroUsize::new(lanes).unwrap()),
+                            )
+                        {
+                            continue;
+                        }
+                        let share = |l: usize| slots / lanes + usize::from(l < slots % lanes);
+                        let mut order: Vec<usize> = (0..e.len()).collect();
+                        order.sort_by_key(|&j| (std::cmp::Reverse(e[j]), j));
+                        let mut load = vec![(0u64, 0usize); lanes];
+                        for j in order {
+                            let l = (0..lanes).min_by_key(|&l| (load[l], l)).unwrap();
+                            load[l] = (load[l].0 + time(e[j], share(l)), load[l].1 + 1);
+                        }
+                        let fork = if lanes < 2 { 0 } else { d(lanes) };
+                        oracle = oracle.min(load.iter().map(|&(t, _)| t).max().unwrap() + fork);
+                    }
+                    let batch = Batch::new(e.iter().map(|&e| vec![(P, serial(e))]).collect());
+                    let p = on(&mut engine, budget, |exec| {
+                        placed(&exec, &batch, Form::Native)
+                    });
+                    let slowest = (0..p.lanes())
+                        .map(|l| {
+                            p.jobs(l)
+                                .iter()
+                                .map(|&j| time(e[j], p.share(l)))
+                                .sum::<u64>()
+                        })
+                        .max()
+                        .unwrap();
+                    let fork = if p.lanes() < 2 { 0 } else { d(p.lanes()) };
+                    assert!(
+                        slowest + fork <= oracle,
+                        "{e:?} on {budget}: {} > {oracle}",
+                        slowest + fork
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Many large blocks whose provider does not widen spread over one-slot
+/// lanes rather than running one after another on the whole budget, as the
+/// width each estimate pays for would suggest under the linear model.
+#[test]
+fn blocks_that_do_not_widen_run_on_balanced_lanes() {
+    let block = Estimate {
+        widen: false,
+        ..serial(100_000)
+    };
+    let batch = Batch::new(vec![vec![(P, block)]; 96]);
+    let mut engine = engine(8, BatchPolicy::default(), row(60));
+    let p = on(&mut engine, 8, |exec| placed(&exec, &batch, Form::Native));
+    assert_eq!(p.lanes(), 8);
+    assert!((0..8).all(|l| p.share(l) == 1 && p.jobs(l).len() == 12));
 }
 
 /// Records the budget every stage is offered; fails the listed stages.
@@ -415,36 +592,9 @@ fn forced_inner_offers_every_provider_stage_the_whole_budget() {
     assert_eq!(spy.batch.reads.load(Ordering::Relaxed), 0);
 }
 
-/// A multi-item factorization is one provider stage whose envelope estimate
-/// (per-item work times items) sets its width; the per-item payback cap does
-/// not apply to it.
-#[cfg(any(feature = "cpu-faer", feature = "cpu-blas-core"))]
-#[test]
-fn a_multi_item_factorization_is_offered_its_envelope_width() {
-    use crate::block_kernel::driver::{estimate, work_model_ns};
-    let model = CpuEngine::serial().batch_policy().model;
-    let item = |work| estimate(work_model_ns(&model, work));
-    let envelope = item(2.0 * tlinalg::svd::estimate_work::<f64>(12, 6));
-    let payback = item(tlinalg::svd::estimate_payback_work::<f64>(12, 6));
-    // A flat dispatch cost the envelope pays for at every width but the
-    // per-item payback does not.
-    let d = payback.as_nanos() as u64 / 3 + 1;
-    assert!(envelope.as_nanos() >= 3 * u128::from(d), "fixture premise");
-    let spy = spy(vec![vec![(
-        P,
-        Estimate {
-            serial: envelope,
-            payback: None,
-            sections: 1,
-        },
-    )]]);
-    let mut engine = engine(6, BatchPolicy::default(), row(d));
-    assert_eq!(run_spy(&mut engine, 6, &spy), [[(0, 6)]]);
-}
-
 /// Two components of a pack (46 ns), a GEMM (606 ns) and a scatter at a
 /// flat 60 ns dispatch on six slots: native lanes overlap the GEMMs and win,
-/// while the barrier form serializes them on the engine and the sequential
+/// while the barrier form serializes them on the engine and the one-lane
 /// run wins (534 against 506 ns).
 #[test]
 fn barrier_scoring_serializes_the_gemms() {
@@ -456,14 +606,14 @@ fn barrier_scoring_serializes_the_gemms() {
         place(&exec, &batch, Form::Native, &mut tables);
         assert_eq!(tables.placement().lanes(), 2);
         place(&exec, &batch, Form::Barrier, &mut tables);
-        assert_eq!(tables.scores(), Some((534, 506)));
+        assert_eq!(tables.scores(), (Some(534), Some(506)));
         assert_eq!(tables.placement().lanes(), 1);
     });
 }
 
 /// A lane ending in its provider stage needs no further round: two lone
-/// 606 ns GEMMs price one fork, `2 (606/6 + 60) + 60 = 382`, against 322
-/// sequential.
+/// 606 ns GEMMs price one fork, `2 (606/6 + 60) + 60 = 382`, against 322 on
+/// one lane.
 #[test]
 fn barrier_scoring_prices_only_the_rounds_entered() {
     let batch = Batch::new(vec![vec![(P, serial(606))]; 2]);
@@ -471,7 +621,7 @@ fn barrier_scoring_prices_only_the_rounds_entered() {
     on(&mut engine, 6, |exec| {
         let mut tables = LaneTables::default();
         place(&exec, &batch, Form::Barrier, &mut tables);
-        assert_eq!(tables.scores(), Some((382, 322)));
+        assert_eq!(tables.scores(), (Some(382), Some(322)));
     });
 }
 

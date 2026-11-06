@@ -287,8 +287,9 @@ impl DefaultDenseExecutor {
     /// semantics. The disadvantage accepted here: a long run plus residual
     /// jobs goes grouped, paying the grouped preparation per unbound call
     /// (O(J log J) staging, and under Auto the placement of its J blocks:
-    /// one width scan over the S slots per distinct widening estimate and
-    /// a source-order lane fill; see `lanes` for the complexity) instead of
+    /// one width scan over the S slots per distinct widening estimate, the
+    /// largest-first baseline and the candidate sweep over its lane counts;
+    /// see `lanes` for the complexity) instead of
     /// the cached O(1) strided analysis plus the residual's own
     /// preparation.
     #[allow(clippy::too_many_arguments)]

@@ -11,7 +11,9 @@ pub trait Work: Jobs + Sync {
 
     /// Runs stage `stage` of `job` on `exec`, whose budget is the stage's
     /// selected width (`Placement::selected`): a movement stage dispatches
-    /// at most that many participants, and a provider stage hands `exec` to
+    /// at most that many participants and checks, under `Auto`, that its
+    /// estimate pays for its final fork on `exec`'s token (running inline
+    /// otherwise), and a provider stage hands `exec` to
     /// the provider as its whole offer. The barrier form never calls it for a
     /// provider stage.
     fn run(

@@ -1394,6 +1394,7 @@ impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
             serial: core::time::Duration::ZERO,
             payback: None,
             sections: 1,
+            widen: true,
         }
     }
 }

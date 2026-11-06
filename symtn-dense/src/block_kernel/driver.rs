@@ -149,6 +149,7 @@ impl<B: BlockOp> lanes::Jobs for Running<'_, B> {
             serial: Duration::ZERO,
             payback: None,
             sections: 1,
+            widen: true,
         }
     }
 }

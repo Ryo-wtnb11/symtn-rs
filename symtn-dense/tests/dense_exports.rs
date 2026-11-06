@@ -225,6 +225,7 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
         "field serial",
         "field payback",
         "field sections",
+        "field widen",
         "enum Form",
         "trait Jobs",
         "struct Placement",
