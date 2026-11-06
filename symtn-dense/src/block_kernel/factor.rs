@@ -2648,27 +2648,22 @@ mod tests {
 
     /// Purpose: only a single-matrix call of a widening factorization is
     /// offered the width its estimates pay for, the smaller of tlinalg's
-    /// total and payback widths; every other input runs alone on its whole
-    /// admitted share, the width its total estimate pays for over one
-    /// section, whatever payback or section count it carries: a single QR,
-    /// a batched SVD (two items), a left polar and a tall full QR. A wide
-    /// null basis solves nothing and estimates no work: one slot.
+    /// total and payback widths; every other input runs alone on the whole
+    /// budget, which the provider's own rule divides, whatever payback or
+    /// section count its estimate carries: a single QR, a batched SVD (two
+    /// items), a left polar and a tall full QR. A wide null basis solves
+    /// nothing and estimates no work: one slot.
     #[test]
     fn only_widening_single_matrices_are_offered_their_estimated_width() {
         let single = |[total, payback]: [f64; 2]| rule(6, total).min(rule(6, payback));
         let svd = Svd::estimates::<f64>(79, 79);
-        let qr = Qr::estimates::<f64>(30, 30);
-        let polar = Polar::<true>::estimates::<f64>(6, 6);
-        let tall = QrFull::estimates::<f64>(8, 4);
         assert_eq!(offered::<Svd>(6, &[&[79, 79]]), [single(svd)]);
-        assert_eq!(offered::<Qr>(6, &[&[30, 30]]), [rule(6, qr[0])]);
-        assert_eq!(offered::<Svd>(6, &[&[79, 79, 2]]), [rule(6, 2.0 * svd[0])]);
-        assert_eq!(offered::<Polar<true>>(6, &[&[6, 6]]), [rule(6, polar[0])]);
-        assert_eq!(offered::<QrFull>(6, &[&[8, 4]]), [rule(6, tall[0])]);
+        assert_eq!(offered::<Qr>(6, &[&[30, 30]]), [6]);
+        assert_eq!(offered::<Svd>(6, &[&[79, 79, 2]]), [6]);
+        assert_eq!(offered::<Polar<true>>(6, &[&[6, 6]]), [6]);
+        assert_eq!(offered::<QrFull>(6, &[&[8, 4]]), [6]);
         assert_eq!(offered::<QrNull>(6, &[&[12, 24]]), [1]);
-        // The fixture separates the widening rule from the whole share.
-        assert!(single(svd) < rule(6, svd[0]));
-        assert!(single(qr) < rule(6, qr[0]));
-        assert!(rule_over(6, polar[0], 3) < rule(6, polar[0]));
+        // The fixture separates the widening rule from the whole budget.
+        assert!(single(svd) < 6);
     }
 }

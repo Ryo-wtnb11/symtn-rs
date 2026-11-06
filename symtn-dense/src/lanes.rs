@@ -22,41 +22,68 @@
 //! time on a share `a` sums its stages at `min(a, w_k)`, grouped by stage
 //! width.
 //!
-//! Admission is per call: with `E_tot` the total estimate, the call uses
-//! `slots = width_for(E_tot, 1)` of the budget, and the baseline is
-//! `L0 = min(slots, J)` lanes of equal shares (the remainder one slot each to
-//! the lowest lanes), filled by the longest-processing-time rule: jobs by
-//! descending estimate, then index, each to the lane of least modeled load,
-//! then fewest jobs, then lowest index. The candidates are the equal shares
-//! of every lane count from `L0` down to one (one lane is the whole call on
-//! `slots`), and one reservation, an intentional heuristic: each job is
-//! allotted `a_j = min(w_j, floor(slots E_j / E_tot))`, a job with
-//! `a_j >= 2` gets a lane of its own, the remaining slots become one-slot
-//! lanes, at most `L0` lanes in all, and every other job goes in source
-//! order to the lane on which it would finish first. A lane count of two or
-//! more is a candidate only when `E_tot` pays for an outer section of that
-//! count. A candidate replaces the best so far only by scoring strictly
-//! lower, so ties keep the baseline, then the larger lane count. The score
-//! is that of the form that will run:
+//! A lone job takes one lane of the widest offer of its stages: a lone
+//! stage that does not widen is offered the whole budget B, which its
+//! provider's own rule divides.
+//!
+//! In the native form, when no stage widens past one slot, no job's time
+//! depends on its share, and nothing is searched: the jobs take one-slot
+//! lanes, as many as the total estimate `E_tot` pays for as one flat
+//! section, `width_for(E_tot, 1)`, at most `J`, and lowered to the largest
+//! count whose outer fork pays (a dispatch row need not be monotone),
+//! filled as the baseline below. A search would trade only the outer fork's
+//! cost against how tightly the lanes pack the jobs, and so pack every lane
+//! up to the longest job. The barrier form searches as below: its rounds
+//! serialize the provider stages and pay the outer fork each.
+//!
+//! Otherwise admission is the whole budget B, each lane at most `cap`, the widest
+//! offer of any stage (a share no stage could use more of). With `E_tot`
+//! the total estimate, the baseline is `L0 = min(B, J)` lanes of equal shares
+//! (`B / L0`, the remainder one slot each to the lowest lanes, each capped),
+//! filled by the longest-processing-time rule: jobs by descending estimate,
+//! then index, each to the lane of least modeled load, then fewest jobs, then
+//! lowest index. The candidates are the equal shares of every lane count
+//! from `L0` down to one (one lane is the whole call on `cap` slots), and one
+//! reservation, an intentional heuristic: each job is allotted
+//! `a_j = min(w_j, floor(B E_j / E_tot))`, a job with `a_j >= 2` gets a lane
+//! of its own, the remaining slots become one-slot lanes, at most `L0` lanes
+//! in all, and every other job goes in source order to the lane on which it
+//! would finish first. A lane count of two or more is a candidate only when
+//! `E_tot` pays for an outer section of that count. The equal-share winner
+//! is the least score, ties to the larger lane count (so to the baseline);
+//! the reservation replaces it only by scoring strictly lower. The score is
+//! that of the form that will run:
 //!
 //! - native: the slowest lane plus `D(L)` (the outer fork publishes `L - 1`
-//!   child leaders); an equal-share candidate whose lower bound (its jobs'
-//!   largest and mean least time) cannot beat the best is not built;
+//!   child leaders). Candidates are built in the order of a lower bound of
+//!   their score (every job takes at least its least time on the
+//!   candidate's two shares, so the slowest lane takes at least the largest
+//!   and the mean of those), and the search stops at the first bound that
+//!   cannot beat the best;
 //! - barrier: per round the slowest lane's movement, plus every provider
 //!   stage serialized at its whole-engine width, plus `R D(L)` for the `R`
 //!   rounds the runner enters: per lane its provider stages, plus one when
-//!   movement follows the last of them, maximized over lanes.
+//!   movement follows the last of them, maximized over lanes. Every
+//!   candidate is built.
 //!
 //! All arithmetic is in integer nanoseconds and ties are total, so the
 //! placement is repeatable for given estimates; nothing is cached. Native
 //! job times divide each width bucket's summed estimate once
-//! (`sum E / x + n D(x)`); the barrier walk divides per stage. Per call it
-//! costs `O(B + G_w B + N_st + J log J + L0 (beta + J log L0))`, plus
-//! `L0 (N_st + R L0)` in the barrier form, where `G_w` counts the distinct
-//! widening estimates (the width memo is emptied by its own keys, amortized
-//! O(1) each), `beta` the jobs' distinct stage widths summed, and the
-//! reservation adds `sum over its queued wide-capable jobs of (L + sigma
-//! beta_j)` with `sigma` the distinct lane shares.
+//! (`sum E / x + n D(x)`); the barrier walk divides per stage. A job's time
+//! is fixed once a share covers its widest stage, so a bound sums only the
+//! jobs wider than the candidate's narrow share `q`, once per distinct `q`
+//! (at most `2 sqrt(B)` of them), while every built candidate queries those
+//! jobs' buckets again on its two shares. With `beta_q` the stage-width
+//! buckets of the jobs wider than `q`, `C` the candidates built (in the
+//! barrier form every paying one) and `G_w` the distinct widening estimates
+//! (the width memo is emptied by its own keys, amortized O(1) each), a call
+//! costs `O(B + G_w B + N_st + J log J + L0 log L0 + sum over distinct q of
+//! beta_q + sum over built candidates c of beta_{q_c} + C J log L0)`, the
+//! winner's rebuild included; each barrier candidate also walks its stages
+//! and rounds, `O(N_st + J + R)`. The reservation adds `sum over its queued
+//! wide-capable jobs of (L + sigma beta_j)` with `sigma` the distinct lane
+//! shares. The native no-search case costs the stage pass, the width scans,
+//! the sort and one fill.
 //!
 //! A movement stage owns the check of its own fork: once it has capped its
 //! selected width to its final part count, under `Auto` it forks only when

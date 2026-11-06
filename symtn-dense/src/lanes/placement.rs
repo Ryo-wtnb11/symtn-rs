@@ -40,6 +40,14 @@ pub(super) struct PlaceScratch {
     /// Per job, its time on an equal-share candidate's narrow and wide
     /// shares.
     at: Vec<[u128; 2]>,
+    /// The equal-share candidates: a native lower bound of each score (zero
+    /// in the barrier form) and the lane count.
+    candidates: Vec<(u128, Reverse<usize>)>,
+    /// Per job its saturated time; the jobs by ascending widest stage, with
+    /// the running largest and sum of their saturated times.
+    saturated: Vec<u128>,
+    by_width: Vec<usize>,
+    prefix: Vec<(u128, u128)>,
     /// The index of each distinct lane share (by share, `usize::MAX` if
     /// none), the distinct shares and a queued job's time on each.
     share_slot: Vec<usize>,
@@ -71,7 +79,8 @@ impl PlaceScratch {
                 + self.share_slot.capacity()
                 + self.distinct.capacity()
                 + self.bucket_of.capacity()
-                + self.bucket_starts.capacity(),
+                + self.bucket_starts.capacity()
+                + self.by_width.capacity(),
         )
         .saturating_add(wide.saturating_mul(
             self.costs.capacity()
@@ -80,8 +89,15 @@ impl PlaceScratch {
                 + self.tau.capacity()
                 + self.distinct_time.capacity()
                 + self.round_max.capacity()
-                + 2 * self.at.capacity(),
+                + 2 * self.at.capacity()
+                + self.saturated.capacity()
+                + 2 * self.prefix.capacity(),
         ))
+        .saturating_add(
+            self.candidates
+                .capacity()
+                .saturating_mul(std::mem::size_of::<(u128, Reverse<usize>)>()),
+        )
         .saturating_add(
             self.kinds
                 .capacity()
@@ -160,14 +176,63 @@ impl PlaceScratch {
         self.bucket_starts.push(self.buckets.len());
     }
 
+    /// Every job's saturated time, its time on any share of at least its
+    /// widest stage `w_j`, and the jobs by ascending `w_j` with the running
+    /// largest and sum of those times.
+    fn saturate(&mut self, count: usize) {
+        self.saturated.clear();
+        for j in 0..count {
+            let t = self.job_time(j, self.job_width[j]);
+            self.saturated.push(t);
+        }
+        self.by_width.clear();
+        self.by_width.extend(0..count);
+        let widths = &self.job_width;
+        self.by_width.sort_unstable_by_key(|&j| (widths[j], j));
+        self.prefix.clear();
+        self.prefix.push((0, 0));
+        for &j in &self.by_width {
+            let (largest, sum) = self.prefix[self.prefix.len() - 1];
+            let t = self.saturated[j];
+            self.prefix.push((largest.max(t), sum.saturating_add(t)));
+        }
+    }
+
     /// Fills `at` with every job's time on `narrow` and `narrow + 1` slots,
-    /// an equal-share candidate's two shares.
+    /// an equal-share candidate's two shares; a job no wider than `narrow`
+    /// takes its saturated time on both.
     fn share_times(&mut self, count: usize, narrow: usize) {
         self.at.clear();
         for j in 0..count {
-            let at = [self.job_time(j, narrow), self.job_time(j, narrow + 1)];
+            let at = if self.job_width[j] <= narrow {
+                [self.saturated[j]; 2]
+            } else {
+                [self.job_time(j, narrow), self.job_time(j, narrow + 1)]
+            };
             self.at.push(at);
         }
+    }
+
+    /// [`ShareBounds`] of narrow share `narrow`: the jobs no wider than it
+    /// from the running saturated times, each wider one evaluated.
+    fn share_bounds(&self, narrow: usize) -> ShareBounds {
+        let fixed = self
+            .by_width
+            .partition_point(|&j| self.job_width[j] <= narrow);
+        let mut bounds = ShareBounds {
+            even: self.prefix[fixed],
+            uneven: self.prefix[fixed],
+        };
+        for &j in &self.by_width[fixed..] {
+            let (at, wider) = (self.job_time(j, narrow), self.job_time(j, narrow + 1));
+            let least = at.min(wider);
+            bounds.even = (bounds.even.0.max(at), bounds.even.1.saturating_add(at));
+            bounds.uneven = (
+                bounds.uneven.0.max(least),
+                bounds.uneven.1.saturating_add(least),
+            );
+        }
+        bounds
     }
 
     /// Job `j`'s time on a share of `a` slots.
@@ -273,7 +338,10 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
             let sections = estimate.sections.max(1);
             // A stage that does not widen is scored at one slot and offered
             // its lane's whole share, which the provider's own rule divides.
-            let (offered, scored) = if !estimate.widen {
+            let (offered, scored) = if largest.is_zero() {
+                // No work: nothing to divide.
+                (1, 1)
+            } else if !estimate.widen {
                 (budget, 1)
             } else if !threadteam::pays_at(largest, sections, cheapest) {
                 // No width pays below `PAYS` sections of the cheapest dispatch.
@@ -307,43 +375,114 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
         scratch.memo.remove(&key);
     }
 
-    // Admission: the whole call's estimate decides the slots it uses.
+    // Admission: the whole budget, each lane at most the widest offer any
+    // stage can use; every lane count of two or more must pay for its own
+    // fork, and the candidates' scores decide how many slots run.
+    //
+    // Why not `width_for(E_tot, 1)`: it prices the call as one flat section
+    // of `k` participants, `D(k) + E_tot / k`, while the lanes it bounds pay
+    // `D(L)` once plus a share-wide section per stage; it excluded
+    // candidates their own score rates faster. Why not main's "the whole
+    // budget only if `E_tot` pays at `B`": on a dispatch row that grows with
+    // the width it serializes calls whose lanes pay at a smaller count.
     let total = scratch
         .job_ns
         .iter()
         .fold(0u128, |sum, &e| sum.saturating_add(e));
-    let slots = token.width_for(duration(total), 1).get();
+    let slots = budget;
+    let cap = placement.widths.iter().copied().max().unwrap_or(1);
     let baseline = slots.min(count);
+    // A lone job (or a one-slot budget) has one lane, of the widest offer:
+    // a lone stage that does not widen is offered the whole budget, which
+    // its provider's own rule divides.
     if baseline <= 1 {
-        return placement.sequential(slots, count);
+        return placement.sequential(cap, count);
     }
-    scratch.summarize(&placement.stage_starts, budget);
     scratch.order.clear();
     scratch.order.extend(0..count);
     let job_ns = &scratch.job_ns;
     scratch
         .order
         .sort_unstable_by_key(|&j| (Reverse(job_ns[j]), j));
-
-    // Candidates: the baseline's equal shares, every smaller lane count, then
-    // the reservation; a later one replaces the best only by scoring strictly
-    // lower, so ties keep the baseline, then the larger lane count.
-    let fork_pays = |lanes: usize| {
-        lanes < 2 || NonZeroUsize::new(lanes).is_some_and(|l| token.pays(duration(total), 1, l))
+    // `pays` on the token, from the costs read above.
+    let fork_pays = |costs: &[u128], lanes: usize| {
+        lanes < 2 || threadteam::pays_at(duration(total), 1, duration(costs[lanes]))
     };
-    let mut best: Option<(u128, Candidate)> = None;
-    let mut built = None;
+
+    // No search in the native form when no stage widens past one slot:
+    // every job then takes its serial estimate on any share, so the
+    // candidates differ only in how many one-slot lanes share the jobs and in
+    // the outer fork's `D(L)`. Searching that by score lets the fork cost
+    // alone pick the fewest lanes that keep the longest job, packing every
+    // lane up to it, where the jobs' real times are least like their
+    // estimates. One-slot lanes are one flat section of `L` participants, so
+    // the jobs take the lanes their total pays for as such a section,
+    // `width_for(E_tot, 1)`, at most one per job, each of one slot; on a
+    // dispatch row that is not monotone, the count cap can land on a width
+    // whose fork does not pay, so the largest paying count below it is
+    // taken. Why not the barrier form: its provider stages run serially
+    // between rounds and every round pays the outer fork again, so lanes of
+    // fixed-time jobs are not one flat section; it keeps its scored search.
+    if form == Form::Native && scratch.job_width.iter().all(|&w| w == 1) {
+        let costs = &scratch.costs;
+        let pays_for = NonZeroUsize::new(budget).map_or(1, |b| {
+            threadteam::width_for_by(duration(total), 1, b, |k| duration(costs[k.get()])).get()
+        });
+        let lanes = (1..=pays_for.min(count))
+            .rev()
+            .find(|&lanes| fork_pays(&scratch.costs, lanes))
+            .unwrap_or(1);
+        scratch.at.clear();
+        for j in 0..count {
+            let e = scratch.job_ns[j];
+            scratch.at.push([e; 2]);
+        }
+        return equal_lanes(placement, scratch, count, slots, 1, lanes);
+    }
+    scratch.summarize(&placement.stage_starts, budget);
+    scratch.saturate(count);
+
+    // Candidates: equal shares at every lane count whose fork pays, the
+    // baseline's `L0` first, then the reservation. The equal-share winner is
+    // the least score, ties to the larger lane count (so to the baseline);
+    // the reservation replaces it only by scoring strictly lower.
+    scratch.candidates.clear();
+    let mut narrow = 0;
+    let mut bounds = ShareBounds::default();
     for lanes in (1..=baseline).rev() {
-        if !fork_pays(lanes) {
+        if !fork_pays(&scratch.costs, lanes) {
             continue;
         }
-        scratch.share_times(count, slots / lanes);
-        if let (Form::Native, Some((score, _))) = (form, best) {
-            if equal_bound(scratch, slots, lanes) >= score {
-                continue;
+        let bound = match form {
+            // The narrow share only grows as the lane count falls, so each
+            // distinct share's job times are summed once.
+            Form::Native => {
+                if slots / lanes != narrow {
+                    narrow = slots / lanes;
+                    bounds = scratch.share_bounds(narrow);
+                }
+                bounds.at(lanes, !slots.is_multiple_of(lanes)) + scratch.dispatch(lanes)
             }
+            // The barrier score has no cheap bound: every candidate is built.
+            Form::Barrier => 0,
+        };
+        scratch.candidates.push((bound, Reverse(lanes)));
+    }
+    // Native candidates in bound order: once a bound cannot beat the best
+    // (score, larger lane count), no later one can, as their bounds are no
+    // smaller.
+    if form == Form::Native {
+        scratch.candidates.sort_unstable();
+    }
+    let mut best: Option<(u128, Reverse<usize>)> = None;
+    let mut built = None;
+    for i in 0..scratch.candidates.len() {
+        let (bound, Reverse(lanes)) = scratch.candidates[i];
+        if best.is_some_and(|best| (bound, Reverse(lanes)) >= best) {
+            break;
         }
-        equal_lanes(placement, scratch, count, slots, lanes);
+        scratch.share_times(count, slots / lanes);
+        equal_lanes(placement, scratch, count, slots, cap, lanes);
         let score = lanes_score(form, placement, scratch);
         #[cfg(test)]
         {
@@ -355,29 +494,49 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
             }
         }
         built = Some(Candidate::Equal(lanes));
-        if best.is_none_or(|(b, _)| score < b) {
-            best = Some((score, Candidate::Equal(lanes)));
-        }
-    }
-    if reserved_lanes(placement, scratch, count, slots, baseline) {
-        built = Some(Candidate::Reserved);
-        let score = lanes_score(form, placement, scratch);
-        if fork_pays(placement.lanes()) && best.is_none_or(|(b, _)| score < b) {
-            best = Some((score, Candidate::Reserved));
+        if best.is_none_or(|best| (score, Reverse(lanes)) < best) {
+            best = Some((score, Reverse(lanes)));
         }
     }
     // One lane always pays, so a candidate was scored.
-    let chosen = best.map_or(Candidate::Equal(1), |(_, c)| c);
+    let (best_score, Reverse(best_lanes)) = best.unwrap_or((u128::MAX, Reverse(1)));
+    let mut chosen = Candidate::Equal(best_lanes);
+    if reserved_lanes(placement, scratch, count, slots, baseline) {
+        built = Some(Candidate::Reserved);
+        let score = lanes_score(form, placement, scratch);
+        if fork_pays(&scratch.costs, placement.lanes()) && score < best_score {
+            chosen = Candidate::Reserved;
+        }
+    }
     if built != Some(chosen) {
         match chosen {
             Candidate::Equal(lanes) => {
                 scratch.share_times(count, slots / lanes);
-                equal_lanes(placement, scratch, count, slots, lanes);
+                equal_lanes(placement, scratch, count, slots, cap, lanes);
             }
             Candidate::Reserved => {
                 reserved_lanes(placement, scratch, count, slots, baseline);
             }
         }
+    }
+}
+
+/// Every job's largest and summed time on one narrow share `q` of an
+/// equal-share candidate, and the same of the smaller of its times on `q`
+/// and `q + 1` (its share when the remainder makes some lanes wider).
+#[derive(Clone, Copy, Debug, Default)]
+struct ShareBounds {
+    even: (u128, u128),
+    uneven: (u128, u128),
+}
+
+impl ShareBounds {
+    /// A lower bound of the slowest of `lanes` lanes: every job takes at
+    /// least its time here, so the slowest lane takes at least the largest
+    /// of them and at least their mean.
+    fn at(self, lanes: usize, uneven: bool) -> u128 {
+        let (largest, sum) = if uneven { self.uneven } else { self.even };
+        largest.max(sum.div_ceil(lanes as u128))
     }
 }
 
@@ -395,25 +554,9 @@ fn lanes_score(form: Form, placement: &Placement, scratch: &mut PlaceScratch) ->
     }
 }
 
-/// A lower bound of the native score of `lanes` equal shares from `at`:
-/// every job takes at least the smaller of its two share times, so the
-/// slowest lane takes at least the largest of those and at least their mean.
-fn equal_bound(scratch: &PlaceScratch, slots: usize, lanes: usize) -> u128 {
-    let uneven = !slots.is_multiple_of(lanes);
-    let (largest, sum) = scratch
-        .at
-        .iter()
-        .map(|&[narrow, wide]| if uneven { narrow.min(wide) } else { narrow })
-        .fold((0u128, 0u128), |(largest, sum), m| {
-            (largest.max(m), sum.saturating_add(m))
-        });
-    largest
-        .max(sum.div_ceil(lanes as u128))
-        .saturating_add(scratch.dispatch(lanes))
-}
-
 /// `lanes` lanes of equal shares of `slots` (the remainder one slot each to
-/// the lowest lanes), filled by the longest-processing-time rule: jobs by
+/// the lowest lanes), each at most `cap`, the widest offer of any stage, a
+/// share no stage could use more of; filled by the longest-processing-time rule: jobs by
 /// descending estimate, then index, each to the lane of least modeled load,
 /// then fewest jobs, then lowest index. Job times come from `scratch.at`.
 fn equal_lanes(
@@ -421,13 +564,14 @@ fn equal_lanes(
     scratch: &mut PlaceScratch,
     count: usize,
     slots: usize,
+    cap: usize,
     lanes: usize,
 ) {
     placement.clear_lanes();
     let (narrow, extra) = (slots / lanes, slots % lanes);
     placement
         .shares
-        .extend((0..lanes).map(|l| narrow + usize::from(l < extra)));
+        .extend((0..lanes).map(|l| (narrow + usize::from(l < extra)).min(cap)));
     placement.lane_of.resize(count, usize::MAX);
     scratch.tau.clear();
     scratch.tau.resize(lanes, 0);

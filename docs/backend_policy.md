@@ -149,19 +149,25 @@ widen (compact QR and LQ, full QR, the null basis, general eigenvalues, the
 polar decompositions, `exp`, and every input of several matrices) are
 modeled at one thread, since their providers are not known to speed up at
 the widths the linear model would grant; they still run on their lane's
-whole share, which the provider's own rule divides. The call admits
-`slots = width_for(E_total)` of the engine's `B` threads, and the baseline
-is `min(slots, blocks)` lanes of equal shares (the remainder one thread each
-to the lowest lanes), filled largest block first, each to the lane of least
-modeled load. Every smaller lane count with equal shares, down to one lane
-of all `slots` threads, and one reservation (a heuristic: a block allotted
-`min(width, floor(slots E / E_total)) >= 2` threads gets a lane of its own,
+whole share, which the provider's own rule divides; a lone block is
+offered the whole engine. When no block of a call widens past one thread,
+nothing is searched: its blocks take one-thread lanes, as many as the call's
+total estimate pays for as one section (`width_for`, at most one lane per
+block, lowered to the largest count whose fork pays), filled largest block
+first. Otherwise the call admits all
+`B` of the engine's threads, each lane at most the widest offer any block
+can use, and the baseline is `min(B, blocks)` lanes of equal shares (the
+remainder one thread each to the lowest lanes), filled largest block first,
+each to the lane of least modeled load. Every smaller lane count with equal
+shares, down to one lane, and one reservation (a heuristic: a block allotted
+`min(width, floor(B E / E_total)) >= 2` threads gets a lane of its own,
 the rest of the threads become one-thread lanes, at most the baseline's lane
-count in all) replace the baseline only when their modeled time (the
-slowest lane plus the engine's dispatch cost for the outer fork; each block
-modeled as its estimate over its width plus that width's dispatch cost, a
-linear speedup) is strictly lower and their total estimate pays for the
-fork. A block then runs on its lane's context limited to `min(share,
+count in all) are scored by their modeled time (the slowest lane plus the
+engine's dispatch cost for the outer fork; each block modeled as its
+estimate over its width plus that width's dispatch cost, a linear speedup),
+a lane count of two or more only when the total estimate pays for its fork.
+The least time wins, ties to more lanes, and the reservation only by being
+strictly faster. A block then runs on its lane's context limited to `min(share,
 width)` (its whole share when it does not widen). Placement is integer arithmetic, recomputed per call without a
 cache, so it is a scheduling estimate, not a promise of a faster run. A
 forced batch policy (`Inner`, `Outer`, `Split`, `Sequential`) computes no
