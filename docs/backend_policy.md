@@ -269,9 +269,9 @@ job, so every destination element has one writer; a fixed-stride member
 batch (several members of one transform) makes each (member, component)
 pair a job, job `member * components + component`, after admitting every
 member's ranges before any write (an ordinary replay is the one-member
-case). Its stages are its direct
-writes (inactive blocks, then Singles), and per Multi group a pack, a GEMM
-and a scatter; a movement stage is estimated by Strided's copy estimate of
+case). Its stages are its direct writes (its inactive blocks and Singles,
+in destination address order), and per Multi group a pack, a GEMM and a
+scatter; a movement stage is estimated by Strided's copy estimate of
 the elements it moves, a GEMM by the same estimate as a block GEMM, and each
 stage runs at its own selected width. A movement stage of width two or more
 splits its component over that many sub-slots of the component's band units
@@ -280,8 +280,9 @@ one flat fork; at width one, or for an overwrite of a component whose one
 item is a Single whose retained Strided plan Strided's own rule
 (`execution::parallel_width` for a copy of its elements) admits on the
 stage's token (gives it more than one worker), each item is written whole on
-that token, the admitted Single through its plan. A pack splits its columns over one flat fork; the GEMM writes
-its lane's initialized packed destination. On the native provider it runs
+that token, the admitted Single through its plan. A pack splits its
+columns over one flat fork; the GEMM writes its lane's initialized packed
+destination. On the native provider it runs
 inside the lanes on the stage's context (tcontract's initialized write, as
 a grouped recoupling GEMM). On a provider without lane GEMMs (BLAS and
 custom executors) the runner works in rounds: each round is one Host region
@@ -291,8 +292,8 @@ pending GEMM is submitted alone, in lane order, through the executor's
 vendor BLAS uses its own threads, not the lane's share; placement scores
 those GEMMs serialized at that width. Every job runs even after another
 fails (a failed GEMM submission fails its own job and is not retried), and
-the lowest-indexed failing job's error is returned, on either provider. On one worker (a serial engine, or a placement of one lane
-of one slot, such as a forced `Sequential` policy on a wider engine), the
+the lowest-indexed failing job's error is returned, on either provider.
+On one worker (a serial engine, or a placement of one lane of one slot, such as a forced `Sequential` policy on a wider engine), the
 replay runs in source order: inactive blocks, Singles, then each Multi
 group's pack, GEMM on the engine and scatter, stopping at the first
 failure; a member batch on one worker moves all its members at once (the

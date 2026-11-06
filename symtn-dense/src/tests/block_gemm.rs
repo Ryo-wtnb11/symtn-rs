@@ -433,21 +433,23 @@ fn the_lowest_indexed_out_of_range_job_is_reported() {
     assert_eq!(out, [-5.0; 8]);
 }
 
+#[path = "../../tests/support/warm_lanes.rs"]
+mod warm_lanes;
+
 /// Purpose: the premise of the warm multi-lane allocation test
-/// (`tests/warm_lane_allocations.rs`, the same fixture, which cannot see the
-/// placement): under `Outer` on four threads its four heterogeneous jobs,
-/// each estimated above zero, run on four lanes, not on one.
+/// (`tests/warm_lane_allocations.rs`, which cannot see the placement): under
+/// `Outer` its heterogeneous jobs, each estimated above zero, run on one lane
+/// per job up to the pool's width, not on one.
 #[test]
 fn the_warm_allocation_fixture_runs_on_four_lanes() {
-    let jobs: Vec<_> = [(2, 4, 2), (3, 3, 2), (2, 3, 3), (3, 2, 3)]
-        .into_iter()
-        .enumerate()
-        .map(|(index, shape)| batch_job(shape, (16 * index, 16 * index, 16 * index)))
-        .collect();
-    let pool = crate::Pool::builder().threads(4).build().unwrap();
+    let jobs = warm_lanes::jobs();
+    let pool = crate::Pool::builder()
+        .threads(warm_lanes::THREADS)
+        .build()
+        .unwrap();
     let mut engine = CpuEngine::new(pool).with_batch_policy(BatchPolicy::new(BatchStrategy::Outer));
-    let (lhs, rhs) = ([1.0; 64], [2.0; 64]);
-    let mut out = [0.0; 64];
+    let (lhs, rhs) = ([1.0; warm_lanes::LEN], [2.0; warm_lanes::LEN]);
+    let mut out = [0.0; warm_lanes::LEN];
     let recording = crate::probe::record();
     let (result, _) = run::<f64>(
         &mut engine,
@@ -461,7 +463,10 @@ fn the_warm_allocation_fixture_runs_on_four_lanes() {
         c64(0.0, 0.0),
     );
     result.unwrap();
-    assert_eq!(recording.get(crate::probe::Event::BlockLanes), 4);
+    assert_eq!(
+        recording.get(crate::probe::Event::BlockLanes),
+        jobs.len().min(warm_lanes::THREADS)
+    );
 }
 
 /// Purpose: zero-depth jobs of a grouped batch, which estimate no work and

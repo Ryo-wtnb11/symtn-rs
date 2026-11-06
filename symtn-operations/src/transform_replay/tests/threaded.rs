@@ -79,7 +79,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
 }
 
 #[test]
-fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
+fn threaded_interleaved_singles_write_their_own_elements() {
     let src_structure = BlockStructure::packed_column_major(1, [vec![2], vec![2]]).unwrap();
     let dst_structure = custom_structure(vec![block(0, 2, 2, 0), block(1, 2, 2, 1)]);
     let structure = TreeTransformStructure::compile_structures(
@@ -189,7 +189,7 @@ fn threaded_replay_ignores_zero_extent_work() {
 }
 
 #[test]
-fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
+fn threaded_multi_scatter_writes_interleaved_destinations() {
     let src_structure =
         Arc::new(BlockStructure::packed_column_major(1, [vec![2], vec![2]]).unwrap());
     let dst_structure = Arc::new(custom_structure(vec![block(0, 2, 2, 0), block(1, 2, 2, 1)]));
@@ -473,14 +473,17 @@ fn joint_components_own_every_writer_of_their_atoms() {
         .map(|component| schedule.component_group_list(component).len())
         .collect::<Vec<_>>();
     assert_eq!(groups, [1, 0, 2]);
-    for group in &schedule.scatter_groups {
-        for column in &schedule.scatter_columns[group.columns.clone()] {
-            let atom = &schedule.atoms[column.slot as usize];
-            let offset = transform.layouts().entry(column.dst_layout).offset;
-            assert!(offset >= atom.lo && offset < atom.lo + atom.len as isize);
-            assert!(schedule
-                .component_atoms(group.component as usize)
-                .contains(&(column.slot as usize)));
+    for component in 0..3 {
+        for &group in schedule.component_group_list(component) {
+            let group = &schedule.scatter_groups[group as usize];
+            for column in &schedule.scatter_columns[group.columns.clone()] {
+                let atom = &schedule.atoms[column.slot as usize];
+                let offset = transform.layouts().entry(column.dst_layout).offset;
+                assert!(offset >= atom.lo && offset < atom.lo + atom.len as isize);
+                assert!(schedule
+                    .component_atoms(component)
+                    .contains(&(column.slot as usize)));
+            }
         }
     }
     assert_eq!(dst.required_len().unwrap(), 14);

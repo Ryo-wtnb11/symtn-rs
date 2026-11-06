@@ -382,7 +382,7 @@ where
     )?;
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
-    checked_fused_index_len(1, requirements.fused_index_len_per_worker)?;
+    checked_fused_index_len(requirements.fused_index_len_per_worker)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
     }

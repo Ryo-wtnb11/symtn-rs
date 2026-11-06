@@ -2,22 +2,22 @@
 //!
 //! Pins the exact names `lib.rs` re-exports and its one public module
 //! (`lanes`), under every feature combination at once, so adding or removing
-//! one fails here and is reviewed as an API change. `DensePlacement` (one variant, `Host`, with four accessors that
-//! always returned it), the `CUTENSOR_PLAN_BYTES` estimate and the test-only
-//! `cuda_is_hermitian_region` were removed from this surface.
+//! one fails here and is reviewed as an API change.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence.
 
 use std::collections::BTreeSet;
 
-use crate::export_scan::reexports;
+use crate::export_scan::{not_unrestricted_pub, reexports, strip, use_leaves};
 
 /// Leaf names re-exported by `pub use` in `source`.
 fn exported_names(source: &str) -> Result<BTreeSet<String>, String> {
     let exports = reexports(source)?;
     // The one public module: the `#[doc(hidden)]` lane runner that
-    // symtn-operations and symtn-tensors drive their block jobs through.
+    // symtn-operations and symtn-tensors drive their block jobs through,
+    // whose own declarations `the_lanes_module_declares_exactly_the_pinned_names`
+    // pins.
     if let Some(module) = exports.modules.iter().find(|module| *module != "lanes") {
         return Err(format!("lib.rs gained a `pub mod {module}`"));
     }
@@ -145,4 +145,129 @@ fn symtn_dense_exports_exactly_the_pinned_names() {
         exported_names(include_str!("../src/lib.rs")).unwrap(),
         expected
     );
+}
+
+/// Every unrestricted public declaration of `source` in source order, as
+/// `kind name`: a `pub use` leaf as `use Name`, a public field as
+/// `field name`. Methods and fields count, so a new public method or field
+/// of a lane type fails the pin as a new free item does.
+fn public_declarations(source: &str) -> Vec<String> {
+    let code = strip(source);
+    let mut out = Vec::new();
+    for (at, _) in code.match_indices("pub") {
+        if not_unrestricted_pub(&code, at) {
+            continue;
+        }
+        let item = code[at + 3..].trim_start();
+        let mut words = item
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|word| !word.is_empty())
+            .peekable();
+        let mut kind = words.next().unwrap_or_default();
+        while matches!(kind, "unsafe" | "async" | "extern")
+            || (kind == "const" && words.peek() == Some(&"fn"))
+        {
+            kind = words.next().unwrap_or_default();
+        }
+        match kind {
+            "use" => {
+                let tree = item["use".len()..item.find(';').expect("unterminated pub use")].trim();
+                for leaf in use_leaves(tree).unwrap() {
+                    out.push(format!("use {leaf}"));
+                }
+            }
+            "fn" | "struct" | "enum" | "trait" | "type" | "const" | "static" | "mod" | "union" => {
+                out.push(format!("{kind} {}", words.next().unwrap_or_default()));
+            }
+            field => out.push(format!("field {field}")),
+        }
+    }
+    out
+}
+
+#[test]
+fn declaration_scan_sees_methods_fields_and_uses_only_when_unrestricted() {
+    let source = r#"
+        // pub fn hidden() {}
+        pub use a::{B, c::D as E};
+        pub struct S { pub x: u8, pub(crate) y: u8 }
+        impl S { pub const fn f<T>() {} pub(super) fn g() {} }
+        pub(crate) fn narrowed() {}
+    "#;
+    assert_eq!(
+        public_declarations(source),
+        ["use B", "use E", "struct S", "field x", "fn f"]
+    );
+}
+
+/// The lane runner's public subtree, file by file, is exactly the pinned
+/// declarations: `lib.rs` exempts the `lanes` module from its own pin, so
+/// this is where a lane API change is reviewed.
+#[test]
+fn the_lanes_module_declares_exactly_the_pinned_names() {
+    let facade: &[&str] = &[
+        "use gemm_estimate",
+        "use LaneGemmBody",
+        "use LaneGemmIo",
+        "use LaneGemmShape",
+        "use LaneGemms",
+        "use BatchPolicy",
+        "use Exec",
+        "use place",
+        "use place_each",
+        "use run_barrier",
+        "use run_native",
+        "use Barrier",
+        "use Outcome",
+        "use Work",
+        "enum StageKind",
+        "struct Estimate",
+        "field serial",
+        "field payback",
+        "field sections",
+        "enum Form",
+        "trait Jobs",
+        "struct Placement",
+        "fn lanes",
+        "fn share",
+        "fn jobs",
+        "struct LaneTables",
+        "fn placement",
+        "fn retained_bytes",
+    ];
+    for (file, source, expected) in [
+        ("lanes.rs", include_str!("../src/lanes.rs"), facade),
+        (
+            "lanes/placement.rs",
+            include_str!("../src/lanes/placement.rs"),
+            &["fn place", "fn place_each"],
+        ),
+        (
+            "lanes/runner.rs",
+            include_str!("../src/lanes/runner.rs"),
+            &[
+                "trait Work",
+                "trait Barrier",
+                "type Outcome",
+                "fn run_native",
+                "fn run_barrier",
+            ],
+        ),
+        (
+            "lane_gemm.rs",
+            include_str!("../src/lane_gemm.rs"),
+            &[
+                "struct LaneGemmShape",
+                "field rows",
+                "field k",
+                "field n",
+                "enum LaneGemmIo",
+                "trait LaneGemms",
+                "fn gemm_estimate",
+                "type LaneGemmBody",
+            ],
+        ),
+    ] {
+        assert_eq!(public_declarations(source), expected, "{file}");
+    }
 }

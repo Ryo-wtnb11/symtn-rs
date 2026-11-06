@@ -18,12 +18,7 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     ///
     /// The materialization of a lazy adjoint input can fail on the engine.
     pub fn re(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
-        let engine = cx.engine();
-        self.re_impl(engine)
-    }
-
-    fn re_impl(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, |value| value.re)
+        self.map_parts(cx.engine(), |value| value.re)
     }
 
     /// The element-wise imaginary part, as an f64 tensor map on the same
@@ -37,12 +32,7 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     ///
     /// As [`Self::re`].
     pub fn im(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
-        let engine = cx.engine();
-        self.im_impl(engine)
-    }
-
-    fn im_impl(&self, engine: &mut dyn Engine) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, |value| value.im)
+        self.map_parts(cx.engine(), |value| value.im)
     }
 
     /// The shared owned-input route of [`Self::re`] / [`Self::im`].

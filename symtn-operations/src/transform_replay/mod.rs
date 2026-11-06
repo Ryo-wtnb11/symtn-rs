@@ -47,103 +47,6 @@ pub use member::*;
 pub use owned::*;
 use writers::{scheduled_single, InitializedWriter, OwnedWriter, ReplayParts};
 
-#[cfg(test)]
-mod allocation_oracle {
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::cell::Cell;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Mutex;
-
-    thread_local! {
-        static MEASURED: Cell<bool> = const { Cell::new(false) };
-        static SESSION_ACTIVE: Cell<bool> = const { Cell::new(false) };
-    }
-
-    static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
-    static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
-    static SESSION: Mutex<()> = Mutex::new(());
-
-    struct CountingAllocator;
-
-    #[allow(unsafe_code)]
-    unsafe impl GlobalAlloc for CountingAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            let pointer = unsafe { System.alloc(layout) };
-            record(pointer, layout.size());
-            pointer
-        }
-
-        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-            let pointer = unsafe { System.alloc_zeroed(layout) };
-            record(pointer, layout.size());
-            pointer
-        }
-
-        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-            unsafe { System.dealloc(pointer, layout) }
-        }
-
-        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-            let pointer = unsafe { System.realloc(pointer, layout, new_size) };
-            record(pointer, new_size);
-            pointer
-        }
-    }
-
-    #[global_allocator]
-    static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-    fn record(pointer: *mut u8, bytes: usize) {
-        if !pointer.is_null() && is_measured() {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-            ALLOCATED_BYTES.fetch_add(bytes, Ordering::Relaxed);
-        }
-    }
-
-    struct RestoreMeasurement(bool);
-
-    struct RestoreSession(bool);
-
-    impl Drop for RestoreMeasurement {
-        fn drop(&mut self) {
-            MEASURED.with(|measured| measured.set(self.0));
-        }
-    }
-
-    impl Drop for RestoreSession {
-        fn drop(&mut self) {
-            SESSION_ACTIVE.with(|active| active.set(self.0));
-        }
-    }
-
-    pub(super) fn is_measured() -> bool {
-        MEASURED.with(Cell::get)
-    }
-
-    pub(super) fn with_session<R>(action: impl FnOnce() -> R) -> (R, usize) {
-        assert!(!is_measured());
-        assert!(!SESSION_ACTIVE.with(Cell::get));
-        let restore = RestoreSession(SESSION_ACTIVE.with(|active| active.replace(true)));
-        let session = SESSION
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        ALLOCATIONS.store(0, Ordering::Relaxed);
-        ALLOCATED_BYTES.store(0, Ordering::Relaxed);
-        let result = action();
-        let allocations = ALLOCATIONS.load(Ordering::Relaxed);
-        drop(session);
-        drop(restore);
-        (result, allocations)
-    }
-
-    pub(super) fn with_measurement<R>(action: impl FnOnce() -> R) -> R {
-        let restore = RestoreMeasurement(MEASURED.with(|measured| measured.replace(true)));
-        let result = action();
-        drop(restore);
-        result
-    }
-}
-
 impl<D: Zero> DestinationMode<D> {
     /// Whether the write ignores the destination: only such a write may run
     /// on a compiled plan.
@@ -212,17 +115,14 @@ where
     }
 }
 
-struct PhysicalOverwriteProof<'a, C> {
-    structure: &'a TreeTransformStructure<C>,
-    dst_structure: &'a Arc<BlockStructure>,
+struct PhysicalOverwriteProof {
     required_len: usize,
-    nout: usize,
 }
 
-impl<'a, C: Copy> PhysicalOverwriteProof<'a, C> {
-    fn new(
-        structure: &'a TreeTransformStructure<C>,
-        dst_structure: &'a Arc<BlockStructure>,
+impl PhysicalOverwriteProof {
+    fn new<C: Copy>(
+        structure: &TreeTransformStructure<C>,
+        dst_structure: &Arc<BlockStructure>,
         src_structure: &Arc<BlockStructure>,
         src_len: usize,
         nout: usize,
@@ -247,12 +147,7 @@ impl<'a, C: Copy> PhysicalOverwriteProof<'a, C> {
         if next != required_len {
             return Ok(None);
         }
-        Ok(Some(Self {
-            structure,
-            dst_structure,
-            required_len,
-            nout,
-        }))
+        Ok(Some(Self { required_len }))
     }
 }
 
@@ -273,6 +168,7 @@ pub struct HostTreeTransformWorkspace<T> {
     // Identity of the structure whose layout-ordered RHS pack is installed.
     coefficient_structure_identity: Option<Weak<()>>,
     /// Coefficient packs converted into this workspace so far.
+    #[cfg(any(test, feature = "testing"))]
     coefficient_pack_builds: usize,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
@@ -298,6 +194,7 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             packed: TreeTransformScratchBuffers::default(),
             coefficient_scratch: Vec::new(),
             coefficient_structure_identity: None,
+            #[cfg(any(test, feature = "testing"))]
             coefficient_pack_builds: 0,
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
@@ -356,6 +253,7 @@ impl<T> HostTreeTransformWorkspace<T> {
     /// Coefficient packs this workspace has converted: a warm replay of the
     /// structure whose pack is installed converts none.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn coefficient_pack_builds(&self) -> usize {
         self.coefficient_pack_builds
     }
@@ -405,7 +303,7 @@ impl<T> HostTreeTransformWorkspace<T> {
     }
 
     fn prepare_fused_indices(&mut self, max_fused_rank: usize) -> Result<(), OperationError> {
-        let len = checked_fused_index_len(1, max_fused_rank)?;
+        let len = checked_fused_index_len(max_fused_rank)?;
         if len > self.fused_indices.len() {
             self.fused_indices.resize(len, 0);
         }
@@ -434,52 +332,15 @@ fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize
 
 // Why not reserve here: public drivers call this before beta mutation, while
 // executors retain ownership of actual workspace growth and profiler attribution.
-fn checked_fused_index_len(threads: usize, max_fused_rank: usize) -> Result<usize, OperationError> {
-    let len = threads
-        .max(1)
-        .checked_mul(max_fused_rank)
-        .ok_or_else(|| OperationError::ElementCountOverflow)?;
-    core::alloc::Layout::array::<usize>(len).map_err(|_| OperationError::ElementCountOverflow)?;
-    Ok(len)
+fn checked_fused_index_len(max_fused_rank: usize) -> Result<usize, OperationError> {
+    core::alloc::Layout::array::<usize>(max_fused_rank)
+        .map_err(|_| OperationError::ElementCountOverflow)?;
+    Ok(max_fused_rank)
 }
 
 impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {
     #[inline]
     fn placement(&self) -> Placement {
         Placement::Host
-    }
-}
-
-#[cfg(test)]
-mod allocation_oracle_tests {
-    use super::allocation_oracle;
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-
-    #[test]
-    fn allocation_oracle_recovers_after_a_panicking_session() {
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            allocation_oracle::with_session(|| {
-                allocation_oracle::with_measurement(|| panic!("expected oracle panic"))
-            });
-        }));
-        assert!(panic.is_err());
-        assert!(!allocation_oracle::is_measured());
-
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            allocation_oracle::with_measurement(|| assert!(allocation_oracle::is_measured()))
-        });
-        assert_eq!(allocations, 0);
-        assert!(!allocation_oracle::is_measured());
-    }
-
-    #[test]
-    fn allocation_oracle_rejects_nested_sessions() {
-        let nested = catch_unwind(AssertUnwindSafe(|| {
-            allocation_oracle::with_session(|| allocation_oracle::with_session(|| ()))
-        }));
-        assert!(nested.is_err());
-
-        let (_, allocations) = allocation_oracle::with_session(|| ());
-        assert_eq!(allocations, 0);
     }
 }

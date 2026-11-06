@@ -277,8 +277,8 @@ pub use symtn_core::{
     FusionTreePairKey, MultiplicityIndex, OpaqueBlockKey,
 };
 /// The caller-owned execution resources every numerical operation takes as
-/// its first argument (any [`ExecContext`], which every engine is): tenferro's engine trait, its CPU engine and the CPU
-/// engine's thread pool.
+/// its first argument (any [`ExecContext`], which every engine is):
+/// tenferro's engine trait, its CPU engine and the CPU engine's thread pool.
 ///
 /// How grouped dense blocks (the recoupling and contraction GEMM batches and
 /// the sector-block factorizations) use a pooled `CpuEngine`'s threads is the

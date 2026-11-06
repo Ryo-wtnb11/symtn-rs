@@ -231,32 +231,7 @@ fn every_destination_element_has_one_writer() {
     let mut dense = Spy::new(&transform);
     let (marks, _) = record(&mut engine, &mut dense, &transform, len, &source);
 
-    let mut addressed = vec![false; len];
-    for &(offset, dims, strides) in &blocks {
-        for at in addresses(offset, &dims, &strides) {
-            addressed[at] = true;
-        }
-    }
-    for (at, mark) in marks.iter().enumerate() {
-        assert_eq!(mark.writes, u32::from(addressed[at]), "element {at}");
-    }
-    // Atom `[0, 4 COLUMNS)`: band `k` is elements `4k..4k + 4`.
-    let mut atom_workers = Vec::new();
-    for band in 0..COLUMNS {
-        let workers = (4 * band..4 * band + 4)
-            .map(|at| marks[at].worker)
-            .collect::<Vec<_>>();
-        assert!(workers.iter().all(|w| *w == workers[0]), "band {band}");
-        atom_workers.push(workers[0]);
-    }
-    atom_workers.sort_unstable_by_key(|w| format!("{w:?}"));
-    atom_workers.dedup();
-    assert!(atom_workers.len() > 1, "the bandable atom is not banded");
-    let injective = addresses(6 * COLUMNS, &[3, 2], &[2, 3])
-        .into_iter()
-        .map(|at| marks[at].worker)
-        .collect::<Vec<_>>();
-    assert!(injective.iter().all(|w| w.is_some() && *w == injective[0]));
+    assert_one_writer_per_element(&blocks, &marks);
 }
 
 /// What: a lone bandable component whose movement and GEMM estimates pay
@@ -567,27 +542,19 @@ fn the_lowest_failing_component_is_reported() {
     ));
 }
 
-/// What: the fixture of the process-wide warm allocation test
+#[path = "../../../tests/support/warm_tree_lanes.rs"]
+mod warm_tree_lanes;
+
+/// What: the small fixture of the process-wide warm allocation test
 /// (`tests/warm_tree_lanes.rs`), eight Multi groups of two `[8, 3]` blocks
-/// and a Single, runs on four lanes under `Outer` on a four-worker engine.
+/// and a Single, runs under `Outer` on one lane per component up to the
+/// engine's width.
 #[test]
 fn the_warm_allocation_fixture_runs_on_four_lanes() {
-    let structure = Arc::new(BlockStructure::packed_column_major(2, vec![vec![8, 3]; 17]).unwrap());
-    let mut specs = (0..8)
-        .map(|g| {
-            TreeTransformBlockSpec::multi(
-                vec![2 * g, 2 * g + 1],
-                vec![2 * g, 2 * g + 1],
-                vec![1.0, 2.0, -0.5, 1.5],
-            )
-        })
-        .collect::<Vec<_>>();
-    specs.push(TreeTransformBlockSpec::single(16, 16, -2.0));
-    let transform =
-        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
-    let mut engine = CpuEngine::new(Pool::builder().threads(4).build().unwrap())
+    let (_, transform, source) = warm_tree_lanes::fixture(8, 8);
+    let threads = warm_tree_lanes::THREADS;
+    let mut engine = CpuEngine::new(Pool::builder().threads(threads).build().unwrap())
         .with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
-    let source = vec![1.0; 17 * 24];
     let (_, workspace) = record(
         &mut engine,
         &mut Spy::new(&transform),
@@ -595,5 +562,8 @@ fn the_warm_allocation_fixture_runs_on_four_lanes() {
         source.len(),
         &source,
     );
-    assert_eq!(workspace.lanes.placement().lanes(), 4);
+    assert_eq!(
+        workspace.lanes.placement().lanes(),
+        transform.parallel_schedule().component_count().min(threads)
+    );
 }

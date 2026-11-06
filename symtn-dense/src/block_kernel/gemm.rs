@@ -21,9 +21,9 @@ use tcontract::{Plan, PlanConfig, SliceAccumulationSource};
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
+use super::driver::{self, BlockOp, Entry, LaneMembers};
 use crate::fresh::{split_fresh_segments, FreshParts};
-use crate::lanes::{Estimate, LaneTables};
+use crate::lanes::{recycle, Estimate, LaneTables};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
@@ -240,11 +240,17 @@ pub(crate) fn execute_erased<T: Scalar + Default>(
     .map_err(|err| grouped_error(err.to_string()))
 }
 
-/// A job's weighted work: `m k n` multiply-adds, four times that for a
-/// complex scalar.
-pub(crate) fn work<T: Scalar>(job: &DenseGemmBatchJob) -> f64 {
-    let complex = if T::IS_COMPLEX { 4.0 } else { 1.0 };
-    job.rows as f64 * job.contracted as f64 * job.cols as f64 * complex
+/// A job's one-stage estimate at tcontract's GEMM rate.
+fn estimate<T: Scalar>(job: &DenseGemmBatchJob, model: &WorkModel) -> Estimate {
+    crate::lane_gemm::gemm_stage_estimate(
+        crate::lanes::LaneGemmShape {
+            rows: job.rows,
+            k: job.contracted,
+            n: job.cols,
+        },
+        T::IS_COMPLEX,
+        model,
+    )
 }
 
 fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
@@ -272,11 +278,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     type Lane = ();
 
     fn estimate(&self, index: usize, _: &Self::Job, model: &WorkModel) -> Estimate {
-        Estimate {
-            serial: driver::cost(OpKind::Gemm, work::<T>(&self.jobs[index]), model),
-            payback: None,
-            sections: 1,
-        }
+        estimate::<T>(&self.jobs[index], model)
     }
 
     fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
@@ -329,11 +331,7 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     type Lane = ();
 
     fn estimate(&self, index: usize, _: &Self::Job, model: &WorkModel) -> Estimate {
-        Estimate {
-            serial: driver::cost(OpKind::Gemm, work::<T>(&self.jobs[index]), model),
-            payback: None,
-            sections: 1,
-        }
+        estimate::<T>(&self.jobs[index], model)
     }
 
     fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
@@ -448,18 +446,6 @@ impl GemmScratch {
     pub(crate) fn keep_fresh_slots<T>(&mut self, slots: FreshSlots<'_, T>) {
         self.fresh_slots = recycle(slots);
     }
-}
-
-/// `vec`'s allocation, emptied, for elements of another lifetime or type of
-/// the same layout.
-///
-/// Why not a transmute: the crate forbids unsafe code. std collects a mapped
-/// `vec::IntoIter` in place when the layouts match; that is an optimization,
-/// not a documented guarantee, so the prepared-workspace allocation tests pin
-/// it (a regression would reallocate, never misbehave).
-fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
-    vec.clear();
-    vec.into_iter().map(|_| unreachable!("emptied")).collect()
 }
 
 /// A job's operand range; an empty one may start anywhere, as validation

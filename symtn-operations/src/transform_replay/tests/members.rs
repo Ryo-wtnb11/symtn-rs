@@ -11,10 +11,6 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 use super::super::writers::ReplayParts;
 
-fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
-    crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
-}
-
 /// The member overwrite of `members` members on `engine` through `dense`.
 #[allow(clippy::too_many_arguments)]
 fn overwrite_members<E: DenseExecutor>(

@@ -62,10 +62,20 @@ pub trait LaneGemms: Sync {
 /// per complex one), one provider stage.
 pub fn gemm_estimate(dtype: DenseDType, shape: LaneGemmShape) -> Estimate {
     let complex = matches!(dtype, DenseDType::C32 | DenseDType::C64);
+    gemm_stage_estimate(shape, complex, &tcontract_exec::WorkModel::default())
+}
+
+/// [`gemm_estimate`] for the block kernels' own GEMMs, at tcontract's GEMM
+/// rate (`model` prices only factorizations).
+pub(crate) fn gemm_stage_estimate(
+    shape: LaneGemmShape,
+    complex: bool,
+    model: &tcontract_exec::WorkModel,
+) -> Estimate {
     let work =
         shape.rows as f64 * shape.k as f64 * shape.n as f64 * if complex { 4.0 } else { 1.0 };
     Estimate {
-        serial: driver::cost(OpKind::Gemm, work, &tcontract_exec::WorkModel::default()),
+        serial: driver::cost(OpKind::Gemm, work, model),
         payback: None,
         sections: 1,
     }

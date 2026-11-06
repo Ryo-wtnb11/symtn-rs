@@ -6,6 +6,8 @@ use crate::kernel_adapter::movement::{Store, Write};
 use crate::transform_structure::TreeTransformDirectItem;
 use std::sync::Mutex;
 use std::thread::ThreadId;
+use symtn_dense::CpuEngine;
+use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 use super::super::writers::{crop_role, inactive_role, DestinationWriter, ReplayParts};
 
@@ -195,6 +197,50 @@ pub(super) fn interleaved_bandable(
     }
     let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
     (blocks, dst, src, transform)
+}
+
+/// The one-writer contract of an [`interleaved_bandable`]`(true)` replay
+/// on four workers: every addressed element of `blocks` is written exactly
+/// once and nothing else is; a band of the interleaved atom is never split,
+/// its bands go to more than one worker, and the injective `[3, 2]` /
+/// `[2, 3]` block is written whole by one worker.
+#[allow(clippy::type_complexity)]
+pub(super) fn assert_one_writer_per_element(
+    blocks: &[(usize, [usize; 2], [usize; 2])],
+    marks: &[Mark],
+) {
+    let len = marks.len();
+    let mut addressed = vec![false; len];
+    for &(offset, dims, strides) in blocks {
+        for at in addresses(offset, &dims, &strides) {
+            addressed[at] = true;
+        }
+    }
+    for (at, mark) in marks.iter().enumerate() {
+        assert_eq!(mark.writes, u32::from(addressed[at]), "element {at}");
+    }
+    // Atom `[0, 4 COLUMNS)`: band `k` is elements `4k..4k + 4`.
+    let mut atom_workers = Vec::new();
+    for band in 0..COLUMNS {
+        let workers = (4 * band..4 * band + 4)
+            .map(|at| marks[at].worker)
+            .collect::<Vec<_>>();
+        assert!(workers.iter().all(|w| *w == workers[0]), "band {band}");
+        atom_workers.push(workers[0]);
+    }
+    atom_workers.sort_unstable_by_key(|w| format!("{w:?}"));
+    atom_workers.dedup();
+    assert!(atom_workers.len() > 1, "the bandable atom is not banded");
+    let injective = addresses(6 * COLUMNS, &[3, 2], &[2, 3])
+        .into_iter()
+        .map(|at| marks[at].worker)
+        .collect::<Vec<_>>();
+    assert!(injective.iter().all(|w| w.is_some() && *w == injective[0]));
+}
+
+/// An eager-policy engine of `threads` workers under `strategy`.
+pub(super) fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
+    crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
 }
 
 /// The error a test executor injects for recoupling group `group`.

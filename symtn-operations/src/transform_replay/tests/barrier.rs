@@ -10,10 +10,6 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 use super::super::writers::ReplayParts;
 
-fn engine(threads: usize, strategy: CpuBatchStrategy) -> CpuEngine {
-    crate::host_pool::eager_test_engine(threads).with_batch_policy(CpuBatchPolicy::new(strategy))
-}
-
 /// `alpha T(src) + beta dst` on `budget` workers under `strategy`.
 #[allow(clippy::too_many_arguments)]
 fn update<E: DenseExecutor>(
@@ -171,32 +167,7 @@ fn every_destination_element_has_one_writer_in_the_barrier_form() {
     .unwrap();
     assert!(ran, "placement left the lane runner");
 
-    let mut addressed = vec![false; len];
-    for &(offset, dims, strides) in &blocks {
-        for at in addresses(offset, &dims, &strides) {
-            addressed[at] = true;
-        }
-    }
-    for (at, mark) in marks.iter().enumerate() {
-        assert_eq!(mark.writes, u32::from(addressed[at]), "element {at}");
-    }
-    // Atom `[0, 4 COLUMNS)`: band `k` is elements `4k..4k + 4`.
-    let mut atom_workers = Vec::new();
-    for band in 0..COLUMNS {
-        let workers = (4 * band..4 * band + 4)
-            .map(|at| marks[at].worker)
-            .collect::<Vec<_>>();
-        assert!(workers.iter().all(|w| *w == workers[0]), "band {band}");
-        atom_workers.push(workers[0]);
-    }
-    atom_workers.sort_unstable_by_key(|w| format!("{w:?}"));
-    atom_workers.dedup();
-    assert!(atom_workers.len() > 1, "the bandable atom is not banded");
-    let injective = addresses(6 * COLUMNS, &[3, 2], &[2, 3])
-        .into_iter()
-        .map(|at| marks[at].worker)
-        .collect::<Vec<_>>();
-    assert!(injective.iter().all(|w| w.is_some() && *w == injective[0]));
+    assert_one_writer_per_element(&blocks, &marks);
 }
 
 /// What: component 0's second GEMM (`e0`) and component 1's only GEMM

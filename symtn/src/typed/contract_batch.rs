@@ -552,16 +552,7 @@ where
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
     ) -> Result<Self, Error> {
-        let engine = cx.engine();
-        Self::new_impl(engine, lhs, rhs)
-    }
-
-    fn new_impl(
-        engine: &mut dyn Engine,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-    ) -> Result<Self, Error> {
-        ContractPlan::prepare(engine, lhs, rhs, None).map(Self)
+        ContractPlan::prepare(cx.engine(), lhs, rhs, None).map(Self)
     }
 
     /// The signature of every output member.
@@ -594,18 +585,7 @@ where
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        let engine = cx.engine();
-        self.execute_impl(engine, lhs, rhs, workspace)
-    }
-
-    fn execute_impl<'a>(
-        &self,
-        engine: &mut dyn Engine,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-        workspace: &'a mut ContractWorkspace<R, D, S>,
-    ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        self.0.execute_impl(engine, lhs, rhs, workspace)
+        self.0.execute_impl(cx.engine(), lhs, rhs, workspace)
     }
 
     /// Composes every member pair into the caller's `dst`, overwriting it;
@@ -627,19 +607,8 @@ where
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
-        let engine = cx.engine();
-        self.execute_into_impl(engine, lhs, rhs, dst, workspace)
-    }
-
-    fn execute_into_impl(
-        &self,
-        engine: &mut dyn Engine,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-        dst: &mut StackedTensorMap<R, D, S>,
-        workspace: &mut ContractWorkspace<R, D, S>,
-    ) -> Result<(), Error> {
-        self.0.execute_into_impl(engine, lhs, rhs, dst, workspace)
+        self.0
+            .execute_into_impl(cx.engine(), lhs, rhs, dst, workspace)
     }
 }
 

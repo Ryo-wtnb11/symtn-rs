@@ -60,16 +60,7 @@ impl Network {
         cx: &mut (impl ExecContext + ?Sized),
         tensors: &[&T],
     ) -> Result<T, T::Error> {
-        let engine = cx.engine();
-        self.contract_impl(engine, tensors)
-    }
-
-    fn contract_impl<T: NetworkOperand>(
-        &self,
-        engine: &mut dyn symtn::typed::Engine,
-        tensors: &[&T],
-    ) -> Result<T, T::Error> {
-        T::contract_network(engine, self, tensors)
+        T::contract_network(cx.engine(), self, tensors)
     }
 
     fn validate_operand_count(&self, operands: usize) -> Result<(), Error> {

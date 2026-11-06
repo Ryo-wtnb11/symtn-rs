@@ -15,11 +15,13 @@ use crate::OperationError;
 mod coefficients;
 mod compile;
 mod layout_table;
+mod ownership;
 mod schedule;
 
 pub(crate) use self::coefficients::*;
 pub use self::compile::*;
 pub use self::layout_table::*;
+use self::ownership::*;
 pub use self::schedule::*;
 
 /// Replay-ready tree-transform descriptor: a cheap shared handle. Clone
@@ -356,6 +358,7 @@ impl<T: Copy> TreeTransformStructure<T> {
 
     /// Whether `self` and `other` share one coefficient payload allocation.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn shares_coefficients_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.core.coefficients, &other.core.coefficients)
     }
@@ -381,8 +384,9 @@ impl<T: Copy> TreeTransformStructure<T> {
         &self.core.recoupling_plan
     }
 
-    /// Test/diagnostic helper: per-block replay weights.
+    /// Test helper: per-block replay weights.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn replay_weights(&self) -> Vec<usize> {
         self.core
             .blocks

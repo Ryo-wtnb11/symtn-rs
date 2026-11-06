@@ -287,11 +287,12 @@ fn the_placement_queue_holds_one_entry_per_lane() {
     let mut jobs = vec![vec![(P, serial(1000))]; 64];
     jobs.push(vec![(P, serial(1))]);
     let batch = Batch::new(jobs);
-    let mut engine = engine(2, BatchPolicy::default(), row(60));
-    on(&mut engine, 2, |exec| {
+    let budget = 2;
+    let mut engine = engine(budget, BatchPolicy::default(), row(60));
+    on(&mut engine, budget, |exec| {
         let mut tables = LaneTables::default();
         place(&exec, &batch, Form::Native, &mut tables);
-        assert!(tables.queued() <= 2, "{} entries", tables.queued());
+        assert!(tables.queued() <= budget, "{} entries", tables.queued());
     });
 }
 

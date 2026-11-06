@@ -45,10 +45,6 @@ where
     else {
         return Ok(None);
     };
-    debug_assert_eq!(proof.required_len, dst_structure.required_len()?);
-    debug_assert_eq!(proof.nout, nout);
-    debug_assert!(Arc::ptr_eq(proof.dst_structure, dst_structure));
-    debug_assert!(core::ptr::eq(proof.structure, structure));
     let task = structure.task_view()?;
     task.validate_workspace_requirements::<D>()?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {

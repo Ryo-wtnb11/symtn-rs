@@ -12,8 +12,8 @@
 //! (member, component) pair one job.
 //!
 //! Its own test binary with one test, so the shared counting allocator's
-//! process-wide measurement sees only that test. That the fixture really runs on four
-//! lanes is asserted in the crate's
+//! process-wide measurement sees only that test. That the fixture really
+//! runs on four lanes is asserted in the crate's
 //! `the_warm_allocation_fixture_runs_on_four_lanes`, which can read the
 //! placement.
 
@@ -43,37 +43,13 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "support/warm_tree_lanes.rs"]
+mod warm_tree_lanes;
+
+use warm_tree_lanes::fixture;
 
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
-
-/// `groups` Multi groups of two `[rows, 3]` blocks each (24 elements at
-/// eight rows keep every stage's copy estimate nonzero), one joint component
-/// per group, plus one Single, recoupled by a non-identity matrix.
-fn fixture(
-    groups: usize,
-    rows: usize,
-) -> (Arc<BlockStructure>, TreeTransformStructure<f64>, Vec<f64>) {
-    let structure = Arc::new(
-        BlockStructure::packed_column_major(2, vec![vec![rows, 3]; 2 * groups + 1]).unwrap(),
-    );
-    let mut specs = (0..groups)
-        .map(|g| {
-            TreeTransformBlockSpec::multi(
-                vec![2 * g, 2 * g + 1],
-                vec![2 * g, 2 * g + 1],
-                vec![1.0, 2.0, -0.5, 1.5],
-            )
-        })
-        .collect::<Vec<_>>();
-    specs.push(TreeTransformBlockSpec::single(2 * groups, 2 * groups, -2.0));
-    let transform =
-        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
-    let source = (0..structure.required_len().unwrap())
-        .map(|value| value as f64 * 0.25)
-        .collect();
-    (structure, transform, source)
-}
 
 /// Rank of the high-rank fixtures.
 const RANK: usize = 17;
@@ -194,8 +170,11 @@ impl DenseExecutor for Forwarding {
 
 #[test]
 fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
-    let pool = Pool::builder().threads(4).build().unwrap();
-    // `Outer` places the components on four one-slot lanes.
+    let pool = Pool::builder()
+        .threads(warm_tree_lanes::THREADS)
+        .build()
+        .unwrap();
+    // `Outer` places the components on one-slot lanes.
     let engine =
         &mut CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
     let mut backend = DenseTreeTransformOperations::default();

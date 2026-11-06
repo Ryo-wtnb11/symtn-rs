@@ -575,11 +575,8 @@ pub(super) fn recoupling_multi_block<C: Copy>(
     task: TreeTransformTaskView<'_, C>,
     block_index: usize,
 ) -> Result<&TreeTransformBlock, OperationError> {
-    // Lazy error construction: recoupling_multi_block is called per block on the
-    // hot replay path (pack/recouple/scatter). Eager .ok_or built the
-    // BlockIndexOutOfBounds struct on every success too, which the d=4 bisect
-    // (see issue #103) attributed to the compose regression. .ok_or_else only
-    // builds it on the never-taken out-of-bounds path.
+    // Why not `.ok_or`: this runs per block on the hot replay path, and an
+    // eager error value would be built on every success.
     let block =
         task.blocks()
             .get(block_index)
@@ -789,10 +786,9 @@ mod allocation_replay_tests {
         };
 
         pool.install(&mut replay);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
-        });
-        assert_eq!(allocations, 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
@@ -846,10 +842,9 @@ mod allocation_replay_tests {
         };
 
         pool.install(&mut replay);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
-        });
-        assert_eq!(allocations, 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
@@ -908,10 +903,9 @@ mod allocation_replay_tests {
         };
 
         pool.install(&mut replay);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
-        });
-        assert_eq!(allocations, 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
@@ -1001,27 +995,25 @@ mod allocation_replay_tests {
 
         assert_eq!(threaded, expected);
         threaded.fill(0.0);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| {
-                allocation_oracle::with_measurement(|| {
-                    tree_transform_structure_with_structural_recoupling_raw(
-                        engine,
-                        &mut kernels,
-                        &mut dense,
-                        &mut workspace,
-                        &structure,
-                        &block_structure,
-                        &block_structure,
-                        &mut threaded,
-                        &src,
-                        1.0,
-                        0.0,
-                    )
-                    .unwrap();
-                })
+        let ((), allocations) = pool.install(|engine| {
+            crate::counting_alloc::measure(|| {
+                tree_transform_structure_with_structural_recoupling_raw(
+                    engine,
+                    &mut kernels,
+                    &mut dense,
+                    &mut workspace,
+                    &structure,
+                    &block_structure,
+                    &block_structure,
+                    &mut threaded,
+                    &src,
+                    1.0,
+                    0.0,
+                )
+                .unwrap();
             })
         });
-        assert_eq!(allocations, 0);
+        assert_eq!(allocations.calls, 0);
         assert_eq!(threaded, expected);
     }
 }
