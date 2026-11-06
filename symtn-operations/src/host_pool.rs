@@ -39,41 +39,78 @@ pub fn region<R>(
 ) -> Result<R, OperationError> {
     #[cfg(feature = "tenferro")]
     {
-        let mut op = Some(op);
-        let ran = tenferro_cpu::with_cpu_engine(engine, |cpu| {
-            let exec = cpu.exec().map_err(|err| {
-                OperationError::Dense(DenseError::Backend {
-                    backend: symtn_dense::DenseBackend::Tenferro,
-                    op: "host_region",
-                    message: err.to_string(),
-                })
-            })?;
-            let exec = exec.into_token();
-            observe(site, exec.budget().get());
-            let op = op.take().expect("region body runs once");
-            Ok(op(exec))
-        });
-        match ran {
-            Some(result) => result,
-            // Why only plan compilation: the other sites move Host payload,
-            // which a CUDA engine does not execute.
-            #[cfg(feature = "cuda")]
-            None if site == HostPoolSite::PlanCompile && is_cuda_engine(engine) => {
-                observe(site, 1);
-                let op = op.take().expect("region body runs once");
-                Ok(op(Exec::serial()))
-            }
-            None => Err(OperationError::Dense(DenseError::Unsupported {
-                op: "host_region",
-                message: "a Host region needs the caller's CPU engine".to_string(),
-            })),
-        }
+        enter(engine, site, false, |exec| op(exec.into_token()))
     }
     #[cfg(not(feature = "tenferro"))]
     {
         let _ = engine;
         observe(site, 1);
         Ok(op(Exec::serial()))
+    }
+}
+
+/// [`region`] with the engine's whole execution context (its token,
+/// workspace and batch policy), which the lane runner places by.
+///
+/// The context is the engine's guarded entry (`CpuEngine::with_exec`): a
+/// panic in `op`, including one a fork joined and resumed, marks the engine
+/// broken before it unwinds, and a broken engine refuses every later entry.
+///
+/// Why [`region`] keeps the unguarded borrow: the guarded entry's retention
+/// check locks the engine's workspace arena, and on Apple targets that std
+/// mutex allocates on its first lock, which every fresh engine's first Host
+/// phase would then pay.
+#[cfg(feature = "tenferro")]
+#[doc(hidden)]
+pub fn lane_region<R>(
+    engine: &mut dyn Engine,
+    site: HostPoolSite,
+    op: impl FnOnce(symtn_dense::lanes::Exec<'_>) -> R,
+) -> Result<R, OperationError> {
+    enter(engine, site, true, op)
+}
+
+/// The engine's execution context for `op`, through its guarded entry when
+/// `guarded`.
+#[cfg(feature = "tenferro")]
+fn enter<R>(
+    engine: &mut dyn Engine,
+    site: HostPoolSite,
+    guarded: bool,
+    op: impl FnOnce(symtn_dense::lanes::Exec<'_>) -> R,
+) -> Result<R, OperationError> {
+    let mut op = Some(op);
+    let mut run = |exec: symtn_dense::lanes::Exec<'_>| {
+        observe(site, exec.budget());
+        let op = op.take().expect("region body runs once");
+        op(exec)
+    };
+    let ran = tenferro_cpu::with_cpu_engine(engine, |cpu| {
+        let ran = if guarded {
+            cpu.with_exec(|exec| run(exec.reborrow()))
+        } else {
+            cpu.exec().map(&mut run)
+        };
+        ran.map_err(|err| {
+            OperationError::Dense(DenseError::Backend {
+                backend: symtn_dense::DenseBackend::Tenferro,
+                op: "host_region",
+                message: err.to_string(),
+            })
+        })
+    });
+    match ran {
+        Some(result) => result,
+        // Why only plan compilation: the other sites move Host payload,
+        // which a CUDA engine does not execute.
+        #[cfg(feature = "cuda")]
+        None if site == HostPoolSite::PlanCompile && is_cuda_engine(engine) => {
+            Ok(run(symtn_dense::lanes::Exec::serial()))
+        }
+        None => Err(OperationError::Dense(DenseError::Unsupported {
+            op: "host_region",
+            message: "a Host region needs the caller's CPU engine".to_string(),
+        })),
     }
 }
 

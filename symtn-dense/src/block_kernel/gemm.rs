@@ -795,14 +795,11 @@ impl crate::lanes::LaneGemms for NativeLaneGemms<'_> {
     }
 
     fn estimate(&self, job: usize) -> Estimate {
-        let complex = matches!(self.dtype, crate::DenseDType::C32 | crate::DenseDType::C64);
-        let work = self.jobs.get(job).map_or(0.0, |shape| {
-            shape.rows as f64 * shape.k as f64 * shape.n as f64 * if complex { 4.0 } else { 1.0 }
-        });
-        Estimate {
-            serial: driver::cost(OpKind::Gemm, work, &WorkModel::default()),
-            payback: None,
-            sections: 1,
-        }
+        let none = crate::lanes::LaneGemmShape {
+            rows: 0,
+            k: 0,
+            n: 0,
+        };
+        crate::lanes::gemm_estimate(self.dtype, self.jobs.get(job).copied().unwrap_or(none))
     }
 }

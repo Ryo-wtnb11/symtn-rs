@@ -4,8 +4,9 @@
 
 use num_complex::{Complex32, Complex64};
 
+use crate::block_kernel::driver::{self, OpKind};
 use crate::lanes::{Estimate, Exec};
-use crate::DenseError;
+use crate::{DenseDType, DenseError};
 
 /// One lane GEMM's geometry: `rows x k` times `k x n`, every operand packed
 /// column-major with no transposition.
@@ -54,6 +55,20 @@ pub trait LaneGemms: Sync {
     /// The serial estimate of job `job` that the block kernels place their
     /// own GEMMs by: one provider stage. An unknown job estimates zero.
     fn estimate(&self, job: usize) -> Estimate;
+}
+
+/// The serial estimate a `dtype` GEMM of `shape` is placed by, lane GEMM or
+/// engine submission alike: tcontract's rate over its multiply-adds (four
+/// per complex one), one provider stage.
+pub fn gemm_estimate(dtype: DenseDType, shape: LaneGemmShape) -> Estimate {
+    let complex = matches!(dtype, DenseDType::C32 | DenseDType::C64);
+    let work =
+        shape.rows as f64 * shape.k as f64 * shape.n as f64 * if complex { 4.0 } else { 1.0 };
+    Estimate {
+        serial: driver::cost(OpKind::Gemm, work, &tcontract_exec::WorkModel::default()),
+        payback: None,
+        sections: 1,
+    }
 }
 
 /// The body of a [`crate::DenseExecutor::with_lane_gemms`]: called at most

@@ -16,9 +16,11 @@ pub struct TreeTransformReplayProfile {
     pub multi_scatter: Duration,
     pub strided_view_setup: Duration,
     pub strided_kernel: Duration,
-    /// Wall time of a lane replay, from the lane-GEMM entry to its return;
+    /// Wall time of a lane replay, from the runner's entry to its return;
     /// the per-phase fields above stay zero on that route, whose stages run
-    /// concurrently.
+    /// concurrently, except that the barrier form (an executor without lane
+    /// GEMMs) reports its GEMM submissions to the engine, which run between
+    /// its rounds, as `multi_dense_matmul_call` and `multi_matmul_total`.
     pub fused_lanes: Duration,
     pub single_blocks: usize,
     pub multi_blocks: usize,

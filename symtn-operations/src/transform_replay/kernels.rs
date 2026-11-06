@@ -701,17 +701,15 @@ mod allocation_replay_tests {
             _rhs: DenseRead<'_>,
             _config: &DenseDotConfig,
         ) -> Result<(), DenseError> {
-            unreachable!("tree replay uses the batched matmul entry point")
+            unreachable!("tree replay uses the accumulate-form matmul")
         }
 
-        fn matmul_batch_axpby_into(
+        fn matmul_axpby_into(
             &mut self,
             _engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
-            jobs: &[DenseGemmBatchJob],
-            _runs: &[usize],
             _alpha: DenseScalar,
             _beta: DenseScalar,
         ) -> Result<(), DenseError> {
@@ -721,24 +719,21 @@ mod allocation_replay_tests {
                 }
                 _ => unreachable!("allocation oracle uses f64"),
             };
-            let output_offset = output.offset();
-            let lhs_offset = lhs.offset();
-            let rhs_offset = rhs.offset();
+            let [rows, contracted] = *lhs.shape() else {
+                unreachable!("a matrix product")
+            };
+            let cols = rhs.shape()[1];
+            let (output_offset, lhs_offset, rhs_offset) =
+                (output.offset(), lhs.offset(), rhs.offset());
             let output_data = output.data_mut();
-            for job in jobs {
-                for col in 0..job.cols {
-                    for row in 0..job.rows {
-                        let mut value = 0.0;
-                        for contracted in 0..job.contracted {
-                            value += lhs.data()
-                                [lhs_offset + job.lhs_offset + row + contracted * job.rows]
-                                * rhs.data()[rhs_offset
-                                    + job.rhs_offset
-                                    + contracted
-                                    + col * job.contracted];
-                        }
-                        output_data[output_offset + job.dst_offset + row + col * job.rows] = value;
+            for col in 0..cols {
+                for row in 0..rows {
+                    let mut value = 0.0;
+                    for k in 0..contracted {
+                        value += lhs.data()[lhs_offset + row + k * rows]
+                            * rhs.data()[rhs_offset + k + col * contracted];
                     }
+                    output_data[output_offset + row + col * rows] = value;
                 }
             }
             Ok(())

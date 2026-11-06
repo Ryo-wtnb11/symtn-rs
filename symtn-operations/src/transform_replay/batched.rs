@@ -3,17 +3,15 @@ use super::*;
 use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// Replays a validated task into `dst` through `writer`, on one of two
-/// routes chosen before any write:
+/// Replays a validated task into `dst` through `writer`, on a route chosen
+/// before any write:
 ///
-/// - the lane runner ([`super::lanes::lane_replay`]) when the engine has
-///   more than one slot, `dense` runs lane GEMMs and placement gives more
-///   than one slot: every joint component is one job placed on a lane;
+/// - the lane runner when the engine has more than one slot and placement
+///   gives more than one slot, every joint component one job placed on a
+///   lane: natively ([`super::lanes::lane_replay`]) when `dense` runs lane
+///   GEMMs, otherwise in the barrier form ([`super::lanes::barrier_replay`]),
+///   which hands each GEMM to the engine between rounds;
 /// - otherwise the one-worker replay ([`replay_serial`]).
-///
-/// Why one worker for an executor without lane GEMMs (BLAS and custom
-/// executors): its GEMM needs the engine itself, between Host phases, which
-/// only the barrier form of the runner provides.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay<E, W, T, D, C>(
     engine: &mut dyn Engine,
@@ -37,9 +35,13 @@ where
     #[cfg(feature = "tenferro")]
     let profile = {
         let mut profile = profile;
-        if dense.supports_lane_gemms()
-            && crate::host_pool::threads(engine) > 1
-            && super::lanes::lane_replay(
+        if crate::host_pool::threads(engine) > 1 {
+            let lanes = if dense.supports_lane_gemms() {
+                super::lanes::lane_replay
+            } else {
+                super::lanes::barrier_replay
+            };
+            if lanes(
                 engine,
                 dense,
                 workspace,
@@ -49,9 +51,9 @@ where
                 src,
                 writer,
                 profile.as_deref_mut(),
-            )?
-        {
-            return Ok(());
+            )? {
+                return Ok(());
+            }
         }
         profile
     };

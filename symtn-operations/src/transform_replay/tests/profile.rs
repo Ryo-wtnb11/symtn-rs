@@ -83,8 +83,9 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 }
 
 /// What: a one-worker replay attributes its recoupling to the dense GEMM
-/// call; a lane replay, whose stages run concurrently, reports its wall time
-/// as `fused_lanes` and no per-phase GEMM time.
+/// call; a native lane replay, whose stages run concurrently, reports its
+/// wall time as `fused_lanes` and no per-phase GEMM time; the barrier form
+/// reports only its engine GEMM submissions per phase.
 #[test]
 fn profiled_multi_attributes_recoupling_to_its_route() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
@@ -122,7 +123,11 @@ fn profiled_multi_attributes_recoupling_to_its_route() {
         if threads == 1 {
             assert_eq!(profile.fused_lanes, Duration::ZERO);
         } else {
-            assert_eq!(profile.multi_dense_matmul_call, Duration::ZERO);
+            if DefaultDenseExecutor::new().supports_lane_gemms() {
+                assert_eq!(profile.multi_dense_matmul_call, Duration::ZERO);
+            }
+            assert_eq!(profile.multi_pack, Duration::ZERO);
+            assert_eq!(profile.multi_scatter, Duration::ZERO);
         }
     }
 }

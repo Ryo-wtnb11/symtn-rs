@@ -6,7 +6,9 @@
 //! allocate the same and no more, a large call does not make a later small
 //! call allocate more, and an overwrite of many high-rank inactive blocks
 //! allocates no more than one of few, as does a general-`beta` update of
-//! many such blocks in Multi groups.
+//! many such blocks in Multi groups. The barrier form (a custom executor
+//! without lane GEMMs, each GEMM handed to the engine between rounds) keeps
+//! the same contract.
 //!
 //! Its own test binary with one test, so the shared counting allocator's
 //! process-wide measurement sees only that test. That the fixture really runs on four
@@ -28,7 +30,10 @@
 use std::sync::Arc;
 
 use symtn_core::{BlockKey, BlockSpec, BlockStructure};
-use symtn_dense::{CpuEngine, Pool};
+use symtn_dense::{
+    CpuEngine, DefaultDenseExecutor, DenseDotConfig, DenseError, DenseExecutor, DenseRead,
+    DenseScalar, DenseTensor, DenseWrite, Engine, Pool,
+};
 use symtn_operations::{
     DenseTreeTransformOperations, TreeTransformBackend, TreeTransformBlockSpec,
     TreeTransformStructure, TreeTransformWorkspace,
@@ -131,6 +136,61 @@ fn high_rank_fixture(
     (structure, transform)
 }
 
+/// A custom executor without lane GEMMs, forwarding every call to the
+/// built-in executor, so its tree replays run in the barrier form.
+#[derive(Default)]
+struct Forwarding(DefaultDenseExecutor);
+
+impl DenseExecutor for Forwarding {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.eigh(engine, input)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.0.dot_general_into(engine, output, lhs, rhs, config)
+    }
+
+    fn matmul_axpby_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        alpha: DenseScalar,
+        beta: DenseScalar,
+    ) -> Result<(), DenseError> {
+        self.0
+            .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
+    }
+}
+
 #[test]
 fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
     let pool = Pool::builder().threads(4).build().unwrap();
@@ -172,6 +232,48 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
     if cfg!(target_vendor = "apple") {
         assert_eq!(call(0), warm, "warm calls grow");
         assert_eq!(after_large, warm, "a large call grows the small one's");
+    } else {
+        assert_eq!(warm, 0);
+        assert_eq!(after_large, 0);
+    }
+
+    // The barrier form on the same four lanes: small, large, small.
+    let mut barrier = DenseTreeTransformOperations::new(Forwarding::default());
+    let mut workspace = TreeTransformWorkspace::default();
+    let mut destinations = [
+        vec![0.0; small.0.required_len().unwrap()],
+        vec![0.0; large.0.required_len().unwrap()],
+    ];
+    let mut call = |which: usize| {
+        let (structure, transform, source) = if which == 0 { &small } else { &large };
+        let destination = &mut destinations[which];
+        counting_alloc::measure_process(|| {
+            barrier
+                .tree_transform_structure_into_raw(
+                    engine,
+                    &mut workspace,
+                    transform,
+                    structure,
+                    structure,
+                    destination,
+                    source,
+                    1.0,
+                    0.0,
+                )
+                .unwrap()
+        })
+        .1
+    };
+    call(0);
+    let warm = call(0);
+    call(1);
+    let after_large = call(0);
+    if cfg!(target_vendor = "apple") {
+        assert_eq!(call(0), warm, "warm barrier calls grow");
+        assert_eq!(
+            after_large, warm,
+            "a large barrier call grows the small one's"
+        );
     } else {
         assert_eq!(warm, 0);
         assert_eq!(after_large, 0);

@@ -189,8 +189,9 @@ where
 /// `dst = alpha * T(src) + beta * dst`.
 ///
 /// The engine and executor fix the route before any write: on a multi-slot
-/// engine whose executor runs lane GEMMs, every joint component is a job on
-/// the lane runner; otherwise one worker replays in source order (see
+/// engine every joint component is a job on the lane runner, natively when
+/// the executor runs lane GEMMs and in the barrier form otherwise; one
+/// worker replays in source order when placement leaves one slot (see
 /// [`replay`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_transform_structure_with_structural_recoupling_raw<A, E, D, C>(

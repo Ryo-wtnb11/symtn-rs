@@ -1,4 +1,4 @@
-//! Native tree replays on the lane runner ([`symtn_dense::lanes`]).
+//! Tree replays on the lane runner ([`symtn_dense::lanes`]).
 //!
 //! Every joint component of the compiled schedule is one job: it owns its
 //! atoms of the destination for the whole call, so each destination element
@@ -15,13 +15,15 @@
 //!   a component whose one item is an overwritten Single whose plan Strided
 //!   admits on the stage's token is never banded;
 //! - a pack on one flat fork over `min(x, columns)` contiguous column ranges;
-//! - a GEMM through the executor's lane GEMMs on the stage's `x`-slot
-//!   context, into the lane's initialized packed destination
-//!   ([`symtn_dense::lanes::LaneGemms::run`]).
+//! - a GEMM into the lane's initialized packed destination: with an executor
+//!   that runs lane GEMMs, on the stage's `x`-slot context inside the lanes
+//!   ([`symtn_dense::lanes::LaneGemms::run`], [`lane_replay`]); otherwise in
+//!   the runner's barrier form ([`barrier_replay`]), handed to the engine
+//!   between rounds as one `matmul_axpby_into` on the whole engine.
 //!
 //! Each lane keeps grow-only scratch (a packed source buffer, an initialized
 //! packed destination, traversal indices and the band tables), retained in
-//! the replay workspace with the runner's tables.
+//! the replay workspace with the runner's tables; both forms use the same.
 
 use std::sync::{PoisonError, RwLock};
 
@@ -29,7 +31,7 @@ use strided_kernel::execution::KernelClass;
 use symtn_dense::lanes::{
     self, Estimate, Form, Jobs, LaneGemmShape, LaneGemms, LaneTables, StageKind, Work,
 };
-use symtn_dense::{DenseDType, DenseScalar};
+use symtn_dense::{DenseDType, DenseScalar, DenseView, DenseViewMut};
 
 use super::writers::{Band, DestinationWriter, ReplayParts};
 use super::*;
@@ -185,18 +187,8 @@ impl<D> TreeLaneScratch<D> {
         .fold(0, usize::saturating_add)
     }
 
-    /// The last call's placement (read by the native provider's lane tests).
-    #[cfg(all(
-        test,
-        feature = "cpu-faer",
-        not(any(
-            feature = "cpu-blas",
-            feature = "blas-accelerate",
-            feature = "blas-openblas",
-            feature = "blas-mkl",
-            feature = "provider-inject"
-        ))
-    ))]
+    /// The last call's placement (read by the lane tests).
+    #[cfg(test)]
     pub(crate) fn placement(&self) -> &lanes::Placement {
         self.tables.placement()
     }
@@ -267,52 +259,162 @@ where
         components,
     } = scratch;
     shapes.clear();
-    shapes.extend(
-        task.recoupling_plan()
-            .jobs()
-            .iter()
-            .map(|job| LaneGemmShape {
-                rows: job.rows,
-                k: job.contracted,
-                n: job.cols,
-            }),
-    );
+    shapes.extend(task.recoupling_plan().jobs().iter().map(lane_gemm_shape));
     let mut target = Some(dst);
     let mut outcome = None;
     let entered = dense.with_lane_gemms(engine, dense_dtype::<D>(), shapes, &mut |exec, gemms| {
         let Some(dst) = target.take() else {
             return;
         };
-        let replay = Replay {
-            parts: ReplayParts::new(task),
+        let replay = Replay::new(
+            task,
             schedule,
-            gemms,
+            Some(gemms),
             writer,
             src,
-            coefficients: coefficient_scratch,
-            rank: task.layouts().max_fused_rank(),
-        };
-        outcome = Some(replay.run(exec, tables, lanes, atoms, components, dst));
+            coefficient_scratch,
+        );
+        outcome = Some(replay.run(
+            Runner::<E, D>::Native(exec),
+            tables,
+            lanes,
+            atoms,
+            components,
+            dst,
+        ));
     });
     entered.map_err(OperationError::Dense)?;
     let ran = outcome.unwrap_or(Err(OperationError::InvalidArgument {
         message: "the lane GEMM entry returned without running its body",
     }))?;
     if let (true, Some(profile), Some(start)) = (ran, profile, start) {
-        profile.fused_lanes += start.elapsed();
-        profile.single_blocks += schedule.single_block_count;
-        profile.multi_blocks += task.recoupling_plan().jobs().len();
-        profile.packed_columns += schedule.packed_column_count;
-        profile.scattered_columns += schedule.scattered_column_count;
+        record_lanes(profile, task, schedule, start.elapsed());
     }
     Ok(ran)
+}
+
+/// [`lane_replay`] in the barrier form of the runner, for an executor
+/// without lane GEMMs (the BLAS provider, custom executors): each round is
+/// one Host region of the engine in which every lane runs its components'
+/// stages up to its next GEMM; between rounds each pending GEMM is
+/// submitted alone, in lane order, through `dense`'s
+/// [`DenseExecutor::matmul_axpby_into`] (`alpha = 1`, `beta = 0`) over its
+/// lane's packed source and initialized packed destination, on the whole
+/// engine. Placement, stages, bands, lane scratch and errors are those of
+/// [`lane_replay`]; a failed submission fails its own component only and is
+/// never retried. Returns `false`, having written nothing, when placement
+/// resolves to one lane of one slot.
+///
+/// Why one submission per GEMM, not one batch per round: each result then
+/// belongs to exactly one component, and no batch operand spans several
+/// lanes' buffers.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn barrier_replay<E, W, T, D, C>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    task: TreeTransformTaskView<'_, C>,
+    schedule: &TreeTransformParallelSchedule,
+    dst: &mut [T],
+    src: &[D],
+    writer: &W,
+    profile: Option<&mut TreeTransformReplayProfile>,
+) -> Result<bool, OperationError>
+where
+    E: DenseExecutor,
+    W: DestinationWriter<T, D>,
+    T: Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    let start = profile.as_ref().map(|_| std::time::Instant::now());
+    let HostTreeTransformWorkspace {
+        lanes: scratch,
+        coefficient_scratch,
+        ..
+    } = workspace;
+    let TreeLaneScratch {
+        tables,
+        lanes,
+        atoms,
+        components,
+        ..
+    } = scratch;
+    let replay = Replay::new(task, schedule, None, writer, src, coefficient_scratch);
+    let mut host = EngineGemms {
+        engine,
+        dense,
+        schedule,
+        jobs: task.recoupling_plan().jobs(),
+        coefficients: coefficient_scratch,
+        matmul: profile.as_ref().map(|_| core::time::Duration::ZERO),
+    };
+    let ran = replay.run(
+        Runner::Barrier(&mut host),
+        tables,
+        lanes,
+        atoms,
+        components,
+        dst,
+    )?;
+    if let (true, Some(profile), Some(start)) = (ran, profile, start) {
+        record_lanes(profile, task, schedule, start.elapsed());
+        let matmul = host.matmul.unwrap_or_default();
+        profile.multi_dense_matmul_call += matmul;
+        profile.multi_matmul_total += matmul;
+    }
+    Ok(ran)
+}
+
+/// A lane run's profile: its whole wall as `fused_lanes`, and its blocks and
+/// columns.
+fn record_lanes<C: Copy>(
+    profile: &mut TreeTransformReplayProfile,
+    task: TreeTransformTaskView<'_, C>,
+    schedule: &TreeTransformParallelSchedule,
+    elapsed: core::time::Duration,
+) {
+    profile.fused_lanes += elapsed;
+    profile.single_blocks += schedule.single_block_count;
+    profile.multi_blocks += task.recoupling_plan().jobs().len();
+    profile.packed_columns += schedule.packed_column_count;
+    profile.scattered_columns += schedule.scattered_column_count;
+}
+
+fn lane_gemm_shape(job: &DenseGemmBatchJob) -> LaneGemmShape {
+    LaneGemmShape {
+        rows: job.rows,
+        k: job.contracted,
+        n: job.cols,
+    }
+}
+
+/// Which runner a lane replay runs on: the native one on the lane-GEMM
+/// entry's context, or the barrier form on `E`'s engine.
+enum Runner<'x, 'e, E, D> {
+    Native(lanes::Exec<'x>),
+    Barrier(&'x mut EngineGemms<'e, E, D>),
+}
+
+/// The barrier form's engine side: the caller's engine and executor, and the
+/// recoupling GEMMs it submits between rounds.
+struct EngineGemms<'e, E, D> {
+    engine: &'e mut dyn Engine,
+    dense: &'e mut E,
+    schedule: &'e TreeTransformParallelSchedule,
+    jobs: &'e [DenseGemmBatchJob],
+    coefficients: &'e [D],
+    /// The summed wall of the submissions, when profiling.
+    matmul: Option<core::time::Duration>,
 }
 
 /// The read-only parts of one lane replay.
 struct Replay<'a, W, D, C> {
     parts: ReplayParts<'a, C>,
     schedule: &'a TreeTransformParallelSchedule,
-    gemms: &'a dyn LaneGemms,
+    /// The lane GEMMs of a native run; `None` in the barrier form, whose
+    /// GEMMs the engine runs between rounds.
+    gemms: Option<&'a dyn LaneGemms>,
     writer: &'a W,
     src: &'a [D],
     coefficients: &'a [D],
@@ -325,12 +427,32 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    /// Places the components on `exec`, sizes each lane's scratch for its
-    /// components, splits `dst` into atom slices and runs every lane; `false`
-    /// without a write when the placement is one lane of one slot.
-    fn run<T>(
+    fn new(
+        task: TreeTransformTaskView<'a, C>,
+        schedule: &'a TreeTransformParallelSchedule,
+        gemms: Option<&'a dyn LaneGemms>,
+        writer: &'a W,
+        src: &'a [D],
+        coefficients: &'a [D],
+    ) -> Self {
+        Self {
+            parts: ReplayParts::new(task),
+            schedule,
+            gemms,
+            writer,
+            src,
+            coefficients,
+            rank: task.layouts().max_fused_rank(),
+        }
+    }
+
+    /// Places the components for `runner`'s form, sizes each lane's scratch
+    /// for its components, splits `dst` into atom slices and runs every
+    /// lane; `false` without a write when the placement is one lane of one
+    /// slot.
+    fn run<T, E>(
         &self,
-        exec: lanes::Exec<'_>,
+        mut runner: Runner<'_, '_, E, D>,
         tables: &mut LaneTables,
         lane_scratch: &mut Vec<TreeLane<D>>,
         atoms_kept: &mut Vec<&'static mut [u8]>,
@@ -340,6 +462,7 @@ where
     where
         W: DestinationWriter<T, D>,
         T: Send + Sync,
+        E: DenseExecutor,
     {
         let schedule = self.schedule;
         // Placement reads only the jobs' estimates, before any atom slice
@@ -348,7 +471,14 @@ where
             replay: self,
             target: core::marker::PhantomData,
         };
-        lanes::place(&exec, &jobs, Form::Native, tables);
+        match &mut runner {
+            Runner::Native(exec) => lanes::place(exec, &jobs, Form::Native, tables),
+            Runner::Barrier(host) => crate::host_pool::lane_region(
+                host.engine,
+                crate::host_pool::HostPoolSite::Replay,
+                |exec| lanes::place(&exec, &jobs, Form::Barrier, tables),
+            )?,
+        }
         let placement = tables.placement();
         let count = placement.lanes();
         if count == 1 && placement.share(0) == 1 {
@@ -393,25 +523,32 @@ where
                 replay: self,
                 target: core::marker::PhantomData,
             };
-            let ran = lanes::run_native(
-                exec,
-                &work,
-                tables,
-                &mut components,
-                &mut lane_scratch[..count],
-            );
+            let lane_scratch = &mut lane_scratch[..count];
+            let ran = match runner {
+                Runner::Native(exec) => {
+                    lanes::run_native(exec, &work, tables, &mut components, lane_scratch)
+                        .map_err(|_| oversized())
+                }
+                Runner::Barrier(host) => {
+                    lanes::run_barrier(host, &work, tables, &mut components, lane_scratch)
+                }
+            };
             *components_kept = recycle(components);
-            match ran {
-                Ok(Ok(())) => Ok(true),
-                Ok(Err((_, error))) => Err(error),
-                // A placement on `exec`'s own budget fits it.
-                Err(_) => Err(OperationError::InvalidArgument {
-                    message: "tree transform lanes exceed the engine budget",
-                }),
+            match ran? {
+                Ok(()) => Ok(true),
+                Err((_, error)) => Err(error),
             }
         });
         *atoms_kept = recycle(atoms);
         result
+    }
+}
+
+/// A placement on the context's own budget fits it, so the runner never
+/// refuses its lane shares.
+fn oversized() -> OperationError {
+    OperationError::InvalidArgument {
+        message: "tree transform lanes exceed the engine budget",
     }
 }
 
@@ -509,7 +646,10 @@ where
         let shape = &self.replay.parts.plan.jobs()[group];
         match (stage - 1) % 3 {
             0 => copy(shape.rows.saturating_mul(shape.contracted)),
-            1 => self.replay.gemms.estimate(group),
+            1 => match self.replay.gemms {
+                Some(gemms) => gemms.estimate(group),
+                None => lanes::gemm_estimate(dense_dtype::<D>(), lane_gemm_shape(shape)),
+            },
             _ => copy(shape.rows.saturating_mul(shape.cols)),
         }
     }
@@ -552,15 +692,13 @@ where
         match (stage - 1) % 3 {
             0 => replay.pack(group, source, packs, index, exec),
             1 => {
-                let coefficients = replay
-                    .coefficients
-                    .get(shape.rhs_offset..shape.rhs_offset + shape.contracted * shape.cols)
-                    .ok_or(OperationError::InvalidArgument {
-                        message: "tree transform recoupling coefficients are shorter than a job",
-                    })?;
+                // The barrier form submits its GEMMs between rounds.
+                let gemms = replay.gemms.ok_or(OperationError::InvalidArgument {
+                    message: "a barrier-form lane ran a GEMM stage",
+                })?;
+                let coefficients = coefficients_of(replay.coefficients, shape)?;
                 let destination = destination.get_mut(..packed).ok_or(scratch_short())?;
-                replay
-                    .gemms
+                gemms
                     .run(
                         exec,
                         group,
@@ -581,6 +719,78 @@ where
                 )
             }
         }
+    }
+}
+
+/// Group `shape`'s recoupling coefficients, `k x n` column-major.
+fn coefficients_of<'c, D>(
+    coefficients: &'c [D],
+    shape: &DenseGemmBatchJob,
+) -> Result<&'c [D], OperationError> {
+    coefficients
+        .get(shape.rhs_offset..shape.rhs_offset + shape.contracted * shape.cols)
+        .ok_or(OperationError::InvalidArgument {
+            message: "tree transform recoupling coefficients are shorter than a job",
+        })
+}
+
+impl<'s, 'd, W, T, D, C, E> lanes::Barrier<TreeWork<'_, '_, 's, 'd, W, T, D, C>>
+    for EngineGemms<'_, E, D>
+where
+    E: DenseExecutor,
+    W: DestinationWriter<T, D>,
+    T: Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    type Refused = OperationError;
+
+    fn region(
+        &mut self,
+        round: &mut dyn FnMut(lanes::Exec<'_>) -> Result<(), tenferro_cpu::threadteam::Error>,
+    ) -> Result<(), OperationError> {
+        crate::host_pool::lane_region(self.engine, crate::host_pool::HostPoolSite::Replay, round)?
+            .map_err(|_| oversized())
+    }
+
+    fn submit(
+        &mut self,
+        job: usize,
+        stage: usize,
+        _: &mut &'s mut [&'d mut [T]],
+        lane: &mut TreeLane<D>,
+    ) -> Result<(), OperationError> {
+        let start = self.matmul.map(|_| std::time::Instant::now());
+        let group = self.schedule.component_group_list(job)[(stage - 1) / 3] as usize;
+        let shape = &self.jobs[group];
+        let (rows, k, n) = (shape.rows, shape.contracted, shape.cols);
+        let (lhs_shape, rhs_shape, dst_shape) = ([rows, k], [k, n], [rows, n]);
+        let (rows_major, rhs_strides) = ([1, rows], [1, k]);
+        let rhs = coefficients_of(self.coefficients, shape)?;
+        let destination = lane
+            .destination
+            .get_mut(..rows * n)
+            .ok_or(scratch_short())?;
+        let result = (|| {
+            self.dense.matmul_axpby_into(
+                self.engine,
+                D::dense_write(DenseViewMut::new(destination, &dst_shape, &rows_major, 0)?),
+                D::dense_read(DenseView::new(
+                    lane.source.as_slice(),
+                    &lhs_shape,
+                    &rows_major,
+                    0,
+                )?),
+                D::dense_read(DenseView::new(rhs, &rhs_shape, &rhs_strides, 0)?),
+                D::one().dense_scalar(),
+                D::zero().dense_scalar(),
+            )
+        })()
+        .map_err(OperationError::Dense);
+        if let (Some(matmul), Some(start)) = (self.matmul.as_mut(), start) {
+            *matmul += start.elapsed();
+        }
+        result
     }
 }
 

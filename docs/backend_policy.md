@@ -261,8 +261,8 @@ lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
 the vendor library. A backend-free Host region (plan compile, strided
 moves) takes the engine's placement token; a serial engine never forks.
 
-A tree-transform replay on the native provider and an engine wider than one
-runs on the same placement and lane runner. Each joint component of the
+A tree-transform replay on an engine wider than one runs on the same
+placement and lane runner. Each joint component of the
 compiled transform (the Singles, Multi groups and inactive blocks whose
 destination intervals overlap, which own those intervals together) is one
 job, so every destination element has one writer. Its stages are its direct
@@ -276,16 +276,23 @@ one flat fork; at width one, or for an overwrite of a component whose one
 item is a Single whose retained Strided plan Strided's own rule
 (`execution::parallel_width` for a copy of its elements) admits on the
 stage's token (gives it more than one worker), each item is written whole on
-that token, the admitted Single through its plan. A pack splits its columns over one flat fork; the GEMM runs
-on the stage's context into its lane's initialized packed destination
-(tcontract's initialized write, as a grouped recoupling GEMM). Every
-component runs even after another fails, and the lowest-indexed failing
-component's error is returned. On one worker (a serial engine, or a
-placement of one lane of one slot, such as a forced `Sequential` policy on a
-wider engine), and on a provider without lane GEMMs (BLAS and custom
-executors), the replay runs one worker in source
-order: inactive blocks, Singles, then each Multi group's pack, GEMM on the
-engine and scatter, stopping at the first failure. Accumulating updates
+that token, the admitted Single through its plan. A pack splits its columns over one flat fork; the GEMM writes
+its lane's initialized packed destination. On the native provider it runs
+inside the lanes on the stage's context (tcontract's initialized write, as
+a grouped recoupling GEMM). On a provider without lane GEMMs (BLAS and
+custom executors) the runner works in rounds: each round is one Host region
+in which every lane runs its stages up to its next GEMM; between rounds each
+pending GEMM is submitted alone, in lane order, through the executor's
+`matmul_axpby_into` (`alpha = 1`, `beta = 0`) on the whole engine, so a
+vendor BLAS uses its own threads, not the lane's share; placement scores
+those GEMMs serialized at that width. Every component runs even after
+another fails (a failed GEMM submission fails its own component and is not
+retried), and the lowest-indexed failing component's error is returned, on
+either provider. On one worker (a serial engine, or a placement of one lane
+of one slot, such as a forced `Sequential` policy on a wider engine), the
+replay runs in source order: inactive blocks, Singles, then each Multi
+group's pack, GEMM on the engine and scatter, stopping at the first
+failure. Accumulating updates
 (`beta` neither zero nor absent), and blocks whose normalized layout exceeds
 Strided's inline fused rank of eight, are never written through a Strided
 plan. The cold compile of a tree transform fans its staged groups out over

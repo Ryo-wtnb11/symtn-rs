@@ -6,8 +6,8 @@ use super::*;
 /// does not have a proof of exact physical overwrite coverage.
 ///
 /// The writer runs on the same route as the initialised replay: the lane
-/// runner on a multi-slot engine whose executor runs lane GEMMs, the
-/// one-worker replay otherwise. Nothing is published unless every write
+/// runner on a multi-slot engine (in the barrier form for an executor
+/// without lane GEMMs), the one-worker replay otherwise. Nothing is published unless every write
 /// succeeded.
 ///
 /// `profile` accumulates the same phases as the initialised profiled replay
@@ -795,23 +795,21 @@ mod owned_overwrite_tests {
             _: DenseRead<'_>,
             _: &DenseDotConfig,
         ) -> Result<(), DenseError> {
-            unreachable!("owned transform replay uses the grouped GEMM")
+            unreachable!("owned transform replay uses the accumulate-form GEMM")
         }
 
-        fn matmul_batch_axpby_into(
+        fn matmul_axpby_into(
             &mut self,
             _engine: &mut dyn Engine,
             _: DenseWrite<'_>,
             _: DenseRead<'_>,
             _: DenseRead<'_>,
-            _: &[DenseGemmBatchJob],
-            _: &[usize],
             _: DenseScalar,
             _: DenseScalar,
         ) -> Result<(), DenseError> {
             Err(DenseError::Backend {
                 backend: DenseBackend::Tenferro,
-                op: "matmul_batch_axpby_into",
+                op: "matmul_axpby_into",
                 message: "injected recoupling failure".to_string(),
             })
         }

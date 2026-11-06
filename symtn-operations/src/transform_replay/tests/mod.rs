@@ -7,6 +7,9 @@ use symtn_dense::{
     DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite,
 };
 
+// The barrier form runs on any CPU provider, through a custom executor.
+#[cfg(feature = "tenferro")]
+mod barrier;
 mod compile_validation;
 mod destination_scales;
 // The lane replay needs the native provider's lane GEMMs.
@@ -23,6 +26,8 @@ mod destination_scales;
 mod lanes;
 mod overwrite;
 mod profile;
+#[cfg(feature = "tenferro")]
+mod recording;
 mod threaded;
 
 /// Test-only host operand: a block structure and the storage it describes.
