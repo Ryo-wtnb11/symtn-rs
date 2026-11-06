@@ -1689,6 +1689,20 @@ impl<T: Scalar> ScalarScratch<T> {
     }
 }
 
+/// One destination lane: its blocks' largest needs, the count of its blocks
+/// still to run and, from its first block's run to its last, its buffers.
+///
+/// Why the buffers are not built in [`BlockOp::lane`]: that runs on the
+/// caller before the fork, so every lane's setup and release would be serial
+/// there while their pages still fault on the lane threads. The lane's own
+/// thread builds them in its first block's run and frees them after its
+/// last; a panic drops whatever remains through `Drop`.
+pub(crate) struct IntoLane {
+    needs: Needs,
+    remaining: usize,
+    buffers: Option<LaneBuffers>,
+}
+
 /// One lane's provider workspace and typed scratch: the largest need of the
 /// lane's blocks, allocated once before its first block.
 pub(crate) struct LaneBuffers {
@@ -1700,6 +1714,17 @@ pub(crate) struct LaneBuffers {
     /// The allocation calls of this lane's buffer setup.
     #[cfg(test)]
     setup_allocs: Option<u64>,
+    /// The thread that set the buffers up.
+    #[cfg(test)]
+    thread: std::thread::ThreadId,
+}
+
+/// Records which thread frees each lane setup's buffers.
+#[cfg(test)]
+impl Drop for LaneBuffers {
+    fn drop(&mut self) {
+        owners::released(self.id);
+    }
 }
 
 /// The largest workspace bytes and typed scratch elements (per scalar, in
@@ -1722,9 +1747,10 @@ pub(crate) struct IntoJob<'a, 'd, 'w> {
     plans: Plans,
     sizing: Option<DenseError>,
     outcome: Option<Result<(), FactorFailure>>,
-    /// The id and workspace length of the lane setup this block ran with.
+    /// The id, workspace length and setup thread of the lane setup this
+    /// block ran with, and the thread of its solve.
     #[cfg(test)]
-    lane_seen: (usize, usize),
+    lane_seen: Option<(usize, usize, std::thread::ThreadId, std::thread::ThreadId)>,
 }
 
 /// Factorization `F` of each block into its destination on the lane driver.
@@ -1737,45 +1763,25 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
     type Job = IntoJob<'a, 'd, 'w>;
     const ENTRY: Entry = Entry::Linalg;
     const LABEL: &'static str = F::ENTRY;
-    type Lane = LaneBuffers;
+    type Lane = IntoLane;
 
     fn estimate(&self, _: usize, job: &Self::Job, model: &WorkModel) -> Estimate {
         estimate::<F>(job.input, model)
     }
 
-    fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> LaneBuffers {
+    fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> IntoLane {
         let mut needs = Needs::default();
+        let mut remaining = 0;
         jobs(&mut |job| {
+            remaining += 1;
             if let Err(error) = needs_of::<F>(job.input, job.dest.placement(), exec, &mut needs) {
                 job.sizing = Some(error);
             }
         });
-        let build = || {
-            (
-                vec![MaybeUninit::uninit(); needs.bytes],
-                TypedScratch {
-                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
-                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
-                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
-                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
-                },
-            )
-        };
-        #[cfg(test)]
-        let ((workspace, typed), setup_allocs) = owners::measured(build);
-        #[cfg(not(test))]
-        let (workspace, typed) = build();
-        LaneBuffers {
-            workspace,
-            typed,
-            #[cfg(test)]
-            id: {
-                static SETUPS: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(1);
-                SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            },
-            #[cfg(test)]
-            setup_allocs,
+        IntoLane {
+            needs,
+            remaining,
+            buffers: None,
         }
     }
 
@@ -1785,12 +1791,19 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         &self,
         _: usize,
         job: &mut Self::Job,
-        lane: &mut LaneBuffers,
+        into: &mut IntoLane,
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
+        let needs = &into.needs;
+        let lane = into.buffers.get_or_insert_with(|| LaneBuffers::new(needs));
         #[cfg(test)]
         {
-            job.lane_seen = (lane.id, lane.workspace.len());
+            job.lane_seen = Some((
+                lane.id,
+                lane.workspace.len(),
+                lane.thread,
+                std::thread::current().id(),
+            ));
         }
         let sizing = job.sizing.take();
         #[cfg(test)]
@@ -1844,7 +1857,46 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         #[cfg(not(test))]
         let outcome = solve();
         job.outcome = Some(outcome);
+        into.remaining = into.remaining.saturating_sub(1);
+        if into.remaining == 0 {
+            into.buffers = None;
+        }
         Ok(())
+    }
+}
+
+impl LaneBuffers {
+    /// Allocates one lane's buffers at its blocks' largest `needs`.
+    fn new(needs: &Needs) -> Self {
+        let build = || {
+            (
+                vec![MaybeUninit::uninit(); needs.bytes],
+                TypedScratch {
+                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
+                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
+                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
+                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
+                },
+            )
+        };
+        #[cfg(test)]
+        let ((workspace, typed), setup_allocs) = owners::measured(build);
+        #[cfg(not(test))]
+        let (workspace, typed) = build();
+        LaneBuffers {
+            workspace,
+            typed,
+            #[cfg(test)]
+            id: {
+                static SETUPS: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(1);
+                SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            #[cfg(test)]
+            setup_allocs,
+            #[cfg(test)]
+            thread: std::thread::current().id(),
+        }
     }
 }
 
@@ -1940,6 +1992,27 @@ pub(crate) mod owners {
                 solve,
                 products,
             });
+    }
+
+    static RELEASES: Mutex<Vec<(usize, std::thread::ThreadId)>> = Mutex::new(Vec::new());
+
+    /// Records that lane setup `lane`'s buffers are freed on this thread.
+    pub(super) fn released(lane: usize) {
+        RELEASES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((lane, std::thread::current().id()));
+    }
+
+    /// The threads that freed lane setup `lane`'s buffers.
+    pub(super) fn releases_of(lane: usize) -> Vec<std::thread::ThreadId> {
+        RELEASES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|&&(id, _)| id == lane)
+            .map(|&(_, thread)| thread)
+            .collect()
     }
 
     /// The position the next record takes.
@@ -2126,7 +2199,7 @@ fn batch_into_on<F: FactorInto>(
                 sizing: None,
                 outcome: None,
                 #[cfg(test)]
-                lane_seen: (0, 0),
+                lane_seen: None,
             }),
             Err(error) => {
                 refused = Some((error, dest));
@@ -2539,9 +2612,10 @@ mod tests {
     /// Purpose: each lane of a destination batch is set up once, before its
     /// first block, with a workspace sufficient for every block it runs:
     /// every block of a lane runs with that one setup, whose workspace is
-    /// never regrown, on uneven blocks over two forced lanes and on the
-    /// single-lane path, including a two-item and an empty-batch input; every
-    /// block succeeds, so no workspace was short.
+    /// never regrown, and the setup and its release happen on the thread
+    /// that runs the lane's solves, on uneven blocks over two forced lanes
+    /// and on the single-lane path, including a two-item and an empty-batch
+    /// input; every block succeeds, so no workspace was short.
     #[test]
     fn each_lane_is_set_up_once_for_all_its_blocks() {
         use crate::factor_dest::validate;
@@ -2622,7 +2696,7 @@ mod tests {
                     plans: [None, None],
                     sizing: None,
                     outcome: None,
-                    lane_seen: (0, 0),
+                    lane_seen: None,
                 })
                 .collect();
             driver::drive(
@@ -2635,14 +2709,18 @@ mod tests {
             let mut setups = BTreeMap::new();
             for job in &jobs {
                 assert_eq!(job.outcome, Some(Ok(())));
-                let (id, len) = job.lane_seen;
+                let (id, len, setup, solve) = job.lane_seen.unwrap();
+                assert_eq!(setup, solve, "set up on the thread of its solves");
                 assert_eq!(
-                    *setups.entry(id).or_insert(len),
-                    len,
+                    *setups.entry(id).or_insert((len, setup)),
+                    (len, setup),
                     "one buffer per setup"
                 );
             }
             assert_eq!(setups.len(), lanes, "{lanes} lane(s)");
+            for (&id, &(_, setup)) in &setups {
+                assert_eq!(owners::releases_of(id), [setup], "freed once, there");
+            }
         }
     }
 

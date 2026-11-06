@@ -374,6 +374,22 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
     for key in scratch.memo_keys.drain(..) {
         scratch.memo.remove(&key);
     }
+    // A barrier set of one movement stage per job is placed as native: every
+    // lane then has a stage, so the runner enters exactly one round and
+    // serializes nothing, and with one stage a job's one width bucket is that
+    // stage, so `job_time` and `stage_time` are the same expression and
+    // `barrier_time` is the native score, slowest lane plus `D(L)`. Why not
+    // every provider-free set: `job_time` divides a bucket's summed estimate
+    // once and the barrier walk each stage, so several stages of one width
+    // round differently and can change the winner; a set with no stage
+    // enters no round.
+    let one_movement_each = placement.stage_starts.windows(2).all(|s| s[1] - s[0] == 1)
+        && !scratch.kinds.contains(&StageKind::Provider);
+    let form = if form == Form::Barrier && one_movement_each {
+        Form::Native
+    } else {
+        form
+    };
 
     // Admission: the whole budget, each lane at most the widest offer any
     // stage can use; every lane count of two or more must pay for its own
@@ -422,7 +438,8 @@ pub fn place(exec: &Exec<'_>, jobs: &dyn Jobs, form: Form, tables: &mut LaneTabl
     // whose fork does not pay, so the largest paying count below it is
     // taken. Why not the barrier form: its provider stages run serially
     // between rounds and every round pays the outer fork again, so lanes of
-    // fixed-time jobs are not one flat section; it keeps its scored search.
+    // fixed-time jobs are not one flat section; it keeps its scored search
+    // (a set of one movement stage per job is placed as native above).
     if form == Form::Native && scratch.job_width.iter().all(|&w| w == 1) {
         let costs = &scratch.costs;
         let pays_for = NonZeroUsize::new(budget).map_or(1, |b| {

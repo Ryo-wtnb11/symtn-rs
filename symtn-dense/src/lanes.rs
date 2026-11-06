@@ -34,7 +34,13 @@
 //! filled as the baseline below. A search would trade only the outer fork's
 //! cost against how tightly the lanes pack the jobs, and so pack every lane
 //! up to the longest job. The barrier form searches as below: its rounds
-//! serialize the provider stages and pay the outer fork each.
+//! serialize the provider stages and pay the outer fork each. A barrier set
+//! of exactly one movement stage per job is placed as the native form: its
+//! runner enters one round and serializes nothing, and a one-stage job's
+//! time is its stage's, so its score is the native one. Any other
+//! provider-free set keeps the barrier search: native job times divide a
+//! width bucket's summed estimate once and the barrier walk each stage
+//! (below), and a set with no stage enters no round.
 //!
 //! Otherwise admission is the whole budget B, each lane at most `cap`, the widest
 //! offer of any stage (a share no stage could use more of). With `E_tot`
@@ -74,12 +80,12 @@
 //! jobs wider than the candidate's narrow share `q`, once per distinct `q`
 //! (at most `2 sqrt(B)` of them), while every built candidate queries those
 //! jobs' buckets again on its two shares. With `beta_q` the stage-width
-//! buckets of the jobs wider than `q`, `C` the candidates built (in the
-//! barrier form every paying one) and `G_w` the distinct widening estimates
+//! buckets of the jobs wider than `q`, `C` the candidates built (in a set
+//! that keeps the barrier search, every paying one) and `G_w` the distinct widening estimates
 //! (the width memo is emptied by its own keys, amortized O(1) each), a call
 //! costs `O(B + G_w B + N_st + J log J + L0 log L0 + sum over distinct q of
 //! beta_q + sum over built candidates c of beta_{q_c} + C J log L0)`, the
-//! winner's rebuild included; each barrier candidate also walks its stages
+//! winner's rebuild included; each barrier-scored candidate also walks its stages
 //! and rounds, `O(N_st + J + R)`. The reservation adds `sum over its queued
 //! wide-capable jobs of (L + sigma beta_j)` with `sigma` the distinct lane
 //! shares. The native no-search case costs the stage pass, the width scans,

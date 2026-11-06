@@ -594,6 +594,56 @@ fn barrier_jobs_of_one_slot_stages_keep_the_scored_search() {
     });
 }
 
+/// A barrier set of one movement stage per job enters one round and
+/// serializes nothing, so it is placed exactly as the native form: one-slot
+/// jobs take the native no-search lanes (no candidate is scored), and
+/// widening jobs the native bound-ordered search.
+#[test]
+fn one_movement_stage_barrier_sets_are_placed_as_native() {
+    let flat = |ns| Estimate {
+        widen: false,
+        ..serial(ns)
+    };
+    let one_slot = Batch::new([100, 10, 30, 10, 40].map(|ns| vec![(M, flat(ns))]).to_vec());
+    let widening = Batch::new(
+        [4000, 900, 300, 50]
+            .map(|ns| vec![(M, serial(ns))])
+            .to_vec(),
+    );
+    let costs = WidthCosts::new([1, 10, 20].map(Duration::from_nanos));
+    let mut engine = engine(8, BatchPolicy::default(), costs);
+    on(&mut engine, 8, |exec| {
+        let mut tables = LaneTables::default();
+        place(&exec, &one_slot, Form::Barrier, &mut tables);
+        assert_eq!(tables.scores(), (None, None));
+        let barrier = tables.placement().clone();
+        assert_eq!(barrier, placed(&exec, &one_slot, Form::Native));
+        let barrier = placed(&exec, &widening, Form::Barrier);
+        assert_eq!(barrier, placed(&exec, &widening, Form::Native));
+    });
+}
+
+/// A provider-free barrier set with a multi-stage job keeps the barrier
+/// search, whose walk divides each stage: on two slots at a 1 ns dispatch,
+/// two 5 ns widening stages and a 4 ns one-slot job score
+/// `max(10, 4) + 1 = 11` on two lanes and `2 (5/2 + 1) + 4 = 10` on one,
+/// which wins, where native's `10/2 + 2 + 4 = 11` would tie and keep two.
+#[test]
+fn multi_stage_provider_free_barrier_sets_keep_the_barrier_search() {
+    let flat = Estimate {
+        widen: false,
+        ..serial(4)
+    };
+    let batch = Batch::new(vec![vec![(M, serial(5)); 2], vec![(M, flat)]]);
+    let mut engine = engine(2, BatchPolicy::default(), row(1));
+    on(&mut engine, 2, |exec| {
+        let mut tables = LaneTables::default();
+        place(&exec, &batch, Form::Barrier, &mut tables);
+        assert_eq!(tables.scores(), (Some(11), Some(10)));
+        assert_eq!(tables.placement().lanes(), 1);
+    });
+}
+
 /// The reservation replaces the equal shares only by scoring strictly lower:
 /// on eight slots at dispatch costs of 1, 10 and 20 ns at two, four and six
 /// slots, a 100 ns job (payback 5 ns, width 2) and a 250 ns job (width 8)
