@@ -205,6 +205,12 @@ pub(super) fn validate_strided_ranks(
 /// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
 /// strided's spilled replay allocates a cursor per worker range, while the
 /// baked walk reuses the replay workspace's index.
+///
+/// Why `#[inline]`: every role write asks this, from other modules' item
+/// loops; out of line, the serial answer costs each role a call (measured
+/// per Direct item on the owned permute replay). Inlined, a serial token
+/// answers with two loads and a compare in the caller.
+#[inline]
 pub(crate) fn admitted_plan<'a>(
     role: BakedFusedLayout<'a>,
     elements: usize,

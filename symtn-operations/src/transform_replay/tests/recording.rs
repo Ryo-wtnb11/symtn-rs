@@ -58,7 +58,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
-        let mut cropped = [0; crate::kernel_adapter::FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
                 let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
@@ -107,7 +107,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
-        let mut cropped = [0; crate::kernel_adapter::FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         let role = layouts.role(dst_layout)?;
         let (role, dst_shift, src_shift) = match band {
             None => (role, 0, 0),

@@ -58,17 +58,21 @@ where
         }
         profile
     };
-    let _ = schedule;
     replay_serial(
-        engine, dense, workspace, task, dst, src, writer, kernels, profile,
+        engine, dense, workspace, task, schedule, dst, src, writer, kernels, profile,
     )
 }
 
-/// The one-worker replay, in the source order: every inactive destination,
-/// every Single in block order, then each recoupling job in plan order, its
-/// pack, its GEMM on the caller's engine and its scatter, one pack buffer
-/// pair reused. Every move runs on one slot. The first failure is returned
-/// and nothing after it runs.
+/// The one-worker replay: the schedule's direct items (inactive
+/// destinations and Singles) in its component order, which is destination
+/// address order except where components interleave, then each recoupling
+/// job in plan order, its pack, its GEMM on the caller's engine and its
+/// scatter, one pack buffer pair reused. Every move runs on one slot. The
+/// first failure is returned and nothing after it runs.
+///
+/// Why the schedule's order and not block order: an owned destination is
+/// written for the first time here, and walking it in address order keeps
+/// the first-touch write stream sequential; block order scatters it.
 ///
 /// TensorKit `_add_general_kernel_nonthreaded!` (indexmanipulations.jl):
 /// Singles apply directly and each Multi block is `destination = source *
@@ -79,6 +83,7 @@ fn replay_serial<E, W, T, D, C>(
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
     task: TreeTransformTaskView<'_, C>,
+    schedule: &TreeTransformParallelSchedule,
     dst: &mut [T],
     src: &[D],
     writer: &W,
@@ -103,35 +108,17 @@ where
     } = &mut *workspace;
     crate::host_pool::with_exec(engine, |exec| {
         let mut exec = exec.limit(one);
-        let start = profile.as_ref().map(|_| std::time::Instant::now());
-        for &layout in task.inactive_destination_layouts() {
-            writer.direct(
-                kernels,
-                zero_strides,
-                TreeTransformDirectItem::Inactive { layout, slot: 0 },
-                src,
-                dst,
-                0,
-                None,
-                exec.reborrow(),
-                fused_indices,
-            )?;
+        if let Some(profile) = profile.as_deref_mut() {
+            profile.single_blocks += schedule.single_block_count;
         }
-        if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-            profile.strided_kernel += start.elapsed();
-        }
-        for (block, item) in task.blocks().iter().enumerate() {
-            if !matches!(item, TreeTransformBlock::Single { .. }) {
-                continue;
-            }
-            // Timestamps only under profiling: the per-block clock reads are
+        for &item in &schedule.direct {
+            // Timestamps only under profiling: the per-item clock reads are
             // measurable against microsecond replays.
             let start = profile.as_ref().map(|_| std::time::Instant::now());
-            let block = u32::try_from(block).map_err(|_| OperationError::ElementCountOverflow)?;
             writer.direct(
                 kernels,
                 zero_strides,
-                TreeTransformDirectItem::Single { block, slot: 0 },
+                item,
                 src,
                 dst,
                 0,
@@ -141,8 +128,9 @@ where
             )?;
             if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
                 let elapsed = start.elapsed();
-                profile.single_blocks += 1;
-                profile.single_total += elapsed;
+                if matches!(item, TreeTransformDirectItem::Single { .. }) {
+                    profile.single_total += elapsed;
+                }
                 profile.strided_kernel += elapsed;
             }
         }

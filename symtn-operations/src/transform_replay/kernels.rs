@@ -97,9 +97,7 @@ where
     let dst_offset = dst.offset - dst_start;
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
-    // Why test the token here: a serial token never widens, and this check
-    // inlines where the admission query is an out-of-line call per role.
-    if mode.overwrites() && !exec.is_serial() {
+    if mode.overwrites() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
             if let Some(result) = kernels.planned_transform(
                 exec.reborrow(),
@@ -449,9 +447,7 @@ where
     let dst = layouts.entry(entry_index);
     let dst_offset = dst.offset - dst_start;
     let packed_offset = offset_to_isize(packed_offset)?;
-    // Why test the token here: a serial token never widens, and this check
-    // inlines where the admission query is an out-of-line call per role.
-    if mode.overwrites() && !exec.is_serial() {
+    if mode.overwrites() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
             if let Some(result) = kernels.planned_scatter(
                 exec.reborrow(),

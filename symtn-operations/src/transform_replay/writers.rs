@@ -57,13 +57,17 @@ pub(super) type Band = (usize, usize);
 /// `dims` with its outermost extent replaced by the band's length, copied
 /// into `scratch`, and the destination and source offset shifts of the
 /// band's first outer index. Compilation admits a band only for a rank
-/// within `scratch`'s length.
+/// within the scratch length.
+///
+/// Why `scratch` is an `Option` the crop fills: a whole-item write never
+/// crops, and an array the caller zeroes up front costs every item its
+/// store (measured per Direct item on the owned permute replay).
 fn crop_dims<'s>(
     dims: &[usize],
     dst_strides: &[isize],
     src_strides: &[isize],
     (k0, k1): Band,
-    scratch: &'s mut [usize; FUSED_LAYOUT_INLINE_RANK],
+    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
 ) -> Result<(&'s [usize], isize, isize), OperationError> {
     let rank = dims.len();
     let (Some(outer), true) = (rank.checked_sub(1), rank <= FUSED_LAYOUT_INLINE_RANK) else {
@@ -71,6 +75,7 @@ fn crop_dims<'s>(
             message: "tree transform band crops a layout it cannot hold",
         });
     };
+    let scratch = scratch.insert([0; FUSED_LAYOUT_INLINE_RANK]);
     scratch[..rank].copy_from_slice(dims);
     scratch[outer] = k1 - k0;
     let k0 = offset_to_isize(k0)?;
@@ -90,7 +95,7 @@ fn crop_dims<'s>(
 pub(super) fn crop_role<'s>(
     role: crate::BakedFusedLayout<'s>,
     band: Band,
-    scratch: &'s mut [usize; FUSED_LAYOUT_INLINE_RANK],
+    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
 ) -> Result<(crate::BakedFusedLayout<'s>, isize, isize), OperationError> {
     let (dims, dst_shift, src_shift) = crop_dims(
         role.dims(),
@@ -118,7 +123,7 @@ pub(super) fn inactive_role<'s>(
     layouts: &'s TreeTransformLayoutTable,
     layout: usize,
     band: Option<Band>,
-    scratch: &'s mut [usize; FUSED_LAYOUT_INLINE_RANK],
+    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
 ) -> Result<(crate::BakedFusedLayout<'s>, isize), OperationError> {
     let (dims, strides) = layouts.inactive_role(layout)?;
     let zeros = layouts.zero_src_strides(dims.len())?;
@@ -154,6 +159,15 @@ pub(super) trait DestinationWriter<T, D>: Sync {
 
     /// The write of direct item `item` from the replayed source `src` (one
     /// member's, in a member replay).
+    ///
+    /// Why the writers mark this `#[inline]`: it runs once per item inside
+    /// the item loops of `batched.rs` and the lane stages, which live in
+    /// other modules. Without the hint rustc gives each writer instance one
+    /// home codegen unit (this module's), so every item pays an out-of-line
+    /// call and prologue that LLVM never sees across (measured on the owned
+    /// permute replay of many small Singles, where the call is a visible
+    /// share of each item's work); with it each caller's codegen unit gets
+    /// a local copy, as for `movement::span`.
     #[allow(clippy::too_many_arguments)]
     fn direct(
         &self,
@@ -211,6 +225,7 @@ where
         self.mode.overwrites()
     }
 
+    #[inline]
     fn direct(
         &self,
         kernels: &mut A,
@@ -224,7 +239,7 @@ where
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
                 let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
@@ -335,7 +350,7 @@ where
                 self.mode,
             );
         };
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         let (baked, dst_shift, src_shift) =
             crop_role(layouts.role(dst_layout)?, band, &mut cropped)?;
         scatter_role(
@@ -374,6 +389,7 @@ where
         true
     }
 
+    #[inline]
     fn direct(
         &self,
         _: &mut (),
@@ -387,7 +403,7 @@ where
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
                 let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
@@ -453,7 +469,7 @@ where
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
         let role = layouts.role(dst_layout)?;
-        let mut cropped = [0; FUSED_LAYOUT_INLINE_RANK];
+        let mut cropped = None;
         let (role, elements, dst_shift, src_shift) = match band {
             None => (role, layouts.entry(dst_layout).element_count, 0, 0),
             Some(band) => {

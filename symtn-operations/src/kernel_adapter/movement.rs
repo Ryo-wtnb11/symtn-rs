@@ -105,8 +105,8 @@ pub(crate) enum Update<T> {
 /// out-of-line call that LLVM never sees across. `#[inline]` is rustc's
 /// `InlineAttr::Hint`, which makes the instance `InstantiationMode::LocalCopy`
 /// in optimized builds: each caller's codegen unit gets its own copy, and
-/// LLVM decides inlining with the caller in view. It forces nothing; this is
-/// the only such attribute in the movement layer.
+/// LLVM decides inlining with the caller in view. It forces nothing; this and
+/// its [`odometer`] are the only such attributes in the movement layer.
 ///
 /// # Panics
 ///
@@ -135,16 +135,36 @@ pub(crate) fn span<S, A, T>(
     }
     debug_assert_eq!(rank, index.len());
     let (len, inner_dst, inner_src) = (dims[0], dst_strides[0], src_strides[0]);
-    index.fill(0);
-    let (mut dst_base, mut src_base) = (dst_offset, src_offset);
-    loop {
-        if inner_dst == 1 && inner_src == 1 {
-            let (dst_start, src_start) = (dst_base as usize, src_base as usize);
-            let run = dst[dst_start..dst_start + len].iter_mut();
-            for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
-                action.element(slot, value);
-            }
-        } else {
+    // Why the run kernel is chosen here, once per call, and not per run:
+    // the inner strides are a layout property, and a per-run test of them
+    // ahead of the general kernel's bodies keeps the odometer's invariants
+    // out of registers (spilled and reloaded on every run).
+    if inner_dst == 1 && inner_src == 1 {
+        odometer(
+            dims,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            index,
+            |dst_base, src_base| {
+                let (dst_start, src_start) = (dst_base as usize, src_base as usize);
+                let run = dst[dst_start..dst_start + len].iter_mut();
+                for (slot, &value) in run.zip(&src[src_start..src_start + len]) {
+                    action.element(slot, value);
+                }
+            },
+        );
+        return;
+    }
+    odometer(
+        dims,
+        dst_strides,
+        src_strides,
+        dst_offset,
+        src_offset,
+        index,
+        |dst_base, src_base| {
             // Why iterators over once-validated runs rather than indexing
             // `base + position * stride`: the indexed loop bound-checks both
             // operands on every element and keeps their lengths live in the
@@ -220,7 +240,32 @@ pub(crate) fn span<S, A, T>(
                     }
                 }
             }
-        }
+        },
+    );
+}
+
+/// Calls `run(dst_base, src_base)` for every run of axis 0 `dims` addresses
+/// from the two offsets, the outer axes stepped as one odometer with axis 1
+/// fastest. `index` is the caller's traversal scratch of the layout's rank.
+///
+/// Why `#[inline]`: this is [`span`]'s own loop, called once per span with
+/// that call's run kernel, and it needs [`span`]'s local copy for the same
+/// codegen-unit reason.
+#[inline]
+fn odometer(
+    dims: &[usize],
+    dst_strides: &[isize],
+    src_strides: &[isize],
+    dst_offset: isize,
+    src_offset: isize,
+    index: &mut [usize],
+    mut run: impl FnMut(isize, isize),
+) {
+    let rank = dims.len();
+    index.fill(0);
+    let (mut dst_base, mut src_base) = (dst_offset, src_offset);
+    loop {
+        run(dst_base, src_base);
         let mut axis = 1;
         loop {
             if axis >= rank {
