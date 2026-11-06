@@ -303,10 +303,10 @@ where
 /// Overwrite a fixed-stride Host batch with one completed tree transform.
 /// Each member uses the exact structure passed at compilation; the workspace
 /// owns only execution scratch and can be reused at a different batch size.
-/// `threads` preserves the ordinary structural schedule for `members == 1`;
-/// larger batches submit member-expanded dense jobs together without an outer
-/// member thread pool. `destination_scales` folds `θ_b` into the moves
-/// writing destination block `b` of every member, as in
+/// One member replays on the ordinary route; larger batches submit
+/// member-expanded dense jobs together without an outer member thread pool.
+/// `destination_scales` folds `θ_b` into the moves writing destination
+/// block `b` of every member, as in
 /// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`].
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
@@ -321,7 +321,6 @@ pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
     dst_data: &mut [D],
     src_data: &[D],
     members: usize,
-    threads: usize,
     destination_scales: &[(usize, C)],
 ) -> Result<(), OperationError>
 where
@@ -331,8 +330,8 @@ where
     C: Copy + Sync,
 {
     if members == 1 {
-        // The ordinary entry retains its structural parallel schedule and
-        // already admits the single member before writing its destination.
+        // The ordinary entry runs its own route and already admits the single
+        // member before writing its destination.
         return tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             kernels,
@@ -345,7 +344,6 @@ where
             src_data,
             D::one(),
             destination_scales,
-            threads,
         );
     }
     let alpha = DestinationAlpha::new(D::one(), destination_scales)?;
@@ -658,7 +656,6 @@ mod tests {
                 &mut destination,
                 &source,
                 members,
-                2,
                 &[],
             )
             .unwrap();
@@ -719,7 +716,6 @@ mod tests {
             &mut dst,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap();
@@ -757,7 +753,6 @@ mod tests {
             &mut dst,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap_err();
@@ -821,7 +816,6 @@ mod tests {
             &mut destination,
             &source,
             members,
-            1,
             &[],
         )
         .unwrap();
@@ -869,7 +863,6 @@ mod tests {
             &mut destination,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap();
@@ -913,7 +906,6 @@ mod tests {
             &mut destination,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap();
@@ -947,7 +939,6 @@ mod tests {
                 &mut destination,
                 &[1.0; 8],
                 members,
-                1,
                 &[],
             )
             .is_err());

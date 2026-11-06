@@ -58,7 +58,6 @@ where
         source,
         D::one(),
         &[],
-        1,
     )
     .unwrap();
     for &(offset, theta) in &SCALES {
@@ -102,7 +101,6 @@ where
                 &mut actual,
                 &source,
                 members,
-                threads,
                 &SCALES,
             )
             .unwrap();
@@ -123,7 +121,6 @@ where
                     &source,
                     D::one(),
                     &SCALES,
-                    threads,
                 )
                 .unwrap();
                 assert_eq!(actual, expected, "threads={threads}");
@@ -160,7 +157,6 @@ fn unsorted_destination_scales_are_rejected_before_any_write() {
             &mut out,
             &source[..16 * members],
             members,
-            1,
             &bad,
         )
         .unwrap_err();

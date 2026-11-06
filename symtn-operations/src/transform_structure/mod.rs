@@ -124,6 +124,10 @@ impl<T> TreeTransformReplay<T> {
                 core::mem::size_of::<isize>(),
             ))
             .saturating_add(vector_bytes(
+                self.layouts.zero_src_strides.capacity(),
+                core::mem::size_of::<isize>(),
+            ))
+            .saturating_add(vector_bytes(
                 self.layouts.plans.capacity(),
                 core::mem::size_of::<strided_kernel::UpdatePlan>(),
             ))
@@ -603,6 +607,7 @@ mod tests {
         assert_eq!(layouts.fused_dims.capacity(), 4);
         assert_eq!(layouts.fused_dst_strides.capacity(), 4);
         assert_eq!(layouts.entries.capacity(), 5);
+        assert_eq!(layouts.zero_src_strides.capacity(), 1);
         // Both four-element Single roles are planned unless Strided estimates
         // their copy at zero time; the inactive role never is.
         let planned = if KernelClass::Copy.estimate(4).is_zero() {
@@ -611,7 +616,6 @@ mod tests {
             2
         };
         assert_eq!(layouts.plans.capacity(), planned);
-        assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
             (&[4usize][..], &[1isize][..])

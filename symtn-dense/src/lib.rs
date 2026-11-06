@@ -50,7 +50,9 @@ mod block_kernel {
     pub(crate) mod factor;
 }
 // The one placement and runner of independent block jobs, which the block
-// kernels and the cold tree compile run on.
+// kernels, the tree replays and the cold tree compile run on.
+#[cfg(feature = "tenferro")]
+mod lane_gemm;
 #[cfg(feature = "tenferro")]
 #[doc(hidden)]
 pub mod lanes;

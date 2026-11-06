@@ -66,6 +66,7 @@ use std::num::NonZeroUsize;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+pub use crate::lane_gemm::{LaneGemmBody, LaneGemmIo, LaneGemmShape, LaneGemms};
 pub use tcontract_exec::{BatchPolicy, Exec};
 use tcontract_exec::{BatchQuery, BatchStrategy};
 use tenferro_cpu::threadteam;

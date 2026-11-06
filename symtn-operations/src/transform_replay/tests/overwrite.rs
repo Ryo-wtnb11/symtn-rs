@@ -104,7 +104,6 @@ fn inactive_destination_scaling_preserves_storage_padding() {
         &[3.0],
         1.0,
         0.5,
-        4,
     )
     .unwrap();
     assert_eq!(dst, [5.0, 99.0, 15.0]);
@@ -126,7 +125,6 @@ fn nan_beta_reaches_active_and_inactive_destinations() {
         src.data(),
         1.0,
         f64::NAN,
-        4,
     )
     .unwrap();
     assert!(dst.data().iter().all(|value| value.is_nan()));
@@ -177,7 +175,6 @@ fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
         src.data(),
         1.0,
         &[],
-        1,
     )
     .unwrap();
     assert_eq!(dst.data(), &[6.0, 0.0]);
@@ -212,7 +209,6 @@ fn overwrite_single_does_not_read_nan_destinations_on_any_replay_route() {
         src.data(),
         1.0,
         &[],
-        1,
         &mut TreeTransformReplayProfile::default(),
     )
     .unwrap();
@@ -243,8 +239,6 @@ fn overwrite_multi_does_not_read_nan_active_or_inactive_destinations() {
 #[test]
 fn overwrite_multi_c64_does_not_read_nan_destinations() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
-    let fused_rank = structure.layouts().max_fused_rank();
-    // Two pack columns: two workers is the most the threaded driver can use.
     for threads in [1, 2] {
         let nan = num_complex::Complex64::new(f64::NAN, f64::NAN);
         let mut dst = vec![nan; 3];
@@ -266,13 +260,9 @@ fn overwrite_multi_c64_does_not_read_nan_destinations() {
                 ],
                 num_complex::Complex64::new(2.0, 0.0),
                 &[],
-                threads,
             )
         })
         .unwrap();
-        // Below the inline rank only the calling lane's index is shared;
-        // forked lanes keep their own on their stacks.
-        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(
             dst,
             [
@@ -306,9 +296,6 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
     let src = [3.0, 4.0, 5.0, 6.0];
     let expected = [6.0, -4.0, 5.0, 6.0, 0.0];
 
-    let fused_rank = structure.layouts().max_fused_rank();
-    // Two runnable Singles and two pack columns: two workers is the most the
-    // threaded driver can use.
     for threads in [1, 2] {
         let mut dst = [f64::NAN; 5];
         let mut workspace = TreeTransformWorkspace::default();
@@ -326,13 +313,9 @@ fn overwrite_threaded_single_and_multi_ignore_destination_bits() {
                 &src,
                 1.0,
                 &[],
-                threads,
             )
         })
         .unwrap();
-        // Below the inline rank only the calling lane's index is shared;
-        // forked lanes keep their own on their stacks.
-        assert_eq!(workspace.fused_indices.len(), fused_rank);
         assert_eq!(dst, expected);
     }
 }
@@ -358,7 +341,6 @@ fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
             &[3.0, 4.0],
             2.0,
             &[],
-            1,
         )
         .is_err()
     );
@@ -381,7 +363,6 @@ fn overwrite_multi_recovers_from_dirty_packed_scratch_after_failure() {
         &[3.0, 4.0],
         2.0,
         &[],
-        1,
     )
     .unwrap();
     assert_eq!(dst, [6.0, 8.0, 0.0]);
@@ -429,7 +410,6 @@ fn overwrite_validates_before_mutation_and_accepts_rank_boundaries() {
         &[],
         1.0,
         &[],
-        1,
     );
     assert!(result.is_err());
     assert_eq!(
@@ -505,7 +485,6 @@ fn structural_serial_replay_scales_inactive_destinations() {
             src.data(),
             1.0,
             beta,
-            1,
         )
         .unwrap();
         assert_eq!(dst.data(), &expected(beta));

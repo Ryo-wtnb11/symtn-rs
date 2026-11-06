@@ -258,21 +258,41 @@ are in `tenferro_cpu`), or force lanes with `Outer` or `Split`. A BLAS provider 
 vendor GEMMs one after another on the calling thread; any threads the vendor
 library starts are outside the engine's lanes. Forcing `Inner` (or another
 lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
-the vendor library. A backend-free Host region
-(tree-transform replay, plan compile, strided moves) takes the engine's
-placement token; a replay forks over the engine's width only when the
-engine's cost rule (threadteam's `pays`, with strided's copy estimate for the
-destination length against the pool's dispatch cost) admits the parallel
-section. A serial engine never forks. Inside a tree-transform replay, each
-Single block and recoupling scatter column keeps the token share of the
-worker that visits it, the whole token when the replay cannot split its
-blocks (one block, or blocks whose destination ranges interleave). An
-overwrite of such a block runs on that share through the block's retained
-Strided plan when Strided's own rule (`execution::parallel_width` for a copy
-of its elements) gives the share more than one worker. Accumulating updates
-(`beta` neither zero nor absent), pack columns, and blocks whose normalized
-layout exceeds Strided's inline fused rank of eight keep one worker per
-block. Results are bit-identical for one
+the vendor library. A backend-free Host region (plan compile, strided
+moves) takes the engine's placement token; a serial engine never forks.
+
+A tree-transform replay on the native provider and an engine wider than one
+runs on the same placement and lane runner. Each joint component of the
+compiled transform (the Singles, Multi groups and inactive blocks whose
+destination intervals overlap, which own those intervals together) is one
+job, so every destination element has one writer. Its stages are its direct
+writes (inactive blocks, then Singles), and per Multi group a pack, a GEMM
+and a scatter; a movement stage is estimated by Strided's copy estimate of
+the elements it moves, a GEMM by the same estimate as a block GEMM, and each
+stage runs at its own selected width. A movement stage of width two or more
+splits its component over that many sub-slots of the component's band units
+(the outer slabs of atoms whose items share one, whole atoms otherwise) in
+one flat fork; at width one, or for an overwrite of a component whose one
+item is a Single whose retained Strided plan Strided's own rule
+(`execution::parallel_width` for a copy of its elements) admits on the
+stage's token (gives it more than one worker), each item is written whole on
+that token, the admitted Single through its plan. A pack splits its columns over one flat fork; the GEMM runs
+on the stage's context into its lane's initialized packed destination
+(tcontract's initialized write, as a grouped recoupling GEMM). Every
+component runs even after another fails, and the lowest-indexed failing
+component's error is returned. On one worker (a serial engine, or a
+placement of one lane of one slot, such as a forced `Sequential` policy on a
+wider engine), and on a provider without lane GEMMs (BLAS and custom
+executors), the replay runs one worker in source
+order: inactive blocks, Singles, then each Multi group's pack, GEMM on the
+engine and scatter, stopping at the first failure. Accumulating updates
+(`beta` neither zero nor absent), and blocks whose normalized layout exceeds
+Strided's inline fused rank of eight, are never written through a Strided
+plan. The cold compile of a tree transform fans its staged groups out over
+the engine's width in contiguous batches, one per one-thread lane, and
+reports the first error in source order. symtn's own data movement (a tree
+replay's direct writes, packs and scatters) writes the same bits at every
+engine width. Results are bit-identical for one
 configuration (provider, build, engine width, batch policy and work model,
 inputs). No promise is made across widths or providers: a provider GEMM may
 reduce in another order at another width (faer's matrix-vector route splits

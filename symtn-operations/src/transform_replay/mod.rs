@@ -2,11 +2,7 @@ use core::mem::MaybeUninit;
 use core::ops::{Add, Mul};
 use std::sync::{Arc, Weak};
 
-#[cfg(not(test))]
-use crate::host_pool::join as pool_join;
 use crate::host_pool::Exec;
-#[cfg(test)]
-use allocation_oracle::join as pool_join;
 use symtn_dense::Engine;
 
 use num_traits::{One, Zero};
@@ -14,22 +10,17 @@ use num_traits::{One, Zero};
 use symtn_core::HostWritableStorage;
 use symtn_core::{BlockStructure, Placement};
 #[cfg(test)]
-#[cfg(test)]
 use symtn_dense::DefaultDenseExecutor;
 use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
-use crate::host_scratch::{HostScratchBuffer, PackColumnWriter};
+use crate::host_scratch::HostScratchBuffer;
 use crate::kernel_adapter::movement::{span, with_payload_map, with_transform_map, Uninit, Write};
-use crate::kernel_adapter::sealed::LeafGate;
-use crate::kernel_adapter::{admitted_plan, planned_write_uninit, FUSED_LAYOUT_INLINE_RANK};
+use crate::kernel_adapter::{admitted_plan, planned_write_uninit};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
-use crate::transform_structure::{
-    TreeTransformPackReplay, TreeTransformParallelSchedule, TreeTransformScatterGroupReplay,
-    TreeTransformScatterReplay,
-};
+use crate::transform_structure::{TreeTransformDirectItem, TreeTransformParallelSchedule};
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
     RecouplingCoefficientAction, ReportsPlacement, TransformScale, TreeTransformBlock,
@@ -40,10 +31,13 @@ mod batched;
 mod coefficients;
 mod entry;
 mod kernels;
+#[cfg(feature = "tenferro")]
+mod lanes;
 mod member;
 mod owned;
 #[cfg(test)]
 mod tests;
+mod writers;
 
 use batched::*;
 use coefficients::*;
@@ -51,6 +45,7 @@ pub use entry::*;
 pub(crate) use kernels::*;
 pub use member::*;
 pub use owned::*;
+use writers::{scheduled_single, InitializedWriter, OwnedWriter, ReplayParts};
 
 #[cfg(test)]
 mod allocation_oracle {
@@ -66,7 +61,6 @@ mod allocation_oracle {
 
     static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
     static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
-    static JOINS: AtomicUsize = AtomicUsize::new(0);
     static SESSION: Mutex<()> = Mutex::new(());
 
     struct CountingAllocator;
@@ -135,7 +129,6 @@ mod allocation_oracle {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         ALLOCATIONS.store(0, Ordering::Relaxed);
         ALLOCATED_BYTES.store(0, Ordering::Relaxed);
-        JOINS.store(0, Ordering::Relaxed);
         let result = action();
         let allocations = ALLOCATIONS.load(Ordering::Relaxed);
         drop(session);
@@ -146,45 +139,6 @@ mod allocation_oracle {
     pub(super) fn with_measurement<R>(action: impl FnOnce() -> R) -> R {
         let restore = RestoreMeasurement(MEASURED.with(|measured| measured.replace(true)));
         let result = action();
-        drop(restore);
-        result
-    }
-
-    pub(super) fn join_entries() -> usize {
-        JOINS.load(Ordering::Relaxed)
-    }
-
-    pub(super) fn join<A, B, RA, RB>(
-        exec: crate::host_pool::Exec<'_>,
-        left: A,
-        right: B,
-    ) -> (RA, RB)
-    where
-        A: FnOnce(crate::host_pool::Exec<'_>) -> RA + Send + Sync,
-        B: FnOnce(crate::host_pool::Exec<'_>) -> RB + Send + Sync,
-        RA: Send + Sync,
-        RB: Send + Sync,
-    {
-        let measured = is_measured();
-        if measured {
-            JOINS.fetch_add(1, Ordering::Relaxed);
-        }
-        let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(false)));
-        let result = crate::host_pool::join(
-            exec,
-            |exec| {
-                let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = left(exec);
-                drop(restore);
-                result
-            },
-            |exec| {
-                let restore = RestoreMeasurement(MEASURED.with(|state| state.replace(measured)));
-                let result = right(exec);
-                drop(restore);
-                result
-            },
-        );
         drop(restore);
         result
     }
@@ -322,11 +276,13 @@ pub struct HostTreeTransformWorkspace<T> {
     coefficient_pack_builds: usize,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
-    chunk_scatter_groups: Vec<usize>,
-    // The calling lane's fused index, one entry per fused axis; inline up to
-    // eight, the rank metadata width, so a fresh per-call workspace allocates
-    // none. Forked lanes below that rank keep their own (`LaneIndex`).
+    // The one-worker replay's fused index, one entry per fused axis; inline
+    // up to eight, the rank metadata width, so a fresh per-call workspace
+    // allocates none.
     fused_indices: smallvec::SmallVec<[usize; 8]>,
+    // The lane replay's runner tables and per-lane scratch.
+    #[cfg(feature = "tenferro")]
+    lanes: lanes::TreeLaneScratch<T>,
     member_shape: Vec<usize>,
     member_dst_strides: Vec<isize>,
     member_src_strides: Vec<isize>,
@@ -345,8 +301,9 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             coefficient_pack_builds: 0,
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
-            chunk_scatter_groups: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
+            #[cfg(feature = "tenferro")]
+            lanes: lanes::TreeLaneScratch::default(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
             member_src_strides: Vec::new(),
@@ -356,34 +313,44 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
 }
 
 impl<T> HostTreeTransformWorkspace<T> {
-    /// Host capacity retained by member replay and ordinary transform scratch.
+    /// Host capacity retained by member replay and ordinary transform
+    /// scratch, the lane replay's included.
     #[doc(hidden)]
     pub fn retained_bytes(&self) -> usize {
         let bytes = |capacity: usize, item: usize| capacity.saturating_mul(item);
-        bytes(
-            self.packed.source().capacity() + self.packed.destination().capacity(),
-            std::mem::size_of::<T>(),
-        ) + bytes(
-            self.coefficient_scratch.capacity(),
-            std::mem::size_of::<T>(),
-        ) + bytes(
-            self.chunk_jobs.capacity(),
-            std::mem::size_of::<DenseGemmBatchJob>(),
-        ) + bytes(
-            self.chunk_runs.capacity()
-                + self.chunk_scatter_groups.capacity()
-                + self.fused_indices_heap_capacity()
-                + self.member_shape.capacity(),
-            std::mem::size_of::<usize>(),
-        ) + bytes(
-            self.zero_strides.capacity()
-                + self.member_dst_strides.capacity()
-                + self.member_src_strides.capacity(),
-            std::mem::size_of::<isize>(),
-        ) + bytes(
-            self.member_ranges.capacity(),
-            std::mem::size_of::<(usize, usize)>(),
-        )
+        #[cfg(feature = "tenferro")]
+        let lanes = self.lanes.retained_bytes();
+        #[cfg(not(feature = "tenferro"))]
+        let lanes = 0;
+        lanes
+            + bytes(
+                self.packed.source().capacity() + self.packed.destination().capacity(),
+                std::mem::size_of::<T>(),
+            )
+            + bytes(
+                self.coefficient_scratch.capacity(),
+                std::mem::size_of::<T>(),
+            )
+            + bytes(
+                self.chunk_jobs.capacity(),
+                std::mem::size_of::<DenseGemmBatchJob>(),
+            )
+            + bytes(
+                self.chunk_runs.capacity()
+                    + self.fused_indices_heap_capacity()
+                    + self.member_shape.capacity(),
+                std::mem::size_of::<usize>(),
+            )
+            + bytes(
+                self.zero_strides.capacity()
+                    + self.member_dst_strides.capacity()
+                    + self.member_src_strides.capacity(),
+                std::mem::size_of::<isize>(),
+            )
+            + bytes(
+                self.member_ranges.capacity(),
+                std::mem::size_of::<(usize, usize)>(),
+            )
     }
 
     /// Coefficient packs this workspace has converted: a warm replay of the
@@ -409,14 +376,6 @@ impl<T> HostTreeTransformWorkspace<T> {
 
     pub fn destination_len(&self) -> usize {
         self.packed.destination().len()
-    }
-
-    #[cfg(test)]
-    fn packed_capacities(&self) -> (usize, usize) {
-        (
-            self.packed.source().capacity(),
-            self.packed.destination().capacity(),
-        )
     }
 
     fn prepare_packed_buffers(&mut self, source_len: usize, destination_len: usize, zero: T)
@@ -445,13 +404,8 @@ impl<T> HostTreeTransformWorkspace<T> {
         }
     }
 
-    fn prepare_fused_indices(
-        &mut self,
-        threads: usize,
-        max_fused_rank: usize,
-    ) -> Result<(), OperationError> {
-        let len =
-            checked_fused_index_len(fused_index_lanes(threads, max_fused_rank), max_fused_rank)?;
+    fn prepare_fused_indices(&mut self, max_fused_rank: usize) -> Result<(), OperationError> {
+        let len = checked_fused_index_len(1, max_fused_rank)?;
         if len > self.fused_indices.len() {
             self.fused_indices.resize(len, 0);
         }
@@ -478,63 +432,6 @@ fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize
     }
 }
 
-/// Fused-index entries a lane keeps inline: the rank metadata width.
-const INLINE_FUSED_RANK: usize = 8;
-
-/// Lanes whose fused indices the shared workspace buffer holds: every lane
-/// above the inline rank, only the calling lane otherwise.
-///
-/// Why not always one shared `threads * rank` buffer: an eager call's
-/// workspace is per call, and that buffer outgrows its inline capacity as
-/// soon as the engine is wider than one, so every parallel call allocated on
-/// the caller thread what the serial call does not. Up to the inline rank a
-/// forked lane keeps its index on its own stack instead ([`LaneIndex`]);
-/// above it the index spills anyway, and one shared buffer keeps a warm
-/// replay allocation-free.
-fn fused_index_lanes(threads: usize, max_fused_rank: usize) -> usize {
-    if max_fused_rank <= INLINE_FUSED_RANK {
-        1
-    } else {
-        threads
-    }
-}
-
-/// The fused-index scratch of the second lane of a fork: a slice of the
-/// shared buffer when it holds every lane, or the lane's own inline index.
-enum LaneIndex<'a> {
-    Shared(&'a mut [usize]),
-    Own(smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>),
-}
-
-impl LaneIndex<'_> {
-    fn get(&mut self) -> &mut [usize] {
-        match self {
-            Self::Shared(indices) => indices,
-            Self::Own(indices) => indices,
-        }
-    }
-}
-
-/// Splits one fork's fused-index scratch: the first `left_threads` lanes keep
-/// the front of `fused_indices`; the rest take the back when the buffer holds
-/// every lane, and their own inline index otherwise.
-fn split_lane_indices(
-    fused_indices: &mut [usize],
-    left_threads: usize,
-    threads: usize,
-    max_fused_rank: usize,
-) -> (&mut [usize], LaneIndex<'_>) {
-    if fused_indices.len() >= threads * max_fused_rank {
-        let (left, right) = fused_indices.split_at_mut(left_threads * max_fused_rank);
-        (left, LaneIndex::Shared(right))
-    } else {
-        (
-            fused_indices,
-            LaneIndex::Own(smallvec::SmallVec::from_elem(0, max_fused_rank)),
-        )
-    }
-}
-
 // Why not reserve here: public drivers call this before beta mutation, while
 // executors retain ownership of actual workspace growth and profiler attribution.
 fn checked_fused_index_len(threads: usize, max_fused_rank: usize) -> Result<usize, OperationError> {
@@ -555,77 +452,8 @@ impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {
 
 #[cfg(test)]
 mod allocation_oracle_tests {
-    use super::{allocation_oracle, replay_join};
-    use crate::host_pool::TestPool;
+    use super::allocation_oracle;
     use std::panic::{catch_unwind, AssertUnwindSafe};
-
-    /// A two-worker engine, so joins really fork. Built and warmed before
-    /// any measured scope: building an engine and its first fork allocate.
-    fn two_slots() -> TestPool {
-        let mut engine = crate::host_pool::test_pool(2);
-        engine.with_exec(|exec| allocation_oracle::join(exec, |_| (), |_| ()));
-        engine
-    }
-
-    #[test]
-    fn allocation_oracle_inherits_and_restores_join_scopes() {
-        let mut engine = two_slots();
-        assert!(!allocation_oracle::is_measured());
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            allocation_oracle::with_measurement(|| {
-                assert!(allocation_oracle::is_measured());
-                engine.with_exec(|exec| {
-                    allocation_oracle::join(
-                        exec,
-                        |_| assert!(allocation_oracle::is_measured()),
-                        |_| assert!(allocation_oracle::is_measured()),
-                    )
-                });
-                assert!(allocation_oracle::is_measured());
-            })
-        });
-        assert_eq!(allocations, 0);
-        assert!(!allocation_oracle::is_measured());
-    }
-
-    #[test]
-    fn allocation_oracle_leaves_inactive_joins_unmeasured() {
-        let mut engine = two_slots();
-        engine.with_exec(|exec| {
-            allocation_oracle::join(
-                exec,
-                |_| assert!(!allocation_oracle::is_measured()),
-                |_| assert!(!allocation_oracle::is_measured()),
-            )
-        });
-        assert!(!allocation_oracle::is_measured());
-    }
-
-    #[test]
-    fn allocation_oracle_restores_nested_worker_scopes() {
-        let mut engine = two_slots();
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            allocation_oracle::with_measurement(|| {
-                engine.with_exec(|exec| {
-                    allocation_oracle::join(
-                        exec,
-                        |exec| {
-                            allocation_oracle::join(
-                                exec,
-                                |_| assert!(allocation_oracle::is_measured()),
-                                |_| assert!(allocation_oracle::is_measured()),
-                            );
-                            assert!(allocation_oracle::is_measured());
-                        },
-                        |_| assert!(allocation_oracle::is_measured()),
-                    )
-                });
-                assert!(allocation_oracle::is_measured());
-            })
-        });
-        assert_eq!(allocations, 0);
-        assert!(!allocation_oracle::is_measured());
-    }
 
     #[test]
     fn allocation_oracle_recovers_after_a_panicking_session() {
@@ -652,31 +480,6 @@ mod allocation_oracle_tests {
         assert!(nested.is_err());
 
         let (_, allocations) = allocation_oracle::with_session(|| ());
-        assert_eq!(allocations, 0);
-    }
-
-    #[test]
-    fn allocation_oracle_restores_after_a_panicking_replay_join() {
-        let mut engine = two_slots();
-        let panic = catch_unwind(AssertUnwindSafe(|| {
-            allocation_oracle::with_session(|| {
-                allocation_oracle::with_measurement(|| {
-                    engine.with_exec(|exec| {
-                        replay_join(
-                            exec,
-                            |_| panic!("expected replay join panic"),
-                            |_| assert!(allocation_oracle::is_measured()),
-                        )
-                    });
-                })
-            });
-        }));
-        assert!(panic.is_err());
-        assert!(!allocation_oracle::is_measured());
-
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            allocation_oracle::with_measurement(|| assert!(allocation_oracle::is_measured()))
-        });
         assert_eq!(allocations, 0);
     }
 }

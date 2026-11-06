@@ -854,7 +854,6 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
         &mut batched,
         &source,
         2,
-        1,
         &[],
     )
     .unwrap();
@@ -926,7 +925,6 @@ fn rank_five_su2_member_transform_matches_physical_permutation_and_ordinary_repl
             &source[member * source_len..(member + 1) * source_len],
             1.0,
             &[],
-            1,
         )
         .unwrap();
         // One linear source transform cannot sum more terms into an entry

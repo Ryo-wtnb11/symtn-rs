@@ -397,7 +397,6 @@ mod tests {
                 &mut output,
                 &vec![1.0; copy.temporary_len() * members],
                 members,
-                1,
                 &[],
             )
             .unwrap();

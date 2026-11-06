@@ -519,7 +519,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     }
 
     slots.reserve(jobs.len());
-    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
+    index_plans::<T>(geometries, plans, jobs.iter().copied(), ops, |plan| {
         slots.push((plan, &mut [][..]))
     })?;
 
@@ -566,14 +566,14 @@ pub(crate) type FreshSlots<'a, T> = Vec<(usize, &'a mut [MaybeUninit<T>], &'a mu
 fn index_plans<T: Scalar>(
     geometries: &mut HashMap<Geometry, usize>,
     plans: &mut Vec<Arc<ErasedPlan>>,
-    jobs: &[DenseGemmBatchJob],
+    jobs: impl IntoIterator<Item = DenseGemmBatchJob>,
     ops: [MatrixOp; 2],
     mut slot: impl FnMut(usize),
 ) -> Result<(), DenseError> {
     geometries.clear();
     plans.clear();
-    for (index, job) in jobs.iter().enumerate() {
-        let geometry = Geometry::new(job, ops)?;
+    for (index, job) in jobs.into_iter().enumerate() {
+        let geometry = Geometry::new(&job, ops)?;
         let next = geometries.len();
         let plan = *geometries.entry(geometry).or_insert(next);
         if plan == plans.len() {
@@ -620,7 +620,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         ..
     } = scratch;
     slots.reserve(jobs.len());
-    index_plans::<T>(geometries, plans, jobs, ops, |plan| {
+    index_plans::<T>(geometries, plans, jobs.iter().copied(), ops, |plan| {
         slots.push((plan, &mut [][..], &mut [][..]))
     })?;
     split_fresh_segments(parts.segments, jobs, order, |j, piece| slots[j].1 = piece)?;
@@ -642,4 +642,167 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     plans.clear();
     scratch.keep_fresh_slots(slots);
     result
+}
+
+/// The native [`crate::DenseExecutor::with_lane_gemms`]: looks every job's
+/// plan up in the geometry-plan cache into `scratch`, enters `cpu`'s guarded
+/// contraction entry once and calls `body` with its whole context and the
+/// prepared GEMMs.
+#[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
+pub(crate) fn with_lane_gemms(
+    cpu: &mut CpuEngine,
+    scratch: &mut GemmScratch,
+    dtype: crate::DenseDType,
+    jobs: &[crate::lanes::LaneGemmShape],
+    body: &mut crate::lanes::LaneGemmBody<'_>,
+) -> Result<(), DenseError> {
+    let GemmScratch {
+        order,
+        geometries,
+        plans,
+        ..
+    } = scratch;
+    order.clear();
+    order.reserve(jobs.len());
+    let geometry = jobs.iter().map(|job| DenseGemmBatchJob {
+        dst_offset: 0,
+        lhs_offset: 0,
+        rhs_offset: 0,
+        rows: job.rows,
+        contracted: job.k,
+        cols: job.n,
+    });
+    let identity = [MatrixOp::Identity; 2];
+    macro_rules! resolve {
+        ($t:ty) => {
+            index_plans::<$t>(geometries, plans, geometry, identity, |p| order.push(p))
+        };
+    }
+    let resolved = match dtype {
+        crate::DenseDType::F32 => resolve!(f32),
+        crate::DenseDType::F64 => resolve!(f64),
+        crate::DenseDType::C32 => resolve!(num_complex::Complex32),
+        crate::DenseDType::C64 => resolve!(num_complex::Complex64),
+        other => Err(DenseError::Unsupported {
+            op: crate::lane_gemm::LANE_GEMM_OP,
+            message: format!("no GEMM of dtype {other:?}"),
+        }),
+    };
+    let entered = resolved.and_then(|()| {
+        cpu.with_contraction_exec(|exec, _, _| {
+            let gemms = NativeLaneGemms {
+                jobs,
+                plan_of_job: order,
+                plans,
+                dtype,
+            };
+            body(exec.reborrow(), &gemms);
+            Ok(())
+        })
+        .map_err(|err| crate::tenferro_adapter::tenferro_error(crate::lane_gemm::LANE_GEMM_OP, err))
+    });
+    plans.clear();
+    entered
+}
+
+/// The prepared GEMMs of one native lane-GEMM call.
+struct NativeLaneGemms<'r> {
+    jobs: &'r [crate::lanes::LaneGemmShape],
+    plan_of_job: &'r [usize],
+    plans: &'r [Arc<ErasedPlan>],
+    dtype: crate::DenseDType,
+}
+
+impl NativeLaneGemms<'_> {
+    /// tcontract's initialized `Replace` write (beta zero, no accumulation
+    /// source), the route main's grouped tree recoupling takes, so a small
+    /// shape keeps faer's nano-gemm route.
+    fn run_typed<T: Scalar + Default>(
+        &self,
+        mut exec: Exec<'_>,
+        job: usize,
+        actual: crate::DenseDType,
+        one: T,
+        (lhs, rhs, destination): (&[T], &[T], &mut [T]),
+    ) -> Result<(), DenseError> {
+        let plan = self.plans[self.plan_of_job[job]]
+            .downcast_ref::<Plan<T>>()
+            .ok_or(DenseError::DTypeMismatch {
+                op: crate::lane_gemm::LANE_GEMM_OP,
+                expected: self.dtype,
+                actual,
+            })?;
+        plan.execute_slices_accum(
+            &mut exec,
+            one,
+            (lhs, 0),
+            (rhs, 0),
+            T::default(),
+            SliceAccumulationSource::Absent,
+            (destination, 0),
+        )
+        .map_err(|err| grouped_error(format!("lane job {job}: {err}")))
+    }
+}
+
+impl crate::lanes::LaneGemms for NativeLaneGemms<'_> {
+    fn run(
+        &self,
+        exec: Exec<'_>,
+        job: usize,
+        io: crate::lanes::LaneGemmIo<'_>,
+    ) -> Result<(), DenseError> {
+        use crate::lanes::LaneGemmIo as Io;
+        use crate::DenseDType as D;
+        use num_complex::Complex;
+        if job >= self.jobs.len() {
+            return Err(DenseError::OutOfBounds);
+        }
+        match io {
+            Io::F32 {
+                lhs,
+                rhs,
+                destination,
+            } => self.run_typed(exec, job, D::F32, 1.0, (lhs, rhs, destination)),
+            Io::F64 {
+                lhs,
+                rhs,
+                destination,
+            } => self.run_typed(exec, job, D::F64, 1.0, (lhs, rhs, destination)),
+            Io::C32 {
+                lhs,
+                rhs,
+                destination,
+            } => self.run_typed(
+                exec,
+                job,
+                D::C32,
+                Complex::new(1.0, 0.0),
+                (lhs, rhs, destination),
+            ),
+            Io::C64 {
+                lhs,
+                rhs,
+                destination,
+            } => self.run_typed(
+                exec,
+                job,
+                D::C64,
+                Complex::new(1.0, 0.0),
+                (lhs, rhs, destination),
+            ),
+        }
+    }
+
+    fn estimate(&self, job: usize) -> Estimate {
+        let complex = matches!(self.dtype, crate::DenseDType::C32 | crate::DenseDType::C64);
+        let work = self.jobs.get(job).map_or(0.0, |shape| {
+            shape.rows as f64 * shape.k as f64 * shape.n as f64 * if complex { 4.0 } else { 1.0 }
+        });
+        Estimate {
+            serial: driver::cost(OpKind::Gemm, work, &WorkModel::default()),
+            payback: None,
+            sections: 1,
+        }
+    }
 }

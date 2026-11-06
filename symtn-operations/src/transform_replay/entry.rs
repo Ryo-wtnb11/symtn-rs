@@ -126,7 +126,7 @@ where
     validate_replay_storage_len(dst_structure, dst_data.len())?;
     validate_replay_storage_len(src_structure, src_data.len())?;
     let task = structure.task_view()?;
-    workspace.prepare_fused_indices(1, structure.layouts().max_fused_rank())?;
+    workspace.prepare_fused_indices(structure.layouts().max_fused_rank())?;
     scale_inactive_destinations(
         exec.reborrow(),
         kernels,
@@ -185,14 +185,13 @@ where
     Ok(())
 }
 
-/// Replays a prepared structural-recoupling tree transform on host slices.
+/// Replays a prepared structural-recoupling tree transform on host slices:
+/// `dst = alpha * T(src) + beta * dst`.
 ///
-/// `threads` selects the replay parallelism (a property of the executing
-/// backend, not of the cached structure): `<= 1` reuses one pack buffer and
-/// submits each Multi group independently; `> 1` runs Single applies, Multi
-/// pack columns and Multi scatter columns as independent work items over up to
-/// `threads` work-stealing workers. Multi blocks submit bounded grouped
-/// recoupling batches between their pack and scatter phases.
+/// The engine and executor fix the route before any write: on a multi-slot
+/// engine whose executor runs lane GEMMs, every joint component is a job on
+/// the lane runner; otherwise one worker replays in source order (see
+/// [`replay`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_transform_structure_with_structural_recoupling_raw<A, E, D, C>(
     engine: &mut dyn Engine,
@@ -206,7 +205,6 @@ pub(crate) fn tree_transform_structure_with_structural_recoupling_raw<A, E, D, C
     src_data: &[D],
     alpha: D,
     beta: D,
-    threads: usize,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -226,7 +224,7 @@ where
         src_data,
         DestinationAlpha::uniform(alpha),
         DestinationMode::Axpby(beta),
-        threads,
+        None,
     )
 }
 
@@ -248,7 +246,6 @@ pub fn tree_transform_structure_overwrite_with_structural_recoupling_raw<A, E, D
     src_data: &[D],
     alpha: D,
     destination_scales: &[(usize, C)],
-    threads: usize,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -268,87 +265,6 @@ where
         src_data,
         DestinationAlpha::new(alpha, destination_scales)?,
         DestinationMode::Overwrite,
-        threads,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn tree_transform_structure_with_structural_recoupling_raw_mode<A, E, D, C>(
-    engine: &mut dyn Engine,
-    kernels: &mut A,
-    dense: &mut E,
-    workspace: &mut TreeTransformWorkspace<D>,
-    structure: &TreeTransformStructure<C>,
-    dst_structure: &Arc<BlockStructure>,
-    src_structure: &Arc<BlockStructure>,
-    dst_data: &mut [D],
-    src_data: &[D],
-    alpha: DestinationAlpha<'_, D, C>,
-    mode: DestinationMode<D>,
-    threads: usize,
-) -> Result<(), OperationError>
-where
-    A: HostKernelAdapter<D> + Clone + Send + Sync,
-    E: DenseExecutor,
-    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
-    C: Copy + Sync,
-{
-    let task = structure.task_view()?;
-    task.validate_structures_and_lengths(
-        dst_structure,
-        src_structure,
-        dst_data.len(),
-        src_data.len(),
-    )?;
-    let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(engine, schedule, threads);
-    let requirements = task.workspace_requirements();
-    task.validate_workspace_requirements::<D>()?;
-    checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;
-    if requirements.converted_coefficient_len != 0 {
-        // Admission converts coefficients before the first destination write.
-        // The shared serial/parallel helpers call this again, but the
-        // structure-identity check makes that call a no-work cache hit.
-        ensure_recoupling_coefficients(workspace, task, structure.identity_marker())?;
-    }
-    crate::host_pool::with_exec(engine, |exec| {
-        scale_inactive_destinations(
-            exec,
-            kernels,
-            &mut workspace.zero_strides,
-            task,
-            dst_data,
-            mode,
-        )
-    })?;
-    if threads > 1 {
-        return tree_transform_blocks_with_batched_recoupling_parallel(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            schedule,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            threads,
-            None,
-        );
-    }
-    tree_transform_blocks_with_batched_recoupling(
-        engine,
-        kernels,
-        dense,
-        workspace,
-        task,
-        structure.identity_marker(),
-        dst_data,
-        src_data,
-        alpha,
-        mode,
         None,
     )
 }
@@ -366,7 +282,6 @@ pub(crate) fn tree_transform_structure_with_structural_recoupling_raw_profiled<A
     src_data: &[D],
     alpha: D,
     beta: D,
-    threads: usize,
     profile: &mut TreeTransformReplayProfile,
 ) -> Result<(), OperationError>
 where
@@ -375,7 +290,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    tree_transform_structure_with_structural_recoupling_raw_profiled_mode(
+    tree_transform_structure_with_structural_recoupling_raw_mode(
         engine,
         kernels,
         dense,
@@ -387,8 +302,7 @@ where
         src_data,
         DestinationAlpha::uniform(alpha),
         DestinationMode::Axpby(beta),
-        threads,
-        profile,
+        Some(profile),
     )
 }
 
@@ -410,7 +324,6 @@ pub(crate) fn tree_transform_structure_overwrite_with_structural_recoupling_raw_
     src_data: &[D],
     alpha: D,
     destination_scales: &[(usize, C)],
-    threads: usize,
     profile: &mut TreeTransformReplayProfile,
 ) -> Result<(), OperationError>
 where
@@ -419,7 +332,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    tree_transform_structure_with_structural_recoupling_raw_profiled_mode(
+    tree_transform_structure_with_structural_recoupling_raw_mode(
         engine,
         kernels,
         dense,
@@ -431,13 +344,14 @@ where
         src_data,
         DestinationAlpha::new(alpha, destination_scales)?,
         DestinationMode::Overwrite,
-        threads,
-        profile,
+        Some(profile),
     )
 }
 
+/// The shared body of the four entries above: validation, the coefficient
+/// pack, and the replay on its route.
 #[allow(clippy::too_many_arguments)]
-fn tree_transform_structure_with_structural_recoupling_raw_profiled_mode<A, E, D, C>(
+fn tree_transform_structure_with_structural_recoupling_raw_mode<A, E, D, C>(
     engine: &mut dyn Engine,
     kernels: &mut A,
     dense: &mut E,
@@ -449,8 +363,7 @@ fn tree_transform_structure_with_structural_recoupling_raw_profiled_mode<A, E, D
     src_data: &[D],
     alpha: DestinationAlpha<'_, D, C>,
     mode: DestinationMode<D>,
-    threads: usize,
-    profile: &mut TreeTransformReplayProfile,
+    mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<D> + Clone + Send + Sync,
@@ -458,9 +371,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    let total_start = std::time::Instant::now();
-
-    let start = std::time::Instant::now();
+    let total_start = profile.as_ref().map(|_| std::time::Instant::now());
     let task = structure.task_view()?;
     task.validate_structures_and_lengths(
         dst_structure,
@@ -468,68 +379,42 @@ where
         dst_data.len(),
         src_data.len(),
     )?;
-
-    let schedule = structure.parallel_schedule();
-    let threads = effective_tree_transform_threads(engine, schedule, threads);
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
-    checked_fused_index_len(threads, requirements.fused_index_len_per_worker)?;
-    profile.validate += start.elapsed();
-
+    checked_fused_index_len(1, requirements.fused_index_len_per_worker)?;
+    if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
+        profile.validate += start.elapsed();
+    }
     if requirements.converted_coefficient_len != 0 {
-        let start = std::time::Instant::now();
-        // Attribute the admission conversion here; the replay helper's second
-        // call is the same no-work identity check as in the unprofiled path.
+        // Converted before the first destination write.
+        let start = profile.as_ref().map(|_| std::time::Instant::now());
         if ensure_recoupling_coefficients(workspace, task, structure.identity_marker())? {
-            profile.multi_coefficient_prepare += start.elapsed();
+            if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+                profile.multi_coefficient_prepare += start.elapsed();
+            }
         }
     }
-
-    let start = std::time::Instant::now();
-    crate::host_pool::with_exec(engine, |exec| {
-        scale_inactive_destinations(
-            exec,
-            kernels,
-            &mut workspace.zero_strides,
-            task,
-            dst_data,
-            mode,
-        )
-    })?;
-    profile.strided_kernel += start.elapsed();
-
-    if threads > 1 {
-        tree_transform_blocks_with_batched_recoupling_parallel(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            schedule,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            threads,
-            Some(profile),
-        )?;
-    } else {
-        tree_transform_blocks_with_batched_recoupling(
-            engine,
-            kernels,
-            dense,
-            workspace,
-            task,
-            structure.identity_marker(),
-            dst_data,
-            src_data,
-            alpha,
-            mode,
-            Some(profile),
-        )?;
+    let writer = InitializedWriter {
+        prototype: kernels.clone(),
+        task: writers::ReplayParts::new(task),
+        src: src_data,
+        alpha,
+        mode,
+    };
+    replay(
+        engine,
+        dense,
+        workspace,
+        task,
+        structure.parallel_schedule(),
+        dst_data,
+        src_data,
+        &writer,
+        kernels,
+        profile.as_deref_mut(),
+    )?;
+    if let (Some(profile), Some(start)) = (profile, total_start) {
+        profile.total += start.elapsed();
     }
-
-    profile.total += total_start.elapsed();
     Ok(())
 }

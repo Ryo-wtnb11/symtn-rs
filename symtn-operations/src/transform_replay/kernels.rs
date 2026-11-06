@@ -57,13 +57,13 @@ where
     Ok(())
 }
 
-/// One Single block of compiled replay on the caller's token share: the
-/// adapter's planned overwrite when `gate` (built from that share) widens the
-/// block, the strided kernel otherwise.
+/// One Single block of compiled replay on the caller's token share, into
+/// `dst_data` whose first element is destination element `dst_start`: the
+/// adapter's planned overwrite when Strided widens the block on that share
+/// ([`admitted_plan`]), the strided kernel otherwise.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -73,6 +73,7 @@ pub(super) fn tree_transform_single_on_token<A, D, C>(
     coefficient: C,
     source_conjugate: bool,
     dst_data: &mut [D],
+    dst_start: isize,
     src_data: &[D],
     alpha: D,
     mode: DestinationMode<D>,
@@ -93,19 +94,20 @@ where
 {
     let role = layouts.role(dst_index)?;
     let dst = layouts.entry(dst_index);
+    let dst_offset = dst.offset - dst_start;
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
     // Why test the token here: a serial token never widens, and this check
     // inlines where the admission query is an out-of-line call per role.
     if mode.overwrites() && !exec.is_serial() {
-        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
             if let Some(result) = kernels.planned_transform(
                 exec.reborrow(),
                 plan,
                 role,
                 dst_data,
                 src_data,
-                dst.offset,
+                dst_offset,
                 src_offset,
                 source_conjugate,
                 scale,
@@ -122,7 +124,7 @@ where
         role.dims(),
         role.dst_strides(),
         role.src_strides(),
-        dst.offset,
+        dst_offset,
         src_offset,
         source_conjugate,
         scale,
@@ -413,12 +415,12 @@ where
 }
 
 /// One recoupling scatter column of compiled replay on the caller's token
-/// share: the adapter's planned overwrite when `gate` (built from that share)
-/// widens the column, the strided scatter otherwise.
+/// share, into `dst_data` whose first element is destination element
+/// `dst_start`: the adapter's planned overwrite when Strided widens the
+/// column on that share ([`admitted_plan`]), the strided scatter otherwise.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -427,6 +429,7 @@ pub(super) fn scatter_column_on_token<A, T>(
     packed: &[T],
     packed_offset: usize,
     dst_data: &mut [T],
+    dst_start: isize,
     alpha: T,
     mode: DestinationMode<T>,
 ) -> Result<(), OperationError>
@@ -444,18 +447,19 @@ where
 {
     let role = layouts.role(entry_index)?;
     let dst = layouts.entry(entry_index);
+    let dst_offset = dst.offset - dst_start;
     let packed_offset = offset_to_isize(packed_offset)?;
     // Why test the token here: a serial token never widens, and this check
     // inlines where the admission query is an out-of-line call per role.
     if mode.overwrites() && !exec.is_serial() {
-        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
             if let Some(result) = kernels.planned_scatter(
                 exec.reborrow(),
                 plan,
                 role,
                 dst_data,
                 packed,
-                dst.offset,
+                dst_offset,
                 packed_offset,
                 alpha,
             ) {
@@ -469,7 +473,7 @@ where
         zero_strides,
         fused_index,
         role,
-        dst.offset,
+        dst_offset,
         packed,
         packed_offset,
         dst_data,
@@ -515,7 +519,7 @@ where
 
 /// A scatter column's strided kernel over its resolved role and offsets.
 #[allow(clippy::too_many_arguments)]
-fn scatter_role<A, T>(
+pub(super) fn scatter_role<A, T>(
     exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
@@ -594,6 +598,7 @@ pub(super) fn recoupling_multi_block<C: Copy>(
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) fn scale_inactive_destinations<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
@@ -741,7 +746,7 @@ mod allocation_replay_tests {
     }
 
     #[test]
-    fn warm_threaded_replay_has_no_owned_allocations() {
+    fn warm_custom_executor_replay_on_a_wide_engine_has_no_owned_allocations() {
         let block_structure = Arc::new(
             BlockStructure::packed_column_major(1, [vec![4], vec![4], vec![4], vec![4]]).unwrap(),
         );
@@ -784,27 +789,20 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 0.0,
-                3,
             )
             .unwrap();
         };
 
         pool.install(&mut replay);
-        let (joins, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| {
-                allocation_oracle::with_measurement(|| {
-                    replay(engine);
-                    allocation_oracle::join_entries()
-                })
-            })
+        let (_, allocations) = allocation_oracle::with_session(|| {
+            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
         });
         assert_eq!(allocations, 0);
-        assert!(joins > 0);
         assert_eq!(dst, expected);
     }
 
     #[test]
-    fn warm_threaded_overwrite_replay_has_no_owned_allocations() {
+    fn warm_custom_executor_overwrite_on_a_wide_engine_has_no_owned_allocations() {
         let block_structure = Arc::new(
             BlockStructure::packed_column_major(1, [vec![4], vec![4], vec![4], vec![4]]).unwrap(),
         );
@@ -848,7 +846,6 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 &[],
-                3,
             )
             .unwrap();
         };
@@ -911,7 +908,6 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 &[],
-                3,
             )
             .unwrap();
         };
@@ -982,7 +978,6 @@ mod allocation_replay_tests {
             &src,
             1.0,
             0.0,
-            1,
         )
         .unwrap();
         assert_eq!(serial, expected);
@@ -1005,7 +1000,6 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 0.0,
-                3,
             )
             .unwrap();
         });
@@ -1027,7 +1021,6 @@ mod allocation_replay_tests {
                         &src,
                         1.0,
                         0.0,
-                        3,
                     )
                     .unwrap();
                 })

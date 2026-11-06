@@ -9,6 +9,18 @@ use symtn_dense::{
 
 mod compile_validation;
 mod destination_scales;
+// The lane replay needs the native provider's lane GEMMs.
+#[cfg(all(
+    feature = "cpu-faer",
+    not(any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ))
+))]
+mod lanes;
 mod overwrite;
 mod profile;
 mod threaded;

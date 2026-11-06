@@ -269,24 +269,12 @@ impl<E> DenseTreeTransformOperations<E> {
     fn kernel_adapter(&self) -> StridedHostKernelAdapter {
         StridedHostKernelAdapter::default()
     }
-
-    /// Worker count for one replay into `dst_len` elements: the caller
-    /// engine's width when the engine's own cost rule admits the section,
-    /// otherwise 1 (see [`crate::host_pool::copy_width`]).
-    #[inline]
-    fn effective_recoupling_threads(
-        &self,
-        engine: &mut dyn Engine,
-        dst_len: usize,
-    ) -> Result<usize, OperationError> {
-        crate::host_pool::copy_width(engine, dst_len)
-    }
 }
 
 impl<E: DenseExecutor> DenseTreeTransformOperations<E> {
-    /// Owned-output transform under this backend's replay worker count and
-    /// size gate, exactly as `tree_transform_structure_overwrite_into_raw`
-    /// would replay into a caller buffer of the same length.
+    /// Owned-output transform on this backend's replay route, exactly as
+    /// `tree_transform_structure_overwrite_into_raw` would replay into a
+    /// caller buffer of the same length.
     ///
     /// Internal and unstable; see
     /// [`crate::try_tree_transform_structure_overwrite_owned_raw`].
@@ -307,12 +295,6 @@ impl<E: DenseExecutor> DenseTreeTransformOperations<E> {
         D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
         C: Copy + Sync,
     {
-        // A malformed destination reports its error from the overwrite proof
-        // in the same order as before; the serial count only sizes scratch.
-        let threads = match dst_structure.required_len() {
-            Ok(len) => self.effective_recoupling_threads(engine, len)?,
-            Err(_) => 1,
-        };
         crate::try_tree_transform_structure_overwrite_owned_raw(
             engine,
             &mut self.dense,
@@ -323,7 +305,6 @@ impl<E: DenseExecutor> DenseTreeTransformOperations<E> {
             nout,
             src_data,
             alpha,
-            threads,
             None,
         )
     }
@@ -362,7 +343,6 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), OperationError> {
-        let threads = self.effective_recoupling_threads(engine, dst_data.len())?;
         crate::tree_transform_structure_with_structural_recoupling_raw(
             engine,
             &mut self.kernel_adapter(),
@@ -375,7 +355,6 @@ where
             src_data,
             alpha,
             beta,
-            threads,
         )
     }
 
@@ -391,7 +370,6 @@ where
         alpha: D,
         destination_scales: &[(usize, C)],
     ) -> Result<(), OperationError> {
-        let threads = self.effective_recoupling_threads(engine, dst_data.len())?;
         crate::tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             &mut self.kernel_adapter(),
@@ -404,7 +382,6 @@ where
             src_data,
             alpha,
             destination_scales,
-            threads,
         )
     }
 
@@ -421,7 +398,6 @@ where
         beta: D,
         profile: &mut TreeTransformReplayProfile,
     ) -> Result<(), OperationError> {
-        let threads = self.effective_recoupling_threads(engine, dst_data.len())?;
         crate::tree_transform_structure_with_structural_recoupling_raw_profiled(
             engine,
             &mut self.kernel_adapter(),
@@ -434,7 +410,6 @@ where
             src_data,
             alpha,
             beta,
-            threads,
             profile,
         )
     }
@@ -452,7 +427,6 @@ where
         destination_scales: &[(usize, C)],
         profile: &mut TreeTransformReplayProfile,
     ) -> Result<(), OperationError> {
-        let threads = self.effective_recoupling_threads(engine, dst_data.len())?;
         crate::tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(
             engine,
             &mut self.kernel_adapter(),
@@ -465,7 +439,6 @@ where
             src_data,
             alpha,
             destination_scales,
-            threads,
             profile,
         )
     }
@@ -520,34 +493,6 @@ mod tests {
                 beta,
             )
         }
-    }
-
-    #[test]
-    fn replay_width_follows_the_engine_cost_rule() {
-        let backend = DenseTreeTransformOperations::default();
-        // A pool that declares free dispatch admits even a one-element section.
-        let mut eager = crate::host_pool::eager_test_pool(4);
-        eager.install(|engine| {
-            assert_eq!(backend.effective_recoupling_threads(engine, 1).unwrap(), 4);
-        });
-        // A measured pool forks a large copy but not a tiny one.
-        let mut measured = crate::host_pool::test_pool(4);
-        measured.install(|engine| {
-            assert_eq!(backend.effective_recoupling_threads(engine, 1).unwrap(), 1);
-            assert_eq!(
-                backend
-                    .effective_recoupling_threads(engine, 1 << 26)
-                    .unwrap(),
-                4
-            );
-        });
-        // A serial engine never forks.
-        assert_eq!(
-            backend
-                .effective_recoupling_threads(&mut symtn_dense::CpuEngine::serial(), 1 << 26)
-                .unwrap(),
-            1
-        );
     }
 
     #[test]

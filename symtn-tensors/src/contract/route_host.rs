@@ -305,8 +305,6 @@ where
         members: usize,
         destination_scales: &[(usize, C)],
     ) -> Result<(), OperationError> {
-        // The engine's own cost rule decides the fan-out of the stacked replay.
-        let threads = symtn_operations::host_pool::copy_width(engine, dst.len())?;
         tree_transform_members_overwrite_raw(
             engine,
             &mut crate::StridedHostKernelAdapter::default(),
@@ -318,7 +316,6 @@ where
             dst,
             src,
             members,
-            threads,
             destination_scales,
         )
     }

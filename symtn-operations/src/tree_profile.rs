@@ -16,6 +16,10 @@ pub struct TreeTransformReplayProfile {
     pub multi_scatter: Duration,
     pub strided_view_setup: Duration,
     pub strided_kernel: Duration,
+    /// Wall time of a lane replay, from the lane-GEMM entry to its return;
+    /// the per-phase fields above stay zero on that route, whose stages run
+    /// concurrently.
+    pub fused_lanes: Duration,
     pub single_blocks: usize,
     pub multi_blocks: usize,
     pub packed_columns: usize,
@@ -39,6 +43,7 @@ impl TreeTransformReplayProfile {
         self.multi_scatter += other.multi_scatter;
         self.strided_view_setup += other.strided_view_setup;
         self.strided_kernel += other.strided_kernel;
+        self.fused_lanes += other.fused_lanes;
         self.single_blocks += other.single_blocks;
         self.multi_blocks += other.multi_blocks;
         self.packed_columns += other.packed_columns;

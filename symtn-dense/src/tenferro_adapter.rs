@@ -1529,6 +1529,33 @@ impl DenseExecutor for DefaultDenseExecutor {
             })
         })
     }
+
+    // Why the native provider only: the BLAS provider's GEMM needs the
+    // engine itself and its thread settings are process-global, so it has
+    // no GEMM to run on a caller's lane.
+    #[cfg(not(feature = "cpu-blas-core"))]
+    fn supports_lane_gemms(&self) -> bool {
+        true
+    }
+
+    #[cfg(not(feature = "cpu-blas-core"))]
+    fn with_lane_gemms(
+        &mut self,
+        engine: &mut dyn Engine,
+        dtype: crate::DenseDType,
+        jobs: &[crate::lanes::LaneGemmShape],
+        body: &mut crate::lanes::LaneGemmBody<'_>,
+    ) -> Result<(), DenseError> {
+        host_cpu(engine, crate::lane_gemm::LANE_GEMM_OP, |cpu| {
+            crate::block_kernel::gemm::with_lane_gemms(
+                cpu,
+                &mut self.gemm_scratch,
+                dtype,
+                jobs,
+                body,
+            )
+        })
+    }
 }
 
 impl DefaultDenseExecutor {

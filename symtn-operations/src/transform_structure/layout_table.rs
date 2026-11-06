@@ -60,15 +60,15 @@ pub struct TreeTransformLayoutTable {
     /// Source strides of the two-sided roles only; a role starting at or past
     /// its length is one-sided.
     pub(super) fused_src_strides: Vec<isize>,
-    /// Largest two-sided role rank: the traversal scratch compiled replay
-    /// hands each worker.
+    /// Largest replayed role rank, one-sided (inactive) roles included: the
+    /// traversal scratch compiled replay hands each worker.
     pub(super) max_fused_rank: usize,
+    /// Zero source strides of the largest one-sided role: an inactive
+    /// role's source is one zero element.
+    pub(super) zero_src_strides: Vec<isize>,
     /// Compiled replays of the planned roles, in role order; inline plans
     /// own no heap storage, so the charge is the vector's capacity.
     pub(super) plans: Vec<UpdatePlan>,
-    /// The largest element count of a planned role: the range a leaf gate
-    /// searches for the smallest paying size.
-    pub(super) max_planned_elements: usize,
 }
 
 /// Why not compare `plans`: each is a pure function of the role geometry the
@@ -80,8 +80,8 @@ impl PartialEq for TreeTransformLayoutTable {
             && self.fused_dst_strides == other.fused_dst_strides
             && self.fused_src_strides == other.fused_src_strides
             && self.max_fused_rank == other.max_fused_rank
+            && self.zero_src_strides == other.zero_src_strides
             && self.plans.len() == other.plans.len()
-            && self.max_planned_elements == other.max_planned_elements
     }
 }
 
@@ -94,8 +94,10 @@ impl TreeTransformLayoutTable {
         self.max_fused_rank
     }
 
-    pub(crate) fn max_planned_elements(&self) -> usize {
-        self.max_planned_elements
+    /// `rank` zero source strides for a one-sided (inactive) role of at most
+    /// that rank.
+    pub(crate) fn zero_src_strides(&self, rank: usize) -> Result<&[isize], OperationError> {
+        self.zero_src_strides.get(..rank).ok_or_else(missing_role)
     }
 
     /// Roles that retain a compiled plan; tests use it to prove a fixture
@@ -152,28 +154,6 @@ impl TreeTransformLayoutTable {
             )),
             _ => Err(missing_role()),
         }
-    }
-
-    /// Lowest physical index a Single block's or a scatter column's
-    /// destination writes, from its compiled role. Normalization only drops
-    /// extent-1 axes, reorders, and fuses same-sign spans, so this equals the
-    /// raw layout's `layout_index_range` low end, which compilation already
-    /// computed without overflow. O(f), read only at threaded split points.
-    pub(crate) fn destination_lo(&self, entry_index: usize) -> Result<isize, OperationError> {
-        let role = self.role(entry_index)?;
-        let mut lo = self.entries[entry_index].offset;
-        for (&extent, &stride) in role.dims().iter().zip(role.dst_strides()) {
-            if stride < 0 {
-                let span = isize::try_from(extent.saturating_sub(1))
-                    .ok()
-                    .and_then(|extent| extent.checked_mul(stride))
-                    .ok_or(OperationError::ElementCountOverflow)?;
-                lo = lo
-                    .checked_add(span)
-                    .ok_or(OperationError::ElementCountOverflow)?;
-            }
-        }
-        Ok(lo)
     }
 
     pub(super) fn diagnostics(
@@ -630,10 +610,12 @@ impl RawLayoutTable {
     ) -> Result<TreeTransformLayoutTable, OperationError> {
         let mut scratch = FusedLayoutScratch::default();
         let (mut two_sided, mut one_sided, mut planned) = (0usize, 0usize, 0usize);
+        let mut one_sided_rank = 0usize;
         self.for_each_role(blocks, inactive, &mut scratch, |_, kind, fused| {
             let total = if kind.is_paired() {
                 &mut two_sided
             } else {
+                one_sided_rank = one_sided_rank.max(fused.dims().len());
                 &mut one_sided
             };
             *total = total.saturating_add(fused.dims().len());
@@ -646,6 +628,7 @@ impl RawLayoutTable {
         table.fused_dst_strides.reserve_exact(all);
         table.fused_src_strides.reserve_exact(two_sided);
         table.plans.reserve_exact(planned);
+        table.zero_src_strides = vec![0; one_sided_rank];
         self.for_each_role(blocks, inactive, &mut scratch, |entry, kind, fused| {
             let paired = kind.is_paired();
             if paired {
@@ -663,9 +646,6 @@ impl RawLayoutTable {
                 );
                 plan = u32::try_from(table.plans.len())
                     .map_err(|_| OperationError::ElementCountOverflow)?;
-                table.max_planned_elements = table
-                    .max_planned_elements
-                    .max(fused.dims().iter().product());
             }
             let start = u32::try_from(table.fused_dims.len())
                 .map_err(|_| OperationError::ElementCountOverflow)?;
@@ -682,8 +662,8 @@ impl RawLayoutTable {
                 table
                     .fused_src_strides
                     .extend_from_slice(fused.src_strides());
-                table.max_fused_rank = table.max_fused_rank.max(rank as usize);
             }
+            table.max_fused_rank = table.max_fused_rank.max(rank as usize);
             table.entries[entry].role = RoleSlot { start, rank, plan };
             Ok(())
         })?;

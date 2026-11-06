@@ -1,10 +1,11 @@
 //! Host parallel regions on the caller's engine.
 //!
 //! Every numerical entry receives the caller's `engine: &mut dyn Engine`.
-//! A backend-free Host region (tree-transform replay fan-out, plan compile,
-//! strided kernels) takes that engine's placement token through [`region`]
-//! and splits it with [`fork`] / [`join`]; leaf kernels take a token argument
-//! and pass it to strided, whose own cost rule decides whether to fan out. symtn schedules no work of its own and keeps no
+//! A backend-free Host region (plan compile, strided kernels) takes that
+//! engine's placement token through [`region`]; a fan-out of independent
+//! jobs places and runs them on `symtn_dense::lanes`, and leaf kernels take
+//! a token argument and pass it to strided, whose own cost rule decides
+//! whether to fan out. symtn keeps no
 //! engine, pool or token anywhere: the token lives only inside [`region`]'s
 //! callback, so a region cannot call the dense backend on the same engine,
 //! and the next dense call can borrow the engine again once it returns.
@@ -22,7 +23,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(test, feature = "testing"))]
 use std::sync::Mutex;
-use std::sync::RwLock;
 
 pub use strided_kernel::Exec;
 use symtn_dense::{DenseError, Engine};
@@ -108,96 +108,6 @@ pub fn threads(engine: &mut dyn Engine) -> usize {
         let _ = engine;
         1
     }
-}
-
-/// Worker count for a Host replay that writes `elements` destination
-/// elements once: the caller engine's full width when the engine's own cost
-/// rule admits the parallel section (threadteam's `pays` on strided's `Copy`
-/// estimate for `elements`, against the engine pool's dispatch cost), and 1
-/// otherwise. A serial engine never forks; the caller sets parallelism only
-/// through its engine (pool width and dispatch costs). A broken or non-CPU
-/// engine (CUDA included: the replay moves Host payload) is a typed error.
-pub fn copy_width(engine: &mut dyn Engine, elements: usize) -> Result<usize, OperationError> {
-    #[cfg(feature = "tenferro")]
-    {
-        let estimate = strided_kernel::execution::KernelClass::Copy.estimate(elements);
-        let width = tenferro_cpu::with_cpu_engine(engine, |cpu| {
-            let exec = cpu.exec().map_err(|err| {
-                OperationError::Dense(DenseError::Backend {
-                    backend: symtn_dense::DenseBackend::Tenferro,
-                    op: "host_region",
-                    message: err.to_string(),
-                })
-            })?;
-            let exec = exec.into_token();
-            let budget = exec.budget();
-            Ok(if exec.pays(estimate, 1, budget) {
-                budget.get()
-            } else {
-                1
-            })
-        });
-        match width {
-            Some(width) => width,
-            None => Err(OperationError::Dense(DenseError::Unsupported {
-                op: "host_region",
-                message: "a Host region needs the caller's CPU engine".to_string(),
-            })),
-        }
-    }
-    #[cfg(not(feature = "tenferro"))]
-    {
-        let _ = (engine, elements);
-        Ok(1)
-    }
-}
-
-/// Runs `jobs` jobs over `exec` (see `Exec::fork`); job `i` gets a child
-/// token.
-pub fn fork(exec: Exec<'_>, jobs: usize, f: impl Fn(usize, Exec<'_>) + Sync) {
-    exec.fork(jobs, f);
-}
-
-/// Runs `left` and `right` as two jobs of `exec`, each with its half of the
-/// budget, and returns both results.
-pub fn join<A, B, RA, RB>(exec: Exec<'_>, left: A, right: B) -> (RA, RB)
-where
-    A: FnOnce(Exec<'_>) -> RA + Send + Sync,
-    B: FnOnce(Exec<'_>) -> RB + Send + Sync,
-    RA: Send + Sync,
-    RB: Send + Sync,
-{
-    // Why the slots: `fork` takes one `Fn` for every job, and each side is a
-    // `FnOnce` that owns its half of the split buffers. Why `RwLock`, not
-    // `Mutex`: each slot is touched by one job only, and std's `Mutex` boxes
-    // an OS lock on first use on some targets (macOS), which would put an
-    // allocation on every replay fork; `RwLock` does not allocate.
-    let left = RwLock::new(Some(left));
-    let right = RwLock::new(Some(right));
-    let left_out = RwLock::new(None);
-    let right_out = RwLock::new(None);
-    fork(exec, 2, |job, child| {
-        if job == 0 {
-            let run = take(&left);
-            *write(&left_out) = Some(run(child));
-        } else {
-            let run = take(&right);
-            *write(&right_out) = Some(run(child));
-        }
-    });
-    (take(&left_out), take(&right_out))
-}
-
-fn write<T>(slot: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
-    slot.write()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
-fn take<T>(slot: &RwLock<Option<T>>) -> T {
-    // INVARIANT: `fork` runs each of the two jobs exactly once before
-    // returning (a panicking job unwinds through `fork`), so every slot is
-    // filled once and taken once.
-    write(slot).take().expect("join slot filled exactly once")
 }
 
 /// Where a Host region observation was taken.
