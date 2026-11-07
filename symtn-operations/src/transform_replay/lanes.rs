@@ -554,9 +554,10 @@ where
                     &mut components,
                     lane_scratch,
                 )
-                .map_err(|_| oversized()),
+                .map_err(|refusal| refused(refusal, |_| oversized())),
                 Runner::Barrier(host) => {
                     lanes::run_barrier(host, &work, tables, &mut components, lane_scratch)
+                        .map_err(|refusal| refused(refusal, |error| error))
                 }
             };
             *components_kept = recycle(components);
@@ -567,6 +568,23 @@ where
         });
         *atoms_kept = recycle(atoms);
         result
+    }
+}
+
+/// The runner's refusal as this replay's error: the context's through
+/// `context`, a short state or lane supply as an invalid lane split (each
+/// component and lane is given its state, so neither is reachable).
+fn refused<R>(
+    refusal: lanes::Refusal<R>,
+    context: impl FnOnce(R) -> OperationError,
+) -> OperationError {
+    match refusal {
+        lanes::Refusal::Context(refused) => context(refused),
+        lanes::Refusal::States { .. } | lanes::Refusal::Lanes { .. } => {
+            OperationError::InvalidArgument {
+                message: "tree transform lanes lack a component or lane state",
+            }
+        }
     }
 }
 

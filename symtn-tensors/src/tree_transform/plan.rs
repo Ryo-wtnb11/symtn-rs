@@ -1311,8 +1311,8 @@ fn execute_staged_groups<I, O, F>(
     build: F,
 ) -> Result<Vec<O>, OperationError>
 where
-    I: Send + Sync,
-    O: Send + Sync,
+    I: Send,
+    O: Send,
     F: Fn(I) -> Result<O, OperationError> + Send + Sync,
 {
     use symtn_dense::lanes::{self, BatchPolicy, Each, Exec};
@@ -1354,8 +1354,12 @@ where
             .collect()),
         Ok(Err((_, error))) => Err(error),
         // One one-slot lane per batch, at most the engine's width.
-        Err(_) => Err(OperationError::InvalidArgument {
+        Err(lanes::Refusal::Context(_)) => Err(OperationError::InvalidArgument {
             message: "tree transform compile lanes exceed the engine width",
+        }),
+        // Each batch is given its state and lane.
+        Err(_) => Err(OperationError::InvalidArgument {
+            message: "tree transform compile lanes lack a batch state",
         }),
     }
 }
@@ -1400,8 +1404,8 @@ impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
 impl<F, I, O> symtn_dense::lanes::Work for StagedBuild<F, I, O>
 where
     F: Fn(I) -> Result<O, OperationError> + Sync,
-    I: Send + Sync,
-    O: Send + Sync,
+    I: Send,
+    O: Send,
 {
     type Job = StagedBatch<I, O>;
     type Lane = ();

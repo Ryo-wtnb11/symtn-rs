@@ -129,7 +129,7 @@ pub use placement::place;
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
 pub use runner::{
-    run_barrier, run_native, Assignment, Barrier, Each, Outcome, Placed, Split, Work,
+    run_barrier, run_native, Assignment, Barrier, Each, Outcome, Placed, Refusal, Split, Work,
 };
 use runner::{Arena, RunScratch};
 

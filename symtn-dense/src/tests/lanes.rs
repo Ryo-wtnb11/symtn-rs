@@ -11,7 +11,7 @@ use tenferro_cpu::{CpuEngine, Pool};
 use super::counting_alloc;
 use crate::lanes::{
     place, run_barrier, run_native, Assignment, Barrier, Each, Estimate, Form, Jobs, LaneTables,
-    Placed, Placement, Split, StageKind, Work,
+    Placed, Placement, Refusal, Split, StageKind, Work,
 };
 use crate::{
     DenseDotConfig, DenseError, DenseExecutor, DenseRead, DenseScalar, DenseTensor, DenseView,
@@ -1290,7 +1290,10 @@ fn a_share_above_the_running_budget_is_refused_before_any_stage() {
     });
     assert_eq!(
         refused.map(|_| ()),
-        Err(threadteam::Error::SharesExceedBudget { budget: 4, sum: 6 })
+        Err(Refusal::Context(threadteam::Error::SharesExceedBudget {
+            budget: 4,
+            sum: 6
+        }))
     );
     assert_eq!(seen, [Vec::<(usize, usize)>::new()]);
 }
@@ -1303,7 +1306,7 @@ fn one_stage(count: usize, fail: &[usize]) -> Spy {
     }
 }
 
-type Assigned = Result<Result<(), usize>, threadteam::Error>;
+type Assigned = Result<Result<(), usize>, Refusal<threadteam::Error>>;
 
 /// Each job's offered budgets and the outcome of `spy` run on `budget`
 /// slots under `assignment`, with `lanes` lane states.
@@ -1394,7 +1397,10 @@ fn each_runs_every_job_on_one_slot_and_refuses_too_few_slots() {
     let (seen, outcome) = run_assigned(&mut engine, 2, &spy, Each, 3);
     assert_eq!(
         outcome,
-        Err(threadteam::Error::SharesExceedBudget { budget: 2, sum: 3 })
+        Err(Refusal::Context(threadteam::Error::SharesExceedBudget {
+            budget: 2,
+            sum: 3
+        }))
     );
     assert!(seen.iter().all(Vec::is_empty));
 }
@@ -1462,65 +1468,150 @@ fn split_lends_without_allocating_on_success_and_failure() {
     }
 }
 
-/// `Send`-only job and lane state (here `Cell`) runs on `Placed` lanes, which
-/// lend each part to one lane exclusively.
+/// `Send`-only job, lane and error state (`Cell`).
+struct Counting(Batch);
+
+impl Jobs for Counting {
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+    fn stages(&self, job: usize) -> usize {
+        self.0.stages(job)
+    }
+    fn kind(&self, job: usize, stage: usize) -> StageKind {
+        self.0.kind(job, stage)
+    }
+    fn estimate(&self, job: usize, stage: usize) -> Estimate {
+        self.0.estimate(job, stage)
+    }
+}
+
+impl Work for Counting {
+    type Job = std::cell::Cell<usize>;
+    type Lane = std::cell::Cell<usize>;
+    type Error = std::cell::Cell<usize>;
+    fn run(
+        &self,
+        job: usize,
+        _: usize,
+        state: &mut Self::Job,
+        lane: &mut Self::Lane,
+        _: Exec<'_>,
+    ) -> Result<(), Self::Error> {
+        state.set(state.get() + 1);
+        lane.set(lane.get() + 1);
+        if job == 3 {
+            return Err(std::cell::Cell::new(job));
+        }
+        Ok(())
+    }
+}
+
+/// `Send`-only job, lane and error state runs on `Placed` lanes and on
+/// `Each`'s one-slot fan-out, each lending a job's state to one lane
+/// exclusively.
 #[test]
-fn placed_lends_send_only_state() {
-    struct Counting(Batch);
-    impl Jobs for Counting {
-        fn count(&self) -> usize {
-            self.0.count()
-        }
-        fn stages(&self, job: usize) -> usize {
-            self.0.stages(job)
-        }
-        fn kind(&self, job: usize, stage: usize) -> StageKind {
-            self.0.kind(job, stage)
-        }
-        fn estimate(&self, job: usize, stage: usize) -> Estimate {
-            self.0.estimate(job, stage)
-        }
-    }
-    impl Work for Counting {
-        type Job = std::cell::Cell<usize>;
-        type Lane = std::cell::Cell<usize>;
-        type Error = ();
-        fn run(
-            &self,
-            _: usize,
-            _: usize,
-            job: &mut Self::Job,
-            lane: &mut Self::Lane,
-            _: Exec<'_>,
-        ) -> Result<(), ()> {
-            job.set(job.get() + 1);
-            lane.set(lane.get() + 1);
-            Ok(())
-        }
-    }
+fn placed_and_each_lend_send_only_state() {
     let work = Counting(Batch::new(vec![vec![(P, serial(1000))]; 4]));
-    let mut engine = engine(2, forced_lanes(2), row(60));
+    let mut engine = engine(4, forced_lanes(2), row(60));
     let mut tables = LaneTables::default();
-    on(&mut engine, 2, |exec| {
+    on(&mut engine, 4, |exec| {
         place(&exec, &work, Form::Native, &mut tables)
     });
-    let mut states = vec![std::cell::Cell::new(0); 4];
-    let mut lanes = vec![std::cell::Cell::new(0); 2];
-    on(&mut engine, 2, |exec| {
-        run_native(
-            exec,
-            &work,
-            Placed {
-                tables: &mut tables,
+    for each in [false, true] {
+        let mut states = vec![std::cell::Cell::new(0); 4];
+        let mut lanes = vec![std::cell::Cell::new(0); 4];
+        let outcome = on(&mut engine, 4, |exec| {
+            if each {
+                run_native(exec, &work, Each, &mut states, &mut lanes)
+            } else {
+                let tables = &mut tables;
+                run_native(exec, &work, Placed { tables }, &mut states, &mut lanes)
+            }
+        });
+        assert_eq!(outcome.unwrap().map_err(|(job, _)| job), Err(3));
+        assert!(states.iter().all(|state| state.get() == 1));
+        assert_eq!(lanes.iter().map(std::cell::Cell::get).sum::<usize>(), 4);
+    }
+}
+
+/// A refusal with its context's error forgotten, to compare across runners.
+fn unit<R>(refusal: Refusal<R>) -> Refusal<()> {
+    match refusal {
+        Refusal::Context(_) => Refusal::Context(()),
+        Refusal::States { jobs, given } => Refusal::States { jobs, given },
+        Refusal::Lanes { needed, given } => Refusal::Lanes { needed, given },
+    }
+}
+
+/// A state or lane supply short of what an assignment lends is refused
+/// before any stage runs: `Each` and `Split` against the work's jobs,
+/// `Placed` and the barrier form against the placement.
+#[test]
+fn short_supplies_are_refused_before_any_stage() {
+    let short = [
+        (
+            2,
+            1,
+            Refusal::Lanes {
+                needed: 2,
+                given: 1,
             },
-            &mut states,
-            &mut lanes,
-        )
-    })
-    .unwrap()
-    .unwrap();
-    assert!(states.iter().all(|state| state.get() == 1));
-    assert_eq!(lanes.iter().map(std::cell::Cell::get).sum::<usize>(), 4);
+        ),
+        (1, 2, Refusal::States { jobs: 2, given: 1 }),
+    ];
+    let spy = one_stage(2, &[]);
+    let mut pool = engine(2, BatchPolicy::default(), row(60));
+    for (states, lanes, refusal) in short {
+        let mut seen = vec![vec![]; states];
+        let outcome = on(&mut pool, 2, |exec| {
+            run_native(exec, &spy, Each, &mut seen, &mut vec![(); lanes])
+        });
+        assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "Each");
+        assert!(seen.iter().all(Vec::is_empty));
+    }
+    let mut seen = vec![vec![]; 1];
+    let outcome = on(&mut pool, 2, |exec| {
+        run_native(exec, &spy, split(2), &mut seen, &mut [])
+    });
+    assert_eq!(
+        outcome.map(|_| ()).map_err(unit),
+        Err(Refusal::States { jobs: 2, given: 1 })
+    );
+
+    let work = packed(&[1, 1], vec![]);
+    let mut tables = LaneTables::default();
+    let mut pool = engine(2, outer(), row(60));
+    on(&mut pool, 2, |exec| {
+        place(&exec, &work, Form::Native, &mut tables)
+    });
+    assert_eq!(tables.placement().lanes(), 2);
+    for (states, lanes, refusal) in short {
+        let (mut components, mut buffers) = (components(states), lane_buffers(lanes));
+        let outcome = on(&mut pool, 2, |exec| {
+            let tables = &mut tables;
+            run_native(
+                exec,
+                &work,
+                Placed { tables },
+                &mut components,
+                &mut buffers,
+            )
+        });
+        assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "Placed");
+        let mut host = Host {
+            engine: engine(2, outer(), row(60)),
+            executor: Recording::default(),
+            rhs: work.rhs.clone(),
+            fail: vec![],
+            attempts: vec![],
+            regions: 0,
+        };
+        let outcome = run_barrier(&mut host, &work, &mut tables, &mut components, &mut buffers);
+        assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "barrier");
+        assert_eq!(host.regions, 0);
+        assert!(buffers.iter().all(|lane| lane.offers.is_empty()));
+    }
 }
 
 fn forced_lanes(lanes: usize) -> BatchPolicy {

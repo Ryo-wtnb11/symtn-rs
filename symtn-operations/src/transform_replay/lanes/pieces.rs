@@ -114,7 +114,9 @@ where
         let token = exec.into_token();
         let width = token.budget().get();
         // The stage's gate on its own thread; each forked sub-slot below
-        // builds its own, as a gate is not `Sync`.
+        // builds its own, as a gate is not `Sync`. A gate per stage repeats
+        // its O(B + log M) scan on every stage that reaches admission, which
+        // can be more admission queries than one width search per role.
         let gate = LeafGate::new(self.parts.layouts.max_planned_elements());
         let bands = if self.writer.overwrites() && self.whole_single(component, &token, &gate) {
             1

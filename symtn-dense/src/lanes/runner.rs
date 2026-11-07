@@ -92,8 +92,9 @@ impl RunScratch {
         lanes: &'a mut [L],
     ) -> Vec<Mutex<Part<'a, 'b, S, L>>> {
         let count = placement.lanes();
-        assert_eq!(states.len(), placement.lane_of.len(), "one state per job");
-        assert!(lanes.len() >= count, "one lane state per lane");
+        // `run_barrier` checked the supply before lending.
+        debug_assert_eq!(states.len(), placement.lane_of.len());
+        debug_assert!(lanes.len() >= count);
         let mut refs: Vec<Vec<(usize, &'b mut S)>> = std::mem::take(&mut self.refs)
             .into_iter()
             .map(recycle)
@@ -238,7 +239,7 @@ mod sealed {
             work: &W,
             states: &mut [W::Job],
             lanes: &mut [W::Lane],
-        ) -> Result<Outcome<W::Error>, threadteam::Error>;
+        ) -> Result<Outcome<W::Error>, Refusal<threadteam::Error>>;
     }
 }
 
@@ -270,8 +271,12 @@ pub struct Split<F> {
 
 /// Each job alone on one slot, contiguous: the context must hold one slot
 /// per job, and job `j` borrows lane state `j`. Every job runs, and the
-/// lowest failing one is returned. Its states pass between threads as
-/// [`Split`]'s do, so they must be `Sync` for the same reason.
+/// lowest failing one is returned.
+///
+/// Why one flat fork over `Mutex` slots rather than [`Split`]'s recursion:
+/// it lends `Send`-only job, lane and error state, which an allocation-free
+/// `RwLock` cannot share. The call allocates its slot vector, and on some
+/// targets (Apple's pthread mutex) each slot's first lock.
 #[derive(Clone, Copy, Debug)]
 pub struct Each;
 
@@ -289,23 +294,72 @@ pub struct Placed<'a> {
 /// `states` entry, and returns the lowest-indexed job's failure, as each
 /// [`Assignment`] describes.
 ///
-/// A panic unwinds after the forks join. The outer error is threadteam's
-/// refusal of the lane shares ([`Placed`]) or of one slot per job ([`Each`])
-/// before any stage ran; [`Split`] never refuses.
-///
-/// # Panics
-///
-/// When [`Placed`]'s `states` does not hold one entry per placed job, or
-/// `lanes` holds fewer entries than the placement has lanes or [`Each`] has
-/// jobs.
+/// A panic unwinds after the forks join. The outer error, before any stage
+/// ran, is a [`Refusal`]: `states` not holding one entry per job (the
+/// placement's under [`Placed`], `work`'s count otherwise), `lanes` holding
+/// fewer entries than the placement has lanes ([`Placed`]) or the work has
+/// jobs ([`Each`]), or threadteam's refusal of the lane shares ([`Placed`])
+/// or of one slot per job ([`Each`]).
 pub fn run_native<W: Work, A: Assignment<W>>(
     exec: Exec<'_>,
     work: &W,
     assignment: A,
     states: &mut [W::Job],
     lanes: &mut [W::Lane],
-) -> Result<Outcome<W::Error>, threadteam::Error> {
+) -> Result<Outcome<W::Error>, Refusal<threadteam::Error>> {
     sealed::Assign::run(assignment, exec, work, states, lanes)
+}
+
+/// Why a run did not start, or, for [`run_barrier`], why its host stopped it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal<R> {
+    /// The context's refusal: threadteam's, of lane shares or slots, before
+    /// any stage; or the barrier host's refused entry.
+    Context(R),
+    /// `states` holds `given` entries for `jobs` jobs.
+    States { jobs: usize, given: usize },
+    /// `lanes` holds `given` entries where `needed` are lent.
+    Lanes { needed: usize, given: usize },
+}
+
+impl<R: std::fmt::Display> std::fmt::Display for Refusal<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Context(refused) => refused.fmt(f),
+            Self::States { jobs, given } => {
+                write!(f, "{given} job states were given for {jobs} jobs")
+            }
+            Self::Lanes { needed, given } => {
+                write!(f, "{given} lane states were given where {needed} are lent")
+            }
+        }
+    }
+}
+
+impl<R: std::error::Error + 'static> std::error::Error for Refusal<R> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Context(refused) => Some(refused),
+            _ => None,
+        }
+    }
+}
+
+/// One state per job and at least `needed` lane states, or the refusal.
+fn supply<R>(jobs: usize, states: usize, needed: usize, lanes: usize) -> Result<(), Refusal<R>> {
+    if states != jobs {
+        return Err(Refusal::States {
+            jobs,
+            given: states,
+        });
+    }
+    if lanes < needed {
+        return Err(Refusal::Lanes {
+            needed,
+            given: lanes,
+        });
+    }
+    Ok(())
 }
 
 impl<W: Work> sealed::Assign<W> for Placed<'_> {
@@ -315,36 +369,57 @@ impl<W: Work> sealed::Assign<W> for Placed<'_> {
         work: &W,
         states: &mut [W::Job],
         lanes: &mut [W::Lane],
-    ) -> Result<Outcome<W::Error>, threadteam::Error> {
-        run_placed(exec, work, self.tables, states, lanes)
+    ) -> Result<Outcome<W::Error>, Refusal<threadteam::Error>> {
+        let placement = &self.tables.placement;
+        supply(
+            placement.lane_of.len(),
+            states.len(),
+            placement.lanes(),
+            lanes.len(),
+        )?;
+        run_placed(exec, work, self.tables, states, lanes).map_err(Refusal::Context)
     }
 }
 
-impl<W: Work> sealed::Assign<W> for Each
-where
-    W::Job: Sync,
-    W::Lane: Sync,
-    W::Error: Sync,
-{
+impl<W: Work> sealed::Assign<W> for Each {
     fn run(
         self,
         exec: Exec<'_>,
         work: &W,
         states: &mut [W::Job],
         lanes: &mut [W::Lane],
-    ) -> Result<Outcome<W::Error>, threadteam::Error> {
-        if states.is_empty() {
-            return Ok(Ok(()));
-        }
-        assert!(lanes.len() >= states.len(), "one lane state per job");
+    ) -> Result<Outcome<W::Error>, Refusal<threadteam::Error>> {
+        let jobs = work.count();
+        supply(jobs, states.len(), jobs, lanes.len())?;
         let budget = exec.budget();
-        let width = NonZeroUsize::new(states.len())
-            .filter(|width| width.get() <= budget)
-            .ok_or(threadteam::Error::SharesExceedBudget {
+        let Some(width) = NonZeroUsize::new(jobs) else {
+            return Ok(Ok(()));
+        };
+        if jobs > budget {
+            return Err(Refusal::Context(threadteam::Error::SharesExceedBudget {
                 budget,
-                sum: states.len(),
-            })?;
-        let failure = each(work, 0, states, lanes, exec.limit(width));
+                sum: jobs,
+            }));
+        }
+        let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
+        // Each slot: the job's state and lane, then its failure.
+        let slots: Vec<_> = states
+            .iter_mut()
+            .zip(lanes.iter_mut())
+            .map(|(state, lane)| Mutex::new((Some((state, lane)), None)))
+            .collect();
+        // A token of exactly `jobs` slots gives each of its `jobs` children
+        // one.
+        exec.limit(width).into_token().fork(jobs, |job, token| {
+            let mut slot = slots[job].lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((state, lane)) = slot.0.take() {
+                let mut exec = Exec::from_token(token, workspace, policy);
+                slot.1 = run_job(work, job, state, lane, &mut exec);
+            }
+        });
+        let failure = slots
+            .into_iter()
+            .find_map(|slot| slot.into_inner().unwrap_or_else(PoisonError::into_inner).1);
         Ok(failure.map_or(Ok(()), Err))
     }
 }
@@ -362,7 +437,8 @@ where
         work: &W,
         states: &mut [W::Job],
         lanes: &mut [W::Lane],
-    ) -> Result<Outcome<W::Error>, threadteam::Error> {
+    ) -> Result<Outcome<W::Error>, Refusal<threadteam::Error>> {
+        supply(work.count(), states.len(), 0, lanes.len())?;
         if states.is_empty() {
             return Ok(Ok(()));
         }
@@ -451,42 +527,6 @@ where
     )
 }
 
-/// [`Each`] over `states`, whose first job is `first`, on a token of exactly
-/// one slot per job: the two-child fork gives the left half, the larger, its
-/// rounded-up half of the slots.
-fn each<W>(
-    work: &W,
-    first: usize,
-    states: &mut [W::Job],
-    lanes: &mut [W::Lane],
-    mut exec: Exec<'_>,
-) -> Option<(usize, W::Error)>
-where
-    W: Work,
-    W::Job: Sync,
-    W::Lane: Sync,
-    W::Error: Sync,
-{
-    if let [state] = states {
-        return run_job(work, first, state, &mut lanes[0], &mut exec);
-    }
-    let middle = states.len().div_ceil(2);
-    let (left_states, right_states) = states.split_at_mut(middle);
-    let (left_lanes, right_lanes) = lanes.split_at_mut(middle);
-    let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
-    join(
-        exec.into_token(),
-        |token| {
-            let exec = Exec::from_token(token, workspace, policy);
-            each(work, first, left_states, left_lanes, exec)
-        },
-        |token| {
-            let exec = Exec::from_token(token, workspace, policy);
-            each(work, first + middle, right_states, right_lanes, exec)
-        },
-    )
-}
-
 /// The lane states of a split's right half: the back of the caller's when
 /// they cover every thread, its own otherwise.
 enum Lanes<'a, L> {
@@ -565,7 +605,8 @@ impl Arena {
     }
 }
 
-/// [`Placed`]: zero and one lane run without the arena; more lanes fill one
+/// [`Placed`], on a supply already checked: zero and one lane run without
+/// the arena; more lanes fill one
 /// flat arena of J slots in lane order and fork once.
 ///
 /// Why each lane part sits behind a `Mutex`: it lends `Send`-only job and
@@ -587,8 +628,6 @@ fn run_placed<W: Work>(
     if count == 0 {
         return Ok(Ok(()));
     }
-    assert_eq!(states.len(), placement.lane_of.len(), "one state per job");
-    assert!(lanes.len() >= count, "one lane state per lane");
     if count == 1 {
         let share = placement.shares[0];
         // `limit` clamps; refuse an oversized share as `fork_sized` would.
@@ -689,19 +728,23 @@ where
 /// Every lane keeps its share and its `lanes` entry in every round. Failures
 /// are job-local exactly as in [`Placed`], so the reported job does not
 /// depend on the lane count; a failed submission is never retried. The outer
-/// error is `host`'s refused entry, which stops the call.
-///
-/// # Panics
-///
-/// As [`run_native`] over [`Placed`].
+/// error is `host`'s refused entry, which stops the call
+/// ([`Refusal::Context`]), or, before any stage, a supply [`Refusal`] as
+/// [`run_native`]'s over [`Placed`].
 pub fn run_barrier<W: Work, H: Barrier<W>>(
     host: &mut H,
     work: &W,
     tables: &mut LaneTables,
     states: &mut [W::Job],
     lanes: &mut [W::Lane],
-) -> Result<Outcome<W::Error>, H::Refused> {
+) -> Result<Outcome<W::Error>, Refusal<H::Refused>> {
     let LaneTables { placement, run, .. } = tables;
+    supply(
+        placement.lane_of.len(),
+        states.len(),
+        placement.lanes(),
+        lanes.len(),
+    )?;
     if placement.lanes() == 0 {
         return Ok(Ok(()));
     }
@@ -731,7 +774,7 @@ pub fn run_barrier<W: Work, H: Barrier<W>>(
         }
     };
     run.park(parts);
-    outcome?;
+    outcome.map_err(Refusal::Context)?;
     let failure = failure.into_inner().unwrap_or_else(PoisonError::into_inner);
     Ok(failure.map_or(Ok(()), Err))
 }
