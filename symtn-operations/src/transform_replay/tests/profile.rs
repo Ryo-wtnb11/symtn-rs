@@ -85,14 +85,23 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
 /// What: a one-worker replay attributes its recoupling to the dense GEMM
 /// call; a native lane replay, whose stages run concurrently, reports its
 /// wall time as `fused_lanes` and no per-phase GEMM time; the barrier form
-/// reports only its engine GEMM submissions per phase.
+/// reports only its engine GEMM submissions per phase. Where the built-in
+/// executor does not honor forced policies (the BLAS provider), the call
+/// runs under `Auto`, which places the barrier form's lanes on the eager
+/// engine.
 #[test]
 fn profiled_multi_attributes_recoupling_to_its_route() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
     for threads in [1, 2] {
-        // A forced `Inner` keeps the tiny call on the lanes, which `Auto`
-        // admits on one slot.
-        let mut engine = super::recording::engine(threads, tenferro_cpu::CpuBatchStrategy::Inner);
+        // A forced `Inner` keeps the tiny call on the native lanes, which
+        // `Auto` admits on one slot.
+        let strategy = if honors {
+            tenferro_cpu::CpuBatchStrategy::Inner
+        } else {
+            tenferro_cpu::CpuBatchStrategy::Auto
+        };
+        let mut engine = super::recording::engine(threads, strategy);
         let mut dst = vec![f64::NAN; 3];
         let mut profile = TreeTransformReplayProfile::default();
         tree_transform_structure_overwrite_with_structural_recoupling_raw_profiled(

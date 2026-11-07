@@ -6,10 +6,10 @@
 //! allocate the same and no more, a large call does not make a later small
 //! call allocate more, and an overwrite of many high-rank inactive blocks
 //! allocates no more than one of few, as does a general-`beta` update of
-//! many such blocks in Multi groups. The barrier form (a custom executor
-//! without lane GEMMs, each GEMM handed to the engine between rounds) keeps
-//! the same contract, as does a member replay of several members, each
-//! (member, component) pair one job.
+//! many such blocks in Multi groups. A custom executor without lane GEMMs,
+//! under `Auto` since it honors no forced policy, keeps the same contract,
+//! as does a member batch of several members, every member moved at once
+//! around one dense submission.
 //!
 //! Its own test binary with one test, so the shared counting allocator's
 //! process-wide measurement sees only that test. That the fixture really
@@ -217,7 +217,14 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         assert_eq!(after_large, 0);
     }
 
-    // The barrier form on the same four lanes: small, large, small.
+    // The custom executor honors no forced policy, so it replays under
+    // `Auto` on the same four workers: small, large, small.
+    let auto = &mut CpuEngine::new(
+        Pool::builder()
+            .threads(warm_tree_lanes::THREADS)
+            .build()
+            .unwrap(),
+    );
     let mut barrier = DenseTreeTransformOperations::new(Forwarding::default());
     let mut workspace = TreeTransformWorkspace::default();
     let mut destinations = [
@@ -230,7 +237,7 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         counting_alloc::measure_process(|| {
             barrier
                 .tree_transform_structure_into_raw(
-                    engine,
+                    auto,
                     &mut workspace,
                     transform,
                     structure,
@@ -259,7 +266,7 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         assert_eq!(after_large, 0);
     }
 
-    // Member replays on the same four lanes: three members of the small
+    // Member batches on the same four workers: three members of the small
     // fixture, two of the large, three of the small.
     let mut workspace = TreeTransformWorkspace::default();
     let mut dense = DefaultDenseExecutor::new();

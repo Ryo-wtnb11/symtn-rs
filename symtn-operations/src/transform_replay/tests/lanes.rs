@@ -154,6 +154,11 @@ impl DenseExecutor for Spy {
             .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
     }
 
+    // Its batch entry is the built-in one.
+    fn honors_forced_batch_policy(&self) -> bool {
+        self.inner.honors_forced_batch_policy()
+    }
+
     fn supports_lane_gemms(&self) -> bool {
         true
     }

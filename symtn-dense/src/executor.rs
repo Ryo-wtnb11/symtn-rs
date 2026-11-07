@@ -654,6 +654,16 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         })
     }
 
+    /// Whether this executor's batch entries carry out a forced engine batch
+    /// policy (`Inner`, `Outer`, `Split`) as the engine's batch decision
+    /// places it. A replay that cannot honor such a policy through its
+    /// executor refuses it rather than running another placement. The BLAS
+    /// provider and every custom executor answer `false`.
+    #[doc(hidden)]
+    fn honors_forced_batch_policy(&self) -> bool {
+        false
+    }
+
     /// Whether [`Self::with_lane_gemms`] can run its body: a route choice
     /// that costs no call. The BLAS provider and every custom executor
     /// answer `false`.

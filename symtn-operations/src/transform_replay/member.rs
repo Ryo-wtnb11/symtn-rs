@@ -303,14 +303,13 @@ where
 /// Overwrite a fixed-stride Host batch with one completed tree transform.
 /// Each member uses the exact structure passed at compilation; the workspace
 /// owns only execution scratch and can be reused at a different batch size.
-/// One member replays on the ordinary route. A larger batch is admitted
-/// whole (every member's ranges) before any write. On an engine wider than
-/// one it then replays on the ordinary route's lane runner, every (member,
-/// joint component) pair one job, numbered member-major; when the engine or
-/// the placement leaves one slot, one worker moves every member at once (the
-/// member axis one more strided dimension of each move) around one dense
-/// submission of the member-expanded GEMM jobs, stopping at the first
-/// failure. `destination_scales` folds `θ_b` into the moves writing
+/// One member replays on the ordinary route. A larger batch refuses a
+/// forced batch policy `dense` cannot honor, as the ordinary route does,
+/// and is admitted whole (every member's ranges) before any write; then the
+/// caller's token moves every member at once (the member axis one more
+/// strided dimension of each move) around one dense submission of the
+/// member-expanded GEMM jobs, plan job outer and member inner, stopping at
+/// the first failure. `destination_scales` folds `θ_b` into the moves writing
 /// destination block `b` of every member, as in
 /// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`].
 #[doc(hidden)]
@@ -351,6 +350,7 @@ where
             destination_scales,
         );
     }
+    refuse_unhonored_policy(engine, dense)?;
     let alpha = DestinationAlpha::new(D::one(), destination_scales)?;
     let task = structure.task_view()?;
     admit::<D, C>(
@@ -363,35 +363,7 @@ where
         &mut workspace.member_ranges,
     )?;
     ensure_recoupling_coefficients(workspace, task, structure.identity_marker())?;
-    #[cfg(feature = "tenferro")]
-    if crate::host_pool::threads(engine) > 1 {
-        let writer = InitializedWriter {
-            prototype: kernels.clone(),
-            task: writers::ReplayParts::new(task),
-            alpha,
-            mode: DestinationMode::Overwrite,
-        };
-        let lanes = if dense.supports_lane_gemms() {
-            super::lanes::lane_replay
-        } else {
-            super::lanes::barrier_replay
-        };
-        if lanes(
-            engine,
-            dense,
-            workspace,
-            task,
-            structure.parallel_schedule(),
-            dst_data,
-            src_data,
-            &writer,
-            None,
-            members,
-        )? {
-            return Ok(());
-        }
-    }
-    // Why the member axis, not the one-member replay per member: one worker
+    // Why the member axis, not the one-member replay per member: the call
     // then makes one dense submission for every member, as the provider's
     // batch entry expects, instead of one per member and group.
     let layouts = task.layouts();
@@ -601,13 +573,10 @@ mod tests {
     }
 
     /// The built-in executor, counting the products it is handed (the
-    /// default batch entry submits each job through the single product);
-    /// its lane GEMMs only with `lanes`, so without them a wide engine
-    /// replays in the barrier form.
+    /// default batch entry submits each job through the single product).
     struct CountingDense {
         inner: DefaultDenseExecutor,
         products: usize,
-        lanes: bool,
     }
 
     impl Default for CountingDense {
@@ -615,41 +584,24 @@ mod tests {
             Self {
                 inner: DefaultDenseExecutor::new(),
                 products: 0,
-                lanes: false,
             }
         }
     }
 
-    /// The routes a member batch replays on: one worker; and four forced
-    /// `Outer` lanes natively (lane GEMMs, where the provider has them) and
-    /// in the barrier form. The flag tells whether the route places lanes.
-    fn routes() -> [(symtn_dense::CpuEngine, CountingDense, bool); 3] {
-        let wide = || {
-            crate::host_pool::eager_test_engine(4).with_batch_policy(
-                tenferro_cpu::CpuBatchPolicy::new(tenferro_cpu::CpuBatchStrategy::Outer),
-            )
-        };
+    /// The engines a member batch runs on: one worker, and four workers
+    /// whose token its moves take.
+    fn routes() -> [(symtn_dense::CpuEngine, CountingDense); 2] {
         [
+            (symtn_dense::CpuEngine::serial(), CountingDense::default()),
             (
-                symtn_dense::CpuEngine::serial(),
+                crate::host_pool::eager_test_engine(4),
                 CountingDense::default(),
-                false,
             ),
-            (
-                wide(),
-                CountingDense {
-                    lanes: true,
-                    ..CountingDense::default()
-                },
-                true,
-            ),
-            (wide(), CountingDense::default(), true),
         ]
     }
 
     /// The member overwrite of `source` into a destination filled with
-    /// NaN on each of [`routes`], asserting that a lane route placed more
-    /// than one lane.
+    /// NaN on each of [`routes`].
     fn on_every_route(
         transform: &TreeTransformStructure<f64>,
         blocks: &Arc<BlockStructure>,
@@ -658,7 +610,7 @@ mod tests {
     ) -> Vec<Vec<Complex64>> {
         routes()
             .into_iter()
-            .map(|(mut engine, mut dense, lanes)| {
+            .map(|(mut engine, mut dense)| {
                 let mut workspace = TreeTransformWorkspace::default();
                 let mut destination = vec![Complex64::new(f64::NAN, f64::NAN); source.len()];
                 tree_transform_members_overwrite_raw(
@@ -675,9 +627,6 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-                if lanes {
-                    assert!(workspace.lanes.placement().lanes() > 1, "one lane");
-                }
                 destination
             })
             .collect()
@@ -728,20 +677,6 @@ mod tests {
             self.products += 1;
             self.inner
                 .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
-        }
-
-        fn supports_lane_gemms(&self) -> bool {
-            self.lanes && self.inner.supports_lane_gemms()
-        }
-
-        fn with_lane_gemms(
-            &mut self,
-            engine: &mut dyn Engine,
-            dtype: symtn_dense::DenseDType,
-            jobs: &[symtn_dense::lanes::LaneGemmShape],
-            body: &mut symtn_dense::lanes::LaneGemmBody<'_>,
-        ) -> Result<(), DenseError> {
-            self.inner.with_lane_gemms(engine, dtype, jobs, body)
         }
     }
 

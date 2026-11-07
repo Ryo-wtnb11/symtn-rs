@@ -8,7 +8,8 @@ use super::*;
 /// The writer runs on the same route as the initialised replay: the lane
 /// runner on a multi-slot engine (in the barrier form for an executor
 /// without lane GEMMs), the one-worker replay otherwise. Nothing is published unless every write
-/// succeeded.
+/// succeeded. A forced batch policy `dense` cannot honor is refused first,
+/// as the initialised replay refuses it, even where `Ok(None)` would follow.
 ///
 /// `profile` accumulates the same phases as the initialised profiled replay
 /// (benches and tests only; production callers pass `None`).
@@ -34,6 +35,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
+    refuse_unhonored_policy(engine, dense)?;
     let total_start = profile.as_ref().map(|_| std::time::Instant::now());
     let Some(proof) = PhysicalOverwriteProof::new(
         structure,

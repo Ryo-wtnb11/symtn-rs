@@ -283,8 +283,8 @@ fn recoupling_fixture() -> (
 /// What: the compiled replay metadata of [`recoupling_fixture`], by hand.
 /// Destination block `d` spans elements `24 d..=24 d + 23`: the Singles
 /// (blocks 0, 1) in address order and slice-disjoint, the group writing
-/// blocks 2 and 3 spans `48..=95` and the one writing block 4 `96..=119`,
-/// each disjoint, the inactive block 5 starts at 120, and the four pack
+/// blocks 2 and 3 spans `48..=95` and the one writing block 4 `96..=119`
+/// (first in plan order), each disjoint, the inactive block 5 starts at 120, and the four pack
 /// columns outnumber the two Singles.
 #[test]
 fn replay_metadata_lists_direct_items_in_address_order() {
@@ -308,13 +308,13 @@ fn replay_metadata_lists_direct_items_in_address_order() {
         .map(|&layout| layouts.entry(layout as usize).offset)
         .collect();
     assert_eq!(inactive, [120]);
-    let mut spans: Vec<_> = schedule
+    // In plan order: the plan sorts the group writing block 4 first.
+    let spans: Vec<_> = schedule
         .group_spans
         .iter()
         .map(|span| (span.lo, span.hi, span.slice_disjoint))
         .collect();
-    spans.sort_unstable();
-    assert_eq!(spans, [(48, 95, true), (96, 119, true)]);
+    assert_eq!(spans, [(96, 119, true), (48, 95, true)]);
     assert_eq!(schedule.replay_runnable, 4);
 }
 

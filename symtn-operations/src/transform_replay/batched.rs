@@ -32,6 +32,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
+    refuse_unhonored_policy(engine, dense)?;
     #[cfg(feature = "tenferro")]
     let profile = {
         let mut profile = profile;

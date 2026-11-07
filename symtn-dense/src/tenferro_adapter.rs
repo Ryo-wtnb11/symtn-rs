@@ -1531,6 +1531,14 @@ impl DenseExecutor for DefaultDenseExecutor {
         })
     }
 
+    // Why the native provider only: its grouped GEMMs are placed by the
+    // engine's batch decision, while the BLAS provider runs its vendor GEMMs
+    // under the library's own process-global threads.
+    #[cfg(not(feature = "cpu-blas-core"))]
+    fn honors_forced_batch_policy(&self) -> bool {
+        true
+    }
+
     // Why the native provider only: the BLAS provider's GEMM needs the
     // engine itself and its thread settings are process-global, so it has
     // no GEMM to run on a caller's lane.

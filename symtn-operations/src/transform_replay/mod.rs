@@ -331,6 +331,38 @@ fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize
     }
 }
 
+/// Refuses a forced `Inner`, `Outer` or `Split` batch policy on `engine`
+/// when `dense` cannot honor it, before any write or executor call: the
+/// replay refuses the forced decision rather than running another
+/// placement. `Auto` and `Sequential` always run; so does every policy on
+/// an executor that honors forced policies.
+fn refuse_unhonored_policy<E: DenseExecutor>(
+    engine: &mut dyn Engine,
+    dense: &E,
+) -> Result<(), OperationError> {
+    #[cfg(feature = "tenferro")]
+    if !dense.honors_forced_batch_policy() {
+        use tenferro_cpu::CpuBatchStrategy;
+        let strategy = crate::host_pool::batch_policy(engine).strategy;
+        if matches!(
+            strategy,
+            CpuBatchStrategy::Inner | CpuBatchStrategy::Outer | CpuBatchStrategy::Split { .. }
+        ) {
+            return Err(OperationError::Dense(
+                symtn_dense::DenseError::Unsupported {
+                    op: "tree_transform_replay",
+                    message: format!(
+                        "the forced batch policy {strategy:?} needs an executor that honors it"
+                    ),
+                },
+            ));
+        }
+    }
+    #[cfg(not(feature = "tenferro"))]
+    let _ = (engine, dense);
+    Ok(())
+}
+
 // Why not reserve here: public drivers call this before beta mutation, while
 // executors retain ownership of actual workspace growth and profiler attribution.
 fn checked_fused_index_len(max_fused_rank: usize) -> Result<usize, OperationError> {

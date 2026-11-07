@@ -77,14 +77,20 @@ where
         + From<f64>
         + core::fmt::Debug,
 {
-    // One worker, and four forced `Outer` lanes (with the built-in
-    // executor, natively where it runs lane GEMMs, and in the barrier form
-    // through the forwarding executor).
-    let engine = |threads: usize| {
-        crate::host_pool::eager_test_engine(threads).with_batch_policy(
-            tenferro_cpu::CpuBatchPolicy::new(tenferro_cpu::CpuBatchStrategy::Outer),
-        )
+    // One worker, and four workers (with the built-in executor, on forced
+    // `Outer` lanes where it honors forced policies; through the forwarding
+    // executor, which does not, under `Auto`). A member batch moves every
+    // member on the caller's token around one dense submission.
+    let engine = |threads: usize, forced: bool| {
+        let strategy = if forced {
+            tenferro_cpu::CpuBatchStrategy::Outer
+        } else {
+            tenferro_cpu::CpuBatchStrategy::Auto
+        };
+        crate::host_pool::eager_test_engine(threads)
+            .with_batch_policy(tenferro_cpu::CpuBatchPolicy::new(strategy))
     };
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
     let routes = [(1, false), (4, false), (4, true)];
     let (dst, src, structure) = fixture();
     for members in [1, 2, 3] {
@@ -100,7 +106,8 @@ where
         for (threads, barrier) in routes {
             let mut actual = vec![D::from(f64::NAN); 20 * members];
             let mut workspace = TreeTransformWorkspace::default();
-            let mut engine = engine(threads);
+            let forced = honors && !barrier;
+            let mut engine = engine(threads, forced);
             let (dst, src, source) = (&dst, &src, &source[..]);
             let ran = if barrier {
                 overwrite_members(
@@ -128,7 +135,7 @@ where
             ran.unwrap();
             let what = format!("B={members} threads={threads} barrier={barrier}");
             assert_eq!(actual, expected, "{what}");
-            if threads > 1 && members > 1 {
+            if threads > 1 && members == 1 && forced {
                 assert!(workspace.lanes.placement().lanes() > 1, "{what}: one lane");
             }
         }
@@ -136,7 +143,7 @@ where
             for threads in [1, 4] {
                 let mut actual = vec![D::from(f64::NAN); 20];
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                    &mut engine(threads),
+                    &mut engine(threads, honors),
                     &mut StridedHostKernelAdapter::default(),
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
@@ -190,8 +197,8 @@ where
 fn destination_scales_fold_into_single_moves_and_multi_scatters() {
     // What: folding θ_b into the move writing block b equals the unscaled
     // overwrite followed by an in-place scale of block b, bit for bit, for
-    // Singles and Multi scatters, on one worker and on four lanes (native
-    // and barrier form), B = 1/2/3, f64/c64.
+    // Singles and Multi scatters, on one worker and on four workers (the
+    // built-in and the forwarding executor), B = 1/2/3, f64/c64.
     check(1.0_f64);
     check(Complex64::new(1.0, -0.5));
 }

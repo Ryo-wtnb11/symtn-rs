@@ -299,7 +299,11 @@ pub use symtn_core::{
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
 /// the batch's vendor GEMMs sequentially on the calling thread (vendor threads
 /// are outside the engine's lanes); forcing `Inner` there runs the GEMMs on
-/// the native kernels instead of the vendor library.
+/// the native kernels instead of the vendor library. A tree-transform
+/// replay (the recoupling of fusion-tree bases) with the BLAS provider
+/// refuses a forced `Inner`, `Outer` or `Split` policy with a typed
+/// `Unsupported` before any write, since its replay cannot carry that
+/// decision out; `Auto` and `Sequential` run.
 pub use symtn_dense::{CpuEngine, Engine, Pool};
 mod exec_context;
 pub use exec_context::ExecContext;
