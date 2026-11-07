@@ -18,6 +18,9 @@ use crate::transform_structure::TreeTransformDirectItem;
 /// Every inline move runs on the caller's whole token (one slot under a
 /// forced `Sequential`) and is admitted through one caller gate; a split
 /// leaf builds its own. The first failure stops the replay.
+///
+/// Its callers refuse a forced policy `dense` cannot honor first
+/// ([`refuse_unhonored_policy`]), before any coefficient preparation.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay<E, W, T, D, C>(
     engine: &mut dyn Engine,
@@ -38,7 +41,6 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
-    refuse_unhonored_policy(engine, dense)?;
     let layouts = task.layouts();
     let mut gate = LeafGate::new(layouts.max_planned_elements());
     let start = profile.as_ref().map(|_| std::time::Instant::now());

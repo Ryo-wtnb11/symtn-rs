@@ -334,8 +334,9 @@ where
     C: Copy + Sync,
 {
     if members == 1 {
-        // The ordinary entry runs its own route and already admits the single
-        // member before writing its destination.
+        // The ordinary entry runs its own route, refuses an unhonored forced
+        // policy first and admits the single member before writing its
+        // destination.
         return tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             kernels,

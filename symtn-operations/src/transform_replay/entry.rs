@@ -347,8 +347,9 @@ where
     )
 }
 
-/// The shared body of the four entries above: validation, the coefficient
-/// pack, and the replay on its route.
+/// The shared body of the four entries above: the refusal of a forced policy
+/// `dense` cannot honor, validation, the coefficient pack, and the replay on
+/// its route.
 #[allow(clippy::too_many_arguments)]
 fn tree_transform_structure_with_structural_recoupling_raw_mode<A, E, D, C>(
     engine: &mut dyn Engine,
@@ -370,6 +371,7 @@ where
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
+    refuse_unhonored_policy(engine, dense)?;
     let total_start = profile.as_ref().map(|_| std::time::Instant::now());
     let task = structure.task_view()?;
     task.validate_structures_and_lengths(

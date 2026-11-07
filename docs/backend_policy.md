@@ -316,7 +316,7 @@ the first failure in that order. An executor that cannot honor a forced
 batch policy (the BLAS provider and every custom executor) refuses a
 tree-transform replay, owned overwrite or member batch under a forced
 `Inner`, `Outer` or `Split` policy with a typed `Unsupported` before any
-write or executor call; `Auto` and `Sequential` run. Accumulating updates
+coefficient preparation, write or executor call; `Auto` and `Sequential` run. Accumulating updates
 (`beta` neither zero nor absent), and blocks whose normalized layout exceeds
 Strided's inline fused rank of eight, are never written through a Strided
 plan. The cold compile of a tree transform fans its staged groups out over

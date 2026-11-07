@@ -150,7 +150,7 @@ pub fn threads(engine: &mut dyn Engine) -> usize {
 /// The caller's CPU engine's batch policy, read without entering it; the
 /// default (`Auto`) for an engine that is not a CPU engine.
 #[cfg(feature = "tenferro")]
-pub fn batch_policy(engine: &mut dyn Engine) -> tenferro_cpu::CpuBatchPolicy {
+pub(crate) fn batch_policy(engine: &mut dyn Engine) -> tenferro_cpu::CpuBatchPolicy {
     tenferro_cpu::with_cpu_engine(engine, |cpu| cpu.batch_policy()).unwrap_or_default()
 }
 

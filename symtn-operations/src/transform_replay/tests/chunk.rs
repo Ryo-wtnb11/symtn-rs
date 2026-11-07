@@ -2,7 +2,8 @@
 //! batch entry: its values equal the built-in executor's replay, every
 //! destination element is written once, its first failing GEMM in plan
 //! order stops it, a panicking worker breaks the engine, and a forced batch
-//! policy it cannot honor is refused before any write.
+//! policy it cannot honor is refused before any coefficient preparation or
+//! write.
 
 use super::recording::*;
 use super::*;
@@ -281,8 +282,8 @@ fn a_split_worker_panic_breaks_the_engine() {
 
 /// What: a forced `Inner`, `Outer` or `Split` policy, which a custom
 /// executor cannot honor, is refused with a typed `Unsupported` before any
-/// write or executor call: on the initialized replay, the owned overwrite
-/// and a two-member batch; on a serial engine with the policy installed and
+/// coefficient preparation, write or executor call: on the initialized
+/// replay, the owned overwrite, a two-member batch and a one-member batch; on a serial engine with the policy installed and
 /// on four workers; for a call `Auto` would replay on one worker (one tiny
 /// Multi group), a provider-free one (Singles only) and one with several
 /// Multi groups. The initialized destination keeps its bits, the owned
@@ -336,11 +337,12 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 let initial = (0..2 * dst_len).map(|v| v as f64 - 7.5).collect::<Vec<_>>();
 
                 let mut out = initial[..dst_len].to_vec();
+                let mut cold = TreeTransformWorkspace::default();
                 let error = tree_transform_structure_with_structural_recoupling_raw(
                     &mut engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut dense,
-                    &mut TreeTransformWorkspace::default(),
+                    &mut cold,
                     transform,
                     dst,
                     src,
@@ -352,6 +354,7 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 .unwrap_err();
                 assert!(unsupported(error), "{what}, initialized");
                 assert_eq!(out, initial[..dst_len], "{what}, initialized");
+                assert_eq!(cold.coefficient_pack_builds(), 0, "{what}, initialized");
 
                 let owned = try_tree_transform_structure_overwrite_owned_raw(
                     &mut engine,
@@ -368,11 +371,12 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 assert!(unsupported(owned.unwrap_err()), "{what}, owned");
 
                 let mut out = initial.clone();
+                let mut cold = TreeTransformWorkspace::default();
                 let error = tree_transform_members_overwrite_raw(
                     &mut engine,
                     &mut StridedHostKernelAdapter::default(),
                     &mut dense,
-                    &mut TreeTransformWorkspace::default(),
+                    &mut cold,
                     transform,
                     dst,
                     src,
@@ -384,6 +388,28 @@ fn a_forced_policy_a_custom_executor_cannot_honor_is_refused_before_any_write() 
                 .unwrap_err();
                 assert!(unsupported(error), "{what}, members");
                 assert_eq!(out, initial, "{what}, members");
+                assert_eq!(cold.coefficient_pack_builds(), 0, "{what}, members");
+
+                // One member delegates to the initialized overwrite.
+                let mut out = initial[..dst_len].to_vec();
+                let mut cold = TreeTransformWorkspace::default();
+                let error = tree_transform_members_overwrite_raw(
+                    &mut engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut dense,
+                    &mut cold,
+                    transform,
+                    dst,
+                    src,
+                    &mut out,
+                    &source[..src_len],
+                    1,
+                    &[],
+                )
+                .unwrap_err();
+                assert!(unsupported(error), "{what}, one member");
+                assert_eq!(out, initial[..dst_len], "{what}, one member");
+                assert_eq!(cold.coefficient_pack_builds(), 0, "{what}, one member");
                 assert!(dense.attempts().is_empty(), "{what}");
             }
         }

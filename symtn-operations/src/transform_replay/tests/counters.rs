@@ -346,12 +346,12 @@ fn an_unsplit_move_gets_the_whole_caller_token() {
     }
 }
 
-/// A custom executor that records each grouped submission's job count and
-/// forwards it to the built-in executor's.
+/// A custom executor that records each grouped submission's jobs and runs
+/// and forwards it to the built-in executor's.
 #[derive(Default)]
 struct Batches {
     inner: DefaultDenseExecutor,
-    jobs: Vec<usize>,
+    submissions: Vec<(Vec<DenseGemmBatchJob>, Vec<usize>)>,
 }
 
 impl DenseExecutor for Batches {
@@ -403,7 +403,7 @@ impl DenseExecutor for Batches {
         alpha: DenseScalar,
         beta: DenseScalar,
     ) -> Result<(), DenseError> {
-        self.jobs.push(jobs.len());
+        self.submissions.push((jobs.to_vec(), runs.to_vec()));
         self.inner
             .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
     }
@@ -447,6 +447,61 @@ fn each_chunk_is_one_grouped_submission() {
         &[],
     )
     .unwrap();
-    assert_eq!(dense.jobs, [4, 4, 2]);
+    let jobs = dense
+        .submissions
+        .iter()
+        .map(|(jobs, _)| jobs.len())
+        .collect::<Vec<_>>();
+    assert_eq!(jobs, [4, 4, 2]);
     assert_eq!(out, source);
+}
+
+/// What (member batch): a three-member overwrite on four free-dispatch
+/// workers is one grouped submission of `G N` jobs, plan job outer and
+/// member inner, each member's operands at its member stride of the packed
+/// scratch and every member sharing its job's coefficients; with one group
+/// the members form one affine run.
+#[test]
+fn a_wide_member_batch_is_one_member_strided_submission() {
+    let members = 3;
+    for (dst, src, transform) in [two_lane_fixture(), identity_multi_fixture()] {
+        let plan = transform.recoupling_plan();
+        let expected = plan
+            .jobs()
+            .iter()
+            .flat_map(|job| {
+                (0..members).map(move |member| DenseGemmBatchJob {
+                    dst_offset: member * plan.destination_len() + job.dst_offset,
+                    lhs_offset: member * plan.source_len() + job.lhs_offset,
+                    ..*job
+                })
+            })
+            .collect::<Vec<_>>();
+        let source = (0..members * src.required_len().unwrap())
+            .map(|v| v as f64 + 1.0)
+            .collect::<Vec<_>>();
+        let mut out = vec![f64::NAN; members * dst.required_len().unwrap()];
+        let mut dense = Batches::default();
+        tree_transform_members_overwrite_raw(
+            &mut engine(4, CpuBatchStrategy::Auto),
+            &mut StridedHostKernelAdapter::default(),
+            &mut dense,
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &dst,
+            &src,
+            &mut out,
+            &source,
+            members,
+            &[],
+        )
+        .unwrap();
+        let groups = plan.jobs().len();
+        assert_eq!(dense.submissions.len(), 1, "{groups} groups");
+        let (jobs, runs) = &dense.submissions[0];
+        assert_eq!(jobs, &expected, "{groups} groups");
+        if groups == 1 {
+            assert_eq!(runs, &[members]);
+        }
+    }
 }

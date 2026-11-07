@@ -379,7 +379,8 @@ fn prepare_packed_buffer<T: Clone>(buffer: &mut HostScratchBuffer<T>, len: usize
 }
 
 /// Refuses a forced `Inner`, `Outer` or `Split` batch policy on `engine`
-/// when `dense` cannot honor it, before any write or executor call: the
+/// when `dense` cannot honor it, before any coefficient preparation, write
+/// or executor call: the
 /// replay refuses the forced decision rather than running another
 /// placement. `Auto` and `Sequential` always run; so does every policy on
 /// an executor that honors forced policies.
