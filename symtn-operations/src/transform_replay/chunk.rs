@@ -32,7 +32,8 @@ use crate::transform_structure::{TreeTransformDirectItem, TreeTransformPackRepla
 /// `t` is [`lanes::flat_width`] of a copy of the whole destination over the
 /// compiled runnable parts (main's `effective_tree_transform_threads`):
 /// under `Auto` the engine's width when that copy pays for it, at most the
-/// runnable parts, else one; a forced policy's decision. The inactive layouts
+/// runnable parts, else one; a forced policy's decision, at most the runnable
+/// parts. The inactive layouts
 /// then run inline on the caller's token, followed by the Singles: split over
 /// `t` workers when `t > 1` and they are slice-disjoint, inline otherwise.
 #[allow(clippy::too_many_arguments)]
@@ -56,7 +57,7 @@ where
     let layouts = task.layouts();
     let rank = layouts.max_fused_rank();
     let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
-    crate::host_pool::lane_region(
+    let admitted = crate::host_pool::lane_region(
         engine,
         crate::host_pool::HostPoolSite::Replay,
         |mut exec| {
@@ -110,9 +111,14 @@ where
                     fused_indices,
                 )?;
             }
-            Ok((threads, sequential))
+            Ok::<_, OperationError>((threads, sequential))
         },
-    )?
+    )??;
+    #[cfg(any(test, feature = "testing"))]
+    {
+        workspace.movement_phases += 1;
+    }
+    Ok(admitted)
 }
 
 /// The plan groups of a replay at width `threads > 1`, in chunks of
@@ -165,8 +171,14 @@ where
     let packed_destination = workspace.packed.destination_mut();
     let mut fill = packed_destination.len() < scratch_destination;
     if fill && packed_destination.capacity() >= scratch_destination {
+        #[cfg(any(test, feature = "testing"))]
+        let tail = scratch_destination - packed_destination.len();
         packed_destination.resize_filled(scratch_destination, D::zero());
         fill = false;
+        #[cfg(any(test, feature = "testing"))]
+        {
+            workspace.destination_fills += tail;
+        }
     }
 
     for (index, chunk) in jobs.chunks(threads).enumerate() {
@@ -208,6 +220,11 @@ where
             threads,
         )?;
         fill = false;
+        #[cfg(any(test, feature = "testing"))]
+        {
+            workspace.movement_phases += 1;
+            workspace.destination_fills += filled.unwrap_or(0);
+        }
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.multi_blocks += chunk.len();
             profile.packed_columns += chunk.iter().map(|job| job.contracted).sum::<usize>();
@@ -294,6 +311,10 @@ where
             }
             Ok(())
         })??;
+        #[cfg(any(test, feature = "testing"))]
+        {
+            workspace.movement_phases += 1;
+        }
         if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
             profile.scattered_columns += chunk.iter().map(|job| job.cols).sum::<usize>();
             profile.multi_scatter += start.elapsed();

@@ -792,8 +792,13 @@ fn equal_shares(
 /// `estimate` the serial time of the whole phase: under `Auto` the budget,
 /// at most `runnable`, when `estimate` pays for one section of the whole
 /// budget, and one otherwise; under a forced policy its decision for
-/// `runnable` items, `lanes * item_threads` slots, at most the budget
-/// (`Sequential`: one). Model-free: no estimate per part, search or cache.
+/// `runnable` items, `lanes * item_threads` slots, at most the budget and at
+/// most `runnable` (`Sequential`: one). Model-free: no estimate per part,
+/// search or cache.
+///
+/// Why a forced width is capped by the parts too: the width sizes per-worker
+/// scratch, and a worker with no part has none to run, while the parts
+/// still run on the caller's whole token.
 pub fn flat_width(exec: &Exec<'_>, estimate: Duration, runnable: usize) -> usize {
     let budget = exec.budget();
     let runnable = runnable.max(1);
@@ -810,6 +815,7 @@ pub fn flat_width(exec: &Exec<'_>, estimate: Duration, runnable: usize) -> usize
                 .lanes
                 .saturating_mul(decision.item_threads)
                 .clamp(1, budget.max(1))
+                .min(runnable)
         }
     }
 }

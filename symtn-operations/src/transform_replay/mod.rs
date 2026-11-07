@@ -171,6 +171,12 @@ pub struct HostTreeTransformWorkspace<T> {
     /// Coefficient packs converted into this workspace so far.
     #[cfg(any(test, feature = "testing"))]
     coefficient_pack_builds: usize,
+    /// Packed-destination elements the parallel replay initialized so far,
+    /// and its movement engine entries (direct, packs, scatters).
+    #[cfg(any(test, feature = "testing"))]
+    destination_fills: usize,
+    #[cfg(any(test, feature = "testing"))]
+    movement_phases: usize,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
     // One chunk's non-empty scatter groups, in destination order.
@@ -196,6 +202,10 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             coefficient_structure_identity: None,
             #[cfg(any(test, feature = "testing"))]
             coefficient_pack_builds: 0,
+            #[cfg(any(test, feature = "testing"))]
+            destination_fills: 0,
+            #[cfg(any(test, feature = "testing"))]
+            movement_phases: 0,
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
@@ -246,6 +256,23 @@ impl<T> HostTreeTransformWorkspace<T> {
     #[cfg(any(test, feature = "testing"))]
     pub fn coefficient_pack_builds(&self) -> usize {
         self.coefficient_pack_builds
+    }
+
+    /// Packed-destination elements this workspace's parallel replays have
+    /// initialized: a fresh or grown scratch inside the first chunk's pack,
+    /// a short one's tail on the caller; a warm replay initializes none.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn destination_fills(&self) -> usize {
+        self.destination_fills
+    }
+
+    /// Movement engine entries of this workspace's parallel replays: one
+    /// direct phase, then one pack and one scatter per chunk.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
+    pub fn movement_phases(&self) -> usize {
+        self.movement_phases
     }
 
     #[inline]

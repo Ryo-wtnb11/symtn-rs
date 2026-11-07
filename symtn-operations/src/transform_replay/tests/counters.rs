@@ -505,3 +505,148 @@ fn a_wide_member_batch_is_one_member_strided_submission() {
         }
     }
 }
+
+/// Ten identity groups of two packed `4 x 6` blocks each.
+fn ten_identity_groups() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
+    let groups = 10;
+    let structure =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![4, 6]; 2 * groups]).unwrap());
+    let specs = (0..groups)
+        .map(|g| {
+            TreeTransformBlockSpec::multi(
+                vec![2 * g, 2 * g + 1],
+                vec![2 * g, 2 * g + 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )
+        })
+        .collect::<Vec<_>>();
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+    (structure, transform)
+}
+
+/// An overwrite of `transform` on `budget` workers under `strategy` through
+/// the built-in executor, into `workspace`.
+fn overwrite(
+    budget: usize,
+    strategy: CpuBatchStrategy,
+    workspace: &mut TreeTransformWorkspace<f64>,
+    transform: &TreeTransformStructure<f64>,
+    structure: &Arc<BlockStructure>,
+) -> Vec<f64> {
+    let source = (0..structure.required_len().unwrap())
+        .map(|v| v as f64)
+        .collect::<Vec<_>>();
+    let mut out = vec![f64::NAN; source.len()];
+    tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        &mut engine(budget, strategy),
+        &mut StridedHostKernelAdapter::default(),
+        &mut DefaultDenseExecutor::new(),
+        workspace,
+        transform,
+        structure,
+        structure,
+        &mut out,
+        &source,
+        1.0,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(out, source);
+    out
+}
+
+/// What (H fill, audit 2): the ten-group overwrite on four free-dispatch
+/// workers has three chunks of 4, 4 and 2 groups and so `1 + 2 * 3 = 7`
+/// movement phases (one direct, three packs, three scatters) on every call.
+/// A fresh workspace initializes the largest chunk's packed destination,
+/// four groups of `2 * 24` elements, `192`, inside the first pack; a warm
+/// repeat initializes none. After serial replays of one `2 x (32 x 32)`
+/// group and then one `2 x (1 x 1)` group, which leave the scratch `2` long
+/// with room for `2048`, the same overwrite initializes only the
+/// `190`-element tail, on the caller.
+#[test]
+fn a_parallel_replay_fills_its_destination_scratch_once_in_seven_phases() {
+    let (structure, transform) = ten_identity_groups();
+    let mut workspace = TreeTransformWorkspace::default();
+    let call = |workspace: &mut TreeTransformWorkspace<f64>| {
+        let (fills, phases) = (workspace.destination_fills(), workspace.movement_phases());
+        overwrite(4, CpuBatchStrategy::Auto, workspace, &transform, &structure);
+        (
+            workspace.destination_fills() - fills,
+            workspace.movement_phases() - phases,
+        )
+    };
+    assert_eq!(call(&mut workspace), (192, 7), "fresh");
+    assert_eq!(call(&mut workspace), (0, 7), "warm");
+
+    let structure_of = |dims: [usize; 2]| {
+        Arc::new(BlockStructure::packed_column_major(2, vec![dims.to_vec(); 2]).unwrap())
+    };
+    let one_group = |structure: &Arc<BlockStructure>| {
+        let spec = TreeTransformBlockSpec::multi(vec![0, 1], vec![0, 1], vec![1.0, 0.0, 0.0, 1.0]);
+        TreeTransformStructure::compile_structures(structure, structure, &[spec]).unwrap()
+    };
+    let mut history = TreeTransformWorkspace::default();
+    for dims in [[32, 32], [1, 1]] {
+        let structure = structure_of(dims);
+        overwrite(
+            1,
+            CpuBatchStrategy::Auto,
+            &mut history,
+            &one_group(&structure),
+            &structure,
+        );
+    }
+    assert_eq!(history.destination_len(), 2);
+    assert_eq!(call(&mut history), (190, 7), "tail");
+}
+
+/// What (step-5 review P1-1): a forced policy's replay width is capped by
+/// the compiled runnable parts, so one rank-nine Single (fused rank nine,
+/// above the inline index width) retains the same traversal scratch on two
+/// workers and on sixty-four, under `Inner` and under `Split`, as main's
+/// runnable clamp does.
+#[test]
+fn a_forced_width_sizes_no_scratch_beyond_the_runnable_parts() {
+    // An executor that cannot honor a forced policy refuses it before any
+    // width is chosen (the refusal matrix in `chunk`).
+    if !DefaultDenseExecutor::new().honors_forced_batch_policy() {
+        return;
+    }
+    let shape = vec![2; 9];
+    let strides = (0..9).map(|axis| 1usize << axis).collect::<Vec<_>>();
+    let block = BlockSpec::with_key(BlockKey::ordinal(0), shape, strides, 0).unwrap();
+    let structure = Arc::new(BlockStructure::from_blocks_with_rank(9, vec![block]).unwrap());
+    let specs = vec![TreeTransformBlockSpec::single(0, 0, 1.0_f64).with_source_axes((0..9).rev())];
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+    let split = CpuBatchStrategy::Split {
+        lanes: core::num::NonZeroUsize::new(2).unwrap(),
+    };
+    for strategy in [CpuBatchStrategy::Inner, split] {
+        let retained = |budget: usize| {
+            let mut workspace = TreeTransformWorkspace::default();
+            let source = (0..structure.required_len().unwrap())
+                .map(|v| v as f64)
+                .collect::<Vec<_>>();
+            let mut out = vec![f64::NAN; source.len()];
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                &mut engine(budget, strategy),
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut workspace,
+                &transform,
+                &structure,
+                &structure,
+                &mut out,
+                &source,
+                1.0,
+                &[],
+            )
+            .unwrap();
+            workspace.retained_bytes()
+        };
+        assert_eq!(retained(2), retained(64), "{strategy:?}");
+    }
+}

@@ -293,7 +293,8 @@ width, at most the compiled runnable parts (the Singles when their
 destinations are slice-disjoint, else one, or the pack columns, whichever is
 more), when Strided's copy estimate of the whole destination pays for that
 section, and one otherwise; under a forced policy its batch decision
-(`lanes * item_threads`, one for `Sequential`). In that region the inactive
+(`lanes * item_threads`, one for `Sequential`), at most the runnable parts,
+on the caller's whole token. In that region the inactive
 blocks are written inline on the caller's token, in destination address
 order, and then the Singles: at `t > 1` with slice-disjoint destinations
 split over `t` workers, otherwise inline in address order. A split part of
