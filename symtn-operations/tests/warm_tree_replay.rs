@@ -29,7 +29,7 @@ use std::sync::Arc;
 use symtn_core::{BlockKey, BlockSpec, BlockStructure};
 use symtn_dense::{
     CpuEngine, DefaultDenseExecutor, DenseDotConfig, DenseError, DenseExecutor, DenseRead,
-    DenseScalar, DenseTensor, DenseWrite, Engine, Pool,
+    DenseScalar, DenseTensor, DenseWrite, Engine,
 };
 use symtn_operations::{
     tree_transform_members_overwrite_raw, DenseTreeTransformOperations, StridedHostKernelAdapter,
@@ -39,6 +39,8 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "../../tests/support/started_pool.rs"]
+mod started_pool;
 #[path = "support/warm_tree_replay.rs"]
 mod warm_tree_replay;
 
@@ -166,10 +168,8 @@ impl DenseExecutor for Forwarding {
 
 #[test]
 fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
-    let pool = Pool::builder()
-        .threads(warm_tree_replay::THREADS)
-        .build()
-        .unwrap();
+    // Every worker has started, so no worker start-up lands in a window.
+    let pool = started_pool::started_pool(warm_tree_replay::THREADS);
     // `Outer` admits the replay on all four workers.
     let engine =
         &mut CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
@@ -215,12 +215,7 @@ fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
 
     // The custom executor honors no forced policy, so it replays under
     // `Auto` on the same four workers: small, large, small.
-    let auto = &mut CpuEngine::new(
-        Pool::builder()
-            .threads(warm_tree_replay::THREADS)
-            .build()
-            .unwrap(),
-    );
+    let auto = &mut CpuEngine::new(started_pool::started_pool(warm_tree_replay::THREADS));
     let mut custom = DenseTreeTransformOperations::new(Forwarding::default());
     let mut workspace = TreeTransformWorkspace::default();
     let mut destinations = [

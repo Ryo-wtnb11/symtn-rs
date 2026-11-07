@@ -19,12 +19,14 @@
 
 use symtn_dense::{
     strided_batch_runs, CpuEngine, DefaultDenseExecutor, DenseExecutor, DenseGemmBatchJob,
-    DenseRead, DenseScalar, DenseView, DenseViewMut, DenseWrite, MatrixOp, Pool,
+    DenseRead, DenseScalar, DenseView, DenseViewMut, DenseWrite, MatrixOp,
 };
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
+#[path = "../../tests/support/started_pool.rs"]
+mod started_pool;
 #[path = "support/warm_lanes.rs"]
 mod warm_lanes;
 
@@ -33,10 +35,8 @@ static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAl
 
 #[test]
 fn warm_multi_lane_grouped_batch_allocates_nothing_but_the_lane_locks() {
-    let pool = Pool::builder()
-        .threads(warm_lanes::THREADS)
-        .build()
-        .unwrap();
+    // Every worker has started, so no worker start-up lands in a window.
+    let pool = started_pool::started_pool(warm_lanes::THREADS);
     // `Outer` places the nonzero-estimate jobs on one-slot lanes.
     let engine =
         &mut CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
