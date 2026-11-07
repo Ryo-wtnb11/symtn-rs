@@ -91,6 +91,7 @@ fn threaded_interleaved_singles_write_their_own_elements() {
         ],
     )
     .unwrap();
+    assert!(!structure.parallel_schedule().singles_slice_disjoint);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -204,6 +205,7 @@ fn threaded_multi_scatter_writes_interleaved_destinations() {
     )
     .unwrap();
     assert_eq!(transform.parallel_schedule().scatter_groups.len(), 1);
+    assert!(!transform.parallel_schedule().group_spans[0].slice_disjoint);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -276,6 +278,44 @@ fn recoupling_fixture() -> (
     )
     .unwrap();
     (dst, src, replay)
+}
+
+/// What: the compiled replay metadata of [`recoupling_fixture`], by hand.
+/// Destination block `d` spans elements `24 d..=24 d + 23`: the Singles
+/// (blocks 0, 1) in address order and slice-disjoint, the group writing
+/// blocks 2 and 3 spans `48..=95` and the one writing block 4 `96..=119`,
+/// each disjoint, the inactive block 5 starts at 120, and the four pack
+/// columns outnumber the two Singles.
+#[test]
+fn replay_metadata_lists_direct_items_in_address_order() {
+    let (_, _, replay) = recoupling_fixture();
+    let schedule = replay.parallel_schedule();
+    let layouts = replay.layouts();
+    let single_starts: Vec<isize> = schedule
+        .singles
+        .iter()
+        .map(|&block| {
+            let (dst_layout, _, _) =
+                crate::transform_replay::writers::scheduled_single(replay.blocks(), block).unwrap();
+            layouts.entry(dst_layout).offset
+        })
+        .collect();
+    assert_eq!(single_starts, [0, 24]);
+    assert!(schedule.singles_slice_disjoint);
+    let inactive: Vec<isize> = schedule
+        .inactive
+        .iter()
+        .map(|&layout| layouts.entry(layout as usize).offset)
+        .collect();
+    assert_eq!(inactive, [120]);
+    let mut spans: Vec<_> = schedule
+        .group_spans
+        .iter()
+        .map(|span| (span.lo, span.hi, span.slice_disjoint))
+        .collect();
+    spans.sort_unstable();
+    assert_eq!(spans, [(48, 95, true), (96, 119, true)]);
+    assert_eq!(schedule.replay_runnable, 4);
 }
 
 /// Explicit-index oracle for [`recoupling_fixture`]: column-major blocks of

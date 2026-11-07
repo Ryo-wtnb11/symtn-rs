@@ -147,6 +147,39 @@ pub(super) fn compile_parallel_schedule(
         });
     }
 
+    // Main's replay metadata: the Direct lists in address order, each
+    // group's span, and the runnable clamp.
+    let singles_slice_disjoint = slice_disjoint(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
+    let mut singles = Vec::with_capacity(ranges.len());
+    singles.extend(ranges.iter().map(|&(_, _, block)| block));
+    let mut inactive = Vec::with_capacity(inactive_dst_layouts.len());
+    for &layout in inactive_dst_layouts {
+        if let Some((lo, _)) = destination_span(layouts, layout) {
+            inactive.push((lo, checked_u32(layout)?));
+        }
+    }
+    // Why the order is total: compilation rejects aliased destinations.
+    inactive.sort_unstable_by_key(|&(lo, _)| lo);
+    let inactive = inactive.into_iter().map(|(_, layout)| layout).collect();
+    let group_spans = scatter_groups
+        .iter()
+        .map(|group| {
+            let columns = &scatter_spans[group.columns.clone()];
+            let ranges = columns.iter().map(|&(range, _)| range);
+            TreeTransformGroupSpan {
+                lo: columns.first().map_or(0, |&((lo, _), _)| lo),
+                hi: ranges.clone().map(|(_, hi)| hi).max().unwrap_or(-1),
+                slice_disjoint: slice_disjoint(ranges),
+            }
+        })
+        .collect();
+    let singles_runnable = if singles_slice_disjoint {
+        singles.len()
+    } else {
+        usize::from(!singles.is_empty())
+    };
+    let replay_runnable = singles_runnable.max(pack_columns.len()).max(1);
+
     let mut scatter_ranges = Vec::with_capacity(scatter_spans.len());
     let mut scatter_columns = Vec::with_capacity(scatter_spans.len());
     for (range, column) in scatter_spans {
@@ -160,6 +193,11 @@ pub(super) fn compile_parallel_schedule(
         pack_columns,
         scatter_columns,
         scatter_groups,
+        inactive,
+        singles,
+        singles_slice_disjoint,
+        group_spans,
+        replay_runnable,
         ..Default::default()
     };
     compile_joint_ownership(
@@ -527,6 +565,19 @@ fn union(parent: &mut [u32], left: u32, right: u32) {
     if left != right {
         parent[left.max(right) as usize] = left.min(right);
     }
+}
+
+/// Whether the inclusive destination ranges, in their order, are
+/// slice-disjoint: each nonnegative and starting after the previous one ends.
+fn slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
+    let mut previous_hi = None;
+    for (lo, hi) in ranges {
+        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
+            return false;
+        }
+        previous_hi = Some(hi);
+    }
+    true
 }
 
 /// The first and last element a destination `layout` writes, or `None` when

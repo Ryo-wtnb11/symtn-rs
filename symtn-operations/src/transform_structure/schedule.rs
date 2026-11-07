@@ -33,6 +33,17 @@ pub(crate) struct TreeTransformScatterGroupReplay {
     pub columns: Range<usize>,
 }
 
+/// The destination span of one plan group's scatter columns, ordered by
+/// destination start: its first and last written element and whether the
+/// columns are slice-disjoint (each starts after the previous one ends). A
+/// group without columns spans `(0, -1)`, disjoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeTransformGroupSpan {
+    pub lo: isize,
+    pub hi: isize,
+    pub slice_disjoint: bool,
+}
+
 /// A destination write that does not go through a packed GEMM column.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TreeTransformDirectItem {
@@ -126,6 +137,21 @@ pub(crate) struct TreeTransformParallelSchedule {
     /// Atom slots in destination address order, along which a replay
     /// splits its destination into atom slices.
     pub address_order: Vec<u32>,
+    /// The non-empty inactive destination layouts, in destination address
+    /// order.
+    pub inactive: Vec<u32>,
+    /// The non-empty Single blocks, by index into the block list, in
+    /// destination address order.
+    pub singles: Vec<u32>,
+    /// Whether the Singles' destinations are slice-disjoint in `singles`
+    /// order, so a replay may split them between workers.
+    pub singles_slice_disjoint: bool,
+    /// Per plan group, its scatter columns' destination span.
+    pub group_spans: Vec<TreeTransformGroupSpan>,
+    /// The most workers a replay can keep busy on one phase: the Singles
+    /// when they are slice-disjoint (else one, if any), or the pack columns,
+    /// whichever is more, and at least one.
+    pub replay_runnable: usize,
 }
 
 impl TreeTransformParallelSchedule {
@@ -191,6 +217,12 @@ impl TreeTransformParallelSchedule {
         .saturating_add(bytes(
             self.address_order.capacity(),
             core::mem::size_of::<u32>(),
+        ))
+        .saturating_add(bytes(self.inactive.capacity(), core::mem::size_of::<u32>()))
+        .saturating_add(bytes(self.singles.capacity(), core::mem::size_of::<u32>()))
+        .saturating_add(bytes(
+            self.group_spans.capacity(),
+            core::mem::size_of::<TreeTransformGroupSpan>(),
         ))
     }
 }
