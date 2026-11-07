@@ -1,5 +1,5 @@
 //! The native block GEMM kernel: a batch of disjoint column-major GEMMs, one
-//! tcontract `Plan` per distinct geometry, run on the shared scheduler.
+//! tcontract `Plan` per distinct geometry, run on the shared lane driver.
 //!
 //! TensorKit (`mul!` per matched sector) and QSpace (`contractDATA_group`)
 //! set up each block GEMM per call. A tcontract plan is immutable data of its
@@ -23,11 +23,10 @@ use tcontract_exec::batch::batch_decision_within;
 use tcontract_exec::{BatchQuery, Exec};
 use tenferro_cpu::CpuEngine;
 
-use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
-use super::schedule::{GrantKey, LaneJobs};
+use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
 use crate::fresh::{split_fresh_segments, FreshParts};
+use crate::lanes::{recycle, GrantKey, LaneTables};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
-use crate::LaneAllocation;
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
 /// Everything a plan depends on besides the scalar type, which a call fixes:
@@ -326,7 +325,7 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
     const LABEL: &'static str = "grouped_gemm";
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
+    fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -399,7 +398,7 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
     const LABEL: &'static str = "grouped_gemm";
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn LaneJobs<Self::Job>, _: &Exec<'_>) {}
+    fn lane(&self, _: &mut LaneMembers<'_, Self::Job>, _: &Exec<'_>) {}
 
     fn work(&self, index: usize, _: &Self::Job) -> f64 {
         work::<T>(&self.jobs[index])
@@ -457,8 +456,11 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
 /// The kernel's per-call staging: the destination order, the geometry index,
 /// the per-job plan slots, the plan handles and the lane driver's staging.
 /// An owner that submits repeatedly (an executor of a prepared workspace)
-/// keeps one, so a warm submission reuses every capacity and allocates
-/// nothing; an eager executor's scratch lives for its one call. Holds no
+/// keeps one, so a warm submission reuses every capacity: on a serial engine
+/// it allocates nothing. On a pooled engine the lane runner also creates one
+/// std mutex per lane per call, which on Apple targets allocates on its
+/// first lock (a disclosed residual, see `lanes`). An eager executor's
+/// scratch lives for its one call. Holds no
 /// plan between calls: the handles are released when a call ends, and the
 /// geometry-plan cache alone retains plans.
 #[derive(Debug, Default)]
@@ -468,7 +470,7 @@ pub(crate) struct GemmScratch {
     slots: Vec<(usize, &'static mut [u8])>,
     fresh_slots: FreshSlots<'static, u8>,
     plans: Vec<Arc<ErasedPlan>>,
-    lanes: LaneScratch,
+    lanes: LaneTables,
 }
 
 impl GemmScratch {
@@ -533,18 +535,6 @@ impl GemmScratch {
     }
 }
 
-/// `vec`'s allocation, emptied, for elements of another lifetime or type of
-/// the same layout.
-///
-/// Why not a transmute: the crate forbids unsafe code. std collects a mapped
-/// `vec::IntoIter` in place when the layouts match; that is an optimization,
-/// not a documented guarantee, so the prepared-workspace allocation tests pin
-/// it (a regression would reallocate, never misbehave).
-fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
-    vec.clear();
-    vec.into_iter().map(|_| unreachable!("emptied")).collect()
-}
-
 /// A job's operand range; an empty one may start anywhere, as validation
 /// does not bound it.
 pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
@@ -568,7 +558,6 @@ pub(crate) fn operand<T>(data: &[T], offset: usize, len: usize) -> &[T] {
 pub(crate) fn gemm_batch_into<T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
-    allocation: LaneAllocation,
     output: &mut DenseViewMut<'_, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -635,7 +624,7 @@ pub(crate) fn gemm_batch_into<T: Scalar + Default>(
         beta,
         source,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     *kept_slots = recycle(slots);
     plans.clear();
     result
@@ -687,7 +676,6 @@ fn index_plans<T: Scalar>(
 pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
     cpu: &mut CpuEngine,
     scratch: &mut GemmScratch,
-    allocation: LaneAllocation,
     parts: FreshParts<'_, 'a, T>,
     lhs: DenseView<'_, T>,
     rhs: DenseView<'_, T>,
@@ -718,7 +706,7 @@ pub(crate) fn gemm_batch_fresh<'a, T: Scalar + Default>(
         alpha,
         destination: PhantomData,
     };
-    let result = driver::drive(cpu, &blocks, &mut slots, lanes, allocation);
+    let result = driver::drive(cpu, &blocks, &mut slots, lanes);
     if result.is_ok() {
         for (j, (_, _, written)) in slots.iter_mut().enumerate() {
             (parts.written)(j, std::mem::take(written));

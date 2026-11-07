@@ -277,31 +277,36 @@ pub use symtn_core::{
     FusionTreePairKey, MultiplicityIndex, OpaqueBlockKey,
 };
 /// The caller-owned execution resources every numerical operation takes as
-/// its first argument (any [`ExecContext`]; an engine is one with the default
-/// [`ExecOptions`]): tenferro's engine trait, its CPU engine and the CPU
-/// engine's thread pool.
+/// its first argument (any [`ExecContext`], which every engine is):
+/// tenferro's engine trait, its CPU engine and the CPU engine's thread pool.
 ///
-/// How grouped dense GEMMs (the recoupling and contraction batches) use a
-/// pooled `CpuEngine`'s threads is the engine's batch policy, an engine-owned
-/// setting symtn never overrides. On the native provider the default
-/// (`CpuBatchStrategy::Auto`) runs a batch on symtn's block GEMM kernel,
-/// which takes the batch's thread count from the engine's cost rule over its
-/// estimated serial time and a lane count of at most the engine's batch
-/// decision, chosen by a provider-derived cost estimate; each lane reserves a
-/// share of those threads (equal shares, or a wider lane for each dominant
-/// block, as the call's [`LaneAllocation`] admits), so a batch of a few large
-/// blocks gives each lane several threads (or runs on one lane of all of
-/// them). A caller can still give each GEMM the whole pool:
+/// How grouped dense blocks (the recoupling and contraction GEMM batches and
+/// the sector-block factorizations) use a pooled `CpuEngine`'s threads is the
+/// engine's batch policy, an engine-owned setting symtn never overrides. On
+/// the native provider the default (`CpuBatchStrategy::Auto`) places each
+/// block with its provider's serial estimate (tcontract's per-flop rate for a
+/// GEMM; tlinalg's work under the engine's `WorkModel` rate `muladds_per_ns`
+/// and `item_overhead_ns` for a factorization, its other fields unused) and
+/// the width the engine's cost rule gives that estimate: a block allotted
+/// several threads gets a lane of its own, the others fill one-thread lanes
+/// in block order, and the lanes are kept only when they beat running every
+/// block on the whole pool one after another. Each block runs on its lane
+/// limited to its own width. A forced policy (`Inner`, `Outer`, `Split`,
+/// `Sequential`) is instead placed by the engine's batch decision, which is
+/// then authoritative. A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and
 /// `CpuBatchStrategy` from `tenferro_cpu`. A BLAS provider under `Auto` runs
 /// the batch's vendor GEMMs sequentially on the calling thread (vendor threads
 /// are outside the engine's lanes); forcing `Inner` there runs the GEMMs on
-/// the native kernels instead of the vendor library.
+/// the native kernels instead of the vendor library. A tree-transform
+/// replay (the recoupling of fusion-tree bases) with the BLAS provider
+/// refuses a forced `Inner`, `Outer` or `Split` policy with a typed
+/// `Unsupported` before any write, since its replay cannot carry that
+/// decision out; `Auto` and `Sequential` run.
 pub use symtn_dense::{CpuEngine, Engine, Pool};
 mod exec_context;
-pub(crate) use exec_context::Invocation;
-pub use exec_context::{Configured, ExecContext, ExecOptions, LaneAllocation};
+pub use exec_context::ExecContext;
 /// The caller-owned CUDA engine every device operation borrows, and the
 /// device id it opens on.
 ///

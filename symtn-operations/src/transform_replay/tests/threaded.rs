@@ -45,7 +45,6 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
                 &source,
                 0.5,
                 &[],
-                1,
             )?;
         } else {
             tree_transform_structure_with_strided_kernel_raw(
@@ -72,7 +71,6 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
                 &source,
                 0.5,
                 -0.25,
-                1,
             )?;
         }
         assert_eq!(actual, expected);
@@ -81,7 +79,7 @@ fn finite_task_view_serial_matches_per_block_replay() -> Result<(), OperationErr
 }
 
 #[test]
-fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
+fn threaded_interleaved_singles_write_their_own_elements() {
     let src_structure = BlockStructure::packed_column_major(1, [vec![2], vec![2]]).unwrap();
     let dst_structure = custom_structure(vec![block(0, 2, 2, 0), block(1, 2, 2, 1)]);
     let structure = TreeTransformStructure::compile_structures(
@@ -114,7 +112,6 @@ fn threaded_active_interleaved_layout_uses_the_serial_fallback() {
                     &src,
                     1.0,
                     0.5,
-                    threads,
                 )
             })
             .unwrap();
@@ -156,7 +153,6 @@ fn threaded_replay_handles_rank_zero_blocks() {
                     &src,
                     1.0,
                     0.5,
-                    threads,
                 )
             })
             .unwrap();
@@ -174,7 +170,6 @@ fn threaded_replay_ignores_zero_extent_work() {
         &[TreeTransformBlockSpec::single(0, 0, 1.0)],
     )
     .unwrap();
-    assert!(transform.parallel_schedule().singles.is_empty());
     crate::host_pool::test_pool(4)
         .install(|engine| {
             tree_transform_structure_with_structural_recoupling_raw(
@@ -189,14 +184,13 @@ fn threaded_replay_ignores_zero_extent_work() {
                 &[],
                 1.0,
                 f64::NAN,
-                4,
             )
         })
         .unwrap();
 }
 
 #[test]
-fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
+fn threaded_multi_scatter_writes_interleaved_destinations() {
     let src_structure =
         Arc::new(BlockStructure::packed_column_major(1, [vec![2], vec![2]]).unwrap());
     let dst_structure = Arc::new(custom_structure(vec![block(0, 2, 2, 0), block(1, 2, 2, 1)]));
@@ -211,7 +205,7 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
     )
     .unwrap();
     assert_eq!(transform.parallel_schedule().scatter_groups.len(), 1);
-    assert!(!transform.parallel_schedule().scatter_groups[0].slice_disjoint);
+    assert!(!transform.parallel_schedule().group_spans[0].slice_disjoint);
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -230,7 +224,6 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
                     &src,
                     1.0,
                     0.5,
-                    threads,
                 )
             })
             .unwrap();
@@ -238,93 +231,6 @@ fn threaded_multi_scatter_falls_back_for_interleaved_destinations() {
 
     assert_eq!(threaded, serial);
     assert_eq!(threaded, [6.0, 13.0, 17.0, 24.0]);
-}
-
-#[test]
-fn huge_thread_request_is_capped_by_pool_and_runnable_work() {
-    let engine = &mut symtn_dense::CpuEngine::serial();
-    // What: normal and profiled replay use the same effective worker count,
-    // preserve serial beta semantics, and never size scratch from a caller's
-    // unbounded thread request.
-    let block_structure =
-        Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 2]; 4]).unwrap());
-    let specs = (0..3)
-        .map(|block| TreeTransformBlockSpec::single(block, block, 1.0).with_source_axes([1, 0]))
-        .collect::<Vec<_>>();
-    let transform =
-        TreeTransformStructure::compile_structures(&block_structure, &block_structure, &specs)
-            .unwrap();
-    assert_eq!(transform.layouts().max_fused_rank(), 2);
-    let source = (1..=16).map(f64::from).collect::<Vec<_>>();
-    let initial = (10..=25).map(f64::from).collect::<Vec<_>>();
-
-    let mut expected = initial.clone();
-    tree_transform_structure_with_structural_recoupling_raw(
-        engine,
-        &mut StridedHostKernelAdapter::default(),
-        &mut DefaultDenseExecutor::new(),
-        &mut TreeTransformWorkspace::default(),
-        &transform,
-        &block_structure,
-        &block_structure,
-        &mut expected,
-        &source,
-        1.0,
-        0.5,
-        1,
-    )
-    .unwrap();
-
-    let mut pool = crate::host_pool::test_pool(3);
-    let mut destination = initial.clone();
-    let mut workspace = TreeTransformWorkspace::default();
-    pool.install(|engine| {
-        tree_transform_structure_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut workspace,
-            &transform,
-            &block_structure,
-            &block_structure,
-            &mut destination,
-            &source,
-            1.0,
-            0.5,
-            usize::MAX,
-        )
-    })
-    .unwrap();
-    assert_eq!(
-        workspace.fused_indices.len(),
-        2,
-        "only the calling lane is shared"
-    );
-    assert_eq!(destination, expected);
-
-    let mut profiled_destination = initial;
-    let mut profiled_workspace = TreeTransformWorkspace::default();
-    let mut profile = TreeTransformReplayProfile::default();
-    pool.install(|engine| {
-        tree_transform_structure_with_structural_recoupling_raw_profiled(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut profiled_workspace,
-            &transform,
-            &block_structure,
-            &block_structure,
-            &mut profiled_destination,
-            &source,
-            1.0,
-            0.5,
-            usize::MAX,
-            &mut profile,
-        )
-    })
-    .unwrap();
-    assert_eq!(profiled_workspace.fused_indices.len(), 2);
-    assert_eq!(profiled_destination, expected);
 }
 
 /// Destination block `d` of [`recoupling_fixture`] is
@@ -372,6 +278,44 @@ fn recoupling_fixture() -> (
     )
     .unwrap();
     (dst, src, replay)
+}
+
+/// What: the compiled replay metadata of [`recoupling_fixture`], by hand.
+/// Destination block `d` spans elements `24 d..=24 d + 23`: the Singles
+/// (blocks 0, 1) in address order and slice-disjoint, the group writing
+/// blocks 2 and 3 spans `48..=95` and the one writing block 4 `96..=119`
+/// (first in plan order), each disjoint, the inactive block 5 starts at 120, and the four pack
+/// columns outnumber the two Singles.
+#[test]
+fn replay_metadata_lists_direct_items_in_address_order() {
+    let (_, _, replay) = recoupling_fixture();
+    let schedule = replay.parallel_schedule();
+    let layouts = replay.layouts();
+    let single_starts: Vec<isize> = schedule
+        .singles
+        .iter()
+        .map(|&block| {
+            let (dst_layout, _, _) =
+                crate::transform_replay::writers::scheduled_single(replay.blocks(), block).unwrap();
+            layouts.entry(dst_layout).offset
+        })
+        .collect();
+    assert_eq!(single_starts, [0, 24]);
+    assert!(schedule.singles_slice_disjoint);
+    let inactive: Vec<isize> = schedule
+        .inactive
+        .iter()
+        .map(|&layout| layouts.entry(layout as usize).offset)
+        .collect();
+    assert_eq!(inactive, [120]);
+    // In plan order: the plan sorts the group writing block 4 first.
+    let spans: Vec<_> = schedule
+        .group_spans
+        .iter()
+        .map(|span| (span.lo, span.hi, span.slice_disjoint))
+        .collect();
+    assert_eq!(spans, [(96, 119, true), (48, 95, true)]);
+    assert_eq!(schedule.replay_runnable, 4);
 }
 
 /// Explicit-index oracle for [`recoupling_fixture`]: column-major blocks of
@@ -434,12 +378,8 @@ where
             src,
             alpha,
             beta,
-            threads,
         )
         .unwrap();
-        // Below the inline rank only the calling lane's index is shared;
-        // forked lanes keep their own on their stacks.
-        assert_eq!(workspace.fused_indices.len(), fused_rank);
 
         let mut overwrite = dst.to_vec();
         let mut workspace = TreeTransformWorkspace::default();
@@ -455,12 +395,8 @@ where
             src,
             alpha,
             &[],
-            threads,
         )
         .unwrap();
-        // Below the inline rank only the calling lane's index is shared;
-        // forked lanes keep their own on their stacks.
-        assert_eq!(workspace.fused_indices.len(), fused_rank);
         [axpby, overwrite]
     })
 }
@@ -502,182 +438,257 @@ fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
     }
 }
 
-/// What: the leaf gate's dispatch-cost scan runs only when an overwrite of a
-/// role with a retained plan reaches admission, once per call on one token:
-/// planless and accumulating calls scan nothing, and an overwrite of planned
-/// roles scans exactly once on a wide engine, however many block lists (one
-/// Single list, one scatter list per Multi block) the call visits.
+/// Seven one-axis destination blocks of two elements (`offset; stride`):
+/// `0;3`, `1;3`, `2;3` interleave in `[0, 5]`; `6;1` alone; `8;2` and `9;2`
+/// interleave in `[8, 11]`; `12;1` alone. Block 0 is a Single, blocks 1 and
+/// 6 one Multi group (one destination in each of two disconnected ranges),
+/// block 2 inactive, block 3 a Single, and blocks 4 and 5 the destinations
+/// of two Multi groups that interleave.
+pub(super) fn joint_fixture() -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let dst = Arc::new(custom_structure(vec![
+        block(0, 2, 3, 0),
+        block(1, 2, 3, 1),
+        block(2, 2, 3, 2),
+        block(3, 2, 1, 6),
+        block(4, 2, 2, 8),
+        block(5, 2, 2, 9),
+        block(6, 2, 1, 12),
+    ]));
+    let src = Arc::new(BlockStructure::packed_column_major(1, vec![vec![2]; 8]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, 2.0),
+            TreeTransformBlockSpec::multi(vec![1, 6], vec![1, 2], vec![1.0, 2.0, 3.0, 4.0]),
+            TreeTransformBlockSpec::single(3, 3, -1.0),
+            TreeTransformBlockSpec::multi(vec![4], vec![4, 5], vec![1.0, -1.0]),
+            TreeTransformBlockSpec::multi(vec![5], vec![6, 7], vec![2.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    (dst, src, transform)
+}
+
 #[test]
-fn leaf_gate_scans_only_for_planned_overwrites() {
-    use crate::kernel_adapter::sealed::GATE_SCANS;
-    let scans = |replay: &mut dyn FnMut(&mut dyn Engine)| {
-        let mut pool = crate::host_pool::eager_test_pool(4);
-        pool.install(|engine| {
-            let before = GATE_SCANS.with(|scans| scans.get());
-            replay(engine);
-            GATE_SCANS.with(|scans| scans.get()) - before
-        })
-    };
+fn a_multi_moving_more_than_usize_elements_still_compiles() {
+    // What: a Multi group whose written plus packed elements (`n` plus `3n`)
+    // exceed `usize` while every buffer extent fits compiles. Metadata only,
+    // no tensor data.
+    let n = 1usize << (usize::BITS - 2);
+    let structure = BlockStructure::packed_column_major(1, [vec![n]]).unwrap();
+    TreeTransformStructure::<f64>::compile_structures(
+        &structure,
+        &structure,
+        &[TreeTransformBlockSpec::multi(
+            vec![0],
+            vec![0, 0, 0],
+            vec![1.0, 1.0, 1.0],
+        )],
+    )
+    .unwrap();
+}
 
-    // Eight Multi groups of one-element blocks: Strided estimates their copy
-    // at zero time, so no scatter role retains a plan.
-    let tiny = Arc::new(BlockStructure::packed_column_major(1, vec![vec![1]; 16]).unwrap());
-    let specs = (0..8)
-        .map(|g| {
-            TreeTransformBlockSpec::multi(
-                vec![2 * g, 2 * g + 1],
-                vec![2 * g, 2 * g + 1],
-                vec![1.0, 0.0, 0.0, 1.0],
-            )
-        })
-        .collect::<Vec<_>>();
-    let planless = TreeTransformStructure::compile_structures(&tiny, &tiny, &specs).unwrap();
-    assert_eq!(planless.layouts().retained_plan_count(), 0);
+#[test]
+fn inactive_block_ending_beyond_isize_still_compiles() {
+    // What: an inactive canonical `[n, 2]` block whose last element `2n - 1`
+    // exceeds `isize::MAX` inside the `usize` storage compiles, as one
+    // inactive layout. Metadata only, no tensor data.
+    use symtn_core::{FusionTreeHomSpace, U1FusionRule, U1Irrep};
+    let n = (1usize << (usize::BITS - 2)) + 1;
+    let structure =
+        FusionTreeHomSpace::from_sectors([(U1Irrep::new(0), n)], [(U1Irrep::new(0), 2)])
+            .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
+            .unwrap();
+    let transform =
+        TreeTransformStructure::<f64>::compile_structures(&structure, &structure, &[]).unwrap();
+    assert_eq!(transform.parallel_schedule().inactive, [0]);
+}
+
+#[test]
+fn joint_fixture_replay_matches_the_block_oracle() {
+    // What: at one and three workers, an overwrite writes `U * source` per
+    // block and zeroes the inactive block that interleaves with active
+    // ones; an accumulation scales that block by beta.
+    let (dst, src, transform) = joint_fixture();
     let source = (1..=16).map(f64::from).collect::<Vec<_>>();
-    let mut destination = vec![f64::NAN; 16];
-    let planless_scans = scans(&mut |engine| {
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &planless,
-            &tiny,
-            &tiny,
-            &mut destination,
-            &source,
-            1.0,
-            &[],
-            1,
-        )
-        .unwrap();
-    });
-    assert_eq!(destination, source);
-    assert_eq!(planless_scans, 0);
+    // Blocks at 0;3, 1;3, 2;3 (inactive), 6;1, 8;2, 9;2, 12;1.
+    let expected = [
+        2.0, 13.0, 0.0, 4.0, 16.0, 0.0, -7.0, -8.0, -2.0, 41.0, -2.0, 44.0, 29.0, 36.0,
+    ];
+    let initial = (0..14).map(|at| f64::from(at) - 3.0).collect::<Vec<_>>();
+    let axpby = expected
+        .iter()
+        .zip(&initial)
+        .map(|(value, old)| value + 0.5 * old)
+        .collect::<Vec<_>>();
+    for threads in [1, 3] {
+        let mut overwritten = vec![f64::NAN; 14];
+        let mut accumulated = initial.clone();
+        crate::host_pool::eager_test_pool(threads).install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst,
+                &src,
+                &mut overwritten,
+                &source,
+                1.0,
+                &[],
+            )
+            .unwrap();
+            tree_transform_structure_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst,
+                &src,
+                &mut accumulated,
+                &source,
+                1.0,
+                0.5,
+            )
+            .unwrap();
+        });
+        assert_eq!(overwritten, expected, "threads {threads}");
+        assert_eq!(accumulated, axpby, "threads {threads}");
+    }
+}
 
-    // Three planned Singles of `BLOCK` elements, accumulated, then overwritten.
-    let blocks =
-        Arc::new(BlockStructure::packed_column_major(2, vec![vec![ROWS, COLS]; 3]).unwrap());
-    let singles = TreeTransformStructure::compile_structures(
-        &blocks,
-        &blocks,
-        &(0..3)
-            .map(|b| TreeTransformBlockSpec::single(b, b, 2.0))
-            .collect::<Vec<_>>(),
+#[test]
+fn interleaved_single_and_scatter_blocks_replay_the_dense_oracle() {
+    // What: a Single's and a scatter column's interleaved blocks (two
+    // codomain trees of two rows over six columns, rows 4) and the group's
+    // other column, whose block fuses with its packed column to one axis: a
+    // one-worker replay writes the dense oracle.
+    let key = |sector| BlockKey::ordinal(sector);
+    let dst = Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            2,
+            vec![
+                BlockSpec::with_key(key(0), vec![2, 6], vec![1, 4], 0).unwrap(),
+                BlockSpec::with_key(key(1), vec![2, 6], vec![1, 4], 2).unwrap(),
+                BlockSpec::with_key(key(2), vec![2, 6], vec![1, 2], 24).unwrap(),
+            ],
+        )
+        .unwrap(),
+    );
+    let src = Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, 6]; 3]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, -2.0),
+            TreeTransformBlockSpec::multi(vec![1, 2], vec![1, 2], vec![1.0, 2.0, 3.0, 4.0]),
+        ],
     )
     .unwrap();
-    assert_eq!(singles.layouts().retained_plan_count(), 3);
-    let source = (1..=3 * BLOCK as u32).map(f64::from).collect::<Vec<_>>();
-    let mut destination = vec![1.0; source.len()];
-    let accumulate_scans = scans(&mut |engine| {
-        tree_transform_structure_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &singles,
-            &blocks,
-            &blocks,
-            &mut destination,
-            &source,
-            1.0,
-            0.5,
-            1,
-        )
-        .unwrap();
-    });
-    let accumulated = source.iter().map(|&v| 2.0 * v + 0.5).collect::<Vec<_>>();
-    assert_eq!(destination, accumulated);
-    assert_eq!(accumulate_scans, 0);
-
-    let overwrite_scans = scans(&mut |engine| {
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &singles,
-            &blocks,
-            &blocks,
-            &mut destination,
-            &source,
-            1.0,
-            &[],
-            1,
-        )
-        .unwrap();
-    });
-    let overwritten = source.iter().map(|&v| 2.0 * v).collect::<Vec<_>>();
-    assert_eq!(destination, overwritten);
-    assert_eq!(overwrite_scans, 1);
-
-    // Eight Multi groups of planned `BLOCK`-element scatter columns: the
-    // serial initialized replay and the owned writer each visit one scatter
-    // list per group and scan once.
-    // A canonical U(1) layout (sixteen charges, one `ROWS x COLS` block each),
-    // so the owned writer also admits it.
-    let leg = |degeneracy: usize| {
-        symtn_core::SectorLeg::new(
-            (0..16).map(|charge| (symtn_core::U1Irrep::new(charge), degeneracy)),
-            false,
-        )
-    };
-    let groups = symtn_core::FusionTreeHomSpace::new(
-        symtn_core::FusionProductSpace::new([leg(ROWS)]),
-        symtn_core::FusionProductSpace::new([leg(COLS)]),
-    )
-    .coupled_subblock_structure_from_leg_degeneracies(&symtn_core::U1FusionRule)
-    .unwrap();
-    assert_eq!(groups.block_count(), 16);
-    let specs = (0..8)
-        .map(|g| {
-            TreeTransformBlockSpec::multi(
-                vec![2 * g, 2 * g + 1],
-                vec![2 * g, 2 * g + 1],
-                vec![1.0, 0.0, 0.0, 1.0],
+    let source = (1..=36).map(f64::from).collect::<Vec<_>>();
+    let mut expected = vec![0.0; 36];
+    for column in 0..6 {
+        for row in 0..2 {
+            let (a, b) = (source[12 + row + 2 * column], source[24 + row + 2 * column]);
+            expected[row + 4 * column] = -2.0 * source[row + 2 * column];
+            expected[2 + row + 4 * column] = a + 2.0 * b;
+            expected[24 + row + 2 * column] = 3.0 * a + 4.0 * b;
+        }
+    }
+    let mut destination = vec![f64::NAN; 36];
+    crate::host_pool::eager_test_pool(1)
+        .install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst,
+                &src,
+                &mut destination,
+                &source,
+                1.0,
+                &[],
             )
         })
+        .unwrap();
+    assert_eq!(destination, expected);
+}
+
+#[test]
+fn replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
+    // What: on interleaved canonical blocks whose Multi groups write
+    // disconnected ranges, replay writes exactly the per-block oracle for the
+    // initialised overwrite, the initialised axpby and the owned writer,
+    // at one worker and at an odd and an even width.
+    let (structure, transform) = su2_interleaved_fixture();
+    let source = (1..=60)
+        .map(|value| f64::from(value) * 0.25)
         .collect::<Vec<_>>();
-    let multi = TreeTransformStructure::compile_structures(&groups, &groups, &specs).unwrap();
-    assert_eq!(multi.layouts().retained_plan_count(), 16);
-    let source = (1..=16 * BLOCK as u32).map(f64::from).collect::<Vec<_>>();
-    let mut destination = vec![f64::NAN; source.len()];
-    let initialized_scans = scans(&mut |engine| {
-        tree_transform_structure_overwrite_with_structural_recoupling_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &multi,
-            &groups,
-            &groups,
-            &mut destination,
-            &source,
-            1.0,
-            &[],
-            1,
-        )
-        .unwrap();
-    });
-    assert_eq!(destination, source);
-    assert_eq!(initialized_scans, 1);
-    let mut owned = None;
-    let owned_scans = scans(&mut |engine| {
-        owned = try_tree_transform_structure_overwrite_owned_raw(
-            engine,
-            &mut DefaultDenseExecutor::new(),
-            &mut TreeTransformWorkspace::default(),
-            &multi,
-            &groups,
-            &groups,
-            1,
-            &source,
-            1.0,
-            1,
-            None,
-        )
-        .unwrap();
-    });
-    assert_eq!(owned, Some(source));
-    assert_eq!(owned_scans, 1);
+    let initial = (1..=60).map(|value| -f64::from(value)).collect::<Vec<_>>();
+    let alpha = 1.5;
+    let expected = su2_oracle(&source, alpha);
+    let axpby = expected
+        .iter()
+        .zip(&initial)
+        .map(|(value, old)| value + 0.5 * old)
+        .collect::<Vec<_>>();
+    for threads in [1, 3, 4] {
+        let mut overwritten = vec![f64::NAN; 60];
+        let mut accumulated = initial.clone();
+        let owned = crate::host_pool::test_pool(threads).install(|engine| {
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut overwritten,
+                &source,
+                alpha,
+                &[],
+            )
+            .unwrap();
+            tree_transform_structure_with_structural_recoupling_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                &mut accumulated,
+                &source,
+                alpha,
+                0.5,
+            )
+            .unwrap();
+            try_tree_transform_structure_overwrite_owned_raw(
+                engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &structure,
+                &structure,
+                2,
+                &source,
+                alpha,
+                None,
+            )
+            .unwrap()
+        });
+        assert_eq!(overwritten, expected, "threads {threads}");
+        assert_eq!(accumulated, axpby, "threads {threads}");
+        assert_eq!(owned, Some(expected.clone()), "threads {threads}");
+    }
 }

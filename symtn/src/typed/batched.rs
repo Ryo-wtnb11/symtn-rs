@@ -407,7 +407,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         i: usize,
     ) -> Result<TensorMap<R, D>, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.member_impl(engine, i)
     }
 
@@ -454,7 +454,7 @@ impl<R, D, S: StackExec<D>> StackedTensorMap<R, D, S> {
         cx: &mut (impl ExecContext + ?Sized),
         members: &[usize],
     ) -> Result<Self, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.select_impl(engine, members)
     }
 
@@ -511,7 +511,7 @@ where
     where
         R::Mode: TypedTensorRootDispatch<R>,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.restrict_leg_impl(engine, legs)
     }
 
@@ -754,7 +754,7 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D> {
         &self,
         cx: &mut (impl ExecContext + ?Sized),
     ) -> Result<StackedTensorMap<R, D, CudaStorage<D>>, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.to_cuda_impl(engine)
     }
 
@@ -781,7 +781,7 @@ impl<R, D: CudaPayload> StackedTensorMap<R, D, CudaStorage<D>> {
         &self,
         cx: &mut (impl ExecContext + ?Sized),
     ) -> Result<StackedTensorMap<R, D>, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.to_host_impl(engine)
     }
 

@@ -95,9 +95,6 @@ pub struct DefaultDenseExecutor {
     // The native block kernel's staging, reused across this executor's
     // calls: a prepared workspace's executor replays without allocating.
     gemm_scratch: crate::block_kernel::gemm::GemmScratch,
-    // The current call's lane allocation, set by the lease that hands this
-    // executor to a call; never retained as authority across calls.
-    lane_allocation: crate::LaneAllocation,
     // Test-only count of low-level batch seam submissions: one per strided
     // call and one per job in the serial route.
     #[cfg(test)]
@@ -132,7 +129,6 @@ impl DefaultDenseExecutor {
             #[cfg(feature = "cpu-blas-core")]
             fresh_layout: FreshLayout::default(),
             gemm_scratch: Default::default(),
-            lane_allocation: crate::LaneAllocation::Moldable,
             #[cfg(test)]
             seam_dispatches: 0,
             #[cfg(test)]
@@ -140,39 +136,6 @@ impl DefaultDenseExecutor {
             #[cfg(all(test, feature = "cpu-blas-core"))]
             grouped_route: None,
         }
-    }
-
-    /// Sets the lane allocation the executor's next block batches search
-    /// with. Unstable plumbing for symtn's execution leases, which set it on
-    /// every call from the caller's execution options; admission of a
-    /// non-default value is [`admit_lane_allocation`]'s.
-    #[doc(hidden)]
-    pub fn set_lane_allocation(&mut self, allocation: crate::LaneAllocation) {
-        self.lane_allocation = allocation;
-    }
-
-    /// Refuses this executor's lane allocation for a batch of `op` over
-    /// `inputs` that would search one on a route without a lane allocator
-    /// (the serial per-block factorizations of the BLAS provider), before
-    /// any solve or write.
-    #[cfg(not(any(
-        feature = "provider-inject",
-        all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
-    )))]
-    fn admit_batch_allocation(
-        &self,
-        op: crate::DenseFactorization,
-        inputs: &[DenseRead<'_>],
-    ) -> Result<(), DenseError> {
-        if self.lane_allocation != crate::LaneAllocation::Moldable
-            && searched(op)
-            && inputs.len() >= 2
-        {
-            return Err(lane_allocation_unsupported(
-                "the serial per-block factorization route has no lane allocator",
-            ));
-        }
-        Ok(())
     }
 
     /// Bytes of reusable call scratch this executor keeps between calls (the
@@ -323,7 +286,7 @@ impl DefaultDenseExecutor {
     /// Why not a per-run cutoff: it would be an empirical constant in tensor
     /// semantics. The disadvantage accepted here: a long run plus residual
     /// jobs goes grouped, paying the grouped preparation per unbound call
-    /// (O(J log J) staging, and under Auto the scheduler's lane search:
+    /// (O(J log J) staging, and under Auto the placement's lane search:
     /// one provider grant query per distinct (time, plan algorithm, work)
     /// group at the full slot count S, further queries per distinct share
     /// width only for the groups widened there, a lower bound per lane count,
@@ -331,10 +294,8 @@ impl DefaultDenseExecutor {
     /// large-block reservation: a query at every width up to S for the
     /// (fewer than S) blocks above the mean load, its target search, and one
     /// placement of the other blocks over the reserved and one-slot lanes;
-    /// a call whose every input was searched before instead takes the
-    /// lane-allocation cache's entry without a query; see
-    /// `block_kernel::schedule` for the complexity) instead of the cached O(1)
-    /// strided analysis plus the residual's own preparation.
+    /// see `lanes` for the complexity) instead of the cached O(1) strided
+    /// analysis plus the residual's own preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
         &mut self,
@@ -414,7 +375,6 @@ impl DefaultDenseExecutor {
         return crate::block_kernel::gemm::gemm_batch_into(
             cpu,
             &mut self.gemm_scratch,
-            self.lane_allocation,
             output,
             lhs,
             rhs,
@@ -428,11 +388,6 @@ impl DefaultDenseExecutor {
         #[cfg(feature = "cpu-blas-core")]
         {
             debug_assert!(identity);
-            if self.lane_allocation != crate::LaneAllocation::Moldable {
-                return Err(lane_allocation_unsupported(
-                    "the BLAS provider's grouped GEMM route has no lane allocator",
-                ));
-            }
             let route = grouped_gemm_into(
                 cpu,
                 &mut self.grouped_jobs,
@@ -1242,16 +1197,9 @@ impl DenseExecutor for DefaultDenseExecutor {
             return Ok(());
         }
         #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
-        return crate::block_kernel::factor::factorize(
-            engine,
-            op,
-            self.lane_allocation,
-            inputs,
-            sink,
-        );
+        return crate::block_kernel::factor::factorize(engine, op, inputs, sink);
         #[cfg(not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))))]
         {
-            self.admit_batch_allocation(op, inputs)?;
             if matches!(
                 op,
                 crate::DenseFactorization::QrFull | crate::DenseFactorization::QrNull
@@ -1271,9 +1219,8 @@ impl DenseExecutor for DefaultDenseExecutor {
     }
 
     // The BLAS provider keeps the trait default's routes (the owned
-    // `factorize_batch` placed, and the polar and exponential composites
-    // of per-matrix calls), admitting its lane allocation first: the composite has no
-    // owned batch whose admission would refuse it.
+    // `factorize_batch`, and the polar and exponential composites of
+    // per-matrix calls).
     #[cfg(not(any(
         feature = "provider-inject",
         all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
@@ -1291,7 +1238,6 @@ impl DenseExecutor for DefaultDenseExecutor {
         ) -> Result<(), DenseError>,
     ) -> Result<(), DenseError> {
         crate::factor_dest::validate(op, inputs, dests)?;
-        self.admit_batch_allocation(op, inputs)?;
         crate::factor_dest::factorize_batch_into_validated(self, engine, op, inputs, dests, sink)
     }
 
@@ -1318,14 +1264,7 @@ impl DenseExecutor for DefaultDenseExecutor {
         if inputs.is_empty() {
             return Ok(());
         }
-        crate::block_kernel::factor::factorize_into(
-            engine,
-            op,
-            self.lane_allocation,
-            inputs,
-            dests,
-            sink,
-        )
+        crate::block_kernel::factor::factorize_into(engine, op, inputs, dests, sink)
     }
 
     fn solve_into(
@@ -1573,13 +1512,6 @@ impl DenseExecutor for DefaultDenseExecutor {
         );
         #[cfg(feature = "cpu-blas-core")]
         {
-            if self.lane_allocation != crate::LaneAllocation::Moldable
-                && crate::batch_searches_lanes(jobs, runs, [lhs_op, rhs_op], false)
-            {
-                return Err(lane_allocation_unsupported(
-                    "the BLAS provider's grouped GEMM route has no lane allocator",
-                ));
-            }
             self.matmul_batch_axpby_ops_blas(
                 engine, output, lhs, rhs, jobs, runs, lhs_op, rhs_op, alpha, beta,
             )
@@ -1601,6 +1533,14 @@ impl DenseExecutor for DefaultDenseExecutor {
                 self.matmul_batch_fresh_typed(cpu, parts, lhs, rhs, jobs, ops, alpha)
             })
         })
+    }
+
+    // Why the native provider only: its grouped GEMMs are placed by the
+    // engine's batch decision, while the BLAS provider runs its vendor GEMMs
+    // under the library's own process-global threads.
+    #[cfg(not(feature = "cpu-blas-core"))]
+    fn honors_forced_batch_policy(&self) -> bool {
+        true
     }
 }
 
@@ -1740,11 +1680,6 @@ impl DefaultDenseExecutor {
             let vendor_loop = cpueinsum::VendorLoopRoute::resolve(exec.batch_policy().strategy)
                 == cpueinsum::VendorLoopRoute::Loop;
             drop(exec);
-            if vendor_loop && self.lane_allocation != crate::LaneAllocation::Moldable {
-                return Err(lane_allocation_unsupported(
-                    "the BLAS provider's grouped GEMM route has no lane allocator",
-                ));
-            }
             if vendor_loop && typed_alpha != T::default() {
                 return self
                     .matmul_batch_fresh_zeroed_typed(cpu, parts, lhs, rhs, jobs, ops, alpha);
@@ -1758,7 +1693,6 @@ impl DefaultDenseExecutor {
         crate::block_kernel::gemm::gemm_batch_fresh(
             cpu,
             &mut self.gemm_scratch,
-            self.lane_allocation,
             parts,
             lhs,
             rhs,
@@ -2338,69 +2272,6 @@ fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
     } else {
         tenferro_error("solve_into", err)
     }
-}
-
-/// Whether the native provider's batch of `op` searches a lane allocation:
-/// the QR family's batches keep the baseline placement and general
-/// eigendecompositions run per matrix on the whole engine.
-#[cfg(not(any(
-    feature = "provider-inject",
-    all(feature = "cpu-faer", not(feature = "cpu-blas-core"))
-)))]
-fn searched(op: crate::DenseFactorization) -> bool {
-    use crate::DenseFactorization as Op;
-    !matches!(op, Op::Qr | Op::Lq | Op::QrFull | Op::QrNull | Op::Eig)
-}
-
-pub(crate) const LANE_ALLOCATION_OP: &str = "lane_allocation";
-
-pub(crate) fn lane_allocation_unsupported(message: &str) -> DenseError {
-    DenseError::Unsupported {
-        op: LANE_ALLOCATION_OP,
-        message: message.to_string(),
-    }
-}
-
-/// Admits a call's lane allocation on `engine` before the call writes,
-/// uploads or submits anything: the default is always admitted; another
-/// allocation is refused on an engine other than a CPU engine (no lane
-/// allocator, and no Host fallback), and, where the call has a phase that
-/// searches lane allocations (`participates`), on a provider without the
-/// allocator or under a forced batch policy; `Auto` is the only policy that
-/// searches. A call without such a phase runs the CPU engine as it is.
-/// Unstable plumbing for symtn's facade admission.
-///
-/// Why refuse rather than ignore: a forced batch policy and a provider
-/// without the allocator are explicit requests the selected allocation
-/// cannot honor, and silently running another placement would hide that.
-#[doc(hidden)]
-pub fn admit_lane_allocation(
-    engine: &mut dyn Engine,
-    allocation: crate::LaneAllocation,
-    participates: bool,
-) -> Result<(), DenseError> {
-    if allocation == crate::LaneAllocation::Moldable {
-        return Ok(());
-    }
-    let Some(strategy) = with_cpu_engine(engine, |cpu| cpu.batch_policy().strategy) else {
-        return Err(lane_allocation_unsupported(
-            "only the native CPU provider has a lane allocator; this engine has none",
-        ));
-    };
-    if !participates {
-        return Ok(());
-    }
-    if cfg!(feature = "cpu-blas-core") {
-        return Err(lane_allocation_unsupported(
-            "the BLAS provider's grouped and factorization routes have no lane allocator",
-        ));
-    }
-    if strategy != tcontract_exec::BatchStrategy::Auto {
-        return Err(lane_allocation_unsupported(
-            "a forced batch policy fixes the placement; use the default lane allocation",
-        ));
-    }
-    Ok(())
 }
 
 pub(crate) const NOT_A_CPU_ENGINE: &str =

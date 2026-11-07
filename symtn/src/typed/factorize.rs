@@ -13,7 +13,7 @@ use mode::{AdjointRule, FactorOp};
 /// only for the dense stage, after preflight, materialization and payload
 /// binding, so a compact diagonal or an earlier error never builds an
 /// executor.
-struct RuntimeDense<'a>(&'a Runtime, ExecOptions);
+struct RuntimeDense<'a>(&'a Runtime);
 
 impl symtn_matrixalgebra::seam::ExecutorLease for RuntimeDense<'_> {
     type Executor = dyn symtn_dense::DenseExecutor + Send;
@@ -21,7 +21,7 @@ impl symtn_matrixalgebra::seam::ExecutorLease for RuntimeDense<'_> {
     // Why not `DenseLease::dense`: its signature ties the trait object's
     // lifetime to the borrow, while both arms hold `'static` executors.
     fn run<T>(self, stage: impl FnOnce(&mut Self::Executor) -> T) -> T {
-        let mut lease = self.0.lease_dense(self.1);
+        let mut lease = self.0.lease_dense();
         let executor: &mut Self::Executor = &mut **lease
             .executor
             .as_mut()
@@ -91,7 +91,6 @@ where
     fn factor_input<'a>(
         &'a self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         local: &'a mut Option<Self>,
     ) -> Result<symtn_matrixalgebra::seam::FactorSource<'a, R, D>, FacadeError<R>> {
@@ -105,7 +104,7 @@ where
                     .map_err(Error::from)?,
             )),
             AdjointRule::Materialize => {
-                let local = local.insert(self.materialized_tensor_uncached(engine, options)?);
+                let local = local.insert(self.materialized_tensor_uncached(engine)?);
                 Ok(owned_factor_source(
                     local
                         .owned_body()
@@ -125,15 +124,11 @@ where
     fn adjoint_of_parent(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         f: impl FnOnce(&Self, &mut dyn Engine) -> Result<Self, FacadeError<R>>,
     ) -> Result<Self, FacadeError<R>> {
-        Ok(f(
-            &self.adjoint(&mut Invocation::new(engine, options))?,
-            engine,
-        )?
-        .adjoint(&mut Invocation::new(engine, options))?
-        .materialized_tensor_uncached(engine, options)?)
+        Ok(f(&self.adjoint(&mut *engine)?, engine)?
+            .adjoint(&mut *engine)?
+            .materialized_tensor_uncached(engine)?)
     }
 
     /// The one body of the values-only factorizations: `stage` (the
@@ -142,7 +137,6 @@ where
     fn factor_values<V>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         stage: impl FnOnce(
             &mut dyn Engine,
@@ -154,8 +148,8 @@ where
         >,
     ) -> Result<Vec<SectorSpectrum<R::Sector, V>>, FacadeError<R>> {
         let mut local = None;
-        let source = self.factor_input(engine, options, op, &mut local)?;
-        let raw = stage(engine, RuntimeDense(&self.runtime, options), source)
+        let source = self.factor_input(engine, op, &mut local)?;
+        let raw = stage(engine, RuntimeDense(&self.runtime), source)
             .map_err(R::Mode::map_factor_error)?;
         let provider = self.logical_space().provider();
         let mut decoded = raw
@@ -177,7 +171,6 @@ where
     fn factor_qr(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         stage: impl FnOnce(
             &mut dyn Engine,
@@ -189,8 +182,8 @@ where
         >,
     ) -> Result<Qr<Self>, FacadeError<R>> {
         let mut local = None;
-        let source = self.factor_input(engine, options, op, &mut local)?;
-        let Qr { q, r } = stage(engine, RuntimeDense(&self.runtime, options), source)
+        let source = self.factor_input(engine, op, &mut local)?;
+        let Qr { q, r } = stage(engine, RuntimeDense(&self.runtime), source)
             .map_err(R::Mode::map_factor_error)?;
         Ok(Qr {
             q: self.factor_output(q),
@@ -204,7 +197,6 @@ where
     fn factor_lq(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         stage: impl FnOnce(
             &mut dyn Engine,
@@ -224,18 +216,13 @@ where
             <R::Mode as symtn_matrixalgebra::seam::FactorMode<R>>::Error,
         >,
     ) -> Result<Lq<Self>, FacadeError<R>> {
-        let Lq { l, q } = self.seam_factors(
-            engine,
-            options,
-            op,
-            stage,
-            |engine, lease, parent, adjoint_space| {
+        let Lq { l, q } =
+            self.seam_factors(engine, op, stage, |engine, lease, parent, adjoint_space| {
                 adjoint_stage(engine, lease, parent, adjoint_space).map(|Lq { l, q }| Lq {
                     l: symtn_matrixalgebra::seam::FactorOutput::Dense(l),
                     q: symtn_matrixalgebra::seam::FactorOutput::Dense(q),
                 })
-            },
-        )?;
+            })?;
         Ok(Lq {
             l: self.factor_output(l),
             q: self.factor_output(q),
@@ -248,7 +235,6 @@ where
     fn factor_null(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         partner: impl FnOnce(&Self, &mut dyn Engine) -> Result<Self, FacadeError<R>>,
         stage: impl FnOnce(
@@ -266,11 +252,11 @@ where
         if matches!(&self.repr, TypedTensorRepr::Adjoint(_))
             && op.adjoint_rule() == AdjointRule::Redirect
         {
-            return self.adjoint_of_parent(engine, options, partner);
+            return self.adjoint_of_parent(engine, partner);
         }
         let mut local = None;
-        let source = self.factor_input(engine, options, op, &mut local)?;
-        let factor = stage(engine, RuntimeDense(&self.runtime, options), source)
+        let source = self.factor_input(engine, op, &mut local)?;
+        let factor = stage(engine, RuntimeDense(&self.runtime), source)
             .map_err(R::Mode::map_factor_error)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
@@ -279,11 +265,7 @@ where
     /// [`AdjointRule::Redirect`] a lazy adjoint `A^H` is the adjoint-swapped
     /// right polar of its parent `A = p wh`: `A^H = wh^H p`, with `wh^H`
     /// detached. A compact diagonal factors directly on its bond.
-    fn factor_left_polar(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<LeftPolar<Self>, FacadeError<R>>
+    fn factor_left_polar(&self, engine: &mut dyn Engine) -> Result<LeftPolar<Self>, FacadeError<R>>
     where
         D: FactorizationScalar,
     {
@@ -294,23 +276,23 @@ where
             let RightPolar { p, wh } =
                 symtn_matrixalgebra::seam::left_polar_adjoint_from_parent::<R::Mode, _, _, _, _>(
                     engine,
-                    RuntimeDense(&self.runtime, options),
+                    RuntimeDense(&self.runtime),
                     &parent,
                 )
                 .map_err(R::Mode::map_factor_error)?;
             return Ok(LeftPolar {
                 w: wrap_factor_on(&self.runtime, wh)
-                    .adjoint(&mut Invocation::new(engine, options))?
-                    .materialized_tensor_uncached(engine, options)?,
+                    .adjoint(&mut *engine)?
+                    .materialized_tensor_uncached(engine)?,
                 p: wrap_factor_on(&self.runtime, p),
             });
         }
         let mut local = None;
-        let source = self.factor_input(engine, options, FactorOp::LeftPolar, &mut local)?;
+        let source = self.factor_input(engine, FactorOp::LeftPolar, &mut local)?;
         let LeftPolar { w, p } =
             symtn_matrixalgebra::seam::left_polar_from_source::<R::Mode, _, _, _, _>(
                 engine,
-                RuntimeDense(&self.runtime, options),
+                RuntimeDense(&self.runtime),
                 source,
             )
             .map_err(R::Mode::map_factor_error)?;
@@ -325,7 +307,6 @@ where
     fn factor_right_polar(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
     ) -> Result<RightPolar<Self>, FacadeError<R>>
     where
         D: FactorizationScalar,
@@ -337,23 +318,23 @@ where
             let LeftPolar { w, p } =
                 symtn_matrixalgebra::seam::right_polar_adjoint_from_parent::<R::Mode, _, _, _, _>(
                     engine,
-                    RuntimeDense(&self.runtime, options),
+                    RuntimeDense(&self.runtime),
                     &parent,
                 )
                 .map_err(R::Mode::map_factor_error)?;
             return Ok(RightPolar {
                 p: wrap_factor_on(&self.runtime, p),
                 wh: wrap_factor_on(&self.runtime, w)
-                    .adjoint(&mut Invocation::new(engine, options))?
-                    .materialized_tensor_uncached(engine, options)?,
+                    .adjoint(&mut *engine)?
+                    .materialized_tensor_uncached(engine)?,
             });
         }
         let mut local = None;
-        let source = self.factor_input(engine, options, FactorOp::RightPolar, &mut local)?;
+        let source = self.factor_input(engine, FactorOp::RightPolar, &mut local)?;
         let RightPolar { p, wh } =
             symtn_matrixalgebra::seam::right_polar_from_source::<R::Mode, _, _, _, _>(
                 engine,
-                RuntimeDense(&self.runtime, options),
+                RuntimeDense(&self.runtime),
                 source,
             )
             .map_err(R::Mode::map_factor_error)?;
@@ -368,17 +349,16 @@ where
     fn factor_eigh_full(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<Self>, FacadeError<R>>
     where
         D: FactorizationScalar,
     {
         let mut local = None;
-        let source = self.factor_input(engine, options, FactorOp::EighFull, &mut local)?;
+        let source = self.factor_input(engine, FactorOp::EighFull, &mut local)?;
         let out = symtn_matrixalgebra::seam::eigh_full_from_source::<R::Mode, _, _, _, _>(
             engine,
-            RuntimeDense(&self.runtime, options),
+            RuntimeDense(&self.runtime),
             source,
             hermitian_tol,
         )
@@ -402,17 +382,16 @@ where
     fn factor_eig_full(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
     ) -> Result<Eig<TensorMap<R, <D as FactorScalar>::Eig>>, FacadeError<R>>
     where
         D: AdvancedLinalgScalar,
         <D as FactorScalar>::Eig: TensorScalar,
     {
         let mut local = None;
-        let source = self.factor_input(engine, options, FactorOp::EigFull, &mut local)?;
+        let source = self.factor_input(engine, FactorOp::EigFull, &mut local)?;
         let out = symtn_matrixalgebra::seam::eig_full_from_source::<R::Mode, _, _, _, _>(
             engine,
-            RuntimeDense(&self.runtime, options),
+            RuntimeDense(&self.runtime),
             source,
         )
         .map_err(R::Mode::map_factor_error)?;
@@ -439,7 +418,6 @@ where
     fn seam_factors<T>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         op: FactorOp,
         stage: impl FnOnce(
             &mut dyn Engine,
@@ -463,7 +441,7 @@ where
                     .map_err(Error::from)?;
                 return adjoint_stage(
                     engine,
-                    RuntimeDense(&self.runtime, options),
+                    RuntimeDense(&self.runtime),
                     parent,
                     &view.logical_space,
                 )
@@ -471,24 +449,18 @@ where
             }
         }
         let mut local = None;
-        let source = self.factor_input(engine, options, op, &mut local)?;
-        stage(engine, RuntimeDense(&self.runtime, options), source)
-            .map_err(R::Mode::map_factor_error)
+        let source = self.factor_input(engine, op, &mut local)?;
+        stage(engine, RuntimeDense(&self.runtime), source).map_err(R::Mode::map_factor_error)
     }
 
     /// The one body of compact SVD: `s` is a compact diagonal on the fresh
     /// spectrum bond `fuse(V)` (`seam::spectrum_bond`).
-    fn factor_svd_compact(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<Svd<Self>, FacadeError<R>>
+    fn factor_svd_compact(&self, engine: &mut dyn Engine) -> Result<Svd<Self>, FacadeError<R>>
     where
         D: FactorizationScalar,
     {
         let (u, vh, mut spectrum) = self.seam_factors(
             engine,
-            options,
             FactorOp::SvdCompact,
             |engine, lease, source| {
                 symtn_matrixalgebra::seam::svd_compact_from_source::<R::Mode, _, _, _, _>(
@@ -518,20 +490,15 @@ where
     /// `svd_compact!(::DiagonalAlgorithm)` is `svd_full!`). Otherwise `s` is
     /// compact on the spectrum bond when every sector is square, and
     /// dense (possibly rectangular) when not.
-    fn factor_svd_full(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<Svd<Self>, FacadeError<R>>
+    fn factor_svd_full(&self, engine: &mut dyn Engine) -> Result<Svd<Self>, FacadeError<R>>
     where
         D: FactorizationScalar,
     {
         if self.spectrum().is_some() {
-            return self.factor_svd_compact(engine, options);
+            return self.factor_svd_compact(engine);
         }
         let factors = self.seam_factors(
             engine,
-            options,
             FactorOp::SvdFull,
             |engine, lease, source| {
                 symtn_matrixalgebra::seam::svd_full_from_source::<R::Mode, _, _, _, _>(
@@ -596,7 +563,6 @@ where
     /// Compact QR of `t`'s current split.
     fn qr_compact(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Qr<TensorMap<R, D, Self>>, FacadeError<R>>;
@@ -604,7 +570,6 @@ where
     /// Compact SVD of `t`'s current split.
     fn svd_compact(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
     ) -> Result<Svd<TensorMap<R, D, Self>>, FacadeError<R>>;
@@ -612,7 +577,6 @@ where
     /// Hermitian eigendecomposition of `t`'s current split.
     fn eigh_full(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D, Self>,
         hermitian_tol: HermitianTol,
@@ -641,39 +605,31 @@ where
 {
     fn qr_compact(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D>,
     ) -> Result<Qr<TensorMap<R, D>>, FacadeError<R>> {
-        t.factor_qr(
-            engine,
-            options,
-            FactorOp::QrCompact,
-            |engine, lease, source| {
-                symtn_matrixalgebra::seam::qr_compact_from_source::<R::Mode, _, _, _, _>(
-                    engine, lease, source,
-                )
-            },
-        )
+        t.factor_qr(engine, FactorOp::QrCompact, |engine, lease, source| {
+            symtn_matrixalgebra::seam::qr_compact_from_source::<R::Mode, _, _, _, _>(
+                engine, lease, source,
+            )
+        })
     }
 
     fn svd_compact(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D>,
     ) -> Result<Svd<TensorMap<R, D>>, FacadeError<R>> {
-        t.factor_svd_compact(engine, options)
+        t.factor_svd_compact(engine)
     }
 
     fn eigh_full(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         _: ExecToken,
         t: &TensorMap<R, D>,
         hermitian_tol: HermitianTol,
     ) -> Result<Eigh<TensorMap<R, D>>, FacadeError<R>> {
-        t.factor_eigh_full(engine, options, hermitian_tol)
+        t.factor_eigh_full(engine, hermitian_tol)
     }
 
     fn eigh_full_stack(

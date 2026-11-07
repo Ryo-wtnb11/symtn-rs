@@ -13,39 +13,96 @@ pub struct TreeTransformRecouplingPlan {
 pub(crate) struct TreeTransformPackReplay {
     pub src_layout: usize,
     pub packed_offset: usize,
-    pub packed_hi: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformScatterReplay {
     pub dst_layout: usize,
     pub packed_offset: usize,
-    pub dst_lo: isize,
-    pub dst_hi: isize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformScatterGroupReplay {
+    /// The group's pack columns in `pack_columns`, in packed order.
+    pub pack: Range<usize>,
+    /// The group's columns, ordered by destination start.
     pub columns: Range<usize>,
+}
+
+/// The destination span of one plan group's scatter columns, ordered by
+/// destination start: its first and last written element and whether the
+/// columns are slice-disjoint (each starts after the previous one ends). A
+/// group without columns spans `(0, -1)`, disjoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TreeTransformGroupSpan {
+    pub lo: isize,
+    pub hi: isize,
     pub slice_disjoint: bool,
 }
 
+/// A destination write that does not go through a packed GEMM column.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TreeTransformDirectItem {
+    /// An inactive destination layout: zeroed by an overwrite, beta-scaled
+    /// by an accumulation.
+    Inactive { layout: usize },
+    /// A Single block, by index into the structure's block list.
+    Single { block: u32 },
+}
+
+/// The replay schedule of a compiled structure, built eagerly with it and
+/// immutable afterwards, so derived equality compares every field: the pack
+/// and scatter columns, the address-ordered direct lists, the Singles'
+/// slice-disjointness, the group spans and the runnable clamp.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TreeTransformParallelSchedule {
-    /// Indices of the non-empty Single blocks, ordered by destination start.
-    /// Why indices rather than copied descriptors: the layout entries,
-    /// coefficient and destination range are all read from the block and its
-    /// compiled role, so a per-Single copy would duplicate retained state;
-    /// threaded replay recomputes a destination start only at its split
-    /// points.
-    pub singles: Vec<u32>,
     pub pack_columns: Vec<TreeTransformPackReplay>,
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
     pub single_block_count: usize,
     pub packed_column_count: usize,
     pub scattered_column_count: usize,
+    /// The non-empty inactive destination layouts, in destination address
+    /// order.
+    pub inactive: Vec<u32>,
+    /// The non-empty Single blocks, by index into the block list, in
+    /// destination address order.
+    pub singles: Vec<u32>,
+    /// Whether the Singles' destinations are slice-disjoint in `singles`
+    /// order, so a replay may split them between workers.
     pub singles_slice_disjoint: bool,
+    /// Per plan group, its scatter columns' destination span.
+    pub group_spans: Vec<TreeTransformGroupSpan>,
+    /// The most workers a replay can keep busy on one phase: the Singles
+    /// when they are slice-disjoint (else one, if any), or the pack columns,
+    /// whichever is more, and at least one.
+    pub replay_runnable: usize,
+}
+
+impl TreeTransformParallelSchedule {
+    /// The bytes of the vectors this schedule retains, each allocated at its
+    /// exact length.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let bytes = |capacity: usize, size: usize| capacity.saturating_mul(size);
+        bytes(
+            self.pack_columns.capacity(),
+            core::mem::size_of::<TreeTransformPackReplay>(),
+        )
+        .saturating_add(bytes(
+            self.scatter_columns.capacity(),
+            core::mem::size_of::<TreeTransformScatterReplay>(),
+        ))
+        .saturating_add(bytes(
+            self.scatter_groups.capacity(),
+            core::mem::size_of::<TreeTransformScatterGroupReplay>(),
+        ))
+        .saturating_add(bytes(self.inactive.capacity(), core::mem::size_of::<u32>()))
+        .saturating_add(bytes(self.singles.capacity(), core::mem::size_of::<u32>()))
+        .saturating_add(bytes(
+            self.group_spans.capacity(),
+            core::mem::size_of::<TreeTransformGroupSpan>(),
+        ))
+    }
 }
 
 impl TreeTransformRecouplingPlan {
@@ -83,157 +140,6 @@ impl TreeTransformRecouplingPlan {
     pub fn is_empty(&self) -> bool {
         self.jobs.is_empty()
     }
-}
-
-pub(super) fn compile_parallel_schedule(
-    blocks: &[TreeTransformBlock],
-    layouts: &RawLayoutTable,
-    recoupling_plan: &TreeTransformRecouplingPlan,
-) -> Result<TreeTransformParallelSchedule, OperationError> {
-    let single_block_count = blocks
-        .iter()
-        .filter(|block| matches!(block, TreeTransformBlock::Single { .. }))
-        .count();
-    let mut packed_column_count = 0usize;
-    let mut scattered_column_count = 0usize;
-    // Destination ranges are needed only to order the schedule and prove it
-    // slice-disjoint, so they stay in this compile-time list.
-    let mut ranges = Vec::with_capacity(single_block_count);
-    for (block_index, block) in blocks.iter().enumerate() {
-        let TreeTransformBlock::Single { dst_layout, .. } = *block else {
-            continue;
-        };
-        let Some((dst_lo, dst_hi)) = layout_index_range(layouts, dst_layout)? else {
-            continue;
-        };
-        let block_index =
-            u32::try_from(block_index).map_err(|_| OperationError::ElementCountOverflow)?;
-        ranges.push((dst_lo, dst_hi, block_index));
-    }
-    // Why the order is the base order: compilation rejects aliased
-    // destinations and drops empty ones, so no two keys tie.
-    ranges.sort_unstable_by_key(|&(dst_lo, _, _)| dst_lo);
-    let singles_slice_disjoint =
-        destination_ranges_are_slice_disjoint(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
-    let mut singles = Vec::with_capacity(ranges.len());
-    singles.extend(ranges.iter().map(|&(_, _, block_index)| block_index));
-    drop(ranges);
-
-    let mut pack_columns = Vec::new();
-    let mut scatter_columns = Vec::new();
-    let mut scatter_groups = Vec::new();
-    for (block_index, job) in recoupling_plan.entries() {
-        let TreeTransformBlock::Multi {
-            dst_layout_start,
-            dst_count,
-            src_layout_start,
-            src_count,
-            element_count,
-            ..
-        } = blocks[block_index]
-        else {
-            return Err(OperationError::InvalidArgument {
-                message: "tree transform recoupling plan references a single block",
-            });
-        };
-        packed_column_count = packed_column_count
-            .checked_add(src_count)
-            .ok_or(OperationError::ElementCountOverflow)?;
-        scattered_column_count = scattered_column_count
-            .checked_add(dst_count)
-            .ok_or(OperationError::ElementCountOverflow)?;
-        let group_start = scatter_columns.len();
-        if element_count == 0 {
-            scatter_groups.push(TreeTransformScatterGroupReplay {
-                columns: group_start..group_start,
-                slice_disjoint: true,
-            });
-            continue;
-        }
-        for src_index in 0..src_count {
-            let packed_offset = job
-                .lhs_offset
-                .checked_add(
-                    src_index
-                        .checked_mul(element_count)
-                        .ok_or(OperationError::ElementCountOverflow)?,
-                )
-                .ok_or(OperationError::ElementCountOverflow)?;
-            let packed_hi = packed_offset
-                .checked_add(element_count - 1)
-                .ok_or(OperationError::ElementCountOverflow)?;
-            pack_columns.push(TreeTransformPackReplay {
-                src_layout: src_layout_start + src_index,
-                packed_offset,
-                packed_hi,
-            });
-        }
-        for dst_index in 0..dst_count {
-            let dst_layout = dst_layout_start + dst_index;
-            let Some((dst_lo, dst_hi)) = layout_index_range(layouts, dst_layout)? else {
-                continue;
-            };
-            let packed_offset = job
-                .dst_offset
-                .checked_add(
-                    dst_index
-                        .checked_mul(element_count)
-                        .ok_or(OperationError::ElementCountOverflow)?,
-                )
-                .ok_or(OperationError::ElementCountOverflow)?;
-            scatter_columns.push(TreeTransformScatterReplay {
-                dst_layout,
-                packed_offset,
-                dst_lo,
-                dst_hi,
-            });
-        }
-        scatter_columns[group_start..].sort_unstable_by_key(|item| item.dst_lo);
-        scatter_groups.push(TreeTransformScatterGroupReplay {
-            columns: group_start..scatter_columns.len(),
-            slice_disjoint: destination_ranges_are_slice_disjoint(
-                scatter_columns[group_start..]
-                    .iter()
-                    .map(|item| (item.dst_lo, item.dst_hi)),
-            ),
-        });
-    }
-    pack_columns.sort_unstable_by_key(|item| item.packed_offset);
-
-    let pack_disjoint = pack_columns
-        .windows(2)
-        .all(|pair| pair[0].packed_hi < pair[1].packed_offset);
-    if !pack_disjoint
-        || pack_columns
-            .last()
-            .is_some_and(|item| item.packed_hi >= recoupling_plan.source_len())
-    {
-        return Err(OperationError::InvalidArgument {
-            message: "tree transform packed source schedule is invalid",
-        });
-    }
-
-    Ok(TreeTransformParallelSchedule {
-        singles_slice_disjoint,
-        single_block_count,
-        packed_column_count,
-        scattered_column_count,
-        singles,
-        pack_columns,
-        scatter_columns,
-        scatter_groups,
-    })
-}
-
-fn destination_ranges_are_slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
-    let mut previous_hi = None;
-    for (lo, hi) in ranges {
-        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
-            return false;
-        }
-        previous_hi = Some(hi);
-    }
-    true
 }
 
 pub(super) fn layout_index_range(

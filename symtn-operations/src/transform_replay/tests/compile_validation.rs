@@ -109,7 +109,6 @@ fn interleaved_disjoint_destinations_with_overlapping_ranges_are_valid() {
         &[3.0],
         1.0,
         0.5,
-        4,
     )
     .unwrap();
     assert_eq!(dst, [5.0, 10.0, 15.0, 20.0]);

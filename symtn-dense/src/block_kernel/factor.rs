@@ -7,8 +7,9 @@
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
 //! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
 //! `eigvals`) does (same provider, same validation, same error values), but
-//! on its lane's child token instead of the whole engine, so a block's faer
-//! width is the engine's decision within its lane's reserved share.
+//! on its lane's child token limited to the block's placed width instead of
+//! the whole engine, so a block's faer width is the engine's decision within
+//! that offer.
 //!
 //! The owned batch ([`factorize`]) returns each factor as a fresh `Vec` from
 //! the provider's `Vec` entry: its length is the factor's logical size and it
@@ -38,16 +39,15 @@ use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
 
-use super::driver::{self, BlockOp, Entry, LaneScratch, OpKind};
+use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
 use super::gemm::{self, ErasedPlan, Geometry};
-use super::schedule::{self, GrantKey, LaneJobs};
 use crate::factor_dest::{
     adjoint_items, compact_mut, copytri_items, map_transposed_items, polar_direction,
     project_hermitian_items, scale_exp_factor, scale_polar_factor, Element, FactorSink,
 };
+use crate::lanes::{GrantKey, LaneTables};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
-use crate::LaneAllocation;
 use crate::{
     DenseError, DenseGemmBatchJob, DenseRead, DenseTensor, DenseView, DenseWrite, FactorDest,
     FactorFailure, FactorPlacement, MatrixOp,
@@ -899,7 +899,7 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
     const LABEL: &'static str = F::ENTRY;
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn LaneJobs<Job<'a>>, _: &Exec<'_>) {}
+    fn lane(&self, _: &mut LaneMembers<'_, Job<'a>>, _: &Exec<'_>) {}
 
     fn work(&self, _: usize, job: &Job<'a>) -> f64 {
         work::<F>(job.input)
@@ -949,35 +949,31 @@ pub(crate) type Sink<'s> =
 /// delivered.
 pub(crate) fn factorize_batch<F: Factor>(
     engine: &mut dyn tenferro_tensor::Engine,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
-    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, allocation, inputs, sink)).unwrap_or_else(
-        || {
-            Err(tenferro_error(
-                F::ENTRY,
-                tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
-            ))
-        },
-    )
+    with_cpu_engine(engine, |cpu| batch_on::<F>(cpu, inputs, sink)).unwrap_or_else(|| {
+        Err(tenferro_error(
+            F::ENTRY,
+            tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
+        ))
+    })
 }
 
 /// [`factorize_batch`] of the factorization `op` names.
 pub(crate) fn factorize(
     engine: &mut dyn tenferro_tensor::Engine,
     op: crate::DenseFactorization,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
     use crate::DenseFactorization as Op;
     match op {
-        Op::Svd => factorize_batch::<Svd>(engine, allocation, inputs, sink),
-        Op::Qr => factorize_batch::<Qr>(engine, allocation, inputs, sink),
-        Op::Eigh => factorize_batch::<Eigh>(engine, allocation, inputs, sink),
-        Op::EighVals => factorize_batch::<EighVals>(engine, allocation, inputs, sink),
-        Op::SvdVals => factorize_batch::<SvdVals>(engine, allocation, inputs, sink),
+        Op::Svd => factorize_batch::<Svd>(engine, inputs, sink),
+        Op::Qr => factorize_batch::<Qr>(engine, inputs, sink),
+        Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
+        Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
+        Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
         // Why not on the lanes: tenferro's eig publishes unit-norm
         // eigenvectors through a normalization it does not export
         // (tensor4all/tenferro-rs#2387), and symtn does not duplicate it, so
@@ -986,10 +982,10 @@ pub(crate) fn factorize(
         Op::Eig => inputs.iter().enumerate().try_for_each(|(index, &input)| {
             sink(index, crate::tenferro_adapter::eig_read(engine, input))
         }),
-        Op::EigVals => factorize_batch::<EigVals>(engine, allocation, inputs, sink),
-        Op::Lq => factorize_batch::<Lq>(engine, allocation, inputs, sink),
-        Op::QrFull => factorize_batch::<QrFull>(engine, allocation, inputs, sink),
-        Op::QrNull => factorize_batch::<QrNull>(engine, allocation, inputs, sink),
+        Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
+        Op::Lq => factorize_batch::<Lq>(engine, inputs, sink),
+        Op::QrFull => factorize_batch::<QrFull>(engine, inputs, sink),
+        Op::QrNull => factorize_batch::<QrNull>(engine, inputs, sink),
         Op::LeftPolar | Op::RightPolar | Op::ExpViaEigh => {
             Err(crate::executor::destination_only_error(op))
         }
@@ -998,7 +994,6 @@ pub(crate) fn factorize(
 
 fn batch_on<F: Factor>(
     cpu: &mut CpuEngine,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     sink: &mut Sink<'_>,
 ) -> Result<(), DenseError> {
@@ -1022,8 +1017,7 @@ fn batch_on<F: Factor>(
             cpu,
             &Blocks::<F>(PhantomData),
             &mut jobs,
-            &mut LaneScratch::default(),
-            allocation,
+            &mut LaneTables::default(),
         )?;
     }
     let admitted = jobs.len();
@@ -1660,6 +1654,20 @@ impl<T: Scalar> ScalarScratch<T> {
     }
 }
 
+/// One destination lane: its blocks' largest needs, the count of its blocks
+/// still to run and, from its first block's run to its last, its buffers.
+///
+/// Why the buffers are not built in [`BlockOp::lane`]: that runs on the
+/// caller before the fork, so every lane's setup and release would be serial
+/// there while their pages still fault on the lane threads. The lane's own
+/// thread builds them in its first block's run and frees them after its
+/// last; a panic drops whatever remains through `Drop`.
+pub(crate) struct IntoLane {
+    needs: Needs,
+    remaining: usize,
+    buffers: Option<LaneBuffers>,
+}
+
 /// One lane's provider workspace and typed scratch: the largest need of the
 /// lane's blocks, allocated once before its first block.
 pub(crate) struct LaneBuffers {
@@ -1671,6 +1679,17 @@ pub(crate) struct LaneBuffers {
     /// The allocation calls of this lane's buffer setup.
     #[cfg(test)]
     setup_allocs: Option<u64>,
+    /// The thread that set the buffers up.
+    #[cfg(test)]
+    thread: std::thread::ThreadId,
+}
+
+/// Records which thread frees each lane setup's buffers.
+#[cfg(test)]
+impl Drop for LaneBuffers {
+    fn drop(&mut self) {
+        owners::released(self.id);
+    }
 }
 
 /// The largest workspace bytes and typed scratch elements (per scalar, in
@@ -1693,9 +1712,10 @@ pub(crate) struct IntoJob<'a, 'd, 'w> {
     plans: Plans,
     sizing: Option<DenseError>,
     outcome: Option<Result<(), FactorFailure>>,
-    /// The id and workspace length of the lane setup this block ran with.
+    /// The id, workspace length and setup thread of the lane setup this
+    /// block ran with, and the thread of its solve.
     #[cfg(test)]
-    lane_seen: (usize, usize),
+    lane_seen: Option<(usize, usize, std::thread::ThreadId, std::thread::ThreadId)>,
 }
 
 /// Factorization `F` of each block into its destination on the lane driver.
@@ -1709,41 +1729,21 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
     const ENTRY: Entry = Entry::Linalg;
     const KIND: OpKind = OpKind::Factorization;
     const LABEL: &'static str = F::ENTRY;
-    type Lane = LaneBuffers;
+    type Lane = IntoLane;
 
-    fn lane(&self, jobs: &mut dyn LaneJobs<Self::Job>, exec: &Exec<'_>) -> LaneBuffers {
+    fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> IntoLane {
         let mut needs = Needs::default();
-        jobs.for_each(&mut |_, job| {
+        let mut remaining = 0;
+        jobs(&mut |job| {
+            remaining += 1;
             if let Err(error) = needs_of::<F>(job.input, job.dest.placement(), exec, &mut needs) {
                 job.sizing = Some(error);
             }
         });
-        let build = || {
-            (
-                vec![MaybeUninit::uninit(); needs.bytes],
-                TypedScratch {
-                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
-                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
-                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
-                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
-                },
-            )
-        };
-        #[cfg(test)]
-        let ((workspace, typed), setup_allocs) = owners::measured(build);
-        #[cfg(not(test))]
-        let (workspace, typed) = build();
-        LaneBuffers {
-            workspace,
-            typed,
-            #[cfg(test)]
-            id: {
-                static SETUPS: std::sync::atomic::AtomicUsize =
-                    std::sync::atomic::AtomicUsize::new(1);
-                SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            },
-            #[cfg(test)]
-            setup_allocs,
+        IntoLane {
+            needs,
+            remaining,
+            buffers: None,
         }
     }
 
@@ -1776,12 +1776,19 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         &self,
         _: usize,
         job: &mut Self::Job,
-        lane: &mut LaneBuffers,
+        into: &mut IntoLane,
         mut exec: Exec<'_>,
     ) -> Result<(), DenseError> {
+        let needs = &into.needs;
+        let lane = into.buffers.get_or_insert_with(|| LaneBuffers::new(needs));
         #[cfg(test)]
         {
-            job.lane_seen = (lane.id, lane.workspace.len());
+            job.lane_seen = Some((
+                lane.id,
+                lane.workspace.len(),
+                lane.thread,
+                std::thread::current().id(),
+            ));
         }
         let sizing = job.sizing.take();
         #[cfg(test)]
@@ -1835,7 +1842,46 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
         #[cfg(not(test))]
         let outcome = solve();
         job.outcome = Some(outcome);
+        into.remaining = into.remaining.saturating_sub(1);
+        if into.remaining == 0 {
+            into.buffers = None;
+        }
         Ok(())
+    }
+}
+
+impl LaneBuffers {
+    /// Allocates one lane's buffers at its blocks' largest `needs`.
+    fn new(needs: &Needs) -> Self {
+        let build = || {
+            (
+                vec![MaybeUninit::uninit(); needs.bytes],
+                TypedScratch {
+                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
+                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
+                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
+                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
+                },
+            )
+        };
+        #[cfg(test)]
+        let ((workspace, typed), setup_allocs) = owners::measured(build);
+        #[cfg(not(test))]
+        let (workspace, typed) = build();
+        LaneBuffers {
+            workspace,
+            typed,
+            #[cfg(test)]
+            id: {
+                static SETUPS: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(1);
+                SETUPS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            #[cfg(test)]
+            setup_allocs,
+            #[cfg(test)]
+            thread: std::thread::current().id(),
+        }
     }
 }
 
@@ -1931,6 +1977,27 @@ pub(crate) mod owners {
                 solve,
                 products,
             });
+    }
+
+    static RELEASES: Mutex<Vec<(usize, std::thread::ThreadId)>> = Mutex::new(Vec::new());
+
+    /// Records that lane setup `lane`'s buffers are freed on this thread.
+    pub(super) fn released(lane: usize) {
+        RELEASES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((lane, std::thread::current().id()));
+    }
+
+    /// The threads that freed lane setup `lane`'s buffers.
+    pub(super) fn releases_of(lane: usize) -> Vec<std::thread::ThreadId> {
+        RELEASES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|&&(id, _)| id == lane)
+            .map(|&(_, thread)| thread)
+            .collect()
     }
 
     /// The position the next record takes.
@@ -2060,48 +2127,39 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
 pub(crate) fn factorize_into(
     engine: &mut dyn tenferro_tensor::Engine,
     op: crate::DenseFactorization,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     dests: &mut [FactorDest<'_>],
     sink: &mut FactorSink<'_>,
 ) -> Result<(), DenseError> {
     use crate::DenseFactorization as Op;
     match op {
-        Op::Svd => factorize_into_batch::<Svd>(engine, allocation, inputs, dests, sink),
-        Op::Qr => factorize_into_batch::<Qr>(engine, allocation, inputs, dests, sink),
-        Op::Eigh => factorize_into_batch::<Eigh>(engine, allocation, inputs, dests, sink),
-        Op::Lq => factorize_into_batch::<Lq>(engine, allocation, inputs, dests, sink),
-        Op::QrFull => factorize_into_batch::<QrFull>(engine, allocation, inputs, dests, sink),
-        Op::QrNull => factorize_into_batch::<QrNull>(engine, allocation, inputs, dests, sink),
-        Op::LeftPolar => {
-            factorize_into_batch::<Polar<true>>(engine, allocation, inputs, dests, sink)
-        }
-        Op::RightPolar => {
-            factorize_into_batch::<Polar<false>>(engine, allocation, inputs, dests, sink)
-        }
-        Op::ExpViaEigh => {
-            factorize_into_batch::<ExpViaEigh>(engine, allocation, inputs, dests, sink)
-        }
+        Op::Svd => factorize_into_batch::<Svd>(engine, inputs, dests, sink),
+        Op::Qr => factorize_into_batch::<Qr>(engine, inputs, dests, sink),
+        Op::Eigh => factorize_into_batch::<Eigh>(engine, inputs, dests, sink),
+        Op::Lq => factorize_into_batch::<Lq>(engine, inputs, dests, sink),
+        Op::QrFull => factorize_into_batch::<QrFull>(engine, inputs, dests, sink),
+        Op::QrNull => factorize_into_batch::<QrNull>(engine, inputs, dests, sink),
+        Op::LeftPolar => factorize_into_batch::<Polar<true>>(engine, inputs, dests, sink),
+        Op::RightPolar => factorize_into_batch::<Polar<false>>(engine, inputs, dests, sink),
+        Op::ExpViaEigh => factorize_into_batch::<ExpViaEigh>(engine, inputs, dests, sink),
         _ => unreachable!("validation admits the ops with a destination form only"),
     }
 }
 
 fn factorize_into_batch<F: FactorInto>(
     engine: &mut dyn tenferro_tensor::Engine,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     dests: &mut [FactorDest<'_>],
     sink: &mut FactorSink<'_>,
 ) -> Result<(), DenseError> {
-    with_cpu_engine(engine, |cpu| {
-        batch_into_on::<F>(cpu, allocation, inputs, dests, sink)
-    })
-    .unwrap_or_else(|| {
-        Err(tenferro_error(
-            F::ENTRY,
-            tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
-        ))
-    })
+    with_cpu_engine(engine, |cpu| batch_into_on::<F>(cpu, inputs, dests, sink)).unwrap_or_else(
+        || {
+            Err(tenferro_error(
+                F::ENTRY,
+                tenferro_tensor::Error::unsupported(F::ENTRY, NOT_A_CPU_ENGINE),
+            ))
+        },
+    )
 }
 
 /// [`batch_on`] into destinations: the same preflight, admission, lanes and
@@ -2109,7 +2167,6 @@ fn factorize_into_batch<F: FactorInto>(
 /// `Result<(), FactorFailure>` instead of its factors.
 fn batch_into_on<F: FactorInto>(
     cpu: &mut CpuEngine,
-    allocation: LaneAllocation,
     inputs: &[DenseRead<'_>],
     dests: &mut [FactorDest<'_>],
     sink: &mut FactorSink<'_>,
@@ -2127,7 +2184,7 @@ fn batch_into_on<F: FactorInto>(
                 sizing: None,
                 outcome: None,
                 #[cfg(test)]
-                lane_seen: (0, 0),
+                lane_seen: None,
             }),
             Err(error) => {
                 refused = Some((error, dest));
@@ -2141,8 +2198,7 @@ fn batch_into_on<F: FactorInto>(
             cpu,
             &IntoBlocks::<F>(PhantomData),
             &mut jobs,
-            &mut LaneScratch::default(),
-            allocation,
+            &mut LaneTables::default(),
         )?;
     }
     let admitted = jobs.len();
@@ -2259,7 +2315,7 @@ pub(crate) fn grant(exec: &Exec<'_>, budget: usize, [total, payback]: [f64; 2]) 
         return 1;
     }
     let model = &exec.batch_policy().model;
-    let width = |work| exec.width_for_within(budget, schedule::work_model_ns(model, work), 1);
+    let width = |work| exec.width_for_within(budget, driver::work_model_ns(model, work), 1);
     width(total).min(width(payback))
 }
 
@@ -2439,7 +2495,7 @@ mod tests {
         const LABEL: &'static str = F::ENTRY;
         type Lane = ();
 
-        fn lane(&self, _: &mut dyn LaneJobs<Job<'a>>, _: &Exec<'_>) {}
+        fn lane(&self, _: &mut LaneMembers<'_, Job<'a>>, _: &Exec<'_>) {}
 
         fn work(&self, index: usize, job: &Job<'a>) -> f64 {
             self.0.work(index, job)
@@ -2522,23 +2578,176 @@ mod tests {
             Blocks(PhantomData),
             shapes.iter().map(|_| 0.into()).collect(),
         );
-        driver::drive(
-            &mut engine,
-            &op,
-            &mut jobs,
-            &mut LaneScratch::default(),
-            LaneAllocation::Moldable,
-        )
-        .unwrap();
+        driver::drive(&mut engine, &op, &mut jobs, &mut LaneTables::default()).unwrap();
         op.1.iter().map(|w| w.load(Ordering::Relaxed)).collect()
+    }
+
+    /// The lanes (share, jobs) `driver::place` gives factorization `F`'s
+    /// owned blocks of `shapes` on `threads` slots of flat `row_ns` dispatch
+    /// under `model` through `cache`, and the placement's comparison sorts.
+    fn placed_in<F: Factor>(
+        cache: &crate::lanes::LaneAllocationCache,
+        threads: usize,
+        row_ns: u64,
+        model: WorkModel,
+        shapes: &[&[usize]],
+    ) -> (Vec<(usize, Vec<usize>)>, usize) {
+        use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+        let row = WidthCosts::flat(Duration::from_nanos(row_ns));
+        let pool = Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(row, row, row))
+            .build()
+            .unwrap();
+        let mut engine =
+            CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
+        let data = vec![0.0_f64; 10000];
+        let strides: Vec<Vec<usize>> = shapes
+            .iter()
+            .map(|shape| {
+                (0..shape.len())
+                    .map(|axis| shape[..axis].iter().product())
+                    .collect()
+            })
+            .collect();
+        let jobs: Vec<Job<'_>> = shapes
+            .iter()
+            .zip(&strides)
+            .map(|(&shape, strides)| {
+                let len = shape.iter().product();
+                let input =
+                    DenseRead::F64(DenseView::new(&data[..len], shape, strides, 0).unwrap());
+                Job {
+                    input,
+                    strides: preflight::<F>(input).unwrap(),
+                    outcome: None,
+                }
+            })
+            .collect();
+        engine
+            .with_linalg_pool(|exec, _| {
+                let mut tables = LaneTables::default();
+                let recording = crate::probe::record();
+                driver::place(exec, &Blocks::<F>(PhantomData), &jobs, cache, &mut tables);
+                let sorts = recording.get(crate::probe::Event::PlacementSort);
+                let p = tables.placement();
+                let lanes = (0..p.lanes())
+                    .map(|l| (p.share(l), p.jobs(l).to_vec()))
+                    .collect();
+                Ok((lanes, sorts))
+            })
+            .unwrap()
+    }
+
+    /// [`placed_in`] through a cache of its own that admits nothing.
+    fn placed<F: Factor>(
+        threads: usize,
+        row_ns: u64,
+        model: WorkModel,
+        shapes: &[&[usize]],
+    ) -> (Vec<(usize, Vec<usize>)>, usize) {
+        let uncached = crate::lanes::LaneAllocationCache::new(
+            symtn_core::StructureCacheKind::LaneAllocations,
+            0,
+        );
+        placed_in::<F>(&uncached, threads, row_ns, model, shapes)
+    }
+
+    /// Purpose: the batch decision caps the searched lane count. Four f64
+    /// SVDs `10 x 10` on four slots (flat 100 ns dispatch, one multiply-add
+    /// per ns, no overhead, a 2000 ns lane minimum, `min_items = 2`,
+    /// `min_items_per_lane = 1`): 4000 ns admit four slots but the decision
+    /// two lanes; no payback pays, so every grant is one; no equal share
+    /// beats the baseline and the reservation's four lanes exceed the cap.
+    /// The result is the baseline's two lanes of two slots, jobs `[0, 2]` and
+    /// `[1, 3]`.
+    #[test]
+    fn the_batch_decision_caps_the_searched_lanes() {
+        let model = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(2000.0)
+            .with_min_items(2)
+            .with_min_items_per_lane(1);
+        let (lanes, _) = placed::<Svd>(4, 100, model, &[&[10, 10][..]; 4]);
+        assert_eq!(lanes, [(2, vec![0, 2]), (2, vec![1, 3])]);
+    }
+
+    /// Purpose: a one-lane placement returns before ordering its jobs, for
+    /// both of main's one-lane reasons: a QR batch whose whole estimate pays
+    /// for no width (one slot), and an SVD batch whose every block widens but
+    /// whose `min_items` admits one lane. The blocks have distinct
+    /// estimates in permuted order, `[2 + pi(j), 1]` and `[128 + pi(j), 1]`.
+    #[test]
+    fn a_one_lane_placement_sorts_nothing() {
+        let pi = [5, 1, 7, 3, 8, 2, 6, 4];
+        let qr: Vec<[usize; 2]> = pi.iter().map(|&p| [2 + p, 1]).collect();
+        let qr: Vec<&[usize]> = qr.iter().map(|s| &s[..]).collect();
+        let unit = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let (lanes, sorts) = placed::<Qr>(2, 1_000_000_000, unit, &qr);
+        assert_eq!((lanes, sorts), (vec![(1, (0..8).collect())], 0));
+
+        let svd: Vec<[usize; 2]> = pi.iter().map(|&p| [128 + p, 1]).collect();
+        let svd: Vec<&[usize]> = svd.iter().map(|s| &s[..]).collect();
+        let gated = WorkModel::default()
+            .with_muladds_per_ns(1e-6)
+            .with_item_overhead_ns(0.0)
+            .with_min_items(usize::MAX);
+        let (lanes, sorts) = placed::<Svd>(2, 1, gated, &svd);
+        assert_eq!((lanes, sorts), (vec![(2, (0..8).collect())], 0));
+    }
+
+    /// Purpose: a searched factorization batch is admitted to the
+    /// lane-allocation cache (here a cache of the test's own), and the
+    /// repeat, a hit, equals the cold search and sorts nothing: the
+    /// review-r3 SVD trace, main's SVD mix (`80 x 80` and three `4 x 4`) and
+    /// the same mix of general eigenvalues, which keep the default
+    /// `SEARCHED`. The first call of each misses and the second hits.
+    #[test]
+    fn a_repeated_searched_batch_hits_its_cold_placement() {
+        let capped = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(2000.0)
+            .with_min_items(2)
+            .with_min_items_per_lane(1);
+        let unit = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let small: &[usize] = &[4, 4];
+        let mix: &[&[usize]] = &[&[80, 80], small, small, small];
+        type Placed = (Vec<(usize, Vec<usize>)>, usize);
+        let twice = |placed: &dyn Fn(&crate::lanes::LaneAllocationCache) -> Placed| {
+            let cache = crate::lanes::LaneAllocationCache::new(
+                symtn_core::StructureCacheKind::LaneAllocations,
+                1 << 20,
+            );
+            let (cold, _) = placed(&cache);
+            let info = cache.info();
+            assert_eq!((info.hits(), info.misses(), info.admissions()), (0, 1, 1));
+            let (warm, sorts) = placed(&cache);
+            assert_eq!((&warm, sorts), (&cold, 0));
+            assert_eq!(cache.info().hits(), 1);
+            cold
+        };
+        let shapes = [&[10, 10][..]; 4];
+        let r3 = twice(&|cache| placed_in::<Svd>(cache, 4, 100, capped, &shapes));
+        assert_eq!(r3, [(2, vec![0, 2]), (2, vec![1, 3])]);
+        let svd = twice(&|cache| placed_in::<Svd>(cache, 4, 100, unit, mix));
+        assert_eq!(svd, [(4, vec![0, 1, 2, 3])]);
+        let eig = twice(&|cache| placed_in::<EigVals>(cache, 4, 100, unit, mix));
+        assert_eq!(eig, [(4, vec![0, 1, 2, 3])]);
     }
 
     /// Purpose: each lane of a destination batch is set up once, before its
     /// first block, with a workspace sufficient for every block it runs:
     /// every block of a lane runs with that one setup, whose workspace is
-    /// never regrown, on uneven blocks over two forced lanes and on the
-    /// single-lane path, including a two-item and an empty-batch input; every
-    /// block succeeds, so no workspace was short.
+    /// never regrown, and the setup and its release happen on the thread
+    /// that runs the lane's solves, on uneven blocks over two forced lanes
+    /// and on the single-lane path, including a two-item and an empty-batch
+    /// input; every block succeeds, so no workspace was short.
     #[test]
     fn each_lane_is_set_up_once_for_all_its_blocks() {
         use crate::factor_dest::validate;
@@ -2619,28 +2828,31 @@ mod tests {
                     plans: [None, None],
                     sizing: None,
                     outcome: None,
-                    lane_seen: (0, 0),
+                    lane_seen: None,
                 })
                 .collect();
             driver::drive(
                 &mut engine,
                 &IntoBlocks::<Qr>(PhantomData),
                 &mut jobs,
-                &mut LaneScratch::default(),
-                LaneAllocation::Moldable,
+                &mut LaneTables::default(),
             )
             .unwrap();
             let mut setups = BTreeMap::new();
             for job in &jobs {
                 assert_eq!(job.outcome, Some(Ok(())));
-                let (id, len) = job.lane_seen;
+                let (id, len, setup, solve) = job.lane_seen.unwrap();
+                assert_eq!(setup, solve, "set up on the thread of its solves");
                 assert_eq!(
-                    *setups.entry(id).or_insert(len),
-                    len,
+                    *setups.entry(id).or_insert((len, setup)),
+                    (len, setup),
                     "one buffer per setup"
                 );
             }
             assert_eq!(setups.len(), lanes, "{lanes} lane(s)");
+            for (&id, &(_, setup)) in &setups {
+                assert_eq!(owners::releases_of(id), [setup], "freed once, there");
+            }
         }
     }
 
@@ -2690,6 +2902,13 @@ mod tests {
         assert_eq!(
             lane_widths::<Qr>(4, 0.0, &[&[80, 80], small, small, small]),
             [1; 4]
+        );
+        // General eigenvalues take the default `SEARCHED`: their whole
+        // estimate is their payback, so the large block is granted every
+        // width and one four-slot lane wins as for the SVD.
+        assert_eq!(
+            lane_widths::<EigVals>(4, 0.0, &[&[80, 80], small, small, small]),
+            [4; 4]
         );
     }
 }

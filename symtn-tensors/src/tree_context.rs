@@ -136,10 +136,10 @@ where
 {
     /// Attempts the built-in uninitialised writer used by owned tensor
     /// transforms. `Ok(None)` means the proof was unavailable and no output
-    /// was allocated. The writer runs under the backend's replay worker
-    /// count: the parallel schedule splits the destination on its compiled
-    /// slice-disjoint boundaries, so thread count never forces the
-    /// zero-then-replay fallback.
+    /// was allocated. The writer runs on the backend's replay route: on a
+    /// multi-slot engine each joint component writes its own atoms of the
+    /// destination, so the thread count never forces the zero-then-replay
+    /// fallback.
     ///
     /// This concrete cross-crate entrypoint is internal and unstable despite
     /// being public for `symtn`; downstream callers must not rely on it.

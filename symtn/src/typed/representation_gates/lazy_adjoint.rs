@@ -25,9 +25,7 @@ fn checked_generic_lazy_transforms_do_not_materialize_uncached_input() {
     )
     .unwrap();
     let lazy = source.adjoint(engine).unwrap();
-    let eager = lazy
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
-        .unwrap();
+    let eager = lazy.materialized_tensor_uncached(engine).unwrap();
     let adjoint = probe::record();
 
     let outputs = [
@@ -312,14 +310,14 @@ fn checked_generic_null_lazy_redirects_are_owned_and_keep_receiver_cold() {
         .unwrap()
         .adjoint(engine)
         .unwrap()
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
+        .materialized_tensor_uncached(engine)
         .unwrap();
     let expected_right = source
         .left_null(engine, &[0, 1], &[2, 3])
         .unwrap()
         .adjoint(engine)
         .unwrap()
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
+        .materialized_tensor_uncached(engine)
         .unwrap();
 
     for (actual, expected) in [
@@ -538,11 +536,11 @@ fn simple_lazy_observers_and_owned_outputs_do_not_publish() {
     let lazy = source.adjoint(engine).unwrap();
 
     assert_eq!(
-        lazy.is_diagonal(engine, crate::typed::ExecOptions::default(), 0.0),
-        eager.is_diagonal(engine, crate::typed::ExecOptions::default(), 0.0)
+        lazy.is_diagonal(engine, 0.0),
+        eager.is_diagonal(engine, 0.0)
     );
     assert!(lazy
-        .is_diagonal(engine, crate::typed::ExecOptions::default(), -1.0)
+        .is_diagonal(engine, -1.0)
         .is_invalid_argument("finite and nonnegative"));
     assert_eq!(
         lazy.convert::<Complex64>(engine)
@@ -897,13 +895,13 @@ fn nonidentity_adjoint_transforms_stay_parent_native_for_checked_generic_and_bot
         let eager = source
             .adjoint(engine)
             .unwrap()
-            .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
+            .materialized_tensor_uncached(engine)
             .unwrap();
         assert_parent_native_transform_suite(engine, &source, &eager);
         let eager_c64 = source_c64
             .adjoint(engine)
             .unwrap()
-            .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
+            .materialized_tensor_uncached(engine)
             .unwrap();
         assert_parent_native_transform_suite(engine, &source_c64, &eager_c64);
     }
@@ -1353,9 +1351,7 @@ fn assert_checked_adjoint_contract_and_compose<D>(
     D: TensorScalar + core::fmt::Debug,
 {
     let lazy = source.adjoint(engine).unwrap();
-    let eager = lazy
-        .materialized_tensor_uncached(engine, crate::typed::ExecOptions::default())
-        .unwrap();
+    let eager = lazy.materialized_tensor_uncached(engine).unwrap();
     let spec = |lhs, rhs, codomain, domain| ContractSpec {
         lhs,
         rhs,

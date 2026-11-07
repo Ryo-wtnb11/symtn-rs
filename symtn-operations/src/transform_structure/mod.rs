@@ -15,11 +15,13 @@ use crate::OperationError;
 mod coefficients;
 mod compile;
 mod layout_table;
+mod ownership;
 mod schedule;
 
 pub(crate) use self::coefficients::*;
 pub use self::compile::*;
 pub use self::layout_table::*;
+use self::ownership::*;
 pub use self::schedule::*;
 
 /// Replay-ready tree-transform descriptor: a cheap shared handle. Clone
@@ -124,6 +126,10 @@ impl<T> TreeTransformReplay<T> {
                 core::mem::size_of::<isize>(),
             ))
             .saturating_add(vector_bytes(
+                self.layouts.zero_src_strides.capacity(),
+                core::mem::size_of::<isize>(),
+            ))
+            .saturating_add(vector_bytes(
                 self.layouts.plans.capacity(),
                 core::mem::size_of::<strided_kernel::UpdatePlan>(),
             ))
@@ -140,22 +146,7 @@ impl<T> TreeTransformReplay<T> {
                 self.recoupling_plan.jobs.capacity(),
                 core::mem::size_of::<DenseGemmBatchJob>(),
             ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.singles.capacity(),
-                core::mem::size_of::<u32>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.pack_columns.capacity(),
-                core::mem::size_of::<TreeTransformPackReplay>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.scatter_columns.capacity(),
-                core::mem::size_of::<TreeTransformScatterReplay>(),
-            ))
-            .saturating_add(vector_bytes(
-                self.parallel_schedule.scatter_groups.capacity(),
-                core::mem::size_of::<TreeTransformScatterGroupReplay>(),
-            ))
+            .saturating_add(self.parallel_schedule.retained_bytes())
     }
 }
 
@@ -367,6 +358,7 @@ impl<T: Copy> TreeTransformStructure<T> {
 
     /// Whether `self` and `other` share one coefficient payload allocation.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn shares_coefficients_with(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.core.coefficients, &other.core.coefficients)
     }
@@ -392,8 +384,9 @@ impl<T: Copy> TreeTransformStructure<T> {
         &self.core.recoupling_plan
     }
 
-    /// Test/diagnostic helper: per-block replay weights.
+    /// Test helper: per-block replay weights.
     #[doc(hidden)]
+    #[cfg(any(test, feature = "testing"))]
     pub fn replay_weights(&self) -> Vec<usize> {
         self.core
             .blocks
@@ -618,6 +611,7 @@ mod tests {
         assert_eq!(layouts.fused_dims.capacity(), 4);
         assert_eq!(layouts.fused_dst_strides.capacity(), 4);
         assert_eq!(layouts.entries.capacity(), 5);
+        assert_eq!(layouts.zero_src_strides.capacity(), 1);
         // Both four-element Single roles are planned unless Strided estimates
         // their copy at zero time; the inactive role never is.
         let planned = if KernelClass::Copy.estimate(4).is_zero() {
@@ -626,7 +620,6 @@ mod tests {
             2
         };
         assert_eq!(layouts.plans.capacity(), planned);
-        assert_eq!(compiled.parallel_schedule().singles.capacity(), 2);
         assert_eq!(
             compiled.layouts().inactive_role(4).unwrap(),
             (&[4usize][..], &[1isize][..])

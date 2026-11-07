@@ -37,7 +37,6 @@ pub(super) fn axpby_bond_diagonal<D: TensorScalar>(
 #[allow(clippy::too_many_arguments)]
 fn tree_transform_into_multiplicity_free<R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     source: &TensorMap<R, D, S>,
     destination: &mut TensorMap<R, D, S>,
     alpha: D,
@@ -71,7 +70,7 @@ where
         TypedTensorRepr::Adjoint(_) => None,
     };
     let mut lease = crate::runtime::ContextLease::new();
-    D::lane(lease.context(options))?;
+    D::lane(lease.context())?;
     // A destination proved once to be this operation's result space of
     // this source hits the completed transformer directly: the owned
     // operation and the result space are not rebuilt.
@@ -87,13 +86,10 @@ where
         });
     }
     if let (Some(structure), Some((_, body, data))) = (exact_layout_hit, direct) {
-        options.admit(engine, |engine| {
-            symtn_operations::transform_replay::tree_transform_searches_lanes(engine, &structure, 1)
-        })?;
         let destination_structure = Arc::clone(destination.logical_space().space().structure());
         let nout = destination.codomain_rank();
         let replay = TreeReplay::new::<MultiplicityFreeTreeLane>(
-            (lease, options),
+            lease,
             &structure,
             &destination_structure,
             body.space.space().structure(),
@@ -115,7 +111,7 @@ where
         TypedTensorRepr::Adjoint(view) => Some(&view.parent.space),
     };
     let destination_space = destination.logical_space().space().clone();
-    let staged = D::lane(lease.context(options))?
+    let staged = D::lane(lease.context())?
         .tree_context_mut()
         .stage_tree_transform_into_multiplicity_free_in(
             engine,
@@ -125,19 +121,12 @@ where
             &operation,
             &destination_space,
         )?;
-    options.admit(engine, |engine| {
-        symtn_operations::transform_replay::tree_transform_searches_lanes(
-            engine,
-            staged.structure(),
-            1,
-        )
-    })?;
     let destination_data = destination_storage_mut(destination)?;
     with_transform_into_source(source, &operation, alpha, beta, |input| {
         S::replay_into(
             engine,
             EXEC,
-            TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>((lease, options), &staged),
+            TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(lease, &staged),
             input,
             destination_data,
             alpha,
@@ -165,7 +154,6 @@ where
 #[allow(private_bounds)]
 fn tree_transform_multiplicity_free_owned<R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     tensor: &TensorMap<R, D, S>,
     operation: TreeTransformOperation,
 ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error>
@@ -190,7 +178,7 @@ where
     let src_len = transform_source_len(body)?;
     #[cfg(test)]
     super::probe::hit(super::probe::Event::TreeTransformSeamCall);
-    let staged = D::lane(lease.context(options))?
+    let staged = D::lane(lease.context())?
         .tree_context_mut()
         .stage_tree_transform_multiplicity_free_in(
             engine,
@@ -199,17 +187,10 @@ where
             src_len,
             &operation,
         )?;
-    options.admit(engine, |engine| {
-        symtn_operations::transform_replay::tree_transform_searches_lanes(
-            engine,
-            staged.structure(),
-            1,
-        )
-    })?;
     let data = S::replay_owned(
         engine,
         EXEC,
-        TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>((lease, options), &staged),
+        TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(lease, &staged),
         tensor,
         D::from_real(1.0),
     )?;
@@ -221,7 +202,6 @@ where
 #[allow(private_bounds)]
 fn transform_bond_spectrum_multiplicity_free<R, D>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     tensor: &TensorMap<R, D>,
     spectrum: &[symtn_matrixalgebra::SectorSpectrum<D>],
     operation: &TreeTransformOperation,
@@ -238,7 +218,7 @@ where
 {
     let source = tensor.logical_space();
     let mut lease = crate::runtime::ContextLease::new();
-    let (destination, outcome) = D::lane(lease.context(options))?
+    let (destination, outcome) = D::lane(lease.context())?
         .tree_context_mut()
         .tree_transform_structure_multiplicity_free_in(
             engine,
@@ -280,7 +260,6 @@ impl<R, D> BondTransform<R, D> {
 /// is a lazy adjoint.
 pub(in crate::typed) fn lazy_adjoint_of_transformed_parent<R, D, S>(
     engine: &mut dyn Engine,
-    options: ExecOptions,
     tensor: &TensorMap<R, D, S>,
     operation: &TreeTransformOperation,
 ) -> Result<Option<TensorMap<R, D, S>>, FacadeError<R>>
@@ -300,8 +279,8 @@ where
         runtime: tensor.runtime.clone(),
         repr: TypedTensorRepr::Owned(Arc::clone(&view.parent)),
     }
-    .tree_transform(engine, options, lowered)?
-    .adjoint(&mut Invocation::new(engine, options))
+    .tree_transform(engine, lowered)?
+    .adjoint(&mut *engine)
     .map(Some)
 }
 
@@ -320,7 +299,6 @@ where
 {
     fn transform_bond_spectrum(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self>,
         spectrum: &[symtn_matrixalgebra::SectorSpectrum<Self>],
         operation: &TreeTransformOperation,
@@ -328,7 +306,6 @@ where
     ) -> Result<BondTransform<R, Self>, Error> {
         transform_bond_spectrum_multiplicity_free(
             engine,
-            options,
             tensor,
             spectrum,
             operation,
@@ -338,25 +315,22 @@ where
 
     fn try_lazy_adjoint<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self, S>,
         operation: &TreeTransformOperation,
     ) -> Result<Option<TensorMap<R, Self, S>>, Error> {
-        lazy_adjoint_of_transformed_parent(engine, options, tensor, operation)
+        lazy_adjoint_of_transformed_parent(engine, tensor, operation)
     }
 
     fn transform<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         tensor: &TensorMap<R, Self, S>,
         operation: TreeTransformOperation,
     ) -> Result<(BoundDynamicFusionMapSpace<R>, S), Error> {
-        tree_transform_multiplicity_free_owned(engine, options, tensor, operation)
+        tree_transform_multiplicity_free_owned(engine, tensor, operation)
     }
 
     fn transform_into<S: TransformExec<R, Self>>(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         source: &TensorMap<R, Self, S>,
         destination: &mut TensorMap<R, Self, S>,
         alpha: Self,
@@ -366,7 +340,6 @@ where
     ) -> Result<(), Error> {
         tree_transform_into_multiplicity_free(
             engine,
-            options,
             source,
             destination,
             alpha,

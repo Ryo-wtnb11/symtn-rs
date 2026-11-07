@@ -303,10 +303,14 @@ where
 /// Overwrite a fixed-stride Host batch with one completed tree transform.
 /// Each member uses the exact structure passed at compilation; the workspace
 /// owns only execution scratch and can be reused at a different batch size.
-/// `threads` preserves the ordinary structural schedule for `members == 1`;
-/// larger batches submit member-expanded dense jobs together without an outer
-/// member thread pool. `destination_scales` folds `θ_b` into the moves
-/// writing destination block `b` of every member, as in
+/// One member replays on the ordinary route. A larger batch refuses a
+/// forced batch policy `dense` cannot honor, as the ordinary route does,
+/// and is admitted whole (every member's ranges) before any write; then the
+/// caller's token moves every member at once (the member axis one more
+/// strided dimension of each move) around one dense submission of the
+/// member-expanded GEMM jobs, plan job outer and member inner, stopping at
+/// the first failure. `destination_scales` folds `θ_b` into the moves writing
+/// destination block `b` of every member, as in
 /// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`].
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
@@ -321,7 +325,6 @@ pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
     dst_data: &mut [D],
     src_data: &[D],
     members: usize,
-    threads: usize,
     destination_scales: &[(usize, C)],
 ) -> Result<(), OperationError>
 where
@@ -331,8 +334,9 @@ where
     C: Copy + Sync,
 {
     if members == 1 {
-        // The ordinary entry retains its structural parallel schedule and
-        // already admits the single member before writing its destination.
+        // The ordinary entry runs its own route, refuses an unhonored forced
+        // policy first and admits the single member before writing its
+        // destination.
         return tree_transform_structure_overwrite_with_structural_recoupling_raw(
             engine,
             kernels,
@@ -345,9 +349,9 @@ where
             src_data,
             D::one(),
             destination_scales,
-            threads,
         );
     }
+    refuse_unhonored_policy(engine, dense)?;
     let alpha = DestinationAlpha::new(D::one(), destination_scales)?;
     let task = structure.task_view()?;
     admit::<D, C>(
@@ -360,6 +364,9 @@ where
         &mut workspace.member_ranges,
     )?;
     ensure_recoupling_coefficients(workspace, task, structure.identity_marker())?;
+    // Why the member axis, not the one-member replay per member: the call
+    // then makes one dense submission for every member, as the provider's
+    // batch entry expects, instead of one per member and group.
     let layouts = task.layouts();
     let plan = task.recoupling_plan();
     let src_stride = offset_to_isize(src_structure.required_len()?)?;
@@ -566,20 +573,64 @@ mod tests {
         (blocks, transform)
     }
 
+    /// The built-in executor, counting the products it is handed (the
+    /// default batch entry submits each job through the single product).
     struct CountingDense {
         inner: DefaultDenseExecutor,
-        submissions: usize,
-        jobs: usize,
+        products: usize,
     }
 
     impl Default for CountingDense {
         fn default() -> Self {
             Self {
                 inner: DefaultDenseExecutor::new(),
-                submissions: 0,
-                jobs: 0,
+                products: 0,
             }
         }
+    }
+
+    /// The engines a member batch runs on: one worker, and four workers
+    /// whose token its moves take.
+    fn routes() -> [(symtn_dense::CpuEngine, CountingDense); 2] {
+        [
+            (symtn_dense::CpuEngine::serial(), CountingDense::default()),
+            (
+                crate::host_pool::eager_test_engine(4),
+                CountingDense::default(),
+            ),
+        ]
+    }
+
+    /// The member overwrite of `source` into a destination filled with
+    /// NaN on each of [`routes`].
+    fn on_every_route(
+        transform: &TreeTransformStructure<f64>,
+        blocks: &Arc<BlockStructure>,
+        source: &[Complex64],
+        members: usize,
+    ) -> Vec<Vec<Complex64>> {
+        routes()
+            .into_iter()
+            .map(|(mut engine, mut dense)| {
+                let mut workspace = TreeTransformWorkspace::default();
+                let mut destination = vec![Complex64::new(f64::NAN, f64::NAN); source.len()];
+                tree_transform_members_overwrite_raw(
+                    &mut engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut dense,
+                    &mut workspace,
+                    transform,
+                    blocks,
+                    blocks,
+                    &mut destination,
+                    source,
+                    members,
+                    &[],
+                )
+                .unwrap();
+                destination
+            })
+            .collect()
     }
 
     impl DenseExecutor for CountingDense {
@@ -615,21 +666,18 @@ mod tests {
             self.inner
                 .dot_general_into(engine, output, lhs, rhs, config)
         }
-        fn matmul_batch_axpby_into(
+        fn matmul_axpby_into(
             &mut self,
             engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
-            jobs: &[DenseGemmBatchJob],
-            runs: &[usize],
             alpha: DenseScalar,
             beta: DenseScalar,
         ) -> Result<(), DenseError> {
-            self.submissions += 1;
-            self.jobs += jobs.len();
+            self.products += 1;
             self.inner
-                .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
+                .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
         }
     }
 
@@ -658,30 +706,9 @@ mod tests {
                 &mut destination,
                 &source,
                 members,
-                2,
                 &[],
             )
             .unwrap();
-            assert_eq!(dense.submissions, 1);
-            assert_eq!(dense.jobs, members);
-            if members > 1 {
-                let plan = transform.recoupling_plan();
-                let base = plan.jobs()[0];
-                assert_eq!(workspace.chunk_jobs.len(), members);
-                for (member, job) in workspace.chunk_jobs.iter().enumerate() {
-                    assert_eq!(
-                        job.dst_offset,
-                        member * plan.destination_len() + base.dst_offset
-                    );
-                    assert_eq!(job.lhs_offset, member * plan.source_len() + base.lhs_offset);
-                    assert_eq!(job.rhs_offset, base.rhs_offset);
-                }
-                assert!(workspace
-                    .chunk_jobs
-                    .windows(2)
-                    .all(|jobs| jobs[0].dst_offset + jobs[0].rows * jobs[0].cols
-                        <= jobs[1].dst_offset));
-            }
             for member in 0..members {
                 let [a, b, c, _] = source[4 * member..][..4].try_into().unwrap();
                 assert_eq!(
@@ -694,7 +721,6 @@ mod tests {
 
     #[test]
     fn complex_members_keep_real_structural_scale_and_grouped_rhs() {
-        let engine = &mut symtn_dense::CpuEngine::serial();
         let (blocks, transform) = fixture();
         let source = [
             Complex64::new(1.0, 2.0),
@@ -706,36 +732,19 @@ mod tests {
             Complex64::new(4.0, 2.0),
             Complex64::new(6.0, 2.0),
         ];
-        let mut dst = vec![Complex64::new(f64::NAN, f64::NAN); source.len()];
-        let mut dense = CountingDense::default();
-        tree_transform_members_overwrite_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut dense,
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &blocks,
-            &blocks,
-            &mut dst,
-            &source,
-            2,
-            1,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(dense.submissions, 1);
-        assert_eq!(dense.jobs, 2);
-        for member in 0..2 {
-            let a = source[4 * member];
-            let b = source[4 * member + 1];
-            let c = source[4 * member + 2];
-            let expected = [
-                a + 2.0 * b,
-                3.0 * a + 4.0 * b,
-                -2.0 * c,
-                Complex64::new(0.0, 0.0),
-            ];
-            assert_eq!(&dst[4 * member..4 * member + 4], &expected);
+        for dst in on_every_route(&transform, &blocks, &source, 2) {
+            for member in 0..2 {
+                let a = source[4 * member];
+                let b = source[4 * member + 1];
+                let c = source[4 * member + 2];
+                let expected = [
+                    a + 2.0 * b,
+                    3.0 * a + 4.0 * b,
+                    -2.0 * c,
+                    Complex64::new(0.0, 0.0),
+                ];
+                assert_eq!(&dst[4 * member..4 * member + 4], &expected);
+            }
         }
     }
 
@@ -757,7 +766,6 @@ mod tests {
             &mut dst,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap_err();
@@ -769,11 +777,11 @@ mod tests {
             }
         ));
         assert!(dst.iter().all(|value| value.is_nan()));
-        assert_eq!(dense.submissions, 0);
+        assert_eq!(dense.products, 0);
     }
 
     #[test]
-    fn heterogeneous_multi_blocks_share_one_dense_submission() {
+    fn heterogeneous_multi_blocks_recouple_every_member() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(
             BlockStructure::packed_column_major(
@@ -821,12 +829,9 @@ mod tests {
             &mut destination,
             &source,
             members,
-            1,
             &[],
         )
         .unwrap();
-        assert_eq!(dense.submissions, 1);
-        assert_eq!(dense.jobs, 2 * members);
         for member in 0..members {
             let [a, b, c, d, e, f, g, _] = source[8 * member..8 * member + 8].try_into().unwrap();
             assert_eq!(
@@ -847,7 +852,6 @@ mod tests {
 
     #[test]
     fn conjugated_complex_source_uses_the_task_view_flag() {
-        let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![1]]).unwrap());
         let transform = TreeTransformStructure::compile_structures_with_storage_conjugation(
             &blocks,
@@ -859,7 +863,7 @@ mod tests {
         let source = [Complex64::new(1.0, 2.0), Complex64::new(-3.0, 4.0)];
         let mut destination = [Complex64::new(f64::NAN, f64::NAN); 2];
         tree_transform_members_overwrite_raw(
-            engine,
+            &mut symtn_dense::CpuEngine::serial(),
             &mut StridedHostKernelAdapter::default(),
             &mut CountingDense::default(),
             &mut TreeTransformWorkspace::default(),
@@ -869,7 +873,6 @@ mod tests {
             &mut destination,
             &source,
             2,
-            1,
             &[],
         )
         .unwrap();
@@ -881,7 +884,6 @@ mod tests {
 
     #[test]
     fn conjugated_complex_multi_pack_matches_hand_matrix_action() {
-        let engine = &mut symtn_dense::CpuEngine::serial();
         let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![1], vec![1]]).unwrap());
         let transform = TreeTransformStructure::compile_structures_with_storage_conjugation(
             &blocks,
@@ -900,32 +902,15 @@ mod tests {
             Complex64::new(-2.0, 4.0),
             Complex64::new(5.0, 3.0),
         ];
-        let mut destination = [Complex64::new(f64::NAN, f64::NAN); 4];
-        let mut dense = CountingDense::default();
-        tree_transform_members_overwrite_raw(
-            engine,
-            &mut StridedHostKernelAdapter::default(),
-            &mut dense,
-            &mut TreeTransformWorkspace::default(),
-            &transform,
-            &blocks,
-            &blocks,
-            &mut destination,
-            &source,
-            2,
-            1,
-            &[],
-        )
-        .unwrap();
-        assert_eq!(dense.submissions, 1);
-        assert_eq!(dense.jobs, 2);
-        for member in 0..2 {
-            let a = source[2 * member].conj();
-            let b = source[2 * member + 1].conj();
-            assert_eq!(
-                &destination[2 * member..2 * member + 2],
-                &[a + 2.0 * b, 3.0 * a + 4.0 * b]
-            );
+        for destination in on_every_route(&transform, &blocks, &source, 2) {
+            for member in 0..2 {
+                let a = source[2 * member].conj();
+                let b = source[2 * member + 1].conj();
+                assert_eq!(
+                    &destination[2 * member..2 * member + 2],
+                    &[a + 2.0 * b, 3.0 * a + 4.0 * b]
+                );
+            }
         }
     }
 
@@ -947,12 +932,11 @@ mod tests {
                 &mut destination,
                 &[1.0; 8],
                 members,
-                1,
                 &[],
             )
             .is_err());
         }
         assert!(destination.iter().all(|value| value.is_nan()));
-        assert_eq!(dense.submissions, 0);
+        assert_eq!(dense.products, 0);
     }
 }

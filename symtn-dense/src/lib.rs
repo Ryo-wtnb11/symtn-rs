@@ -48,9 +48,12 @@ mod block_kernel {
     // per-block vendor calls.
     #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
     pub(crate) mod factor;
-    #[cfg_attr(feature = "cpu-blas-core", allow(dead_code))]
-    pub(crate) mod schedule;
 }
+// The one placement and runner of independent block jobs, which the block
+// kernels, the tree replays and the cold tree compile run on.
+#[cfg(feature = "tenferro")]
+#[doc(hidden)]
+pub mod lanes;
 #[cfg(test)]
 mod probe;
 #[cfg(feature = "tenferro")]
@@ -61,12 +64,10 @@ mod tests;
 pub use dot::DenseDotConfig;
 pub use dtype::{DenseBackend, DenseDType};
 pub use error::DenseError;
-#[doc(hidden)]
-pub use executor::batch_searches_lanes;
 pub use executor::{
     arity_mismatch, check_contiguous_output, strided_batch_runs, strided_batch_runs_into,
     DenseExecutor, DenseFactorization, DenseGemmBatchJob, DenseLinalgScopeBody, DenseOwned,
-    LaneAllocation, MatrixOp,
+    MatrixOp,
 };
 #[doc(hidden)]
 pub use factor_dest::{finite_eigenvalues, EIGH_EIGENVALUE_CHECK};
@@ -77,9 +78,6 @@ pub use scalar::DenseScalar;
 pub use tensor::DenseTensor;
 pub use view::{DenseRead, DenseView, DenseViewMut, DenseWrite};
 
-#[cfg(feature = "tenferro")]
-#[doc(hidden)]
-pub use tenferro_adapter::admit_lane_allocation;
 #[cfg(feature = "tenferro")]
 pub use tenferro_adapter::DefaultDenseExecutor;
 

@@ -211,11 +211,11 @@ impl Runtime {
         )
     }
 
-    /// The dense executor of one factorization running with `options`:
+    /// The dense executor of one factorization:
     /// descriptors and job scratch owned by this invocation, dropped when it
     /// returns. It owns no threads;
     /// the operation runs it on the caller's engine.
-    pub(crate) fn lease_dense(&self, options: crate::typed::ExecOptions) -> DenseLease {
+    pub(crate) fn lease_dense(&self) -> DenseLease {
         #[cfg(test)]
         {
             crate::typed::probe::hit(crate::typed::probe::Event::DenseLease);
@@ -226,10 +226,8 @@ impl Runtime {
                 };
             }
         }
-        let mut executor = symtn_dense::DefaultDenseExecutor::new();
-        executor.set_lane_allocation(options.lane_allocation());
         DenseLease {
-            executor: Some(Box::new(executor)),
+            executor: Some(Box::new(symtn_dense::DefaultDenseExecutor::new())),
             #[cfg(test)]
             injected: false,
         }

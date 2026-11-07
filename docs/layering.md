@@ -131,7 +131,7 @@ to observe, clear or size them.
 | Completed tree transformer | Rule, mode, coefficient type, operation/scope, orientation, basis/storage conventions and source/destination content identities | `symtn-tensors` |
 | Composed transformation coefficients | Rule, mode, coefficient type, operation/scope, orientation and ordered source tree group; no degeneracies or content identities | `symtn-tensors` |
 | Dense GEMM plans | Scalar type, block extents, effective A/B/D strides and conjugation; no offsets, values, coefficients or engine settings | `symtn-dense` (native provider) |
-| Lane allocations | Kernel family (GEMM or factorization, which fixes the grant), the call's lane allocation (`LaneAllocation`), engine budget, work model, mean work, team, dispatch costs, per-block serial times and grant inputs; no offsets, values or engine identity | `symtn-dense` (native provider) |
+| Block lane allocations | Kernel kind (GEMM or factorization), engine budget, work model, team, dispatch cost at every width, mean work, and each block's serial time and grant inputs; no values or offsets | `symtn-dense` (native provider) |
 
 A degeneracy-only change can reuse sector structure and composed coefficients.
 Unique fusion bypasses the composed-coefficient cache. Checked Generic

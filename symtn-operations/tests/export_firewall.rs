@@ -275,6 +275,8 @@ const CRATE_INTERNAL: &[&str] = &[
     "direct_group_matrix_offset",
     "validate_recoupling_lens",
     "with_host_pool",
+    // The batch policy a replay reads to refuse an unhonored forced policy.
+    "batch_policy",
     // Unrouted replay entries.
     "tree_transform_structure_overwrite_with_structural_recoupling",
     "tree_transform_structure_with_structural_recoupling_raw",

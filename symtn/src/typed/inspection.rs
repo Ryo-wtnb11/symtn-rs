@@ -82,7 +82,7 @@ where
     /// broken. On CUDA also [`Error::PlacementMismatch`] for a payload of
     /// another device or engine, and CUDA backend errors.
     pub fn materialize(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<Self, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.materialize_impl(engine)
     }
 
@@ -187,18 +187,14 @@ where
     /// Infallible for the reason [`TypedTensorBody::materialized_dense_data`]
     /// is: the diagonal fill is total on a bond space this module built from
     /// that same spectrum.
-    pub(super) fn shareable_dense_payload(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Arc<TypedData<D>> {
+    pub(super) fn shareable_dense_payload(&self, engine: &mut dyn Engine) -> Arc<TypedData<D>> {
         if let Some(body) = self.owned_body() {
             if matches!(body.data.as_ref(), TypedData::Dense(_)) {
                 return Arc::clone(&body.data);
             }
         }
         let materialized = self
-            .materialize(&mut Invocation::new(engine, options))
+            .materialize(&mut *engine)
             .expect("a pre-admitted typed tensor must materialize");
         Arc::clone(
             &materialized
@@ -214,10 +210,9 @@ where
     pub(super) fn materialized_tensor_uncached(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
     ) -> Result<Self, Error> {
         match &self.repr {
-            TypedTensorRepr::Adjoint(_) => self.materialize(&mut Invocation::new(engine, options)),
+            TypedTensorRepr::Adjoint(_) => self.materialize(&mut *engine),
             TypedTensorRepr::Owned(_) => Ok(self.clone()),
         }
     }
@@ -337,7 +332,7 @@ where
     where
         I: IntoIterator<Item = SectorSpectrum<R::Sector, D>>,
     {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::diagonal_impl(engine, runtime, bond, spectra)
     }
 
@@ -491,7 +486,7 @@ where
         &self,
         cx: &mut (impl ExecContext + ?Sized),
     ) -> Result<Vec<SectorSpectrum<R::Sector, D>>, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.diagview_impl(engine)
     }
 
@@ -609,12 +604,7 @@ where
     /// non-finite tolerances are rejected before every shortcut.
     ///
     /// Scale `tol` to the payload dtype, as [`FactorizationScalar`] describes.
-    pub(crate) fn is_diagonal(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-        tol: f64,
-    ) -> Result<bool, Error> {
+    pub(crate) fn is_diagonal(&self, engine: &mut dyn Engine, tol: f64) -> Result<bool, Error> {
         if !tol.is_finite() || tol < 0.0 {
             return Err(Error::InvalidArgument(
                 "diagonal tolerance must be finite and nonnegative".into(),
@@ -626,7 +616,7 @@ where
         if self.rank() != 2 || self.codomain_rank() != 1 || self.domain_rank() != 1 {
             return Ok(false);
         }
-        let materialized = self.materialized_tensor_uncached(engine, options)?;
+        let materialized = self.materialized_tensor_uncached(engine)?;
         let data_payload = materialized
             .owned_body()
             .expect("uncached materialization is owned")

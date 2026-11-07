@@ -1,16 +1,17 @@
 //! The block kernels' one lane driver: a kernel describes one block's work
 //! and execution ([`BlockOp`]); the driver enters the kernel's guarded engine
 //! entry, turns the work into times with the one cost function, allocates the
-//! lanes and runs every block, returning the lowest-indexed failure.
+//! lanes with [`lanes::allocate`] and runs every block on
+//! [`lanes::run_native`], returning the lowest-indexed failure.
 
 use std::time::Duration;
 
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use super::schedule::{self, AllocationScratch, GrantKey, LaneJobs};
-use crate::tenferro_adapter::{lane_allocation_unsupported, tenferro_error};
-use crate::{DenseError, LaneAllocation};
+use crate::lanes::{self, GrantKey, LaneAllocationCache, LaneTables};
+use crate::tenferro_adapter::tenferro_error;
+use crate::DenseError;
 
 /// The guarded engine entry a kernel runs under: a panic inside either marks
 /// the engine broken.
@@ -24,8 +25,7 @@ pub(crate) enum Entry {
 }
 
 /// The dependency whose own model turns a block's work into time, and the
-/// family of its grant: the lane-allocation cache keys it, so two kinds never
-/// share an allocation.
+/// family of its grant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
@@ -33,6 +33,30 @@ pub(crate) enum OpKind {
     /// The engine's `WorkModel`, from which tlinalg makes its own width
     /// decision for a factorization (see `factor::grant`).
     Factorization,
+}
+
+/// A nanosecond estimate as the dependency normalizes it (`tcontract-exec`
+/// `exec.rs: ns_duration`): NaN and nonpositive are zero, huge saturates.
+pub(crate) fn estimate(ns: f64) -> Duration {
+    if ns.is_nan() || ns <= 0.0 {
+        Duration::ZERO
+    } else if ns >= 1e18 {
+        Duration::from_secs(u64::MAX / 4)
+    } else {
+        Duration::from_secs_f64(ns * 1e-9)
+    }
+}
+
+/// Serial time of `work` weighted multiply-adds under the engine's work model,
+/// mirroring `tcontract-exec` `batch.rs: item_ns` (a rate that is not `> 0`,
+/// NaN included, counts as 1).
+pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
+    let rate = if model.muladds_per_ns > 0.0 {
+        model.muladds_per_ns
+    } else {
+        1.0
+    };
+    model.item_overhead_ns + work / rate
 }
 
 /// The estimated serial time of `work` weighted multiply-adds (four per
@@ -44,11 +68,14 @@ pub(crate) enum OpKind {
 /// `tcontract-exec` `item_ns`) for a factorization. Neither is calibrated
 /// here; both move to the providers' own estimates when they publish them.
 pub(crate) fn cost(kind: OpKind, work: f64, model: &WorkModel) -> Duration {
-    schedule::estimate(match kind {
+    estimate(match kind {
         OpKind::Gemm => 2.0 * work * tcontract::ns_per_flop(),
-        OpKind::Factorization => schedule::work_model_ns(model, work),
+        OpKind::Factorization => work_model_ns(model, work),
     })
 }
+
+/// A lane's blocks, handed out one by one to the visitor it is called with.
+pub(crate) type LaneMembers<'v, J> = dyn FnMut(&mut dyn FnMut(&mut J)) + 'v;
 
 /// One kernel's blocks: what the driver needs to cost and run each one.
 /// Validation that must precede the entry, and the outputs a block produces,
@@ -56,6 +83,9 @@ pub(crate) fn cost(kind: OpKind, work: f64, model: &WorkModel) -> Duration {
 pub(crate) trait BlockOp: Sync {
     /// One block's exclusive state: its validated operands and its output.
     type Job: Send;
+    /// One lane's state, made on the caller before the fork; its blocks run
+    /// with it in order on the lane's thread.
+    type Lane: Send;
     const ENTRY: Entry;
     const KIND: OpKind;
     /// The `DenseError` label of a refused entry.
@@ -73,7 +103,7 @@ pub(crate) trait BlockOp: Sync {
 
     /// The width block `index`'s provider takes on a lane of `budget`
     /// reserved slots of `exec`, for a block of serial time `serial`: the
-    /// scheduler's model of that provider's own width decision, composed from
+    /// placement's model of that provider's own width decision, composed from
     /// the provider's public decisions. Consulted only for a batch whose
     /// every block is [`modeled`](Self::modeled).
     fn grant(
@@ -89,13 +119,9 @@ pub(crate) trait BlockOp: Sync {
     /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
     fn grant_key(&self, index: usize, job: &Self::Job) -> GrantKey;
 
-    /// A lane's own scratch, built once per lane before its first block runs
-    /// and dropped when the lane finishes.
-    type Lane;
-
-    /// Builds one lane's [`Lane`](Self::Lane) from that lane's blocks and its
-    /// child context, before any of them runs.
-    fn lane(&self, jobs: &mut dyn LaneJobs<Self::Job>, exec: &Exec<'_>) -> Self::Lane;
+    /// Builds one lane's [`Lane`](Self::Lane) from that lane's blocks
+    /// (`visit` hands out each one) on a context of the lane's share.
+    fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> Self::Lane;
 
     /// Runs block `index` on its lane's execution context with its lane's
     /// scratch.
@@ -108,117 +134,127 @@ pub(crate) trait BlockOp: Sync {
     ) -> Result<(), DenseError>;
 }
 
-/// The driver's reusable staging: the per-block times and the lane tables.
-/// An owner that submits repeatedly keeps one, so a warm submission reuses
-/// every capacity.
-#[derive(Debug, Default)]
-pub(crate) struct LaneScratch {
-    times: Vec<Duration>,
-    allocation: AllocationScratch,
+/// The runner's view of a kernel's blocks.
+struct Running<'a, B> {
+    op: &'a B,
+    count: usize,
 }
 
-impl LaneScratch {
-    /// The capacities kept, in bytes. Saturates.
-    pub(crate) fn retained_bytes(&self) -> usize {
-        self.times
-            .capacity()
-            .saturating_mul(std::mem::size_of::<Duration>())
-            .saturating_add(self.allocation.retained_bytes())
+impl<B: BlockOp> lanes::Work for Running<'_, B> {
+    type Job = B::Job;
+    type Lane = B::Lane;
+    type Error = DenseError;
+    fn count(&self) -> usize {
+        self.count
+    }
+    fn run(
+        &self,
+        job: usize,
+        state: &mut B::Job,
+        lane: &mut B::Lane,
+        exec: Exec<'_>,
+    ) -> Result<(), DenseError> {
+        self.op.run(job, state, lane, exec)
     }
 }
 
-/// Runs every block of `jobs` on `cpu`'s lanes inside `B::ENTRY`, staged in
-/// `scratch`, placed by `allocation` (see [`schedule::allocate_in`]), and
-/// returns the lowest-indexed block's error. Every block runs
+/// Runs every block of `jobs` on `cpu`'s lanes inside `B::ENTRY`, placed in
+/// `tables`, and returns the lowest-indexed block's error. Every block runs
 /// even after another fails; a panicking block unwinds after the lanes join
 /// and leaves the engine broken.
 pub(crate) fn drive<B: BlockOp>(
     cpu: &mut CpuEngine,
     op: &B,
     jobs: &mut [B::Job],
-    scratch: &mut LaneScratch,
-    allocation: LaneAllocation,
+    tables: &mut LaneTables,
 ) -> Result<(), DenseError> {
     let entered = match B::ENTRY {
         Entry::Contraction => {
-            cpu.with_contraction_exec(|exec, _, _| on_lanes(exec, op, jobs, scratch, allocation))
+            cpu.with_contraction_exec(|exec, _, _| on_lanes(exec, op, jobs, tables))
         }
-        Entry::Linalg => {
-            cpu.with_linalg_pool(|exec, _| on_lanes(exec, op, jobs, scratch, allocation))
-        }
+        Entry::Linalg => cpu.with_linalg_pool(|exec, _| on_lanes(exec, op, jobs, tables)),
     };
     entered
         .map_err(|err| tenferro_error(B::LABEL, err))?
         .map_err(|(_, error)| error)
 }
 
-fn on_lanes<B: BlockOp>(
-    exec: &mut Exec<'_>,
+/// Places `jobs` of `op` on `exec` into `tables`: each block's work turned
+/// into its serial time by [`cost`], and [`lanes::allocate`] offered the
+/// blocks' grants only where it can search and every block is modeled,
+/// through `cache` (the process-global lane-allocation cache in production).
+pub(crate) fn place<B: BlockOp>(
+    exec: &Exec<'_>,
     op: &B,
-    jobs: &mut [B::Job],
-    scratch: &mut LaneScratch,
-    allocation: LaneAllocation,
-) -> tenferro_tensor::Result<Result<(), (usize, DenseError)>> {
+    jobs: &[B::Job],
+    cache: &LaneAllocationCache,
+    tables: &mut LaneTables,
+) {
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
-    scratch.times.clear();
-    // One `extend` reserves from the job iterator's size hint up front, as
-    // the former per-kernel cost staging did, instead of growing by pushes.
-    scratch
-        .times
-        .extend(jobs.iter().enumerate().map(|(index, job)| {
-            let work = op.work(index, job);
-            total_work += work;
-            cost(B::KIND, work, &model)
-        }));
-    // A batch the search would place (two or more modeled blocks) refuses a
-    // selection a forced policy overrides, before any block runs, rather than
-    // silently running the forced placement.
-    if allocation != LaneAllocation::Moldable
-        && exec.batch_policy().strategy != tcontract_exec::BatchStrategy::Auto
-        && jobs.len() >= 2
-        && jobs
-            .iter()
-            .enumerate()
-            .all(|(index, job)| op.modeled(index, job))
-    {
-        return Ok(Err((
-            0,
-            lane_allocation_unsupported(
-                "a forced batch policy fixes the placement; use the default lane allocation",
-            ),
-        )));
-    }
+    let mut times = tables.take_times();
+    // One `extend` reserves from the job iterator's size hint up front.
+    times.extend(jobs.iter().enumerate().map(|(index, job)| {
+        let work = op.work(index, job);
+        total_work += work;
+        cost(B::KIND, work, &model)
+    }));
     let mean_work = total_work / jobs.len().max(1) as f64;
-    let shared: &Exec<'_> = exec;
     // Admission is read only where the allocation can search, so a serial or
     // forced allocation computes no grant input for its blocks.
-    let modeled = schedule::searchable(shared, &scratch.times, mean_work)
+    let modeled = lanes::searchable(exec, &times, mean_work)
         && jobs
             .iter()
             .enumerate()
             .all(|(index, job)| op.modeled(index, job));
     let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
-        op.grant(j, &jobs[j], shared, budget, serial)
+        op.grant(j, &jobs[j], exec, budget, serial)
     });
-    let allocation = schedule::allocate_in(
-        shared,
-        &scratch.times,
-        (B::KIND, allocation, |j| op.grant_key(j, &jobs[j])),
+    lanes::allocate(
+        exec,
+        &times,
+        (B::KIND, |j| op.grant_key(j, &jobs[j])),
         mean_work,
-        &mut scratch.allocation,
-        schedule::lane_allocations(),
         grant,
+        cache,
+        tables,
     );
-    let result = schedule::run_with_lanes(
+    tables.keep_times(times);
+}
+
+fn on_lanes<B: BlockOp>(
+    exec: &mut Exec<'_>,
+    op: &B,
+    jobs: &mut [B::Job],
+    tables: &mut LaneTables,
+) -> tenferro_tensor::Result<lanes::Outcome<DenseError>> {
+    place(exec, op, jobs, lanes::lane_allocations(), tables);
+    let placement = tables.placement();
+    #[cfg(test)]
+    crate::probe::add(crate::probe::Event::BlockLanes, placement.lanes());
+    let mut lane_states = Vec::with_capacity(placement.lanes());
+    for l in 0..placement.lanes() {
+        let lane_exec = exec.reborrow().limit(
+            std::num::NonZeroUsize::new(placement.share(l)).unwrap_or(std::num::NonZeroUsize::MIN),
+        );
+        let members = placement.jobs(l);
+        let mut visit = |each: &mut dyn FnMut(&mut B::Job)| {
+            for &j in members {
+                each(&mut jobs[j]);
+            }
+        };
+        lane_states.push(op.lane(&mut visit, &lane_exec));
+    }
+    let running = Running {
+        op,
+        count: jobs.len(),
+    };
+    lanes::run_native(
         exec.reborrow(),
-        &allocation,
+        &running,
+        lanes::Placed { tables },
         jobs,
-        |lane_jobs, exec| op.lane(lane_jobs, exec),
-        |index, job, lane, exec| op.run(index, job, lane, exec),
-    );
-    scratch.allocation.keep(allocation);
-    // A refused lane split is the engine's typed failure under this kernel's
-    // label, like a refused entry.
-    result.map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
+        &mut lane_states,
+    )
+    .map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
 }

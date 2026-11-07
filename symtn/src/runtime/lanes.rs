@@ -69,31 +69,6 @@ fn built<T: Default>(lane: &mut Option<Box<T>>) -> &mut T {
     lane.get_or_insert_with(Box::default)
 }
 
-/// `lane` with both of its dense executors (tree transform and contraction)
-/// set to the current call's lane allocation: every lane handed to a call,
-/// whether built now or kept by a prepared workspace, runs that call's
-/// options, never an earlier call's.
-fn configured<D, Key, C>(
-    lane: &mut CoefficientCtx<D, Key, C>,
-    allocation: symtn_dense::LaneAllocation,
-) -> &mut CoefficientCtx<D, Key, C>
-where
-    D: symtn_tensors::DenseBlockScalar + symtn_tensors::RecouplingCoefficientAction<C>,
-    C: symtn_tensors::DenseBlockScalar,
-    Key: 'static + Clone + Eq + Hash + Send + Sync,
-    DenseTreeTransformOperations:
-        symtn_tensors::TreeTransformBackend<D, C> + symtn_tensors::TensorContractBackend<D, C>,
-{
-    lane.tree_context_mut()
-        .backend_mut()
-        .dense_mut()
-        .set_lane_allocation(allocation);
-    lane.contract_backend_mut()
-        .dense_mut()
-        .set_lane_allocation(allocation);
-    lane
-}
-
 macro_rules! lane_accessor {
     ($name:ident, $field:ident, $variant:ident, $ty:ty) => {
         pub(crate) fn $name(&mut self) -> &mut Ctx<$ty, Key> {
@@ -167,9 +142,6 @@ macro_rules! define_tensor_execution_context {
         pub(crate) struct TensorExecutionContext {
             $(pub(crate) $field: Ctxs<$key>,)+
             mf_c64_coeff_c64: Option<Box<CoefficientCtx<Complex64, RuleIdentity, Complex64>>>,
-            // The current call's lane allocation, applied to every lane
-            // handed out; set by `ContextLease::context` on every call.
-            lane_allocation: symtn_dense::LaneAllocation,
         }
 
         impl TensorExecutionContext {
@@ -177,12 +149,7 @@ macro_rules! define_tensor_execution_context {
                 Self {
                     $($field: Ctxs::default(),)+
                     mf_c64_coeff_c64: None,
-                    lane_allocation: symtn_dense::LaneAllocation::Moldable,
                 }
-            }
-
-            pub(crate) fn set_lane_allocation(&mut self, allocation: symtn_dense::LaneAllocation) {
-                self.lane_allocation = allocation;
             }
 
             /// Returns the multiplicity-free lane matching scalar `D`.
@@ -192,7 +159,7 @@ macro_rules! define_tensor_execution_context {
             pub(crate) fn multiplicity_free_lane<D: ScalarOps>(
                 &mut self,
             ) -> Result<&mut Ctx<D, symtn_core::RuleIdentity>, Error> {
-                Ok(configured(D::ctx_of(&mut self.mf)?, self.lane_allocation))
+                D::ctx_of(&mut self.mf)
             }
 
             /// Returns the statically compatible complex-payload,
@@ -204,7 +171,7 @@ macro_rules! define_tensor_execution_context {
             pub(crate) fn complex_multiplicity_free_lane(
                 &mut self,
             ) -> &mut CoefficientCtx<Complex64, RuleIdentity, Complex64> {
-                configured(built(&mut self.mf_c64_coeff_c64), self.lane_allocation)
+                built(&mut self.mf_c64_coeff_c64)
             }
 
             /// Bytes of call scratch the context's dense executors keep
@@ -220,7 +187,7 @@ macro_rules! define_tensor_execution_context {
             pub(crate) fn generic_lane<D: ScalarOps>(
                 &mut self,
             ) -> Result<&mut Ctx<D, symtn_core::RuleIdentity>, Error> {
-                Ok(configured(D::ctx_of(&mut self.generic)?, self.lane_allocation))
+                D::ctx_of(&mut self.generic)
             }
         }
     };

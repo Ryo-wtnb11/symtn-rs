@@ -67,7 +67,7 @@ fn resolve(
     let source = source.test_bound_space();
     let mut lease = crate::runtime::ContextLease::new();
     lease
-        .context(crate::typed::ExecOptions::default())
+        .context()
         .multiplicity_free_lane::<f64>()
         .unwrap()
         .tree_context_mut()

@@ -16,9 +16,10 @@ use num_traits::{One, Zero};
 use smallvec::SmallVec;
 
 use crate::host_scalar_kernels::{
-    raw_strided_action, validate_raw_strided_bounds, RawStridedAction,
+    raw_action_span, raw_strided_action, validate_raw_strided_bounds,
 };
-use crate::kernel_adapter::apply_fused_pair_slices;
+use crate::kernel_adapter::movement::{span, with_conjugation, Uninit, Write};
+use crate::kernel_adapter::BakedFusedLayout;
 use crate::scalar::scale_value;
 use crate::{ConjugateValue, OperationError};
 
@@ -315,7 +316,6 @@ impl CheckedBlockLayout {
         validate_raw_strided_bounds(src_data.len(), &self.dims, &self.lhs_strides, src_offset)?;
         #[cfg(any(test, feature = "testing"))]
         crate::probe::add(crate::probe::Event::SpanWalk, 1);
-        let op = move |value: T| value.maybe_conj(source_conjugate);
         let Self {
             dims,
             dst_strides,
@@ -324,30 +324,28 @@ impl CheckedBlockLayout {
             ..
         } = self;
         index.resize(dims.len(), 0);
-        macro_rules! run {
-            ($store:expr) => {
-                apply_fused_pair_slices(
-                    dst_data,
-                    src_data,
-                    dims,
-                    dst_strides,
-                    lhs_strides,
-                    dst_offset,
-                    src_offset,
-                    index,
-                    $store,
-                    op,
-                )
-            };
-        }
+        let layout =
+            BakedFusedLayout::from_compiled_normalized_slices(dims, dst_strides, lhs_strides, None);
         if alpha.is_one() {
-            run!(|dst: &mut MaybeUninit<T>, value| {
-                dst.write(value);
-            });
+            with_conjugation!(T, source_conjugate, |map| span::<Uninit, _, T>(
+                dst_data,
+                src_data,
+                layout,
+                dst_offset,
+                src_offset,
+                index,
+                &Write(map),
+            ));
         } else {
-            run!(move |dst: &mut MaybeUninit<T>, value| {
-                dst.write(scale_value(value, alpha));
-            });
+            span::<Uninit, _, T>(
+                dst_data,
+                src_data,
+                layout,
+                dst_offset,
+                src_offset,
+                index,
+                &Write(move |value: T| scale_value(value.maybe_conj(source_conjugate), alpha)),
+            );
         }
         Ok(())
     }
@@ -436,7 +434,6 @@ impl CheckedBlockLayout {
     {
         #[cfg(any(test, feature = "testing"))]
         crate::probe::add(crate::probe::Event::SpanWalk, 1);
-        let op = move |value: T| value.maybe_conj(source_conjugate);
         let Self {
             dims,
             dst_strides,
@@ -446,34 +443,16 @@ impl CheckedBlockLayout {
         } = self;
         let src_strides = if rhs { rhs_strides } else { lhs_strides };
         index.resize(dims.len(), 0);
-        macro_rules! run {
-            ($apply:expr) => {
-                apply_fused_pair_slices(
-                    dst_data,
-                    src_data,
-                    dims,
-                    dst_strides,
-                    src_strides,
-                    dst_offset,
-                    src_offset,
-                    index,
-                    $apply,
-                    op,
-                )
-            };
-        }
-        match raw_strided_action(alpha, beta) {
-            RawStridedAction::Copy => run!(|dst: &mut T, value| *dst = value),
-            RawStridedAction::CopyScale { alpha } => run!(move |dst: &mut T, value| {
-                *dst = scale_value(value, alpha);
-            }),
-            RawStridedAction::Axpy { alpha } => run!(move |dst: &mut T, value| {
-                *dst = *dst + scale_value(value, alpha);
-            }),
-            RawStridedAction::Axpby { alpha, beta } => run!(move |dst: &mut T, value| {
-                *dst = beta * *dst + scale_value(value, alpha);
-            }),
-        }
+        raw_action_span(
+            raw_strided_action(alpha, beta),
+            source_conjugate,
+            dst_data,
+            src_data,
+            BakedFusedLayout::from_compiled_normalized_slices(dims, dst_strides, src_strides, None),
+            dst_offset,
+            src_offset,
+            index,
+        );
     }
 }
 
@@ -494,7 +473,7 @@ fn reaches_each_element_once(dims: &[usize], strides: &[isize]) -> bool {
     true
 }
 
-/// The three-operand form of `apply_fused_pair_slices`: one odometer over the
+/// The three-operand form of the span leaf: one odometer over the
 /// normalized axes, the innermost axis as a contiguous run when all three
 /// operands step by one.
 #[allow(clippy::too_many_arguments)]
@@ -529,7 +508,10 @@ fn apply_fused_triple_slices<Dst, T, Combine>(
                 store(&mut dst[position], lhs[position], rhs[position]);
             }
         } else {
-            for position in 0..inner_len as isize {
+            // Why the bound stays `usize`: a zero-stride extent may exceed
+            // `isize::MAX`, which a signed range end would wrap.
+            for position in 0..inner_len {
+                let position = position as isize;
                 store(
                     &mut dst_data[(dst_base + position * inner_dst) as usize],
                     lhs_data[(lhs_base + position * inner_lhs) as usize],
@@ -565,6 +547,30 @@ mod tests {
     use crate::probe::{take_checked_block_passes, CheckedBlockPasses};
     use crate::tensoradd_raw_strided_kernel;
     use num_complex::Complex64;
+
+    /// What: a zero-stride extent above `isize::MAX` still visits its first
+    /// element rather than walking an empty range. Tested at the walker: the
+    /// public two-source entries send a repeating destination to the two-walk
+    /// sequence, so only an impractically large write-once destination would
+    /// reach this walk with such an extent.
+    #[test]
+    #[should_panic(expected = "first element visited")]
+    fn triple_walk_visits_a_zero_stride_extent_above_isize_max() {
+        let mut index = [0];
+        apply_fused_triple_slices(
+            &mut [7.0_f64],
+            &[2.0_f64],
+            &[3.0_f64],
+            &[isize::MAX as usize + 1],
+            [&[0], &[0], &[0]],
+            [0, 0, 0],
+            &mut index,
+            |dst: &mut f64, lhs, rhs| {
+                assert_eq!((*dst, lhs, rhs), (7.0, 2.0, 3.0));
+                panic!("first element visited");
+            },
+        );
+    }
 
     /// `(shape, [destination, lhs, rhs] strides, [destination, lhs, rhs]
     /// offsets)`: windows of 5-wide parents, as restriction and lazy-adjoint

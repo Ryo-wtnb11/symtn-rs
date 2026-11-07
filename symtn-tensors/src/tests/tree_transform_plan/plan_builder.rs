@@ -1218,7 +1218,7 @@ fn staged_group_scheduler_builds_bounded_balanced_contiguous_batches() {
     ] {
         let batches = partition_staged_groups_for_test((0..group_count).collect(), threads);
         // What: awkward group/thread ratios still create exactly the bounded
-        // task count rather than relying on Rayon's recursive split heuristic.
+        // task count, in contiguous source order.
         assert_eq!(
             batches.iter().map(Vec::len).collect::<Vec<_>>(),
             expected_sizes

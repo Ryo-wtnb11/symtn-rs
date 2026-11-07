@@ -77,6 +77,12 @@ impl<Source, Destination> TreeTransformScratchBuffers<Source, Destination> {
     pub fn source_and_destination_mut(&mut self) -> (&Source, &mut Destination) {
         (&self.source, &mut self.destination)
     }
+
+    /// Both buffers mutably, for a phase that writes both.
+    #[inline]
+    pub(crate) fn split_mut(&mut self) -> (&mut Source, &mut Destination) {
+        (&mut self.source, &mut self.destination)
+    }
 }
 
 #[cfg(test)]

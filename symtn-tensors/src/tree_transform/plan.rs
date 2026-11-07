@@ -1294,150 +1294,17 @@ where
 
 type TransformRows<K, T> = Vec<(K, T)>;
 
-#[cfg(test)]
-mod generic_preflight_tests {
-    use super::{validate_generic_tree_pair_preflight, TreeTransformOperation};
-    use crate::tests::GenericMultiplicityRule;
-    use symtn_core::{
-        BlockKey, BlockSpec, BlockStructure, CoreError, FusionTreeKey, FusionTreePairKey,
-        MultiplicityIndex, SectorId,
-    };
-    use symtn_operations::OperationError;
-
-    #[test]
-    fn generic_preflight_accepts_valid_braid_before_categorical_admission() {
-        let rule = GenericMultiplicityRule;
-        let charge = SectorId::new(1);
-        let vacuum = SectorId::new(0);
-        let valid = FusionTreePairKey::pair(
-            FusionTreeKey::try_new_for_rule(
-                &rule,
-                [charge, charge],
-                vacuum,
-                [false, false],
-                [],
-                [MultiplicityIndex::ONE],
-            )
-            .unwrap(),
-            FusionTreeKey::try_new_for_rule(&rule, [], vacuum, [], [], []).unwrap(),
-        );
-        let valid_structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
-            BlockKey::from(valid),
-            vec![1, 1],
-            0,
-        )
-        .unwrap()])
-        .unwrap();
-
-        validate_generic_tree_pair_preflight(
-            &rule,
-            &TreeTransformOperation::braid([1, 0], [], [0, 1], []),
-            &valid_structure,
-        )
-        .unwrap();
-
-        assert_eq!(
-            FusionTreePairKey::try_pair_from_sector_ids(
-                [charge.id(), charge.id()],
-                [],
-                vacuum.id(),
-                [false, false],
-                [],
-                [],
-                [],
-                [0],
-                [],
-            )
-            .unwrap_err(),
-            CoreError::InvalidMultiplicityIndex { value: 0 }
-        );
-
-        let malformed = FusionTreePairKey::try_pair_from_sector_ids(
-            [charge.id(), charge.id()],
-            [],
-            vacuum.id(),
-            [false, false],
-            [],
-            [],
-            [],
-            [2],
-            [],
-        )
-        .unwrap();
-        let malformed_structure =
-            BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
-                BlockKey::from(malformed),
-                vec![1, 1],
-                0,
-            )
-            .unwrap()])
-            .unwrap();
-        let error = match validate_generic_tree_pair_preflight(
-            &rule,
-            &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
-            &malformed_structure,
-        ) {
-            Ok(_) => panic!("invalid Generic operation unexpectedly admitted"),
-            Err(error) => error,
-        };
-
-        // What: invalid operation syntax retains precedence over malformed
-        // Generic categorical data.
-        assert_eq!(
-            error,
-            OperationError::InvalidPermutation {
-                axes: vec![0, 0],
-                rank: 2
-            }
-        );
-    }
-
-    #[test]
-    fn generic_preflight_checks_rank_syntax_before_opaque_namespace() {
-        let rule = GenericMultiplicityRule;
-        let structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
-            BlockKey::opaque([4, 2]),
-            vec![1, 1],
-            0,
-        )
-        .unwrap()])
-        .unwrap();
-
-        let syntax_error = match validate_generic_tree_pair_preflight(
-            &rule,
-            &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
-            &structure,
-        ) {
-            Ok(_) => panic!("invalid operation unexpectedly admitted"),
-            Err(error) => error,
-        };
-        assert_eq!(
-            syntax_error,
-            OperationError::InvalidPermutation {
-                axes: vec![0, 0],
-                rank: 2
-            }
-        );
-
-        let namespace_error = match validate_generic_tree_pair_preflight(
-            &rule,
-            &TreeTransformOperation::braid([0, 1], [], [0, 1], []),
-            &structure,
-        ) {
-            Ok(_) => panic!("opaque namespace unexpectedly admitted"),
-            Err(error) => error,
-        };
-        // What: Generic and multiplicity-free cold admission share the same
-        // operation-before-namespace boundary.
-        assert_eq!(
-            namespace_error,
-            OperationError::Core(CoreError::ExpectedFusionTreePairKey {
-                actual: symtn_core::BlockKeyKind::Opaque,
-            })
-        );
-    }
-}
-
+/// Builds every input of `inputs` with `build`, in parallel on the caller
+/// engine's width, and returns the outputs in source order, or the first
+/// error in source order.
+///
+/// The fan-out is the lane runner's ([`symtn_dense::lanes`]) with this
+/// compile's own partition: `min(inputs, threads)` contiguous batches
+/// ([`partition_staged_groups`]), each a one-stage job alone on a one-slot
+/// lane, with no estimate. A batch stops at its own first failure and every
+/// other batch runs; the runner reports the lowest-indexed failing batch,
+/// whose first failure is the first in source order. A CUDA engine's
+/// metadata-only compile has a width of one and builds serially.
 fn execute_staged_groups<I, O, F>(
     engine: &mut dyn Engine,
     inputs: Vec<I>,
@@ -1448,6 +1315,8 @@ where
     O: Send,
     F: Fn(I) -> Result<O, OperationError> + Send + Sync,
 {
+    use symtn_dense::lanes::{self, BatchPolicy, Each, Exec};
+
     // The caller engine's width bounds this compile's fan-out.
     let threads = if inputs.len() <= 1 {
         1
@@ -1457,73 +1326,83 @@ where
     if threads <= 1 {
         return inputs.into_iter().map(build).collect();
     }
-
-    use std::sync::Mutex;
-    use symtn_operations::host_pool::fork;
-
-    // One input and one result slot per batch: each job takes its input and
-    // stores its result, so the fold below sees the batches in source order
-    // whatever ran first.
-    let inputs: Vec<Mutex<Option<Vec<I>>>> = partition_staged_groups(inputs, threads)
+    let mut batches = partition_staged_groups(inputs, threads)
         .into_iter()
-        .map(|batch| Mutex::new(Some(batch)))
-        .collect();
-    type Slot<O> = Mutex<Option<Result<Vec<O>, OperationError>>>;
-    let results: Vec<Slot<O>> = inputs.iter().map(|_| Mutex::new(None)).collect();
-    symtn_operations::host_pool::region(
+        .map(|inputs| StagedBatch {
+            inputs,
+            outputs: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let work = StagedBuild {
+        build,
+        count: batches.len(),
+        io: core::marker::PhantomData,
+    };
+    let mut lane_states = vec![(); batches.len()];
+    let ran = symtn_operations::host_pool::region(
         engine,
         symtn_operations::host_pool::HostPoolSite::PlanCompile,
-        |exec| {
-            fork(exec, inputs.len(), |job, _child| {
-                let batch = inputs[job].lock().unwrap_or_else(|p| p.into_inner()).take();
-                if let Some(batch) = batch {
-                    let result = batch.into_iter().map(&build).collect();
-                    *results[job].lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
-                }
-            });
+        |token| {
+            let exec = Exec::from_token(token, None, BatchPolicy::default());
+            lanes::run_native(exec, &work, Each, &mut batches, &mut lane_states)
         },
     )?;
-    let batches = results.into_iter().map(|slot| {
-        // INVARIANT: `fork` runs every job before returning.
-        slot.into_inner()
-            .unwrap_or_else(|p| p.into_inner())
-            .expect("every staged batch ran")
-    });
-    flatten_ordered_batch_results(batches)
-}
-
-fn flatten_ordered_batch_results<O, E>(
-    batches: impl IntoIterator<Item = Result<Vec<O>, E>>,
-) -> Result<Vec<O>, E> {
-    let mut outputs = Vec::new();
-    // Why not stop at the first failing job as it finishes: jobs finish in
-    // scheduling order, so the winning error would be nondeterministic when
-    // several batches fail. Folding ordered batch results here preserves the
-    // serial source-group error precedence without publishing partial state.
-    for batch in batches {
-        outputs.extend(batch?);
+    match ran {
+        Ok(Ok(())) => Ok(batches
+            .into_iter()
+            .flat_map(|batch| batch.outputs)
+            .collect()),
+        Ok(Err((_, error))) => Err(error),
+        // One one-slot lane per batch, at most the engine's width.
+        Err(lanes::Refusal::Context(_)) => Err(OperationError::InvalidArgument {
+            message: "tree transform compile lanes exceed the engine width",
+        }),
+        // Each batch is given its state and lane.
+        Err(_) => Err(OperationError::InvalidArgument {
+            message: "tree transform compile lanes lack a batch state",
+        }),
     }
-    Ok(outputs)
 }
 
-#[cfg(test)]
-mod ordered_batch_tests {
-    use super::flatten_ordered_batch_results;
+/// One batch of [`execute_staged_groups`]: its inputs, then their outputs.
+struct StagedBatch<I, O> {
+    inputs: Vec<I>,
+    outputs: Vec<O>,
+}
 
-    #[test]
-    fn flatten_ordered_batches_selects_first_error_and_preserves_success_order() {
-        // What: collector semantics follow source-batch order even when several
-        // worker results contain distinct errors.
-        let errors = vec![Ok(vec![0, 1]), Err("first"), Err("second")];
-        assert_eq!(flatten_ordered_batch_results(errors), Err("first"));
+/// The batches of [`execute_staged_groups`] as lane jobs.
+struct StagedBuild<F, I, O> {
+    build: F,
+    count: usize,
+    io: core::marker::PhantomData<fn(I) -> O>,
+}
 
-        // What: successful batches flatten without reordering their rows.
-        let successes: Vec<Result<Vec<usize>, &str>> =
-            vec![Ok(vec![0, 1]), Ok(vec![2]), Ok(vec![3, 4])];
-        assert_eq!(
-            flatten_ordered_batch_results(successes),
-            Ok(vec![0, 1, 2, 3, 4])
-        );
+impl<F, I, O> symtn_dense::lanes::Work for StagedBuild<F, I, O>
+where
+    F: Fn(I) -> Result<O, OperationError> + Sync,
+    I: Send,
+    O: Send,
+{
+    type Job = StagedBatch<I, O>;
+    type Lane = ();
+    type Error = OperationError;
+
+    fn count(&self) -> usize {
+        self.count
+    }
+
+    fn run(
+        &self,
+        _: usize,
+        batch: &mut StagedBatch<I, O>,
+        (): &mut (),
+        _: symtn_dense::lanes::Exec<'_>,
+    ) -> Result<(), OperationError> {
+        batch.outputs = core::mem::take(&mut batch.inputs)
+            .into_iter()
+            .map(&self.build)
+            .collect::<Result<_, _>>()?;
+        Ok(())
     }
 }
 
@@ -2958,4 +2837,148 @@ where
         return Ok(());
     }
     Err(OperationError::ExpectedAllCodomainFusionTree { index })
+}
+
+#[cfg(test)]
+mod generic_preflight_tests {
+    use super::{validate_generic_tree_pair_preflight, TreeTransformOperation};
+    use crate::tests::GenericMultiplicityRule;
+    use symtn_core::{
+        BlockKey, BlockSpec, BlockStructure, CoreError, FusionTreeKey, FusionTreePairKey,
+        MultiplicityIndex, SectorId,
+    };
+    use symtn_operations::OperationError;
+
+    #[test]
+    fn generic_preflight_accepts_valid_braid_before_categorical_admission() {
+        let rule = GenericMultiplicityRule;
+        let charge = SectorId::new(1);
+        let vacuum = SectorId::new(0);
+        let valid = FusionTreePairKey::pair(
+            FusionTreeKey::try_new_for_rule(
+                &rule,
+                [charge, charge],
+                vacuum,
+                [false, false],
+                [],
+                [MultiplicityIndex::ONE],
+            )
+            .unwrap(),
+            FusionTreeKey::try_new_for_rule(&rule, [], vacuum, [], [], []).unwrap(),
+        );
+        let valid_structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
+            BlockKey::from(valid),
+            vec![1, 1],
+            0,
+        )
+        .unwrap()])
+        .unwrap();
+
+        validate_generic_tree_pair_preflight(
+            &rule,
+            &TreeTransformOperation::braid([1, 0], [], [0, 1], []),
+            &valid_structure,
+        )
+        .unwrap();
+
+        assert_eq!(
+            FusionTreePairKey::try_pair_from_sector_ids(
+                [charge.id(), charge.id()],
+                [],
+                vacuum.id(),
+                [false, false],
+                [],
+                [],
+                [],
+                [0],
+                [],
+            )
+            .unwrap_err(),
+            CoreError::InvalidMultiplicityIndex { value: 0 }
+        );
+
+        let malformed = FusionTreePairKey::try_pair_from_sector_ids(
+            [charge.id(), charge.id()],
+            [],
+            vacuum.id(),
+            [false, false],
+            [],
+            [],
+            [],
+            [2],
+            [],
+        )
+        .unwrap();
+        let malformed_structure =
+            BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
+                BlockKey::from(malformed),
+                vec![1, 1],
+                0,
+            )
+            .unwrap()])
+            .unwrap();
+        let error = match validate_generic_tree_pair_preflight(
+            &rule,
+            &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
+            &malformed_structure,
+        ) {
+            Ok(_) => panic!("invalid Generic operation unexpectedly admitted"),
+            Err(error) => error,
+        };
+
+        // What: invalid operation syntax retains precedence over malformed
+        // Generic categorical data.
+        assert_eq!(
+            error,
+            OperationError::InvalidPermutation {
+                axes: vec![0, 0],
+                rank: 2
+            }
+        );
+    }
+
+    #[test]
+    fn generic_preflight_checks_rank_syntax_before_opaque_namespace() {
+        let rule = GenericMultiplicityRule;
+        let structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
+            BlockKey::opaque([4, 2]),
+            vec![1, 1],
+            0,
+        )
+        .unwrap()])
+        .unwrap();
+
+        let syntax_error = match validate_generic_tree_pair_preflight(
+            &rule,
+            &TreeTransformOperation::braid([0, 0], [], [0, 1], []),
+            &structure,
+        ) {
+            Ok(_) => panic!("invalid operation unexpectedly admitted"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            syntax_error,
+            OperationError::InvalidPermutation {
+                axes: vec![0, 0],
+                rank: 2
+            }
+        );
+
+        let namespace_error = match validate_generic_tree_pair_preflight(
+            &rule,
+            &TreeTransformOperation::braid([0, 1], [], [0, 1], []),
+            &structure,
+        ) {
+            Ok(_) => panic!("opaque namespace unexpectedly admitted"),
+            Err(error) => error,
+        };
+        // What: Generic and multiplicity-free cold admission share the same
+        // operation-before-namespace boundary.
+        assert_eq!(
+            namespace_error,
+            OperationError::Core(CoreError::ExpectedFusionTreePairKey {
+                actual: symtn_core::BlockKeyKind::Opaque,
+            })
+        );
+    }
 }

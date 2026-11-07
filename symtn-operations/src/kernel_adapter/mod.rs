@@ -15,6 +15,7 @@ use crate::{
 
 mod adapter;
 mod fused_layout;
+pub(crate) mod movement;
 #[cfg(test)]
 pub(crate) mod observed;
 
@@ -42,7 +43,7 @@ mod tests {
                 crate::host_pool::eager_test_pool(threads),
             ] {
                 pool.with_exec(|exec| {
-                    let gate = sealed::LeafGate::new(usize::MAX);
+                    let mut gate = sealed::LeafGate::new(usize::MAX);
                     let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
                     // The first widened count, by bisection on Strided's own
                     // answer, so the sweep also covers its exact boundary.
@@ -62,7 +63,7 @@ mod tests {
                     // A gate bounded by the largest planned role is exact up
                     // to that bound; bound it just past the boundary.
                     let bound = around.last().copied().unwrap_or(4096);
-                    let bounded = sealed::LeafGate::new(bound);
+                    let mut bounded = sealed::LeafGate::new(bound);
                     let mut seen = [false; 2];
                     for &n in elements.iter().chain(&around) {
                         let widens = widens(n);
@@ -271,34 +272,6 @@ mod tests {
                 expected: 2,
                 actual: 1,
             }
-        );
-    }
-
-    #[test]
-    fn fused_span_order_keeps_axis_one_fastest_with_negative_strides() {
-        // What: the shared odometer preserves exact visit order and signed
-        // offset arithmetic while using caller-owned runtime-rank scratch.
-        let mut index = [0; 3];
-        let mut visits = Vec::new();
-        for_each_fused_span(
-            &[3, 2, 2],
-            &[1, 10, -100],
-            &[2, -20, 200],
-            300,
-            60,
-            &mut index,
-            |dst, src, len, dst_stride, src_stride| {
-                visits.push((dst, src, len, dst_stride, src_stride));
-            },
-        );
-        assert_eq!(
-            visits,
-            [
-                (300, 60, 3, 1, 2),
-                (310, 40, 3, 1, 2),
-                (200, 260, 3, 1, 2),
-                (210, 240, 3, 1, 2),
-            ]
         );
     }
 
@@ -557,72 +530,86 @@ mod tests {
         );
     }
 
+    /// `dst = alpha * src` (or `dst + alpha * src` for `accumulate`) on the
+    /// one span leaf, through the adapter's unbaked serial walk.
+    #[allow(clippy::too_many_arguments)]
+    fn walk(
+        dst: &mut [f64],
+        src: &[f64],
+        shape: &[usize],
+        dst_strides: &[isize],
+        src_strides: &[isize],
+        offsets: (isize, isize),
+        alpha: f64,
+        accumulate: bool,
+    ) {
+        let mut adapter = StridedHostKernelAdapter::default();
+        let beta = if accumulate { 1.0 } else { 0.0 };
+        adapter
+            .add_strided_baked(
+                strided_kernel::Exec::serial(),
+                &mut Vec::new(),
+                dst,
+                src,
+                shape,
+                dst_strides,
+                src_strides,
+                offsets.0,
+                offsets.1,
+                false,
+                alpha,
+                beta,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
     #[test]
-    fn apply_fused_pair_copies_transposed_layout_exactly() {
+    fn span_copies_transposed_layout_exactly() {
         // dst[j * 2 + i] = 2 * src[i * 3 + j] over a logical [2, 3] iteration:
         // exact element placement through non-fusable permuted strides.
         let src = [1.0_f64, 2.0, 3.0, 4.0, 5.0, 6.0];
         let mut dst = [0.0_f64; 6];
-        let mut scratch = StridedKernelScratch::default();
-        fused_pair(
-            &mut scratch,
+        walk(
             &mut dst,
             &src,
             &[2, 3],
             &[1, 2],
             &[3, 1],
-            0,
-            0,
-            |dst, value| *dst = value,
-            |value| 2.0 * value,
-        )
-        .unwrap();
+            (0, 0),
+            2.0,
+            false,
+        );
         assert_eq!(dst, [2.0, 8.0, 4.0, 10.0, 6.0, 12.0]);
     }
 
     #[test]
-    fn apply_fused_pair_accumulates_with_offsets() {
+    fn span_accumulates_with_offsets() {
         let src = [0.0_f64, 1.0, 2.0];
         let mut dst = [10.0_f64, 20.0, 30.0];
-        let mut scratch = StridedKernelScratch::default();
-        fused_pair(
-            &mut scratch,
-            &mut dst,
-            &src,
-            &[2],
-            &[1],
-            &[1],
-            1,
-            1,
-            |dst, value| *dst += value,
-            |value| 3.0 * value,
-        )
-        .unwrap();
+        walk(&mut dst, &src, &[2], &[1], &[1], (1, 1), 3.0, true);
         assert_eq!(dst, [10.0, 23.0, 36.0]);
     }
 
     #[test]
-    fn fused_pair_dynamic_rank_matches_reference() {
+    fn span_dynamic_rank_matches_reference() {
         let shape = [2usize; 9];
         let src_strides = row_major(&shape);
         let dst_strides: Vec<isize> = src_strides.iter().rev().copied().collect();
         let src: Vec<f64> = (0..512).map(|value| value as f64 - 100.0).collect();
 
         let mut dst = vec![0.0_f64; 512];
-        let mut scratch = StridedKernelScratch::default();
-        fused_pair(
-            &mut scratch,
+        walk(
             &mut dst,
             &src,
             &shape,
             &dst_strides,
             &src_strides,
-            0,
-            0,
-            |dst, value| *dst = value,
-            |value| value,
-        )
-        .unwrap();
+            (0, 0),
+            1.0,
+            false,
+        );
 
         let mut dst_reference = vec![0.0_f64; 512];
         reference_copy(&mut dst_reference, &src, &shape, &dst_strides, &src_strides);
@@ -630,23 +617,19 @@ mod tests {
     }
 
     #[test]
-    fn fused_pair_zero_extent_shape_is_a_noop() {
+    fn span_zero_extent_shape_is_a_noop() {
         let src = [1.0_f64; 4];
         let mut dst = [9.0_f64; 4];
-        let mut scratch = StridedKernelScratch::default();
-        fused_pair(
-            &mut scratch,
+        walk(
             &mut dst,
             &src,
             &[2, 0],
             &[1, 2],
             &[1, 2],
-            0,
-            0,
-            |dst, value| *dst = value,
-            |value| value,
-        )
-        .unwrap();
+            (0, 0),
+            1.0,
+            false,
+        );
         assert_eq!(dst, [9.0; 4]);
     }
 

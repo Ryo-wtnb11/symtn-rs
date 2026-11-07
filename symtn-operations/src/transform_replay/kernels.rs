@@ -57,14 +57,14 @@ where
     Ok(())
 }
 
-/// One Single block of compiled replay on the caller's token share: the
-/// adapter's planned overwrite when `gate` (built from that share) widens the
-/// block, the strided kernel otherwise.
-#[inline]
+/// One Single block of compiled replay on the caller's token share, into
+/// `dst_data` whose first element is destination element `dst_start`: the
+/// adapter's planned overwrite when Strided widens the block on that share
+/// ([`admitted_plan`]), the strided kernel otherwise.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -74,6 +74,7 @@ pub(super) fn tree_transform_single_on_token<A, D, C>(
     coefficient: C,
     source_conjugate: bool,
     dst_data: &mut [D],
+    dst_start: isize,
     src_data: &[D],
     alpha: D,
     mode: DestinationMode<D>,
@@ -94,6 +95,7 @@ where
 {
     let role = layouts.role(dst_index)?;
     let dst = layouts.entry(dst_index);
+    let dst_offset = dst.offset - dst_start;
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
     if mode.overwrites() {
@@ -104,7 +106,7 @@ where
                 role,
                 dst_data,
                 src_data,
-                dst.offset,
+                dst_offset,
                 src_offset,
                 source_conjugate,
                 scale,
@@ -121,7 +123,7 @@ where
         role.dims(),
         role.dst_strides(),
         role.src_strides(),
-        dst.offset,
+        dst_offset,
         src_offset,
         source_conjugate,
         scale,
@@ -412,13 +414,13 @@ where
 }
 
 /// One recoupling scatter column of compiled replay on the caller's token
-/// share: the adapter's planned overwrite when `gate` (built from that share)
-/// widens the column, the strided scatter otherwise.
-#[inline]
+/// share, into `dst_data` whose first element is destination element
+/// `dst_start`: the adapter's planned overwrite when Strided widens the
+/// column on that share ([`admitted_plan`]), the strided scatter otherwise.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -427,15 +429,25 @@ pub(super) fn scatter_column_on_token<A, T>(
     packed: &[T],
     packed_offset: usize,
     dst_data: &mut [T],
+    dst_start: isize,
     alpha: T,
     mode: DestinationMode<T>,
 ) -> Result<(), OperationError>
 where
     A: HostKernelAdapter<T>,
-    T: Copy + Send + Sync + Add<T, Output = T> + Mul<T, Output = T> + PartialEq + Zero + One,
+    T: Copy
+        + Send
+        + Sync
+        + Add<T, Output = T>
+        + Mul<T, Output = T>
+        + PartialEq
+        + Zero
+        + One
+        + ConjugateValue,
 {
     let role = layouts.role(entry_index)?;
     let dst = layouts.entry(entry_index);
+    let dst_offset = dst.offset - dst_start;
     let packed_offset = offset_to_isize(packed_offset)?;
     if mode.overwrites() {
         if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
@@ -445,7 +457,7 @@ where
                 role,
                 dst_data,
                 packed,
-                dst.offset,
+                dst_offset,
                 packed_offset,
                 alpha,
             ) {
@@ -459,7 +471,7 @@ where
         zero_strides,
         fused_index,
         role,
-        dst.offset,
+        dst_offset,
         packed,
         packed_offset,
         dst_data,
@@ -504,9 +516,8 @@ where
 }
 
 /// A scatter column's strided kernel over its resolved role and offsets.
-#[inline]
 #[allow(clippy::too_many_arguments)]
-fn scatter_role<A, T>(
+pub(super) fn scatter_role<A, T>(
     exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
@@ -562,11 +573,8 @@ pub(super) fn recoupling_multi_block<C: Copy>(
     task: TreeTransformTaskView<'_, C>,
     block_index: usize,
 ) -> Result<&TreeTransformBlock, OperationError> {
-    // Lazy error construction: recoupling_multi_block is called per block on the
-    // hot replay path (pack/recouple/scatter). Eager .ok_or built the
-    // BlockIndexOutOfBounds struct on every success too, which the d=4 bisect
-    // (see issue #103) attributed to the compose regression. .ok_or_else only
-    // builds it on the never-taken out-of-bounds path.
+    // Why not `.ok_or`: this runs per block on the hot replay path, and an
+    // eager error value would be built on every success.
     let block =
         task.blocks()
             .get(block_index)
@@ -585,6 +593,7 @@ pub(super) fn recoupling_multi_block<C: Copy>(
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 pub(super) fn scale_inactive_destinations<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
     kernels: &mut A,
@@ -687,17 +696,15 @@ mod allocation_replay_tests {
             _rhs: DenseRead<'_>,
             _config: &DenseDotConfig,
         ) -> Result<(), DenseError> {
-            unreachable!("tree replay uses the batched matmul entry point")
+            unreachable!("tree replay uses the accumulate-form matmul")
         }
 
-        fn matmul_batch_axpby_into(
+        fn matmul_axpby_into(
             &mut self,
             _engine: &mut dyn Engine,
             output: DenseWrite<'_>,
             lhs: DenseRead<'_>,
             rhs: DenseRead<'_>,
-            jobs: &[DenseGemmBatchJob],
-            _runs: &[usize],
             _alpha: DenseScalar,
             _beta: DenseScalar,
         ) -> Result<(), DenseError> {
@@ -707,24 +714,21 @@ mod allocation_replay_tests {
                 }
                 _ => unreachable!("allocation oracle uses f64"),
             };
-            let output_offset = output.offset();
-            let lhs_offset = lhs.offset();
-            let rhs_offset = rhs.offset();
+            let [rows, contracted] = *lhs.shape() else {
+                unreachable!("a matrix product")
+            };
+            let cols = rhs.shape()[1];
+            let (output_offset, lhs_offset, rhs_offset) =
+                (output.offset(), lhs.offset(), rhs.offset());
             let output_data = output.data_mut();
-            for job in jobs {
-                for col in 0..job.cols {
-                    for row in 0..job.rows {
-                        let mut value = 0.0;
-                        for contracted in 0..job.contracted {
-                            value += lhs.data()
-                                [lhs_offset + job.lhs_offset + row + contracted * job.rows]
-                                * rhs.data()[rhs_offset
-                                    + job.rhs_offset
-                                    + contracted
-                                    + col * job.contracted];
-                        }
-                        output_data[output_offset + job.dst_offset + row + col * job.rows] = value;
+            for col in 0..cols {
+                for row in 0..rows {
+                    let mut value = 0.0;
+                    for k in 0..contracted {
+                        value += lhs.data()[lhs_offset + row + k * rows]
+                            * rhs.data()[rhs_offset + k + col * contracted];
                     }
+                    output_data[output_offset + row + col * rows] = value;
                 }
             }
             Ok(())
@@ -732,7 +736,7 @@ mod allocation_replay_tests {
     }
 
     #[test]
-    fn warm_threaded_replay_has_no_owned_allocations() {
+    fn warm_custom_executor_replay_on_a_wide_engine_has_no_owned_allocations() {
         let block_structure = Arc::new(
             BlockStructure::packed_column_major(1, [vec![4], vec![4], vec![4], vec![4]]).unwrap(),
         );
@@ -775,27 +779,19 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 0.0,
-                3,
             )
             .unwrap();
         };
 
         pool.install(&mut replay);
-        let (joins, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| {
-                allocation_oracle::with_measurement(|| {
-                    replay(engine);
-                    allocation_oracle::join_entries()
-                })
-            })
-        });
-        assert_eq!(allocations, 0);
-        assert!(joins > 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
     #[test]
-    fn warm_threaded_overwrite_replay_has_no_owned_allocations() {
+    fn warm_custom_executor_overwrite_on_a_wide_engine_has_no_owned_allocations() {
         let block_structure = Arc::new(
             BlockStructure::packed_column_major(1, [vec![4], vec![4], vec![4], vec![4]]).unwrap(),
         );
@@ -839,16 +835,14 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 &[],
-                3,
             )
             .unwrap();
         };
 
         pool.install(&mut replay);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
-        });
-        assert_eq!(allocations, 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
@@ -902,16 +896,14 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 &[],
-                3,
             )
             .unwrap();
         };
 
         pool.install(&mut replay);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| allocation_oracle::with_measurement(|| replay(engine)))
-        });
-        assert_eq!(allocations, 0);
+        let ((), allocations) =
+            pool.install(|engine| crate::counting_alloc::measure(|| replay(engine)));
+        assert_eq!(allocations.calls, 0);
         assert_eq!(dst, expected);
     }
 
@@ -973,7 +965,6 @@ mod allocation_replay_tests {
             &src,
             1.0,
             0.0,
-            1,
         )
         .unwrap();
         assert_eq!(serial, expected);
@@ -996,35 +987,31 @@ mod allocation_replay_tests {
                 &src,
                 1.0,
                 0.0,
-                3,
             )
             .unwrap();
         });
 
         assert_eq!(threaded, expected);
         threaded.fill(0.0);
-        let (_, allocations) = allocation_oracle::with_session(|| {
-            pool.install(|engine| {
-                allocation_oracle::with_measurement(|| {
-                    tree_transform_structure_with_structural_recoupling_raw(
-                        engine,
-                        &mut kernels,
-                        &mut dense,
-                        &mut workspace,
-                        &structure,
-                        &block_structure,
-                        &block_structure,
-                        &mut threaded,
-                        &src,
-                        1.0,
-                        0.0,
-                        3,
-                    )
-                    .unwrap();
-                })
+        let ((), allocations) = pool.install(|engine| {
+            crate::counting_alloc::measure(|| {
+                tree_transform_structure_with_structural_recoupling_raw(
+                    engine,
+                    &mut kernels,
+                    &mut dense,
+                    &mut workspace,
+                    &structure,
+                    &block_structure,
+                    &block_structure,
+                    &mut threaded,
+                    &src,
+                    1.0,
+                    0.0,
+                )
+                .unwrap();
             })
         });
-        assert_eq!(allocations, 0);
+        assert_eq!(allocations.calls, 0);
         assert_eq!(threaded, expected);
     }
 }

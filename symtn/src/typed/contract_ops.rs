@@ -75,14 +75,13 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         other: impl Into<TensorRef<'a, R, D>>,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.otimes_impl(engine, options, other)
+        let engine = cx.engine();
+        self.otimes_impl(engine, other)
     }
 
     fn otimes_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D>>,
     ) -> Result<Self, FacadeError<R>> {
         let other = other.into().operand()?;
@@ -91,8 +90,8 @@ where
         if !self.runtime.same_runtime(&other.runtime) {
             return Err(Error::RuntimeMismatch.into());
         }
-        let lhs_owned = self.materialized_tensor_uncached(engine, options)?;
-        let rhs_owned = other.materialized_tensor_uncached(engine, options)?;
+        let lhs_owned = self.materialized_tensor_uncached(engine)?;
+        let rhs_owned = other.materialized_tensor_uncached(engine)?;
         let (Some(lhs_body), Some(rhs_body)) = (lhs_owned.owned_body(), rhs_owned.owned_body())
         else {
             return Err(internal_layout_error("uncached materialization is owned").into());
@@ -358,18 +357,16 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.contract_impl(engine, options, other, spec)
+        let engine = cx.engine();
+        self.contract_impl(engine, other, spec)
     }
 
     fn contract_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         // The one check the expert layer cannot make: it never sees the two
@@ -390,7 +387,6 @@ where
                 admit_host_engine(engine)?;
                 if let Some(compact) = lhs.try_contract_diagonal(
                     engine,
-                    options,
                     rhs,
                     spec.lhs,
                     spec.rhs,
@@ -402,7 +398,7 @@ where
             }
         }
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
-            engine, options, self, other, spec, None,
+            engine, self, other, spec, None,
         )?;
         Ok(self.published(space, data))
     }
@@ -491,22 +487,20 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.contract_into_impl(engine, options, other, spec, destination, alpha, beta)
+        let engine = cx.engine();
+        self.contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn contract_into_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime)
@@ -540,14 +534,13 @@ where
             S::as_host_mut(EXEC, destination),
         ) {
             if (lhs.spectrum().is_some() || rhs.spectrum().is_some())
-                && lhs.try_contract_diagonal_into(engine, options, rhs, spec, dst, alpha, beta)?
+                && lhs.try_contract_diagonal_into(engine, rhs, spec, dst, alpha, beta)?
             {
                 return Ok(());
             }
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
             engine,
-            options,
             self,
             other,
             spec,
@@ -685,18 +678,16 @@ where
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.planar_contract_impl(engine, options, other, spec)
+        let engine = cx.engine();
+        self.planar_contract_impl(engine, other, spec)
     }
 
     fn planar_contract_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime) {
@@ -704,11 +695,10 @@ where
         }
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract(&mut Invocation::new(engine, options), other, spec);
+            return self.contract(&mut *engine, other, spec);
         }
         let (space, data) = <R::Mode as TypedTensorContractDispatch<R, D>>::contract(
             engine,
-            options,
             self,
             other,
             spec,
@@ -753,22 +743,20 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.planar_contract_into_impl(engine, options, other, spec, destination, alpha, beta)
+        let engine = cx.engine();
+        self.planar_contract_into_impl(engine, other, spec, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn planar_contract_into_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
         spec: &ContractSpec<'_>,
         destination: &mut Self,
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         if !self.runtime.same_runtime(&other.runtime)
@@ -791,18 +779,10 @@ where
         destination_precheck(destination, &other.storage_body().data, S::NOUN)?;
         let orders = self.planar_orders(other, spec)?;
         if self.is_bosonic() {
-            return self.contract_into(
-                &mut Invocation::new(engine, options),
-                other,
-                spec,
-                destination,
-                alpha,
-                beta,
-            );
+            return self.contract_into(&mut *engine, other, spec, destination, alpha, beta);
         }
         <R::Mode as TypedTensorContractDispatch<R, D>>::contract_into(
             engine,
-            options,
             self,
             other,
             spec,
@@ -875,14 +855,13 @@ where
                 Mode = MultiplicityFreeAdmissionMode,
             >,
     {
-        let (engine, options) = cx.parts();
-        self.deligne_product_impl(engine, options, other, product)
+        let engine = cx.engine();
+        self.deligne_product_impl(engine, other, product)
     }
 
     fn deligne_product_impl<'a, R2, C>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R2, D>>,
         product: Arc<ProductFusionRule<R, R2, C>>,
     ) -> Result<TensorMap<ProductFusionRule<R, R2, C>, D>, Error>
@@ -944,9 +923,9 @@ where
             |sector| ProductSector::new(left_vacuum.clone(), sector),
             |sector| sector.right().clone(),
         )?;
-        let left = left.commit(engine, options)?;
-        let right = right.commit(engine, options)?;
-        left.otimes(&mut Invocation::new(engine, options), &right)
+        let left = left.commit(engine)?;
+        let right = right.commit(engine)?;
+        left.otimes(&mut *engine, &right)
     }
 }
 
@@ -1032,17 +1011,15 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         other: impl Into<TensorRef<'a, R, D, S>>,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.compose_impl(engine, options, other)
+        let engine = cx.engine();
+        self.compose_impl(engine, other)
     }
 
     fn compose_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         other: impl Into<TensorRef<'a, R, D, S>>,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         let other = other.into().operand()?;
         let other = &*other;
         // Runtime first, exactly as `contract`: crossing runtimes is a
@@ -1060,7 +1037,7 @@ where
             }
         }
         let (space, data) =
-            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(engine, options, self, other)?;
+            <R::Mode as TypedTensorContractDispatch<R, D>>::compose(engine, self, other)?;
         Ok(self.published(space, data))
     }
 }
@@ -1143,8 +1120,6 @@ where
 #[doc(hidden)]
 pub struct ContractReplay<'a, D, C> {
     pub(super) lease: Option<crate::runtime::ContextLease>,
-    // The call's options, applied to the lease's lanes on replay.
-    pub(super) options: ExecOptions,
     execute: RouteReplay<D, C>,
     execute_owned: OwnedRouteReplay<D, C>,
     pub(super) resolution: &'a symtn_tensors::StorageContractResolution<C>,
@@ -1167,7 +1142,7 @@ where
     /// The replay of `resolution` on lane `L` into `destination`
     /// (`destination_len` elements) from the stored `operands`.
     pub(super) fn new<L: HostTreeLane<D, C>>(
-        (lease, options): (Option<crate::runtime::ContextLease>, ExecOptions),
+        lease: Option<crate::runtime::ContextLease>,
         resolution: &'a symtn_tensors::StorageContractResolution<C>,
         (destination, destination_len): (&'a DynamicFusionMapSpace, usize),
         (lhs, rhs): (
@@ -1177,7 +1152,6 @@ where
     ) -> Self {
         Self {
             lease,
-            options,
             execute: host_route_replay::<L, D, C>,
             execute_owned: host_route_replay_owned::<L, D, C>,
             resolution,
@@ -1275,7 +1249,6 @@ pub trait PreparedExec<R, D>: TypedStorage<R, D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
-        options: ExecOptions,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error>;
 
@@ -1322,12 +1295,11 @@ impl<R, D: TensorScalar> PreparedExec<R, D> for Vec<D> {
         lhs: (&Arc<BlockStructure>, &Self),
         rhs: (&Arc<BlockStructure>, &Self),
         members: usize,
-        options: ExecOptions,
         init: symtn_tensors::ContractDestinationInit<D>,
     ) -> Result<(), Error> {
         workspace
             .host_context
-            .context(options)
+            .context()
             .multiplicity_free_lane::<D>()?
             .execute_storage_contract_members_host(
                 &mut **engine,
@@ -1370,7 +1342,6 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
     {
         let ContractReplay {
             lease,
-            options,
             execute_owned,
             resolution,
             destination,
@@ -1384,7 +1355,7 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
         let (_, rhs_data) = rhs.fusion_operand_and_data();
         execute_owned(
             engine,
-            lease.context(options),
+            lease.context(),
             resolution,
             destination,
             (lhs_structure, &lhs_data),
@@ -1438,7 +1409,6 @@ fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
 ) -> Result<(), TransformExecError> {
     let ContractReplay {
         lease,
-        options,
         execute,
         resolution,
         destination: destination_structure,
@@ -1452,7 +1422,7 @@ fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
     let (_, rhs_data) = rhs.fusion_operand_and_data();
     execute(
         engine,
-        lease.context(options),
+        lease.context(),
         resolution,
         (destination_structure, destination),
         (lhs_structure, &lhs_data),
