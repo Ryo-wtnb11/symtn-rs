@@ -181,7 +181,17 @@ that faer's QR does not deliver at the widths QR's payback share admits. A
 batch holding an input whose batch product is not one (including zero) keeps
 the baseline as well: tlinalg runs such an input through its multi-item
 route, which its public queries do not expose. Placement is integer
-arithmetic, recomputed per call. A forced batch policy (`Inner`, `Outer`,
+arithmetic. Each searched placement is kept in the process-global structure
+cache `StructureCacheKind::LaneAllocations`, keyed by every input it is a
+function of (the kernel's kind, GEMM or factorization, which fixes the
+grant; the engine's budget, work model, team and dispatch cost at every
+width, the mean work, and each block's serial time and grant inputs), so a
+batch already searched, on any executor including an eager call's fresh one,
+rebuilds its lanes without a query or a sort. Each entry is charged its
+inline key and entry, the entry overhead, and its per-block, per-width and
+per-lane slices; an entry above the largest admissible size is refused
+before its key is copied, and with a budget of zero every call searches,
+with the same placement. A forced batch policy (`Inner`, `Outer`,
 `Split`, `Sequential`) reserves its batch decision's threads, the blocks
 placed by the same largest-first baseline over its lanes and each block run
 on its lane's whole share (`Inner`: every block on the whole engine). Prepared
@@ -338,7 +348,7 @@ reports the first error in source order. symtn's own data movement (a tree
 replay's direct writes, packs and scatters) writes the same bits at every
 engine width. Results are bit-identical for one
 configuration (provider, build, engine width, batch policy and work model,
-inputs). No promise is made across widths or providers: a provider GEMM may
+inputs), whether a block placement is searched or taken from the cache. No promise is made across widths or providers: a provider GEMM may
 reduce in another order at another width (faer's matrix-vector route splits
 the contraction over its threads), so results agree within rounding.
 BLAS-internal threads remain separate.

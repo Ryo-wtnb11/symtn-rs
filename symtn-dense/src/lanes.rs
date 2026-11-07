@@ -55,6 +55,12 @@
 //! of `O(J (R + log S))` steps for its R < S reserved lanes, querying each
 //! widened (time, key) group once per reserved width it evaluates. The
 //! winner is written as flat tables in `O(J + L)`.
+//!
+//! A searched placement is kept in the process-global
+//! `StructureCacheKind::LaneAllocations` cache, keyed by every input the
+//! search reads, so a call whose inputs were all searched before, on any
+//! executor, rebuilds its tables in `O(J + B + L)` without a sort or a grant
+//! query, and without allocating once the tables have the capacity.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -72,7 +78,9 @@ mod runner;
 pub use placement::flat_width;
 #[cfg(test)]
 pub(crate) use placement::item_time;
-pub(crate) use placement::{allocate, searchable};
+#[cfg(test)]
+pub(crate) use placement::LaneAllocationCache;
+pub(crate) use placement::{allocate, lane_allocations, searchable};
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
 use runner::Arena;

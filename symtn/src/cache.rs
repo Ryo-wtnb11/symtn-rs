@@ -26,7 +26,15 @@
 //! - prepared dense GEMM plans per block geometry (scalar type, extents,
 //!   effective strides, conjugation), [`StructureCacheKind::GemmPlans`], on
 //!   the native CPU provider. TensorKit has no counterpart: it calls BLAS
-//!   `mul!` per block, which keeps no plan.
+//!   `mul!` per block, which keeps no plan;
+//! - searched lane allocations of block GEMM and single-matrix
+//!   factorization (other than QR) batches per schedule input (kernel kind,
+//!   budget, batch
+//!   policy, mean work, team, dispatch costs, per-block serial times and
+//!   grant inputs), [`StructureCacheKind::LaneAllocations`],
+//!   on the native CPU provider, so a repeated batch on a fresh executor
+//!   skips the lane search. Neither TensorKit nor QSpace has a model-based
+//!   lane search or a cache of its result.
 //!
 //! This mirrors TensorKit's `GLOBAL_CACHES` with `empty_globalcaches!` and
 //! `global_cache_info` (`caches.jl:1-11` @cfaa073).
@@ -54,13 +62,16 @@ pub use symtn_core::{StructureCacheInfo, StructureCacheKind};
 /// on another's build could steal work that waits on its own. A concurrent
 /// miss resolved by single-flight builds once and reports no duplicate: the
 /// [`StructureCacheKind::GemmPlans`] cache's builds run no parallel region,
-/// so it has single-flight.
+/// so it has single-flight. The [`StructureCacheKind::LaneAllocations`]
+/// cache has none: its lookup borrows the call's inputs, and of racing
+/// searches of one batch all but the first published count as duplicates.
 pub fn stats() -> Vec<StructureCacheInfo> {
     symtn_core::structure_cache_infos()
 }
 
 /// Clears every process-global structure cache (sector, degeneracy,
-/// completed tree transformer, composed coefficients, GEMM plans) for all
+/// completed tree transformer, composed coefficients, GEMM plans, lane
+/// allocations) for all
 /// Runtimes.
 /// Semantic data only: no device executor, scratch or fusion-symbols symbol cache is
 /// touched. Builds in flight across the clear return their result

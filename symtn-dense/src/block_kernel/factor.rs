@@ -2684,6 +2684,39 @@ mod tests {
         assert_eq!((lanes, sorts), (vec![(2, (0..8).collect())], 0));
     }
 
+    /// Purpose: a searched factorization batch is cached in the
+    /// process-global lane-allocation cache, and the repeat (a hit) equals
+    /// the cold search and sorts nothing: the review-r3 SVD trace, main's
+    /// SVD mix (`80 x 80` and three `4 x 4`) and the same mix of general
+    /// eigenvalues, which keep the default `SEARCHED`. Every key input is
+    /// part of these fixtures, so another test's entries cannot collide.
+    #[test]
+    fn a_repeated_searched_batch_hits_its_cold_placement() {
+        let capped = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0)
+            .with_min_work_per_lane_ns(2000.0)
+            .with_min_items(2)
+            .with_min_items_per_lane(1);
+        let unit = WorkModel::default()
+            .with_muladds_per_ns(1.0)
+            .with_item_overhead_ns(0.0);
+        let small: &[usize] = &[4, 4];
+        let mix: &[&[usize]] = &[&[80, 80], small, small, small];
+        let twice = |placed: &dyn Fn() -> (Vec<(usize, Vec<usize>)>, usize)| {
+            let (cold, _) = placed();
+            let (warm, sorts) = placed();
+            assert_eq!((&warm, sorts), (&cold, 0));
+            cold
+        };
+        let r3 = twice(&|| placed::<Svd>(4, 100, capped, &[&[10, 10][..]; 4]));
+        assert_eq!(r3, [(2, vec![0, 2]), (2, vec![1, 3])]);
+        let svd = twice(&|| placed::<Svd>(4, 100, unit, mix));
+        assert_eq!(svd, [(4, vec![0, 1, 2, 3])]);
+        let eig = twice(&|| placed::<EigVals>(4, 100, unit, mix));
+        assert_eq!(eig, [(4, vec![0, 1, 2, 3])]);
+    }
+
     /// Purpose: each lane of a destination batch is set up once, before its
     /// first block, with a workspace sufficient for every block it runs:
     /// every block of a lane runs with that one setup, whose workspace is

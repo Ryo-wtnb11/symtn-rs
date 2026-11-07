@@ -181,7 +181,8 @@ pub(crate) fn drive<B: BlockOp>(
 
 /// Places `jobs` of `op` on `exec` into `tables`: each block's work turned
 /// into its serial time by [`cost`], and [`lanes::allocate`] offered the
-/// blocks' grants only where it can search and every block is modeled.
+/// blocks' grants only where it can search and every block is modeled, with
+/// the process-global lane-allocation cache.
 pub(crate) fn place<B: BlockOp>(exec: &Exec<'_>, op: &B, jobs: &[B::Job], tables: &mut LaneTables) {
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
@@ -206,9 +207,10 @@ pub(crate) fn place<B: BlockOp>(exec: &Exec<'_>, op: &B, jobs: &[B::Job], tables
     lanes::allocate(
         exec,
         &times,
-        |j| op.grant_key(j, &jobs[j]),
+        (B::KIND, |j| op.grant_key(j, &jobs[j])),
         mean_work,
         grant,
+        lanes::lane_allocations(),
         tables,
     );
     tables.keep_times(times);

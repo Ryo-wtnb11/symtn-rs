@@ -10,8 +10,13 @@ use std::time::Duration;
 use tcontract_exec::{BatchDecision, BatchPolicy, BatchQuery, BatchStrategy, Exec, WorkModel};
 use tenferro_cpu::{CpuEngine, Pool};
 
-use crate::block_kernel::driver::{estimate, work_model_ns};
-use crate::lanes::{self, item_time, run_native, GrantKey, LaneTables, Placed, Placement, Work};
+use symtn_core::{ErasedStructureCacheControl, StructureCacheKind};
+
+use super::counting_alloc;
+use crate::block_kernel::driver::{estimate, work_model_ns, OpKind};
+use crate::lanes::{
+    self, item_time, run_native, GrantKey, LaneAllocationCache, LaneTables, Placed, Placement, Work,
+};
 
 /// One lane of an [`Allocation`]: its share and its jobs, ascending.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,7 +37,22 @@ struct Allocation {
     placement: Placement,
 }
 
-/// [`allocate`] of `times` with grant `grant` and keys `key`, read back.
+/// [`lanes::allocate`] of `times` with grant `grant`, keys `key` of op kind
+/// `family`, into `tables` through `cache`, read back.
+fn allocate_in(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    family_key: (OpKind, impl Fn(usize) -> GrantKey),
+    mean_work: f64,
+    tables: &mut LaneTables,
+    cache: &LaneAllocationCache,
+    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+) -> Allocation {
+    lanes::allocate(exec, times, family_key, mean_work, grant, cache, tables);
+    read_back(exec, times, mean_work, tables)
+}
+
+/// [`allocate_in`] of a GEMM batch on fresh tables, uncached.
 fn allocate_with(
     exec: &Exec<'_>,
     times: &[Duration],
@@ -40,8 +60,35 @@ fn allocate_with(
     mean_work: f64,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
 ) -> Allocation {
-    let mut tables = LaneTables::default();
-    lanes::allocate(exec, times, key, mean_work, grant, &mut tables);
+    let tables = &mut LaneTables::default();
+    allocate_in(
+        exec,
+        times,
+        (OpKind::Gemm, key),
+        mean_work,
+        tables,
+        &uncached(),
+        grant,
+    )
+}
+
+/// A lane-allocation cache of its own, so a test sees no other test's
+/// entries; a budget of zero admits nothing.
+fn cache(budget: u64) -> LaneAllocationCache {
+    LaneAllocationCache::new(StructureCacheKind::LaneAllocations, budget)
+}
+
+fn uncached() -> LaneAllocationCache {
+    cache(0)
+}
+
+/// `tables`' placement of `times` as an [`Allocation`].
+fn read_back(
+    exec: &Exec<'_>,
+    times: &[Duration],
+    mean_work: f64,
+    tables: &LaneTables,
+) -> Allocation {
     let decision = exec.batch_decision(&BatchQuery::new(times.len(), mean_work));
     let slots = if times.is_empty() {
         0
@@ -979,4 +1026,347 @@ fn gemm_lane_decision_reads_work_units() {
         .unwrap();
     assert_eq!(a.decision.lanes, 2);
     assert_eq!(lanes(&a), [(1, vec![0]), (1, vec![1])]);
+}
+
+/// Purpose: the placement tables' reuse is visible and complete. A cached
+/// placement is rebuilt into the tables' kept capacity, so a warm hit
+/// allocates and frees nothing, sorts nothing and queries no grant, even
+/// where the search narrowed main's four lanes to one (a 40000 ns block and
+/// three 100 ns ones on four slots, flat 100 ns dispatch) or reserved uneven
+/// lanes (blocks of 100, 100, 1000 and 2000 ns: three slots and one); the
+/// batches alternate, so each hit replaces another's lanes, and each hit
+/// equals its cold search. Dropping the tables then frees at most their
+/// `retained_bytes`.
+#[test]
+fn warm_cached_allocation_allocates_nothing_and_scratch_is_charged() {
+    let batches = [
+        (nanos(&[40000, 100, 100, 100]), 1),
+        (nanos(&[40000, 100, 100, 101]), 1),
+        (nanos(&[100, 100, 1000, 2000]), 2),
+    ];
+    let keys = [[0; 2]; 4];
+    let model = WorkModel::default()
+        .with_muladds_per_ns(1.0)
+        .with_item_overhead_ns(0.0);
+    let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+    let cache = cache(1 << 20);
+    engine
+        .with_contraction_exec(|exec, _, _| {
+            let exec: &Exec<'_> = exec;
+            let mut tables = LaneTables::default();
+            let queries = std::cell::Cell::new(0);
+            let call = |t: &[Duration], tables: &mut LaneTables| {
+                let grant = |_, t: Duration, w| {
+                    queries.set(queries.get() + 1);
+                    exec.width_for_within(w, t.as_nanos() as f64, 1)
+                };
+                let key = (OpKind::Gemm, |j: usize| keys[j]);
+                lanes::allocate(exec, t, key, 10075.0, Some(grant), &cache, tables);
+            };
+            let mut cold = Vec::new();
+            for (t, lanes) in &batches {
+                call(t, &mut tables);
+                assert_eq!(tables.placement().lanes(), *lanes);
+                cold.push(tables.placement().clone());
+            }
+            for (i, (t, _)) in batches.iter().enumerate().chain(batches.iter().enumerate()) {
+                queries.set(0);
+                let recording = crate::probe::record();
+                let ((), allocs) = counting_alloc::measure(|| call(t, &mut tables));
+                assert_eq!(*tables.placement(), cold[i], "hit == cold miss");
+                assert_eq!(queries.get(), 0, "the call hit");
+                assert_eq!(recording.get(crate::probe::Event::PlacementSort), 0);
+                assert_eq!((allocs.calls, allocs.frees), (0, 0));
+            }
+            let charged = tables.retained_bytes();
+            let ((), dropped) = counting_alloc::measure(|| drop(tables));
+            assert!(
+                dropped.freed_bytes as usize <= charged,
+                "{} freed, {charged} charged",
+                dropped.freed_bytes
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// Purpose: jobs with equal serial times and grant keys share every
+/// grant, so only one of them is queried, without changing the choice.
+/// Nine jobs in three groups of three (flat 100 ns dispatch, six slots)
+/// cost a third of the queries of the same jobs with distinct keys and
+/// get the same lanes; 200 serial blocks are queried once per distinct
+/// serial time.
+#[test]
+fn equal_grant_inputs_are_queried_once() {
+    let queries = std::cell::Cell::new(0);
+    let run = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey]| {
+        queries.set(0);
+        let a = engine
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let grant = |_, t: Duration, w| {
+                    queries.set(queries.get() + 1);
+                    exec.width_for_within(w, t.as_nanos() as f64, 1)
+                };
+                Ok(allocate_with(exec, t, |j| keys[j], 1e9, Some(grant)))
+            })
+            .unwrap();
+        (lanes(&a), queries.get())
+    };
+    let mut engine = flat(6, BatchPolicy::default(), 100);
+    let t = nanos(&[9000, 9000, 9000, 4000, 4000, 4000, 100, 100, 100]);
+    let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0]).collect();
+    let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0]).collect();
+    let (shared, few) = run(&mut engine, &t, &grouped);
+    let (separate, all) = run(&mut engine, &t, &distinct);
+    assert_eq!(shared, separate);
+    assert!(few > 0);
+    assert_eq!(all, 3 * few);
+
+    let tiny: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
+    let times: std::collections::BTreeSet<u64> = tiny.iter().copied().collect();
+    let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 2]; 200]);
+    assert_eq!(count, times.len());
+}
+
+/// Purpose: a repeated placement with every input unchanged is taken from
+/// the cache without a grant query and equals the searched one; changing
+/// any one input it depends on (a serial time, a grant key, the op kind, a
+/// factorization's total or payback work, the mean work, the work model, a
+/// dispatch cost, the budget, the token's team) searches again; after a
+/// clear, and on a disabled cache at every call, it searches and finds the
+/// cached placement.
+#[test]
+fn unchanged_inputs_hit_and_any_change_searches() {
+    let t = nanos(&[40000, 100, 100, 100]);
+    let keys = [[0; 2]; 4];
+    let model = WorkModel::default()
+        .with_muladds_per_ns(1.0)
+        .with_item_overhead_ns(0.0);
+    let policy = BatchPolicy::default().with_model(model);
+    let cache = cache(1 << 20);
+    let mut tables = LaneTables::default();
+    let queries = std::cell::Cell::new(0);
+    let family = std::cell::Cell::new(OpKind::Gemm);
+    // Runs one placement of `family`'s kind on `exec` and returns its lanes
+    // and whether it queried a grant.
+    let mut run = |exec: &Exec<'_>, t: &[Duration], keys: &[GrantKey], mean: f64| {
+        queries.set(0);
+        let grant = |_, t: Duration, w| {
+            queries.set(queries.get() + 1);
+            exec.width_for_within(w, t.as_nanos() as f64, 1)
+        };
+        let key = (family.get(), |j: usize| keys[j]);
+        let a = allocate_in(exec, t, key, mean, &mut tables, &cache, Some(grant));
+        (lanes(&a), queries.get() > 0)
+    };
+    let mut on = |engine: &mut CpuEngine, t: &[Duration], keys: &[GrantKey], mean: f64| {
+        engine
+            .with_contraction_exec(|exec, _, _| Ok(run(exec, t, keys, mean)))
+            .unwrap()
+    };
+    let mut base = flat(4, policy, 100);
+    let (first, searched) = on(&mut base, &t, &keys, 10075.0);
+    assert!(searched);
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+    let mut other_time = t.clone();
+    other_time[3] = Duration::from_nanos(101);
+    assert!(on(&mut base, &other_time, &keys, 10075.0).1);
+    let mut other_key = keys;
+    other_key[2] = [1, 0];
+    assert!(on(&mut base, &t, &other_key, 10075.0).1);
+    assert!(on(&mut base, &t, &keys, 10076.0).1);
+    let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
+    assert!(on(&mut flat(4, other_model, 100), &t, &keys, 10075.0).1);
+    assert!(on(&mut flat(4, policy, 101), &t, &keys, 10075.0).1);
+    // One dispatch-cost entry alone: width 4's anchor.
+    assert!(
+        on(
+            &mut engine_with_costs(4, policy, [100, 101, 100]),
+            &t,
+            &keys,
+            10075.0
+        )
+        .1
+    );
+    assert!(on(&mut flat(5, policy, 100), &t, &keys, 10075.0).1);
+    // The same keys under the factorizations' grant, then their per-job
+    // total and payback work bits.
+    family.set(OpKind::Factorization);
+    assert!(on(&mut base, &t, &keys, 10075.0).1);
+    let work: Vec<GrantKey> = [40000.0_f64, 100.0, 100.0, 100.0]
+        .iter()
+        .map(|&w| [w.to_bits(), (w * 6e-4).to_bits()])
+        .collect();
+    assert!(on(&mut base, &t, &work, 10075.0).1);
+    assert!(!on(&mut base, &t, &work, 10075.0).1);
+    let mut other_payback = work.clone();
+    other_payback[1][1] = 0.07_f64.to_bits();
+    assert!(on(&mut base, &t, &other_payback, 10075.0).1);
+    let mut other_total = work.clone();
+    other_total[1][0] = 100.5_f64.to_bits();
+    assert!(on(&mut base, &t, &other_total, 10075.0).1);
+    family.set(OpKind::Gemm);
+    // The base entry survived the other keys' admissions.
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+
+    ErasedStructureCacheControl::clear(&cache);
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
+    ErasedStructureCacheControl::set_byte_budget(&cache, 0);
+    for _ in 0..2 {
+        assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+    }
+    ErasedStructureCacheControl::set_byte_budget(&cache, 1 << 20);
+
+    // The same pool and dispatch costs, through a plain token without
+    // the engine's team.
+    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+    let row = WidthCosts::new([Duration::from_nanos(100); 3]);
+    let pool = Pool::builder()
+        .threads(4)
+        .dispatch_costs(DispatchCosts::new(row, row, row))
+        .build()
+        .unwrap();
+    let borrowed = tcontract_exec::Pool::borrow(&pool);
+    let plain = Exec::new(&borrowed, 4).unwrap().with_batch_policy(policy);
+    assert!(!plain.token_ref().carries_team());
+    assert!(run(&plain, &t, &keys, 10075.0).1);
+}
+
+/// Purpose: the cache's retained bytes stay within its budget. Distinct
+/// batches beyond what a small budget holds evict older entries, and an
+/// entry above the largest admissible size is rejected before its key is
+/// staged, with the same placement as a search. An evicted batch searches
+/// again, is admitted again (a resident one only hits) and then hits.
+#[test]
+fn admission_respects_the_byte_budget() {
+    let model = WorkModel::default()
+        .with_muladds_per_ns(1.0)
+        .with_item_overhead_ns(0.0);
+    let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
+    let keys = [[0; 2]; 4];
+    let bounded = cache(4096);
+    let tiny = cache(64);
+    engine
+        .with_contraction_exec(|exec, _, _| {
+            let exec: &Exec<'_> = exec;
+            let queries = std::cell::Cell::new(0);
+            let grant = |_, t: Duration, w| {
+                queries.set(queries.get() + 1);
+                exec.width_for_within(w, t.as_nanos() as f64, 1)
+            };
+            let key = (OpKind::Gemm, |j: usize| keys[j]);
+            let batches = 100..164;
+            for last in batches.clone() {
+                let t = nanos(&[40000, 100, 100, last]);
+                let mut tables = LaneTables::default();
+                let cached =
+                    allocate_in(exec, &t, key, 10075.0, &mut tables, &bounded, Some(grant));
+                let rejected = allocate_in(exec, &t, key, 10075.0, &mut tables, &tiny, Some(grant));
+                assert_eq!(cached, rejected);
+                let info = bounded.info();
+                assert!(info.charged_bytes() <= info.byte_budget(), "{info:?}");
+            }
+            assert!(bounded.info().evictions() > 0);
+            let info = tiny.info();
+            assert_eq!(
+                (info.entries(), info.admissions(), info.rejections()),
+                (0, 0, batches.end - batches.start)
+            );
+
+            // An evicted batch: the first that searches again.
+            let mut tables = LaneTables::default();
+            let evicted = batches
+                .clone()
+                .map(|last| nanos(&[40000, 100, 100, last]))
+                .find(|t| {
+                    queries.set(0);
+                    let admitted = bounded.info().admissions();
+                    allocate_in(exec, t, key, 10075.0, &mut tables, &bounded, Some(grant));
+                    let searched = queries.get() > 0;
+                    assert_eq!(
+                        bounded.info().admissions(),
+                        admitted + usize::from(searched) as u64
+                    );
+                    searched
+                })
+                .expect("an evicted batch searches");
+            queries.set(0);
+            allocate_in(
+                exec,
+                &evicted,
+                key,
+                10075.0,
+                &mut tables,
+                &bounded,
+                Some(grant),
+            );
+            assert_eq!(queries.get(), 0, "and hits once admitted again");
+            Ok(())
+        })
+        .unwrap();
+}
+
+/// Purpose: racing misses of one batch each search and publish; the loser
+/// finds the winner resident, counts one duplicate build, and both get the
+/// same placement, which then hits. Each thread's first grant query waits
+/// for the other's, so both have missed before either publishes.
+#[test]
+fn a_racing_duplicate_search_counts_and_keeps_the_winner() {
+    let model = WorkModel::default()
+        .with_muladds_per_ns(1.0)
+        .with_item_overhead_ns(0.0);
+    let policy = BatchPolicy::default().with_model(model);
+    let t = nanos(&[100, 100, 1000, 2000]);
+    let keys = [[0; 2]; 4];
+    let cache = cache(1 << 20);
+    let both = std::sync::Barrier::new(2);
+    let search = || {
+        flat(4, policy, 100)
+            .with_contraction_exec(|exec, _, _| {
+                let exec: &Exec<'_> = exec;
+                let waited = std::cell::Cell::new(false);
+                let grant = |_, t: Duration, w| {
+                    if !waited.replace(true) {
+                        both.wait();
+                    }
+                    exec.width_for_within(w, t.as_nanos() as f64, 1)
+                };
+                let key = (OpKind::Gemm, |j: usize| keys[j]);
+                let tables = &mut LaneTables::default();
+                Ok(allocate_in(
+                    exec,
+                    &t,
+                    key,
+                    10075.0,
+                    tables,
+                    &cache,
+                    Some(grant),
+                ))
+            })
+            .unwrap()
+    };
+    let (a, b) = std::thread::scope(|scope| {
+        let a = scope.spawn(search);
+        let b = scope.spawn(search);
+        (a.join().unwrap(), b.join().unwrap())
+    });
+    assert_eq!(a, b);
+    let info = cache.info();
+    assert_eq!(
+        (info.entries(), info.admissions(), info.duplicate_builds()),
+        (1, 1, 1)
+    );
+    let hits = info.hits();
+    let again = flat(4, policy, 100)
+        .with_contraction_exec(|exec, _, _| {
+            let key = (OpKind::Gemm, |j: usize| keys[j]);
+            let tables = &mut LaneTables::default();
+            let grant = Some(|_, _, _| unreachable!("the call hits"));
+            Ok(allocate_in(exec, &t, key, 10075.0, tables, &cache, grant))
+        })
+        .unwrap();
+    assert_eq!((again, cache.info().hits()), (a, hits + 1));
 }

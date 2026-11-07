@@ -8,8 +8,10 @@ use tenferro_cpu::threadteam::{self, DispatchCosts, WidthCosts};
 use tenferro_cpu::{CpuEngine, Pool};
 
 use super::counting_alloc;
+use crate::block_kernel::driver::OpKind;
 use crate::lanes::{
-    allocate, run_native, Assignment, Cut, Each, LaneTables, Placed, Refusal, Split, Work,
+    allocate, lane_allocations, run_native, Assignment, Cut, Each, LaneAllocationCache, LaneTables,
+    Placed, Refusal, Split, Work,
 };
 use crate::DenseError;
 
@@ -41,7 +43,17 @@ fn on<R>(engine: &mut CpuEngine, budget: usize, f: impl FnOnce(Exec<'_>) -> R) -
 /// no grant, so no candidate is scored.
 fn place(exec: &Exec<'_>, times: &[Duration], tables: &mut LaneTables) {
     let grant = None::<fn(usize, Duration, usize) -> usize>;
-    allocate(exec, times, |_| [0; 2], 1e9, grant, tables);
+    // Without a grant the cache is not read.
+    let cache = lane_allocations();
+    allocate(
+        exec,
+        times,
+        (OpKind::Gemm, |_| [0; 2]),
+        1e9,
+        grant,
+        cache,
+        tables,
+    );
 }
 
 /// `count` jobs of `ns` each.
@@ -340,7 +352,9 @@ fn the_tables_charge_covers_what_they_retain() {
     on(&mut engine, 8, |mut exec| {
         let shared: &Exec<'_> = &exec;
         let grant = |_, t: Duration, w| shared.width_for_within(w, t.as_nanos() as f64, 1);
-        allocate(shared, &times, |_| [0; 2], 1e9, Some(grant), &mut tables);
+        let cache = LaneAllocationCache::new(symtn_core::StructureCacheKind::LaneAllocations, 0);
+        let key = (OpKind::Gemm, |_| [0; 2]);
+        allocate(shared, &times, key, 1e9, Some(grant), &cache, &mut tables);
         let lanes = tables.placement().lanes();
         run_native(
             exec.reborrow(),

@@ -1,5 +1,17 @@
 use super::*;
 
+use std::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
+
+use symtn_core::{
+    ErasedStructureCacheControl, StructureCache, StructureCacheEquivalent, StructureCacheInfo,
+    StructureCacheKind,
+};
+use tcontract_exec::WorkModel;
+
+use crate::block_kernel::driver::OpKind;
+use crate::block_kernel::gemm::ENTRY_OVERHEAD_BYTES;
+
 /// The working tables of [`allocate`], kept for reuse: the grant keys, the
 /// LPT order and heaps, the equal-share columns, the reservation's tables
 /// and lanes, and per-lane loads and counts.
@@ -90,18 +102,29 @@ pub(crate) fn searchable(exec: &Exec<'_>, times: &[Duration], mean_work: f64) ->
 /// twice) into `tables`, as the module documentation describes.
 ///
 /// `grant(j, times[j], w)` is the width job `j`'s provider takes in a lane of
-/// `w` reserved slots and `key(j)` its other inputs (see [`GrantKey`]);
-/// Auto scores the candidates with it. Without a grant, and under a forced
+/// `w` reserved slots, `key(j)` its other inputs (see [`GrantKey`]) and
+/// `family` the op kind whose grant function `grant` is; Auto scores the
+/// candidates with it, and takes a searched placement from `cache` when one
+/// was computed from the same inputs (see [`LaneAllocationKey`]), offering
+/// each new search for admission. Without a grant, and under a forced
 /// strategy, the baseline placement is returned and no candidate is scored;
-/// `key` is then not called.
+/// `key` is then not called, and the cache is not read.
+///
+/// Why a lookup and a publish rather than the cache's single-flight build:
+/// that build takes an owned key, which a hit would have to stage. Racing
+/// misses of one key each search, and the losers count as duplicate builds.
 pub(crate) fn allocate(
     exec: &Exec<'_>,
     times: &[Duration],
-    key: impl Fn(usize) -> GrantKey,
+    (family, key): (OpKind, impl Fn(usize) -> GrantKey),
     mean_work: f64,
     grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+    cache: &LaneAllocationCache,
     tables: &mut LaneTables,
 ) {
+    // Captured before any input is read, so a reset during the search
+    // keeps its result out of the cache.
+    let epoch = symtn_core::core_reset_epoch();
     let LaneTables {
         placement, scratch, ..
     } = tables;
@@ -113,7 +136,28 @@ pub(crate) fn allocate(
     if grant.is_some() && searchable(exec, times, mean_work) {
         keys.extend((0..times.len()).map(key));
     }
-    place(exec, times, &keys, mean_work, grant, placement, scratch);
+    // Staged keys mean a search: `searchable` admits only lane counts of two
+    // or more, so the search branch of `place` runs.
+    let query = (!keys.is_empty()).then_some(LaneAllocationQuery {
+        family,
+        exec,
+        times,
+        keys: &keys,
+        mean_work,
+    });
+    if let Some(entry) = query.as_ref().and_then(|query| cache.get(query)) {
+        placement.restore(&entry);
+    } else {
+        place(exec, times, &keys, mean_work, grant, placement, scratch);
+        if let Some(query) = query {
+            let bytes = charge(exec.budget(), times.len(), placement.lanes());
+            if bytes > cache.info().max_entry_bytes() {
+                cache.reject();
+            } else {
+                cache.publish(&query.to_key(), Arc::new(placement.entry()), bytes, epoch);
+            }
+        }
+    }
     scratch.keys = keys;
 }
 
@@ -240,6 +284,252 @@ fn place(
         placement.shares.iter().all(|&share| share > 0)
             && placement.shares.iter().sum::<usize>() <= slots
     );
+}
+
+/// Everything a searched placement is a function of, as the
+/// [`StructureCacheKind::LaneAllocations`] cache keys it.
+///
+/// Why the key is complete: a searched placement is a function of the
+/// context's budget B, its work model (the strategy is Auto, the only one
+/// that searches), the mean work (the batch decision), the token's dispatch
+/// cost at every width `2..=B` (the slot count, the batch decision, every
+/// grant and every item time read only those), whether the token carries a
+/// team (the Faer GEMM and the factorization grants), the jobs' serial times
+/// in canonical order (the slot count, the order, the placements and the
+/// scores), their grant keys (every other grant input) and the op kind,
+/// which fixes the grant function: every GEMM block op grants through
+/// `gemm::grant` (keys: the plan's algorithm and the work) and every
+/// factorization through `factor::grant` (keys: the item's total and payback
+/// work), so equal keys of different kinds never share a placement. Every
+/// job is one stage, so the job count fixes the stage boundaries. Floats are
+/// keyed by their bits, so equality is reflexive and a differently signed
+/// zero only searches again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LaneAllocationKey {
+    family: OpKind,
+    budget: usize,
+    model: [u64; 5],
+    mean_work: u64,
+    team: bool,
+    costs: Box<[Duration]>,
+    times: Box<[Duration]>,
+    keys: Box<[GrantKey]>,
+}
+
+/// One call's [`LaneAllocationKey`], borrowed: a lookup reads the dispatch
+/// costs from the token instead of staging them, so a hit allocates nothing.
+struct LaneAllocationQuery<'a, 'e> {
+    family: OpKind,
+    exec: &'a Exec<'e>,
+    times: &'a [Duration],
+    keys: &'a [GrantKey],
+    mean_work: f64,
+}
+
+/// The work model's fields, by bits.
+fn model_bits(model: &WorkModel) -> [u64; 5] {
+    [
+        model.item_overhead_ns.to_bits(),
+        model.muladds_per_ns.to_bits(),
+        model.min_work_per_lane_ns.to_bits(),
+        model.min_items as u64,
+        model.min_items_per_lane as u64,
+    ]
+}
+
+/// The token's dispatch cost at every width `2..=budget`.
+fn dispatch_costs<'a>(exec: &'a Exec<'_>) -> impl Iterator<Item = Duration> + 'a {
+    (2..=exec.budget())
+        .filter_map(NonZeroUsize::new)
+        .map(|width| exec.token_ref().dispatch_cost(width))
+}
+
+/// The one hash of a key and of its borrowed query, field by field.
+#[allow(clippy::too_many_arguments)]
+fn hash_key<H: Hasher>(
+    state: &mut H,
+    family: OpKind,
+    budget: usize,
+    model: [u64; 5],
+    mean_work: u64,
+    team: bool,
+    costs: (usize, impl Iterator<Item = Duration>),
+    times: &[Duration],
+    keys: &[GrantKey],
+) {
+    (family, budget, model, mean_work, team).hash(state);
+    state.write_usize(costs.0);
+    costs.1.for_each(|cost| cost.hash(state));
+    times.hash(state);
+    keys.hash(state);
+}
+
+impl Hash for LaneAllocationKey {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        hash_key(
+            state,
+            self.family,
+            self.budget,
+            self.model,
+            self.mean_work,
+            self.team,
+            (self.costs.len(), self.costs.iter().copied()),
+            &self.times,
+            &self.keys,
+        );
+    }
+}
+
+impl LaneAllocationQuery<'_, '_> {
+    fn model(&self) -> [u64; 5] {
+        model_bits(&self.exec.batch_policy().model)
+    }
+
+    fn team(&self) -> bool {
+        self.exec.token_ref().carries_team()
+    }
+
+    fn to_key(&self) -> LaneAllocationKey {
+        LaneAllocationKey {
+            family: self.family,
+            budget: self.exec.budget(),
+            model: self.model(),
+            mean_work: self.mean_work.to_bits(),
+            team: self.team(),
+            costs: dispatch_costs(self.exec).collect(),
+            times: self.times.into(),
+            keys: self.keys.into(),
+        }
+    }
+}
+
+impl Hash for LaneAllocationQuery<'_, '_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let budget = self.exec.budget();
+        hash_key(
+            state,
+            self.family,
+            budget,
+            self.model(),
+            self.mean_work.to_bits(),
+            self.team(),
+            (budget.saturating_sub(1), dispatch_costs(self.exec)),
+            self.times,
+            self.keys,
+        );
+    }
+}
+
+impl StructureCacheEquivalent<LaneAllocationKey> for LaneAllocationQuery<'_, '_> {
+    fn equivalent(&self, key: &LaneAllocationKey) -> bool {
+        key.family == self.family
+            && key.budget == self.exec.budget()
+            && key.model == self.model()
+            && key.mean_work == self.mean_work.to_bits()
+            && key.team == self.team()
+            && *key.times == *self.times
+            && *key.keys == *self.keys
+            && key.costs.len() + 1 == key.budget
+            && key.costs.iter().copied().eq(dispatch_costs(self.exec))
+    }
+}
+
+/// A searched placement, immutable: each lane's share and the end of its
+/// jobs in `jobs`, whose jobs ascend within each lane.
+#[derive(Debug)]
+pub(crate) struct LaneAllocationEntry {
+    lanes: Box<[(usize, usize)]>,
+    jobs: Box<[usize]>,
+}
+
+pub(crate) type LaneAllocationCache = StructureCache<LaneAllocationKey, LaneAllocationEntry>;
+
+/// The bytes charged for one cached placement of `jobs` jobs on `lanes`
+/// lanes at budget `budget`: the inline key and entry, the entry overhead,
+/// and their boxed slices (`B - 1` costs, J times, keys and job indices, one
+/// pair per lane). Saturates. A function of the lengths alone, so an
+/// oversized entry is refused before its owned key is staged.
+fn charge(budget: usize, jobs: usize, lanes: usize) -> u64 {
+    use std::mem::size_of;
+    [
+        size_of::<LaneAllocationKey>(),
+        size_of::<LaneAllocationEntry>(),
+        ENTRY_OVERHEAD_BYTES,
+        budget
+            .saturating_sub(1)
+            .saturating_mul(size_of::<Duration>()),
+        jobs.saturating_mul(size_of::<Duration>()),
+        jobs.saturating_mul(size_of::<GrantKey>()),
+        lanes.saturating_mul(size_of::<(usize, usize)>()),
+        jobs.saturating_mul(size_of::<usize>()),
+    ]
+    .into_iter()
+    .fold(0, |total: u64, bytes| total.saturating_add(bytes as u64))
+}
+
+struct LaneAllocationsControl;
+
+impl ErasedStructureCacheControl for LaneAllocationsControl {
+    fn info(&self) -> StructureCacheInfo {
+        lane_allocations().info()
+    }
+
+    fn clear(&self) {
+        ErasedStructureCacheControl::clear(lane_allocations())
+    }
+
+    fn set_byte_budget(&self, bytes: u64) {
+        ErasedStructureCacheControl::set_byte_budget(lane_allocations(), bytes)
+    }
+}
+
+/// The process-global lane-allocation cache, registered with `symtn-core`'s
+/// structure-cache registry on first use.
+pub(crate) fn lane_allocations() -> &'static LaneAllocationCache {
+    static CACHE: OnceLock<LaneAllocationCache> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        // Refused only if another crate claimed the slot first. Then
+        // `symtn::cache::clear` cannot reach this cache, so it admits
+        // nothing: every batch searches per call, with identical results.
+        let budget = symtn_core::register_structure_cache(
+            StructureCacheKind::LaneAllocations,
+            &LaneAllocationsControl,
+        )
+        .unwrap_or(0);
+        StructureCache::new(StructureCacheKind::LaneAllocations, budget)
+    })
+}
+
+impl Placement {
+    /// The placement `entry` holds, in these tables' capacity.
+    fn restore(&mut self, entry: &LaneAllocationEntry) {
+        self.clear();
+        self.lane_starts.push(0);
+        for &(share, end) in entry.lanes.iter() {
+            self.shares.push(share);
+            self.lane_starts.push(end);
+        }
+        self.lane_jobs.extend_from_slice(&entry.jobs);
+        self.lane_of.resize(entry.jobs.len(), 0);
+        for lane in 0..self.shares.len() {
+            for i in self.lane_starts[lane]..self.lane_starts[lane + 1] {
+                self.lane_of[self.lane_jobs[i]] = lane;
+            }
+        }
+    }
+
+    /// This placement as a cache entry.
+    fn entry(&self) -> LaneAllocationEntry {
+        LaneAllocationEntry {
+            lanes: self
+                .shares
+                .iter()
+                .zip(&self.lane_starts[1..])
+                .map(|(&share, &end)| (share, end))
+                .collect(),
+            jobs: self.lane_jobs.as_slice().into(),
+        }
+    }
 }
 
 /// Every job's modeled item time at two lane widths, so a width the

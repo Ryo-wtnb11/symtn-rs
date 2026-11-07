@@ -10,6 +10,7 @@ use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneMembers, OpKin
 use crate::block_kernel::factor;
 use crate::lanes::{self, GrantKey, LaneTables};
 use std::time::Duration;
+use symtn_core::StructureCacheKind;
 use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 pub(super) use super::numerics;
@@ -595,7 +596,9 @@ fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> (Vec<usize>,
             let mean = work.iter().sum::<f64>() / work.len() as f64;
             let mut tables = LaneTables::default();
             let grant = Some(|_, _, _| 1);
-            lanes::allocate(exec, &times, |_| [0; 2], mean, grant, &mut tables);
+            let cache = lanes::LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0);
+            let key = (OpKind::Factorization, |_| [0; 2]);
+            lanes::allocate(exec, &times, key, mean, grant, &cache, &mut tables);
             let placement = tables.placement();
             let shares = (0..placement.lanes()).map(|l| placement.share(l)).collect();
             let decision = exec.batch_decision(&tcontract_exec::BatchQuery::new(work.len(), mean));
