@@ -28,9 +28,11 @@ pub(crate) enum Event {
     LqAdjointStaging,
     /// The lanes the block lane driver placed one batch on.
     BlockLanes,
+    /// The lane parts the native runner lent one multi-lane placed batch.
+    RunnerLanes,
 }
 
-const EVENTS: usize = Event::BlockLanes as usize + 1;
+const EVENTS: usize = Event::RunnerLanes as usize + 1;
 
 #[derive(Default)]
 struct Probe {

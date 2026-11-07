@@ -214,9 +214,9 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
         "use BatchPolicy",
         "use Exec",
         "use place",
-        "use place_each",
         "use run_barrier",
         "use run_native",
+        "use Assignment",
         "use Barrier",
         "use Outcome",
         "use Work",
@@ -241,7 +241,7 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
         (
             "lanes/placement.rs",
             include_str!("../src/lanes/placement.rs"),
-            &["fn place", "fn place_each"],
+            &["fn place"],
         ),
         (
             "lanes/runner.rs",
@@ -250,6 +250,7 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
                 "trait Work",
                 "trait Barrier",
                 "type Outcome",
+                "enum Assignment",
                 "fn run_native",
                 "fn run_barrier",
             ],

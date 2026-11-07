@@ -4,9 +4,12 @@
 //! A job owns an exclusive destination and is an ordered list of stages, each
 //! one symtn-owned movement section or one provider call ([`StageKind`]).
 //! [`place`] splits the context's budget B into lanes; [`run_native`] runs
-//! every lane in one fork, and [`run_barrier`] runs the same stage
-//! enumeration in rounds cut at each provider stage, handing those stages to
-//! the caller's engine between rounds ([`Barrier`]).
+//! every lane in one fork ([`Assignment::Placed`]), and [`run_barrier`] runs
+//! the same stage enumeration in rounds cut at each provider stage, handing
+//! those stages to the caller's engine between rounds ([`Barrier`]).
+//! [`run_native`] also runs a batch without a placement: split in two
+//! recursively over a count of logical threads ([`Assignment::Split`]), or
+//! each job alone on one slot ([`Assignment::Each`]).
 //!
 //! # Placement under `Auto`
 //!
@@ -111,7 +114,7 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::num::NonZeroUsize;
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use crate::lane_gemm::{gemm_estimate, LaneGemmBody, LaneGemmIo, LaneGemmShape, LaneGemms};
@@ -122,11 +125,11 @@ use tenferro_cpu::threadteam;
 mod placement;
 mod runner;
 
-pub use placement::{place, place_each};
-use placement::{words, PlaceScratch};
+pub use placement::place;
+use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
-use runner::RunScratch;
-pub use runner::{run_barrier, run_native, Barrier, Outcome, Work};
+pub use runner::{run_barrier, run_native, Assignment, Barrier, Outcome, Work};
+use runner::{Arena, RunScratch};
 
 /// What one stage of a job is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,6 +277,7 @@ pub struct LaneTables {
     placement: Placement,
     scratch: PlaceScratch,
     run: RunScratch,
+    arena: Arena,
 }
 
 impl LaneTables {
@@ -287,6 +291,7 @@ impl LaneTables {
             .retained_bytes()
             .saturating_add(self.scratch.retained_bytes())
             .saturating_add(self.run.retained_bytes())
+            .saturating_add(self.arena.retained_bytes())
     }
 
     /// The placement queue's live entries.

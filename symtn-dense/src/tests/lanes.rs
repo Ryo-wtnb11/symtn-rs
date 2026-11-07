@@ -10,8 +10,8 @@ use tenferro_cpu::{CpuEngine, Pool};
 
 use super::counting_alloc;
 use crate::lanes::{
-    place, run_barrier, run_native, Barrier, Estimate, Form, Jobs, LaneTables, Placement,
-    StageKind, Work,
+    place, run_barrier, run_native, Assignment, Barrier, Estimate, Form, Jobs, LaneTables,
+    Placement, StageKind, Work,
 };
 use crate::{
     DenseDotConfig, DenseError, DenseExecutor, DenseRead, DenseScalar, DenseTensor, DenseView,
@@ -726,6 +726,9 @@ impl Work for Spy {
         }
         Ok(())
     }
+    fn lane(&self) -> Option<()> {
+        Some(())
+    }
 }
 
 fn spy(jobs: Vec<Vec<(StageKind, Estimate)>>) -> Spy {
@@ -744,7 +747,7 @@ fn run_spy(engine: &mut CpuEngine, budget: usize, spy: &Spy) -> Vec<Vec<(usize, 
         run_native(
             exec.reborrow(),
             spy,
-            &mut tables,
+            Assignment::Placed(&mut tables),
             &mut seen,
             &mut vec![(); lanes],
         )
@@ -1042,7 +1045,14 @@ fn run_packed(work: &Packed, budget: usize, policy: BatchPolicy, form: Form) -> 
     let (outcome, host) = match form {
         Form::Native => {
             let outcome = on(&mut engine, budget, |exec| {
-                run_native(exec, work, &mut tables, &mut states, &mut lanes).unwrap()
+                run_native(
+                    exec,
+                    work,
+                    Assignment::Placed(&mut tables),
+                    &mut states,
+                    &mut lanes,
+                )
+                .unwrap()
             });
             (outcome, None)
         }
@@ -1183,6 +1193,9 @@ impl Work for Noop {
     fn run(&self, _: usize, _: usize, _: &mut (), _: &mut (), _: Exec<'_>) -> Result<(), ()> {
         Ok(())
     }
+    fn lane(&self) -> Option<()> {
+        Some(())
+    }
 }
 
 /// After a four-lane call warms the tables, a one-lane call and its repeat
@@ -1200,9 +1213,15 @@ fn a_repeated_call_after_fewer_lanes_allocates_nothing() {
         on(engine, budget, |mut exec| {
             counting_alloc::measure(|| {
                 place(&exec, &work, Form::Native, &mut tables);
-                run_native(exec.reborrow(), &work, &mut tables, &mut states, &mut lanes)
-                    .unwrap()
-                    .unwrap();
+                run_native(
+                    exec.reborrow(),
+                    &work,
+                    Assignment::Placed(&mut tables),
+                    &mut states,
+                    &mut lanes,
+                )
+                .unwrap()
+                .unwrap();
             })
             .1
         })
@@ -1225,7 +1244,7 @@ fn the_tables_charge_covers_what_they_retain() {
         run_native(
             exec.reborrow(),
             &spy,
-            &mut tables,
+            Assignment::Placed(&mut tables),
             &mut seen,
             &mut vec![(); lanes],
         )
@@ -1257,11 +1276,212 @@ fn a_share_above_the_running_budget_is_refused_before_any_stage() {
     );
     let mut seen = vec![vec![]];
     let refused = on(&mut engine, 4, |exec| {
-        run_native(exec, &spy, &mut tables, &mut seen, &mut [()])
+        run_native(
+            exec,
+            &spy,
+            Assignment::Placed(&mut tables),
+            &mut seen,
+            &mut [()],
+        )
     });
     assert_eq!(
         refused.map(|_| ()),
         Err(threadteam::Error::SharesExceedBudget { budget: 4, sum: 6 })
     );
     assert_eq!(seen, [Vec::<(usize, usize)>::new()]);
+}
+
+/// One-stage jobs, `count` of them, failing at the listed jobs.
+fn one_stage(count: usize, fail: &[usize]) -> Spy {
+    Spy {
+        batch: Batch::new(vec![vec![(M, serial(1000))]; count]),
+        fail: fail.iter().map(|&j| (j, 0)).collect(),
+    }
+}
+
+type Assigned = Result<Result<(), usize>, threadteam::Error>;
+
+/// Each job's offered budgets and the outcome of `spy` run on `budget`
+/// slots under `assignment`, with `lanes` lane states.
+fn run_assigned(
+    engine: &mut CpuEngine,
+    budget: usize,
+    spy: &Spy,
+    assignment: Assignment<'_>,
+    lanes: usize,
+) -> (Vec<Vec<(usize, usize)>>, Assigned) {
+    let mut seen = vec![vec![]; spy.count()];
+    let outcome = on(engine, budget, |exec| {
+        run_native(exec, spy, assignment, &mut seen, &mut vec![(); lanes])
+    });
+    (seen, outcome.map(|ran| ran.map_err(|(j, _)| j)))
+}
+
+fn offered(seen: &[Vec<(usize, usize)>]) -> Vec<usize> {
+    seen.iter().flatten().map(|&(_, budget)| budget).collect()
+}
+
+/// `Split` gives every job the token of main's recursive replay split
+/// (`parallel_split`, `threads / 2` logical threads to the left, a two-child
+/// fork halving the token), by hand: six jobs over six threads split 3 | 3
+/// on tokens 3 | 3, each half 1 | 2 on tokens 2 | 1, and the two jobs on one
+/// slot share it, so [2, 1, 1, 2, 1, 1]; three jobs over four threads split
+/// 2 | 1 on tokens 2 | 2, the left 1 | 1, so [1, 1, 2]. Lanes shared from
+/// the caller or a half's own give the same tokens.
+#[test]
+fn split_offers_each_job_the_token_of_mains_recursion() {
+    let mut engine = engine(6, BatchPolicy::default(), row(60));
+    for (jobs, threads, expected) in [(6, 6, vec![2, 1, 1, 2, 1, 1]), (3, 4, vec![1, 1, 2])] {
+        let spy = one_stage(jobs, &[]);
+        for lanes in [0, threads] {
+            let (seen, outcome) = run_assigned(
+                &mut engine,
+                threads,
+                &spy,
+                Assignment::Split { threads },
+                lanes,
+            );
+            assert_eq!(outcome, Ok(Ok(())));
+            assert_eq!(offered(&seen), expected, "{jobs} jobs, {lanes} lanes");
+        }
+    }
+}
+
+/// Six jobs over two threads split into leaves [0, 1, 2] and [3, 4, 5]:
+/// with jobs 0 and 3 failing, each leaf stops at its failure, the sibling
+/// still runs, and the left failure is returned.
+#[test]
+fn a_split_leaf_stops_at_its_first_failure_and_the_left_wins() {
+    let spy = one_stage(6, &[0, 3]);
+    let mut engine = engine(2, BatchPolicy::default(), row(60));
+    let (seen, outcome) = run_assigned(&mut engine, 2, &spy, Assignment::Split { threads: 2 }, 0);
+    assert_eq!(outcome, Ok(Err(0)));
+    let attempted: Vec<usize> = (0..6).filter(|&j| !seen[j].is_empty()).collect();
+    assert_eq!(attempted, [0, 3]);
+}
+
+/// `Each` runs every job on one slot of its own and returns the lowest
+/// failure; a context narrower than the jobs is refused before any job.
+#[test]
+fn each_runs_every_job_on_one_slot_and_refuses_too_few_slots() {
+    let spy = one_stage(3, &[1, 2]);
+    let mut engine = engine(4, BatchPolicy::default(), row(60));
+    let (seen, outcome) = run_assigned(&mut engine, 4, &spy, Assignment::Each, 3);
+    assert_eq!(outcome, Ok(Err(1)));
+    assert_eq!(seen, [[(0, 1)]; 3]);
+    let (seen, outcome) = run_assigned(&mut engine, 2, &spy, Assignment::Each, 3);
+    assert_eq!(
+        outcome,
+        Err(threadteam::Error::SharesExceedBudget { budget: 2, sum: 3 })
+    );
+    assert!(seen.iter().all(Vec::is_empty));
+}
+
+/// A warm `Split` lends on the stack: no heap allocation on the caller,
+/// whether the halves share the caller's lanes or make their own.
+#[test]
+fn split_lends_without_allocating() {
+    let work = Noop(Batch::new(vec![vec![(M, serial(1000))]; 64]));
+    let mut engine = engine(8, BatchPolicy::default(), row(60));
+    let mut states = vec![(); 64];
+    for lanes in [0, 8] {
+        let mut lanes = vec![(); lanes];
+        let mut call = |engine: &mut CpuEngine| {
+            on(engine, 8, |exec| {
+                counting_alloc::measure(|| {
+                    run_native(
+                        exec,
+                        &work,
+                        Assignment::Split { threads: 8 },
+                        &mut states,
+                        &mut lanes,
+                    )
+                    .unwrap()
+                    .unwrap();
+                })
+                .1
+            })
+        };
+        call(&mut engine);
+        assert_eq!(call(&mut engine).calls, 0, "{} lanes", lanes.len());
+    }
+}
+
+fn forced_lanes(lanes: usize) -> BatchPolicy {
+    BatchPolicy::new(BatchStrategy::Split {
+        lanes: NonZeroUsize::new(lanes).unwrap(),
+    })
+}
+
+/// A `Placed` run on fresh tables allocates its two flat tables, whatever
+/// its lane count.
+#[test]
+fn fresh_placed_allocations_do_not_depend_on_the_lane_count() {
+    let work = Noop(Batch::new(vec![vec![(P, serial(1000))]; 16]));
+    let mut states = vec![(); 16];
+    for lanes in [2, 8] {
+        let mut engine = engine(8, forced_lanes(lanes), row(60));
+        let mut lane_states = vec![(); lanes];
+        let mut placed = || {
+            let mut tables = LaneTables::default();
+            on(&mut engine, 8, |exec| {
+                place(&exec, &work, Form::Native, &mut tables)
+            });
+            assert_eq!(tables.placement().lanes(), lanes);
+            on(&mut engine, 8, |exec| {
+                counting_alloc::measure(|| {
+                    run_native(
+                        exec,
+                        &work,
+                        Assignment::Placed(&mut tables),
+                        &mut states,
+                        &mut lane_states,
+                    )
+                    .unwrap()
+                    .unwrap();
+                })
+                .1
+            })
+        };
+        // The first run also warms the engine's fork of this many lanes.
+        placed();
+        assert_eq!(placed().calls, 2, "{lanes} lanes");
+    }
+}
+
+/// After a 64-lane run, a two-lane run lends two lane parts and allocates
+/// nothing: no work scales with the lanes of earlier calls.
+#[test]
+fn a_placed_run_touches_only_its_own_lanes_after_wider_calls() {
+    let work = Noop(Batch::new(vec![vec![(P, serial(1000))]; 64]));
+    let mut states = vec![(); 64];
+    let mut lane_states = vec![(); 64];
+    let mut tables = LaneTables::default();
+    let mut call = |lanes: usize| {
+        let mut engine = engine(64, forced_lanes(lanes), row(60));
+        on(&mut engine, 64, |exec| {
+            place(&exec, &work, Form::Native, &mut tables)
+        });
+        on(&mut engine, 64, |exec| {
+            let recording = crate::probe::record();
+            let ((), allocs) = counting_alloc::measure(|| {
+                run_native(
+                    exec,
+                    &work,
+                    Assignment::Placed(&mut tables),
+                    &mut states,
+                    &mut lane_states,
+                )
+                .unwrap()
+                .unwrap();
+            });
+            (
+                recording.get(crate::probe::Event::RunnerLanes),
+                allocs.calls,
+            )
+        })
+    };
+    call(64);
+    call(2);
+    assert_eq!(call(2), (2, 0));
 }

@@ -547,10 +547,14 @@ where
             };
             let lane_scratch = &mut lane_scratch[..count];
             let ran = match runner {
-                Runner::Native(exec) => {
-                    lanes::run_native(exec, &work, tables, &mut components, lane_scratch)
-                        .map_err(|_| oversized())
-                }
+                Runner::Native(exec) => lanes::run_native(
+                    exec,
+                    &work,
+                    lanes::Assignment::Placed(tables),
+                    &mut components,
+                    lane_scratch,
+                )
+                .map_err(|_| oversized()),
                 Runner::Barrier(host) => {
                     lanes::run_barrier(host, &work, tables, &mut components, lane_scratch)
                 }

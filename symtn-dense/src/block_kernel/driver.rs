@@ -79,10 +79,10 @@ pub(crate) type LaneMembers<'v, J> = dyn FnMut(&mut dyn FnMut(&mut J)) + 'v;
 /// stay with the kernel. Each block is one provider stage.
 pub(crate) trait BlockOp: Sync {
     /// One block's exclusive state: its validated operands and its output.
-    type Job: Send;
+    type Job: Send + Sync;
     /// One lane's state, made on the caller before the fork; its blocks run
     /// with it in order on the lane's thread.
-    type Lane: Send;
+    type Lane: Send + Sync;
     const ENTRY: Entry;
     /// The `DenseError` label of a refused entry.
     const LABEL: &'static str;
@@ -224,8 +224,14 @@ fn on_lanes<B: BlockOp>(
         op,
         count: jobs.len(),
     };
-    lanes::run_native(exec.reborrow(), &running, tables, jobs, &mut lane_states)
-        .map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
+    lanes::run_native(
+        exec.reborrow(),
+        &running,
+        lanes::Assignment::Placed(tables),
+        jobs,
+        &mut lane_states,
+    )
+    .map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
 }
 
 #[cfg(test)]

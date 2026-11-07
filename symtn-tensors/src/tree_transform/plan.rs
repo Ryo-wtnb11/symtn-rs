@@ -1311,11 +1311,11 @@ fn execute_staged_groups<I, O, F>(
     build: F,
 ) -> Result<Vec<O>, OperationError>
 where
-    I: Send,
-    O: Send,
+    I: Send + Sync,
+    O: Send + Sync,
     F: Fn(I) -> Result<O, OperationError> + Send + Sync,
 {
-    use symtn_dense::lanes::{self, BatchPolicy, Exec, LaneTables};
+    use symtn_dense::lanes::{self, Assignment, BatchPolicy, Exec};
 
     // The caller engine's width bounds this compile's fan-out.
     let threads = if inputs.len() <= 1 {
@@ -1338,15 +1338,19 @@ where
         count: batches.len(),
         io: core::marker::PhantomData,
     };
-    let mut tables = LaneTables::default();
-    lanes::place_each(batches.len(), &mut tables);
     let mut lane_states = vec![(); batches.len()];
     let ran = symtn_operations::host_pool::region(
         engine,
         symtn_operations::host_pool::HostPoolSite::PlanCompile,
         |token| {
             let exec = Exec::from_token(token, None, BatchPolicy::default());
-            lanes::run_native(exec, &work, &mut tables, &mut batches, &mut lane_states)
+            lanes::run_native(
+                exec,
+                &work,
+                Assignment::Each,
+                &mut batches,
+                &mut lane_states,
+            )
         },
     )?;
     match ran {
@@ -1388,7 +1392,7 @@ impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
         symtn_dense::lanes::StageKind::Movement
     }
 
-    // Placed without estimates (`place_each`).
+    // Run on one slot each (`Assignment::Each`), without estimates.
     fn estimate(&self, _: usize, _: usize) -> symtn_dense::lanes::Estimate {
         symtn_dense::lanes::Estimate {
             serial: core::time::Duration::ZERO,
@@ -1402,8 +1406,8 @@ impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
 impl<F, I, O> symtn_dense::lanes::Work for StagedBuild<F, I, O>
 where
     F: Fn(I) -> Result<O, OperationError> + Sync,
-    I: Send,
-    O: Send,
+    I: Send + Sync,
+    O: Send + Sync,
 {
     type Job = StagedBatch<I, O>;
     type Lane = ();

@@ -740,16 +740,15 @@ fn place_forced(
     compact(placement, scratch, count);
 }
 
-/// Places each of `count` jobs alone on a lane of one slot, reading no
-/// estimate: the fan-out of a caller whose partition into jobs is already
-/// its placement. Every stage then runs at one slot.
-pub fn place_each(count: usize, tables: &mut LaneTables) {
-    let placement = &mut tables.placement;
-    placement.clear();
-    placement.shares.resize(count, 1);
-    placement.lane_starts.extend(0..=count);
-    placement.lane_jobs.extend(0..count);
-    placement.lane_of.extend(0..count);
+/// The job count of the left half of a split of `items >= 2` jobs over
+/// `threads >= 2` logical threads: the left threads' proportional share,
+/// rounded up, keeping at least one job on each side.
+pub(super) fn parallel_split(items: usize, threads: usize) -> usize {
+    let left_threads = threads / 2;
+    items
+        .saturating_mul(left_threads)
+        .div_ceil(threads)
+        .clamp(1, items - 1)
 }
 
 /// The lane of least accumulated time, ties to the lowest, popped from
