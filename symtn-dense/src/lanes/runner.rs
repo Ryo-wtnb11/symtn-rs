@@ -1,25 +1,27 @@
 use super::*;
 
-/// The stage bodies of a placed batch.
-pub trait Work: Jobs + Sync {
+/// The job bodies of a batch. Job indices are dense and stable for one
+/// placement and its run.
+pub trait Work: Sync {
     /// One job's exclusive state.
     type Job: Send;
     /// One lane's state (its initialized source and destination buffers),
-    /// kept for the whole call and lent to every stage the lane runs.
+    /// kept for the whole call and lent to every job the lane runs.
     type Lane: Send;
     type Error: Send;
 
-    /// Runs stage `stage` of `job` on `exec`, whose budget is the stage's
-    /// selected width (`Placement::selected`) under [`Placed`] and the job's
-    /// own token under the other assignments: a movement stage
-    /// dispatches at most that many participants and checks, under `Auto`,
-    /// that its estimate pays for its final fork on `exec`'s token (running
-    /// inline otherwise), and a provider stage hands `exec` to the provider
-    /// as its whole offer.
+    /// The number of jobs J.
+    fn count(&self) -> usize;
+
+    /// Runs `job` on `exec`, whose budget is its lane's share under
+    /// [`Placed`] and the job's own token under the other assignments: a
+    /// movement body dispatches at most that many participants and checks,
+    /// under `Auto`, that its estimate pays for its final fork on `exec`'s
+    /// token (running inline otherwise), and a provider body hands `exec` to
+    /// the provider as its whole offer.
     fn run(
         &self,
         job: usize,
-        stage: usize,
         state: &mut Self::Job,
         lane: &mut Self::Lane,
         exec: Exec<'_>,
@@ -69,8 +71,7 @@ mod sealed {
 /// left half takes `parallel_split(J, threads)` jobs and `threads / 2`
 /// threads, the right half the rest, and the two halves run as the children
 /// of a two-child fork of the token, which halves it. A part of one thread
-/// or one job is a leaf, which runs its jobs in order on its own token,
-/// every stage on that token.
+/// or one job is a leaf, which runs its jobs in order on its own token.
 ///
 /// The call lends its one lane state (`lanes[0]`) to the root part. At each
 /// fork `split` divides the part's lane: it shrinks it to the left half's
@@ -114,10 +115,9 @@ pub struct Cut {
 pub struct Each;
 
 /// The lanes of `tables`' placement, each one `fork_sized` child of exactly
-/// its share; lane `l` borrows lane state `l`, and every stage runs on its
-/// selected width (`Placement::selected`) of its lane's share. Every job
-/// runs to its end or its own first failing stage, and the lowest failing
-/// job is returned.
+/// its share; lane `l` borrows lane state `l`, and every job runs on its
+/// lane's whole share. Every job runs, and the lowest failing job is
+/// returned.
 #[derive(Debug)]
 pub struct Placed<'a> {
     pub tables: &'a mut LaneTables,
@@ -127,7 +127,7 @@ pub struct Placed<'a> {
 /// `states` entry, and returns the lowest-indexed job's failure, as each
 /// [`Assignment`] describes.
 ///
-/// A panic unwinds after the forks join. The outer error, before any stage
+/// A panic unwinds after the forks join. The outer error, before any job
 /// ran, is a [`Refusal`]: `states` not holding one entry per job (the
 /// placement's under [`Placed`], `work`'s count otherwise), `lanes` holding
 /// fewer entries than the placement has lanes ([`Placed`]) or the work has
@@ -147,7 +147,7 @@ pub fn run_native<W: Work, A: Assignment<W>>(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Refusal<R> {
     /// The context's refusal: threadteam's, of lane shares or slots, before
-    /// any stage.
+    /// any job.
     Context(R),
     /// `states` holds `given` entries for `jobs` jobs.
     States { jobs: usize, given: usize },
@@ -289,8 +289,7 @@ where
     }
 }
 
-/// Runs every stage of `job` in order on `exec`, stopping at its first
-/// failure.
+/// Runs `job` on `exec`; its failure, if any, with its index.
 fn run_job<W: Work>(
     work: &W,
     job: usize,
@@ -298,11 +297,9 @@ fn run_job<W: Work>(
     lane: &mut W::Lane,
     exec: &mut Exec<'_>,
 ) -> Option<(usize, W::Error)> {
-    (0..work.stages(job)).find_map(|stage| {
-        work.run(job, stage, state, lane, exec.reborrow())
-            .err()
-            .map(|error| (job, error))
-    })
+    work.run(job, state, lane, exec.reborrow())
+        .err()
+        .map(|error| (job, error))
 }
 
 /// [`Split`] over `states`, whose first job is `first`, on `lane`.
@@ -453,7 +450,7 @@ fn run_placed<W: Work>(
         let width = NonZeroUsize::new(share).ok_or(threadteam::Error::ZeroBudget)?;
         let mut exec = exec.limit(width);
         let jobs = states.iter_mut().enumerate();
-        let failure = run_lane(work, placement, share, &mut exec, jobs, &mut lanes[0]);
+        let failure = run_lane(work, &mut exec, jobs, &mut lanes[0]);
         return Ok(failure.map_or(Ok(()), Err));
     }
     let mut slots: Vec<Option<(usize, &mut W::Job)>> = recycle(std::mem::take(&mut arena.slots));
@@ -487,8 +484,7 @@ fn run_placed<W: Work>(
         let Lent { jobs, lane, .. } = &mut *part;
         let mut exec = Exec::from_token(token, workspace, policy);
         let jobs = jobs.iter_mut().filter_map(Option::take);
-        let share = placement.shares[l];
-        if let Some((job, error)) = run_lane(work, placement, share, &mut exec, jobs, lane) {
+        if let Some((job, error)) = run_lane(work, &mut exec, jobs, lane) {
             let mut first = failure.lock().unwrap_or_else(PoisonError::into_inner);
             if first.as_ref().is_none_or(|&(j, _)| job < j) {
                 *first = Some((job, error));
@@ -502,13 +498,10 @@ fn run_placed<W: Work>(
     Ok(failure.map_or(Ok(()), Err))
 }
 
-/// Runs one lane's `jobs`, ascending, each stage on its selected width of
-/// `share`; a job stops at its own first failing stage and the lane goes on.
-/// Returns the lane's first, so lowest, failure.
+/// Runs one lane's `jobs`, ascending, each on the lane's token; a failing
+/// job does not stop the lane. Returns the lane's first, so lowest, failure.
 fn run_lane<'s, W: Work>(
     work: &W,
-    placement: &Placement,
-    share: usize,
     exec: &mut Exec<'_>,
     jobs: impl Iterator<Item = (usize, &'s mut W::Job)>,
     lane: &mut W::Lane,
@@ -518,13 +511,8 @@ where
 {
     let mut first = None;
     for (j, state) in jobs {
-        for k in 0..work.stages(j) {
-            let width =
-                NonZeroUsize::new(placement.selected(j, k, share)).unwrap_or(NonZeroUsize::MIN);
-            if let Err(error) = work.run(j, k, state, lane, exec.reborrow().limit(width)) {
-                first.get_or_insert((j, error));
-                break;
-            }
+        if let Some(failure) = run_job(work, j, state, lane, exec) {
+            first.get_or_insert(failure);
         }
     }
     first

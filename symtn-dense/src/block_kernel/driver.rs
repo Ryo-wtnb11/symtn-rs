@@ -1,15 +1,15 @@
-//! The block kernels' one lane driver: a kernel describes one block's
-//! estimate and execution ([`BlockOp`]); the driver enters the kernel's
-//! guarded engine entry, places the blocks with [`lanes::place`] (one
-//! provider stage each) and runs them on [`lanes::run_native`], returning the
-//! lowest-indexed failure.
+//! The block kernels' one lane driver: a kernel describes one block's work
+//! and execution ([`BlockOp`]); the driver enters the kernel's guarded engine
+//! entry, turns the work into times with the one cost function, allocates the
+//! lanes with [`lanes::allocate`] and runs every block on
+//! [`lanes::run_native`], returning the lowest-indexed failure.
 
 use std::time::Duration;
 
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use crate::lanes::{self, Estimate, Form, LaneTables, StageKind};
+use crate::lanes::{self, GrantKey, LaneTables};
 use crate::tenferro_adapter::tenferro_error;
 use crate::DenseError;
 
@@ -24,13 +24,14 @@ pub(crate) enum Entry {
     Linalg,
 }
 
-/// The dependency whose own model turns a block's work into time.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The dependency whose own model turns a block's work into time, and the
+/// family of its grant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
     Gemm,
     /// The engine's `WorkModel`, from which tlinalg makes its own width
-    /// decision for a factorization.
+    /// decision for a factorization (see `factor::grant`).
     Factorization,
 }
 
@@ -61,9 +62,11 @@ pub(crate) fn work_model_ns(model: &WorkModel, work: f64) -> f64 {
 /// The estimated serial time of `work` weighted multiply-adds (four per
 /// complex multiply-add) of kind `kind`.
 ///
-/// Each kind uses the model of the dependency that executes the block:
-/// tcontract's `ns_per_flop` over `2 work` flops for GEMM, the engine work
-/// model (as `tcontract-exec` `item_ns`) for a factorization.
+/// Each kind uses the model of the dependency that executes the block, so the
+/// scheduler and that dependency agree on the job's cost: tcontract's
+/// `ns_per_flop` over `2 work` flops for GEMM, the engine work model (as
+/// `tcontract-exec` `item_ns`) for a factorization. Neither is calibrated
+/// here; both move to the providers' own estimates when they publish them.
 pub(crate) fn cost(kind: OpKind, work: f64, model: &WorkModel) -> Duration {
     estimate(match kind {
         OpKind::Gemm => 2.0 * work * tcontract::ns_per_flop(),
@@ -74,9 +77,9 @@ pub(crate) fn cost(kind: OpKind, work: f64, model: &WorkModel) -> Duration {
 /// A lane's blocks, handed out one by one to the visitor it is called with.
 pub(crate) type LaneMembers<'v, J> = dyn FnMut(&mut dyn FnMut(&mut J)) + 'v;
 
-/// One kernel's blocks: what the driver needs to estimate and run each one.
+/// One kernel's blocks: what the driver needs to cost and run each one.
 /// Validation that must precede the entry, and the outputs a block produces,
-/// stay with the kernel. Each block is one provider stage.
+/// stay with the kernel.
 pub(crate) trait BlockOp: Sync {
     /// One block's exclusive state: its validated operands and its output.
     type Job: Send;
@@ -84,18 +87,44 @@ pub(crate) trait BlockOp: Sync {
     /// with it in order on the lane's thread.
     type Lane: Send;
     const ENTRY: Entry;
+    const KIND: OpKind;
     /// The `DenseError` label of a refused entry.
     const LABEL: &'static str;
 
-    /// Block `index`'s provider estimates under the engine's work model.
-    fn estimate(&self, index: usize, job: &Self::Job, model: &WorkModel) -> Estimate;
+    /// The block's weighted multiply-adds, as its provider estimates them.
+    fn work(&self, index: usize, job: &Self::Job) -> f64;
+
+    /// Whether [`grant`](Self::grant) models block `index`'s provider
+    /// width. A batch holding a block it does not model keeps the baseline
+    /// placement, without the search.
+    fn modeled(&self, _: usize, _: &Self::Job) -> bool {
+        true
+    }
+
+    /// The width block `index`'s provider takes on a lane of `budget`
+    /// reserved slots of `exec`, for a block of serial time `serial`: the
+    /// placement's model of that provider's own width decision, composed from
+    /// the provider's public decisions. Consulted only for a batch whose
+    /// every block is [`modeled`](Self::modeled).
+    fn grant(
+        &self,
+        index: usize,
+        job: &Self::Job,
+        exec: &Exec<'_>,
+        budget: usize,
+        serial: Duration,
+    ) -> usize;
+
+    /// What block `index`'s [`grant`](Self::grant) depends on besides its
+    /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
+    fn grant_key(&self, index: usize, job: &Self::Job) -> GrantKey;
 
     /// Builds one lane's [`Lane`](Self::Lane) from that lane's blocks
     /// (`visit` hands out each one) on a context of the lane's share.
     fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> Self::Lane;
 
-    /// Runs block `index` on `exec`, whose budget is the block's selected
-    /// width, with its lane's scratch.
+    /// Runs block `index` on its lane's execution context with its lane's
+    /// scratch.
     fn run(
         &self,
         index: usize,
@@ -105,64 +134,22 @@ pub(crate) trait BlockOp: Sync {
     ) -> Result<(), DenseError>;
 }
 
-/// Placement's view of a kernel's blocks: one provider stage each, estimated
-/// on demand.
-struct Costed<'a, B: BlockOp> {
-    op: &'a B,
-    jobs: &'a [B::Job],
-    model: WorkModel,
-}
-
-impl<B: BlockOp> lanes::Jobs for Costed<'_, B> {
-    fn count(&self) -> usize {
-        self.jobs.len()
-    }
-    fn stages(&self, _: usize) -> usize {
-        1
-    }
-    fn kind(&self, _: usize, _: usize) -> StageKind {
-        StageKind::Provider
-    }
-    fn estimate(&self, job: usize, _: usize) -> Estimate {
-        self.op.estimate(job, &self.jobs[job], &self.model)
-    }
-}
-
 /// The runner's view of a kernel's blocks.
 struct Running<'a, B> {
     op: &'a B,
     count: usize,
 }
 
-impl<B: BlockOp> lanes::Jobs for Running<'_, B> {
-    fn count(&self) -> usize {
-        self.count
-    }
-    fn stages(&self, _: usize) -> usize {
-        1
-    }
-    fn kind(&self, _: usize, _: usize) -> StageKind {
-        StageKind::Provider
-    }
-    // Placement has finished before the run, which reads no estimate.
-    fn estimate(&self, _: usize, _: usize) -> Estimate {
-        Estimate {
-            serial: Duration::ZERO,
-            payback: None,
-            sections: 1,
-            widen: true,
-        }
-    }
-}
-
 impl<B: BlockOp> lanes::Work for Running<'_, B> {
     type Job = B::Job;
     type Lane = B::Lane;
     type Error = DenseError;
+    fn count(&self) -> usize {
+        self.count
+    }
     fn run(
         &self,
         job: usize,
-        _: usize,
         state: &mut B::Job,
         lane: &mut B::Lane,
         exec: Exec<'_>,
@@ -192,18 +179,48 @@ pub(crate) fn drive<B: BlockOp>(
         .map_err(|(_, error)| error)
 }
 
+/// Places `jobs` of `op` on `exec` into `tables`: each block's work turned
+/// into its serial time by [`cost`], and [`lanes::allocate`] offered the
+/// blocks' grants only where it can search and every block is modeled.
+pub(crate) fn place<B: BlockOp>(exec: &Exec<'_>, op: &B, jobs: &[B::Job], tables: &mut LaneTables) {
+    let model = exec.batch_policy().model;
+    let mut total_work = 0.0;
+    let mut times = tables.take_times();
+    // One `extend` reserves from the job iterator's size hint up front.
+    times.extend(jobs.iter().enumerate().map(|(index, job)| {
+        let work = op.work(index, job);
+        total_work += work;
+        cost(B::KIND, work, &model)
+    }));
+    let mean_work = total_work / jobs.len().max(1) as f64;
+    // Admission is read only where the allocation can search, so a serial or
+    // forced allocation computes no grant input for its blocks.
+    let modeled = lanes::searchable(exec, &times, mean_work)
+        && jobs
+            .iter()
+            .enumerate()
+            .all(|(index, job)| op.modeled(index, job));
+    let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
+        op.grant(j, &jobs[j], exec, budget, serial)
+    });
+    lanes::allocate(
+        exec,
+        &times,
+        |j| op.grant_key(j, &jobs[j]),
+        mean_work,
+        grant,
+        tables,
+    );
+    tables.keep_times(times);
+}
+
 fn on_lanes<B: BlockOp>(
     exec: &mut Exec<'_>,
     op: &B,
     jobs: &mut [B::Job],
     tables: &mut LaneTables,
 ) -> tenferro_tensor::Result<lanes::Outcome<DenseError>> {
-    let costed = Costed {
-        op,
-        jobs,
-        model: exec.batch_policy().model,
-    };
-    lanes::place(exec, &costed, Form::Native, tables);
+    place(exec, op, jobs, tables);
     let placement = tables.placement();
     #[cfg(test)]
     crate::probe::add(crate::probe::Event::BlockLanes, placement.lanes());
@@ -232,23 +249,4 @@ fn on_lanes<B: BlockOp>(
         &mut lane_states,
     )
     .map_err(|refused| tenferro_tensor::Error::backend_source("Exec::fork_sized", refused))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Purpose: a work-model rate that is zero or NaN counts as one
-    /// multiply-add per ns, and a NaN or negative time is zero while an
-    /// infinite one saturates, as the dependency normalizes them.
-    #[test]
-    fn rate_zero_or_nan_counts_as_one_and_nan_time_is_zero() {
-        let rate = |r: f64| WorkModel::default().with_muladds_per_ns(r);
-        let reference = work_model_ns(&rate(1.0), 4096.0);
-        assert_eq!(work_model_ns(&rate(0.0), 4096.0), reference);
-        assert_eq!(work_model_ns(&rate(f64::NAN), 4096.0), reference);
-        assert_eq!(estimate(f64::NAN), Duration::ZERO);
-        assert_eq!(estimate(-1.0), Duration::ZERO);
-        assert_eq!(estimate(f64::INFINITY), Duration::from_secs(u64::MAX / 4));
-    }
 }

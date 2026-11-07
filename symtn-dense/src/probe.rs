@@ -30,9 +30,11 @@ pub(crate) enum Event {
     BlockLanes,
     /// The lane parts the native runner lent one multi-lane placed batch.
     RunnerLanes,
+    /// The block placement made one comparison sort of its working tables.
+    PlacementSort,
 }
 
-const EVENTS: usize = Event::RunnerLanes as usize + 1;
+const EVENTS: usize = Event::PlacementSort as usize + 1;
 
 #[derive(Default)]
 struct Probe {

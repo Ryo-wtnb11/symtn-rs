@@ -126,53 +126,65 @@ of `left_null`, Hermitian eigendecomposition full and values-only, general
 eigenvalues, the polar decompositions and the Hermitian `exp`) are placed by
 one routine and run by one lane runner (the factorizations inside the
 engine's guarded linalg entry, the GEMMs inside its contraction entry).
-Each block is one provider job with the provider's own serial estimate:
+Each block is one provider job whose cost is the provider's work estimate:
 tcontract's per-flop rate over the block's `2 m k n` flops (four times that
 for complex scalars) for a GEMM, tlinalg's work estimate under the engine's
 work model for a factorization (SVD `m n min(m, n)`, QR `m n k - k^3/3` with
 `k = min(m, n)`, LQ that of its transpose's QR, a tall full QR or null basis
 tlinalg's Householder factor plus its reflector application, EIGH and EIG
 values `n^3`; a polar decomposition or Hermitian `exp` adds its products).
-Its width is the provider's own public rule, threadteam's `width_for` over
-that estimate with one section, when the block widens: a single matrix of
-the compact SVD, values-only SVD, Hermitian eigendecomposition or its
-values, and every GEMM. A single matrix is capped at the width its payback
-estimate (`estimate_payback_work`) pays for, as tlinalg caps a batch of one.
-An input of several matrices is one intact job whose estimate is the
-per-item work times the items, with no cap, tlinalg routing the items inside
-the offer. A composite, whose one body makes several provider calls (a polar
-decomposition one SVD and two products per item, a Hermitian `exp` one EIGH
-and one product per item, a tall full QR or null basis a factor and a
-reflector application), is priced as one aggregate envelope: its summed
-estimate, an approximation rather than a per-call model. Blocks that do not
-widen (compact QR and LQ, full QR, the null basis, general eigenvalues, the
-polar decompositions, `exp`, and every input of several matrices) are
-modeled at one thread, since their providers are not known to speed up at
-the widths the linear model would grant; they still run on their lane's
-whole share, which the provider's own rule divides; a lone block is
-offered the whole engine. When no block of a call widens past one thread,
-nothing is searched: its blocks take one-thread lanes, as many as the call's
-total estimate pays for as one section (`width_for`, at most one lane per
-block, lowered to the largest count whose fork pays), filled largest block
-first. Otherwise the call admits all
-`B` of the engine's threads, each lane at most the widest offer any block
-can use, and the baseline is `min(B, blocks)` lanes of equal shares (the
-remainder one thread each to the lowest lanes), filled largest block first,
-each to the lane of least modeled load. Every smaller lane count with equal
-shares, down to one lane, and one reservation (a heuristic: a block allotted
-`min(width, floor(B E / E_total)) >= 2` threads gets a lane of its own,
-the rest of the threads become one-thread lanes, at most the baseline's lane
-count in all) are scored by their modeled time (the slowest lane plus the
-engine's dispatch cost for the outer fork; each block modeled as its
-estimate over its width plus that width's dispatch cost, a linear speedup),
-a lane count of two or more only when the total estimate pays for its fork.
-The least time wins, ties to more lanes, and the reservation only by being
-strictly faster. A block then runs on its lane's context limited to `min(share,
-width)` (its whole share when it does not widen). Placement is integer arithmetic, recomputed per call without a
-cache, so it is a scheduling estimate, not a promise of a faster run. A
-forced batch policy (`Inner`, `Outer`, `Split`, `Sequential`) computes no
-width: its batch decision is authoritative, each block running at its
-lane's whole share (`Inner`: every block on the whole engine). Prepared
+The call takes its thread count from the engine's cost rule over the batch's
+estimated serial time, and its lane count is at most the engine's batch
+decision, so the work model's fan-out limits are never exceeded. Each lane
+reserves a nonzero share of those threads, the shares summing to at most
+the thread count, and each block runs on a context of exactly its lane's
+share; a thread no lane reserves stays idle for the call. A batch of a few
+large blocks gives each lane several threads, and a batch of many small
+blocks runs one thread per lane. The baseline placement is equal shares over
+`L0 = min(threads, blocks, decision lanes)` lanes, blocks largest first on
+the lane of least accumulated serial time; a single lane takes every block
+before any ordering. When every block's provider width is modeled (every
+GEMM; a factorization whose every input is one matrix, except for the QR
+family: compact and full QR, LQ, the null basis), the placement also scores
+an equal-share placement for every lane count from `L0` down to one and a
+large-block reservation under one model, and keeps the lowest score; ties
+keep the baseline, then the equal shares. The reservation finds the least
+target time at which the blocks above it, each on the narrowest lane that
+brings it under the target, fit in the thread count; it gives each such
+block that lane, makes the remaining threads one-thread lanes, places the
+other blocks largest first on the lane where they finish earliest, then
+widens the reserved lanes with the threads of unused one-thread lanes while
+the provider's width still grows. It is discarded when more than `L0` of its
+lanes hold blocks, and it is scored as placed, since a block below the
+target can still finish above it. The model charges a block its serial time
+where the provider would run it on one thread in that lane, otherwise its
+time over the provider's granted width plus the engine's dispatch cost at
+that width. The granted width is an estimate composed from the provider's
+public decisions: for a GEMM the plan's own two decisions (its `width_for`
+narrowing, then a Faer plan's one-item batch decision with the token's team
+capability, or a Packed plan's balanced-lanes decision, an optimistic upper
+bound on its grid); for a factorization tlinalg's decision for one item
+under `Auto`, the engine's cost rule over the total work's time capped at
+the width the provider's payback work (`estimate_payback_work`) pays for,
+and one thread on a token without a team. The model has no sublinear
+speedup, so the choice is a scheduling estimate, not a promise of a faster
+run. The search queries the provider width of each group of blocks with the
+same estimated time and the same grant inputs (for GEMM, the plan's
+algorithm and the work; for a factorization, its total and payback work)
+once, at the full thread count; only the groups the provider widens there
+are queried again, once per distinct share width during the sweep, since a
+block the provider keeps serial at the full count stays serial at every
+narrower share; a lane count whose proved lower bound on its score is not
+below the best score so far is not placed. QR-family batches keep the
+baseline placement: the model credits a granted width with a linear speedup
+that faer's QR does not deliver at the widths QR's payback share admits. A
+batch holding an input whose batch product is not one (including zero) keeps
+the baseline as well: tlinalg runs such an input through its multi-item
+route, which its public queries do not expose. Placement is integer
+arithmetic, recomputed per call. A forced batch policy (`Inner`, `Outer`,
+`Split`, `Sequential`) reserves its batch decision's threads, the blocks
+placed by the same largest-first baseline over its lanes and each block run
+on its lane's whole share (`Inner`: every block on the whole engine). Prepared
 `ContractPlan`/`ComposePlan` workspaces of any member count run their
 grouped core batches the same way. Every block runs up to the first one refused before the engine is entered
 (an unsupported dtype or a malformed view), and keeps its own outcome; the

@@ -52,8 +52,6 @@ mod block_kernel {
 // The one placement and runner of independent block jobs, which the block
 // kernels, the tree replays and the cold tree compile run on.
 #[cfg(feature = "tenferro")]
-mod lane_gemm;
-#[cfg(feature = "tenferro")]
 #[doc(hidden)]
 pub mod lanes;
 #[cfg(test)]

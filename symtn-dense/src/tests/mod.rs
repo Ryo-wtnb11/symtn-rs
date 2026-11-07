@@ -26,6 +26,8 @@ mod fresh;
 mod lanes;
 #[path = "../../../tests/support/numerics.rs"]
 mod numerics;
+#[cfg(feature = "tenferro")]
+mod placement;
 mod tensor;
 mod view;
 

@@ -18,7 +18,7 @@
 //! writes its items whole in order on its token through a gate of its own
 //! and stops at its first failure. The left failure wins.
 
-use symtn_dense::lanes::{self, Cut, Estimate, Jobs, Split, StageKind, Work};
+use symtn_dense::lanes::{self, Cut, Split, Work};
 
 use super::writers::{scheduled_single, DestinationWriter};
 use super::*;
@@ -499,37 +499,6 @@ where
     }
 }
 
-/// The estimate the head placer would read; a split reads none.
-fn unpriced() -> Estimate {
-    Estimate {
-        serial: core::time::Duration::ZERO,
-        payback: None,
-        sections: 1,
-        widen: false,
-    }
-}
-
-impl<W, T, D> Jobs for Moves<'_, '_, W, T, D> {
-    fn count(&self) -> usize {
-        match self.items {
-            Items::Singles { singles, .. } => singles.len(),
-            Items::Groups { groups, .. } => groups.len(),
-        }
-    }
-
-    fn stages(&self, _: usize) -> usize {
-        1
-    }
-
-    fn kind(&self, _: usize, _: usize) -> StageKind {
-        StageKind::Movement
-    }
-
-    fn estimate(&self, _: usize, _: usize) -> Estimate {
-        unpriced()
-    }
-}
-
 impl<'d, W, T, D> Moves<'_, 'd, W, T, D>
 where
     W: DestinationWriter<T, D>,
@@ -592,10 +561,16 @@ where
     type Lane = MoveLane<'d, T, W::Kernels>;
     type Error = OperationError;
 
+    fn count(&self) -> usize {
+        match self.items {
+            Items::Singles { singles, .. } => singles.len(),
+            Items::Groups { groups, .. } => groups.len(),
+        }
+    }
+
     fn run(
         &self,
         job: usize,
-        _: usize,
         _: &mut (),
         lane: &mut Self::Lane,
         exec: lanes::Exec<'_>,
@@ -673,24 +648,6 @@ struct PackLane<'a, D> {
     fill: Option<PackColumnWriter<'a, D>>,
 }
 
-impl<D> Jobs for Pack<'_, '_, D> {
-    fn count(&self) -> usize {
-        self.columns.len()
-    }
-
-    fn stages(&self, _: usize) -> usize {
-        1
-    }
-
-    fn kind(&self, _: usize, _: usize) -> StageKind {
-        StageKind::Movement
-    }
-
-    fn estimate(&self, _: usize, _: usize) -> Estimate {
-        unpriced()
-    }
-}
-
 impl<'l, D: Copy> Pack<'_, 'l, D> {
     /// Cuts `lane` before column `cut.job`: the pack scratch at the column's
     /// packed offset, the destination fill in proportion to the threads.
@@ -721,10 +678,13 @@ where
     type Lane = PackLane<'l, D>;
     type Error = OperationError;
 
+    fn count(&self) -> usize {
+        self.columns.len()
+    }
+
     fn run(
         &self,
         job: usize,
-        _: usize,
         _: &mut (),
         lane: &mut Self::Lane,
         _: lanes::Exec<'_>,

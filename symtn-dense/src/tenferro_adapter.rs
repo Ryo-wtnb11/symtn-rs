@@ -286,12 +286,16 @@ impl DefaultDenseExecutor {
     /// Why not a per-run cutoff: it would be an empirical constant in tensor
     /// semantics. The disadvantage accepted here: a long run plus residual
     /// jobs goes grouped, paying the grouped preparation per unbound call
-    /// (O(J log J) staging, and under Auto the placement of its J blocks:
-    /// one width scan over the S slots per distinct widening estimate, the
-    /// largest-first baseline and the candidate sweep over its lane counts;
-    /// see `lanes` for the complexity) instead of
-    /// the cached O(1) strided analysis plus the residual's own
-    /// preparation.
+    /// (O(J log J) staging, and under Auto the placement's lane search:
+    /// one provider grant query per distinct (time, plan algorithm, work)
+    /// group at the full slot count S, further queries per distinct share
+    /// width only for the groups widened there, a lower bound per lane count,
+    /// a placement for each lane count the bound does not rule out, and the
+    /// large-block reservation: a query at every width up to S for the
+    /// (fewer than S) blocks above the mean load, its target search, and one
+    /// placement of the other blocks over the reserved and one-slot lanes;
+    /// see `lanes` for the complexity) instead of the cached O(1) strided
+    /// analysis plus the residual's own preparation.
     #[allow(clippy::too_many_arguments)]
     fn matmul_batch_axpby_route_typed<T, W, R>(
         &mut self,
@@ -1537,33 +1541,6 @@ impl DenseExecutor for DefaultDenseExecutor {
     #[cfg(not(feature = "cpu-blas-core"))]
     fn honors_forced_batch_policy(&self) -> bool {
         true
-    }
-
-    // Why the native provider only: the BLAS provider's GEMM needs the
-    // engine itself and its thread settings are process-global, so it has
-    // no GEMM to run on a caller's lane.
-    #[cfg(not(feature = "cpu-blas-core"))]
-    fn supports_lane_gemms(&self) -> bool {
-        true
-    }
-
-    #[cfg(not(feature = "cpu-blas-core"))]
-    fn with_lane_gemms(
-        &mut self,
-        engine: &mut dyn Engine,
-        dtype: crate::DenseDType,
-        jobs: &[crate::lanes::LaneGemmShape],
-        body: &mut crate::lanes::LaneGemmBody<'_>,
-    ) -> Result<(), DenseError> {
-        host_cpu(engine, crate::lane_gemm::LANE_GEMM_OP, |cpu| {
-            crate::block_kernel::gemm::with_lane_gemms(
-                cpu,
-                &mut self.gemm_scratch,
-                dtype,
-                jobs,
-                body,
-            )
-        })
     }
 }
 

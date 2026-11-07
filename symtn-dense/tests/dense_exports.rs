@@ -206,15 +206,9 @@ fn declaration_scan_sees_methods_fields_and_uses_only_when_unrestricted() {
 #[test]
 fn the_lanes_module_declares_exactly_the_pinned_names() {
     let facade: &[&str] = &[
-        "use gemm_estimate",
-        "use LaneGemmBody",
-        "use LaneGemmIo",
-        "use LaneGemmShape",
-        "use LaneGemms",
         "use BatchPolicy",
         "use Exec",
         "use flat_width",
-        "use place",
         "use run_native",
         "use Assignment",
         "use Cut",
@@ -224,14 +218,6 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
         "use Refusal",
         "use Split",
         "use Work",
-        "enum StageKind",
-        "struct Estimate",
-        "field serial",
-        "field payback",
-        "field sections",
-        "field widen",
-        "enum Form",
-        "trait Jobs",
         "struct Placement",
         "fn lanes",
         "fn share",
@@ -245,7 +231,7 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
         (
             "lanes/placement.rs",
             include_str!("../src/lanes/placement.rs"),
-            &["fn place", "fn flat_width"],
+            &["fn flat_width"],
         ),
         (
             "lanes/runner.rs",
@@ -268,20 +254,6 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
                 "field tables",
                 "fn run_native",
                 "enum Refusal",
-            ],
-        ),
-        (
-            "lane_gemm.rs",
-            include_str!("../src/lane_gemm.rs"),
-            &[
-                "struct LaneGemmShape",
-                "field rows",
-                "field k",
-                "field n",
-                "enum LaneGemmIo",
-                "trait LaneGemms",
-                "fn gemm_estimate",
-                "type LaneGemmBody",
             ],
         ),
     ] {

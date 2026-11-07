@@ -1370,35 +1370,11 @@ struct StagedBatch<I, O> {
     outputs: Vec<O>,
 }
 
-/// The batches of [`execute_staged_groups`] as one-stage lane jobs.
+/// The batches of [`execute_staged_groups`] as lane jobs.
 struct StagedBuild<F, I, O> {
     build: F,
     count: usize,
     io: core::marker::PhantomData<fn(I) -> O>,
-}
-
-impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
-    fn count(&self) -> usize {
-        self.count
-    }
-
-    fn stages(&self, _: usize) -> usize {
-        1
-    }
-
-    fn kind(&self, _: usize, _: usize) -> symtn_dense::lanes::StageKind {
-        symtn_dense::lanes::StageKind::Movement
-    }
-
-    // Run on one slot each (`Each`), without estimates.
-    fn estimate(&self, _: usize, _: usize) -> symtn_dense::lanes::Estimate {
-        symtn_dense::lanes::Estimate {
-            serial: core::time::Duration::ZERO,
-            payback: None,
-            sections: 1,
-            widen: true,
-        }
-    }
 }
 
 impl<F, I, O> symtn_dense::lanes::Work for StagedBuild<F, I, O>
@@ -1411,9 +1387,12 @@ where
     type Lane = ();
     type Error = OperationError;
 
+    fn count(&self) -> usize {
+        self.count
+    }
+
     fn run(
         &self,
-        _: usize,
         _: usize,
         batch: &mut StagedBatch<I, O>,
         (): &mut (),
