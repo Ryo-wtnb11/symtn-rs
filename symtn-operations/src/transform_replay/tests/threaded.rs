@@ -439,11 +439,11 @@ fn threaded_non_identity_recoupling_matches_oracle_for_complex_data() {
 }
 
 /// Seven one-axis destination blocks of two elements (`offset; stride`):
-/// `0;3`, `1;3`, `2;3` interleave in one atom `[0, 5]`; `6;1` alone; `8;2`
-/// and `9;2` interleave in `[8, 11]`; `12;1` alone. Block 0 is a Single,
-/// blocks 1 and 6 one Multi group (one destination in each of two
-/// disconnected atoms), block 2 inactive, block 3 a Single, and blocks 4 and
-/// 5 the destinations of two Multi groups sharing their atom.
+/// `0;3`, `1;3`, `2;3` interleave in `[0, 5]`; `6;1` alone; `8;2` and `9;2`
+/// interleave in `[8, 11]`; `12;1` alone. Block 0 is a Single, blocks 1 and
+/// 6 one Multi group (one destination in each of two disconnected ranges),
+/// block 2 inactive, block 3 a Single, and blocks 4 and 5 the destinations
+/// of two Multi groups that interleave.
 pub(super) fn joint_fixture() -> (
     Arc<BlockStructure>,
     Arc<BlockStructure>,
@@ -475,63 +475,8 @@ pub(super) fn joint_fixture() -> (
 }
 
 #[test]
-fn joint_components_own_every_writer_of_their_atoms() {
-    // What: the Single, the Multi group and the inactive layout writing the
-    // first atom form one component, which also owns the group's
-    // disconnected atom; the two groups sharing an atom form another; the
-    // lone Single a third. Every item lies inside the atom of its slot.
-    let (dst, _, transform) = joint_fixture();
-    let schedule = transform.parallel_schedule();
-    assert_eq!(schedule.component_count(), 3);
-    let atoms = |component: usize| {
-        schedule.atoms[schedule.component_atoms(component)]
-            .iter()
-            .map(|atom| (atom.lo, atom.len))
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(atoms(0), [(0, 6), (12, 2)]);
-    assert_eq!(atoms(1), [(6, 2)]);
-    assert_eq!(atoms(2), [(8, 4)]);
-    let kinds = |component: usize| {
-        let mut kinds = schedule
-            .component_direct(component)
-            .iter()
-            .map(|item| match *item {
-                crate::transform_structure::TreeTransformDirectItem::Inactive { .. } => "inactive",
-                crate::transform_structure::TreeTransformDirectItem::Single { .. } => "single",
-            })
-            .collect::<Vec<_>>();
-        kinds.sort_unstable();
-        kinds
-    };
-    // Items of one atom are in no particular order: they write disjoint
-    // elements.
-    assert_eq!(kinds(0), ["inactive", "single"]);
-    assert_eq!(kinds(1), ["single"]);
-    assert!(kinds(2).is_empty());
-    let groups = (0..3)
-        .map(|component| schedule.component_group_list(component).len())
-        .collect::<Vec<_>>();
-    assert_eq!(groups, [1, 0, 2]);
-    for component in 0..3 {
-        for &group in schedule.component_group_list(component) {
-            let group = &schedule.scatter_groups[group as usize];
-            for column in &schedule.scatter_columns[group.columns.clone()] {
-                let atom = &schedule.atoms[column.slot as usize];
-                let offset = transform.layouts().entry(column.dst_layout).offset;
-                assert!(offset >= atom.lo && offset < atom.lo + atom.len as isize);
-                assert!(schedule
-                    .component_atoms(component)
-                    .contains(&(column.slot as usize)));
-            }
-        }
-    }
-    assert_eq!(dst.required_len().unwrap(), 14);
-}
-
-#[test]
-fn component_moving_more_than_usize_elements_still_compiles() {
-    // What: a component whose written plus packed elements (`n` plus `3n`)
+fn a_multi_moving_more_than_usize_elements_still_compiles() {
+    // What: a Multi group whose written plus packed elements (`n` plus `3n`)
     // exceed `usize` while every buffer extent fits compiles. Metadata only,
     // no tensor data.
     let n = 1usize << (usize::BITS - 2);
@@ -551,8 +496,8 @@ fn component_moving_more_than_usize_elements_still_compiles() {
 #[test]
 fn inactive_block_ending_beyond_isize_still_compiles() {
     // What: an inactive canonical `[n, 2]` block whose last element `2n - 1`
-    // exceeds `isize::MAX` inside the `usize` storage compiles to one atom
-    // of its `2n` elements. Metadata only, no tensor data.
+    // exceeds `isize::MAX` inside the `usize` storage compiles, as one
+    // inactive layout. Metadata only, no tensor data.
     use symtn_core::{FusionTreeHomSpace, U1FusionRule, U1Irrep};
     let n = (1usize << (usize::BITS - 2)) + 1;
     let structure =
@@ -561,13 +506,11 @@ fn inactive_block_ending_beyond_isize_still_compiles() {
             .unwrap();
     let transform =
         TreeTransformStructure::<f64>::compile_structures(&structure, &structure, &[]).unwrap();
-    let atoms = &transform.parallel_schedule().atoms;
-    assert_eq!(atoms.len(), 1);
-    assert_eq!((atoms[0].lo, atoms[0].len), (0, 2 * n));
+    assert_eq!(transform.parallel_schedule().inactive, [0]);
 }
 
 #[test]
-fn joint_component_replay_matches_the_block_oracle() {
+fn joint_fixture_replay_matches_the_block_oracle() {
     // What: at one and three workers, an overwrite writes `U * source` per
     // block and zeroes the inactive block that interleaves with active
     // ones; an accumulation scales that block by beta.
@@ -622,16 +565,11 @@ fn joint_component_replay_matches_the_block_oracle() {
 }
 
 #[test]
-fn atom_bands_certify_a_common_outer_slab() {
-    // What: an atom holding a Single's and a scatter column's interleaved
-    // blocks (two codomain trees of two rows over six columns, rows 4) is
-    // bandable by its six columns, and the group's other column, whose
-    // block fuses with its packed column to one axis, by its twelve
-    // elements; a one-worker replay writes the dense oracle. A
-    // unit-row-and-column atom and the injective `[3, 2]` / `[2, 3]`
-    // layout, whose inner reach leaves its first slab, stay indivisible, as
-    // does an atom whose Single and inactive block disagree on the outer
-    // extent.
+fn interleaved_single_and_scatter_blocks_replay_the_dense_oracle() {
+    // What: a Single's and a scatter column's interleaved blocks (two
+    // codomain trees of two rows over six columns, rows 4) and the group's
+    // other column, whose block fuses with its packed column to one axis: a
+    // one-worker replay writes the dense oracle.
     let key = |sector| BlockKey::ordinal(sector);
     let dst = Arc::new(
         BlockStructure::from_blocks_with_rank(
@@ -654,17 +592,6 @@ fn atom_bands_certify_a_common_outer_slab() {
         ],
     )
     .unwrap();
-    let schedule = transform.parallel_schedule();
-    assert_eq!(schedule.component_count(), 1);
-    let bands = schedule
-        .atoms
-        .iter()
-        .zip(&schedule.bands)
-        .map(|(atom, band)| (atom.lo, band.stride, band.extent))
-        .collect::<Vec<_>>();
-    assert_eq!(bands, [(0, 4, 6), (24, 1, 12)]);
-    assert_eq!(schedule.components[0].units, 18);
-
     let source = (1..=36).map(f64::from).collect::<Vec<_>>();
     let mut expected = vec![0.0; 36];
     for column in 0..6 {
@@ -694,58 +621,12 @@ fn atom_bands_certify_a_common_outer_slab() {
         })
         .unwrap();
     assert_eq!(destination, expected);
-
-    let single = |shape: Vec<usize>, strides: Vec<usize>| {
-        let rank = shape.len();
-        let dst = Arc::new(
-            BlockStructure::from_blocks_with_rank(
-                rank,
-                vec![BlockSpec::with_key(key(0), shape.clone(), strides, 0).unwrap()],
-            )
-            .unwrap(),
-        );
-        let src = Arc::new(BlockStructure::packed_column_major(rank, vec![shape]).unwrap());
-        TreeTransformStructure::compile_structures(
-            &dst,
-            &src,
-            &[TreeTransformBlockSpec::single(0, 0, 1.0)],
-        )
-        .unwrap()
-    };
-    let bandable = |transform: &TreeTransformStructure<f64>| {
-        transform
-            .parallel_schedule()
-            .bands
-            .iter()
-            .map(|band| band.stride != 0)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(bandable(&single(vec![1, 1], vec![1, 2])), [false]);
-    assert_eq!(bandable(&single(vec![3, 2], vec![2, 3])), [false]);
-    // A Single `{0, 4, 8}` and an inactive block `{2, 6}` share one atom
-    // with outer extents 3 and 2, so the atom stays indivisible.
-    let dst = BlockStructure::from_blocks_with_rank(
-        2,
-        vec![
-            BlockSpec::with_key(key(0), vec![1, 3], vec![1, 4], 0).unwrap(),
-            BlockSpec::with_key(key(1), vec![1, 2], vec![1, 4], 2).unwrap(),
-        ],
-    )
-    .unwrap();
-    let src = BlockStructure::packed_column_major(2, vec![vec![1, 3]]).unwrap();
-    let with_inactive = TreeTransformStructure::compile_structures(
-        &dst,
-        &src,
-        &[TreeTransformBlockSpec::single(0, 0, 1.0)],
-    )
-    .unwrap();
-    assert_eq!(bandable(&with_inactive), [false]);
 }
 
 #[test]
-fn component_replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
-    // What: on interleaved canonical blocks whose Multi groups own
-    // disconnected atoms, replay writes exactly the per-block oracle for the
+fn replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
+    // What: on interleaved canonical blocks whose Multi groups write
+    // disconnected ranges, replay writes exactly the per-block oracle for the
     // initialised overwrite, the initialised axpby and the owned writer,
     // at one worker and at an odd and an even width.
     let (structure, transform) = su2_interleaved_fixture();

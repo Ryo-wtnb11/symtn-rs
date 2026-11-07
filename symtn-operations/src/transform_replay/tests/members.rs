@@ -50,12 +50,13 @@ fn overwrite_members<E: DenseExecutor>(
 fn members_equal_the_single_member_replay_of_each_member() {
     let (joint_dst, joint_src, joint) = super::threaded::joint_fixture();
     let (su2_structure, su2) = su2_interleaved_fixture();
-    let (bandable_blocks, bandable_dst, bandable_src, bandable) = interleaved_bandable(false);
+    let (interleaved_layout, interleaved_dst, interleaved_src, interleaved) =
+        interleaved_blocks(false);
     let su2_moved = super::su2_interleaved::SINGLES
         .iter()
         .flat_map(|&(offset, _)| super::su2_interleaved::addresses(offset))
         .collect::<Vec<_>>();
-    let (offset, dims, strides) = bandable_blocks[0];
+    let (offset, dims, strides) = interleaved_layout[0];
     // Destination scales on a Single and on both destinations of a Multi
     // group (uniform per group, as the contraction compiler emits them).
     let cases = [
@@ -74,9 +75,9 @@ fn members_equal_the_single_member_replay_of_each_member() {
             vec![(0, 0.5), (4, -1.5), (20, 0.5)],
         ),
         (
-            &bandable,
-            &bandable_dst,
-            &bandable_src,
+            &interleaved,
+            &interleaved_dst,
+            &interleaved_src,
             addresses(offset, &dims, &strides),
             vec![(0, -1.5), (2, 0.5), (4 * COLUMNS, 0.5)],
         ),
@@ -149,12 +150,12 @@ fn members_equal_the_single_member_replay_of_each_member() {
 }
 
 /// What: on a four-worker engine, through the built-in executor and a
-/// custom one, a two-member overwrite of the interleaved bandable family
+/// custom one, a two-member overwrite of the interleaved family
 /// writes every addressed element of each member exactly once and nothing
 /// else, counted at the kernel adapter.
 #[test]
 fn every_element_of_every_member_is_written_once() {
-    let (blocks, dst, src, transform) = interleaved_bandable(true);
+    let (blocks, dst, src, transform) = interleaved_blocks(true);
     let len = dst.required_len().unwrap();
     let members = 2;
     let source = (0..members * src.required_len().unwrap())
@@ -214,8 +215,8 @@ fn every_element_of_every_member_is_written_once() {
     }
 }
 
-/// What: in a two-member overwrite of the two-lane fixture, member 0's
-/// component 1 GEMM and member 1's component 0 first GEMM fail. At every
+/// What: in a two-member overwrite of the two-lane fixture, member 0's GEMM
+/// of the lone group and member 1's GEMM of the first interleaved group fail. At every
 /// width (a serial engine, `Auto` on two and four workers, forced
 /// `Sequential` on four), the batch submits the GEMMs plan job outer,
 /// member inner (each plan job for member 0, then member 1), stops at the
@@ -224,14 +225,14 @@ fn every_element_of_every_member_is_written_once() {
 #[test]
 fn member_failures_follow_the_plan_job_outer_member_inner_order() {
     let (dst, src, transform) = two_lane_fixture();
-    let schedule = transform.parallel_schedule();
     let label: Vec<usize> = transform
         .recoupling_plan()
         .entries()
         .map(|(block, _)| block + 1)
         .collect();
-    let first = label[schedule.component_group_list(1)[0] as usize];
-    let second = label[schedule.component_group_list(0)[0] as usize] + 10;
+    // Member 0's lone group (block 2) and member 1's first interleaved
+    // group (block 0).
+    let (first, second) = (3, 1 + 10);
     let src_len = src.required_len().unwrap();
     let source = (0..2 * src_len)
         .map(|at| (at / src_len) as f64 * MEMBER_SPAN + (at % src_len) as f64 + 1.0)

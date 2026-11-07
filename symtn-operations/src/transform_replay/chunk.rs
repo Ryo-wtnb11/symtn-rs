@@ -115,7 +115,7 @@ where
         },
     )??;
     #[cfg(any(test, feature = "testing"))]
-    {
+    if admitted.0 > 1 {
         workspace.movement_phases += 1;
     }
     Ok(admitted)
@@ -302,7 +302,6 @@ where
                         column.packed_offset - destination_start,
                         dst,
                         0,
-                        None,
                         exec.reborrow(),
                         gate,
                         fused_indices,
@@ -612,12 +611,10 @@ where
                 zero_strides,
                 TreeTransformDirectItem::Single {
                     block: singles[job],
-                    slot: 0,
                 },
                 src,
                 dst,
                 *dst_start,
-                None,
                 exec,
                 gate,
                 index,
@@ -637,7 +634,6 @@ where
                         column.packed_offset - packed_start,
                         dst,
                         *dst_start,
-                        None,
                         exec.reborrow(),
                         gate,
                         index,

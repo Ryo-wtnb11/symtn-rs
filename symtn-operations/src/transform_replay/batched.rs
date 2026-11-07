@@ -112,17 +112,15 @@ pub(super) fn inline_direct<W, T, D>(
 where
     W: DestinationWriter<T, D>,
 {
-    // Why `slot: 0`: the writers read no atom slot of an item written whole.
     let inactive = schedule
         .inactive
         .iter()
         .map(|&layout| TreeTransformDirectItem::Inactive {
             layout: layout as usize,
-            slot: 0,
         });
     let singles = singles
         .iter()
-        .map(|&block| TreeTransformDirectItem::Single { block, slot: 0 });
+        .map(|&block| TreeTransformDirectItem::Single { block });
     for item in inactive.chain(singles) {
         writer.direct(
             kernels,
@@ -131,7 +129,6 @@ where
             src,
             dst,
             0,
-            None,
             exec.reborrow(),
             gate,
             index,
@@ -283,7 +280,6 @@ where
                     dst_index * element_count,
                     dst,
                     0,
-                    None,
                     exec.reborrow(),
                     gate,
                     fused_indices,

@@ -506,12 +506,18 @@ fn a_wide_member_batch_is_one_member_strided_submission() {
     }
 }
 
-/// Ten identity groups of two packed `4 x 6` blocks each.
+/// The ten-group fixture's dimensions: groups of two packed `ROWS x COLS`
+/// blocks.
+const GROUPS: usize = 10;
+const ROWS: usize = 4;
+const COLS: usize = 6;
+
+/// Ten identity groups of two packed `ROWS x COLS` blocks each.
 fn ten_identity_groups() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
-    let groups = 10;
-    let structure =
-        Arc::new(BlockStructure::packed_column_major(2, vec![vec![4, 6]; 2 * groups]).unwrap());
-    let specs = (0..groups)
+    let structure = Arc::new(
+        BlockStructure::packed_column_major(2, vec![vec![ROWS, COLS]; 2 * GROUPS]).unwrap(),
+    );
+    let specs = (0..GROUPS)
         .map(|g| {
             TreeTransformBlockSpec::multi(
                 vec![2 * g, 2 * g + 1],
@@ -527,13 +533,13 @@ fn ten_identity_groups() -> (Arc<BlockStructure>, TreeTransformStructure<f64>) {
 
 /// An overwrite of `transform` on `budget` workers under `strategy` through
 /// the built-in executor, into `workspace`.
-fn overwrite(
+fn try_overwrite(
     budget: usize,
     strategy: CpuBatchStrategy,
     workspace: &mut TreeTransformWorkspace<f64>,
     transform: &TreeTransformStructure<f64>,
     structure: &Arc<BlockStructure>,
-) -> Vec<f64> {
+) -> Result<Vec<f64>, OperationError> {
     let source = (0..structure.required_len().unwrap())
         .map(|v| v as f64)
         .collect::<Vec<_>>();
@@ -550,35 +556,57 @@ fn overwrite(
         &source,
         1.0,
         &[],
-    )
-    .unwrap();
-    assert_eq!(out, source);
+    )?;
+    Ok(out)
+}
+
+/// [`try_overwrite`] of an identity transform, which succeeds and copies.
+fn overwrite(
+    budget: usize,
+    strategy: CpuBatchStrategy,
+    workspace: &mut TreeTransformWorkspace<f64>,
+    transform: &TreeTransformStructure<f64>,
+    structure: &Arc<BlockStructure>,
+) -> Vec<f64> {
+    let out = try_overwrite(budget, strategy, workspace, transform, structure).unwrap();
+    assert_eq!(out, (0..out.len()).map(|v| v as f64).collect::<Vec<_>>());
     out
 }
 
-/// What (H fill, audit 2): the ten-group overwrite on four free-dispatch
-/// workers has three chunks of 4, 4 and 2 groups and so `1 + 2 * 3 = 7`
-/// movement phases (one direct, three packs, three scatters) on every call.
-/// A fresh workspace initializes the largest chunk's packed destination,
-/// four groups of `2 * 24` elements, `192`, inside the first pack; a warm
-/// repeat initializes none. After serial replays of one `2 x (32 x 32)`
-/// group and then one `2 x (1 x 1)` group, which leave the scratch `2` long
-/// with room for `2048`, the same overwrite initializes only the
-/// `190`-element tail, on the caller.
+/// What (H fill, audit 2): the ten-group overwrite on `t = 4` free-dispatch
+/// workers replays `Q = ceil(10 / 4)` chunks of consecutive groups in
+/// `1 + 2 Q` parallel movement phases (one direct, a pack and a scatter per
+/// chunk) on every call. A fresh workspace initializes the largest chunk's
+/// packed destination, `t` groups of two `ROWS x COLS` columns, inside the
+/// first pack; a warm repeat initializes none. Serial replays (one worker)
+/// add no parallel phase: after one of a `2 x (32 x 32)` group and one of a
+/// `2 x (1 x 1)` group, which leave the scratch short of that chunk with the
+/// capacity for it, the same overwrite initializes only the missing tail,
+/// on the caller.
 #[test]
-fn a_parallel_replay_fills_its_destination_scratch_once_in_seven_phases() {
+fn a_parallel_replay_fills_its_destination_scratch_once_in_its_phases() {
+    let threads = 4;
+    let chunks = GROUPS.div_ceil(threads);
+    let phases = 1 + 2 * chunks;
+    let largest_chunk = threads.min(GROUPS) * 2 * ROWS * COLS;
     let (structure, transform) = ten_identity_groups();
     let mut workspace = TreeTransformWorkspace::default();
     let call = |workspace: &mut TreeTransformWorkspace<f64>| {
         let (fills, phases) = (workspace.destination_fills(), workspace.movement_phases());
-        overwrite(4, CpuBatchStrategy::Auto, workspace, &transform, &structure);
+        overwrite(
+            threads,
+            CpuBatchStrategy::Auto,
+            workspace,
+            &transform,
+            &structure,
+        );
         (
             workspace.destination_fills() - fills,
             workspace.movement_phases() - phases,
         )
     };
-    assert_eq!(call(&mut workspace), (192, 7), "fresh");
-    assert_eq!(call(&mut workspace), (0, 7), "warm");
+    assert_eq!(call(&mut workspace), (largest_chunk, phases), "fresh");
+    assert_eq!(call(&mut workspace), (0, phases), "warm");
 
     let structure_of = |dims: [usize; 2]| {
         Arc::new(BlockStructure::packed_column_major(2, vec![dims.to_vec(); 2]).unwrap())
@@ -598,22 +626,24 @@ fn a_parallel_replay_fills_its_destination_scratch_once_in_seven_phases() {
             &structure,
         );
     }
-    assert_eq!(history.destination_len(), 2);
-    assert_eq!(call(&mut history), (190, 7), "tail");
+    assert_eq!(
+        (history.movement_phases(), history.destination_fills()),
+        (0, 0),
+        "serial"
+    );
+    let prefix = history.destination_len();
+    assert!(prefix < largest_chunk && 2 * 32 * 32 >= largest_chunk);
+    assert_eq!(call(&mut history), (largest_chunk - prefix, phases), "tail");
 }
 
 /// What (step-5 review P1-1): a forced policy's replay width is capped by
 /// the compiled runnable parts, so one rank-nine Single (fused rank nine,
 /// above the inline index width) retains the same traversal scratch on two
 /// workers and on sixty-four, under `Inner` and under `Split`, as main's
-/// runnable clamp does.
+/// runnable clamp does. An executor that cannot honor a forced policy
+/// refuses it instead, before any write.
 #[test]
 fn a_forced_width_sizes_no_scratch_beyond_the_runnable_parts() {
-    // An executor that cannot honor a forced policy refuses it before any
-    // width is chosen (the refusal matrix in `chunk`).
-    if !DefaultDenseExecutor::new().honors_forced_batch_policy() {
-        return;
-    }
     let shape = vec![2; 9];
     let strides = (0..9).map(|axis| 1usize << axis).collect::<Vec<_>>();
     let block = BlockSpec::with_key(BlockKey::ordinal(0), shape, strides, 0).unwrap();
@@ -624,29 +654,28 @@ fn a_forced_width_sizes_no_scratch_beyond_the_runnable_parts() {
     let split = CpuBatchStrategy::Split {
         lanes: core::num::NonZeroUsize::new(2).unwrap(),
     };
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
     for strategy in [CpuBatchStrategy::Inner, split] {
         let retained = |budget: usize| {
             let mut workspace = TreeTransformWorkspace::default();
-            let source = (0..structure.required_len().unwrap())
-                .map(|v| v as f64)
-                .collect::<Vec<_>>();
-            let mut out = vec![f64::NAN; source.len()];
-            tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                &mut engine(budget, strategy),
-                &mut StridedHostKernelAdapter::default(),
-                &mut DefaultDenseExecutor::new(),
-                &mut workspace,
-                &transform,
-                &structure,
-                &structure,
-                &mut out,
-                &source,
-                1.0,
-                &[],
-            )
-            .unwrap();
-            workspace.retained_bytes()
+            try_overwrite(budget, strategy, &mut workspace, &transform, &structure)
+                .map(|_| workspace.retained_bytes())
         };
-        assert_eq!(retained(2), retained(64), "{strategy:?}");
+        if honors {
+            assert_eq!(retained(2).unwrap(), retained(64).unwrap(), "{strategy:?}");
+        } else {
+            for budget in [2, 64] {
+                assert!(
+                    matches!(
+                        retained(budget),
+                        Err(OperationError::Dense(DenseError::Unsupported {
+                            op: "tree_transform_replay",
+                            ..
+                        }))
+                    ),
+                    "{strategy:?} on {budget}"
+                );
+            }
+        }
     }
 }

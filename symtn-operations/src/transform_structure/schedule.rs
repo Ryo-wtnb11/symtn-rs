@@ -19,17 +19,13 @@ pub(crate) struct TreeTransformPackReplay {
 pub(crate) struct TreeTransformScatterReplay {
     pub dst_layout: usize,
     pub packed_offset: usize,
-    /// Slot of this column's joint atom
-    /// (`TreeTransformParallelSchedule::atoms`).
-    pub slot: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformScatterGroupReplay {
     /// The group's pack columns in `pack_columns`, in packed order.
     pub pack: Range<usize>,
-    /// The group's columns, ordered by destination start and so by joint
-    /// atom slot: a component's atoms take their slots in address order.
+    /// The group's columns, ordered by destination start.
     pub columns: Range<usize>,
 }
 
@@ -49,63 +45,15 @@ pub(crate) struct TreeTransformGroupSpan {
 pub(crate) enum TreeTransformDirectItem {
     /// An inactive destination layout: zeroed by an overwrite, beta-scaled
     /// by an accumulation.
-    Inactive { layout: usize, slot: u32 },
+    Inactive { layout: usize },
     /// A Single block, by index into the structure's block list.
-    Single { block: u32, slot: u32 },
+    Single { block: u32 },
 }
 
-/// One joint atom: a maximal run of overlapping destination intervals of
-/// Singles, Multi scatter columns and inactive layouts. Only whole atoms (or
-/// whole bands of a bandable atom) may be handed to different writers.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TreeTransformJointAtom {
-    /// First destination element.
-    pub lo: isize,
-    /// Elements from `lo` to the last one any item writes.
-    pub len: usize,
-    /// Destination elements the atom's items write.
-    pub weight: usize,
-}
-
-/// One atom's band certificate: the common outermost baked destination
-/// stride `S` and extent `E >= 2` of every item when the atom is bandable,
-/// `(0, 1)` when it is indivisible (one band unit).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct TreeTransformAtomBand {
-    pub stride: usize,
-    pub extent: usize,
-}
-
-/// One joint component: the atoms whose owners (Singles, Multi groups and
-/// inactive layouts) are connected through shared atoms. The list ends with
-/// a sentinel whose starts are the totals.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TreeTransformJointComponent {
-    /// First slot of the component's atoms in
-    /// `TreeTransformParallelSchedule::atoms`.
-    pub atom_start: u32,
-    /// First of the component's entries in `direct`.
-    pub direct_start: u32,
-    /// First of the component's entries in `component_groups`.
-    pub group_start: u32,
-    /// Destination elements of its direct items.
-    pub direct_weight: usize,
-    /// Band units: the bands of its bandable atoms plus one per indivisible
-    /// atom.
-    pub units: usize,
-    /// Largest packed source (`rows * k`) of its groups.
-    pub packed_source: usize,
-    /// Largest packed destination (`rows * n`) of its groups.
-    pub packed_destination: usize,
-}
-
-/// The joint ownership schedule of a compiled structure, built eagerly with
-/// it and immutable afterwards, so derived equality compares every field.
-///
-/// The replay dispatches on the address-ordered direct lists, the
-/// Singles' slice-disjointness, the group spans and the runnable clamp. The
-/// atoms, components, component direct items and bands are compiled
-/// ownership metadata no replay reads.
+/// The replay schedule of a compiled structure, built eagerly with it and
+/// immutable afterwards, so derived equality compares every field: the pack
+/// and scatter columns, the address-ordered direct lists, the Singles'
+/// slice-disjointness, the group spans and the runnable clamp.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TreeTransformParallelSchedule {
     pub pack_columns: Vec<TreeTransformPackReplay>,
@@ -114,22 +62,6 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub single_block_count: usize,
     pub packed_column_count: usize,
     pub scattered_column_count: usize,
-    /// Joint atoms in slot order: grouped by component, each component's
-    /// atoms in address order.
-    pub atoms: Vec<TreeTransformJointAtom>,
-    /// Per atom slot.
-    pub bands: Vec<TreeTransformAtomBand>,
-    /// Joint components and the sentinel (empty without destination
-    /// writes).
-    pub components: Vec<TreeTransformJointComponent>,
-    /// Direct items grouped by component; within one, inactive layouts and
-    /// Singles ordered by atom slot.
-    pub direct: Vec<TreeTransformDirectItem>,
-    /// Multi group indices grouped by component, in recoupling-plan order.
-    pub component_groups: Vec<u32>,
-    /// Atom slots in destination address order, along which a replay
-    /// splits its destination into atom slices.
-    pub address_order: Vec<u32>,
     /// The non-empty inactive destination layouts, in destination address
     /// order.
     pub inactive: Vec<u32>,
@@ -148,33 +80,6 @@ pub(crate) struct TreeTransformParallelSchedule {
 }
 
 impl TreeTransformParallelSchedule {
-    /// Joint components.
-    pub fn component_count(&self) -> usize {
-        self.components.len().saturating_sub(1)
-    }
-
-    /// Atom slots of component `component`.
-    pub fn component_atoms(&self, component: usize) -> Range<usize> {
-        self.components[component].atom_start as usize
-            ..self.components[component + 1].atom_start as usize
-    }
-
-    // Read by the ownership metadata tests only, until that metadata goes.
-    #[cfg(test)]
-    /// Direct items of component `component`, ordered by atom slot.
-    pub fn component_direct(&self, component: usize) -> &[TreeTransformDirectItem] {
-        &self.direct[self.components[component].direct_start as usize
-            ..self.components[component + 1].direct_start as usize]
-    }
-
-    // Read by the ownership metadata tests only, until that metadata goes.
-    #[cfg(test)]
-    /// Multi groups of component `component`, in recoupling-plan order.
-    pub fn component_group_list(&self, component: usize) -> &[u32] {
-        &self.component_groups[self.components[component].group_start as usize
-            ..self.components[component + 1].group_start as usize]
-    }
-
     /// The bytes of the vectors this schedule retains, each allocated at its
     /// exact length.
     pub(crate) fn retained_bytes(&self) -> usize {
@@ -190,30 +95,6 @@ impl TreeTransformParallelSchedule {
         .saturating_add(bytes(
             self.scatter_groups.capacity(),
             core::mem::size_of::<TreeTransformScatterGroupReplay>(),
-        ))
-        .saturating_add(bytes(
-            self.atoms.capacity(),
-            core::mem::size_of::<TreeTransformJointAtom>(),
-        ))
-        .saturating_add(bytes(
-            self.bands.capacity(),
-            core::mem::size_of::<TreeTransformAtomBand>(),
-        ))
-        .saturating_add(bytes(
-            self.components.capacity(),
-            core::mem::size_of::<TreeTransformJointComponent>(),
-        ))
-        .saturating_add(bytes(
-            self.direct.capacity(),
-            core::mem::size_of::<TreeTransformDirectItem>(),
-        ))
-        .saturating_add(bytes(
-            self.component_groups.capacity(),
-            core::mem::size_of::<u32>(),
-        ))
-        .saturating_add(bytes(
-            self.address_order.capacity(),
-            core::mem::size_of::<u32>(),
         ))
         .saturating_add(bytes(self.inactive.capacity(), core::mem::size_of::<u32>()))
         .saturating_add(bytes(self.singles.capacity(), core::mem::size_of::<u32>()))

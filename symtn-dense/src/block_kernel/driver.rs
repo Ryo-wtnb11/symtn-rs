@@ -9,7 +9,7 @@ use std::time::Duration;
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use crate::lanes::{self, GrantKey, LaneTables};
+use crate::lanes::{self, GrantKey, LaneAllocationCache, LaneTables};
 use crate::tenferro_adapter::tenferro_error;
 use crate::DenseError;
 
@@ -181,9 +181,15 @@ pub(crate) fn drive<B: BlockOp>(
 
 /// Places `jobs` of `op` on `exec` into `tables`: each block's work turned
 /// into its serial time by [`cost`], and [`lanes::allocate`] offered the
-/// blocks' grants only where it can search and every block is modeled, with
-/// the process-global lane-allocation cache.
-pub(crate) fn place<B: BlockOp>(exec: &Exec<'_>, op: &B, jobs: &[B::Job], tables: &mut LaneTables) {
+/// blocks' grants only where it can search and every block is modeled,
+/// through `cache` (the process-global lane-allocation cache in production).
+pub(crate) fn place<B: BlockOp>(
+    exec: &Exec<'_>,
+    op: &B,
+    jobs: &[B::Job],
+    cache: &LaneAllocationCache,
+    tables: &mut LaneTables,
+) {
     let model = exec.batch_policy().model;
     let mut total_work = 0.0;
     let mut times = tables.take_times();
@@ -210,7 +216,7 @@ pub(crate) fn place<B: BlockOp>(exec: &Exec<'_>, op: &B, jobs: &[B::Job], tables
         (B::KIND, |j| op.grant_key(j, &jobs[j])),
         mean_work,
         grant,
-        lanes::lane_allocations(),
+        cache,
         tables,
     );
     tables.keep_times(times);
@@ -222,7 +228,7 @@ fn on_lanes<B: BlockOp>(
     jobs: &mut [B::Job],
     tables: &mut LaneTables,
 ) -> tenferro_tensor::Result<lanes::Outcome<DenseError>> {
-    place(exec, op, jobs, tables);
+    place(exec, op, jobs, lanes::lane_allocations(), tables);
     let placement = tables.placement();
     #[cfg(test)]
     crate::probe::add(crate::probe::Event::BlockLanes, placement.lanes());

@@ -3,7 +3,6 @@
 //! (`T = MaybeUninit<D>`): every replay phase writes through these.
 
 use super::*;
-use crate::kernel_adapter::FUSED_LAYOUT_INLINE_RANK;
 use crate::transform_structure::TreeTransformDirectItem;
 
 /// The parts of a completed transform every writer and worker reads: shared
@@ -46,101 +45,22 @@ pub(super) fn scheduled_single(
     }
 }
 
-/// Outer indices `[k0, k1)` of a bandable atom's items: the item's baked
-/// layout with its outermost extent replaced by `k1 - k0` and both operand
-/// offsets advanced by `k0` outer strides.
-pub(super) type Band = (usize, usize);
-
-/// `dims` with its outermost extent replaced by the band's length, copied
-/// into `scratch`, and the destination and source offset shifts of the
-/// band's first outer index. Compilation admits a band only for a rank
-/// within the scratch length.
-///
-/// Why `scratch` is an `Option` the crop fills: a whole-item write never
-/// crops, and an array the caller zeroes up front costs every item its
-/// store (measured per Direct item on the owned permute replay).
-fn crop_dims<'s>(
-    dims: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    (k0, k1): Band,
-    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
-) -> Result<(&'s [usize], isize, isize), OperationError> {
-    let rank = dims.len();
-    let (Some(outer), true) = (rank.checked_sub(1), rank <= FUSED_LAYOUT_INLINE_RANK) else {
-        return Err(OperationError::InvalidArgument {
-            message: "tree transform band crops a layout it cannot hold",
-        });
-    };
-    let scratch = scratch.insert([0; FUSED_LAYOUT_INLINE_RANK]);
-    scratch[..rank].copy_from_slice(dims);
-    scratch[outer] = k1 - k0;
-    let k0 = offset_to_isize(k0)?;
-    let shift = |stride: isize| {
-        k0.checked_mul(stride)
-            .ok_or(OperationError::ElementCountOverflow)
-    };
-    Ok((
-        &scratch[..rank],
-        shift(dst_strides[outer])?,
-        shift(src_strides.get(outer).copied().unwrap_or(0))?,
-    ))
-}
-
-/// A two-sided role cropped to `band`: the baked layout over `scratch`'s
-/// dims and the destination and source offset shifts.
-pub(super) fn crop_role<'s>(
-    role: crate::BakedFusedLayout<'s>,
-    band: Band,
-    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
-) -> Result<(crate::BakedFusedLayout<'s>, isize, isize), OperationError> {
-    let (dims, dst_shift, src_shift) = crop_dims(
-        role.dims(),
-        role.dst_strides(),
-        role.src_strides(),
-        band,
-        scratch,
-    )?;
-    Ok((
-        crate::BakedFusedLayout::from_compiled_normalized_slices(
-            dims,
-            role.dst_strides(),
-            role.src_strides(),
-            None,
-        ),
-        dst_shift,
-        src_shift,
-    ))
-}
-
-/// An inactive layout's one-sided role, cropped to `band` when given, as a
-/// baked layout against the compiled zero source strides (its source is one
-/// zero element), and the destination offset shift.
-pub(super) fn inactive_role<'s>(
-    layouts: &'s TreeTransformLayoutTable,
+/// An inactive layout's one-sided role, as a baked layout against the
+/// compiled zero source strides (its source is one zero element).
+pub(super) fn inactive_role(
+    layouts: &TreeTransformLayoutTable,
     layout: usize,
-    band: Option<Band>,
-    scratch: &'s mut Option<[usize; FUSED_LAYOUT_INLINE_RANK]>,
-) -> Result<(crate::BakedFusedLayout<'s>, isize), OperationError> {
+) -> Result<crate::BakedFusedLayout<'_>, OperationError> {
     let (dims, strides) = layouts.inactive_role(layout)?;
     let zeros = layouts.zero_src_strides(dims.len())?;
-    let (dims, shift) = match band {
-        Some(band) => {
-            let (dims, shift, _) = crop_dims(dims, strides, &[], band, scratch)?;
-            (dims, shift)
-        }
-        None => (dims, 0),
-    };
-    Ok((
-        crate::BakedFusedLayout::from_compiled_normalized_slices(dims, strides, zeros, None),
-        shift,
+    Ok(crate::BakedFusedLayout::from_compiled_normalized_slices(
+        dims, strides, zeros, None,
     ))
 }
 
 /// Writes the destination items of a replay into a destination of `T`.
-/// `dst` starts at destination element `dst_start`; `band` crops the item to
-/// outer indices of its bandable atom, `None` writes it whole on its
-/// compiled path (its plan when `gate` admits it on `exec`). A writer is
+/// `dst` starts at destination element `dst_start`; each item is written
+/// whole on its compiled path (its plan when `gate` admits it on `exec`). A writer is
 /// shared by every worker of a replay split; each worker brings its own
 /// [`Self::Kernels`], traversal scratch and gate.
 pub(super) trait DestinationWriter<T, D>: Sync {
@@ -170,7 +90,6 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         src: &[D],
         dst: &mut [T],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
@@ -188,7 +107,6 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         packed_offset: usize,
         dst: &mut [T],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
@@ -225,17 +143,15 @@ where
         src: &[D],
         dst: &mut [D],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
-        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
-                let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
-                let offset = layouts.entry(layout).offset - dst_start + shift;
+                let role = inactive_role(layouts, layout)?;
+                let offset = layouts.entry(layout).offset - dst_start;
                 match self.mode {
                     DestinationMode::Axpby(beta) if beta.is_one() => Ok(()),
                     DestinationMode::Axpby(beta) => kernels.scale_strided(
@@ -267,45 +183,22 @@ where
                     scheduled_single(self.task.blocks, block)?;
                 let coefficient = self.task.single_coefficients[coefficient];
                 let alpha = self.alpha.at(layouts.entry(dst_layout).offset);
-                let Some(band) = band else {
-                    return tree_transform_single_on_token(
-                        exec,
-                        gate,
-                        kernels,
-                        zero_strides,
-                        Some(index),
-                        layouts,
-                        dst_layout,
-                        src_layout,
-                        coefficient,
-                        self.task.storage_conjugate,
-                        dst,
-                        dst_start,
-                        src,
-                        alpha,
-                        self.mode,
-                    );
-                };
-                let (baked, dst_shift, src_shift) =
-                    crop_role(layouts.role(dst_layout)?, band, &mut cropped)?;
-                kernels.transform_strided_baked(
+                tree_transform_single_on_token(
                     exec,
+                    gate,
+                    kernels,
                     zero_strides,
-                    dst,
-                    src,
-                    baked.dims(),
-                    baked.dst_strides(),
-                    baked.src_strides(),
-                    layouts.entry(dst_layout).offset - dst_start + dst_shift,
-                    layouts.entry(src_layout).offset + src_shift,
-                    self.task.storage_conjugate,
-                    TransformScale::new(alpha, coefficient),
-                    match self.mode {
-                        DestinationMode::Axpby(beta) => Some(beta),
-                        DestinationMode::Overwrite => None,
-                    },
-                    Some(baked),
                     Some(index),
+                    layouts,
+                    dst_layout,
+                    src_layout,
+                    coefficient,
+                    self.task.storage_conjugate,
+                    dst,
+                    dst_start,
+                    src,
+                    alpha,
+                    self.mode,
                 )
             }
         }
@@ -320,7 +213,6 @@ where
         packed_offset: usize,
         dst: &mut [D],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
@@ -328,36 +220,18 @@ where
         let layouts = self.task.layouts;
         let offset = layouts.entry(dst_layout).offset;
         let alpha = self.alpha.at(offset);
-        let Some(band) = band else {
-            return scatter_column_on_token(
-                exec,
-                gate,
-                kernels,
-                zero_strides,
-                Some(index),
-                layouts,
-                dst_layout,
-                packed,
-                packed_offset,
-                dst,
-                dst_start,
-                alpha,
-                self.mode,
-            );
-        };
-        let mut cropped = None;
-        let (baked, dst_shift, src_shift) =
-            crop_role(layouts.role(dst_layout)?, band, &mut cropped)?;
-        scatter_role(
+        scatter_column_on_token(
             exec,
+            gate,
             kernels,
             zero_strides,
             Some(index),
-            baked,
-            offset - dst_start + dst_shift,
+            layouts,
+            dst_layout,
             packed,
-            offset_to_isize(packed_offset)? + src_shift,
+            packed_offset,
             dst,
+            dst_start,
             alpha,
             self.mode,
         )
@@ -389,16 +263,14 @@ where
         src: &[D],
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
-        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
-                let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
+                let role = inactive_role(layouts, layout)?;
                 let index =
                     index
                         .get_mut(..role.dims().len())
@@ -409,7 +281,7 @@ where
                     dst,
                     &[D::zero()],
                     role,
-                    layouts.entry(layout).offset - dst_start + shift,
+                    layouts.entry(layout).offset - dst_start,
                     0,
                     index,
                     &Write(|value: D| value),
@@ -420,13 +292,7 @@ where
                 let (dst_layout, src_layout, coefficient) =
                     scheduled_single(self.task.blocks, block)?;
                 let role = layouts.role(dst_layout)?;
-                let (role, elements, dst_shift, src_shift) = match band {
-                    None => (role, layouts.entry(dst_layout).element_count, 0, 0),
-                    Some(band) => {
-                        let (baked, dst_shift, src_shift) = crop_role(role, band, &mut cropped)?;
-                        (baked, baked.dims().iter().product(), dst_shift, src_shift)
-                    }
-                };
+                let elements = layouts.entry(dst_layout).element_count;
                 let scale =
                     TransformScale::new(self.alpha, self.task.single_coefficients[coefficient]);
                 with_transform_map!(D, scale, self.task.storage_conjugate, |map| {
@@ -437,8 +303,8 @@ where
                         elements,
                         dst,
                         src,
-                        layouts.entry(dst_layout).offset - dst_start + dst_shift,
-                        layouts.entry(src_layout).offset + src_shift,
+                        layouts.entry(dst_layout).offset - dst_start,
+                        layouts.entry(src_layout).offset,
                         index,
                         map,
                     )
@@ -456,21 +322,13 @@ where
         packed_offset: usize,
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
-        band: Option<Band>,
         exec: Exec<'_>,
         gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
         let role = layouts.role(dst_layout)?;
-        let mut cropped = None;
-        let (role, elements, dst_shift, src_shift) = match band {
-            None => (role, layouts.entry(dst_layout).element_count, 0, 0),
-            Some(band) => {
-                let (baked, dst_shift, src_shift) = crop_role(role, band, &mut cropped)?;
-                (baked, baked.dims().iter().product(), dst_shift, src_shift)
-            }
-        };
+        let elements = layouts.entry(dst_layout).element_count;
         // A zero alpha gives an exact zero even where the recoupling GEMM
         // left a NaN in `packed`, as TensorKit's scatter `tensoradd!` does.
         with_payload_map!(D, self.alpha, false, |map| {
@@ -481,8 +339,8 @@ where
                 elements,
                 dst,
                 packed,
-                layouts.entry(dst_layout).offset - dst_start + dst_shift,
-                offset_to_isize(packed_offset)? + src_shift,
+                layouts.entry(dst_layout).offset - dst_start,
+                offset_to_isize(packed_offset)?,
                 index,
                 map,
             )

@@ -172,7 +172,8 @@ pub struct HostTreeTransformWorkspace<T> {
     #[cfg(any(test, feature = "testing"))]
     coefficient_pack_builds: usize,
     /// Packed-destination elements the parallel replay initialized so far,
-    /// and its movement engine entries (direct, packs, scatters).
+    /// and its completed parallel movement engine entries (direct, packs,
+    /// scatters at a width above one).
     #[cfg(any(test, feature = "testing"))]
     destination_fills: usize,
     #[cfg(any(test, feature = "testing"))]
@@ -267,8 +268,9 @@ impl<T> HostTreeTransformWorkspace<T> {
         self.destination_fills
     }
 
-    /// Movement engine entries of this workspace's parallel replays: one
-    /// direct phase, then one pack and one scatter per chunk.
+    /// Completed movement engine entries of this workspace's parallel
+    /// replays (width above one): one direct phase, then one pack and one
+    /// scatter per chunk. A serial replay adds none.
     #[doc(hidden)]
     #[cfg(any(test, feature = "testing"))]
     pub fn movement_phases(&self) -> usize {

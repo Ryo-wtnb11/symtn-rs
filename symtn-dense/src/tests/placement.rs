@@ -1219,6 +1219,10 @@ fn unchanged_inputs_hit_and_any_change_searches() {
         assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
     }
     ErasedStructureCacheControl::set_byte_budget(&cache, 1 << 20);
+    // Admit the team-bearing base entry again, so the plain token below
+    // differs from a resident entry in its team alone.
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), true));
+    assert_eq!(on(&mut base, &t, &keys, 10075.0), (first.clone(), false));
 
     // The same pool and dispatch costs, through a plain token without
     // the engine's team.

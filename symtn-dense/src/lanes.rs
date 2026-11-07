@@ -5,7 +5,7 @@
 //! [`run_native`] runs a batch without a placement, split in two
 //! recursively over a count of logical threads ([`Split`]) or each job alone
 //! on one slot ([`Each`]), or on the lanes the block kernels' placement
-//! chose ([`Placed`]).
+//! chose (`Placed`, crate-private).
 //!
 //! # Placement
 //!
@@ -78,13 +78,12 @@ mod runner;
 pub use placement::flat_width;
 #[cfg(test)]
 pub(crate) use placement::item_time;
-#[cfg(test)]
-pub(crate) use placement::LaneAllocationCache;
-pub(crate) use placement::{allocate, lane_allocations, searchable};
+pub(crate) use placement::{allocate, lane_allocations, searchable, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
 use runner::Arena;
-pub use runner::{run_native, Assignment, Cut, Each, Outcome, Placed, Refusal, Split, Work};
+pub(crate) use runner::Placed;
+pub use runner::{run_native, Assignment, Cut, Each, Outcome, Refusal, Split, Work};
 
 /// What a job's grant depends on besides its serial time, the execution
 /// context and its op's kind: jobs with equal keys and equal serial times get
@@ -94,7 +93,7 @@ pub(crate) type GrantKey = [u64; 2];
 /// A placed batch: lanes of nonzero shares summing to at most the budget,
 /// every job in exactly one lane, each lane's jobs ascending.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Placement {
+pub(crate) struct Placement {
     shares: Vec<usize>,
     lane_starts: Vec<usize>,
     lane_jobs: Vec<usize>,
@@ -103,17 +102,17 @@ pub struct Placement {
 
 impl Placement {
     /// The number of lanes L (zero for an empty batch).
-    pub fn lanes(&self) -> usize {
+    pub(crate) fn lanes(&self) -> usize {
         self.shares.len()
     }
 
     /// The slots lane `lane` reserves.
-    pub fn share(&self, lane: usize) -> usize {
+    pub(crate) fn share(&self, lane: usize) -> usize {
         self.shares[lane]
     }
 
     /// Lane `lane`'s jobs, ascending.
-    pub fn jobs(&self, lane: usize) -> &[usize] {
+    pub(crate) fn jobs(&self, lane: usize) -> &[usize] {
         &self.lane_jobs[self.lane_starts[lane]..self.lane_starts[lane + 1]]
     }
 
@@ -149,7 +148,7 @@ impl Placement {
 /// The placement, its call-local working tables and the runner's tables,
 /// kept by the caller's workspace so a warm call reuses every capacity.
 #[derive(Debug, Default)]
-pub struct LaneTables {
+pub(crate) struct LaneTables {
     placement: Placement,
     /// The block driver's per-job serial times, staged here between calls.
     times: Vec<Duration>,
@@ -158,12 +157,12 @@ pub struct LaneTables {
 }
 
 impl LaneTables {
-    pub fn placement(&self) -> &Placement {
+    pub(crate) fn placement(&self) -> &Placement {
         &self.placement
     }
 
     /// The capacities kept, in bytes.
-    pub fn retained_bytes(&self) -> usize {
+    pub(crate) fn retained_bytes(&self) -> usize {
         self.placement
             .retained_bytes()
             .saturating_add(

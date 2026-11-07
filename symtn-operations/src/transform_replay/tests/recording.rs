@@ -9,9 +9,7 @@ use std::thread::ThreadId;
 use symtn_dense::CpuEngine;
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
-use super::super::writers::{
-    crop_role, inactive_role, scheduled_single, DestinationWriter, ReplayParts,
-};
+use super::super::writers::{inactive_role, scheduled_single, DestinationWriter, ReplayParts};
 
 /// One destination element as the recording writer leaves it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -69,21 +67,19 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         src: &[f64],
         dst: &mut [Mark],
         dst_start: isize,
-        band: Option<super::super::writers::Band>,
         exec: crate::host_pool::Exec<'_>,
         _: &mut crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
-        let mut cropped = None;
         match item {
             TreeTransformDirectItem::Inactive { layout, .. } => {
-                let (role, shift) = inactive_role(layouts, layout, band, &mut cropped)?;
+                let role = inactive_role(layouts, layout)?;
                 span::<Record, _, f64>(
                     dst,
                     &[0.0],
                     role,
-                    layouts.entry(layout).offset - dst_start + shift,
+                    layouts.entry(layout).offset - dst_start,
                     0,
                     &mut index[..role.dims().len()],
                     &Write(|value: f64| value),
@@ -96,16 +92,12 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
                     .unwrap()
                     .push((layouts.entry(dst_layout).offset, exec.budget().get()));
                 let role = layouts.role(dst_layout)?;
-                let (role, dst_shift, src_shift) = match band {
-                    None => (role, 0, 0),
-                    Some(band) => crop_role(role, band, &mut cropped)?,
-                };
                 span::<Record, _, f64>(
                     dst,
                     src,
                     role,
-                    layouts.entry(dst_layout).offset - dst_start + dst_shift,
-                    layouts.entry(src_layout).offset + src_shift,
+                    layouts.entry(dst_layout).offset - dst_start,
+                    layouts.entry(src_layout).offset,
                     &mut index[..role.dims().len()],
                     &Write(|value: f64| value),
                 );
@@ -123,7 +115,6 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         packed_offset: usize,
         dst: &mut [Mark],
         dst_start: isize,
-        band: Option<super::super::writers::Band>,
         exec: crate::host_pool::Exec<'_>,
         _: &mut crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
@@ -133,18 +124,13 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
             .lock()
             .unwrap()
             .push((layouts.entry(dst_layout).offset, exec.budget().get()));
-        let mut cropped = None;
         let role = layouts.role(dst_layout)?;
-        let (role, dst_shift, src_shift) = match band {
-            None => (role, 0, 0),
-            Some(band) => crop_role(role, band, &mut cropped)?,
-        };
         span::<Record, _, f64>(
             dst,
             packed,
             role,
-            layouts.entry(dst_layout).offset - dst_start + dst_shift,
-            offset_to_isize(packed_offset)? + src_shift,
+            layouts.entry(dst_layout).offset - dst_start,
+            offset_to_isize(packed_offset)?,
             &mut index[..role.dims().len()],
             &Write(|value: f64| value),
         );
@@ -164,18 +150,17 @@ pub(super) fn addresses(offset: usize, dims: &[usize], strides: &[usize]) -> Vec
     out
 }
 
-/// Columns of the interleaved bandable blocks.
+/// Columns of the interleaved blocks.
 pub(super) const COLUMNS: usize = 32;
 
-/// Two `[2, COLUMNS]` blocks of row stride 4 interleave in one atom
-/// bandable by its columns, a Single and a Multi group's first column; the
-/// group's second column, `[2, COLUMNS]` of row stride 2, fuses to one
-/// contiguous atom; with `injective`, a Single over the `[3, 2]` / `[2, 3]`
-/// layout, which no band certificate can split, forms a second component.
+/// Two `[2, COLUMNS]` blocks of row stride 4 interleave, a Single and a
+/// Multi group's first column; the group's second column, `[2, COLUMNS]` of
+/// row stride 2, fuses to one contiguous run; with `injective`, a Single
+/// over the injective `[3, 2]` / `[2, 3]` layout follows.
 /// Returns the destination blocks `(offset, dims, strides)`, the structures
 /// and the transform.
 #[allow(clippy::type_complexity)]
-pub(super) fn interleaved_bandable(
+pub(super) fn interleaved_blocks(
     injective: bool,
 ) -> (
     Vec<(usize, [usize; 2], [usize; 2])>,
@@ -351,11 +336,9 @@ impl DenseExecutor for Forwarding {
     }
 }
 
-/// Two Multi groups `1` and `2` share the interleaved atom `[0, 63]` (one
-/// component of two GEMMs) and group `3` owns `[64, 95]` (a component of
-/// one); each group's label is its coefficients' first value. Blocks of 32
-/// elements keep every stage's estimate nonzero, so forced lanes spread the
-/// components.
+/// Two Multi groups `1` and `2` interleave in `[0, 63]` and group `3` owns
+/// `[64, 95]`; each group's label is its coefficients' first value. Blocks
+/// of 32 elements keep every GEMM's estimate nonzero.
 pub(super) fn two_lane_fixture() -> (
     Arc<BlockStructure>,
     Arc<BlockStructure>,

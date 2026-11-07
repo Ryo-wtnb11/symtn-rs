@@ -14,7 +14,7 @@ pub trait Work: Sync {
     fn count(&self) -> usize;
 
     /// Runs `job` on `exec`, whose budget is its lane's share under
-    /// [`Placed`] and the job's own token under the other assignments: a
+    /// `Placed` and the job's own token under the other assignments: a
     /// movement body dispatches at most that many participants and checks,
     /// under `Auto`, that its estimate pays for its final fork on `exec`'s
     /// token (running inline otherwise), and a provider body hands `exec` to
@@ -47,7 +47,7 @@ pub(crate) fn recycle<A, B>(mut vec: Vec<A>) -> Vec<B> {
 pub type Outcome<E> = Result<(), (usize, E)>;
 
 /// How [`run_native`] lends a batch's jobs to the slots of its context:
-/// [`Split`], [`Each`] or [`Placed`]. Each assignment states what it needs of
+/// [`Split`], [`Each`] or the block kernels' `Placed`. Each assignment states what it needs of
 /// the work's state.
 pub trait Assignment<W: Work>: sealed::Assign<W> {}
 
@@ -119,8 +119,8 @@ pub struct Each;
 /// lane's whole share. Every job runs, and the lowest failing job is
 /// returned.
 #[derive(Debug)]
-pub struct Placed<'a> {
-    pub tables: &'a mut LaneTables,
+pub(crate) struct Placed<'a> {
+    pub(crate) tables: &'a mut LaneTables,
 }
 
 /// Runs every job of `assignment` on `exec` with exclusive access to its own
@@ -129,9 +129,9 @@ pub struct Placed<'a> {
 ///
 /// A panic unwinds after the forks join. The outer error, before any job
 /// ran, is a [`Refusal`]: `states` not holding one entry per job (the
-/// placement's under [`Placed`], `work`'s count otherwise), `lanes` holding
-/// fewer entries than the placement has lanes ([`Placed`]) or the work has
-/// jobs ([`Each`]), or threadteam's refusal of the lane shares ([`Placed`])
+/// placement's under `Placed`, `work`'s count otherwise), `lanes` holding
+/// fewer entries than the placement has lanes (`Placed`) or the work has
+/// jobs ([`Each`]), or threadteam's refusal of the lane shares (`Placed`)
 /// or of one slot per job ([`Each`]).
 pub fn run_native<W: Work, A: Assignment<W>>(
     exec: Exec<'_>,

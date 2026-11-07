@@ -2584,8 +2584,9 @@ mod tests {
 
     /// The lanes (share, jobs) `driver::place` gives factorization `F`'s
     /// owned blocks of `shapes` on `threads` slots of flat `row_ns` dispatch
-    /// under `model`, and the placement's comparison sorts.
-    fn placed<F: Factor>(
+    /// under `model` through `cache`, and the placement's comparison sorts.
+    fn placed_in<F: Factor>(
+        cache: &crate::lanes::LaneAllocationCache,
         threads: usize,
         row_ns: u64,
         model: WorkModel,
@@ -2627,7 +2628,7 @@ mod tests {
             .with_linalg_pool(|exec, _| {
                 let mut tables = LaneTables::default();
                 let recording = crate::probe::record();
-                driver::place(exec, &Blocks::<F>(PhantomData), &jobs, &mut tables);
+                driver::place(exec, &Blocks::<F>(PhantomData), &jobs, cache, &mut tables);
                 let sorts = recording.get(crate::probe::Event::PlacementSort);
                 let p = tables.placement();
                 let lanes = (0..p.lanes())
@@ -2636,6 +2637,20 @@ mod tests {
                 Ok((lanes, sorts))
             })
             .unwrap()
+    }
+
+    /// [`placed_in`] through a cache of its own that admits nothing.
+    fn placed<F: Factor>(
+        threads: usize,
+        row_ns: u64,
+        model: WorkModel,
+        shapes: &[&[usize]],
+    ) -> (Vec<(usize, Vec<usize>)>, usize) {
+        let uncached = crate::lanes::LaneAllocationCache::new(
+            symtn_core::StructureCacheKind::LaneAllocations,
+            0,
+        );
+        placed_in::<F>(&uncached, threads, row_ns, model, shapes)
     }
 
     /// Purpose: the batch decision caps the searched lane count. Four f64
@@ -2684,12 +2699,12 @@ mod tests {
         assert_eq!((lanes, sorts), (vec![(2, (0..8).collect())], 0));
     }
 
-    /// Purpose: a searched factorization batch is cached in the
-    /// process-global lane-allocation cache, and the repeat (a hit) equals
-    /// the cold search and sorts nothing: the review-r3 SVD trace, main's
-    /// SVD mix (`80 x 80` and three `4 x 4`) and the same mix of general
-    /// eigenvalues, which keep the default `SEARCHED`. Every key input is
-    /// part of these fixtures, so another test's entries cannot collide.
+    /// Purpose: a searched factorization batch is admitted to the
+    /// lane-allocation cache (here a cache of the test's own), and the
+    /// repeat, a hit, equals the cold search and sorts nothing: the
+    /// review-r3 SVD trace, main's SVD mix (`80 x 80` and three `4 x 4`) and
+    /// the same mix of general eigenvalues, which keep the default
+    /// `SEARCHED`. The first call of each misses and the second hits.
     #[test]
     fn a_repeated_searched_batch_hits_its_cold_placement() {
         let capped = WorkModel::default()
@@ -2703,17 +2718,26 @@ mod tests {
             .with_item_overhead_ns(0.0);
         let small: &[usize] = &[4, 4];
         let mix: &[&[usize]] = &[&[80, 80], small, small, small];
-        let twice = |placed: &dyn Fn() -> (Vec<(usize, Vec<usize>)>, usize)| {
-            let (cold, _) = placed();
-            let (warm, sorts) = placed();
+        type Placed = (Vec<(usize, Vec<usize>)>, usize);
+        let twice = |placed: &dyn Fn(&crate::lanes::LaneAllocationCache) -> Placed| {
+            let cache = crate::lanes::LaneAllocationCache::new(
+                symtn_core::StructureCacheKind::LaneAllocations,
+                1 << 20,
+            );
+            let (cold, _) = placed(&cache);
+            let info = cache.info();
+            assert_eq!((info.hits(), info.misses(), info.admissions()), (0, 1, 1));
+            let (warm, sorts) = placed(&cache);
             assert_eq!((&warm, sorts), (&cold, 0));
+            assert_eq!(cache.info().hits(), 1);
             cold
         };
-        let r3 = twice(&|| placed::<Svd>(4, 100, capped, &[&[10, 10][..]; 4]));
+        let shapes = [&[10, 10][..]; 4];
+        let r3 = twice(&|cache| placed_in::<Svd>(cache, 4, 100, capped, &shapes));
         assert_eq!(r3, [(2, vec![0, 2]), (2, vec![1, 3])]);
-        let svd = twice(&|| placed::<Svd>(4, 100, unit, mix));
+        let svd = twice(&|cache| placed_in::<Svd>(cache, 4, 100, unit, mix));
         assert_eq!(svd, [(4, vec![0, 1, 2, 3])]);
-        let eig = twice(&|| placed::<EigVals>(4, 100, unit, mix));
+        let eig = twice(&|cache| placed_in::<EigVals>(cache, 4, 100, unit, mix));
         assert_eq!(eig, [(4, vec![0, 1, 2, 3])]);
     }
 

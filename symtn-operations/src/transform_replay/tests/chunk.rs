@@ -41,7 +41,7 @@ fn update<E: DenseExecutor>(
 }
 
 /// What: on the joint fixture, the SU(2) fixture and the interleaved
-/// bandable family, at budgets 1, 2, 3 and 8 under `Auto`, the custom
+/// family, at budgets 1, 2, 3 and 8 under `Auto`, the custom
 /// executor's replay writes the built-in executor's: its movement-only
 /// elements (Singles and inactive blocks) bit for bit, the recoupled ones
 /// within GEMM rounding; the SU(2) update and owned overwrite also match
@@ -50,19 +50,20 @@ fn update<E: DenseExecutor>(
 fn custom_executor_values_equal_the_built_in_replay() {
     let (joint_dst, joint_src, joint) = super::threaded::joint_fixture();
     let (su2_structure, su2) = su2_interleaved_fixture();
-    let (bandable_blocks, bandable_dst, bandable_src, bandable) = interleaved_bandable(false);
+    let (interleaved_layout, interleaved_dst, interleaved_src, interleaved) =
+        interleaved_blocks(false);
     let su2_moved = super::su2_interleaved::SINGLES
         .iter()
         .flat_map(|&(offset, _)| super::su2_interleaved::addresses(offset))
         .collect::<Vec<_>>();
-    let (offset, dims, strides) = bandable_blocks[0];
+    let (offset, dims, strides) = interleaved_layout[0];
     let cases = [
         (&joint, &joint_dst, &joint_src, vec![0, 3, 2, 5, 6, 7]),
         (&su2, &su2_structure, &su2_structure, su2_moved),
         (
-            &bandable,
-            &bandable_dst,
-            &bandable_src,
+            &interleaved,
+            &interleaved_dst,
+            &interleaved_src,
             addresses(offset, &dims, &strides),
         ),
     ];
@@ -141,7 +142,7 @@ fn custom_executor_values_equal_the_built_in_replay() {
 /// of the interleaved fixture is written exactly once and nothing else is.
 #[test]
 fn every_destination_element_is_written_once() {
-    let (blocks, dst, _, transform) = interleaved_bandable(true);
+    let (blocks, dst, _, transform) = interleaved_blocks(true);
     let len = dst.required_len().unwrap();
     let source = (0..len).map(|v| v as f64).collect::<Vec<_>>();
     let task = transform.task_view().unwrap();
