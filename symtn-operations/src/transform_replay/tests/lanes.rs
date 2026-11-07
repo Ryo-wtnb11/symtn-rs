@@ -663,3 +663,53 @@ fn a_forced_policy_keeps_its_band_fork() {
     let workers: std::collections::HashSet<_> = marks.iter().map(|mark| mark.worker).collect();
     assert_eq!(workers.len(), 2);
 }
+
+/// What: a fresh workspace's lane replay allocates every lane's packed
+/// source and packed destination on the caller, before the fork, one of
+/// each per lane, on two and on four lanes; the same workspace's next replay
+/// allocates neither.
+#[test]
+fn lane_packed_scratch_is_allocated_on_the_caller_once_per_lane() {
+    let rows = 1024;
+    let (_, transform, source) = warm_tree_lanes::fixture(8, rows);
+    let task = transform.task_view().unwrap();
+    for threads in [2, 4] {
+        let mut engine = CpuEngine::new(Pool::builder().threads(threads).build().unwrap())
+            .with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
+        let mut dense = Spy::new(&transform);
+        let mut workspace = TreeTransformWorkspace::default();
+        ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
+        let mut marks = vec![Mark::default(); source.len()];
+        let recorder = Recorder {
+            parts: ReplayParts::new(task),
+        };
+        // Every lane's packed buffers hold at least one `rows`-long column;
+        // nothing else the replay allocates is that large.
+        let mut replay = |workspace: &mut TreeTransformWorkspace<f64>| {
+            crate::counting_alloc::measure_matching(
+                rows * core::mem::size_of::<f64>()..=usize::MAX,
+                || {
+                    super::super::lanes::lane_replay(
+                        &mut engine,
+                        &mut dense,
+                        workspace,
+                        task,
+                        transform.parallel_schedule(),
+                        &mut marks,
+                        &source,
+                        &recorder,
+                        None,
+                        1,
+                    )
+                    .unwrap()
+                },
+            )
+        };
+        let (ran, fresh) = replay(&mut workspace);
+        assert!(ran);
+        assert_eq!(workspace.lanes.placement().lanes(), threads);
+        assert_eq!(fresh.matched_calls, 2 * threads as u64, "{threads} lanes");
+        let (_, warm) = replay(&mut workspace);
+        assert_eq!(warm.matched_calls, 0, "{threads} lanes, warm");
+    }
+}

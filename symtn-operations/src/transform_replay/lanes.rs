@@ -32,6 +32,10 @@
 //! Each lane keeps grow-only scratch (a packed source buffer, an initialized
 //! packed destination, traversal indices and the band tables), retained in
 //! the replay workspace with the runner's tables; both forms use the same.
+//! The caller only reserves the packed buffers' capacity before the fork;
+//! each pack overwrites its source uninitialized, and each job zero-fills
+//! the destination beyond its initialized length on its own lane, so the
+//! fill runs in parallel and a retained workspace fills nothing once grown.
 
 use std::sync::{PoisonError, RwLock};
 
@@ -60,9 +64,13 @@ use pieces::{PackCell, Piece, SubCell};
 /// its first lock on Apple targets.
 pub(super) struct TreeLane<D> {
     source: HostScratchBuffer<D>,
-    /// Initialized once and only where it grows; every GEMM overwrites what
-    /// it uses.
-    destination: Vec<D>,
+    /// Initialized on the lane and only where it grows; every GEMM overwrites
+    /// what it uses.
+    ///
+    /// Why initialized although every GEMM writes it with `beta = 0` before
+    /// any read: the GEMM APIs take the output as an initialized `&mut [D]`,
+    /// which safe Rust cannot form over spare capacity.
+    destination: HostScratchBuffer<D>,
     index: Vec<usize>,
     pieces: Vec<Piece<'static, u8>>,
     subs: Vec<SubCell<'static, 'static, u8>>,
@@ -73,7 +81,7 @@ impl<D> Default for TreeLane<D> {
     fn default() -> Self {
         Self {
             source: HostScratchBuffer::default(),
-            destination: Vec::new(),
+            destination: HostScratchBuffer::default(),
             index: Vec::new(),
             pieces: Vec::new(),
             subs: Vec::new(),
@@ -510,9 +518,10 @@ where
                             destination.max(component.packed_destination),
                         )
                     });
+            // Capacity only: nothing is written here, on the caller.
             lane.source.reserve_overwrite(source);
-            if lane.destination.len() < destination {
-                lane.destination.resize(destination, D::zero());
+            if destination > lane.destination.capacity() {
+                lane.destination.reserve_overwrite(destination);
             }
             let index = placement.share(l).saturating_mul(self.rank);
             if lane.index.len() < index {
@@ -720,6 +729,11 @@ where
         } = lane;
         let (member, component) = replay.job(job);
         if stage == 0 {
+            // Within the capacity the caller reserved: fills, never allocates.
+            let packed = replay.schedule.components[component].packed_destination;
+            if destination.len() < packed {
+                destination.resize_filled(packed, D::zero());
+            }
             let src = replay.source(member);
             let direct = Movement::Direct { src };
             let estimate = self.estimate(job, stage);
@@ -749,7 +763,10 @@ where
                     message: "a barrier-form lane ran a GEMM stage",
                 })?;
                 let coefficients = coefficients_of(replay.coefficients, shape)?;
-                let destination = destination.get_mut(..packed).ok_or(scratch_short())?;
+                let destination = destination
+                    .as_mut_slice()
+                    .get_mut(..packed)
+                    .ok_or(scratch_short())?;
                 gemms
                     .run(
                         exec,
@@ -759,7 +776,10 @@ where
                     .map_err(OperationError::Dense)
             }
             _ => {
-                let packed = destination.get(..packed).ok_or(scratch_short())?;
+                let packed = destination
+                    .as_slice()
+                    .get(..packed)
+                    .ok_or(scratch_short())?;
                 replay.movement(
                     component,
                     Movement::Scatter { group, packed },
@@ -823,6 +843,7 @@ where
         let rhs = coefficients_of(self.coefficients, shape)?;
         let destination = lane
             .destination
+            .as_mut_slice()
             .get_mut(..rows * n)
             .ok_or(scratch_short())?;
         let result = (|| {
