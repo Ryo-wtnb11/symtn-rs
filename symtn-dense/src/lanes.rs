@@ -4,12 +4,12 @@
 //! A job owns an exclusive destination and is an ordered list of stages, each
 //! one symtn-owned movement section or one provider call ([`StageKind`]).
 //! [`place`] splits the context's budget B into lanes; [`run_native`] runs
-//! every lane in one fork ([`Assignment::Placed`]), and [`run_barrier`] runs
+//! every lane in one fork ([`Placed`]), and [`run_barrier`] runs
 //! the same stage enumeration in rounds cut at each provider stage, handing
 //! those stages to the caller's engine between rounds ([`Barrier`]).
 //! [`run_native`] also runs a batch without a placement: split in two
-//! recursively over a count of logical threads ([`Assignment::Split`]), or
-//! each job alone on one slot ([`Assignment::Each`]).
+//! recursively over a count of logical threads ([`Split`]), or each job
+//! alone on one slot ([`Each`]).
 //!
 //! # Placement under `Auto`
 //!
@@ -128,7 +128,9 @@ mod runner;
 pub use placement::place;
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
-pub use runner::{run_barrier, run_native, Assignment, Barrier, Outcome, Work};
+pub use runner::{
+    run_barrier, run_native, Assignment, Barrier, Each, Outcome, Placed, Split, Work,
+};
 use runner::{Arena, RunScratch};
 
 /// What one stage of a job is.

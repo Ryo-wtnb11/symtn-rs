@@ -3,15 +3,15 @@ use super::*;
 /// The stage bodies of a placed batch.
 pub trait Work: Jobs + Sync {
     /// One job's exclusive state.
-    type Job: Send + Sync;
+    type Job: Send;
     /// One lane's state (its initialized source and destination buffers),
     /// kept for the whole call and lent to every stage the lane runs.
-    type Lane: Send + Sync;
+    type Lane: Send;
     type Error: Send;
 
     /// Runs stage `stage` of `job` on `exec`, whose budget is the stage's
-    /// selected width (`Placement::selected`) under [`Assignment::Placed`]
-    /// and the job's own token under the other assignments: a movement stage
+    /// selected width (`Placement::selected`) under [`Placed`] and the job's
+    /// own token under the other assignments: a movement stage
     /// dispatches at most that many participants and checks, under `Auto`,
     /// that its estimate pays for its final fork on `exec`'s token (running
     /// inline otherwise), and a provider stage hands `exec` to the provider
@@ -25,13 +25,6 @@ pub trait Work: Jobs + Sync {
         lane: &mut Self::Lane,
         exec: Exec<'_>,
     ) -> Result<(), Self::Error>;
-
-    /// A lane state of its own for an [`Assignment::Split`] half that the
-    /// caller's lanes do not cover; `None`, the default, for a work whose
-    /// caller always passes one lane state per thread.
-    fn lane(&self) -> Option<Self::Lane> {
-        None
-    }
 }
 
 /// The engine side of the barrier form: the caller owns the engine and
@@ -228,90 +221,159 @@ impl<S, L> Part<'_, '_, S, L> {
 /// job and its error.
 pub type Outcome<E> = Result<(), (usize, E)>;
 
-/// How [`run_native`] lends a batch's jobs to the slots of its context.
+/// How [`run_native`] lends a batch's jobs to the slots of its context:
+/// [`Split`], [`Each`] or [`Placed`]. Each assignment states what it needs of
+/// the work's state.
+pub trait Assignment<W: Work>: sealed::Assign<W> {}
+
+impl<W: Work, A: sealed::Assign<W>> Assignment<W> for A {}
+
+mod sealed {
+    use super::*;
+
+    pub trait Assign<W: Work> {
+        fn run(
+            self,
+            exec: Exec<'_>,
+            work: &W,
+            states: &mut [W::Job],
+            lanes: &mut [W::Lane],
+        ) -> Result<Outcome<W::Error>, threadteam::Error>;
+    }
+}
+
+/// The jobs split in two, recursively, over `threads` logical threads: the
+/// left half takes `parallel_split(J, threads)` jobs and `threads / 2`
+/// threads, the right half the rest, and the two halves run as the children
+/// of a two-child fork of the token, which halves it. A part of one thread
+/// or one job is a leaf, which runs its jobs in order on its own token,
+/// every stage on that token.
+///
+/// A part of `n` threads borrows `n` entries of the caller's lanes when they
+/// cover it; otherwise the left half keeps the part's lanes and the right
+/// half makes its own with `lane`, as does a call given no lanes.
+///
+/// A leaf stops at its first failing job; its sibling subtree still runs,
+/// and the left subtree's failure is returned first, so the returned job is
+/// the lowest that failed while every job before it in its leaf succeeded.
+///
+/// Why the job, lane and error states must be `Sync`: the two halves and
+/// their failures pass through `RwLock` slots, which do not allocate; the
+/// `Mutex` that would pass `Send`-only state boxes an OS lock on its first
+/// lock on some targets (Apple's pthread mutex), an allocation at every
+/// split.
+#[derive(Clone, Copy, Debug)]
+pub struct Split<F> {
+    pub threads: usize,
+    pub lane: F,
+}
+
+/// Each job alone on one slot, contiguous: the context must hold one slot
+/// per job, and job `j` borrows lane state `j`. Every job runs, and the
+/// lowest failing one is returned. Its states pass between threads as
+/// [`Split`]'s do, so they must be `Sync` for the same reason.
+#[derive(Clone, Copy, Debug)]
+pub struct Each;
+
+/// The lanes of `tables`' placement, each one `fork_sized` child of exactly
+/// its share; lane `l` borrows lane state `l`, and every stage runs on its
+/// selected width (`Placement::selected`) of its lane's share. Every job
+/// runs to its end or its own first failing stage, and the lowest failing
+/// job is returned.
 #[derive(Debug)]
-pub enum Assignment<'a> {
-    /// The jobs split in two, recursively, over `threads` logical threads:
-    /// the left half takes `parallel_split(J, threads)` jobs and
-    /// `threads / 2` threads, the right half the rest, and the two halves
-    /// run as the children of a two-child fork of the token, which halves
-    /// it. A part of one thread or one job is a leaf, which runs its jobs in
-    /// order on its own token, every stage on that token.
-    ///
-    /// A leaf stops at its first failing job; its sibling subtree still runs,
-    /// and the left subtree's failure is returned first, so the returned job
-    /// is the lowest that failed while every job before it in its leaf
-    /// succeeded.
-    Split { threads: usize },
-    /// Each job alone on one slot, contiguous: the context must hold one
-    /// slot per job. Every job runs, and the lowest failing one is returned.
-    Each,
-    /// The lanes of `tables`' placement, each one `fork_sized` child of
-    /// exactly its share. Every job runs to its end or its own first failing
-    /// stage, and the lowest failing job is returned.
-    Placed(&'a mut LaneTables),
+pub struct Placed<'a> {
+    pub tables: &'a mut LaneTables,
 }
 
 /// Runs every job of `assignment` on `exec` with exclusive access to its own
-/// `states` entry, and returns the lowest-indexed job's failure, as
-/// [`Assignment`] describes for each.
-///
-/// - `Placed`: lane `l` borrows `lanes[l]` for the call, and every stage
-///   runs on its selected width (`Placement::selected`) of its lane's share.
-/// - `Each`: job `j` borrows `lanes[j]`.
-/// - `Split`: a part of `n` threads borrows `n` entries of `lanes` when the
-///   caller passed that many, and otherwise the right half of each split
-///   gets its own [`Work::lane`] while the left keeps its lanes.
+/// `states` entry, and returns the lowest-indexed job's failure, as each
+/// [`Assignment`] describes.
 ///
 /// A panic unwinds after the forks join. The outer error is threadteam's
-/// refusal of the lane shares (`Placed`) or of one slot per job (`Each`)
-/// before any stage ran; `Split` never refuses.
+/// refusal of the lane shares ([`Placed`]) or of one slot per job ([`Each`])
+/// before any stage ran; [`Split`] never refuses.
 ///
 /// # Panics
 ///
-/// When `Placed`'s `states` does not hold one entry per placed job, when
-/// `lanes` holds fewer entries than the placement has lanes or `Each` has
-/// jobs, or when a `Split` part needs a lane state that neither `lanes` nor
-/// [`Work::lane`] provides.
-pub fn run_native<W: Work>(
+/// When [`Placed`]'s `states` does not hold one entry per placed job, or
+/// `lanes` holds fewer entries than the placement has lanes or [`Each`] has
+/// jobs.
+pub fn run_native<W: Work, A: Assignment<W>>(
     exec: Exec<'_>,
     work: &W,
-    assignment: Assignment<'_>,
+    assignment: A,
     states: &mut [W::Job],
     lanes: &mut [W::Lane],
 ) -> Result<Outcome<W::Error>, threadteam::Error> {
-    let failure = match assignment {
-        Assignment::Placed(tables) => return run_placed(exec, work, tables, states, lanes),
-        _ if states.is_empty() => None,
-        Assignment::Each => {
-            assert!(lanes.len() >= states.len(), "one lane state per job");
-            let budget = exec.budget();
-            let width = NonZeroUsize::new(states.len())
-                .filter(|width| width.get() <= budget)
-                .ok_or(threadteam::Error::SharesExceedBudget {
-                    budget,
-                    sum: states.len(),
-                })?;
-            each(work, 0, states, lanes, exec.limit(width))
-        }
-        Assignment::Split { threads } => {
-            let mut own = None;
-            let lanes = match lanes {
-                [] => std::slice::from_mut(own.insert(fresh(work))),
-                lanes => lanes,
-            };
-            split(work, threads, 0, states, lanes, exec)
-        }
-    };
-    Ok(failure.map_or(Ok(()), Err))
+    sealed::Assign::run(assignment, exec, work, states, lanes)
 }
 
-/// A lane state for a `Split` half the caller's lanes do not cover.
-fn fresh<W: Work>(work: &W) -> W::Lane {
-    let Some(lane) = work.lane() else {
-        panic!("a Split part needs one lane state per thread or Work::lane");
-    };
-    lane
+impl<W: Work> sealed::Assign<W> for Placed<'_> {
+    fn run(
+        self,
+        exec: Exec<'_>,
+        work: &W,
+        states: &mut [W::Job],
+        lanes: &mut [W::Lane],
+    ) -> Result<Outcome<W::Error>, threadteam::Error> {
+        run_placed(exec, work, self.tables, states, lanes)
+    }
+}
+
+impl<W: Work> sealed::Assign<W> for Each
+where
+    W::Job: Sync,
+    W::Lane: Sync,
+    W::Error: Sync,
+{
+    fn run(
+        self,
+        exec: Exec<'_>,
+        work: &W,
+        states: &mut [W::Job],
+        lanes: &mut [W::Lane],
+    ) -> Result<Outcome<W::Error>, threadteam::Error> {
+        if states.is_empty() {
+            return Ok(Ok(()));
+        }
+        assert!(lanes.len() >= states.len(), "one lane state per job");
+        let budget = exec.budget();
+        let width = NonZeroUsize::new(states.len())
+            .filter(|width| width.get() <= budget)
+            .ok_or(threadteam::Error::SharesExceedBudget {
+                budget,
+                sum: states.len(),
+            })?;
+        let failure = each(work, 0, states, lanes, exec.limit(width));
+        Ok(failure.map_or(Ok(()), Err))
+    }
+}
+
+impl<W: Work, F> sealed::Assign<W> for Split<F>
+where
+    W::Job: Sync,
+    W::Lane: Sync,
+    W::Error: Sync,
+    F: Fn() -> W::Lane + Sync,
+{
+    fn run(
+        self,
+        exec: Exec<'_>,
+        work: &W,
+        states: &mut [W::Job],
+        lanes: &mut [W::Lane],
+    ) -> Result<Outcome<W::Error>, threadteam::Error> {
+        if states.is_empty() {
+            return Ok(Ok(()));
+        }
+        let mut own = None;
+        let lanes = match lanes {
+            [] => std::slice::from_mut(own.insert((self.lane)())),
+            lanes => lanes,
+        };
+        let failure = split(work, &self.lane, self.threads, 0, states, lanes, exec);
+        Ok(failure.map_or(Ok(()), Err))
+    }
 }
 
 /// Runs every stage of `job` in order on `exec`, stopping at its first
@@ -330,15 +392,24 @@ fn run_job<W: Work>(
     })
 }
 
-/// [`Assignment::Split`] over `states`, whose first job is `first`.
-fn split<W: Work>(
+/// [`Split`] over `states`, whose first job is `first`, with at least one
+/// lane state.
+fn split<W, F>(
     work: &W,
+    fresh: &F,
     threads: usize,
     first: usize,
     states: &mut [W::Job],
     lanes: &mut [W::Lane],
     mut exec: Exec<'_>,
-) -> Option<(usize, W::Error)> {
+) -> Option<(usize, W::Error)>
+where
+    W: Work,
+    W::Job: Sync,
+    W::Lane: Sync,
+    W::Error: Sync,
+    F: Fn() -> W::Lane + Sync,
+{
     if threads <= 1 || states.len() <= 1 {
         let lane = &mut lanes[0];
         return states
@@ -354,40 +425,48 @@ fn split<W: Work>(
         let (left, right) = lanes.split_at_mut(left_threads);
         (left, Lanes::Shared(right))
     } else {
-        (lanes, Lanes::Own(fresh(work)))
+        (lanes, Lanes::Own(fresh()))
     };
     let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
     join(
         exec.into_token(),
         |token| {
             let exec = Exec::from_token(token, workspace, policy);
-            split(work, left_threads, first, left_states, left_lanes, exec)
+            split(
+                work,
+                fresh,
+                left_threads,
+                first,
+                left_states,
+                left_lanes,
+                exec,
+            )
         },
         |token| {
             let exec = Exec::from_token(token, workspace, policy);
             let lanes = right_lanes.get();
-            split(
-                work,
-                right_threads,
-                first + middle,
-                right_states,
-                lanes,
-                exec,
-            )
+            let right = first + middle;
+            split(work, fresh, right_threads, right, right_states, lanes, exec)
         },
     )
 }
 
-/// [`Assignment::Each`] over `states`, whose first job is `first`, on a
-/// token of exactly one slot per job: the two-child fork gives the left
-/// half, the larger, its rounded-up half of the slots.
-fn each<W: Work>(
+/// [`Each`] over `states`, whose first job is `first`, on a token of exactly
+/// one slot per job: the two-child fork gives the left half, the larger, its
+/// rounded-up half of the slots.
+fn each<W>(
     work: &W,
     first: usize,
     states: &mut [W::Job],
     lanes: &mut [W::Lane],
     mut exec: Exec<'_>,
-) -> Option<(usize, W::Error)> {
+) -> Option<(usize, W::Error)>
+where
+    W: Work,
+    W::Job: Sync,
+    W::Lane: Sync,
+    W::Error: Sync,
+{
     if let [state] = states {
         return run_job(work, first, state, &mut lanes[0], &mut exec);
     }
@@ -427,30 +506,27 @@ impl<L> Lanes<'_, L> {
 /// Runs `left` and `right` as the two children of one fork of `token`, each
 /// on its half of the token, and returns the left failure, else the right.
 ///
-/// Why `RwLock` slots: `fork` shares one `Fn` with both children, and each
-/// side is a `FnOnce` that owns its half of the split buffers. A std `Mutex`
-/// boxes an OS lock on its first lock on some targets (Apple's pthread
-/// mutex), which would put an allocation on every split; `RwLock` does not
-/// allocate, and the failure slots are locked only by a failing side.
+/// Why `RwLock` slots, for the closures and their failures alike: `fork`
+/// shares one `Fn` with both children, and each side is a `FnOnce` that owns
+/// its half of the split buffers; a std `Mutex` boxes an OS lock on its
+/// first lock on some targets, while `RwLock` does not allocate.
 fn join<A, B, E>(token: threadteam::Exec<'_>, left: A, right: B) -> Option<(usize, E)>
 where
     A: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
     B: FnOnce(threadteam::Exec<'_>) -> Option<(usize, E)> + Send + Sync,
-    E: Send,
+    E: Send + Sync,
 {
     let (left, right) = (RwLock::new(Some(left)), RwLock::new(Some(right)));
-    let failures = [Mutex::new(None), Mutex::new(None)];
+    let failures = [RwLock::new(None), RwLock::new(None)];
     token.fork(2, |side, child| {
         let failure = if side == 0 {
-            take(&left).map(|run| run(child))
+            take(&left).and_then(|run| run(child))
         } else {
-            take(&right).map(|run| run(child))
+            take(&right).and_then(|run| run(child))
         };
-        if let Some(failure) = failure.flatten() {
-            *failures[side]
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some(failure);
-        }
+        *failures[side]
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = failure;
     });
     let [left, right] = failures.map(|f| f.into_inner().unwrap_or_else(PoisonError::into_inner));
     left.or(right)
@@ -461,7 +537,7 @@ fn take<T>(slot: &RwLock<Option<T>>) -> Option<T> {
     slot.write().unwrap_or_else(PoisonError::into_inner).take()
 }
 
-/// One lane of [`Assignment::Placed`]: its range of the flat job arena, the
+/// One lane of [`Placed`]: its range of the flat job arena, the
 /// count filled so far, and its lane state.
 #[derive(Debug)]
 struct Lent<'r, 'a, 'b, S, L> {
@@ -470,12 +546,12 @@ struct Lent<'r, 'a, 'b, S, L> {
     lane: &'a mut L,
 }
 
-/// The flat job arena and the per-lane parts of [`Assignment::Placed`],
-/// kept empty between calls so a warm run reuses their capacity.
+/// The flat job arena and the per-lane parts of [`Placed`], kept empty
+/// between calls so a warm run reuses their capacity.
 #[derive(Debug, Default)]
 pub(super) struct Arena {
     slots: Vec<Option<ParkedRef>>,
-    parts: Vec<RwLock<Lent<'static, 'static, 'static, (), ()>>>,
+    parts: Vec<Mutex<Lent<'static, 'static, 'static, (), ()>>>,
 }
 
 impl Arena {
@@ -484,13 +560,19 @@ impl Arena {
             .capacity()
             .saturating_mul(std::mem::size_of::<Option<ParkedRef>>())
             .saturating_add(self.parts.capacity().saturating_mul(std::mem::size_of::<
-                RwLock<Lent<'static, 'static, 'static, (), ()>>,
+                Mutex<Lent<'static, 'static, 'static, (), ()>>,
             >()))
     }
 }
 
-/// [`Assignment::Placed`]: zero and one lane run without the arena; more
-/// lanes fill one flat arena of J slots in lane order and fork once.
+/// [`Placed`]: zero and one lane run without the arena; more lanes fill one
+/// flat arena of J slots in lane order and fork once.
+///
+/// Why each lane part sits behind a `Mutex`: it lends `Send`-only job and
+/// lane state, which an allocation-free `RwLock` cannot share. A fresh
+/// `Mutex` allocates on its first lock on some targets (Apple's pthread
+/// mutex), so a multi-lane call pays one such allocation per lane, as main's
+/// runner does, and a failing call one more for its shared failure.
 fn run_placed<W: Work>(
     exec: Exec<'_>,
     work: &W,
@@ -524,13 +606,13 @@ fn run_placed<W: Work>(
     }
     let mut slots: Vec<Option<(usize, &mut W::Job)>> = recycle(std::mem::take(&mut arena.slots));
     slots.resize_with(states.len(), || None);
-    let mut parts: Vec<RwLock<Lent<'_, '_, '_, W::Job, W::Lane>>> =
+    let mut parts: Vec<Mutex<Lent<'_, '_, '_, W::Job, W::Lane>>> =
         recycle(std::mem::take(&mut arena.parts));
     parts.reserve_exact(count);
     let mut rest = &mut slots[..];
     for (l, lane) in lanes.iter_mut().take(count).enumerate() {
         let (jobs, tail) = std::mem::take(&mut rest).split_at_mut(placement.jobs(l).len());
-        parts.push(RwLock::new(Lent {
+        parts.push(Mutex::new(Lent {
             jobs,
             filled: 0,
             lane,
@@ -549,7 +631,7 @@ fn run_placed<W: Work>(
     let failure = Mutex::new(None);
     let (workspace, policy) = (exec.workspace(), *exec.batch_policy());
     let forked = exec.into_token().fork_sized(&placement.shares, |l, token| {
-        let mut part = parts[l].write().unwrap_or_else(PoisonError::into_inner);
+        let mut part = parts[l].lock().unwrap_or_else(PoisonError::into_inner);
         let Lent { jobs, lane, .. } = &mut *part;
         let mut exec = Exec::from_token(token, workspace, policy);
         let jobs = jobs.iter_mut().filter_map(Option::take);
@@ -605,13 +687,13 @@ where
 /// last of them; no round is entered once every lane is done.
 ///
 /// Every lane keeps its share and its `lanes` entry in every round. Failures
-/// are job-local exactly as in [`Assignment::Placed`], so the reported job does not
+/// are job-local exactly as in [`Placed`], so the reported job does not
 /// depend on the lane count; a failed submission is never retried. The outer
 /// error is `host`'s refused entry, which stops the call.
 ///
 /// # Panics
 ///
-/// As [`run_native`] over [`Assignment::Placed`].
+/// As [`run_native`] over [`Placed`].
 pub fn run_barrier<W: Work, H: Barrier<W>>(
     host: &mut H,
     work: &W,

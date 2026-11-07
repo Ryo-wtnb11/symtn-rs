@@ -550,7 +550,7 @@ where
                 Runner::Native(exec) => lanes::run_native(
                     exec,
                     &work,
-                    lanes::Assignment::Placed(tables),
+                    lanes::Placed { tables },
                     &mut components,
                     lane_scratch,
                 )

@@ -1315,7 +1315,7 @@ where
     O: Send + Sync,
     F: Fn(I) -> Result<O, OperationError> + Send + Sync,
 {
-    use symtn_dense::lanes::{self, Assignment, BatchPolicy, Exec};
+    use symtn_dense::lanes::{self, BatchPolicy, Each, Exec};
 
     // The caller engine's width bounds this compile's fan-out.
     let threads = if inputs.len() <= 1 {
@@ -1344,13 +1344,7 @@ where
         symtn_operations::host_pool::HostPoolSite::PlanCompile,
         |token| {
             let exec = Exec::from_token(token, None, BatchPolicy::default());
-            lanes::run_native(
-                exec,
-                &work,
-                Assignment::Each,
-                &mut batches,
-                &mut lane_states,
-            )
+            lanes::run_native(exec, &work, Each, &mut batches, &mut lane_states)
         },
     )?;
     match ran {
@@ -1392,7 +1386,7 @@ impl<F, I, O> symtn_dense::lanes::Jobs for StagedBuild<F, I, O> {
         symtn_dense::lanes::StageKind::Movement
     }
 
-    // Run on one slot each (`Assignment::Each`), without estimates.
+    // Run on one slot each (`Each`), without estimates.
     fn estimate(&self, _: usize, _: usize) -> symtn_dense::lanes::Estimate {
         symtn_dense::lanes::Estimate {
             serial: core::time::Duration::ZERO,

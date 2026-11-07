@@ -79,10 +79,10 @@ pub(crate) type LaneMembers<'v, J> = dyn FnMut(&mut dyn FnMut(&mut J)) + 'v;
 /// stay with the kernel. Each block is one provider stage.
 pub(crate) trait BlockOp: Sync {
     /// One block's exclusive state: its validated operands and its output.
-    type Job: Send + Sync;
+    type Job: Send;
     /// One lane's state, made on the caller before the fork; its blocks run
     /// with it in order on the lane's thread.
-    type Lane: Send + Sync;
+    type Lane: Send;
     const ENTRY: Entry;
     /// The `DenseError` label of a refused entry.
     const LABEL: &'static str;
@@ -227,7 +227,7 @@ fn on_lanes<B: BlockOp>(
     lanes::run_native(
         exec.reborrow(),
         &running,
-        lanes::Assignment::Placed(tables),
+        lanes::Placed { tables },
         jobs,
         &mut lane_states,
     )
