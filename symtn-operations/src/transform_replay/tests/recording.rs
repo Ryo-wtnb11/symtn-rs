@@ -56,6 +56,7 @@ impl<'a> Recorder<'a> {
 
 impl DestinationWriter<Mark, f64> for Recorder<'_> {
     type Kernels = ();
+    const FIRST_TOUCH: bool = false;
 
     fn kernels(&self) {}
 

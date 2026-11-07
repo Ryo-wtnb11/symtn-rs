@@ -307,7 +307,9 @@ section, and one otherwise; under a forced policy its batch decision
 on the caller's whole token. In that region the inactive
 blocks are written inline on the caller's token, in destination address
 order, and then the Singles: at `t > 1` with slice-disjoint destinations
-split over `t` workers, otherwise inline in address order. A split part of
+split over `t` workers, otherwise inline: in block order into a
+caller-provided destination at `t = 1` (main's one-worker replay), in
+address order into an owned output or at `t > 1`. A split part of
 `n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
 workers to its left half and forks its token in two (the odd slot to the
 left); a part of one worker or one item is a leaf, which writes its items

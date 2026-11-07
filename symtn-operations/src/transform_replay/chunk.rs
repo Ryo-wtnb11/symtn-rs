@@ -35,7 +35,8 @@ use crate::transform_structure::{TreeTransformDirectItem, TreeTransformPackRepla
 /// runnable parts, else one; a forced policy's decision, at most the runnable
 /// parts. The inactive layouts
 /// then run inline on the caller's token, followed by the Singles: split over
-/// `t` workers when `t > 1` and they are slice-disjoint, inline otherwise.
+/// `t` workers when `t > 1` and they are slice-disjoint, inline otherwise
+/// in [`InlineSingles::ordered`]'s order.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn direct<W, T, D, C>(
     engine: &mut dyn Engine,
@@ -78,9 +79,9 @@ where
                 token
             };
             let inline = if split {
-                &[][..]
+                InlineSingles::None
             } else {
-                &schedule.singles[..]
+                InlineSingles::ordered(W::FIRST_TOUCH, task, threads)
             };
             inline_direct(
                 token,

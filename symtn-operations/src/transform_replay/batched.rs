@@ -60,7 +60,7 @@ where
             inline_direct(
                 exec,
                 schedule,
-                &schedule.singles,
+                InlineSingles::ordered(W::FIRST_TOUCH, task, 1),
                 dst,
                 src,
                 writer,
@@ -93,14 +93,50 @@ where
     )
 }
 
-/// The direct items on the caller's token `exec`, in destination address
-/// order: the inactive layouts, then `singles` (the schedule's Singles, or
-/// none when a split wrote them), each through the caller gate.
+/// The Singles an inline direct replay writes, and their order: main's
+/// order for the destination kind and the replay width.
+#[derive(Clone, Copy)]
+pub(super) enum InlineSingles<'a> {
+    /// None: a split writes them.
+    None,
+    /// The schedule's, in destination address order.
+    Schedule,
+    /// The non-empty Singles of `blocks`, in block (source) order.
+    Blocks(&'a [TreeTransformBlock], &'a TreeTransformLayoutTable),
+}
+
+impl<'a> InlineSingles<'a> {
+    /// Block order for a caller-provided destination at width one (main's
+    /// one-worker replay, `for block in task.blocks()`), the schedule's
+    /// address order otherwise: on a first-touch destination (main's
+    /// `split_join_uninit`) and at a width above one (main's parallel
+    /// replay).
+    ///
+    /// Why not one order for every destination: address order on the
+    /// one-worker caller-provided `permute_into` measured 1.08-1.09x main,
+    /// block order 0.99-1.02x; block order on the owned path loses the
+    /// owned permute's write-miss reduction that address order gave it.
+    pub(super) fn ordered<C: Copy>(
+        first_touch: bool,
+        task: TreeTransformTaskView<'a, C>,
+        threads: usize,
+    ) -> Self {
+        if first_touch || threads > 1 {
+            Self::Schedule
+        } else {
+            Self::Blocks(task.blocks(), task.layouts())
+        }
+    }
+}
+
+/// The direct items on the caller's token `exec`: the inactive layouts in
+/// destination address order, then the `singles`, each through the caller
+/// gate.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn inline_direct<W, T, D>(
     mut exec: Exec<'_>,
     schedule: &TreeTransformParallelSchedule,
-    singles: &[u32],
+    singles: InlineSingles<'_>,
     dst: &mut [T],
     src: &[D],
     writer: &W,
@@ -112,16 +148,42 @@ pub(super) fn inline_direct<W, T, D>(
 where
     W: DestinationWriter<T, D>,
 {
+    let (scheduled, blocks) = match singles {
+        InlineSingles::None => (&[][..], None),
+        InlineSingles::Schedule => (&schedule.singles[..], None),
+        InlineSingles::Blocks(blocks, layouts) => {
+            u32::try_from(blocks.len()).map_err(|_| OperationError::ElementCountOverflow)?;
+            (&[][..], Some((blocks, layouts)))
+        }
+    };
     let inactive = schedule
         .inactive
         .iter()
         .map(|&layout| TreeTransformDirectItem::Inactive {
             layout: layout as usize,
         });
-    let singles = singles
+    let scheduled = scheduled
         .iter()
         .map(|&block| TreeTransformDirectItem::Single { block });
-    for item in inactive.chain(singles) {
+    let blocks = blocks.into_iter().flat_map(|(blocks, layouts)| {
+        blocks
+            .iter()
+            .enumerate()
+            .filter_map(move |(block, item)| match *item {
+                TreeTransformBlock::Single { dst_layout, .. }
+                    if layouts.entry(dst_layout).element_count != 0 =>
+                {
+                    Some(TreeTransformDirectItem::Single {
+                        block: block as u32,
+                    })
+                }
+                _ => None,
+            })
+    });
+    // Why one chain, not a loop per order: `direct` is inlined at each call
+    // site, and a loop per order made the owned one-worker U1s permute 1.03x
+    // slower than one call site.
+    for item in inactive.chain(scheduled).chain(blocks) {
         writer.direct(
             kernels,
             zero_strides,

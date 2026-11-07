@@ -67,6 +67,10 @@ pub(super) trait DestinationWriter<T, D>: Sync {
     /// One worker's kernel adapter state.
     type Kernels: Send + Sync;
 
+    /// Whether the destination is uninitialized memory this replay writes
+    /// for the first time (an owned output), not a caller-provided one.
+    const FIRST_TOUCH: bool;
+
     /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
 
@@ -129,6 +133,7 @@ where
     C: Copy + Sync,
 {
     type Kernels = A;
+    const FIRST_TOUCH: bool = false;
 
     fn kernels(&self) -> A {
         self.prototype.clone()
@@ -251,6 +256,7 @@ where
     C: Copy + Sync,
 {
     type Kernels = ();
+    const FIRST_TOUCH: bool = true;
 
     fn kernels(&self) {}
 
