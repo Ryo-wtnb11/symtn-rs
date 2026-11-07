@@ -15,6 +15,7 @@ use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::HostScratchBuffer;
 use crate::kernel_adapter::movement::{span, with_payload_map, with_transform_map, Uninit, Write};
+use crate::kernel_adapter::sealed::LeafGate;
 use crate::kernel_adapter::{admitted_plan, planned_write_uninit};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::storage_scratch::TreeTransformScratchBuffers;

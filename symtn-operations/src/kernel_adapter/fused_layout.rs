@@ -1,3 +1,4 @@
+use super::adapter::sealed::LeafGate;
 use super::*;
 use strided_kernel::{RawStridedMut, RawStridedRef, UpdatePlan};
 
@@ -195,11 +196,9 @@ pub(super) fn validate_strided_ranks(
 }
 
 /// The compiled plan a leaf replays `role` (of `elements` elements) with on
-/// `exec`: present when the role carries a plan and Strided's own copy cost
-/// rule (`parallel_width`, the rule `UpdatePlan` itself applies) gives
-/// `exec` more than one worker. Callers ask only for overwrites. A serial
-/// token answers without a width search, so a stage at one slot pays O(1)
-/// per role.
+/// `exec`: present when the role carries a plan and `gate` (Strided's own
+/// copy cost rule, the rule `UpdatePlan` itself applies) gives `exec` more
+/// than one worker. Callers ask only for overwrites.
 ///
 /// Why not replay the plan at width one: it then runs the same serial loop
 /// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
@@ -215,13 +214,10 @@ pub(crate) fn admitted_plan<'a>(
     role: BakedFusedLayout<'a>,
     elements: usize,
     exec: &crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
 ) -> Option<&'a UpdatePlan> {
-    use strided_kernel::execution::{parallel_width, KernelClass};
     let plan = role.plan?;
-    if exec.is_serial() {
-        return None;
-    }
-    (parallel_width(exec, KernelClass::Copy, elements).get() > 1).then_some(plan)
+    gate.widens(exec, elements).then_some(plan)
 }
 
 /// `dst = map(src)` over `baked` by its compiled `plan` on `exec`. The

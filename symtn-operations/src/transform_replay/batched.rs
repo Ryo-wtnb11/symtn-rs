@@ -100,6 +100,7 @@ where
     let rank = layouts.max_fused_rank();
     workspace.prepare_fused_indices(rank)?;
     let one = core::num::NonZeroUsize::MIN;
+    let gate = LeafGate::new(layouts.max_planned_elements());
 
     let HostTreeTransformWorkspace {
         zero_strides,
@@ -124,6 +125,7 @@ where
                 0,
                 None,
                 exec.reborrow(),
+                &gate,
                 fused_indices,
             )?;
             if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
@@ -255,6 +257,7 @@ where
                     0,
                     None,
                     exec.reborrow(),
+                    &gate,
                     fused_indices,
                 )?;
             }

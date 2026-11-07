@@ -297,7 +297,10 @@ splits its component over that many sub-slots of the component's band units
 one flat fork; at width one, or for an overwrite of a component whose one
 item is a Single whose retained Strided plan Strided's own rule
 (`execution::parallel_width` for a copy of its elements) admits on the
-stage's token (gives it more than one worker), each item is written whole on
+stage's token (gives it more than one worker; one leaf gate per stage and
+thread answers that rule exactly, scanning the token's dispatch costs once
+and searching widths only for a role at or above the smallest paying size),
+each item is written whole on
 that token, the admitted Single through its plan. A pack splits its
 columns over one flat fork; the GEMM writes its lane's initialized packed
 destination. On the native provider it runs

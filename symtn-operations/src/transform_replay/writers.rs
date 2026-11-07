@@ -143,7 +143,7 @@ pub(super) fn inactive_role<'s>(
 /// Writes the destination items of a replay into a destination of `T`.
 /// `dst` starts at destination element `dst_start`; `band` crops the item to
 /// outer indices of its bandable atom, `None` writes it whole on its
-/// compiled path (its plan when Strided widens it on `exec`). A writer is
+/// compiled path (its plan when `gate` admits it on `exec`). A writer is
 /// shared by every lane; each lane stage brings its own
 /// [`Self::Kernels`] and traversal scratch.
 pub(super) trait DestinationWriter<T, D>: Sync {
@@ -179,6 +179,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 
@@ -196,6 +197,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 }
@@ -236,6 +238,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -278,6 +281,7 @@ where
                 let Some(band) = band else {
                     return tree_transform_single_on_token(
                         exec,
+                        gate,
                         kernels,
                         zero_strides,
                         Some(index),
@@ -329,6 +333,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -337,6 +342,7 @@ where
         let Some(band) = band else {
             return scatter_column_on_token(
                 exec,
+                gate,
                 kernels,
                 zero_strides,
                 Some(index),
@@ -400,6 +406,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -440,6 +447,7 @@ where
                 with_transform_map!(D, scale, self.task.storage_conjugate, |map| {
                     write_role_uninit(
                         exec,
+                        gate,
                         role,
                         elements,
                         dst,
@@ -465,6 +473,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
+        gate: &LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -482,6 +491,7 @@ where
         with_payload_map!(D, self.alpha, false, |map| {
             write_role_uninit(
                 exec,
+                gate,
                 role,
                 elements,
                 dst,

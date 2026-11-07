@@ -771,3 +771,52 @@ fn component_replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
         assert_eq!(owned, Some(expected.clone()), "threads {threads}");
     }
 }
+
+/// What: one caller gate serves every planned role a call admits, with one
+/// dispatch-cost scan per token, and rejects each role below the paying size
+/// without a width search: `G` Multi groups of planned `BLOCK`-element
+/// scatter columns on a wide host token scan once and search no width,
+/// whether `G` is 8, 32 or 128.
+#[test]
+fn one_caller_gate_scans_once_and_rejects_without_a_width_search() {
+    use crate::kernel_adapter::sealed::{LeafGate, GATE_SCANS, GATE_WIDTHS};
+    let count = |counter: &'static std::thread::LocalKey<core::cell::Cell<usize>>| {
+        counter.with(|c| c.get())
+    };
+    for groups in [8, 32, 128] {
+        let blocks = Arc::new(
+            BlockStructure::packed_column_major(2, vec![vec![ROWS, COLS]; 2 * groups]).unwrap(),
+        );
+        let specs = (0..groups)
+            .map(|g| {
+                TreeTransformBlockSpec::multi(
+                    vec![2 * g, 2 * g + 1],
+                    vec![2 * g, 2 * g + 1],
+                    vec![1.0, 0.0, 0.0, 1.0],
+                )
+            })
+            .collect::<Vec<_>>();
+        let structure =
+            TreeTransformStructure::compile_structures(&blocks, &blocks, &specs).unwrap();
+        let layouts = structure.layouts();
+        assert_eq!(layouts.retained_plan_count(), 2 * groups);
+        let mut pool = crate::host_pool::test_pool(4);
+        let (scans, widths, admitted) = pool.with_exec(|exec| {
+            let (scans, widths) = (count(&GATE_SCANS), count(&GATE_WIDTHS));
+            let gate = LeafGate::new(layouts.max_planned_elements());
+            let admitted = (0..layouts.entry_count())
+                .filter(|&entry| {
+                    let elements = layouts.entry(entry).element_count;
+                    let role = layouts.role(entry).unwrap();
+                    crate::kernel_adapter::admitted_plan(role, elements, &exec, &gate).is_some()
+                })
+                .count();
+            (
+                count(&GATE_SCANS) - scans,
+                count(&GATE_WIDTHS) - widths,
+                admitted,
+            )
+        });
+        assert_eq!((scans, widths, admitted), (1, 0, 0), "{groups} groups");
+    }
+}

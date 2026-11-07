@@ -64,6 +64,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -98,7 +99,7 @@ where
     let src_offset = layouts.entry(src_index).offset;
     let scale = TransformScale::new(alpha, coefficient);
     if mode.overwrites() {
-        if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
             if let Some(result) = kernels.planned_transform(
                 exec.reborrow(),
                 plan,
@@ -419,6 +420,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
+    gate: &LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -448,7 +450,7 @@ where
     let dst_offset = dst.offset - dst_start;
     let packed_offset = offset_to_isize(packed_offset)?;
     if mode.overwrites() {
-        if let Some(plan) = admitted_plan(role, dst.element_count, &exec) {
+        if let Some(plan) = admitted_plan(role, dst.element_count, &exec, gate) {
             if let Some(result) = kernels.planned_scatter(
                 exec.reborrow(),
                 plan,

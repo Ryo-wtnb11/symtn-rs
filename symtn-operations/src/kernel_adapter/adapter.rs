@@ -6,11 +6,139 @@ use strided_kernel::UpdatePlan;
 
 pub(crate) mod sealed {
     use super::*;
+    use strided_kernel::execution;
+
+    /// The smallest paying element count of one token shape, found at most
+    /// once per call and token shape on one thread.
+    ///
+    /// Why: Strided's `parallel_width` scans every width up to the budget on each
+    /// call, so asking it for every small block of a serial replay costs
+    /// O(blocks x budget) and makes wide engines slower on small tensors. A
+    /// width pays only if `estimate >= PAYS * dispatch_cost(width)`, which is
+    /// monotone in the cost, so no width pays exactly when the cheapest one does
+    /// not: one `pays` query against that width rejects a block in O(1), and only
+    /// blocks it admits pay for the full width search.
+    ///
+    /// Why lazy: the O(budget + log bound) scan runs only when an overwrite of
+    /// a role with a retained plan reaches admission, so a call of planless or
+    /// accumulating blocks pays nothing. A gate lives on the thread that runs
+    /// its blocks, because a token's dispatch cost depends on the calling
+    /// thread: one per call for the calling thread's unsplit lists, one per
+    /// forked leaf otherwise.
+    pub struct LeafGate {
+        /// The largest element count any planned role this gate admits has.
+        bound: usize,
+        /// The last scan, keyed by the token shape it was taken on.
+        memo: core::cell::Cell<Option<GateScan>>,
+    }
+
+    #[derive(Clone, Copy)]
+    struct GateScan {
+        budget: core::num::NonZeroUsize,
+        team: bool,
+        min_elements: Option<usize>,
+    }
+
+    impl LeafGate {
+        /// A gate for roles of at most `bound` elements.
+        pub(crate) fn new(bound: usize) -> Self {
+            Self {
+                bound,
+                memo: core::cell::Cell::new(None),
+            }
+        }
+
+        /// The smallest element count up to `bound` whose copy estimate pays
+        /// at the token's cheapest width, or `None` when none does. A copy
+        /// estimate is monotone in the element count, so a binary search over
+        /// `pays` at that one width finds it in O(log bound).
+        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
+            #[cfg(test)]
+            GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
+            let mut cheapest = None;
+            let mut best = core::time::Duration::MAX;
+            for width in 2..=exec.budget().get() {
+                let Some(width) = core::num::NonZeroUsize::new(width) else {
+                    continue;
+                };
+                let cost = exec.dispatch_cost(width);
+                if cost < best {
+                    best = cost;
+                    cheapest = Some(width);
+                }
+            }
+            let cheapest = cheapest?;
+            let class = execution::KernelClass::Copy;
+            let pays = |elements: usize| exec.pays(class.estimate(elements), 1, cheapest);
+            if !pays(bound) {
+                return None;
+            }
+            if pays(0) {
+                return Some(0);
+            }
+            let (mut below, mut at) = (0usize, bound);
+            while at - below > 1 {
+                let middle = below + (at - below) / 2;
+                if pays(middle) {
+                    at = middle;
+                } else {
+                    below = middle;
+                }
+            }
+            Some(at)
+        }
+
+        /// Exactly `parallel_width(exec, Copy, elements) > 1` for
+        /// `elements <= bound`: a block below the paying size is rejected
+        /// without a width search.
+        ///
+        /// Why the memo is keyed by budget and team authority: one gate
+        /// serves every unsplit block list of a call on the calling thread,
+        /// whose tokens all come from one engine, so those two fields are
+        /// what can still differ between its tokens; the calling thread fixes
+        /// the remaining dispatch kind. The gate is not `Sync`, so a forked
+        /// worker builds its own.
+        pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
+            if exec.is_serial() {
+                return false;
+            }
+            let (budget, team) = (exec.budget(), exec.carries_team());
+            let min_elements = match self.memo.get() {
+                Some(scan) if scan.budget == budget && scan.team == team => scan.min_elements,
+                _ => {
+                    let min_elements = Self::scan(exec, self.bound);
+                    self.memo.set(Some(GateScan {
+                        budget,
+                        team,
+                        min_elements,
+                    }));
+                    min_elements
+                }
+            };
+            match min_elements {
+                Some(min) if elements >= min => {
+                    #[cfg(test)]
+                    GATE_WIDTHS.with(|widths| widths.set(widths.get() + 1));
+                    execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
+                        > 1
+                }
+                _ => false,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        /// Dispatch-cost scans this thread's gates ran (test observation).
+        pub(crate) static GATE_SCANS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+        /// Width searches this thread's gates ran (test observation).
+        pub(crate) static GATE_WIDTHS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
+    }
 
     /// Unnameable outside this crate, so its methods are crate-internal.
     ///
-    /// Compiled replay calls these for an overwrite whose role's plan
-    /// [`admitted_plan`](super::admitted_plan) admitted: an adapter that replays plans runs it across
+    /// Compiled replay calls these for an overwrite whose role's plan its
+    /// leaf gate admitted: an adapter that replays plans runs it across
     /// `exec`; the default returns `None`, leaving the block to the public
     /// primitive's serial walk.
     pub trait Sealed {

@@ -87,6 +87,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_role_uninit<D, F>(
     exec: Exec<'_>,
+    gate: &LeafGate,
     role: crate::BakedFusedLayout<'_>,
     elements: usize,
     dst: &mut [MaybeUninit<D>],
@@ -100,7 +101,7 @@ where
     D: Copy + Send + Sync + Mul<D, Output = D> + One + PartialEq,
     F: Fn(D) -> D + Send + Sync,
 {
-    if let Some(plan) = admitted_plan(role, elements, &exec) {
+    if let Some(plan) = admitted_plan(role, elements, &exec, gate) {
         return planned_write_uninit(plan, role, dst, src, dst_offset, src_offset, exec, map);
     }
     let Some(index) = fused_index.get_mut(..role.dims().len()) else {

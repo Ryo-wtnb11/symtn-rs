@@ -55,6 +55,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         dst_start: isize,
         band: Option<super::super::writers::Band>,
         _: crate::host_pool::Exec<'_>,
+        _: &crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
@@ -104,6 +105,7 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         dst_start: isize,
         band: Option<super::super::writers::Band>,
         _: crate::host_pool::Exec<'_>,
+        _: &crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;

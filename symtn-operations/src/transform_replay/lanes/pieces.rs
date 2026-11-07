@@ -63,8 +63,9 @@ where
     /// Whether an overwrite of component `component` runs whole on its one
     /// planned Single on `exec`, never banded: a group-free component whose
     /// one item is a Single with a compiled plan that [`admitted_plan`]
-    /// admits on `exec` (the same check its writer then applies).
-    fn whole_single(&self, component: usize, exec: &Exec<'_>) -> bool {
+    /// admits on `exec` through `gate` (the same check its writer then
+    /// applies).
+    fn whole_single(&self, component: usize, exec: &Exec<'_>, gate: &LeafGate) -> bool {
         let schedule = self.schedule;
         if !schedule.component_group_list(component).is_empty() {
             return false;
@@ -79,7 +80,7 @@ where
                 let elements = layouts.entry(dst_layout).element_count;
                 layouts
                     .role(dst_layout)
-                    .map(|role| admitted_plan(role, elements, exec).is_some())
+                    .map(|role| admitted_plan(role, elements, exec, gate).is_some())
             })
             .unwrap_or(false)
     }
@@ -112,7 +113,10 @@ where
         let policy = *exec.batch_policy();
         let token = exec.into_token();
         let width = token.budget().get();
-        let bands = if self.writer.overwrites() && self.whole_single(component, &token) {
+        // The stage's gate on its own thread; each forked sub-slot below
+        // builds its own, as a gate is not `Sync`.
+        let gate = LeafGate::new(self.parts.layouts.max_planned_elements());
+        let bands = if self.writer.overwrites() && self.whole_single(component, &token, &gate) {
             1
         } else {
             let bands = width.min(schedule.components[component].units).max(1);
@@ -129,6 +133,7 @@ where
                         &mut list,
                         &mut index[..self.rank],
                         token,
+                        Some(&gate),
                     );
                 }
                 let mut cells: Vec<SubCell<'_, '_, T>> = recycle(core::mem::take(subs));
@@ -157,7 +162,8 @@ where
                         result,
                     }) = cell.as_mut()
                     {
-                        *result = self.write_pieces(component, movement, pieces, index, child);
+                        *result =
+                            self.write_pieces(component, movement, pieces, index, child, None);
                     }
                 });
                 let mut first = Ok(());
@@ -176,7 +182,8 @@ where
     }
 
     /// Writes `movement`'s items of each of `pieces` on `exec`: the items of
-    /// the piece's atom, cropped to its bands.
+    /// the piece's atom, cropped to its bands, admitted through `gate`, or
+    /// through a gate of this sub-slot's own without one.
     fn write_pieces<T>(
         &self,
         component: usize,
@@ -184,10 +191,19 @@ where
         pieces: &mut [Piece<'_, T>],
         index: &mut [usize],
         mut exec: Exec<'_>,
+        gate: Option<&LeafGate>,
     ) -> Result<(), OperationError>
     where
         W: DestinationWriter<T, D>,
     {
+        let own;
+        let gate = match gate {
+            Some(gate) => gate,
+            None => {
+                own = LeafGate::new(self.parts.layouts.max_planned_elements());
+                &own
+            }
+        };
         let schedule = self.schedule;
         // Why a fresh adapter and stride vector per stage, not lane-retained
         // ones: every write here passes its compiled role, the compiled zero
@@ -213,6 +229,7 @@ where
                             piece.start,
                             piece.band,
                             exec.reborrow(),
+                            gate,
                             index,
                         )?;
                     }
@@ -236,6 +253,7 @@ where
                             piece.start,
                             piece.band,
                             exec.reborrow(),
+                            gate,
                             index,
                         )?;
                     }

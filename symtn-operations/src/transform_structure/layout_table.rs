@@ -69,6 +69,9 @@ pub struct TreeTransformLayoutTable {
     /// Compiled replays of the planned roles, in role order; inline plans
     /// own no heap storage, so the charge is the vector's capacity.
     pub(super) plans: Vec<UpdatePlan>,
+    /// The largest element count of a planned role: the range a leaf gate
+    /// searches for the smallest paying size.
+    pub(super) max_planned_elements: usize,
 }
 
 /// Why not compare `plans`: each is a pure function of the role geometry the
@@ -82,6 +85,7 @@ impl PartialEq for TreeTransformLayoutTable {
             && self.max_fused_rank == other.max_fused_rank
             && self.zero_src_strides == other.zero_src_strides
             && self.plans.len() == other.plans.len()
+            && self.max_planned_elements == other.max_planned_elements
     }
 }
 
@@ -92,6 +96,10 @@ impl TreeTransformLayoutTable {
 
     pub(crate) fn max_fused_rank(&self) -> usize {
         self.max_fused_rank
+    }
+
+    pub(crate) fn max_planned_elements(&self) -> usize {
+        self.max_planned_elements
     }
 
     /// `rank` zero source strides for a one-sided (inactive) role of at most
@@ -105,6 +113,12 @@ impl TreeTransformLayoutTable {
     #[cfg(test)]
     pub(crate) fn retained_plan_count(&self) -> usize {
         self.plans.len()
+    }
+
+    /// The layout entries, so tests can visit every role.
+    #[cfg(test)]
+    pub(crate) fn entry_count(&self) -> usize {
+        self.entries.len()
     }
 
     fn slot_range(&self, entry_index: usize) -> Option<Range<usize>> {
@@ -646,6 +660,9 @@ impl RawLayoutTable {
                 );
                 plan = u32::try_from(table.plans.len())
                     .map_err(|_| OperationError::ElementCountOverflow)?;
+                table.max_planned_elements = table
+                    .max_planned_elements
+                    .max(fused.dims().iter().product());
             }
             let start = u32::try_from(table.fused_dims.len())
                 .map_err(|_| OperationError::ElementCountOverflow)?;

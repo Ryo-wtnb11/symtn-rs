@@ -27,6 +27,67 @@ mod tests {
     use super::*;
     use crate::tensoradd_raw_strided_kernel;
 
+    /// What: the leaf gate answers exactly Strided's
+    /// `parallel_width(exec, Copy, elements) > 1`, on tokens with the host
+    /// default dispatch costs and with free dispatch, across budgets and
+    /// element counts from empty to far past any paying size.
+    #[test]
+    fn leaf_gate_matches_strided_parallel_width() {
+        use strided_kernel::execution::{parallel_width, KernelClass};
+        let elements = (0..=4096)
+            .chain((13..=30).flat_map(|shift| [(1 << shift) - 1, 1 << shift, (1 << shift) + 1]))
+            .collect::<Vec<_>>();
+        for threads in [1, 2, 3, 4, 8, 16] {
+            for mut pool in [
+                crate::host_pool::test_pool(threads),
+                crate::host_pool::eager_test_pool(threads),
+            ] {
+                pool.with_exec(|exec| {
+                    let gate = sealed::LeafGate::new(usize::MAX);
+                    let widens = |n| parallel_width(&exec, KernelClass::Copy, n).get() > 1;
+                    // The first widened count, by bisection on Strided's own
+                    // answer, so the sweep also covers its exact boundary.
+                    let mut around = Vec::new();
+                    if widens(usize::MAX >> 8) {
+                        let (mut below, mut at) = (0usize, usize::MAX >> 8);
+                        while at - below > 1 {
+                            let middle = below + (at - below) / 2;
+                            if widens(middle) {
+                                at = middle;
+                            } else {
+                                below = middle;
+                            }
+                        }
+                        around.extend(at.saturating_sub(64)..at + 64);
+                    }
+                    // A gate bounded by the largest planned role is exact up
+                    // to that bound; bound it just past the boundary.
+                    let bound = around.last().copied().unwrap_or(4096);
+                    let bounded = sealed::LeafGate::new(bound);
+                    let mut seen = [false; 2];
+                    for &n in elements.iter().chain(&around) {
+                        let widens = widens(n);
+                        assert_eq!(
+                            gate.widens(&exec, n),
+                            widens,
+                            "threads {threads}, elements {n}"
+                        );
+                        if n <= bound {
+                            assert_eq!(
+                                bounded.widens(&exec, n),
+                                widens,
+                                "bounded, threads {threads}, elements {n}"
+                            );
+                        }
+                        seen[usize::from(widens)] = true;
+                    }
+                    // The sweep crosses the threshold on every wide token.
+                    assert!(threads == 1 || seen == [true, true], "threads {threads}");
+                });
+            }
+        }
+    }
+
     #[test]
     fn strided_host_adapter_add_strided_matches_axpby_semantics() {
         let mut adapter = StridedHostKernelAdapter::default();
