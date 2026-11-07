@@ -1,5 +1,5 @@
-//! The recording writer, the forwarding executor and the fixtures the lane
-//! replay tests (native, barrier and member) share.
+//! The recording writer, the forwarding executor and the fixtures the
+//! chunk replay and member tests share.
 
 use super::*;
 use crate::kernel_adapter::movement::{Store, Write};
@@ -9,7 +9,9 @@ use std::thread::ThreadId;
 use symtn_dense::CpuEngine;
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
-use super::super::writers::{crop_role, inactive_role, DestinationWriter, ReplayParts};
+use super::super::writers::{
+    crop_role, inactive_role, scheduled_single, DestinationWriter, ReplayParts,
+};
 
 /// One destination element as the recording writer leaves it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -31,19 +33,33 @@ impl Store<f64> for Record {
 }
 
 /// A writer that addresses exactly the elements the real writers address,
-/// whole or cropped to a band, and records who wrote each.
+/// and records who wrote each and, per Single and scatter column, the
+/// destination offset it writes and the budget it was offered.
 pub(super) struct Recorder<'a> {
     pub(super) parts: ReplayParts<'a, f64>,
+    pub(super) offers: Mutex<Vec<(isize, usize)>>,
+}
+
+impl<'a> Recorder<'a> {
+    pub(super) fn new(task: TreeTransformTaskView<'a, f64>) -> Self {
+        Self {
+            parts: ReplayParts::new(task),
+            offers: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The offered budgets, in destination order.
+    pub(super) fn offers(&self) -> Vec<usize> {
+        let mut offers = self.offers.lock().unwrap().clone();
+        offers.sort_unstable();
+        offers.into_iter().map(|(_, budget)| budget).collect()
+    }
 }
 
 impl DestinationWriter<Mark, f64> for Recorder<'_> {
     type Kernels = ();
 
     fn kernels(&self) {}
-
-    fn overwrites(&self) -> bool {
-        true
-    }
 
     fn direct(
         &self,
@@ -54,8 +70,8 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         dst: &mut [Mark],
         dst_start: isize,
         band: Option<super::super::writers::Band>,
-        _: crate::host_pool::Exec<'_>,
-        _: &crate::kernel_adapter::sealed::LeafGate,
+        exec: crate::host_pool::Exec<'_>,
+        _: &mut crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
@@ -75,6 +91,10 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
             }
             TreeTransformDirectItem::Single { block, .. } => {
                 let (dst_layout, src_layout, _) = scheduled_single(self.parts.blocks, block)?;
+                self.offers
+                    .lock()
+                    .unwrap()
+                    .push((layouts.entry(dst_layout).offset, exec.budget().get()));
                 let role = layouts.role(dst_layout)?;
                 let (role, dst_shift, src_shift) = match band {
                     None => (role, 0, 0),
@@ -104,11 +124,15 @@ impl DestinationWriter<Mark, f64> for Recorder<'_> {
         dst: &mut [Mark],
         dst_start: isize,
         band: Option<super::super::writers::Band>,
-        _: crate::host_pool::Exec<'_>,
-        _: &crate::kernel_adapter::sealed::LeafGate,
+        exec: crate::host_pool::Exec<'_>,
+        _: &mut crate::kernel_adapter::sealed::LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
+        self.offers
+            .lock()
+            .unwrap()
+            .push((layouts.entry(dst_layout).offset, exec.budget().get()));
         let mut cropped = None;
         let role = layouts.role(dst_layout)?;
         let (role, dst_shift, src_shift) = match band {
@@ -201,18 +225,11 @@ pub(super) fn interleaved_bandable(
     (blocks, dst, src, transform)
 }
 
-/// The one-writer contract of an [`interleaved_bandable`]`(true)` replay
-/// on four workers: every addressed element of `blocks` is written exactly
-/// once and nothing else is; a band of the interleaved atom is never split,
-/// its bands go to more than one worker, and the injective `[3, 2]` /
-/// `[2, 3]` block is written whole by one worker.
+/// Every addressed element of `blocks` is written exactly once, and
+/// nothing else is.
 #[allow(clippy::type_complexity)]
-pub(super) fn assert_one_writer_per_element(
-    blocks: &[(usize, [usize; 2], [usize; 2])],
-    marks: &[Mark],
-) {
-    let len = marks.len();
-    let mut addressed = vec![false; len];
+pub(super) fn assert_written_once(blocks: &[(usize, [usize; 2], [usize; 2])], marks: &[Mark]) {
+    let mut addressed = vec![false; marks.len()];
     for &(offset, dims, strides) in blocks {
         for at in addresses(offset, &dims, &strides) {
             addressed[at] = true;
@@ -221,23 +238,6 @@ pub(super) fn assert_one_writer_per_element(
     for (at, mark) in marks.iter().enumerate() {
         assert_eq!(mark.writes, u32::from(addressed[at]), "element {at}");
     }
-    // Atom `[0, 4 COLUMNS)`: band `k` is elements `4k..4k + 4`.
-    let mut atom_workers = Vec::new();
-    for band in 0..COLUMNS {
-        let workers = (4 * band..4 * band + 4)
-            .map(|at| marks[at].worker)
-            .collect::<Vec<_>>();
-        assert!(workers.iter().all(|w| *w == workers[0]), "band {band}");
-        atom_workers.push(workers[0]);
-    }
-    atom_workers.sort_unstable_by_key(|w| format!("{w:?}"));
-    atom_workers.dedup();
-    assert!(atom_workers.len() > 1, "the bandable atom is not banded");
-    let injective = addresses(6 * COLUMNS, &[3, 2], &[2, 3])
-        .into_iter()
-        .map(|at| marks[at].worker)
-        .collect::<Vec<_>>();
-    assert!(injective.iter().all(|w| w.is_some() && *w == injective[0]));
 }
 
 /// An eager-policy engine of `threads` workers under `strategy`.
@@ -254,8 +254,8 @@ pub(super) fn injected(group: usize) -> DenseError {
 }
 
 /// A custom executor on the default batch entry forwarding to the built-in
-/// executor, without lane GEMMs unless `lanes`: each GEMM (single product
-/// or lane GEMM) records its label and fails when that label is in `fail`.
+/// executor: each GEMM records its label and fails when that label is in
+/// `fail`.
 /// The label is the coefficients' first value (the fixture's group label)
 /// plus ten times the member, read as the packed source's first value over
 /// [`MEMBER_SPAN`] (the fixtures give member `b` the source values
@@ -263,7 +263,6 @@ pub(super) fn injected(group: usize) -> DenseError {
 #[derive(Default)]
 pub(super) struct Forwarding {
     pub(super) inner: DefaultDenseExecutor,
-    pub(super) lanes: bool,
     pub(super) fail: Vec<usize>,
     pub(super) attempts: Mutex<Vec<usize>>,
 }
@@ -272,8 +271,7 @@ pub(super) struct Forwarding {
 pub(super) const MEMBER_SPAN: f64 = 1000.0;
 
 impl Forwarding {
-    /// The labels attempted, in submission order (lane GEMMs in completion
-    /// order).
+    /// The labels attempted, in submission order.
     pub(super) fn attempts(&self) -> Vec<usize> {
         self.attempts.lock().unwrap().clone()
     }
@@ -350,61 +348,6 @@ impl DenseExecutor for Forwarding {
         self.attempt(first(&lhs), first(&rhs))?;
         self.inner
             .matmul_axpby_into(engine, output, lhs, rhs, alpha, beta)
-    }
-
-    fn supports_lane_gemms(&self) -> bool {
-        self.lanes
-    }
-
-    fn with_lane_gemms(
-        &mut self,
-        engine: &mut dyn Engine,
-        dtype: symtn_dense::DenseDType,
-        jobs: &[symtn_dense::lanes::LaneGemmShape],
-        body: &mut symtn_dense::lanes::LaneGemmBody<'_>,
-    ) -> Result<(), DenseError> {
-        let Self {
-            inner,
-            fail,
-            attempts,
-            ..
-        } = self;
-        let spy = Forwarding {
-            fail: core::mem::take(fail),
-            attempts: Mutex::new(core::mem::take(attempts.get_mut().unwrap())),
-            ..Forwarding::default()
-        };
-        let entered = inner.with_lane_gemms(engine, dtype, jobs, &mut |exec, gemms| {
-            body(exec, &Labelled { gemms, spy: &spy })
-        });
-        *fail = spy.fail;
-        *attempts.get_mut().unwrap() = spy.attempts.into_inner().unwrap();
-        entered
-    }
-}
-
-/// Lane GEMMs labelled and failed as [`Forwarding`]'s products are.
-struct Labelled<'a> {
-    gemms: &'a dyn symtn_dense::lanes::LaneGemms,
-    spy: &'a Forwarding,
-}
-
-impl symtn_dense::lanes::LaneGemms for Labelled<'_> {
-    fn run(
-        &self,
-        exec: symtn_dense::lanes::Exec<'_>,
-        job: usize,
-        io: symtn_dense::lanes::LaneGemmIo<'_>,
-    ) -> Result<(), DenseError> {
-        if let symtn_dense::lanes::LaneGemmIo::F64 { lhs, rhs, .. } = &io {
-            self.spy
-                .attempt(lhs.first().copied(), rhs.first().copied())?;
-        }
-        self.gemms.run(exec, job, io)
-    }
-
-    fn estimate(&self, job: usize) -> symtn_dense::lanes::Estimate {
-        self.gemms.estimate(job)
     }
 }
 

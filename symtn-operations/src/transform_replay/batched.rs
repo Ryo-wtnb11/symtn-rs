@@ -3,83 +3,23 @@ use super::*;
 use crate::kernel_adapter::movement::with_conjugation;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// Replays a validated task into `dst` through `writer`, on a route chosen
-/// before any write:
+/// Replays a validated task into `dst` through `writer` (main's replay):
 ///
-/// - the lane runner when the engine has more than one slot and placement
-///   gives more than one slot, every joint component one job placed on a
-///   lane: natively ([`super::lanes::lane_replay`]) when `dense` runs lane
-///   GEMMs, otherwise in the barrier form ([`super::lanes::barrier_replay`]),
-///   which hands each GEMM to the engine between rounds;
-/// - otherwise the one-worker replay ([`replay_serial`]).
+/// - first the direct items, in one engine entry that also fixes the replay
+///   width `t` ([`super::chunk::direct`]): the inactive layouts inline, then
+///   the Singles, split over `t` workers when they are slice-disjoint and
+///   inline otherwise;
+/// - then the plan groups: at `t > 1` in chunks of `t` consecutive groups
+///   ([`super::chunk::groups`]), each a parallel pack, one grouped GEMM and
+///   a scatter split over `t` workers when the chunk's groups are
+///   slice-disjoint (inline otherwise); at `t = 1` one group at a time
+///   ([`replay_serial_groups`]).
+///
+/// Every inline move runs on the caller's whole token (one slot under a
+/// forced `Sequential`) and is admitted through one caller gate; a split
+/// leaf builds its own. The first failure stops the replay.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn replay<E, W, T, D, C>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    workspace: &mut TreeTransformWorkspace<D>,
-    task: TreeTransformTaskView<'_, C>,
-    schedule: &TreeTransformParallelSchedule,
-    dst: &mut [T],
-    src: &[D],
-    writer: &W,
-    kernels: &mut W::Kernels,
-    profile: Option<&mut TreeTransformReplayProfile>,
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor,
-    W: DestinationWriter<T, D>,
-    T: Send + Sync,
-    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
-    C: Copy + Sync,
-{
-    refuse_unhonored_policy(engine, dense)?;
-    #[cfg(feature = "tenferro")]
-    let profile = {
-        let mut profile = profile;
-        if crate::host_pool::threads(engine) > 1 {
-            let lanes = if dense.supports_lane_gemms() {
-                super::lanes::lane_replay
-            } else {
-                super::lanes::barrier_replay
-            };
-            if lanes(
-                engine,
-                dense,
-                workspace,
-                task,
-                schedule,
-                dst,
-                src,
-                writer,
-                profile.as_deref_mut(),
-                1,
-            )? {
-                return Ok(());
-            }
-        }
-        profile
-    };
-    replay_serial(
-        engine, dense, workspace, task, schedule, dst, src, writer, kernels, profile,
-    )
-}
-
-/// The one-worker replay: the schedule's direct items (inactive
-/// destinations and Singles) in its component order, which is destination
-/// address order except where components interleave, then each recoupling
-/// job in plan order, its pack, its GEMM on the caller's engine and its
-/// scatter, one pack buffer pair reused. Every move runs on one slot. The
-/// first failure is returned and nothing after it runs.
-///
-/// Why the schedule's order and not block order: an owned destination is
-/// written for the first time here, and walking it in address order keeps
-/// the first-touch write stream sequential; block order scatters it.
-///
-/// TensorKit `_add_general_kernel_nonthreaded!` (indexmanipulations.jl):
-/// Singles apply directly and each Multi block is `destination = source *
-/// U^T` over packed columns, here as one dense GEMM per block.
-#[allow(clippy::too_many_arguments)]
-fn replay_serial<E, W, T, D, C>(
     engine: &mut dyn Engine,
     dense: &mut E,
     workspace: &mut TreeTransformWorkspace<D>,
@@ -94,56 +34,140 @@ fn replay_serial<E, W, T, D, C>(
 where
     E: DenseExecutor,
     W: DestinationWriter<T, D>,
+    T: Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    refuse_unhonored_policy(engine, dense)?;
+    let layouts = task.layouts();
+    let mut gate = LeafGate::new(layouts.max_planned_elements());
+    let start = profile.as_ref().map(|_| std::time::Instant::now());
+    #[cfg(feature = "tenferro")]
+    let (threads, sequential) = super::chunk::direct(
+        engine, workspace, task, schedule, dst, src, writer, kernels, &mut gate,
+    )?;
+    #[cfg(not(feature = "tenferro"))]
+    let (threads, sequential) = {
+        workspace.prepare_fused_indices(1, layouts.max_fused_rank())?;
+        let HostTreeTransformWorkspace {
+            zero_strides,
+            fused_indices,
+            ..
+        } = &mut *workspace;
+        crate::host_pool::with_exec(engine, |exec| {
+            inline_direct(
+                exec,
+                schedule,
+                &schedule.singles,
+                dst,
+                src,
+                writer,
+                kernels,
+                zero_strides,
+                fused_indices,
+                &mut gate,
+            )
+        })?;
+        (1, false)
+    };
+    if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
+        let elapsed = start.elapsed();
+        profile.single_blocks += schedule.single_block_count;
+        profile.single_total += elapsed;
+        profile.strided_kernel += elapsed;
+    }
+    if task.recoupling_plan().is_empty() {
+        return Ok(());
+    }
+    if threads > 1 {
+        #[cfg(feature = "tenferro")]
+        return super::chunk::groups(
+            engine, dense, workspace, task, schedule, dst, src, writer, kernels, &mut gate,
+            threads, profile,
+        );
+    }
+    replay_serial_groups(
+        engine, dense, workspace, task, dst, src, writer, kernels, &mut gate, sequential, profile,
+    )
+}
+
+/// The direct items on the caller's token `exec`, in destination address
+/// order: the inactive layouts, then `singles` (the schedule's Singles, or
+/// none when a split wrote them), each through the caller gate.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn inline_direct<W, T, D>(
+    mut exec: Exec<'_>,
+    schedule: &TreeTransformParallelSchedule,
+    singles: &[u32],
+    dst: &mut [T],
+    src: &[D],
+    writer: &W,
+    kernels: &mut W::Kernels,
+    zero_strides: &mut Vec<isize>,
+    index: &mut [usize],
+    gate: &mut LeafGate,
+) -> Result<(), OperationError>
+where
+    W: DestinationWriter<T, D>,
+{
+    // Why `slot: 0`: the writers read no atom slot of an item written whole.
+    let inactive = schedule
+        .inactive
+        .iter()
+        .map(|&layout| TreeTransformDirectItem::Inactive {
+            layout: layout as usize,
+            slot: 0,
+        });
+    let singles = singles
+        .iter()
+        .map(|&block| TreeTransformDirectItem::Single { block, slot: 0 });
+    for item in inactive.chain(singles) {
+        writer.direct(
+            kernels,
+            zero_strides,
+            item,
+            src,
+            dst,
+            0,
+            None,
+            exec.reborrow(),
+            gate,
+            index,
+        )?;
+    }
+    Ok(())
+}
+
+/// The plan groups of a one-worker replay, each in plan order: its pack, its
+/// GEMM on the caller's engine and its scatter, one pack buffer pair reused.
+/// Every move runs on the caller's whole token, one slot when `sequential`,
+/// through the caller gate.
+///
+/// TensorKit `_add_general_kernel_nonthreaded!` (indexmanipulations.jl):
+/// each Multi block is `destination = source * U^T` over packed columns,
+/// here as one dense GEMM per block.
+#[allow(clippy::too_many_arguments)]
+fn replay_serial_groups<E, W, T, D, C>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    task: TreeTransformTaskView<'_, C>,
+    dst: &mut [T],
+    src: &[D],
+    writer: &W,
+    kernels: &mut W::Kernels,
+    gate: &mut LeafGate,
+    sequential: bool,
+    mut profile: Option<&mut TreeTransformReplayProfile>,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor,
+    W: DestinationWriter<T, D>,
     D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
     C: Copy + Sync,
 {
     let layouts = task.layouts();
-    let rank = layouts.max_fused_rank();
-    workspace.prepare_fused_indices(rank)?;
-    let one = core::num::NonZeroUsize::MIN;
-    let gate = LeafGate::new(layouts.max_planned_elements());
-
-    let HostTreeTransformWorkspace {
-        zero_strides,
-        fused_indices,
-        ..
-    } = &mut *workspace;
-    crate::host_pool::with_exec(engine, |exec| {
-        let mut exec = exec.limit(one);
-        if let Some(profile) = profile.as_deref_mut() {
-            profile.single_blocks += schedule.single_block_count;
-        }
-        for &item in &schedule.direct {
-            // Timestamps only under profiling: the per-item clock reads are
-            // measurable against microsecond replays.
-            let start = profile.as_ref().map(|_| std::time::Instant::now());
-            writer.direct(
-                kernels,
-                zero_strides,
-                item,
-                src,
-                dst,
-                0,
-                None,
-                exec.reborrow(),
-                &gate,
-                fused_indices,
-            )?;
-            if let (Some(profile), Some(start)) = (profile.as_deref_mut(), start) {
-                let elapsed = start.elapsed();
-                if matches!(item, TreeTransformDirectItem::Single { .. }) {
-                    profile.single_total += elapsed;
-                }
-                profile.strided_kernel += elapsed;
-            }
-        }
-        Ok(())
-    })?;
-
     let recoupling_plan = task.recoupling_plan();
-    if recoupling_plan.is_empty() {
-        return Ok(());
-    }
     // Size the pack scratch for the largest Multi block once, so a fresh
     // per-call workspace allocates each buffer once instead of growing it
     // block by block.
@@ -163,6 +187,7 @@ where
     )?;
     workspace.packed.source_mut().reserve_overwrite(source_len);
     workspace.prepare_packed_destination(destination_len, D::zero());
+    let slots = core::num::NonZeroUsize::MIN;
 
     for (block_index, job) in recoupling_plan.entries() {
         let TreeTransformBlock::Multi {
@@ -246,7 +271,7 @@ where
             ..
         } = &mut *workspace;
         crate::host_pool::with_exec(engine, |exec| {
-            let mut exec = exec.limit(one);
+            let mut exec = if sequential { exec.limit(slots) } else { exec };
             for dst_index in 0..dst_count {
                 writer.scatter(
                     kernels,
@@ -258,7 +283,7 @@ where
                     0,
                     None,
                     exec.reborrow(),
-                    &gate,
+                    gate,
                     fused_indices,
                 )?;
             }

@@ -66,5 +66,5 @@ name = "serial"
 path = "tests/serial.rs"
 
 [[test]]
-name = "warm_tree_lanes"
-path = "tests/warm_tree_lanes.rs"
+name = "warm_tree_replay"
+path = "tests/warm_tree_replay.rs"

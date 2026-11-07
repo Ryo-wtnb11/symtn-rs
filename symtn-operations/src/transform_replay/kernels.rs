@@ -64,7 +64,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn tree_transform_single_on_token<A, D, C>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,
@@ -420,7 +420,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn scatter_column_on_token<A, T>(
     mut exec: crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
     kernels: &mut A,
     zero_strides: &mut Vec<isize>,
     fused_index: Option<&mut [usize]>,

@@ -1,0 +1,452 @@
+//! Structural counters of the replay's dispatch: grouped submissions, the
+//! budgets each item is offered, and the leaf-gate work of every gate a
+//! call builds on any thread. Counts, not timings; expected values follow
+//! from the fixtures and main's recursion by hand, or from main's gate scan
+//! replayed on the same token.
+
+use super::recording::*;
+use super::*;
+use crate::kernel_adapter::sealed::gate_counts::{self, Counts};
+use symtn_dense::{CpuEngine, Pool};
+use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
+use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
+
+/// A `threads`-worker engine under `strategy` whose every dispatch kind
+/// costs `ns` at every width.
+fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -> CpuEngine {
+    let flat = WidthCosts::flat(Duration::from_nanos(ns));
+    CpuEngine::new(
+        Pool::builder()
+            .threads(threads)
+            .dispatch_costs(DispatchCosts::new(flat, flat, flat))
+            .build()
+            .unwrap(),
+    )
+    .with_batch_policy(CpuBatchPolicy::new(strategy))
+}
+
+/// A rank-two structure of `(dims, strides, offset)` blocks.
+fn blocks(blocks: &[([usize; 2], [usize; 2], usize)]) -> Arc<BlockStructure> {
+    Arc::new(
+        BlockStructure::from_blocks_with_rank(
+            2,
+            blocks
+                .iter()
+                .enumerate()
+                .map(|(key, &(dims, strides, offset))| {
+                    BlockSpec::with_key(
+                        BlockKey::ordinal(key),
+                        dims.to_vec(),
+                        strides.to_vec(),
+                        offset,
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        )
+        .unwrap(),
+    )
+}
+
+/// The initialized overwrite of `transform` through the built-in executor,
+/// and the counts of the gates of bound `M` it built.
+fn overwrite_counts(
+    engine: &mut CpuEngine,
+    transform: &TreeTransformStructure<f64>,
+    dst: &Arc<BlockStructure>,
+    src: &Arc<BlockStructure>,
+) -> Counts {
+    let source = (0..src.required_len().unwrap())
+        .map(|v| v as f64 + 1.0)
+        .collect::<Vec<_>>();
+    let mut out = vec![f64::NAN; dst.required_len().unwrap()];
+    let watch = gate_counts::watch(transform.layouts().max_planned_elements());
+    tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        engine,
+        &mut StridedHostKernelAdapter::default(),
+        &mut DefaultDenseExecutor::new(),
+        &mut TreeTransformWorkspace::default(),
+        transform,
+        dst,
+        src,
+        &mut out,
+        &source,
+        1.0,
+        &[],
+    )
+    .unwrap();
+    watch.take()
+}
+
+/// The recording replay of `transform`: the budget each Single and scatter
+/// column was offered, in destination order, and every element's mark.
+fn recorded(
+    engine: &mut CpuEngine,
+    transform: &TreeTransformStructure<f64>,
+    dst: &Arc<BlockStructure>,
+    src: &Arc<BlockStructure>,
+) -> (Vec<usize>, Vec<Mark>) {
+    let task = transform.task_view().unwrap();
+    let mut workspace = TreeTransformWorkspace::default();
+    ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
+    let source = vec![0.0; src.required_len().unwrap()];
+    let mut marks = vec![Mark::default(); dst.required_len().unwrap()];
+    let recorder = Recorder::new(task);
+    super::super::replay(
+        engine,
+        &mut DefaultDenseExecutor::new(),
+        &mut workspace,
+        task,
+        transform.parallel_schedule(),
+        &mut marks,
+        &source,
+        &recorder,
+        &mut (),
+        None,
+    )
+    .unwrap();
+    (recorder.offers(), marks)
+}
+
+/// Main's `LeafGate::scan` on `exec`'s token for `bound`: its `pays`
+/// queries.
+fn main_scan_probes(exec: &crate::host_pool::Exec<'_>, bound: usize) -> usize {
+    use strided_kernel::execution::KernelClass;
+    let cheapest = (2..=exec.budget().get())
+        .filter_map(core::num::NonZeroUsize::new)
+        .min_by_key(|&width| (exec.dispatch_cost(width), width))
+        .unwrap();
+    let mut probes = 0;
+    let mut pays = |elements: usize| {
+        probes += 1;
+        exec.pays(KernelClass::Copy.estimate(elements), 1, cheapest)
+    };
+    if pays(bound) && !pays(0) {
+        let (mut below, mut at) = (0usize, bound);
+        while at - below > 1 {
+            let middle = below + (at - below) / 2;
+            if pays(middle) {
+                at = middle;
+            } else {
+                below = middle;
+            }
+        }
+    }
+    probes
+}
+
+/// What (caller-scan trace): `G` Multi groups of planned `[7, 11]` columns
+/// on a four-worker engine whose dispatch never pays replay serially, and
+/// the one caller gate serves every role: one scan of one `pays` query,
+/// which rejects them all without a width search, for `G` 8, 32 and 128.
+#[test]
+fn the_caller_gate_scans_once_whatever_the_group_count() {
+    for groups in [8, 32, 128] {
+        let structure = Arc::new(
+            BlockStructure::packed_column_major(2, vec![vec![7, 11]; 2 * groups]).unwrap(),
+        );
+        let specs = (0..groups)
+            .map(|g| {
+                TreeTransformBlockSpec::multi(
+                    vec![2 * g, 2 * g + 1],
+                    vec![2 * g, 2 * g + 1],
+                    vec![1.0, 0.0, 0.0, 1.0],
+                )
+            })
+            .collect::<Vec<_>>();
+        let transform =
+            TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+        assert_eq!(transform.layouts().retained_plan_count(), 2 * groups);
+        let mut engine = flat_engine(4, 1_000_000_000, CpuBatchStrategy::Auto);
+        let counts = overwrite_counts(&mut engine, &transform, &structure, &structure);
+        let expected = Counts {
+            scans: 1,
+            pays: 1,
+            widths: 0,
+        };
+        assert_eq!(counts, expected, "{groups} groups");
+    }
+}
+
+/// The r5 partial-overlap fixture: `G` groups of one `[3, 32]` destination
+/// (strides `[4, 6]`, at `196 floor(j / 2) + j mod 2`, so each pair's hulls
+/// overlap) from two packed sources, then one `[2, m]` transposing Single
+/// after them; `M = 2m`.
+fn partial_overlap(
+    groups: usize,
+    m: usize,
+) -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let mut dst = (0..groups)
+        .map(|j| ([3, 32], [4, 6], 196 * (j / 2) + j % 2))
+        .collect::<Vec<_>>();
+    dst.push(([2, m], [m, 1], 196 * (groups / 2)));
+    let mut src = vec![vec![3, 32]; 2 * groups];
+    src.push(vec![2, m]);
+    let src = Arc::new(BlockStructure::packed_column_major(2, src).unwrap());
+    let mut specs = (0..groups)
+        .map(|j| TreeTransformBlockSpec::multi(vec![j], vec![2 * j, 2 * j + 1], vec![1.0, 1.0]))
+        .collect::<Vec<_>>();
+    specs.push(TreeTransformBlockSpec::single(groups, 2 * groups, 1.0));
+    let dst = blocks(&dst);
+    let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    (dst, src, transform)
+}
+
+/// What (r5): on the partial-overlap fixture at four workers and flat
+/// 100 ns dispatch, no chunk is slice-disjoint, so every scatter runs inline
+/// on the caller's whole token through the caller gate: the gates scan
+/// twice per call (the Single's leaf and the caller gate), within
+/// `2 (log2 M + 2)` `pays` queries, for `G` 8, 32 and 128 alike; every
+/// scatter is offered all four slots and written by the calling thread.
+#[test]
+fn partially_overlapping_scatters_stay_on_the_caller_gate() {
+    let m: usize = 8192;
+    let bound = 2 * (2 * m).ilog2() as usize + 4;
+    let mut per_call = Vec::new();
+    for groups in [8, 32, 128] {
+        let (dst, src, transform) = partial_overlap(groups, m);
+        assert_eq!(transform.layouts().retained_plan_count(), groups + 1);
+        assert_eq!(transform.layouts().max_planned_elements(), 2 * m);
+        let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+        let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+        assert_eq!(counts.scans, 2, "{groups} groups");
+        assert!(counts.pays <= bound, "{groups} groups: {counts:?}");
+        per_call.push(counts);
+
+        let (offers, marks) = recorded(&mut engine, &transform, &dst, &src);
+        assert_eq!(offers, vec![4; groups + 1], "{groups} groups");
+        let caller = Some(std::thread::current().id());
+        let scattered = 196 * (groups / 2);
+        assert!(marks[..scattered]
+            .iter()
+            .all(|mark| mark.writes == 0 || mark.worker == caller));
+    }
+    assert!(
+        per_call.windows(2).all(|pair| pair[0] == pair[1]),
+        "{per_call:?}"
+    );
+}
+
+/// What (r6 Singles trace): a `[2, m]` transposing Single, two scalar
+/// Singles and two scalar Multis, consecutive, on four workers at flat
+/// 100 ns. The three Singles split as main's recursion (two left on two
+/// slots, the right one on two; then one slot each on the left): offers
+/// `[1, 1, 2]` in destination order, so the planned Single runs on one slot
+/// and no gate probes. The two groups' scatter splits two and two.
+#[test]
+fn singles_are_offered_the_tokens_of_mains_recursion() {
+    let m = 8192;
+    let dst = blocks(&[
+        ([2, m], [m, 1], 0),
+        ([1, 1], [1, 1], 2 * m),
+        ([1, 1], [1, 1], 2 * m + 1),
+        ([1, 1], [1, 1], 2 * m + 2),
+        ([1, 1], [1, 1], 2 * m + 3),
+    ]);
+    let mut src = vec![vec![2, m]];
+    src.extend(vec![vec![1, 1]; 6]);
+    let src = Arc::new(BlockStructure::packed_column_major(2, src).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(0, 0, 1.0),
+            TreeTransformBlockSpec::single(1, 1, 1.0),
+            TreeTransformBlockSpec::single(2, 2, 1.0),
+            TreeTransformBlockSpec::multi(vec![3], vec![3, 4], vec![1.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![4], vec![5, 6], vec![1.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    assert_eq!(transform.layouts().retained_plan_count(), 1);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    assert_eq!(offers, [1, 1, 2, 2, 2]);
+    let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+    assert_eq!(counts, Counts::default());
+}
+
+/// What (r6 short scatter and P2 trace): two slice-disjoint groups of
+/// `[2, 1666]` and `[2, 1667]` transposes (four pack columns, so four
+/// workers) at flat 100 ns: the chunk's two groups split over four logical
+/// threads, each offered two slots; each group's leaf gate scans once with
+/// main's global bound, making main's `pays` queries on a two-slot token,
+/// and both roles are admitted.
+#[test]
+fn a_short_scatter_phase_follows_mains_recursion_and_gate() {
+    let dst = blocks(&[([2, 1666], [1666, 1], 0), ([2, 1667], [1667, 1], 3332)]);
+    let src = Arc::new(
+        BlockStructure::packed_column_major(
+            2,
+            vec![vec![2, 1666], vec![2, 1666], vec![2, 1667], vec![2, 1667]],
+        )
+        .unwrap(),
+    );
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::multi(vec![0], vec![0, 1], vec![1.0, 1.0]),
+            TreeTransformBlockSpec::multi(vec![1], vec![2, 3], vec![1.0, 1.0]),
+        ],
+    )
+    .unwrap();
+    let bound = transform.layouts().max_planned_elements();
+    assert_eq!(bound, 3334);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    assert_eq!(offers, [2, 2]);
+    let probes = crate::host_pool::region(
+        &mut engine,
+        crate::host_pool::HostPoolSite::Replay,
+        |exec| main_scan_probes(&exec.limit(core::num::NonZeroUsize::new(2).unwrap()), bound),
+    )
+    .unwrap();
+    let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+    let expected = Counts {
+        scans: 2,
+        pays: 2 * probes,
+        widths: 2,
+    };
+    assert_eq!(counts, expected);
+}
+
+/// What (serial token): one planned `[2, m]` transposing Single replays on
+/// one worker (one runnable part) on the caller's whole token: under `Auto`
+/// on eight workers it is offered all eight and its plan is admitted (one
+/// width search); under a forced `Sequential` it is offered one slot and
+/// the gate does not scan.
+#[test]
+fn an_unsplit_move_gets_the_whole_caller_token() {
+    let m = 8192;
+    let dst = blocks(&[([2, m], [m, 1], 0)]);
+    let src = Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, m]]).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[TreeTransformBlockSpec::single(0, 0, 1.0)],
+    )
+    .unwrap();
+    for (strategy, offer, widths) in [
+        (CpuBatchStrategy::Auto, 8, 1),
+        (CpuBatchStrategy::Sequential, 1, 0),
+    ] {
+        let mut engine = flat_engine(8, 100, strategy);
+        let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+        assert_eq!(offers, [offer], "{strategy:?}");
+        let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+        assert_eq!(counts.widths, widths, "{strategy:?}");
+        if strategy == CpuBatchStrategy::Sequential {
+            assert_eq!(counts, Counts::default());
+        }
+    }
+}
+
+/// A custom executor that records each grouped submission's job count and
+/// forwards it to the built-in executor's.
+#[derive(Default)]
+struct Batches {
+    inner: DefaultDenseExecutor,
+    jobs: Vec<usize>,
+}
+
+impl DenseExecutor for Batches {
+    fn svd(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.eigh(engine, input)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.inner
+            .dot_general_into(engine, output, lhs, rhs, config)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn matmul_batch_axpby_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        jobs: &[DenseGemmBatchJob],
+        runs: &[usize],
+        alpha: DenseScalar,
+        beta: DenseScalar,
+    ) -> Result<(), DenseError> {
+        self.jobs.push(jobs.len());
+        self.inner
+            .matmul_batch_axpby_into(engine, output, lhs, rhs, jobs, runs, alpha, beta)
+    }
+}
+
+/// What (audit 1): ten identity groups on four free-dispatch workers replay
+/// in chunks of four consecutive groups, one grouped submission each:
+/// `ceil(10 / 4)` submissions of 4, 4 and 2 jobs, and the values copy.
+#[test]
+fn each_chunk_is_one_grouped_submission() {
+    let groups = 10;
+    let structure =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![4, 6]; 2 * groups]).unwrap());
+    let specs = (0..groups)
+        .map(|g| {
+            TreeTransformBlockSpec::multi(
+                vec![2 * g, 2 * g + 1],
+                vec![2 * g, 2 * g + 1],
+                vec![1.0, 0.0, 0.0, 1.0],
+            )
+        })
+        .collect::<Vec<_>>();
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+    let source = (0..structure.required_len().unwrap())
+        .map(|v| v as f64)
+        .collect::<Vec<_>>();
+    let mut out = vec![f64::NAN; source.len()];
+    let mut dense = Batches::default();
+    tree_transform_structure_overwrite_with_structural_recoupling_raw(
+        &mut engine(4, CpuBatchStrategy::Auto),
+        &mut StridedHostKernelAdapter::default(),
+        &mut dense,
+        &mut TreeTransformWorkspace::default(),
+        &transform,
+        &structure,
+        &structure,
+        &mut out,
+        &source,
+        1.0,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(dense.jobs, [4, 4, 2]);
+    assert_eq!(out, source);
+}

@@ -143,26 +143,36 @@ pub(crate) struct PackColumnWriter<'a, T> {
 
 impl<T: Copy> PackColumnWriter<'_, T> {
     /// Splits off the slots from `mid` on as a second writer, for a parallel
-    /// pack. `mid` must not precede a slot already written.
-    pub(crate) fn split_at(self, mid: usize) -> Result<(Self, Self), OperationError> {
+    /// pack; `self` keeps the slots before `mid`. `mid` must not precede a
+    /// slot already written.
+    pub(crate) fn split_off(&mut self, mid: usize) -> Result<Self, OperationError> {
         if mid < self.cursor || mid > self.slots.len() {
             return Err(OperationError::InvalidArgument {
                 message: "pack scratch split outside its unwritten range",
             });
         }
-        let (left, right) = self.slots.split_at_mut(mid);
-        Ok((
-            PackColumnWriter {
-                slots: left,
-                cursor: self.cursor,
-                written: self.written,
-            },
-            PackColumnWriter {
-                slots: right,
-                cursor: 0,
-                written: self.written,
-            },
-        ))
+        let (left, right) = core::mem::take(&mut self.slots).split_at_mut(mid);
+        self.slots = left;
+        Ok(PackColumnWriter {
+            slots: right,
+            cursor: 0,
+            written: self.written,
+        })
+    }
+
+    /// The slots of this writer's range.
+    pub(crate) fn len(&self) -> usize {
+        self.slots.len()
+    }
+
+    /// Writes `value` to every slot not yet written, front to back.
+    pub(crate) fn fill(&mut self, value: T) {
+        let rest = &mut self.slots[self.cursor..];
+        for slot in rest.iter_mut() {
+            slot.write(value);
+        }
+        self.written.fetch_add(rest.len(), Ordering::Relaxed);
+        self.cursor = self.slots.len();
     }
 
     /// Writes `map(src)` through `layout` as the column starting at `offset`
@@ -273,8 +283,8 @@ mod tests {
         let transposed = column(&[2, 3], &[3, 1], &[1, 2]);
         let mut buffer = HostScratchBuffer::default();
         buffer
-            .overwrite_with_columns(8, |writer| {
-                let (mut left, mut right) = writer.split_at(6)?;
+            .overwrite_with_columns(8, |mut left| {
+                let mut right = left.split_off(6)?;
                 left.write_column(0, transposed, &src, 0, &mut index, |v| v)?;
                 right.write_column(0, column(&[2], &[1], &[1]), &src, 4, &mut index, |v| -v)
             })
@@ -282,6 +292,22 @@ mod tests {
         assert_eq!(
             buffer.as_slice(),
             [1.0, 3.0, 5.0, 2.0, 4.0, 6.0, -5.0, -6.0]
+        );
+
+        // A fill writes every remaining slot of its own range, after a
+        // column or alone.
+        buffer
+            .overwrite_with_columns(8, |mut left| {
+                let mut right = left.split_off(6)?;
+                left.write_column(0, column(&[2], &[1], &[1]), &src, 0, &mut index, |v| v)?;
+                left.fill(7.0);
+                right.fill(-1.0);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            buffer.as_slice(),
+            [1.0, 2.0, 7.0, 7.0, 7.0, 7.0, -1.0, -1.0]
         );
 
         let partial = buffer.overwrite_with_columns(8, |mut writer| {

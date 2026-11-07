@@ -5,10 +5,8 @@ use super::*;
 /// once. Returns `Ok(None)` without allocating output when the destination
 /// does not have a proof of exact physical overwrite coverage.
 ///
-/// The writer runs on the same route as the initialised replay: the lane
-/// runner on a multi-slot engine (in the barrier form for an executor
-/// without lane GEMMs), the one-worker replay otherwise. Nothing is published unless every write
-/// succeeded. A forced batch policy `dense` cannot honor is refused first,
+/// The writer runs on the same route as the initialised replay ([`replay`]).
+/// Nothing is published unless every write succeeded. A forced batch policy `dense` cannot honor is refused first,
 /// as the initialised replay refuses it, even where `Ok(None)` would follow.
 ///
 /// `profile` accumulates the same phases as the initialised profiled replay
@@ -89,7 +87,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(super) fn write_role_uninit<D, F>(
     exec: Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
     role: crate::BakedFusedLayout<'_>,
     elements: usize,
     dst: &mut [MaybeUninit<D>],
@@ -586,10 +584,10 @@ mod owned_overwrite_tests {
     }
 
     #[test]
-    fn owned_writer_on_lanes_is_bit_identical_to_one_worker() {
+    fn owned_writer_on_many_workers_is_bit_identical_to_one_worker() {
         let engine = &mut symtn_dense::CpuEngine::serial();
-        // What: on a multi-worker engine the owned writer runs on the lane
-        // runner and produces exactly the one-worker owned bytes for real
+        // What: on a multi-worker engine the owned writer runs the chunk
+        // replay and produces exactly the one-worker owned bytes for real
         // and complex data, which in turn equal the initialised overwrite
         // oracle.
         let (structure, transform, source) = mixed_fixture();
@@ -691,9 +689,9 @@ mod owned_overwrite_tests {
     }
 
     #[test]
-    fn owned_writer_of_one_component_on_a_wide_engine_returns_the_result() {
-        // What: a structure with one joint component runs as one lane job on
-        // a multi-worker engine and still returns the owned result.
+    fn owned_writer_of_one_single_on_a_wide_engine_returns_the_result() {
+        // What: a structure of one Single replays on a multi-worker engine
+        // and still returns the owned result.
         let structure = canonical_structure(0);
         let transform = TreeTransformStructure::compile_structures(
             &structure,

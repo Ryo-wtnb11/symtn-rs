@@ -54,15 +54,6 @@ pub(crate) enum TreeTransformDirectItem {
     Single { block: u32, slot: u32 },
 }
 
-impl TreeTransformDirectItem {
-    /// The slot of the item's joint atom.
-    pub fn slot(self) -> u32 {
-        match self {
-            Self::Inactive { slot, .. } | Self::Single { slot, .. } => slot,
-        }
-    }
-}
-
 /// One joint atom: a maximal run of overlapping destination intervals of
 /// Singles, Multi scatter columns and inactive layouts. Only whole atoms (or
 /// whole bands of a bandable atom) may be handed to different writers.
@@ -111,8 +102,10 @@ pub(crate) struct TreeTransformJointComponent {
 /// The joint ownership schedule of a compiled structure, built eagerly with
 /// it and immutable afterwards, so derived equality compares every field.
 ///
-/// The atoms, components, direct items and bands are the
-/// one-writer-per-element ownership the lane replay places by.
+/// The replay dispatches on the address-ordered direct lists, the
+/// Singles' slice-disjointness, the group spans and the runnable clamp. The
+/// atoms, components, component direct items and bands are compiled
+/// ownership metadata no replay reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TreeTransformParallelSchedule {
     pub pack_columns: Vec<TreeTransformPackReplay>,
@@ -166,12 +159,16 @@ impl TreeTransformParallelSchedule {
             ..self.components[component + 1].atom_start as usize
     }
 
+    // Read by the ownership metadata tests only, until that metadata goes.
+    #[cfg(test)]
     /// Direct items of component `component`, ordered by atom slot.
     pub fn component_direct(&self, component: usize) -> &[TreeTransformDirectItem] {
         &self.direct[self.components[component].direct_start as usize
             ..self.components[component + 1].direct_start as usize]
     }
 
+    // Read by the ownership metadata tests only, until that metadata goes.
+    #[cfg(test)]
     /// Multi groups of component `component`, in recoupling-plan order.
     pub fn component_group_list(&self, component: usize) -> &[u32] {
         &self.component_groups[self.components[component].group_start as usize

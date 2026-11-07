@@ -126,7 +126,7 @@ where
     validate_replay_storage_len(dst_structure, dst_data.len())?;
     validate_replay_storage_len(src_structure, src_data.len())?;
     let task = structure.task_view()?;
-    workspace.prepare_fused_indices(structure.layouts().max_fused_rank())?;
+    workspace.prepare_fused_indices(1, structure.layouts().max_fused_rank())?;
     scale_inactive_destinations(
         exec.reborrow(),
         kernels,
@@ -188,11 +188,9 @@ where
 /// Replays a prepared structural-recoupling tree transform on host slices:
 /// `dst = alpha * T(src) + beta * dst`.
 ///
-/// The engine and executor fix the route before any write: on a multi-slot
-/// engine every joint component is a job on the lane runner, natively when
-/// the executor runs lane GEMMs and in the barrier form otherwise; one
-/// worker replays in source order when placement leaves one slot (see
-/// [`replay`]).
+/// The engine's width and policy fix the route before any write: the direct
+/// items, then the Multi groups in chunks of the replay width, or one at a
+/// time on one worker (see [`replay`]).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tree_transform_structure_with_structural_recoupling_raw<A, E, D, C>(
     engine: &mut dyn Engine,
@@ -382,7 +380,7 @@ where
     )?;
     let requirements = task.workspace_requirements();
     task.validate_workspace_requirements::<D>()?;
-    checked_fused_index_len(requirements.fused_index_len_per_worker)?;
+    checked_fused_index_len(1, requirements.fused_index_len_per_worker)?;
     if let (Some(profile), Some(start)) = (profile.as_deref_mut(), total_start) {
         profile.validate += start.elapsed();
     }

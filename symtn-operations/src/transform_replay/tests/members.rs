@@ -92,19 +92,19 @@ fn members_equal_the_single_member_replay_of_each_member() {
                 .collect::<Vec<_>>();
             for budget in [1, 2, 4] {
                 for strategy in [CpuBatchStrategy::Auto, CpuBatchStrategy::Outer] {
-                    for barrier in [false, true] {
+                    for custom in [false, true] {
                         let honors =
-                            !barrier && DefaultDenseExecutor::new().honors_forced_batch_policy();
+                            !custom && DefaultDenseExecutor::new().honors_forced_batch_policy();
                         if strategy != CpuBatchStrategy::Auto && !honors {
                             continue;
                         }
                         let what = format!(
                             "dst {dst_len}, members {members}, budget {budget}, \
-                             {strategy:?}, barrier {barrier}"
+                             {strategy:?}, custom {custom}"
                         );
                         let mut engine = engine(budget, strategy);
                         let run = |engine: &mut CpuEngine, source: &[f64], members| {
-                            if barrier {
+                            if custom {
                                 overwrite_members(
                                     engine,
                                     &mut Forwarding::default(),

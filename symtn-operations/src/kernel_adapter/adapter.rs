@@ -21,15 +21,20 @@ pub(crate) mod sealed {
     ///
     /// Why lazy: the O(budget + log bound) scan runs only when an overwrite of
     /// a role with a retained plan reaches admission, so a call of planless or
-    /// accumulating blocks pays nothing. A gate lives on the thread that runs
-    /// its blocks, because a token's dispatch cost depends on the calling
+    /// accumulating blocks pays nothing. A gate serves the blocks of one
+    /// thread, because a token's dispatch cost depends on the calling
     /// thread: one per call for the calling thread's unsplit lists, one per
     /// forked leaf otherwise.
+    ///
+    /// Why the memo is a plain field behind `&mut self` rather than a `Cell`:
+    /// a forked leaf's gate travels inside its lane through the replay
+    /// split's `Sync` slots before the leaf runs; exclusive access gives the
+    /// same single-owner memo.
     pub struct LeafGate {
         /// The largest element count any planned role this gate admits has.
         bound: usize,
         /// The last scan, keyed by the token shape it was taken on.
-        memo: core::cell::Cell<Option<GateScan>>,
+        memo: Option<GateScan>,
     }
 
     #[derive(Clone, Copy)]
@@ -42,10 +47,7 @@ pub(crate) mod sealed {
     impl LeafGate {
         /// A gate for roles of at most `bound` elements.
         pub(crate) fn new(bound: usize) -> Self {
-            Self {
-                bound,
-                memo: core::cell::Cell::new(None),
-            }
+            Self { bound, memo: None }
         }
 
         /// The smallest element count up to `bound` whose copy estimate pays
@@ -54,7 +56,7 @@ pub(crate) mod sealed {
         /// `pays` at that one width finds it in O(log bound).
         fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
             #[cfg(test)]
-            GATE_SCANS.with(|scans| scans.set(scans.get() + 1));
+            gate_counts::add(bound, |counts| counts.scans += 1);
             let mut cheapest = None;
             let mut best = core::time::Duration::MAX;
             for width in 2..=exec.budget().get() {
@@ -69,7 +71,11 @@ pub(crate) mod sealed {
             }
             let cheapest = cheapest?;
             let class = execution::KernelClass::Copy;
-            let pays = |elements: usize| exec.pays(class.estimate(elements), 1, cheapest);
+            let pays = |elements: usize| {
+                #[cfg(test)]
+                gate_counts::add(bound, |counts| counts.pays += 1);
+                exec.pays(class.estimate(elements), 1, cheapest)
+            };
             if !pays(bound) {
                 return None;
             }
@@ -96,43 +102,38 @@ pub(crate) mod sealed {
         /// serves every unsplit block list of a call on the calling thread,
         /// whose tokens all come from one engine, so those two fields are
         /// what can still differ between its tokens; the calling thread fixes
-        /// the remaining dispatch kind. The gate is not `Sync`, so a forked
-        /// worker builds its own.
-        pub(crate) fn widens(&self, exec: &crate::host_pool::Exec<'_>, elements: usize) -> bool {
+        /// the remaining dispatch kind. A forked leaf gets a gate of its own.
+        pub(crate) fn widens(
+            &mut self,
+            exec: &crate::host_pool::Exec<'_>,
+            elements: usize,
+        ) -> bool {
             if exec.is_serial() {
                 return false;
             }
             let (budget, team) = (exec.budget(), exec.carries_team());
-            let min_elements = match self.memo.get() {
+            let min_elements = match self.memo {
                 Some(scan) if scan.budget == budget && scan.team == team => scan.min_elements,
                 _ => {
                     let min_elements = Self::scan(exec, self.bound);
-                    self.memo.set(Some(GateScan {
+                    self.memo = Some(GateScan {
                         budget,
                         team,
                         min_elements,
-                    }));
+                    });
                     min_elements
                 }
             };
             match min_elements {
                 Some(min) if elements >= min => {
                     #[cfg(test)]
-                    GATE_WIDTHS.with(|widths| widths.set(widths.get() + 1));
+                    gate_counts::add(self.bound, |counts| counts.widths += 1);
                     execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
                         > 1
                 }
                 _ => false,
             }
         }
-    }
-
-    #[cfg(test)]
-    thread_local! {
-        /// Dispatch-cost scans this thread's gates ran (test observation).
-        pub(crate) static GATE_SCANS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
-        /// Width searches this thread's gates ran (test observation).
-        pub(crate) static GATE_WIDTHS: core::cell::Cell<usize> = const { core::cell::Cell::new(0) };
     }
 
     /// Unnameable outside this crate, so its methods are crate-internal.
@@ -208,6 +209,69 @@ pub(crate) mod sealed {
                 + ConjugateValue,
         {
             None
+        }
+    }
+
+    /// Test observation of the gates of one watched bound, on every thread:
+    /// a forked leaf's gate runs on a worker. A test watches a bound no other
+    /// test's planned roles reach, so concurrent tests do not count.
+    #[cfg(test)]
+    pub(crate) mod gate_counts {
+        use std::sync::{Mutex, MutexGuard, PoisonError};
+
+        /// What the watched gates did.
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+        pub(crate) struct Counts {
+            /// Dispatch-cost scans.
+            pub scans: usize,
+            /// `pays` queries of those scans.
+            pub pays: usize,
+            /// Width searches of admitted roles.
+            pub widths: usize,
+        }
+
+        static WATCHED: Mutex<Option<(usize, Counts)>> = Mutex::new(None);
+        static WATCHERS: Mutex<()> = Mutex::new(());
+
+        pub(super) fn add(bound: usize, count: impl FnOnce(&mut Counts)) {
+            let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some((watched, counts)) = watched.as_mut() {
+                if *watched == bound {
+                    count(counts);
+                }
+            }
+        }
+
+        /// Counts the gates of `bound` until the watch drops; one watch at a
+        /// time.
+        pub(crate) struct Watch {
+            _one_at_a_time: MutexGuard<'static, ()>,
+        }
+
+        pub(crate) fn watch(bound: usize) -> Watch {
+            let guard = WATCHERS.lock().unwrap_or_else(PoisonError::into_inner);
+            *WATCHED.lock().unwrap_or_else(PoisonError::into_inner) =
+                Some((bound, Counts::default()));
+            Watch {
+                _one_at_a_time: guard,
+            }
+        }
+
+        impl Watch {
+            /// The counts so far, reset to zero.
+            pub(crate) fn take(&self) -> Counts {
+                let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+                watched
+                    .as_mut()
+                    .map(|(_, counts)| std::mem::take(counts))
+                    .unwrap_or_default()
+            }
+        }
+
+        impl Drop for Watch {
+            fn drop(&mut self) {
+                *WATCHED.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            }
         }
     }
 }

@@ -115,12 +115,6 @@ impl TreeTransformLayoutTable {
         self.plans.len()
     }
 
-    /// The layout entries, so tests can visit every role.
-    #[cfg(test)]
-    pub(crate) fn entry_count(&self) -> usize {
-        self.entries.len()
-    }
-
     fn slot_range(&self, entry_index: usize) -> Option<Range<usize>> {
         let slot = self.entries.get(entry_index)?.role;
         if slot.rank == 0 {
@@ -152,6 +146,28 @@ impl TreeTransformLayoutTable {
             }
             _ => Err(missing_role()),
         }
+    }
+
+    /// Lowest physical index a Single block's destination writes, from its
+    /// compiled role. Normalization only drops extent-1 axes, reorders, and
+    /// fuses same-sign spans, so this equals the raw layout's low end, which
+    /// compilation already computed without overflow. O(f), read only at a
+    /// replay split's cut.
+    pub(crate) fn destination_lo(&self, entry_index: usize) -> Result<isize, OperationError> {
+        let role = self.role(entry_index)?;
+        let mut lo = self.entries[entry_index].offset;
+        for (&extent, &stride) in role.dims().iter().zip(role.dst_strides()) {
+            if stride < 0 {
+                let span = isize::try_from(extent.saturating_sub(1))
+                    .ok()
+                    .and_then(|extent| extent.checked_mul(stride))
+                    .ok_or(OperationError::ElementCountOverflow)?;
+                lo = lo
+                    .checked_add(span)
+                    .ok_or(OperationError::ElementCountOverflow)?;
+            }
+        }
+        Ok(lo)
     }
 
     /// The compiled one-sided role of an inactive destination entry: the

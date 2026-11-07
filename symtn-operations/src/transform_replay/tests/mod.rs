@@ -7,23 +7,12 @@ use symtn_dense::{
     DenseGemmBatchJob, DenseRead, DenseScalar, DenseTensor, DenseWrite,
 };
 
-// The barrier form runs on any CPU provider, through a custom executor.
 #[cfg(feature = "tenferro")]
-mod barrier;
+mod chunk;
 mod compile_validation;
+#[cfg(feature = "tenferro")]
+mod counters;
 mod destination_scales;
-// The lane replay needs the native provider's lane GEMMs.
-#[cfg(all(
-    feature = "cpu-faer",
-    not(any(
-        feature = "cpu-blas",
-        feature = "blas-accelerate",
-        feature = "blas-openblas",
-        feature = "blas-mkl",
-        feature = "provider-inject"
-    ))
-))]
-mod lanes;
 #[cfg(feature = "tenferro")]
 mod members;
 mod overwrite;

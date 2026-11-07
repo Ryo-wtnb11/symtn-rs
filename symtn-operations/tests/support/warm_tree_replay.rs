@@ -1,7 +1,5 @@
-//! The warm multi-lane tree replay fixture: measured process-wide by
-//! `tests/warm_tree_lanes.rs`, and its lane placement checked by the crate's
-//! lane replay tests, which can read the placement. One definition, so both
-//! measure the same workload.
+//! The warm parallel tree replay fixture, measured process-wide by
+//! `tests/warm_tree_replay.rs`.
 
 use super::{Arc, BlockStructure, TreeTransformBlockSpec, TreeTransformStructure};
 
@@ -9,8 +7,8 @@ use super::{Arc, BlockStructure, TreeTransformBlockSpec, TreeTransformStructure}
 pub const THREADS: usize = 4;
 
 /// `groups` Multi groups of two `[rows, 3]` blocks each (24 elements at
-/// eight rows keep every stage's copy estimate nonzero), one joint component
-/// per group, plus one Single, recoupled by a non-identity matrix.
+/// eight rows keep every move's copy estimate nonzero), plus one Single,
+/// recoupled by a non-identity matrix.
 pub fn fixture(
     groups: usize,
     rows: usize,

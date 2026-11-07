@@ -21,7 +21,7 @@ use crate::owned_overwrite_buffer::initialize_owned;
 use crate::storage_scratch::TreeTransformScratchBuffers;
 use crate::strided::offset_to_isize;
 use crate::task_view::TreeTransformTaskView;
-use crate::transform_structure::{TreeTransformDirectItem, TreeTransformParallelSchedule};
+use crate::transform_structure::TreeTransformParallelSchedule;
 use crate::{
     ConjugateValue, DenseRecouplingScalar, HostKernelAdapter, OperationError,
     RecouplingCoefficientAction, ReportsPlacement, TransformScale, TreeTransformBlock,
@@ -29,11 +29,11 @@ use crate::{
 };
 
 mod batched;
+#[cfg(feature = "tenferro")]
+mod chunk;
 mod coefficients;
 mod entry;
 mod kernels;
-#[cfg(feature = "tenferro")]
-mod lanes;
 mod member;
 mod owned;
 #[cfg(test)]
@@ -46,7 +46,7 @@ pub use entry::*;
 pub(crate) use kernels::*;
 pub use member::*;
 pub use owned::*;
-use writers::{scheduled_single, InitializedWriter, OwnedWriter, ReplayParts};
+use writers::{InitializedWriter, OwnedWriter, ReplayParts};
 
 impl<D: Zero> DestinationMode<D> {
     /// Whether the write ignores the destination: only such a write may run
@@ -173,13 +173,12 @@ pub struct HostTreeTransformWorkspace<T> {
     coefficient_pack_builds: usize,
     chunk_jobs: Vec<DenseGemmBatchJob>,
     chunk_runs: Vec<usize>,
-    // The one-worker replay's fused index, one entry per fused axis; inline
-    // up to eight, the rank metadata width, so a fresh per-call workspace
-    // allocates none.
-    fused_indices: smallvec::SmallVec<[usize; 8]>,
-    // The lane replay's runner tables and per-lane scratch.
-    #[cfg(feature = "tenferro")]
-    lanes: lanes::TreeLaneScratch<T>,
+    // One chunk's non-empty scatter groups, in destination order.
+    chunk_scatter_groups: Vec<usize>,
+    // The fused traversal indices of the replay's lanes ([`fused_index_lanes`]):
+    // inline up to eight, the rank metadata width, so a fresh per-call
+    // workspace of low rank allocates none.
+    fused_indices: smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>,
     member_shape: Vec<usize>,
     member_dst_strides: Vec<isize>,
     member_src_strides: Vec<isize>,
@@ -199,9 +198,8 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             coefficient_pack_builds: 0,
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
+            chunk_scatter_groups: Vec::new(),
             fused_indices: smallvec::SmallVec::new(),
-            #[cfg(feature = "tenferro")]
-            lanes: lanes::TreeLaneScratch::default(),
             member_shape: Vec::new(),
             member_dst_strides: Vec::new(),
             member_src_strides: Vec::new(),
@@ -212,43 +210,34 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
 
 impl<T> HostTreeTransformWorkspace<T> {
     /// Host capacity retained by member replay and ordinary transform
-    /// scratch, the lane replay's included.
+    /// scratch.
     #[doc(hidden)]
     pub fn retained_bytes(&self) -> usize {
         let bytes = |capacity: usize, item: usize| capacity.saturating_mul(item);
-        #[cfg(feature = "tenferro")]
-        let lanes = self.lanes.retained_bytes();
-        #[cfg(not(feature = "tenferro"))]
-        let lanes = 0;
-        lanes
-            + bytes(
-                self.packed.source().capacity() + self.packed.destination().capacity(),
-                std::mem::size_of::<T>(),
-            )
-            + bytes(
-                self.coefficient_scratch.capacity(),
-                std::mem::size_of::<T>(),
-            )
-            + bytes(
-                self.chunk_jobs.capacity(),
-                std::mem::size_of::<DenseGemmBatchJob>(),
-            )
-            + bytes(
-                self.chunk_runs.capacity()
-                    + self.fused_indices_heap_capacity()
-                    + self.member_shape.capacity(),
-                std::mem::size_of::<usize>(),
-            )
-            + bytes(
-                self.zero_strides.capacity()
-                    + self.member_dst_strides.capacity()
-                    + self.member_src_strides.capacity(),
-                std::mem::size_of::<isize>(),
-            )
-            + bytes(
-                self.member_ranges.capacity(),
-                std::mem::size_of::<(usize, usize)>(),
-            )
+        bytes(
+            self.packed.source().capacity() + self.packed.destination().capacity(),
+            std::mem::size_of::<T>(),
+        ) + bytes(
+            self.coefficient_scratch.capacity(),
+            std::mem::size_of::<T>(),
+        ) + bytes(
+            self.chunk_jobs.capacity(),
+            std::mem::size_of::<DenseGemmBatchJob>(),
+        ) + bytes(
+            self.chunk_runs.capacity()
+                + self.chunk_scatter_groups.capacity()
+                + self.fused_indices_heap_capacity()
+                + self.member_shape.capacity(),
+            std::mem::size_of::<usize>(),
+        ) + bytes(
+            self.zero_strides.capacity()
+                + self.member_dst_strides.capacity()
+                + self.member_src_strides.capacity(),
+            std::mem::size_of::<isize>(),
+        ) + bytes(
+            self.member_ranges.capacity(),
+            std::mem::size_of::<(usize, usize)>(),
+        )
     }
 
     /// Coefficient packs this workspace has converted: a warm replay of the
@@ -303,12 +292,70 @@ impl<T> HostTreeTransformWorkspace<T> {
         }
     }
 
-    fn prepare_fused_indices(&mut self, max_fused_rank: usize) -> Result<(), OperationError> {
-        let len = checked_fused_index_len(max_fused_rank)?;
+    fn prepare_fused_indices(
+        &mut self,
+        threads: usize,
+        max_fused_rank: usize,
+    ) -> Result<(), OperationError> {
+        let len =
+            checked_fused_index_len(fused_index_lanes(threads, max_fused_rank), max_fused_rank)?;
         if len > self.fused_indices.len() {
             self.fused_indices.resize(len, 0);
         }
         Ok(())
+    }
+}
+
+/// Fused-index entries a lane keeps inline: the rank metadata width.
+const INLINE_FUSED_RANK: usize = 8;
+
+/// Lanes whose fused indices the shared workspace buffer holds: every lane
+/// above the inline rank, only the calling lane otherwise.
+///
+/// Why not always one shared `threads * rank` buffer: an eager call's
+/// workspace is per call, and that buffer outgrows its inline capacity as
+/// soon as the engine is wider than one, so every parallel call allocated on
+/// the caller thread what the serial call does not. Up to the inline rank a
+/// forked lane keeps its index on its own stack instead ([`LaneIndex`]);
+/// above it the index spills anyway, and one shared buffer keeps a warm
+/// replay allocation-free.
+fn fused_index_lanes(threads: usize, max_fused_rank: usize) -> usize {
+    if max_fused_rank <= INLINE_FUSED_RANK {
+        1
+    } else {
+        threads
+    }
+}
+
+/// The fused-index scratch of one lane of a replay split: a slice of the
+/// shared buffer when it holds every lane of the part, or the lane's own
+/// inline index.
+enum LaneIndex<'a> {
+    Shared(&'a mut [usize]),
+    Own(smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>),
+}
+
+impl LaneIndex<'_> {
+    fn get(&mut self) -> &mut [usize] {
+        match self {
+            Self::Shared(indices) => indices,
+            Self::Own(indices) => indices,
+        }
+    }
+
+    /// Splits one fork's fused-index scratch: the first `left_threads` lanes
+    /// keep the front of `self`; the rest take the back when it holds every
+    /// lane, and their own inline index otherwise.
+    fn split_off(&mut self, left_threads: usize, threads: usize, max_fused_rank: usize) -> Self {
+        match self {
+            Self::Shared(indices) if indices.len() >= threads * max_fused_rank => {
+                let (left, right) =
+                    core::mem::take(indices).split_at_mut(left_threads * max_fused_rank);
+                *indices = left;
+                Self::Shared(right)
+            }
+            _ => Self::Own(smallvec::SmallVec::from_elem(0, max_fused_rank)),
+        }
     }
 }
 
@@ -365,10 +412,13 @@ fn refuse_unhonored_policy<E: DenseExecutor>(
 
 // Why not reserve here: public drivers call this before beta mutation, while
 // executors retain ownership of actual workspace growth and profiler attribution.
-fn checked_fused_index_len(max_fused_rank: usize) -> Result<usize, OperationError> {
-    core::alloc::Layout::array::<usize>(max_fused_rank)
-        .map_err(|_| OperationError::ElementCountOverflow)?;
-    Ok(max_fused_rank)
+fn checked_fused_index_len(threads: usize, max_fused_rank: usize) -> Result<usize, OperationError> {
+    let len = threads
+        .max(1)
+        .checked_mul(max_fused_rank)
+        .ok_or(OperationError::ElementCountOverflow)?;
+    core::alloc::Layout::array::<usize>(len).map_err(|_| OperationError::ElementCountOverflow)?;
+    Ok(len)
 }
 
 impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {

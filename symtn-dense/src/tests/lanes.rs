@@ -10,13 +10,10 @@ use tenferro_cpu::{CpuEngine, Pool};
 
 use super::counting_alloc;
 use crate::lanes::{
-    place, run_barrier, run_native, Assignment, Barrier, Each, Estimate, Form, Jobs, LaneTables,
-    Placed, Placement, Refusal, Split, StageKind, Work,
+    place, run_native, Assignment, Cut, Each, Estimate, Form, Jobs, LaneTables, Placed, Placement,
+    Refusal, Split, StageKind, Work,
 };
-use crate::{
-    DenseDotConfig, DenseError, DenseExecutor, DenseRead, DenseScalar, DenseTensor, DenseView,
-    DenseViewMut, DenseWrite, Engine,
-};
+use crate::DenseError;
 
 use StageKind::{Movement as M, Provider as P};
 
@@ -896,105 +893,6 @@ impl Work for Packed {
     }
 }
 
-/// A custom executor on the default batch entry that records the budget the
-/// engine offers each GEMM submission.
-#[derive(Default)]
-struct Recording {
-    budgets: Vec<usize>,
-}
-
-impl DenseExecutor for Recording {
-    fn svd(
-        &mut self,
-        _: &mut dyn Engine,
-        _: DenseRead<'_>,
-    ) -> Result<Vec<DenseTensor>, DenseError> {
-        unreachable!("not a factorization test")
-    }
-    fn qr(&mut self, _: &mut dyn Engine, _: DenseRead<'_>) -> Result<Vec<DenseTensor>, DenseError> {
-        unreachable!("not a factorization test")
-    }
-    fn eigh(
-        &mut self,
-        _: &mut dyn Engine,
-        _: DenseRead<'_>,
-    ) -> Result<Vec<DenseTensor>, DenseError> {
-        unreachable!("not a factorization test")
-    }
-    fn dot_general_into(
-        &mut self,
-        engine: &mut dyn Engine,
-        output: DenseWrite<'_>,
-        lhs: DenseRead<'_>,
-        rhs: DenseRead<'_>,
-        _: &DenseDotConfig,
-    ) -> Result<(), DenseError> {
-        let budget = tenferro_cpu::with_cpu_engine(engine, |cpu| {
-            cpu.with_contraction_exec(|exec, _, _| Ok(exec.budget()))
-                .unwrap()
-        });
-        self.budgets.push(budget.unwrap());
-        let (DenseWrite::F64(mut out), DenseRead::F64(lhs), DenseRead::F64(rhs)) =
-            (output, lhs, rhs)
-        else {
-            unreachable!("an f64 test")
-        };
-        gemm(out.data_mut(), lhs.data(), rhs.data());
-        Ok(())
-    }
-}
-
-/// The barrier form's engine: one contraction entry per round, and each GEMM
-/// submitted alone through the executor over its lane's buffers.
-struct Host {
-    engine: CpuEngine,
-    executor: Recording,
-    rhs: Vec<f64>,
-    fail: Vec<(usize, usize)>,
-    attempts: Vec<(usize, usize)>,
-    regions: usize,
-}
-
-impl Barrier<Packed> for Host {
-    type Refused = tenferro_tensor::Error;
-    fn region(
-        &mut self,
-        round: &mut dyn FnMut(Exec<'_>) -> Result<(), threadteam::Error>,
-    ) -> Result<(), Self::Refused> {
-        self.regions += 1;
-        self.engine
-            .with_contraction_exec(|exec, _, _| Ok(round(exec.reborrow())))
-            .map(|forked| forked.unwrap())
-    }
-    fn submit(
-        &mut self,
-        job: usize,
-        stage: usize,
-        _: &mut Component,
-        lane: &mut LaneBuffers,
-    ) -> Result<(), DenseError> {
-        self.attempts.push((job, stage));
-        if self.fail.contains(&(job, stage)) {
-            return Err(injected(job));
-        }
-        let (src_shape, rhs_shape, dst_shape) = ([ROWS, K], [K, COLS], [ROWS, COLS]);
-        let (src_strides, rhs_strides, dst_strides) = ([1, ROWS], [1, K], [1, ROWS]);
-        self.executor.matmul_axpby_into(
-            &mut self.engine,
-            DenseWrite::F64(DenseViewMut::new(
-                &mut lane.destination,
-                &dst_shape,
-                &dst_strides,
-                0,
-            )?),
-            DenseRead::F64(DenseView::new(&lane.source, &src_shape, &src_strides, 0)?),
-            DenseRead::F64(DenseView::new(&self.rhs, &rhs_shape, &rhs_strides, 0)?),
-            DenseScalar::F64(1.0),
-            DenseScalar::F64(0.0),
-        )
-    }
-}
-
 fn packed(groups: &[usize], fail: Vec<(usize, usize)>) -> Packed {
     let group = [(M, serial(1000)), (P, serial(1000)), (M, serial(1000))];
     Packed {
@@ -1024,52 +922,34 @@ fn lane_buffers(count: usize) -> Vec<LaneBuffers> {
         .collect()
 }
 
-/// Outcome, outputs, each lane's users and the host of one run on `budget`
-/// slots under `policy`.
+/// Outcome, outputs and each lane's users of one run on `budget` slots
+/// under `policy`.
 type Ran = (
     Result<(), usize>,
     Vec<Component>,
     Vec<(Vec<usize>, Vec<usize>, Vec<usize>)>,
-    Option<Host>,
 );
 
-fn run_packed(work: &Packed, budget: usize, policy: BatchPolicy, form: Form) -> Ran {
+fn run_packed(work: &Packed, budget: usize, policy: BatchPolicy) -> Ran {
     let mut engine = engine(budget, policy, row(60));
     let mut tables = LaneTables::default();
     on(&mut engine, budget, |exec| {
-        place(&exec, work, form, &mut tables)
+        place(&exec, work, Form::Native, &mut tables)
     });
     let mut states = components(work.count());
     let mut lanes = lane_buffers(tables.placement().lanes());
-    let (outcome, host) = match form {
-        Form::Native => {
-            let outcome = on(&mut engine, budget, |exec| {
-                run_native(
-                    exec,
-                    work,
-                    Placed {
-                        tables: &mut tables,
-                    },
-                    &mut states,
-                    &mut lanes,
-                )
-                .unwrap()
-            });
-            (outcome, None)
-        }
-        Form::Barrier => {
-            let mut host = Host {
-                engine,
-                executor: Recording::default(),
-                rhs: work.rhs.clone(),
-                fail: work.fail.clone(),
-                attempts: vec![],
-                regions: 0,
-            };
-            let outcome = run_barrier(&mut host, work, &mut tables, &mut states, &mut lanes);
-            (outcome.unwrap(), Some(host))
-        }
-    };
+    let outcome = on(&mut engine, budget, |exec| {
+        run_native(
+            exec,
+            work,
+            Placed {
+                tables: &mut tables,
+            },
+            &mut states,
+            &mut lanes,
+        )
+        .unwrap()
+    });
     let p = tables.placement();
     let users = (0..p.lanes())
         .map(|l| {
@@ -1081,7 +961,7 @@ fn run_packed(work: &Packed, budget: usize, policy: BatchPolicy, form: Form) -> 
             )
         })
         .collect();
-    (outcome.map_err(|(j, _)| j), states, users, host)
+    (outcome.map_err(|(j, _)| j), states, users)
 }
 
 fn outer() -> BatchPolicy {
@@ -1089,10 +969,9 @@ fn outer() -> BatchPolicy {
 }
 
 /// Each lane packs, multiplies and scatters through its own initialized
-/// source and destination buffers, natively and in barrier rounds, and the
-/// outputs are the hand products.
+/// source and destination buffers, and the outputs are the hand products.
 #[test]
-fn lanes_run_their_jobs_through_their_own_buffers_in_both_forms() {
+fn lanes_run_their_jobs_through_their_own_buffers() {
     let work = packed(&[1, 2, 1], vec![]);
     let expected: Vec<Vec<f64>> = components(3)
         .iter()
@@ -1103,70 +982,30 @@ fn lanes_run_their_jobs_through_their_own_buffers_in_both_forms() {
             out.iter().map(|x| x * groups).collect()
         })
         .collect();
-    for form in [Form::Native, Form::Barrier] {
-        let (outcome, states, users, _) = run_packed(&work, 2, outer(), form);
-        assert_eq!(outcome, Ok(()));
-        let outputs: Vec<_> = states.into_iter().map(|c| c.output).collect();
-        assert_eq!(outputs, expected);
-        assert_eq!(users.len(), 2);
-        for (jobs, used_by, _) in users {
-            let expected_users: Vec<usize> = jobs
-                .iter()
-                .flat_map(|&j| std::iter::repeat_n(j, work.batch.stages(j) / 3))
-                .collect();
-            assert_eq!(used_by, expected_users);
-        }
+    let (outcome, states, users) = run_packed(&work, 2, outer());
+    assert_eq!(outcome, Ok(()));
+    let outputs: Vec<_> = states.into_iter().map(|c| c.output).collect();
+    assert_eq!(outputs, expected);
+    assert_eq!(users.len(), 2);
+    for (jobs, used_by, _) in users {
+        let expected_users: Vec<usize> = jobs
+            .iter()
+            .flat_map(|&j| std::iter::repeat_n(j, work.batch.stages(j) / 3))
+            .collect();
+        assert_eq!(used_by, expected_users);
     }
 }
 
 /// Component 0's second GEMM and component 1's first GEMM fail: component
-/// 0's error is reported on one lane and on two, and its second GEMM is
-/// attempted in both, after component 1 failed.
+/// 0's error is reported on one lane and on two.
 #[test]
 fn a_failure_ends_only_its_own_job_and_the_lowest_index_wins() {
-    let fail = vec![(0, 4), (1, 1)];
-    let work = packed(&[2, 1], fail.clone());
+    let work = packed(&[2, 1], vec![(0, 4), (1, 1)]);
     for budget in [1, 2] {
-        for form in [Form::Native, Form::Barrier] {
-            let (outcome, _, users, host) = run_packed(&work, budget, outer(), form);
-            assert_eq!(users.len(), budget);
-            assert_eq!(outcome, Err(0), "budget {budget}, {form:?}");
-            if let Some(host) = host {
-                assert!(fail.iter().all(|f| host.attempts.contains(f)));
-            }
-        }
+        let (outcome, _, users) = run_packed(&work, budget, outer());
+        assert_eq!(users.len(), budget);
+        assert_eq!(outcome, Err(0), "budget {budget}");
     }
-}
-
-/// In the barrier form every GEMM submission sees the engine's whole budget
-/// (four slots), not its lane's share (two), on which the movement runs.
-#[test]
-fn barrier_submissions_get_the_whole_engine() {
-    let work = packed(&[1, 1], vec![]);
-    let split = BatchPolicy::new(BatchStrategy::Split {
-        lanes: NonZeroUsize::new(2).unwrap(),
-    });
-    let (outcome, _, users, host) = run_packed(&work, 4, split, Form::Barrier);
-    assert_eq!(outcome, Ok(()));
-    assert_eq!(users.len(), 2);
-    assert_eq!(host.unwrap().executor.budgets, [4, 4]);
-    for (_, _, offers) in users {
-        assert_eq!(offers, [2, 2]);
-    }
-}
-
-/// The barrier runner enters one round per provider stage of its longest
-/// lane, plus one only when movement follows the last of them.
-#[test]
-fn barrier_rounds_end_with_the_last_stage() {
-    let provider_only = Packed {
-        batch: Batch::new(vec![vec![(P, serial(1000))]; 2]),
-        ..packed(&[], vec![])
-    };
-    let (_, _, users, host) = run_packed(&provider_only, 2, outer(), Form::Barrier);
-    assert_eq!((users.len(), host.unwrap().regions), (2, 1));
-    let (_, _, users, host) = run_packed(&packed(&[1, 1], vec![]), 2, outer(), Form::Barrier);
-    assert_eq!((users.len(), host.unwrap().regions), (2, 2));
 }
 
 /// No stage work: the runner's own tables are what a warm call reuses.
@@ -1328,10 +1167,12 @@ fn offered(seen: &[Vec<(usize, usize)>]) -> Vec<usize> {
     seen.iter().flatten().map(|&(_, budget)| budget).collect()
 }
 
-fn split(threads: usize) -> Split<fn()> {
+type UnitCut<E> = fn(&mut (), Cut) -> Result<(), E>;
+
+fn split<E>(threads: usize) -> Split<UnitCut<E>> {
     Split {
         threads,
-        lane: || (),
+        split: |_, _| Ok(()),
     }
 }
 
@@ -1347,8 +1188,6 @@ fn split(threads: usize) -> Split<fn()> {
 /// - 3 jobs, 4 threads, budget 7: 2 | 1 on tokens 4 | 3, the left 1 | 1 on
 ///   tokens 2 | 2: [2, 2, 3];
 /// - 1 job, 8 threads, budget 8: a leaf on the whole token: [8].
-///
-/// Lanes shared from the caller or made by a half give the same tokens.
 #[test]
 fn split_offers_each_job_the_token_of_mains_recursion() {
     let mut engine = engine(8, BatchPolicy::default(), row(60));
@@ -1360,15 +1199,13 @@ fn split_offers_each_job_the_token_of_mains_recursion() {
         (1, 8, 8, vec![8]),
     ] {
         let spy = one_stage(jobs, &[]);
-        for lanes in [0, threads] {
-            let (seen, outcome) = run_assigned(&mut engine, budget, &spy, split(threads), lanes);
-            assert_eq!(outcome, Ok(Ok(())));
-            assert_eq!(
-                offered(&seen),
-                expected,
-                "{jobs} jobs, {threads} threads, budget {budget}, {lanes} lanes"
-            );
-        }
+        let (seen, outcome) = run_assigned(&mut engine, budget, &spy, split(threads), 1);
+        assert_eq!(outcome, Ok(Ok(())));
+        assert_eq!(
+            offered(&seen),
+            expected,
+            "{jobs} jobs, {threads} threads, budget {budget}"
+        );
     }
 }
 
@@ -1379,10 +1216,102 @@ fn split_offers_each_job_the_token_of_mains_recursion() {
 fn a_split_leaf_stops_at_its_first_failure_and_the_left_wins() {
     let spy = one_stage(6, &[0, 3]);
     let mut engine = engine(2, BatchPolicy::default(), row(60));
-    let (seen, outcome) = run_assigned(&mut engine, 2, &spy, split(2), 0);
+    let (seen, outcome) = run_assigned(&mut engine, 2, &spy, split(2), 1);
     assert_eq!(outcome, Ok(Err(0)));
     let attempted: Vec<usize> = (0..6).filter(|&j| !seen[j].is_empty()).collect();
     assert_eq!(attempted, [0, 3]);
+}
+
+/// Jobs that record their attempt and check that their part's lane, the
+/// job range `split` handed it, holds them.
+struct Ranged(Batch);
+
+impl Jobs for Ranged {
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+    fn stages(&self, job: usize) -> usize {
+        self.0.stages(job)
+    }
+    fn kind(&self, job: usize, stage: usize) -> StageKind {
+        self.0.kind(job, stage)
+    }
+    fn estimate(&self, job: usize, stage: usize) -> Estimate {
+        self.0.estimate(job, stage)
+    }
+}
+
+impl Work for Ranged {
+    type Job = bool;
+    type Lane = std::ops::Range<usize>;
+    type Error = usize;
+    fn run(
+        &self,
+        job: usize,
+        _: usize,
+        attempted: &mut bool,
+        lane: &mut Self::Lane,
+        _: Exec<'_>,
+    ) -> Result<(), usize> {
+        *attempted = true;
+        if lane.contains(&job) {
+            Ok(())
+        } else {
+            Err(usize::MAX)
+        }
+    }
+}
+
+/// `split` divides each part's lane at its cut: six jobs over four threads
+/// cut at job 3, then the left `[0, 3)` over two threads at job 2 and the
+/// right `[3, 6)` at job 5, so every job runs inside its own range. A cut
+/// `split` refuses (job 2's) stops that part before either half runs and is
+/// reported as the part's first job, while the right part still runs.
+#[test]
+fn a_split_lane_is_divided_at_each_cut() {
+    let work = Ranged(Batch::new(vec![vec![(M, serial(1000))]; 6]));
+    let mut engine = engine(4, BatchPolicy::default(), row(60));
+    for refused in [None, Some(2)] {
+        let mut attempted = vec![false; 6];
+        let cuts = std::sync::Mutex::new(vec![]);
+        let outcome = on(&mut engine, 4, |exec| {
+            let divide = |lane: &mut std::ops::Range<usize>, cut: Cut| {
+                cuts.lock().unwrap().push((cut.job, cut.left, cut.threads));
+                if Some(cut.job) == refused {
+                    return Err(cut.job);
+                }
+                let right = cut.job..lane.end;
+                lane.end = cut.job;
+                Ok(right)
+            };
+            let split = Split {
+                threads: 4,
+                split: divide,
+            };
+            let root = 0..6;
+            run_native(
+                exec,
+                &work,
+                split,
+                &mut attempted,
+                std::slice::from_mut(&mut { root }),
+            )
+            .unwrap()
+        });
+        let mut cuts = cuts.into_inner().unwrap();
+        cuts.sort_unstable();
+        match refused {
+            None => {
+                assert_eq!(outcome, Ok(()));
+                assert_eq!(attempted, [true; 6]);
+                assert_eq!(cuts, [(2, 1, 2), (3, 2, 4), (5, 1, 2)]);
+            }
+            Some(_) => {
+                assert_eq!(outcome, Err((0, 2)));
+                assert_eq!(attempted, [false, false, false, true, true, true]);
+            }
+        }
+    }
 }
 
 /// `Each` runs every job on one slot of its own and returns the lowest
@@ -1433,7 +1362,6 @@ impl Work for Failing {
 }
 
 /// A warm `Split` lends on the stack: no heap allocation on the caller,
-/// whether the halves share the caller's lanes or make their own, and
 /// whether every job succeeds or every leaf fails.
 #[test]
 fn split_lends_without_allocating_on_success_and_failure() {
@@ -1441,8 +1369,8 @@ fn split_lends_without_allocating_on_success_and_failure() {
     let (noop, failing) = (Noop(Batch::new(jobs.clone())), Failing(Batch::new(jobs)));
     let mut engine = engine(8, BatchPolicy::default(), row(60));
     let mut states = vec![(); 64];
-    for lanes in [0, 8] {
-        let mut lanes = vec![(); lanes];
+    {
+        let mut lanes = [()];
         let mut call = |engine: &mut CpuEngine, fails: bool| {
             on(engine, 8, |exec| {
                 counting_alloc::measure(|| {
@@ -1458,12 +1386,7 @@ fn split_lends_without_allocating_on_success_and_failure() {
         };
         for fails in [false, true] {
             call(&mut engine, fails);
-            assert_eq!(
-                call(&mut engine, fails).calls,
-                0,
-                "{} lanes, failing {fails}",
-                lanes.len()
-            );
+            assert_eq!(call(&mut engine, fails).calls, 0, "failing {fails}");
         }
     }
 }
@@ -1545,8 +1468,8 @@ fn unit<R>(refusal: Refusal<R>) -> Refusal<()> {
 }
 
 /// A state or lane supply short of what an assignment lends is refused
-/// before any stage runs: `Each` and `Split` against the work's jobs,
-/// `Placed` and the barrier form against the placement.
+/// before any stage runs: `Each` and `Split` against the work's jobs (a
+/// nonempty `Split` lends one lane), `Placed` against the placement.
 #[test]
 fn short_supplies_are_refused_before_any_stage() {
     let short = [
@@ -1570,14 +1493,24 @@ fn short_supplies_are_refused_before_any_stage() {
         assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "Each");
         assert!(seen.iter().all(Vec::is_empty));
     }
-    let mut seen = vec![vec![]; 1];
-    let outcome = on(&mut pool, 2, |exec| {
-        run_native(exec, &spy, split(2), &mut seen, &mut [])
-    });
-    assert_eq!(
-        outcome.map(|_| ()).map_err(unit),
-        Err(Refusal::States { jobs: 2, given: 1 })
-    );
+    for (states, lanes, refusal) in [
+        (1, 1, Refusal::States { jobs: 2, given: 1 }),
+        (
+            2,
+            0,
+            Refusal::Lanes {
+                needed: 1,
+                given: 0,
+            },
+        ),
+    ] {
+        let mut seen = vec![vec![]; states];
+        let outcome = on(&mut pool, 2, |exec| {
+            run_native(exec, &spy, split(2), &mut seen, &mut vec![(); lanes])
+        });
+        assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "Split");
+        assert!(seen.iter().all(Vec::is_empty));
+    }
 
     let work = packed(&[1, 1], vec![]);
     let mut tables = LaneTables::default();
@@ -1599,17 +1532,6 @@ fn short_supplies_are_refused_before_any_stage() {
             )
         });
         assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "Placed");
-        let mut host = Host {
-            engine: engine(2, outer(), row(60)),
-            executor: Recording::default(),
-            rhs: work.rhs.clone(),
-            fail: vec![],
-            attempts: vec![],
-            regions: 0,
-        };
-        let outcome = run_barrier(&mut host, &work, &mut tables, &mut components, &mut buffers);
-        assert_eq!(outcome.map(|_| ()).map_err(unit), Err(refusal), "barrier");
-        assert_eq!(host.regions, 0);
         assert!(buffers.iter().all(|lane| lane.offers.is_empty()));
     }
 }

@@ -1,14 +1,13 @@
 //! The destination writes of a replay, one per item kind, for the
 //! initialized destination (`T = D`) and the owned uninitialized one
-//! (`T = MaybeUninit<D>`): the one-worker replay and every lane stage write
-//! through these, whole or cropped to a band of the item's joint atom.
+//! (`T = MaybeUninit<D>`): every replay phase writes through these.
 
 use super::*;
 use crate::kernel_adapter::FUSED_LAYOUT_INLINE_RANK;
 use crate::transform_structure::TreeTransformDirectItem;
 
-/// The parts of a completed transform every writer and lane reads: shared by
-/// reference only, so lanes need no bound on the coefficient type beyond
+/// The parts of a completed transform every writer and worker reads: shared
+/// by reference only, so workers need no bound on the coefficient type beyond
 /// `Sync`.
 #[derive(Clone, Copy)]
 pub(super) struct ReplayParts<'a, C> {
@@ -16,7 +15,6 @@ pub(super) struct ReplayParts<'a, C> {
     pub blocks: &'a [TreeTransformBlock],
     pub single_coefficients: &'a [C],
     pub storage_conjugate: bool,
-    pub plan: &'a crate::transform_structure::TreeTransformRecouplingPlan,
 }
 
 impl<'a, C: Copy> ReplayParts<'a, C> {
@@ -26,7 +24,6 @@ impl<'a, C: Copy> ReplayParts<'a, C> {
             blocks: task.blocks(),
             single_coefficients: task.single_coefficients(),
             storage_conjugate: task.storage_conjugate(),
-            plan: task.recoupling_plan(),
         }
     }
 }
@@ -144,25 +141,21 @@ pub(super) fn inactive_role<'s>(
 /// `dst` starts at destination element `dst_start`; `band` crops the item to
 /// outer indices of its bandable atom, `None` writes it whole on its
 /// compiled path (its plan when `gate` admits it on `exec`). A writer is
-/// shared by every lane; each lane stage brings its own
-/// [`Self::Kernels`] and traversal scratch.
+/// shared by every worker of a replay split; each worker brings its own
+/// [`Self::Kernels`], traversal scratch and gate.
 pub(super) trait DestinationWriter<T, D>: Sync {
-    /// A stage's kernel adapter state.
-    type Kernels: Send;
+    /// One worker's kernel adapter state.
+    type Kernels: Send + Sync;
 
-    /// A fresh stage's kernel state.
+    /// A fresh worker's kernel state.
     fn kernels(&self) -> Self::Kernels;
-
-    /// Whether every write ignores the destination: only such a write may
-    /// run on a compiled plan.
-    fn overwrites(&self) -> bool;
 
     /// The write of direct item `item` from the replayed source `src` (one
     /// member's, in a member replay).
     ///
     /// Why the writers mark this `#[inline]`: it runs once per item inside
-    /// the item loops of `batched.rs` and the lane stages, which live in
-    /// other modules. Without the hint rustc gives each writer instance one
+    /// the item loops of `batched.rs` and `chunk.rs`, which live in other
+    /// modules. Without the hint rustc gives each writer instance one
     /// home codegen unit (this module's), so every item pays an out-of-line
     /// call and prologue that LLVM never sees across (measured on the owned
     /// permute replay of many small Singles, where the call is a visible
@@ -179,7 +172,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 
@@ -197,7 +190,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 }
@@ -223,10 +216,6 @@ where
         self.prototype.clone()
     }
 
-    fn overwrites(&self) -> bool {
-        self.mode.overwrites()
-    }
-
     #[inline]
     fn direct(
         &self,
@@ -238,7 +227,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -333,7 +322,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -391,10 +380,6 @@ where
 
     fn kernels(&self) {}
 
-    fn overwrites(&self) -> bool {
-        true
-    }
-
     #[inline]
     fn direct(
         &self,
@@ -406,7 +391,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -473,7 +458,7 @@ where
         dst_start: isize,
         band: Option<Band>,
         exec: Exec<'_>,
-        gate: &LeafGate,
+        gate: &mut LeafGate,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;

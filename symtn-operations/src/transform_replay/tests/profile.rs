@@ -82,20 +82,15 @@ fn zero_extent_multi_profile_counts_match_serial_replay() {
     assert_eq!(threaded.scattered_columns, 2);
 }
 
-/// What: a one-worker replay attributes its recoupling to the dense GEMM
-/// call; a native lane replay, whose stages run concurrently, reports its
-/// wall time as `fused_lanes` and no per-phase GEMM time; the barrier form
-/// reports only its engine GEMM submissions per phase. Where the built-in
-/// executor does not honor forced policies (the BLAS provider), the call
-/// runs under `Auto`, which places the barrier form's lanes on the eager
-/// engine.
+/// What: the one-worker replay and the chunk replay (`threads > 1` under a
+/// forced `Inner`, which admits the tiny call on two workers where the
+/// executor honors it, `Auto` otherwise) count the same block and column
+/// work and attribute their recoupling to the dense GEMM call.
 #[test]
 fn profiled_multi_attributes_recoupling_to_its_route() {
     let (dst_structure, src_structure, structure) = identity_multi_fixture();
     let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
     for threads in [1, 2] {
-        // A forced `Inner` keeps the tiny call on the native lanes, which
-        // `Auto` admits on one slot.
         let strategy = if honors {
             tenferro_cpu::CpuBatchStrategy::Inner
         } else {
@@ -121,7 +116,15 @@ fn profiled_multi_attributes_recoupling_to_its_route() {
         .unwrap();
 
         assert_eq!(dst, [6.0, 8.0, 0.0]);
-        assert_eq!(profile.multi_blocks, 1);
+        assert_eq!(
+            (
+                profile.multi_blocks,
+                profile.packed_columns,
+                profile.scattered_columns
+            ),
+            (1, 2, 2),
+            "threads {threads}"
+        );
         assert_eq!(profile.multi_scalar_recoupling, Duration::ZERO);
         assert_eq!(
             profile.multi_matmul_total,
@@ -129,15 +132,6 @@ fn profiled_multi_attributes_recoupling_to_its_route() {
                 + profile.multi_dense_matmul_call
                 + profile.multi_scalar_recoupling
         );
-        if threads == 1 {
-            assert_eq!(profile.fused_lanes, Duration::ZERO);
-        } else {
-            if DefaultDenseExecutor::new().supports_lane_gemms() {
-                assert_eq!(profile.multi_dense_matmul_call, Duration::ZERO);
-            }
-            assert_eq!(profile.multi_pack, Duration::ZERO);
-            assert_eq!(profile.multi_scatter, Duration::ZERO);
-        }
     }
 }
 

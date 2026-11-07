@@ -214,7 +214,7 @@ pub(crate) fn admitted_plan<'a>(
     role: BakedFusedLayout<'a>,
     elements: usize,
     exec: &crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
 ) -> Option<&'a UpdatePlan> {
     let plan = role.plan?;
     gate.widens(exec, elements).then_some(plan)

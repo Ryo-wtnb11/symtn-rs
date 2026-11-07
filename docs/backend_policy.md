@@ -275,45 +275,39 @@ lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
 the vendor library. A backend-free Host region (plan compile, strided
 moves) takes the engine's placement token; a serial engine never forks.
 
-A tree-transform replay on an engine wider than one runs on the same
-placement and lane runner. Each joint component of the
-compiled transform (the Singles, Multi groups and inactive blocks whose
-destination intervals overlap, which own those intervals together) is one
-job, so every destination element has one writer. Its stages are its direct writes (its inactive blocks and Singles,
-in destination address order), and per Multi group a pack, a GEMM and a
-scatter; a movement stage is estimated by Strided's copy estimate of
-the elements it moves, a GEMM by the same estimate as a block GEMM, and each
-stage runs at its own selected width. The bands and pack ranges first cap
-the selected width; under `Auto` the actual-fork pays check (the stage's
-estimate against a section of that many parts on the lane's own token, the
-one that forks) may then choose inline execution; a forced policy keeps its
-parts. A movement stage of width two or more
-splits its component over that many sub-slots of the component's band units
-(the outer slabs of atoms whose items share one, whole atoms otherwise) in
-one flat fork; at width one, or for an overwrite of a component whose one
-item is a Single whose retained Strided plan Strided's own rule
-(`execution::parallel_width` for a copy of its elements) admits on the
-stage's token (gives it more than one worker; one leaf gate per stage and
-thread answers that rule exactly, scanning the token's dispatch costs once
-and searching widths only for a role at or above the smallest paying size),
-each item is written whole on
-that token, the admitted Single through its plan. A pack splits its
-columns over one flat fork; the GEMM writes its lane's initialized packed
-destination. On the native provider it runs
-inside the lanes on the stage's context (tcontract's initialized write, as
-a grouped recoupling GEMM). On a provider without lane GEMMs (BLAS and
-custom executors) the runner works in rounds: each round is one Host region
-in which every lane runs its stages up to its next GEMM; between rounds each
-pending GEMM is submitted alone, in lane order, through the executor's
-`matmul_axpby_into` (`alpha = 1`, `beta = 0`) on the whole engine, so a
-vendor BLAS uses its own threads, not the lane's share; placement scores
-those GEMMs serialized at that width. Every job runs even after another
-fails (a failed GEMM submission fails its own job and is not retried), and
-the lowest-indexed failing job's error is returned, on either provider.
-On one worker (a serial engine, or a placement of one lane of one slot, such as a forced `Sequential` policy on a wider engine), the
-replay runs in source order: inactive blocks, Singles, then each Multi
-group's pack, GEMM on the engine and scatter, stopping at the first
-failure. A fixed-stride member batch (several members of one transform)
+A tree-transform replay follows TensorKit's threaded kernels and main's
+replay. One Host region fixes its width `t`: under `Auto` the engine's
+width, at most the compiled runnable parts (the Singles when their
+destinations are slice-disjoint, else one, or the pack columns, whichever is
+more), when Strided's copy estimate of the whole destination pays for that
+section, and one otherwise; under a forced policy its batch decision
+(`lanes * item_threads`, one for `Sequential`). In that region the inactive
+blocks are written inline on the caller's token, in destination address
+order, and then the Singles: at `t > 1` with slice-disjoint destinations
+split over `t` workers, otherwise inline in address order. A split part of
+`n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
+workers to its left half and forks its token in two (the odd slot to the
+left); a part of one worker or one item is a leaf, which writes its items
+whole on its token. The Multi groups then replay in chunks of `t`
+consecutive groups: each chunk's pack is split the same way over its
+columns, its jobs go to the executor as one grouped GEMM, and its non-empty
+groups, ordered by destination, are scattered split by group when every
+group's columns and every pair of consecutive groups are slice-disjoint,
+and inline on the caller's token otherwise. At `t = 1` each group is packed,
+multiplied and scattered in plan order. Every inline move is offered the
+caller's whole token (one slot under a forced `Sequential`), so Strided's
+own rule decides whether one large block's move fans out; an overwrite of a
+block whose role retains a Strided plan writes through that plan when
+Strided's rule (`execution::parallel_width` for a copy of its elements)
+gives it more than one worker. One leaf gate per call on the caller, and
+one per split leaf, answers that rule exactly, scanning the token's
+dispatch costs once and searching widths only for a role at or above the
+smallest paying size. A leaf stops at its first failure, a split runs both
+halves and returns the left failure first, and the first failing phase or
+GEMM stops the replay. The packed destination of the chunks is sized once
+for the largest chunk; when it must grow it is zero-initialized inside the
+first chunk's pack, each split part its own range.
+A fixed-stride member batch (several members of one transform)
 admits every member's ranges before any write, then, at every engine
 width, moves all its members at once on the caller's token (the member
 axis one more strided dimension of each move) around one dense submission
@@ -337,8 +331,8 @@ the contraction over its threads), so results agree within rounding.
 BLAS-internal threads remain separate.
 
 [`Runtime`](../symtn/src/runtime.rs) holds prepared structural state only.
-An eager operation builds its execution scratch (tree-transform and
-contraction lanes, a factorization's dense executor) for the call and drops
+An eager operation builds its execution scratch (tree-transform pack
+scratch, contraction lanes, a factorization's dense executor) for the call and drops
 it on return, as TensorKit allocates its temporaries per call; a prepared
 plan's workspace keeps that scratch for its replays. Structural and plan
 caches take short lookup and publication locks.

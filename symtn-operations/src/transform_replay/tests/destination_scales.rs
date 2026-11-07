@@ -103,13 +103,13 @@ where
             expected[4..16].iter().any(|value| *value != D::zero()),
             "vacuous twisted blocks"
         );
-        for (threads, barrier) in routes {
+        for (threads, custom) in routes {
             let mut actual = vec![D::from(f64::NAN); 20 * members];
             let mut workspace = TreeTransformWorkspace::default();
-            let forced = honors && !barrier;
+            let forced = honors && !custom;
             let mut engine = engine(threads, forced);
             let (dst, src, source) = (&dst, &src, &source[..]);
-            let ran = if barrier {
+            let ran = if custom {
                 overwrite_members(
                     &mut engine,
                     &mut super::recording::Forwarding::default(),
@@ -133,11 +133,8 @@ where
                 )
             };
             ran.unwrap();
-            let what = format!("B={members} threads={threads} barrier={barrier}");
+            let what = format!("B={members} threads={threads} custom={custom}");
             assert_eq!(actual, expected, "{what}");
-            if threads > 1 && members == 1 && forced {
-                assert!(workspace.lanes.placement().lanes() > 1, "{what}: one lane");
-            }
         }
         if members == 1 {
             for threads in [1, 4] {

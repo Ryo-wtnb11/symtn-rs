@@ -4,12 +4,9 @@
 //! A job owns an exclusive destination and is an ordered list of stages, each
 //! one symtn-owned movement section or one provider call ([`StageKind`]).
 //! [`place`] splits the context's budget B into lanes; [`run_native`] runs
-//! every lane in one fork ([`Placed`]), and [`run_barrier`] runs
-//! the same stage enumeration in rounds cut at each provider stage, handing
-//! those stages to the caller's engine between rounds ([`Barrier`]).
-//! [`run_native`] also runs a batch without a placement: split in two
-//! recursively over a count of logical threads ([`Split`]), or each job
-//! alone on one slot ([`Each`]).
+//! every lane in one fork ([`Placed`]). [`run_native`] also runs a batch
+//! without a placement: split in two recursively over a count of logical
+//! threads ([`Split`]), or each job alone on one slot ([`Each`]).
 //!
 //! # Placement under `Auto`
 //!
@@ -125,13 +122,11 @@ use tenferro_cpu::threadteam;
 mod placement;
 mod runner;
 
-pub use placement::place;
+pub use placement::{flat_width, place};
 use placement::{parallel_split, words, PlaceScratch};
 pub(crate) use runner::recycle;
-pub use runner::{
-    run_barrier, run_native, Assignment, Barrier, Each, Outcome, Placed, Refusal, Split, Work,
-};
-use runner::{Arena, RunScratch};
+use runner::Arena;
+pub use runner::{run_native, Assignment, Cut, Each, Outcome, Placed, Refusal, Split, Work};
 
 /// What one stage of a job is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,8 +169,8 @@ pub struct Estimate {
 pub enum Form {
     /// Every stage runs inside the lanes ([`run_native`]).
     Native,
-    /// Provider stages are handed to the engine between rounds
-    /// ([`run_barrier`]).
+    /// Provider stages are handed to the engine between rounds, a form
+    /// placement still scores; no runner of it remains.
     Barrier,
 }
 
@@ -278,7 +273,6 @@ impl Placement {
 pub struct LaneTables {
     placement: Placement,
     scratch: PlaceScratch,
-    run: RunScratch,
     arena: Arena,
 }
 
@@ -292,7 +286,6 @@ impl LaneTables {
         self.placement
             .retained_bytes()
             .saturating_add(self.scratch.retained_bytes())
-            .saturating_add(self.run.retained_bytes())
             .saturating_add(self.arena.retained_bytes())
     }
 

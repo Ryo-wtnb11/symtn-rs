@@ -1,16 +1,13 @@
-//! The barrier form's contracts, through a custom executor without lane
-//! GEMMs: its values equal the built-in executor's replay, every destination
-//! element has one writer, and a failure is job-local with the lowest-indexed
-//! component reported at every lane count. A custom executor honors no
-//! forced batch policy, so its public replays refuse one; the forced lanes
-//! below are the barrier route's own.
+//! The chunk replay's contracts, through a custom executor on the default
+//! batch entry: its values equal the built-in executor's replay, every
+//! destination element is written once, its first failing GEMM in plan
+//! order stops it, a panicking worker breaks the engine, and a forced batch
+//! policy it cannot honor is refused before any write.
 
 use super::recording::*;
 use super::*;
 use symtn_dense::{CpuEngine, Pool};
 use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
-
-use super::super::writers::ReplayParts;
 
 /// `alpha T(src) + beta dst` on `budget` workers under `strategy`.
 #[allow(clippy::too_many_arguments)]
@@ -43,13 +40,13 @@ fn update<E: DenseExecutor>(
 }
 
 /// What: on the joint fixture, the SU(2) fixture and the interleaved
-/// bandable family, at budgets 1, 2, 3 and 8 under `Auto`, the barrier
-/// form writes the built-in executor's replay: its movement-only
+/// bandable family, at budgets 1, 2, 3 and 8 under `Auto`, the custom
+/// executor's replay writes the built-in executor's: its movement-only
 /// elements (Singles and inactive blocks) bit for bit, the recoupled ones
 /// within GEMM rounding; the SU(2) update and owned overwrite also match
 /// the hand oracle.
 #[test]
-fn barrier_values_equal_the_built_in_replay() {
+fn custom_executor_values_equal_the_built_in_replay() {
     let (joint_dst, joint_src, joint) = super::threaded::joint_fixture();
     let (su2_structure, su2) = su2_interleaved_fixture();
     let (bandable_blocks, bandable_dst, bandable_src, bandable) = interleaved_bandable(false);
@@ -137,55 +134,56 @@ fn barrier_values_equal_the_built_in_replay() {
     }
 }
 
-/// What: in the barrier form on a four-worker engine, every destination
-/// element is written exactly once, by one worker; a band of the
-/// interleaved atom (the interior one included) is never split, its bands
-/// go to more than one worker, and the `[3, 2]` / `[2, 3]` block is
-/// written whole by one worker.
+/// What: on four workers, under `Auto` (the eager engine's free dispatch
+/// admits every phase on all four), a forced `Sequential` and, where the
+/// built-in executor honors it, a forced `Outer`, every destination element
+/// of the interleaved fixture is written exactly once and nothing else is.
 #[test]
-fn every_destination_element_has_one_writer_in_the_barrier_form() {
+fn every_destination_element_is_written_once() {
     let (blocks, dst, _, transform) = interleaved_bandable(true);
     let len = dst.required_len().unwrap();
     let source = (0..len).map(|v| v as f64).collect::<Vec<_>>();
-    let mut engine = crate::host_pool::eager_test_engine(4);
     let task = transform.task_view().unwrap();
-    let mut workspace = TreeTransformWorkspace::default();
-    ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
-    let mut marks = vec![Mark::default(); len];
-    let recorder = Recorder {
-        parts: ReplayParts::new(task),
-    };
-    let ran = super::super::lanes::barrier_replay(
-        &mut engine,
-        &mut Forwarding::default(),
-        &mut workspace,
-        task,
-        transform.parallel_schedule(),
-        &mut marks,
-        &source,
-        &recorder,
-        None,
-        1,
-    )
-    .unwrap();
-    assert!(ran, "placement left the lane runner");
-
-    assert_one_writer_per_element(&blocks, &marks);
+    for strategy in [
+        CpuBatchStrategy::Auto,
+        CpuBatchStrategy::Outer,
+        CpuBatchStrategy::Sequential,
+    ] {
+        if strategy == CpuBatchStrategy::Outer
+            && !DefaultDenseExecutor::new().honors_forced_batch_policy()
+        {
+            continue;
+        }
+        let mut engine = engine(4, strategy);
+        let mut workspace = TreeTransformWorkspace::default();
+        ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
+        let mut marks = vec![Mark::default(); len];
+        let recorder = Recorder::new(task);
+        super::super::replay(
+            &mut engine,
+            &mut DefaultDenseExecutor::new(),
+            &mut workspace,
+            task,
+            transform.parallel_schedule(),
+            &mut marks,
+            &source,
+            &recorder,
+            &mut (),
+            None,
+        )
+        .unwrap();
+        assert_written_once(&blocks, &marks);
+    }
 }
 
-/// What: component 0's second GEMM (`e0`) and component 1's only GEMM
-/// (`e1`) fail. On two, three and four forced `Outer` one-slot lanes of the
-/// barrier route, `e0` is reported and both GEMMs are attempted, `e0` after
-/// `e1` failed; one worker (a serial engine, or forced `Sequential` on four
-/// workers, through the public replay) replays in plan order, reports the
-/// first failure there and attempts nothing after it; no failed GEMM is
-/// submitted twice.
+/// What: two of three Multi groups' GEMMs fail. On one worker and on two,
+/// three and four (`Auto` on free dispatch: chunks of two, three and three
+/// groups), the replay stops at the first failing GEMM in plan order: the
+/// executor saw exactly the plan's GEMMs up to it, and its error is
+/// returned; no failed GEMM is submitted twice.
 #[test]
-fn a_barrier_failure_ends_only_its_component_and_the_lowest_wins() {
+fn the_first_failing_gemm_in_plan_order_stops_the_replay() {
     let (dst, src, transform) = two_lane_fixture();
-    let schedule = transform.parallel_schedule();
-    assert_eq!(schedule.component_count(), 2);
-    assert_eq!(schedule.component_group_list(0).len(), 2);
     let source = (1..=192).map(f64::from).collect::<Vec<_>>();
     // Each plan job's label: its Multi block's spec position plus one.
     let label: Vec<usize> = transform
@@ -193,76 +191,37 @@ fn a_barrier_failure_ends_only_its_component_and_the_lowest_wins() {
         .entries()
         .map(|(block, _)| block + 1)
         .collect();
-    let e0 = label[schedule.component_group_list(0)[1] as usize];
-    let e1 = label[schedule.component_group_list(1)[0] as usize];
-    for (budget, strategy) in [
-        (1, CpuBatchStrategy::Auto),
-        (2, CpuBatchStrategy::Outer),
-        (3, CpuBatchStrategy::Outer),
-        (4, CpuBatchStrategy::Outer),
-        (4, CpuBatchStrategy::Sequential),
-    ] {
-        let one_worker = budget == 1 || matches!(strategy, CpuBatchStrategy::Sequential);
+    let failing = [label[1], label[2]];
+    for budget in [1, 2, 3, 4] {
         let mut engine = if budget == 1 {
             CpuEngine::serial()
         } else {
-            CpuEngine::new(Pool::builder().threads(budget).build().unwrap())
-                .with_batch_policy(CpuBatchPolicy::new(strategy))
+            engine(budget, CpuBatchStrategy::Auto)
         };
         let mut dense = Forwarding {
-            fail: vec![e0, e1],
+            fail: failing.to_vec(),
             ..Forwarding::default()
         };
-        let what = format!("budget {budget}, {strategy:?}");
-        if one_worker {
-            let error = tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                &mut engine,
-                &mut StridedHostKernelAdapter::default(),
-                &mut dense,
-                &mut TreeTransformWorkspace::default(),
-                &transform,
-                &dst,
-                &src,
-                &mut [f64::NAN; 96],
-                &source,
-                1.0,
-                &[],
-            )
-            .unwrap_err();
-            // Plan order through the first failing job, nothing after it.
-            let first = label.iter().position(|l| [e0, e1].contains(l)).unwrap();
-            assert_eq!(dense.attempts(), label[..=first], "{what}");
-            assert_eq!(group_of(error), format!("group {}", label[first]), "{what}");
-        } else {
-            let task = transform.task_view().unwrap();
-            let mut workspace = TreeTransformWorkspace::default();
-            ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker())
-                .unwrap();
-            let recorder = Recorder {
-                parts: ReplayParts::new(task),
-            };
-            let error = super::super::lanes::barrier_replay(
-                &mut engine,
-                &mut dense,
-                &mut workspace,
-                task,
-                schedule,
-                &mut [Mark::default(); 96],
-                &source,
-                &recorder,
-                None,
-                1,
-            )
-            .unwrap_err();
-            assert_eq!(group_of(error), format!("group {e0}"), "{what}");
-            for failed in [e0, e1] {
-                let tries = dense.attempts().iter().filter(|&&l| l == failed).count();
-                assert_eq!(tries, 1, "{what}, group {failed} retried");
-            }
-            let attempts = dense.attempts();
-            let at = |label| attempts.iter().position(|&l| l == label);
-            assert!(at(e1).unwrap() < at(e0).unwrap(), "{what}");
-        }
+        let error = tree_transform_structure_overwrite_with_structural_recoupling_raw(
+            &mut engine,
+            &mut StridedHostKernelAdapter::default(),
+            &mut dense,
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &dst,
+            &src,
+            &mut [f64::NAN; 96],
+            &source,
+            1.0,
+            &[],
+        )
+        .unwrap_err();
+        assert_eq!(dense.attempts(), label[..=1], "budget {budget}");
+        assert_eq!(
+            group_of(error),
+            format!("group {}", label[1]),
+            "budget {budget}"
+        );
     }
 }
 
@@ -281,12 +240,12 @@ impl RecouplingCoefficientAction<Panicking> for f64 {
     }
 }
 
-/// What: a movement panic inside a barrier round of the barrier route (the
-/// second of two Singles, each its own component on one of two forced
-/// `Outer` lanes) unwinds out of the replay after the fork joined, leaves
-/// the engine broken, and the engine refuses its next entry.
+/// What: a movement panic on a split worker (the second of two
+/// slice-disjoint Singles, split over two workers of a free-dispatch
+/// engine) unwinds out of the replay after the fork joined, leaves the
+/// engine broken, and the engine refuses its next entry.
 #[test]
-fn a_barrier_round_panic_breaks_the_engine() {
+fn a_split_worker_panic_breaks_the_engine() {
     let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![32]; 2]).unwrap());
     let transform = TreeTransformStructure::compile_structures(
         &structure,
@@ -297,33 +256,25 @@ fn a_barrier_round_panic_breaks_the_engine() {
         ],
     )
     .unwrap();
+    assert!(transform.parallel_schedule().singles_slice_disjoint);
     let source = (1..=64).map(f64::from).collect::<Vec<_>>();
-    let mut engine = CpuEngine::new(Pool::builder().threads(2).build().unwrap())
-        .with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
-    let mut workspace = TreeTransformWorkspace::default();
-    let task = transform.task_view().unwrap();
-    let writer = super::super::writers::InitializedWriter {
-        prototype: StridedHostKernelAdapter::default(),
-        task: ReplayParts::new(task),
-        alpha: DestinationAlpha::new(1.0, &[]).unwrap(),
-        mode: DestinationMode::Overwrite,
-    };
+    let mut engine = engine(2, CpuBatchStrategy::Auto);
     let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::super::lanes::barrier_replay(
+        tree_transform_structure_overwrite_with_structural_recoupling_raw(
             &mut engine,
-            &mut Forwarding::default(),
-            &mut workspace,
-            task,
-            transform.parallel_schedule(),
+            &mut StridedHostKernelAdapter::default(),
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            &transform,
+            &structure,
+            &structure,
             &mut [0.0; 64],
             &source,
-            &writer,
-            None,
-            1,
+            1.0,
+            &[],
         )
     }));
     assert!(unwind.is_err());
-    assert_eq!(workspace.lanes.placement().lanes(), 2);
     assert!(engine.is_broken());
     assert!(engine.with_exec(|exec| exec.budget()).is_err());
 }

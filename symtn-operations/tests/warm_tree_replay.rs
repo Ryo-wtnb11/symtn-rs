@@ -1,21 +1,17 @@
-//! A reused workspace's warm tree replays on four lanes, counted on every
+//! A reused workspace's warm tree replays on four workers, counted on every
 //! thread of the process: on a target whose std mutex locks without
-//! allocating they allocate nothing; on Apple targets, where each runner
-//! lane's fresh std mutex allocates its pthread mutex on first lock (one per
-//! lane per call, the disclosed runner residual), repeated warm calls
-//! allocate the same and no more, a large call does not make a later small
-//! call allocate more, and an overwrite of many high-rank inactive blocks
-//! allocates no more than one of few, as does a general-`beta` update of
-//! many such blocks in Multi groups. A custom executor without lane GEMMs,
-//! under `Auto` since it honors no forced policy, keeps the same contract,
-//! as does a member batch of several members, every member moved at once
-//! around one dense submission.
+//! allocating they allocate nothing; on Apple targets, where a fresh std
+//! mutex allocates its pthread mutex on first lock (the native provider's
+//! grouped GEMM lanes take such locks), repeated warm calls allocate the
+//! same and no more, a large call does not make a later small call allocate
+//! more, and an overwrite of many high-rank inactive blocks allocates no
+//! more than one of few, as does a general-`beta` update of many such
+//! blocks in Multi groups. A custom executor, under `Auto` since it honors
+//! no forced policy, keeps the same contract, as does a member batch of
+//! several members, every member moved at once around one dense submission.
 //!
 //! Its own test binary with one test, so the shared counting allocator's
-//! process-wide measurement sees only that test. That the fixture really
-//! runs on four lanes is asserted in the crate's
-//! `the_warm_allocation_fixture_runs_on_four_lanes`, which can read the
-//! placement.
+//! process-wide measurement sees only that test.
 
 #![cfg(all(
     feature = "cpu-faer",
@@ -43,10 +39,10 @@ use tenferro_cpu::{CpuBatchPolicy, CpuBatchStrategy};
 
 #[path = "../../tests/support/counting_alloc.rs"]
 mod counting_alloc;
-#[path = "support/warm_tree_lanes.rs"]
-mod warm_tree_lanes;
+#[path = "support/warm_tree_replay.rs"]
+mod warm_tree_replay;
 
-use warm_tree_lanes::fixture;
+use warm_tree_replay::fixture;
 
 #[global_allocator]
 static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
@@ -68,7 +64,7 @@ fn high_rank_span() -> usize {
 
 /// `blocks` rank-17 `[2; 17]` blocks with strides `2^(i+1) - 1`: injective,
 /// no two axes fuse (nor with a packed column's), so each role keeps rank
-/// 17, above the inline traversal rank, and is one indivisible band unit;
+/// 17, above the inline traversal rank;
 /// the blocks fill consecutive disjoint spans. Inactive (spec-free) without
 /// `groups`, else paired into Multi groups `(2g, 2g + 1)` with the symmetric
 /// recoupling `[[1, 2], [2, -0.5]]`.
@@ -113,8 +109,8 @@ fn high_rank_fixture(
     (structure, transform)
 }
 
-/// A custom executor without lane GEMMs, forwarding every call to the
-/// built-in executor, so its tree replays run in the barrier form.
+/// A custom executor forwarding every call to the built-in executor, on
+/// the default grouped GEMM entry.
 #[derive(Default)]
 struct Forwarding(DefaultDenseExecutor);
 
@@ -169,12 +165,12 @@ impl DenseExecutor for Forwarding {
 }
 
 #[test]
-fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
+fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
     let pool = Pool::builder()
-        .threads(warm_tree_lanes::THREADS)
+        .threads(warm_tree_replay::THREADS)
         .build()
         .unwrap();
-    // `Outer` places the components on one-slot lanes.
+    // `Outer` admits the replay on all four workers.
     let engine =
         &mut CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Outer));
     let mut backend = DenseTreeTransformOperations::default();
@@ -221,11 +217,11 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
     // `Auto` on the same four workers: small, large, small.
     let auto = &mut CpuEngine::new(
         Pool::builder()
-            .threads(warm_tree_lanes::THREADS)
+            .threads(warm_tree_replay::THREADS)
             .build()
             .unwrap(),
     );
-    let mut barrier = DenseTreeTransformOperations::new(Forwarding::default());
+    let mut custom = DenseTreeTransformOperations::new(Forwarding::default());
     let mut workspace = TreeTransformWorkspace::default();
     let mut destinations = [
         vec![0.0; small.0.required_len().unwrap()],
@@ -235,7 +231,7 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         let (structure, transform, source) = if which == 0 { &small } else { &large };
         let destination = &mut destinations[which];
         counting_alloc::measure_process(|| {
-            barrier
+            custom
                 .tree_transform_structure_into_raw(
                     auto,
                     &mut workspace,
@@ -256,10 +252,10 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
     call(1);
     let after_large = call(0);
     if cfg!(target_vendor = "apple") {
-        assert_eq!(call(0), warm, "warm barrier calls grow");
+        assert_eq!(call(0), warm, "warm custom-executor calls grow");
         assert_eq!(
             after_large, warm,
-            "a large barrier call grows the small one's"
+            "a large custom-executor call grows the small one's"
         );
     } else {
         assert_eq!(warm, 0);
@@ -318,8 +314,8 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
         assert_eq!(after_large, 0);
     }
 
-    // High-rank inactive overwrites: four and eight components on the same
-    // four lanes.
+    // High-rank inactive overwrites: four and eight blocks on the same four
+    // workers.
     let inactive = [high_rank_fixture(4, false), high_rank_fixture(8, false)];
     let mut buffers = inactive
         .iter()
@@ -353,14 +349,14 @@ fn warm_multi_lane_tree_replay_allocates_nothing_but_the_lane_locks() {
     let few = overwrite(0);
     let many = overwrite(1);
     if cfg!(target_vendor = "apple") {
-        assert_eq!(many, few, "inactive overwrites allocate per component");
+        assert_eq!(many, few, "inactive overwrites allocate per block");
     } else {
         assert_eq!(few, 0);
         assert_eq!(many, 0);
     }
 
     // High-rank Multi groups at `alpha = 1, beta = 2`: four and eight
-    // groups (components) on the same four lanes.
+    // groups on the same four workers.
     let multi = [high_rank_fixture(8, true), high_rank_fixture(16, true)];
     let span = high_rank_span();
     // Block `b`'s source span holds `b + 1`.
