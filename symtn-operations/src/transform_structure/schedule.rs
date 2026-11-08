@@ -60,8 +60,6 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub scatter_columns: Vec<TreeTransformScatterReplay>,
     pub scatter_groups: Vec<TreeTransformScatterGroupReplay>,
     pub single_block_count: usize,
-    pub packed_column_count: usize,
-    pub scattered_column_count: usize,
     /// The non-empty inactive destination layouts, in destination address
     /// order.
     pub inactive: Vec<u32>,

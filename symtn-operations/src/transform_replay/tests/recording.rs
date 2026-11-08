@@ -33,17 +33,32 @@ impl Store<f64> for Record {
 /// A writer that addresses exactly the elements the real writers address,
 /// and records who wrote each and, per Single and scatter column, the
 /// destination offset it writes and the budget it was offered.
-pub(super) struct Recorder<'a> {
+/// `FIRST_TOUCH` is the destination kind it stands for: an owned output
+/// when true, a caller-provided one otherwise.
+pub(super) struct Recorder<'a, const FIRST_TOUCH: bool = false> {
     pub(super) parts: ReplayParts<'a, f64>,
     pub(super) offers: Mutex<Vec<(isize, usize)>>,
 }
 
 impl<'a> Recorder<'a> {
     pub(super) fn new(task: TreeTransformTaskView<'a, f64>) -> Self {
+        Self::of_kind(task)
+    }
+}
+
+impl<'a, const FIRST_TOUCH: bool> Recorder<'a, FIRST_TOUCH> {
+    pub(super) fn of_kind(task: TreeTransformTaskView<'a, f64>) -> Self {
         Self {
             parts: ReplayParts::new(task),
             offers: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The destination offsets of the Singles and scatter columns, in the
+    /// order the replay wrote them.
+    pub(super) fn visits(&self) -> Vec<isize> {
+        let offers = self.offers.lock().unwrap();
+        offers.iter().map(|&(offset, _)| offset).collect()
     }
 
     /// The offered budgets, in destination order.
@@ -54,9 +69,9 @@ impl<'a> Recorder<'a> {
     }
 }
 
-impl DestinationWriter<Mark, f64> for Recorder<'_> {
+impl<const FIRST_TOUCH: bool> DestinationWriter<Mark, f64> for Recorder<'_, FIRST_TOUCH> {
     type Kernels = ();
-    const FIRST_TOUCH: bool = false;
+    const FIRST_TOUCH: bool = FIRST_TOUCH;
 
     fn kernels(&self) {}
 

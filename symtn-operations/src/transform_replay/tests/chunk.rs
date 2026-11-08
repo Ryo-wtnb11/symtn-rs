@@ -178,6 +178,74 @@ fn every_destination_element_is_written_once() {
     }
 }
 
+/// What: two Singles whose block order (destination block 1, then 0) is
+/// not their destination order. On one worker, and under a forced
+/// `Sequential` on four, a caller-provided destination is written in block
+/// order (main's one-worker replay) and an owned one in destination order
+/// (main's `split_join_uninit`).
+#[test]
+fn one_worker_singles_follow_the_destination_kinds_order() {
+    let blocks = vec![vec![2, 3]; 2];
+    let dst = Arc::new(BlockStructure::packed_column_major(2, blocks.clone()).unwrap());
+    let src = Arc::new(BlockStructure::packed_column_major(2, blocks).unwrap());
+    let transform = TreeTransformStructure::compile_structures(
+        &dst,
+        &src,
+        &[
+            TreeTransformBlockSpec::single(1, 0, 2.0),
+            TreeTransformBlockSpec::single(0, 1, -1.5),
+        ],
+    )
+    .unwrap();
+    let source = (0..12).map(f64::from).collect::<Vec<_>>();
+    fn visits<const FIRST_TOUCH: bool>(
+        mut engine: CpuEngine,
+        transform: &TreeTransformStructure<f64>,
+        source: &[f64],
+    ) -> Vec<isize> {
+        let task = transform.task_view().unwrap();
+        let recorder = Recorder::<FIRST_TOUCH>::of_kind(task);
+        super::super::replay(
+            &mut engine,
+            &mut DefaultDenseExecutor::new(),
+            &mut TreeTransformWorkspace::default(),
+            task,
+            transform.parallel_schedule(),
+            &mut [Mark::default(); 12],
+            source,
+            &recorder,
+            &mut (),
+            None,
+        )
+        .unwrap();
+        recorder.visits()
+    }
+    for sequential in [false, true] {
+        let make = || {
+            if sequential {
+                engine(4, CpuBatchStrategy::Sequential)
+            } else {
+                CpuEngine::serial()
+            }
+        };
+        let what = if sequential {
+            "forced Sequential"
+        } else {
+            "one worker"
+        };
+        assert_eq!(
+            visits::<false>(make(), &transform, &source),
+            [6, 0],
+            "{what}"
+        );
+        assert_eq!(
+            visits::<true>(make(), &transform, &source),
+            [0, 6],
+            "{what}"
+        );
+    }
+}
+
 /// What: two of three Multi groups' GEMMs fail. On one worker and on two,
 /// three and four (`Auto` on free dispatch: chunks of two, three and three
 /// groups), the replay stops at the first failing GEMM in plan order: the

@@ -283,16 +283,14 @@ pub use symtn_core::{
 /// How grouped dense blocks (the recoupling and contraction GEMM batches and
 /// the sector-block factorizations) use a pooled `CpuEngine`'s threads is the
 /// engine's batch policy, an engine-owned setting symtn never overrides. On
-/// the native provider the default (`CpuBatchStrategy::Auto`) places each
-/// block with its provider's serial estimate (tcontract's per-flop rate for a
-/// GEMM; tlinalg's work under the engine's `WorkModel` rate `muladds_per_ns`
-/// and `item_overhead_ns` for a factorization, its other fields unused) and
-/// the width the engine's cost rule gives that estimate: a block allotted
-/// several threads gets a lane of its own, the others fill one-thread lanes
-/// in block order, and the lanes are kept only when they beat running every
-/// block on the whole pool one after another. Each block runs on its lane
-/// limited to its own width. A forced policy (`Inner`, `Outer`, `Split`,
-/// `Sequential`) is instead placed by the engine's batch decision, which is
+/// the native provider the default (`CpuBatchStrategy::Auto`) starts from
+/// an equal-share placement, blocks largest first on the least loaded lane,
+/// with at most as many lanes as the engine's batch decision; another
+/// candidate placement replaces it only when it strictly improves the
+/// modeled score, and each block runs on its lane's whole thread share
+/// (the cost model and the candidates: `docs/backend_policy.md`, "Parallel
+/// execution"). A forced policy (`Inner`, `Outer`, `Split`, `Sequential`) is
+/// instead placed by the engine's batch decision, which is
 /// then authoritative. A caller can still give each GEMM the whole pool:
 /// `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`,
 /// or `set_batch_policy` on an existing engine, with `CpuBatchPolicy` and

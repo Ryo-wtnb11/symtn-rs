@@ -16,8 +16,6 @@ pub(super) fn compile_parallel_schedule(
         .iter()
         .filter(|block| matches!(block, TreeTransformBlock::Single { .. }))
         .count();
-    let mut packed_column_count = 0usize;
-    let mut scattered_column_count = 0usize;
     let mut ranges = Vec::with_capacity(single_block_count);
     for (block_index, block) in blocks.iter().enumerate() {
         let TreeTransformBlock::Single { dst_layout, .. } = *block else {
@@ -34,16 +32,16 @@ pub(super) fn compile_parallel_schedule(
 
     // Every count is known from the plan, so no table grows while it is
     // built.
-    let (packed_total, scattered_total) =
-        recoupling_plan
-            .jobs()
-            .iter()
-            .fold((0usize, 0usize), |(packed, scattered), job| {
-                (
-                    packed.saturating_add(job.contracted),
-                    scattered.saturating_add(job.cols),
-                )
-            });
+    let (packed_total, scattered_total) = recoupling_plan
+        .jobs()
+        .iter()
+        .try_fold((0usize, 0usize), |(packed, scattered), job| {
+            Some((
+                packed.checked_add(job.contracted)?,
+                scattered.checked_add(job.cols)?,
+            ))
+        })
+        .ok_or(OperationError::ElementCountOverflow)?;
     let mut pack_columns = Vec::with_capacity(packed_total);
     // Each scatter column with its destination range `(lo, hi)`, which only
     // compilation reads.
@@ -67,12 +65,6 @@ pub(super) fn compile_parallel_schedule(
                 message: "tree transform recoupling plan references a single block",
             });
         };
-        packed_column_count = packed_column_count
-            .checked_add(src_count)
-            .ok_or(OperationError::ElementCountOverflow)?;
-        scattered_column_count = scattered_column_count
-            .checked_add(dst_count)
-            .ok_or(OperationError::ElementCountOverflow)?;
         let group_start = scatter_spans.len();
         let pack_start = pack_columns.len();
         if element_count == 0 {
@@ -175,8 +167,6 @@ pub(super) fn compile_parallel_schedule(
         .collect();
     Ok(TreeTransformParallelSchedule {
         single_block_count,
-        packed_column_count,
-        scattered_column_count,
         pack_columns,
         scatter_columns,
         scatter_groups,
