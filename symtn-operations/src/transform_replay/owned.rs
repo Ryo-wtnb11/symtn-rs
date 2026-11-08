@@ -85,6 +85,7 @@ where
 /// Writes one role into uninitialized memory: its compiled plan across
 /// `exec` when [`admitted_plan`] admits one, the span leaf otherwise.
 #[allow(clippy::too_many_arguments)]
+#[inline]
 pub(super) fn write_role_uninit<D, F>(
     exec: Exec<'_>,
     gate: &mut LeafGate,

@@ -103,6 +103,7 @@ pub(crate) mod sealed {
         /// whose tokens all come from one engine, so those two fields are
         /// what can still differ between its tokens; the calling thread fixes
         /// the remaining dispatch kind. A forked leaf gets a gate of its own.
+        #[inline]
         pub(crate) fn widens(
             &mut self,
             exec: &crate::host_pool::Exec<'_>,
