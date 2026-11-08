@@ -28,7 +28,7 @@
 //!   the native CPU provider. TensorKit has no counterpart: it calls BLAS
 //!   `mul!` per block, which keeps no plan;
 //! - searched lane allocations of block GEMM and single-matrix
-//!   factorization (other than QR) batches per schedule input (kernel kind,
+//!   factorization batches per schedule input (kernel kind,
 //!   budget, batch
 //!   policy, mean work, team, dispatch costs, per-block serial times and
 //!   grant inputs), [`StructureCacheKind::LaneAllocations`],
