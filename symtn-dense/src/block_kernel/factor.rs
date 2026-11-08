@@ -67,10 +67,6 @@ pub(crate) trait Factor {
     /// after the rank and before the zero-extent shortcut.
     const SQUARE: bool = false;
 
-    /// Whether a batch of single-matrix inputs joins the lane search with
-    /// [`grant`]; otherwise its batches keep the baseline placement.
-    const SEARCHED: bool = true;
-
     /// Whether the provider reads each item's transpose (the first two
     /// extents and strides swapped, no copy) instead of the item itself.
     const TRANSPOSED: bool = false;
@@ -131,14 +127,6 @@ pub(crate) struct Qr;
 impl Factor for Qr {
     const ENTRY: &'static str = "qr_read";
     const OP: tlinalg::Op = tlinalg::Op::Qr;
-    // Why not searched: the item model credits a granted width with a linear
-    // speedup, and QR's payback share lets the search hand few large QR blocks
-    // wide lanes that faer's QR does not use (tlinalg's own measured `s(8)`:
-    // about 1.03 at 192 x 192, 2.16 at 512 x 512). On lg the searched
-    // placement ran 1.14-1.44x slower than the baseline on few-sector batches
-    // of 192-1024 blocks at 16 and 48 threads. Searching QR needs the
-    // provider's time-at-width estimates (tensor4all/tlinalg-rs#88).
-    const SEARCHED: bool = false;
 
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
         use tlinalg::qr::{estimate_payback_work, estimate_work};
@@ -177,8 +165,6 @@ pub(crate) struct Lq;
 impl Factor for Lq {
     const ENTRY: &'static str = Qr::ENTRY;
     const OP: tlinalg::Op = Qr::OP;
-    // Why not searched: it is the QR of the transpose (see `Qr::SEARCHED`).
-    const SEARCHED: bool = false;
     const TRANSPOSED: bool = true;
 
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
@@ -230,8 +216,6 @@ pub(crate) struct QrFull;
 impl Factor for QrFull {
     const ENTRY: &'static str = Qr::ENTRY;
     const OP: tlinalg::Op = Qr::OP;
-    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
-    const SEARCHED: bool = false;
 
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
         if m <= n {
@@ -283,8 +267,6 @@ pub(crate) struct QrNull;
 impl Factor for QrNull {
     const ENTRY: &'static str = Qr::ENTRY;
     const OP: tlinalg::Op = Qr::OP;
-    // Why not searched: the same QR-family provider width as `Qr::SEARCHED`.
-    const SEARCHED: bool = false;
 
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
         householder_estimates::<T>(m, n, m - m.min(n))
@@ -906,7 +888,7 @@ impl<'a, F: Factor> BlockOp for Blocks<'a, F> {
     }
 
     fn modeled(&self, _: usize, job: &Job<'a>) -> bool {
-        F::SEARCHED && single_item::<F>(job.input).is_some()
+        single_item::<F>(job.input).is_some()
     }
 
     fn grant(&self, _: usize, job: &Job<'a>, exec: &Exec<'_>, budget: usize, _: Duration) -> usize {
@@ -1752,7 +1734,7 @@ impl<'a, 'd, 'w: 'd, F: FactorInto> BlockOp for IntoBlocks<'a, 'd, 'w, F> {
     }
 
     fn modeled(&self, _: usize, job: &Self::Job) -> bool {
-        F::SEARCHED && single_item::<F>(job.input).is_some()
+        single_item::<F>(job.input).is_some()
     }
 
     fn grant(
@@ -2703,8 +2685,8 @@ mod tests {
     /// lane-allocation cache (here a cache of the test's own), and the
     /// repeat, a hit, equals the cold search and sorts nothing: the
     /// review-r3 SVD trace, main's SVD mix (`80 x 80` and three `4 x 4`) and
-    /// the same mix of general eigenvalues, which keep the default
-    /// `SEARCHED`. The first call of each misses and the second hits.
+    /// the same mix of general eigenvalues. The first call of each misses and
+    /// the second hits.
     #[test]
     fn a_repeated_searched_batch_hits_its_cold_placement() {
         let capped = WorkModel::default()
@@ -2857,9 +2839,9 @@ mod tests {
     }
 
     /// Purpose: a factorization batch whose every input is one matrix joins
-    /// the lane search with tlinalg's own width for one SVD item, while a QR
-    /// batch and a batch holding an input whose batch product is not one
-    /// (including zero) keep the baseline placement. Four slots, flat 100 ns dispatch (a width pays
+    /// the lane search with tlinalg's own width for one SVD item, while a
+    /// batch holding an input whose batch product is not one (including
+    /// zero) keeps the baseline placement. Four slots, flat 100 ns dispatch (a width pays
     /// from 300 ns), one multiply-add per ns:
     /// - `80 x 80` and three `4 x 4`: the large SVD's payback work is
     ///   `80^3 * 6e-4 = 307.2` ns, so it is granted every width; one
@@ -2877,10 +2859,6 @@ mod tests {
     /// reservation's six one-slot lanes 10000 ns but hold more than `L0`
     /// lanes and are discarded, so the baseline's two three-slot lanes run
     /// every block.
-    ///
-    /// QR keeps the baseline even where its grant would widen: the first
-    /// batch's `80 x 80` QR has payback `(80^3 - 80^3 / 3) * 1e-2 = 3413` ns,
-    /// enough for every width, yet runs on the baseline's four one-slot lanes.
     #[test]
     fn single_matrix_factorizations_join_the_lane_search() {
         let small: &[usize] = &[4, 4];
@@ -2899,13 +2877,9 @@ mod tests {
         let mut many: Vec<&[usize]> = vec![&[10000, 1]];
         many.extend([&[100, 1][..]; 120]);
         assert_eq!(lane_widths::<Svd>(6, 10000.0, &many), [3; 121]);
-        assert_eq!(
-            lane_widths::<Qr>(4, 0.0, &[&[80, 80], small, small, small]),
-            [1; 4]
-        );
-        // General eigenvalues take the default `SEARCHED`: their whole
-        // estimate is their payback, so the large block is granted every
-        // width and one four-slot lane wins as for the SVD.
+        // General eigenvalues: their whole estimate is their payback, so the
+        // large block is granted every width and one four-slot lane wins as
+        // for the SVD.
         assert_eq!(
             lane_widths::<EigVals>(4, 0.0, &[&[80, 80], small, small, small]),
             [4; 4]

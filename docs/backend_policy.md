@@ -144,8 +144,7 @@ blocks runs one thread per lane. The baseline placement is equal shares over
 `L0 = min(threads, blocks, decision lanes)` lanes, blocks largest first on
 the lane of least accumulated serial time; a single lane takes every block
 before any ordering. When every block's provider width is modeled (every
-GEMM; a factorization whose every input is one matrix, except for the QR
-family: compact and full QR, LQ, the null basis), the placement also scores
+GEMM; a factorization whose every input is one matrix), the placement also scores
 an equal-share placement for every lane count from `L0` down to one and a
 large-block reservation under one model, and keeps the lowest score; ties
 keep the baseline, then the equal shares. The reservation finds the least
@@ -175,9 +174,7 @@ once, at the full thread count; only the groups the provider widens there
 are queried again, once per distinct share width during the sweep, since a
 block the provider keeps serial at the full count stays serial at every
 narrower share; a lane count whose proved lower bound on its score is not
-below the best score so far is not placed. QR-family batches keep the
-baseline placement: the model credits a granted width with a linear speedup
-that faer's QR does not deliver at the widths QR's payback share admits. A
+below the best score so far is not placed. A
 batch holding an input whose batch product is not one (including zero) keeps
 the baseline as well: tlinalg runs such an input through its multi-item
 route, which its public queries do not expose. Placement is integer
