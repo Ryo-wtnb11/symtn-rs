@@ -153,23 +153,14 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.permute_into_impl(
-            engine,
-            options,
-            codomain_axes,
-            domain_axes,
-            destination,
-            alpha,
-            beta,
-        )
+        let engine = cx.engine();
+        self.permute_into_impl(engine, codomain_axes, domain_axes, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn permute_into_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         destination: &mut Self,
@@ -178,7 +169,6 @@ where
     ) -> Result<(), FacadeError<R>> {
         self.tree_transform_into(
             engine,
-            options,
             destination,
             alpha,
             beta,
@@ -222,10 +212,9 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
+        let engine = cx.engine();
         self.braid_into_impl(
             engine,
-            options,
             codomain_axes,
             domain_axes,
             levels,
@@ -239,7 +228,6 @@ where
     fn braid_into_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         levels: &[usize],
@@ -257,7 +245,6 @@ where
         let probe_operation = operation.clone();
         self.tree_transform_into(
             engine,
-            options,
             destination,
             alpha,
             beta,
@@ -290,23 +277,14 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.transpose_into_impl(
-            engine,
-            options,
-            codomain_axes,
-            domain_axes,
-            destination,
-            alpha,
-            beta,
-        )
+        let engine = cx.engine();
+        self.transpose_into_impl(engine, codomain_axes, domain_axes, destination, alpha, beta)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn transpose_into_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         destination: &mut Self,
@@ -315,7 +293,6 @@ where
     ) -> Result<(), FacadeError<R>> {
         self.tree_transform_into(
             engine,
-            options,
             destination,
             alpha,
             beta,
@@ -364,14 +341,13 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.repartition_into_impl(engine, options, destination, alpha, beta)
+        let engine = cx.engine();
+        self.repartition_into_impl(engine, destination, alpha, beta)
     }
 
     fn repartition_into_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         destination: &mut Self,
         alpha: D,
         beta: D,
@@ -380,7 +356,7 @@ where
         let source_rank = self.rank();
         let destination_codomain_rank = destination.codomain_rank();
         let destination_rank = destination.rank();
-        self.tree_transform_into(engine, options,
+        self.tree_transform_into(engine,
             destination,
             alpha,
             beta,
@@ -424,7 +400,6 @@ where
     pub(super) fn tree_transform_into(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         destination: &mut Self,
         alpha: D,
         beta: D,
@@ -447,10 +422,8 @@ where
         }
         // Why the storage body: a lazy-adjoint source aliases its parent.
         destination_precheck(destination, &self.storage_body().data, S::NOUN)?;
-        options.admit(engine, |_| false)?;
         <R::Mode as TypedTensorTransformDispatch<R, D>>::transform_into(
             engine,
-            options,
             self,
             destination,
             alpha,
@@ -561,14 +534,13 @@ where
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.permute_impl(engine, options, codomain_axes, domain_axes)
+        let engine = cx.engine();
+        self.permute_impl(engine, codomain_axes, domain_axes)
     }
 
     fn permute_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
@@ -578,7 +550,6 @@ where
         }
         self.tree_transform(
             engine,
-            options,
             TreeTransformOperation::permute(
                 codomain_axes.iter().copied(),
                 domain_axes.iter().copied(),
@@ -595,7 +566,6 @@ where
     pub(super) fn with_leg_roles<T>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         rows: &[usize],
         cols: &[usize],
         op: impl FnOnce(&Self, &mut dyn Engine) -> Result<T, FacadeError<R>>,
@@ -603,7 +573,7 @@ where
         if self.axes_are_identity(rows, cols) {
             return op(self, engine);
         }
-        let permuted = self.permute(&mut Invocation::new(engine, options), rows, cols)?;
+        let permuted = self.permute(&mut *engine, rows, cols)?;
         op(&permuted, engine)
     }
 
@@ -645,14 +615,13 @@ where
         domain_axes: &[usize],
         levels: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.braid_impl(engine, options, codomain_axes, domain_axes, levels)
+        let engine = cx.engine();
+        self.braid_impl(engine, codomain_axes, domain_axes, levels)
     }
 
     fn braid_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
         levels: &[usize],
@@ -674,7 +643,6 @@ where
         let nout = self.codomain_rank();
         self.tree_transform(
             engine,
-            options,
             TreeTransformOperation::braid(
                 codomain_axes.iter().copied(),
                 domain_axes.iter().copied(),
@@ -709,25 +677,20 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         num_codomain: usize,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.repartition_impl(engine, options, num_codomain)
+        let engine = cx.engine();
+        self.repartition_impl(engine, num_codomain)
     }
 
     fn repartition_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         num_codomain: usize,
     ) -> Result<Self, FacadeError<R>> {
         if num_codomain == self.codomain_rank() {
             self.admit_shortcut_engine(engine)?;
             return Ok(self.clone());
         }
-        self.planar(
-            engine,
-            options,
-            PlanarRequestKind::Repartition { num_codomain },
-        )
+        self.planar(engine, PlanarRequestKind::Repartition { num_codomain })
     }
 
     /// TensorKit `transpose(t, (p₁, p₂))`: the planar transpose with an
@@ -765,14 +728,13 @@ where
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.transpose_impl(engine, options, codomain_axes, domain_axes)
+        let engine = cx.engine();
+        self.transpose_impl(engine, codomain_axes, domain_axes)
     }
 
     fn transpose_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         codomain_axes: &[usize],
         domain_axes: &[usize],
     ) -> Result<Self, FacadeError<R>> {
@@ -782,7 +744,6 @@ where
         }
         self.planar(
             engine,
-            options,
             PlanarRequestKind::Explicit {
                 codomain_axes,
                 domain_axes,
@@ -798,7 +759,6 @@ where
     fn planar(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         kind: PlanarRequestKind<'_>,
     ) -> Result<Self, FacadeError<R>> {
         let operation = with_planar_axes(
@@ -817,7 +777,7 @@ where
             },
         )
         .map_err(FacadeError::<R>::from)?;
-        self.tree_transform(engine, options, operation)
+        self.tree_transform(engine, operation)
     }
 
     /// The one body of every admitted permutation, braid and planar
@@ -826,13 +786,11 @@ where
     pub(super) fn tree_transform(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         operation: TreeTransformOperation,
     ) -> Result<Self, FacadeError<R>> {
-        options.admit(engine, |_| false)?;
         if let Some(host) = S::as_host(EXEC, self) {
             if let Some(compact) =
-                compact_arms::transform_rank_one_diagonal(engine, options, host, &operation)?
+                compact_arms::transform_rank_one_diagonal(engine, host, &operation)?
             {
                 return Ok(S::from_host(EXEC, compact)?);
             }
@@ -840,15 +798,14 @@ where
         if let TypedTensorRepr::Adjoint(_) = &self.repr {
             if let Some(lazy) =
                 <R::Mode as TypedTensorTransformDispatch<R, D>>::try_lazy_adjoint_transform(
-                    engine, options, self, &operation,
+                    engine, self, &operation,
                 )?
             {
                 return Ok(lazy);
             }
         }
-        let (space, data) = <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(
-            engine, options, self, operation,
-        )?;
+        let (space, data) =
+            <R::Mode as TypedTensorTransformDispatch<R, D>>::transform(engine, self, operation)?;
         Ok(Self {
             runtime: self.runtime.clone(),
             repr: owned_repr(TypedTensorBody::dense(space, data)),
@@ -909,7 +866,7 @@ where
     /// # Ok::<(), symtn::typed::Error>(())
     /// ```
     pub fn adjoint(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.adjoint_impl(engine)
     }
 

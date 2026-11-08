@@ -6,7 +6,8 @@
 
 use super::block_svd::{col_major, engine, numerics, policies, reflector, wide, PanicsAt, Scalar};
 use super::*;
-use crate::block_kernel::driver::{self, LaneScratch};
+use crate::block_kernel::driver;
+use crate::lanes::LaneTables;
 use tcontract_exec::{BatchPolicy, BatchStrategy};
 
 /// One block of the oracle: `A = Q0[:, :k] R0` with `R0` upper trapezoidal.
@@ -358,8 +359,7 @@ fn broken_engine_refuses_like_the_per_matrix_entry() {
             &mut engine,
             &PanicsAt(1),
             &mut [(); 3],
-            &mut LaneScratch::default(),
-            crate::LaneAllocation::Moldable,
+            &mut LaneTables::default(),
         )
     }));
     assert!(unwound.is_err());

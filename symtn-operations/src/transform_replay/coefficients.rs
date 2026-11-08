@@ -60,7 +60,10 @@ where
         });
     }
     workspace.coefficient_structure_identity = Some(Arc::downgrade(structure_identity));
-    workspace.coefficient_pack_builds += 1;
+    #[cfg(any(test, feature = "testing"))]
+    {
+        workspace.coefficient_pack_builds += 1;
+    }
     Ok(true)
 }
 

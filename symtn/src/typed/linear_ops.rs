@@ -18,16 +18,7 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     ///
     /// The materialization of a lazy adjoint input can fail on the engine.
     pub fn re(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
-        let (engine, options) = cx.parts();
-        self.re_impl(engine, options)
-    }
-
-    fn re_impl(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, options, |value| value.re)
+        self.map_parts(cx.engine(), |value| value.re)
     }
 
     /// The element-wise imaginary part, as an f64 tensor map on the same
@@ -41,27 +32,17 @@ impl<R> TensorMap<R, num_complex::Complex64> {
     ///
     /// As [`Self::re`].
     pub fn im(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, f64>, Error> {
-        let (engine, options) = cx.parts();
-        self.im_impl(engine, options)
-    }
-
-    fn im_impl(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<TensorMap<R, f64>, Error> {
-        self.map_parts(engine, options, |value| value.im)
+        self.map_parts(cx.engine(), |value| value.im)
     }
 
     /// The shared owned-input route of [`Self::re`] / [`Self::im`].
     fn map_parts(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         part: impl Fn(num_complex::Complex64) -> f64,
     ) -> Result<TensorMap<R, f64>, Error> {
         admit_host_engine(engine)?;
-        let materialized = self.materialized_tensor_uncached(engine, options)?;
+        let materialized = self.materialized_tensor_uncached(engine)?;
         let source = materialized
             .owned_body()
             .expect("uncached materialization is owned");
@@ -134,7 +115,7 @@ where
         y: impl Into<TensorRef<'a, R, D, S>>,
         beta: D,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.axpby_impl(engine, alpha, y, beta)
     }
 
@@ -195,16 +176,11 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         factor: D,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, options) = cx.parts();
-        self.scale_impl(engine, options, factor)
+        let engine = cx.engine();
+        self.scale_impl(engine, factor)
     }
 
-    fn scale_impl(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-        factor: D,
-    ) -> Result<Self, FacadeError<R>> {
+    fn scale_impl(&self, engine: &mut dyn Engine, factor: D) -> Result<Self, FacadeError<R>> {
         if let Some(spectrum) = self.spectrum() {
             admit_host_engine(engine)?;
             return Ok(self.with_spectrum(
@@ -222,10 +198,9 @@ where
             ));
         }
         if let TypedTensorRepr::Adjoint(view) = &self.repr {
-            let parent = self.parent_of(view).scale(
-                &mut Invocation::new(engine, options),
-                FactorScalar::adjoint(factor),
-            )?;
+            let parent = self
+                .parent_of(view)
+                .scale(&mut *engine, FactorScalar::adjoint(factor))?;
             return Ok(parent.lazy_adjoint_on(&view.logical_space)?);
         }
         Ok(S::combine(engine, EXEC, self, factor, None)?)
@@ -298,7 +273,7 @@ where
         alpha: D,
         beta: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.axpby_into_impl(engine, destination, alpha, beta)
     }
 
@@ -667,7 +642,7 @@ where
         cx: &mut (impl ExecContext + ?Sized),
         factor: D,
     ) -> Result<(), FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.scale_assign_impl(engine, factor)
     }
 

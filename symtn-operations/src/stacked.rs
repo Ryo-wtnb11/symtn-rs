@@ -277,31 +277,6 @@ where
         })
     }
 
-    /// Whether the initialized replay of `plan` over `members` members
-    /// submits a GEMM batch the dense executor places by its lane search: the
-    /// plan's own batches for one member, else the member-expanded batches of
-    /// each sign. A plan the stacked replay does not admit runs no member batch.
-    /// Unstable plumbing for symtn's lane-allocation admission.
-    #[doc(hidden)]
-    pub fn searches_lanes(plan: &Arc<FusionBlockContractPlan<C>>, members: usize) -> bool
-    where
-        C: std::ops::Neg<Output = C>,
-    {
-        if members <= 1 {
-            return plan.searches_lanes(false);
-        }
-        Self::new_signed(Arc::clone(plan), members).is_ok_and(|replay| {
-            let identity = [crate::fusion_replay::MatrixOp::Identity; 2];
-            symtn_dense::batch_searches_lanes(&replay.jobs, &replay.runs, identity, false)
-                || symtn_dense::batch_searches_lanes(
-                    &replay.negative_jobs,
-                    &replay.negative_runs,
-                    identity,
-                    false,
-                )
-        })
-    }
-
     pub fn plan(&self) -> &Arc<FusionBlockContractPlan<C>> {
         &self.plan
     }

@@ -10,10 +10,16 @@ pub struct TreeTransformReplayProfile {
     pub multi_pack: Duration,
     pub multi_coefficient_prepare: Duration,
     pub multi_matmul_total: Duration,
+    /// Zero for the built-in replays: no current route times this phase
+    /// separately.
     pub multi_dense_view_setup: Duration,
     pub multi_dense_matmul_call: Duration,
+    /// Zero for the built-in replays: no current route times this phase
+    /// separately.
     pub multi_scalar_recoupling: Duration,
     pub multi_scatter: Duration,
+    /// Zero for the built-in replays: no current route times this phase
+    /// separately.
     pub strided_view_setup: Duration,
     pub strided_kernel: Duration,
     pub single_blocks: usize,

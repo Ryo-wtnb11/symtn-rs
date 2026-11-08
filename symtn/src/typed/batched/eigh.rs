@@ -1,7 +1,7 @@
 use super::*;
 #[cfg(feature = "cuda")]
 use crate::typed::ensure_cuda_owns;
-use crate::typed::{ExecContext, ExecOptions};
+use crate::typed::ExecContext;
 use symtn_dense::Engine;
 
 /// The factors of one [`EighFullPlan::execute`], borrowed from its workspace.
@@ -187,7 +187,7 @@ where
         cols: &[usize],
         hermitian_tol: HermitianTol,
     ) -> Result<Self, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         Self::new_impl(engine, source, rows, cols, hermitian_tol)
     }
 
@@ -454,7 +454,7 @@ where
         source: &StackedTensorMap<R, D, S>,
         workspace: &'a mut EighFullWorkspace<R, D, S>,
     ) -> Result<EighStackOutput<'a, R, D, S>, BatchError> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.execute_impl(engine, source, workspace)
     }
 
@@ -567,9 +567,8 @@ where
             ..
         } = plan;
         let runtime = self.runtime.clone();
-        // Each member streams on the whole engine: no lane allocation is
-        // searched, so the call's lane allocation does not apply.
-        let mut dense = runtime.lease_dense(ExecOptions::default());
+        // Each member streams on the whole engine.
+        let mut dense = runtime.lease_dense();
         // One linear-algebra scope for the batch: eager opens one per member.
         let faults =
             symtn_matrixalgebra::seam::in_linalg_scope(engine, dense.dense(), |dense, engine| {

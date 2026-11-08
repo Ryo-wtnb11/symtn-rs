@@ -2,13 +2,15 @@
 //! independent `Q1 diag(sigma) Q2^H` construction for every scalar, engine
 //! width and batch policy (degenerate singular values compared as subspace
 //! projectors); determinism for a fixed engine; errors identical to the
-//! per-matrix entry, lowest input first; the engine-derived reserved lane
-//! widths; and a lane panic breaking the engine.
+//! per-matrix entry, lowest input first; the provider work estimate and the
+//! widths each policy reserves; and a lane panic breaking the engine.
 
 use super::*;
-use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneScratch, OpKind};
-use crate::block_kernel::{factor, schedule};
+use crate::block_kernel::driver::{self, cost, BlockOp, Entry, LaneMembers, OpKind};
+use crate::block_kernel::factor;
+use crate::lanes::{self, GrantKey, LaneTables};
 use std::time::Duration;
+use symtn_core::StructureCacheKind;
 use tcontract_exec::{BatchPolicy, BatchStrategy, Exec, WorkModel};
 
 pub(super) use super::numerics;
@@ -520,8 +522,7 @@ fn every_admitted_outcome_and_the_refusal_reach_the_sink_in_order() {
             &mut broken,
             &PanicsAt(0),
             &mut [(); 2],
-            &mut LaneScratch::default(),
-            crate::LaneAllocation::Moldable,
+            &mut LaneTables::default(),
         )
     }));
     assert!(unwound.is_err() && broken.is_broken());
@@ -564,10 +565,27 @@ fn zero_extent_inputs_return_the_per_matrix_shapes() {
     }
 }
 
-/// The scheduler's baseline allocation for jobs of `work` multiply-adds
-/// (`schedule::allocate` grants every job one slot), computed through the
-/// kernel's own cost function inside the linalg entry.
-fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> schedule::Allocation {
+/// Purpose: an empty input whose trailing extents multiply past `usize`
+/// (`[0, 0, usize::MAX / 2, 3]`, no element) is placed and solved like any
+/// empty input on a pooled `Auto` engine: its empty factors are delivered
+/// and the engine stays usable.
+#[test]
+fn an_empty_input_with_an_unrepresentable_batch_product_solves_empty() {
+    let shape = [0, 0, usize::MAX / 2, 3];
+    let input = DenseRead::F64(DenseView::new(&[], &shape, &[0; 4], 0).unwrap());
+    let mut engine = engine(2, BatchPolicy::default());
+    let (outcomes, result) = recorded_svd_batch(&mut engine, &[input]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(outcomes.len(), 1);
+    let factors = outcomes[0].1.as_ref().unwrap();
+    assert!(factors.iter().all(|factor| factor.shape().contains(&0)));
+    assert!(!engine.is_broken());
+}
+
+/// The placement's lane shares and the batch decision's lane count for jobs
+/// of `work` multiply-adds (every job granted one slot), computed through
+/// the kernel's own cost function inside the linalg entry.
+fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> (Vec<usize>, usize) {
     engine(threads, policy)
         .with_linalg_pool(|exec, _| {
             let model = exec.batch_policy().model;
@@ -576,13 +594,21 @@ fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> schedule::Al
                 .map(|&w| cost(OpKind::Factorization, w, &model))
                 .collect();
             let mean = work.iter().sum::<f64>() / work.len() as f64;
-            Ok(schedule::allocate(exec, &times, mean))
+            let mut tables = LaneTables::default();
+            let grant = Some(|_, _, _| 1);
+            let cache = lanes::LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0);
+            let key = (OpKind::Factorization, |_| [0; 2]);
+            lanes::allocate(exec, &times, key, mean, grant, &cache, &mut tables);
+            let placement = tables.placement();
+            let shares = (0..placement.lanes()).map(|l| placement.share(l)).collect();
+            let decision = exec.batch_decision(&tcontract_exec::BatchQuery::new(work.len(), mean));
+            Ok((shares, decision.lanes))
         })
         .unwrap()
 }
 
-fn budgets(allocation: &schedule::Allocation) -> Vec<usize> {
-    allocation.lanes.iter().map(|lane| lane.budget).collect()
+fn budgets((shares, _): &(Vec<usize>, usize)) -> Vec<usize> {
+    shares.clone()
 }
 
 /// Purpose: tlinalg's SVD work estimate, `m n min(m, n)` per item, four times
@@ -634,8 +660,8 @@ fn lane_minimum_is_checked_against_work_not_time() {
         .with_item_overhead_ns(0.0)
         .with_min_work_per_lane_ns(1000.0);
     let work = [factor::work::<factor::Svd>(block); 2];
-    let a = allocation(8, BatchPolicy::default().with_model(model), &work);
-    assert_eq!(a.decision.lanes, 2);
+    let (_, lanes) = allocation(8, BatchPolicy::default().with_model(model), &work);
+    assert_eq!(lanes, 2);
 }
 
 /// A linalg-entry kernel whose block `self.0` panics.
@@ -648,7 +674,7 @@ impl BlockOp for PanicsAt {
     const LABEL: &'static str = "svd_read";
     type Lane = ();
 
-    fn lane(&self, _: &mut dyn schedule::LaneJobs<()>, _: &Exec<'_>) {}
+    fn lane(&self, _: &mut LaneMembers<'_, ()>, _: &Exec<'_>) {}
 
     fn work(&self, _: usize, _: &()) -> f64 {
         1.0
@@ -658,7 +684,7 @@ impl BlockOp for PanicsAt {
         1
     }
 
-    fn grant_key(&self, _: usize, _: &()) -> schedule::GrantKey {
+    fn grant_key(&self, _: usize, _: &()) -> GrantKey {
         [0; 2]
     }
 
@@ -679,8 +705,7 @@ fn lane_panic_breaks_the_engine() {
             &mut engine,
             &PanicsAt(2),
             &mut [(); 4],
-            &mut LaneScratch::default(),
-            crate::LaneAllocation::Moldable,
+            &mut LaneTables::default(),
         )
     }));
     assert!(unwound.is_err());

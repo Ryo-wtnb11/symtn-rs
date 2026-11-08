@@ -1,5 +1,6 @@
 use super::*;
 use num_complex::Complex64;
+use symtn_dense::CpuEngine;
 
 /// Five 2x2 destination blocks: two Singles (one transposed), one two-block
 /// Multi, and an inactive block; four 2x2 source blocks.
@@ -58,7 +59,6 @@ where
         source,
         D::one(),
         &[],
-        1,
     )
     .unwrap();
     for &(offset, theta) in &SCALES {
@@ -77,7 +77,21 @@ where
         + From<f64>
         + core::fmt::Debug,
 {
-    let engine = &mut symtn_dense::CpuEngine::serial();
+    // One worker, and four workers (with the built-in executor, on forced
+    // `Outer` lanes where it honors forced policies; through the forwarding
+    // executor, which does not, under `Auto`). A member batch moves every
+    // member on the caller's token around one dense submission.
+    let engine = |threads: usize, forced: bool| {
+        let strategy = if forced {
+            tenferro_cpu::CpuBatchStrategy::Outer
+        } else {
+            tenferro_cpu::CpuBatchStrategy::Auto
+        };
+        crate::host_pool::eager_test_engine(threads)
+            .with_batch_policy(tenferro_cpu::CpuBatchPolicy::new(strategy))
+    };
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
+    let routes = [(1, false), (4, false), (4, true)];
     let (dst, src, structure) = fixture();
     for members in [1, 2, 3] {
         let source = source(members, unit);
@@ -89,30 +103,44 @@ where
             expected[4..16].iter().any(|value| *value != D::zero()),
             "vacuous twisted blocks"
         );
-        for threads in [1, 4] {
+        for (threads, custom) in routes {
             let mut actual = vec![D::from(f64::NAN); 20 * members];
-            tree_transform_members_overwrite_raw(
-                engine,
-                &mut StridedHostKernelAdapter::default(),
-                &mut DefaultDenseExecutor::new(),
-                &mut TreeTransformWorkspace::default(),
-                &structure,
-                &dst,
-                &src,
-                &mut actual,
-                &source,
-                members,
-                threads,
-                &SCALES,
-            )
-            .unwrap();
-            assert_eq!(actual, expected, "B={members} threads={threads}");
+            let mut workspace = TreeTransformWorkspace::default();
+            let forced = honors && !custom;
+            let mut engine = engine(threads, forced);
+            let (dst, src, source) = (&dst, &src, &source[..]);
+            let ran = if custom {
+                overwrite_members(
+                    &mut engine,
+                    &mut super::recording::Forwarding::default(),
+                    &mut workspace,
+                    &structure,
+                    [dst, src],
+                    &mut actual,
+                    source,
+                    members,
+                )
+            } else {
+                overwrite_members(
+                    &mut engine,
+                    &mut DefaultDenseExecutor::new(),
+                    &mut workspace,
+                    &structure,
+                    [dst, src],
+                    &mut actual,
+                    source,
+                    members,
+                )
+            };
+            ran.unwrap();
+            let what = format!("B={members} threads={threads} custom={custom}");
+            assert_eq!(actual, expected, "{what}");
         }
         if members == 1 {
             for threads in [1, 4] {
                 let mut actual = vec![D::from(f64::NAN); 20];
                 tree_transform_structure_overwrite_with_structural_recoupling_raw(
-                    engine,
+                    &mut engine(threads, honors),
                     &mut StridedHostKernelAdapter::default(),
                     &mut DefaultDenseExecutor::new(),
                     &mut TreeTransformWorkspace::default(),
@@ -123,7 +151,6 @@ where
                     &source,
                     D::one(),
                     &SCALES,
-                    threads,
                 )
                 .unwrap();
                 assert_eq!(actual, expected, "threads={threads}");
@@ -132,11 +159,43 @@ where
     }
 }
 
+/// The scaled member overwrite of `source` through `dense`.
+#[allow(clippy::too_many_arguments)]
+fn overwrite_members<E, D>(
+    engine: &mut CpuEngine,
+    dense: &mut E,
+    workspace: &mut TreeTransformWorkspace<D>,
+    structure: &TreeTransformStructure<f64>,
+    [dst, src]: [&Arc<BlockStructure>; 2],
+    actual: &mut [D],
+    source: &[D],
+    members: usize,
+) -> Result<(), OperationError>
+where
+    E: DenseExecutor,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<f64> + ConjugateValue,
+{
+    tree_transform_members_overwrite_raw(
+        engine,
+        &mut StridedHostKernelAdapter::default(),
+        dense,
+        workspace,
+        structure,
+        dst,
+        src,
+        actual,
+        source,
+        members,
+        &SCALES,
+    )
+}
+
 #[test]
 fn destination_scales_fold_into_single_moves_and_multi_scatters() {
     // What: folding θ_b into the move writing block b equals the unscaled
     // overwrite followed by an in-place scale of block b, bit for bit, for
-    // Singles and Multi scatters, serial and threaded, B = 1/2/3, f64/c64.
+    // Singles and Multi scatters, on one worker and on four workers (the
+    // built-in and the forwarding executor), B = 1/2/3, f64/c64.
     check(1.0_f64);
     check(Complex64::new(1.0, -0.5));
 }
@@ -160,7 +219,6 @@ fn unsorted_destination_scales_are_rejected_before_any_write() {
             &mut out,
             &source[..16 * members],
             members,
-            1,
             &bad,
         )
         .unwrap_err();

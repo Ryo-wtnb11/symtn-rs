@@ -69,7 +69,7 @@ impl<R, D: CudaPayload> TensorMap<R, D> {
         &self,
         cx: &mut (impl ExecContext + ?Sized),
     ) -> Result<TensorMap<R, D, CudaStorage<D>>, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.to_cuda_impl(engine)
     }
 
@@ -127,7 +127,7 @@ impl<R, D: CudaPayload> TensorMap<R, D, CudaStorage<D>> {
     /// }
     /// ```
     pub fn to_host(&self, cx: &mut (impl ExecContext + ?Sized)) -> Result<TensorMap<R, D>, Error> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.to_host_impl(engine)
     }
 

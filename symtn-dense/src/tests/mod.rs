@@ -22,8 +22,12 @@ mod factor_into;
 ))]
 mod factor_properties;
 mod fresh;
+#[cfg(feature = "tenferro")]
+mod lanes;
 #[path = "../../../tests/support/numerics.rs"]
 mod numerics;
+#[cfg(feature = "tenferro")]
+mod placement;
 mod tensor;
 mod view;
 

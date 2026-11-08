@@ -1,8 +1,8 @@
 //! Restricted binding for one ordinary contraction over owned-dense stacks.
 
 use super::*;
+use crate::typed::ExecContext;
 use crate::typed::PreparedExec;
-use crate::typed::{ExecContext, ExecOptions};
 use symtn_dense::Engine;
 use symtn_tensors::{HostContractMembersWorkspace, OutputAxisOrder, StorageContractResolution};
 
@@ -117,18 +117,17 @@ where
         rhs: &StackedTensorMap<R, D, S>,
         spec: &super::super::ContractSpec<'_>,
     ) -> Result<Self, Error> {
-        let (engine, options) = cx.parts();
-        Self::new_impl(engine, options, lhs, rhs, spec)
+        let engine = cx.engine();
+        Self::new_impl(engine, lhs, rhs, spec)
     }
 
     fn new_impl(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         spec: &super::super::ContractSpec<'_>,
     ) -> Result<Self, Error> {
-        Self::prepare(engine, options, lhs, rhs, Some(spec))
+        Self::prepare(engine, lhs, rhs, Some(spec))
     }
 
     /// The one constructor of both prepared operations: `Some(spec)` is the
@@ -138,7 +137,6 @@ where
     /// legs differ by the supertrace twist.
     fn prepare(
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         spec: Option<&super::super::ContractSpec<'_>>,
@@ -175,7 +173,7 @@ where
                     spec.codomain.len(),
                 )?;
                 let mut lease = crate::runtime::ContextLease::new();
-                let lane = lease.context(options).multiplicity_free_lane::<D>()?;
+                let lane = lease.context().multiplicity_free_lane::<D>()?;
                 let resolution = lane.plan_contract::<symtn_tensors::DirectCoreExecutor, _>(
                     engine,
                     &space,
@@ -357,26 +355,18 @@ where
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        let (engine, options) = cx.parts();
-        self.execute_impl(engine, options, lhs, rhs, workspace)
+        let engine = cx.engine();
+        self.execute_impl(engine, lhs, rhs, workspace)
     }
 
     fn execute_impl<'a>(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
         self.check_workspace(workspace)?;
-        // Before the lease and any upload: a refused allocation keeps the
-        // workspace as it was. Participation is the member replay's.
-        let participates =
-            |engine: &mut dyn Engine| self.resolution.member_searches_lanes(engine, lhs.members);
-        if let Err(error) = options.admit(engine, participates) {
-            return Err(workspace.output.hide(error));
-        }
         // First, so no later error of this call keeps another engine's state.
         let mut lease = match S::lease_members(EXEC, engine, workspace) {
             Ok(lease) => lease,
@@ -413,7 +403,6 @@ where
             (lhs.space.space().structure(), &lhs.storage),
             (rhs.space.space().structure(), &rhs.storage),
             members,
-            options,
             symtn_tensors::ContractDestinationInit::Zeroed,
         );
         drop(lease);
@@ -436,27 +425,19 @@ where
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
-        let (engine, options) = cx.parts();
-        self.execute_into_impl(engine, options, lhs, rhs, dst, workspace)
+        let engine = cx.engine();
+        self.execute_into_impl(engine, lhs, rhs, dst, workspace)
     }
 
     fn execute_into_impl(
         &self,
         engine: &mut dyn Engine,
-        options: ExecOptions,
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
         self.check_workspace(workspace)?;
-        // Before the lease and any upload: a refused allocation keeps the
-        // workspace as it was. Participation is the member replay's.
-        let participates =
-            |engine: &mut dyn Engine| self.resolution.member_searches_lanes(engine, lhs.members);
-        if let Err(error) = options.admit(engine, participates) {
-            return Err(workspace.output.hide(error));
-        }
         // First, so no later error of this call keeps another engine's state.
         let mut lease = match S::lease_members(EXEC, engine, workspace) {
             Ok(lease) => lease,
@@ -474,7 +455,6 @@ where
                 (lhs.space.space().structure(), &lhs.storage),
                 (rhs.space.space().structure(), &rhs.storage),
                 members,
-                options,
                 symtn_tensors::ContractDestinationInit::Axpby(D::from_real(0.0)),
             )
         });
@@ -572,17 +552,7 @@ where
         lhs: &StackedTensorMap<R, D, S>,
         rhs: &StackedTensorMap<R, D, S>,
     ) -> Result<Self, Error> {
-        let (engine, options) = cx.parts();
-        Self::new_impl(engine, options, lhs, rhs)
-    }
-
-    fn new_impl(
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-    ) -> Result<Self, Error> {
-        ContractPlan::prepare(engine, options, lhs, rhs, None).map(Self)
+        ContractPlan::prepare(cx.engine(), lhs, rhs, None).map(Self)
     }
 
     /// The signature of every output member.
@@ -615,19 +585,7 @@ where
         rhs: &StackedTensorMap<R, D, S>,
         workspace: &'a mut ContractWorkspace<R, D, S>,
     ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        let (engine, options) = cx.parts();
-        self.execute_impl(engine, options, lhs, rhs, workspace)
-    }
-
-    fn execute_impl<'a>(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-        workspace: &'a mut ContractWorkspace<R, D, S>,
-    ) -> Result<&'a StackedTensorMap<R, D, S>, Error> {
-        self.0.execute_impl(engine, options, lhs, rhs, workspace)
+        self.0.execute_impl(cx.engine(), lhs, rhs, workspace)
     }
 
     /// Composes every member pair into the caller's `dst`, overwriting it;
@@ -649,21 +607,8 @@ where
         dst: &mut StackedTensorMap<R, D, S>,
         workspace: &mut ContractWorkspace<R, D, S>,
     ) -> Result<(), Error> {
-        let (engine, options) = cx.parts();
-        self.execute_into_impl(engine, options, lhs, rhs, dst, workspace)
-    }
-
-    fn execute_into_impl(
-        &self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-        lhs: &StackedTensorMap<R, D, S>,
-        rhs: &StackedTensorMap<R, D, S>,
-        dst: &mut StackedTensorMap<R, D, S>,
-        workspace: &mut ContractWorkspace<R, D, S>,
-    ) -> Result<(), Error> {
         self.0
-            .execute_into_impl(engine, options, lhs, rhs, dst, workspace)
+            .execute_into_impl(cx.engine(), lhs, rhs, dst, workspace)
     }
 }
 

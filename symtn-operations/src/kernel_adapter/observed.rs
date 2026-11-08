@@ -21,11 +21,22 @@ pub(crate) struct ObservedKernels<F = fn(KernelCall)> {
     inner: StridedHostKernelAdapter,
     observe: F,
     pub(crate) calls: Vec<KernelCall>,
+    /// With [`Self::addressing`], every element a write primitive writes:
+    /// its destination buffer's address and its index in that buffer.
+    pub(crate) writes: Option<Vec<(usize, isize)>>,
 }
 
 impl ObservedKernels {
     pub(crate) fn recording() -> Self {
         Self::new(|_| {})
+    }
+
+    /// [`Self::recording`] that also records every written element.
+    pub(crate) fn addressing() -> Self {
+        Self {
+            writes: Some(Vec::new()),
+            ..Self::recording()
+        }
     }
 }
 
@@ -35,12 +46,30 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
             inner: StridedHostKernelAdapter::default(),
             observe,
             calls: Vec::new(),
+            writes: None,
         }
     }
 
     fn record(&mut self, call: KernelCall) {
         self.calls.push(call);
         (self.observe)(call);
+    }
+
+    /// Records the elements `shape` / `strides` from `offset` address in
+    /// `dst`, when addressing.
+    fn record_writes<T>(&mut self, dst: &[T], shape: &[usize], strides: &[isize], offset: isize) {
+        let Some(writes) = self.writes.as_mut() else {
+            return;
+        };
+        let mut at = vec![offset];
+        for (&extent, &stride) in shape.iter().zip(strides) {
+            at = at
+                .iter()
+                .flat_map(|&base| (0..extent as isize).map(move |i| base + i * stride))
+                .collect();
+        }
+        let buffer = dst.as_ptr() as usize;
+        writes.extend(at.into_iter().map(|index| (buffer, index)));
     }
 
     pub(crate) fn count(&self, call: KernelCall) -> usize {
@@ -93,6 +122,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Add);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset);
         self.inner.add_strided_baked(
             exec,
             zero_strides,
@@ -127,6 +157,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Axpby);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset);
         self.inner.axpby_strided_baked(
             exec,
             dst_data,
@@ -159,6 +190,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::CopyScale { dst_offset });
+        self.record_writes(dst_data, shape, dst_strides, dst_offset);
         self.inner.copy_scale_strided_baked(
             exec,
             dst_data,
@@ -185,6 +217,7 @@ where
         beta: T,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Scale { dst_offset });
+        self.record_writes(dst_data, shape, dst_strides, dst_offset);
         self.inner
             .scale_strided(exec, dst_data, shape, dst_strides, dst_offset, beta)
     }

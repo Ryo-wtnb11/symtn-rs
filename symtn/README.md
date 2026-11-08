@@ -17,19 +17,7 @@ Start with the primitive examples below. The main
 | Reduce and inspect | `trace_pairs`, `inner`, `norm`, `blocks`, `subblocks` |
 | Factorize | `qr_compact`, `svd_compact`, `eigh_full` |
 
-Every numerical operation takes the caller's engine first. To change how
-grouped dense blocks are placed on the engine's threads for the calls you
-make, pass a `Configured` engine instead (see the
-[backend policy](../docs/backend_policy.md#lane-allocation) for its scope):
-
-```rust
-use symtn::typed::{Configured, CpuEngine, LaneAllocation, Pool};
-
-let pool = Pool::builder().threads(4).build()?;
-let mut cx = Configured::new(CpuEngine::new(pool))
-    .with_lane_allocation(LaneAllocation::EqualShare);
-let c = a.contract(&mut cx, &b, &spec)?; // equal-share lanes
-```
+Every numerical operation takes the caller's engine first.
 
 For index notation and network planning, add `symtn-network` and run its
 [contract example](../symtn-network/examples/contract.rs). Mathematical conventions

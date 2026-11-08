@@ -379,6 +379,16 @@ where
         }
     }
 
+    /// Counts a build its caller found heavier than
+    /// [`StructureCacheInfo::max_entry_bytes`] and returned uncached without
+    /// staging its owned key: one miss and one rejection, as [`Self::publish`]
+    /// counts such a build.
+    pub fn reject(&self) {
+        let stripe = self.stripe();
+        stripe.misses.fetch_add(1, Ordering::Relaxed);
+        stripe.rejections.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Adds `bytes` to the charge of `key` while `value` is its resident
     /// entry: a lazily derived part of an entry joins the budget when it
     /// materializes. Never waits; a key being admitted is left alone, and an

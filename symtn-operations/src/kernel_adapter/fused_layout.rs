@@ -45,7 +45,7 @@ pub(super) struct StridedKernelScratch {
 /// would return for one (block, role) stride pair, computed once at compile
 /// time in the immutable `TreeTransformLayoutTable` and reused across every
 /// replay call instead of recomputed. The slices live in that table's arena;
-/// `apply_fused_pair_slices` consumes them directly. dtype-independent — one
+/// the movement leaf `span` consumes them directly. dtype-independent — one
 /// baked layout serves f64 and c64 alike (the normalization never inspects
 /// values).
 ///
@@ -145,7 +145,6 @@ impl<'a> BakedFusedLayout<'a> {
         })
     }
 
-    #[inline]
     pub(crate) fn from_compiled_normalized_slices(
         dims: &'a [usize],
         dst_strides: &'a [isize],
@@ -163,23 +162,19 @@ impl<'a> BakedFusedLayout<'a> {
         }
     }
 
-    #[inline]
     pub fn dims(&self) -> &'a [usize] {
         self.dims
     }
 
-    #[inline]
     pub fn dst_strides(&self) -> &'a [isize] {
         self.dst_strides
     }
 
-    #[inline]
     pub fn src_strides(&self) -> &'a [isize] {
         self.src_strides
     }
 }
 
-#[inline]
 pub(super) fn validate_strided_ranks(
     shape: &[usize],
     dst_strides: &[isize],
@@ -209,20 +204,27 @@ pub(super) fn validate_strided_ranks(
 /// as the baked walk. Why roles above `RAW_FUSED_RANK_LIMIT` carry no plan:
 /// strided's spilled replay allocates a cursor per worker range, while the
 /// baked walk reuses the replay workspace's index.
+///
+/// Why `#[inline]`: every role write asks this, from other modules' item
+/// loops; out of line, the serial answer costs each role a call (measured
+/// per Direct item on the owned permute replay). Inlined, a serial token
+/// answers with two loads and a compare in the caller.
 #[inline]
 pub(crate) fn admitted_plan<'a>(
     role: BakedFusedLayout<'a>,
     elements: usize,
     exec: &crate::host_pool::Exec<'_>,
-    gate: &LeafGate,
+    gate: &mut LeafGate,
 ) -> Option<&'a UpdatePlan> {
     let plan = role.plan?;
     gate.widens(exec, elements).then_some(plan)
 }
 
-/// `dst = op(src)` over `baked` by its compiled `plan` on `exec`. The plan's
-/// alpha is one and its beta zero, so the destination is never read and
-/// `op` is the whole element action, exactly as in the baked walk.
+/// `dst = map(src)` over `baked` by its compiled `plan` on `exec`. The
+/// plan's alpha is one and its beta zero, so the destination is never read
+/// and `map` is the whole element action, exactly as in [`span`].
+///
+/// [`span`]: super::movement::span
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn planned_overwrite<T, F>(
     plan: &UpdatePlan,
@@ -232,7 +234,7 @@ pub(crate) fn planned_overwrite<T, F>(
     dst_offset: isize,
     src_offset: isize,
     exec: crate::host_pool::Exec<'_>,
-    op: F,
+    map: F,
 ) -> Result<(), OperationError>
 where
     T: Copy + Send + Sync + Add<Output = T> + Mul<Output = T> + Zero + One + PartialEq,
@@ -242,12 +244,12 @@ where
         .map_err(crate::strided::error)?;
     let mut destination = RawStridedMut::new(dst, baked.dims, baked.dst_strides, dst_offset)
         .map_err(crate::strided::error)?;
-    plan.execute(&mut destination, &source, T::one(), T::zero(), op, exec)
+    plan.execute(&mut destination, &source, T::one(), T::zero(), map, exec)
         .map_err(crate::strided::error)
 }
 
 /// [`planned_overwrite`] into uninitialized memory: every element `baked`
-/// addresses is written once, with alpha one so `op` is the whole action.
+/// addresses is written once, with alpha one so `map` is the whole action.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn planned_write_uninit<T, F>(
     plan: &UpdatePlan,
@@ -257,7 +259,7 @@ pub(crate) fn planned_write_uninit<T, F>(
     dst_offset: isize,
     src_offset: isize,
     exec: crate::host_pool::Exec<'_>,
-    op: F,
+    map: F,
 ) -> Result<(), OperationError>
 where
     T: Copy + Send + Sync + Mul<Output = T> + One + PartialEq,
@@ -267,7 +269,7 @@ where
         .map_err(crate::strided::error)?;
     let mut destination = RawStridedMut::new(dst, baked.dims, baked.dst_strides, dst_offset)
         .map_err(crate::strided::error)?;
-    plan.execute_uninit(&mut destination, &source, T::one(), op, exec)
+    plan.execute_uninit(&mut destination, &source, T::one(), map, exec)
         .map_err(crate::strided::error)
 }
 
@@ -327,295 +329,5 @@ pub(crate) fn normalize_fused_layout(
     scratch.dims.truncate(rank);
     scratch.dst_strides.truncate(rank);
     scratch.src_strides.truncate(rank);
-    Ok(())
-}
-
-pub(crate) fn for_each_fused_span<F>(
-    dims: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    mut visit: F,
-) where
-    F: FnMut(isize, isize, usize, isize, isize),
-{
-    let rank = dims.len();
-    debug_assert_eq!(rank, dst_strides.len());
-    debug_assert_eq!(rank, src_strides.len());
-    if rank == 0 || dims.contains(&0) {
-        return;
-    }
-    debug_assert_eq!(rank, index.len());
-    let inner_len = dims[0];
-    let inner_dst = dst_strides[0];
-    let inner_src = src_strides[0];
-    index.fill(0);
-    let mut dst_base = dst_offset;
-    let mut src_base = src_offset;
-    loop {
-        visit(dst_base, src_base, inner_len, inner_dst, inner_src);
-        let mut axis = 1;
-        loop {
-            if axis >= rank {
-                return;
-            }
-            index[axis] += 1;
-            dst_base += dst_strides[axis];
-            src_base += src_strides[axis];
-            if index[axis] < dims[axis] {
-                break;
-            }
-            dst_base -= dims[axis] as isize * dst_strides[axis];
-            src_base -= dims[axis] as isize * src_strides[axis];
-            index[axis] = 0;
-            axis += 1;
-        }
-    }
-}
-
-/// Fused loop nest over a prebaked layout writing into uninitialized memory
-/// (issue #232, condition 2), mirroring `apply_fused_pair_slices` but with
-/// `MaybeUninit::write` for the destination. Each destination offset is visited
-/// exactly once, identical to `layout_linear_offset`'s odometer, so the
-/// write-once-then-`assume_init` invariants of `initialize_owned` (#226/#233)
-/// and of the pack scratch column writer are preserved: the normalization only drops extent-1 axes, reorders, and fuses
-/// contiguous runs — the *set* of visited (dst, src) offsets is unchanged, and
-/// there is no read-after-write within a single writer (`src` is a disjoint,
-/// fully-initialized slice). The caller supplies runtime-length traversal scratch.
-pub(crate) fn write_fused_uninit<D, F>(
-    baked: BakedFusedLayout<'_>,
-    dst: &mut [core::mem::MaybeUninit<D>],
-    src: &[D],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    map: F,
-) -> Result<(), OperationError>
-where
-    D: Copy,
-    F: Fn(D) -> D,
-{
-    let dims = baked.dims();
-    let dst_strides = baked.dst_strides();
-    let src_strides = baked.src_strides();
-    let Some(index) = index.get_mut(..dims.len()) else {
-        return Err(OperationError::InvalidArgument {
-            message: "fused traversal scratch is shorter than the normalized rank",
-        });
-    };
-    apply_fused_pair_slices(
-        dst,
-        src,
-        dims,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        index,
-        |slot: &mut core::mem::MaybeUninit<D>, value| {
-            slot.write(value);
-        },
-        map,
-    );
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn fused_pair<T, Apply, ElementOp>(
-    scratch: &mut StridedKernelScratch,
-    dst_data: &mut [T],
-    src_data: &[T],
-    shape: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    apply: Apply,
-    op: ElementOp,
-) -> Result<(), OperationError>
-where
-    T: Copy,
-    Apply: Fn(&mut T, T),
-    ElementOp: Fn(T) -> T,
-{
-    let StridedKernelScratch { layout, index } = scratch;
-    normalize_fused_layout(shape, dst_strides, src_strides, layout)?;
-    index.resize(layout.dims.len(), 0);
-    apply_fused_pair_slices(
-        dst_data,
-        src_data,
-        &layout.dims,
-        &layout.dst_strides,
-        &layout.src_strides,
-        dst_offset,
-        src_offset,
-        index.as_mut_slice(),
-        apply,
-        op,
-    );
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn apply_fused_pair_slices<Dst, T, Apply, ElementOp>(
-    dst_data: &mut [Dst],
-    src_data: &[T],
-    dims: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    index: &mut [usize],
-    apply: Apply,
-    op: ElementOp,
-) where
-    T: Copy,
-    Apply: Fn(&mut Dst, T),
-    ElementOp: Fn(T) -> T,
-{
-    for_each_fused_span(
-        dims,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        index,
-        |dst_base, src_base, inner_len, inner_dst, inner_src| {
-            if inner_dst == 1 && inner_src == 1 {
-                let dst_start = dst_base as usize;
-                let src_start = src_base as usize;
-                let dst = &mut dst_data[dst_start..dst_start + inner_len];
-                let src = &src_data[src_start..src_start + inner_len];
-                for position in 0..inner_len {
-                    apply(&mut dst[position], op(src[position]));
-                }
-            } else {
-                for position in 0..inner_len {
-                    let dst_position = (dst_base + position as isize * inner_dst) as usize;
-                    let src_position = (src_base + position as isize * inner_src) as usize;
-                    apply(&mut dst_data[dst_position], op(src_data[src_position]));
-                }
-            }
-        },
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn fused_pair_baked<T, Apply, ElementOp>(
-    scratch: &mut StridedKernelScratch,
-    baked: Option<BakedFusedLayout<'_>>,
-    dst_data: &mut [T],
-    src_data: &[T],
-    shape: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    apply: Apply,
-    op: ElementOp,
-) -> Result<(), OperationError>
-where
-    T: Copy,
-    Apply: Fn(&mut T, T),
-    ElementOp: Fn(T) -> T,
-{
-    match baked {
-        Some(baked) => {
-            scratch.index.resize(baked.dims().len(), 0);
-            apply_fused_pair_slices(
-                dst_data,
-                src_data,
-                baked.dims(),
-                baked.dst_strides(),
-                baked.src_strides(),
-                dst_offset,
-                src_offset,
-                scratch.index.as_mut_slice(),
-                apply,
-                op,
-            );
-            Ok(())
-        }
-        None => fused_pair(
-            scratch,
-            dst_data,
-            src_data,
-            shape,
-            dst_strides,
-            src_strides,
-            dst_offset,
-            src_offset,
-            apply,
-            op,
-        ),
-    }
-}
-
-#[inline]
-#[allow(clippy::too_many_arguments)]
-pub(super) fn fused_pair_baked_with_index<T, Apply, ElementOp>(
-    layout: &mut FusedLayoutScratch,
-    baked: Option<BakedFusedLayout<'_>>,
-    index: &mut [usize],
-    dst_data: &mut [T],
-    src_data: &[T],
-    shape: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    apply: Apply,
-    op: ElementOp,
-) -> Result<(), OperationError>
-where
-    T: Copy,
-    Apply: Fn(&mut T, T),
-    ElementOp: Fn(T) -> T,
-{
-    match baked {
-        Some(baked) => {
-            let rank = baked.dims().len();
-            let Some(index) = index.get_mut(..rank) else {
-                return Err(OperationError::InvalidArgument {
-                    message: "fused traversal scratch is shorter than the normalized rank",
-                });
-            };
-            apply_fused_pair_slices(
-                dst_data,
-                src_data,
-                baked.dims(),
-                baked.dst_strides(),
-                baked.src_strides(),
-                dst_offset,
-                src_offset,
-                index,
-                apply,
-                op,
-            );
-        }
-        None => {
-            normalize_fused_layout(shape, dst_strides, src_strides, layout)?;
-            let rank = layout.dims.len();
-            let Some(index) = index.get_mut(..rank) else {
-                return Err(OperationError::InvalidArgument {
-                    message: "fused traversal scratch is shorter than the normalized rank",
-                });
-            };
-            apply_fused_pair_slices(
-                dst_data,
-                src_data,
-                &layout.dims,
-                &layout.dst_strides,
-                &layout.src_strides,
-                dst_offset,
-                src_offset,
-                index,
-                apply,
-                op,
-            );
-        }
-    }
     Ok(())
 }

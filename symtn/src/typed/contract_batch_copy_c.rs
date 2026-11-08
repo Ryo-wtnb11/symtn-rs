@@ -1,6 +1,7 @@
-//! CopyC member tests: the direct core into the temporary, then one completed
-//! output transform, both member-expanded. The Host replay itself is the one
-//! route executor (`symtn_tensors::HostContractMembersWorkspace`).
+//! CopyC member tests: the direct core into the temporary (one
+//! member-expanded batch), then one completed output transform over every
+//! member. The Host replay itself is the one route executor
+//! (`symtn_tensors::HostContractMembersWorkspace`).
 
 #[cfg(test)]
 mod tests {
@@ -308,8 +309,9 @@ mod tests {
     }
 
     /// What: the two primitives the executor replays a B > 1 CopyC route
-    /// with — the planned core's signed stacked replay and the member
-    /// output transform — each submit one member-expanded batch (jobs × B).
+    /// with: the planned core's signed stacked replay submits one
+    /// member-expanded batch (jobs × B), and the member output transform,
+    /// whose selected route has no recoupling job, submits no product.
     /// Payload values are not checked here; the executor's member values
     /// are pinned against the base sequence and a dense oracle in
     /// `symtn-tensors` (`route_host_core_tests`).
@@ -397,7 +399,6 @@ mod tests {
                 &mut output,
                 &vec![1.0; copy.temporary_len() * members],
                 members,
-                1,
                 &[],
             )
             .unwrap();

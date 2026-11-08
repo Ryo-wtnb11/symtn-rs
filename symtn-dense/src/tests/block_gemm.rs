@@ -1,15 +1,13 @@
 //! The native block GEMM kernel through the public batch entries: values
 //! against an independent column-major triple loop for every scalar, op
 //! lowering, engine width and batch policy; one plan lookup per distinct
-//! geometry; rejections before any write; the engine-derived reserved lane
-//! widths; and the geometry-plan cache (a hit is the rebuilt plan, every key
+//! geometry; rejections before any write; zero-depth jobs that only scale
+//! their destination; and the geometry-plan cache (a hit is the rebuilt plan, every key
 //! field separates entries, a disabled or rejecting cache builds per lookup,
 //! concurrent misses build once).
 
 use super::*;
-use crate::block_kernel::driver::{cost, OpKind};
-use crate::block_kernel::{gemm, schedule};
-use tcontract_exec::{BatchPolicy, BatchStrategy, WorkModel};
+use tcontract_exec::{BatchPolicy, BatchStrategy};
 
 trait Scalar: Copy + PartialEq + std::fmt::Debug + 'static {
     const TOL: f64;
@@ -128,36 +126,7 @@ fn run<T: Scalar>(
     alpha: Complex64,
     beta: Complex64,
 ) -> (Result<(), DenseError>, usize) {
-    run_with(
-        engine,
-        LaneAllocation::Moldable,
-        jobs,
-        base,
-        out,
-        lhs,
-        rhs,
-        ops,
-        alpha,
-        beta,
-    )
-}
-
-/// [`run`] on an executor set to `allocation`.
-#[allow(clippy::too_many_arguments)]
-fn run_with<T: Scalar>(
-    engine: &mut CpuEngine,
-    allocation: LaneAllocation,
-    jobs: &[DenseGemmBatchJob],
-    base: [usize; 3],
-    out: &mut [T],
-    lhs: &[T],
-    rhs: &[T],
-    ops: [MatrixOp; 2],
-    alpha: Complex64,
-    beta: Complex64,
-) -> (Result<(), DenseError>, usize) {
     let mut executor = DefaultDenseExecutor::new();
-    executor.set_lane_allocation(allocation);
     let shapes = [
         out.len() - base[0],
         lhs.len() - base[1],
@@ -252,6 +221,16 @@ fn check<T: Scalar>(engine: &mut CpuEngine, ops: [MatrixOp; 2], beta: Complex64,
 fn engines() -> Vec<(String, CpuEngine)> {
     let pool = |threads| crate::Pool::builder().threads(threads).build().unwrap();
     let mut engines = vec![("serial".to_string(), CpuEngine::serial())];
+    // Auto at several widths: placement and provider widths follow the
+    // budget, and results agree with the oracle within the dtype tolerance
+    // at every one (a provider may reduce in another order at another
+    // width, so equality across widths is not promised).
+    for threads in [2, 3, 8] {
+        engines.push((
+            format!("{threads} threads Auto"),
+            CpuEngine::new(pool(threads)),
+        ));
+    }
     for policy in [
         BatchPolicy::default(),
         BatchPolicy::new(BatchStrategy::Outer),
@@ -390,82 +369,6 @@ fn complex_adjoint_conjugates_and_transposes() {
     }
 }
 
-/// Purpose: a forced batch policy fixes the placement, so another lane
-/// allocation is refused with a typed `Unsupported`, by the admission and by
-/// the executor, before any write; under `Auto` both allocations are
-/// admitted and write the oracle's values.
-#[test]
-fn a_forced_policy_refuses_another_lane_allocation_before_any_write() {
-    let (jobs, _) = mixed_jobs();
-    let len = |f: fn(&DenseGemmBatchJob) -> usize| jobs.iter().map(f).max().unwrap() + 1;
-    let lhs: Vec<f64> = (0..len(|j| j.lhs_offset + j.rows * j.contracted))
-        .map(|i| value(i, 0.5).re)
-        .collect();
-    let rhs: Vec<f64> = (0..len(|j| j.rhs_offset + j.contracted * j.cols))
-        .map(|i| value(i, 7.0).re)
-        .collect();
-    let initial = vec![-5.0; len(|j| j.dst_offset + j.rows * j.cols)];
-    let pool = || crate::Pool::builder().threads(4).build().unwrap();
-    for (policy, forced) in [
-        (BatchPolicy::default(), false),
-        (BatchPolicy::new(BatchStrategy::Inner), true),
-    ] {
-        let mut engine = CpuEngine::new(pool()).with_batch_policy(policy);
-        for allocation in [LaneAllocation::Moldable, LaneAllocation::EqualShare] {
-            let refused = forced && allocation != LaneAllocation::Moldable;
-            let label = format!("{:?} {allocation:?}", policy.strategy);
-            let admitted = crate::admit_lane_allocation(&mut engine, allocation, true);
-            assert_eq!(admitted.is_err(), refused, "{label}: admission");
-            let mut out = initial.clone();
-            let (result, _) = run_with(
-                &mut engine,
-                allocation,
-                &jobs,
-                [0; 3],
-                &mut out,
-                &lhs,
-                &rhs,
-                [MatrixOp::Identity; 2],
-                c64(1.0, 0.0),
-                c64(0.0, 0.0),
-            );
-            if refused {
-                for error in [result.unwrap_err(), admitted.unwrap_err()] {
-                    assert!(
-                        matches!(
-                            error,
-                            DenseError::Unsupported {
-                                op: "lane_allocation",
-                                ..
-                            }
-                        ),
-                        "{label}: {error:?}"
-                    );
-                }
-                assert_eq!(out, initial, "{label}: no write");
-            } else {
-                result.unwrap();
-                let want = oracle(
-                    &jobs,
-                    [0; 3],
-                    &initial.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
-                    &lhs.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
-                    &rhs.iter().map(|&x| c64(x, 0.0)).collect::<Vec<_>>(),
-                    [MatrixOp::Identity; 2],
-                    c64(1.0, 0.0),
-                    c64(0.0, 0.0),
-                );
-                for (found, want) in out.iter().zip(&want) {
-                    assert!(
-                        (found - want.re).abs() <= 1e-12 * (1.0 + want.norm()),
-                        "{label}"
-                    );
-                }
-            }
-        }
-    }
-}
-
 #[test]
 fn overlapping_destinations_are_rejected_before_any_write() {
     let mut engine = CpuEngine::new(crate::Pool::builder().threads(4).build().unwrap());
@@ -530,119 +433,74 @@ fn the_lowest_indexed_out_of_range_job_is_reported() {
     assert_eq!(out, [-5.0; 8]);
 }
 
-/// The kernel's per-job times and mean work for `f64` jobs, as the driver
-/// derives them (the GEMM cost ignores the engine's work model).
-fn costs(jobs: &[DenseGemmBatchJob]) -> (Vec<std::time::Duration>, f64) {
-    let work: Vec<f64> = jobs.iter().map(gemm::work::<f64>).collect();
-    let times = work
-        .iter()
-        .map(|&w| cost(OpKind::Gemm, w, &WorkModel::default()))
-        .collect();
-    (times, work.iter().sum::<f64>() / work.len() as f64)
-}
+#[path = "../../tests/support/warm_lanes.rs"]
+mod warm_lanes;
 
-/// The lanes and reserved widths the kernel derives from its own costs and
-/// the engine's decisions, under the baseline placement (`schedule::allocate`
-/// grants every job one slot, so no fewer-lane candidate scores lower on
-/// equal jobs): few large jobs under Auto share every slot (no lane is capped
-/// at one thread), forced Split and Inner reserve their decision, and a
-/// reserved width is what each job's child context gets.
+/// Purpose: the premise of the warm multi-lane allocation test
+/// (`tests/warm_lane_allocations.rs`, which cannot see the placement): under
+/// `Outer` its heterogeneous jobs, each estimated above zero, run on one lane
+/// per job up to the pool's width, not on one.
 #[test]
-fn reserved_widths_follow_the_engine_under_auto_split_and_inner() {
-    let pool = || crate::Pool::builder().threads(16).build().unwrap();
-    let large = vec![batch_job((256, 256, 256), (0, 0, 0)); 5];
-    let (times, mean) = costs(&large);
-    let widths = |policy: BatchPolicy| {
-        let mut engine = CpuEngine::new(pool()).with_batch_policy(policy);
-        engine
-            .with_contraction_exec(|exec, _, _| {
-                let allocation = schedule::allocate(exec, &times, mean);
-                let seen: Vec<_> = (0..times.len())
-                    .map(|_| std::sync::atomic::AtomicUsize::new(0))
-                    .collect();
-                schedule::run(
-                    exec.reborrow(),
-                    &allocation,
-                    &mut vec![(); times.len()],
-                    |j, _, child| {
-                        seen[j].store(child.budget(), std::sync::atomic::Ordering::Relaxed);
-                        Ok::<(), ()>(())
-                    },
-                )
-                .unwrap()
-                .unwrap();
-                let per_job: Vec<usize> = seen.into_iter().map(|s| s.into_inner()).collect();
-                let lanes: Vec<usize> = allocation.lanes.iter().map(|l| l.budget).collect();
-                Ok((allocation.slots, lanes, per_job))
-            })
-            .unwrap()
-    };
-    let (slots, lanes, per_job) = widths(BatchPolicy::default());
-    assert_eq!((slots, lanes.as_slice()), (16, &[4, 3, 3, 3, 3][..]));
-    assert_eq!(per_job.iter().sum::<usize>(), 16);
-    let split = BatchPolicy::new(BatchStrategy::Split {
-        lanes: std::num::NonZeroUsize::new(2).unwrap(),
-    });
-    let (slots, lanes, per_job) = widths(split);
-    assert_eq!((slots, lanes.as_slice()), (16, &[8, 8][..]));
-    assert!(per_job.iter().all(|&w| w == 8));
-    let (slots, lanes, per_job) = widths(BatchPolicy::new(BatchStrategy::Inner));
-    assert_eq!((slots, lanes.as_slice()), (16, &[16][..]));
-    assert!(per_job.iter().all(|&w| w == 16));
-
-    // Many tiny jobs: every reserved width is one or the batch is serial.
-    let tiny = vec![batch_job((2, 2, 2), (0, 0, 0)); 200];
-    let (times, mean) = costs(&tiny);
-    let mut engine = CpuEngine::new(pool());
-    let allocation = engine
-        .with_contraction_exec(|exec, _, _| Ok(schedule::allocate(exec, &times, mean)))
+fn the_warm_allocation_fixture_runs_on_four_lanes() {
+    let jobs = warm_lanes::jobs();
+    let pool = crate::Pool::builder()
+        .threads(warm_lanes::THREADS)
+        .build()
         .unwrap();
-    assert!(
-        allocation.lanes.len() == 1 || allocation.lanes.iter().all(|l| l.budget == 1),
-        "{allocation:?}"
+    let mut engine = CpuEngine::new(pool).with_batch_policy(BatchPolicy::new(BatchStrategy::Outer));
+    let (lhs, rhs) = ([1.0; warm_lanes::LEN], [2.0; warm_lanes::LEN]);
+    let mut out = [0.0; warm_lanes::LEN];
+    let recording = crate::probe::record();
+    let (result, _) = run::<f64>(
+        &mut engine,
+        &jobs,
+        [0; 3],
+        &mut out,
+        &lhs,
+        &rhs,
+        [MatrixOp::Identity; 2],
+        c64(1.0, 0.0),
+        c64(0.0, 0.0),
+    );
+    result.unwrap();
+    assert_eq!(
+        recording.get(crate::probe::Event::BlockLanes),
+        jobs.len().min(warm_lanes::THREADS)
     );
 }
 
-/// Purpose: the scheduler's GEMM grant is faer's final width, not only the
-/// plan's narrowing. A 64x64x64 f64 Faer block on a 4-slot lane (flat 100 ns
-/// dispatch) narrows to 4 slots on its time, but a caller model of 262144
-/// multiply-adds per ns makes faer's own item 1 ns, too small for a team: the
-/// grant is one slot and the block is charged its serial time.
+/// Purpose: zero-depth jobs of a grouped batch, which estimate no work and
+/// run on whatever lane is free first, still scale their destinations:
+/// `(1,0,1)`, `(2,0,1)`, `(3,0,1)` with `beta = -2` leave `-2 D` in every
+/// destination element and touch nothing else.
 #[test]
-fn gemm_grant_follows_faer_batch_decision() {
-    use tenferro_cpu::threadteam::{DispatchCosts, WidthCosts};
-    let row = WidthCosts::flat(std::time::Duration::from_nanos(100));
-    let pool = crate::Pool::builder()
-        .threads(4)
-        .dispatch_costs(DispatchCosts::new(row, row, row))
-        .build()
-        .unwrap();
-    let model = WorkModel::default()
-        .with_muladds_per_ns(262_144.0)
-        .with_item_overhead_ns(0.0);
-    let mut engine =
-        CpuEngine::new(pool).with_batch_policy(BatchPolicy::default().with_model(model));
-    let job = batch_job((64, 64, 64), (0, 0, 0));
-    let plan = gemm::Geometry::new(&job, [MatrixOp::Identity; 2])
-        .unwrap()
-        .plan::<f64>()
-        .unwrap();
-    assert_eq!(plan.report().algorithm, tcontract::Algorithm::Faer);
-    let work = gemm::work::<f64>(&job);
-    let t = cost(OpKind::Gemm, work, &model);
-    let (narrowed, granted, item) = engine
-        .with_contraction_exec(|exec, _, _| {
-            assert!(exec.token_ref().carries_team());
-            let granted = gemm::grant(&plan, work, exec, 4, t);
-            Ok((
-                exec.width_for_within(4, t.as_nanos() as f64, 1),
-                granted,
-                schedule::item_time(exec, t, granted),
-            ))
-        })
-        .unwrap();
-    assert_eq!((narrowed, granted), (4, 1));
-    assert_eq!(item, t);
+fn zero_depth_jobs_scale_their_destinations() {
+    let jobs = [
+        batch_job((1, 0, 1), (0, 0, 0)),
+        batch_job((2, 0, 1), (2, 0, 0)),
+        batch_job((3, 0, 1), (5, 0, 0)),
+    ];
+    let initial: Vec<f64> = (1..=9).map(f64::from).collect();
+    for (name, mut engine) in engines() {
+        let mut out = initial.clone();
+        let (result, _) = run::<f64>(
+            &mut engine,
+            &jobs,
+            [0; 3],
+            &mut out,
+            &[0.0],
+            &[0.0],
+            [MatrixOp::Identity; 2],
+            c64(0.75, 0.0),
+            c64(-2.0, 0.0),
+        );
+        result.unwrap();
+        assert_eq!(
+            out,
+            [-2.0, 2.0, -6.0, -8.0, 5.0, -12.0, -14.0, -16.0, 9.0],
+            "{name}"
+        );
+    }
 }
 
 mod plan_cache {

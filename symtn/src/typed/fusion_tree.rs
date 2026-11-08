@@ -470,13 +470,9 @@ where
         + CanonicalUnitFusionRule,
     D: TensorScalar,
 {
-    pub(super) fn commit(
-        self,
-        engine: &mut dyn Engine,
-        options: ExecOptions,
-    ) -> Result<TensorMap<P, D>, Error> {
+    pub(super) fn commit(self, engine: &mut dyn Engine) -> Result<TensorMap<P, D>, Error> {
         let source = self.source;
-        let materialized = source.materialized_tensor_uncached(engine, options)?;
+        let materialized = source.materialized_tensor_uncached(engine)?;
         let data_payload = materialized
             .owned_body()
             .expect("uncached materialization is owned")
@@ -487,7 +483,7 @@ where
         let domain = self.domain;
         let mut missing_block = false;
         let built = TensorMap::from_subblock_fn(
-            &mut Invocation::new(engine, options),
+            &mut *engine,
             source.runtime(),
             codomain.iter(),
             domain.iter(),

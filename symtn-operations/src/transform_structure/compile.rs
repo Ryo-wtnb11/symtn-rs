@@ -342,7 +342,8 @@ impl<T: Copy> TreeTransformStructure<T> {
             return Err(shared_payload_mismatch());
         }
         let recoupling_plan = compile_recoupling_plan(&blocks)?;
-        let parallel_schedule = compile_parallel_schedule(&blocks, &layouts, &recoupling_plan)?;
+        let parallel_schedule =
+            compile_parallel_schedule(&blocks, &inactive_dst_layouts, &layouts, &recoupling_plan)?;
         let physical_overwrite_len = compile_physical_overwrite_coverage(
             &blocks,
             &inactive_dst_layouts,

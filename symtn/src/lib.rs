@@ -20,9 +20,7 @@
 //! **Execution.** Every numerical operation takes the caller's execution
 //! context as its first argument ([`typed::ExecContext`]): an engine
 //! ([`typed::Engine`]), a [`typed::CpuEngine`] (serial, or over a
-//! [`typed::Pool`] of threads) for Host tensors, or a [`typed::Configured`]
-//! engine carrying [`typed::ExecOptions`] for the calls it is passed to. The
-//! caller owns the engine; symtn stores none, and the
+//! [`typed::Pool`] of threads) for Host tensors. The caller owns the engine; symtn stores none, and the
 //! dense provider (faer or a linked BLAS/LAPACK) is the one compiled in by
 //! cargo feature. A [`typed::Runtime`] holds prepared structural state only:
 //! the per-rule contraction/tree-transform contexts, reusable scratch, and

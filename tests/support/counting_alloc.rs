@@ -15,12 +15,17 @@
 //! `transform_owned_parallel`, the CUDA tests, or the default row of the
 //! `eager_overhead_ledger` bench) a measurement gates only the calling
 //! thread's allocations, not those made on worker threads.
+//!
+//! [`measure_process`] is the one opt-in exception: it counts the allocating
+//! calls of every thread, so only a test binary that runs nothing else
+//! concurrently may use it.
 
 #![allow(dead_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::ops::RangeInclusive;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// Allocator hooks counted on the calling thread while [`measure`] or
@@ -83,8 +88,14 @@ thread_local! {
     };
 }
 
+static PROCESS_ENABLED: AtomicBool = AtomicBool::new(false);
+static PROCESS_CALLS: AtomicU64 = AtomicU64::new(0);
+
 /// One hook: the `(size, zeroed)` it requested and the size it released.
 fn record(allocated: Option<(usize, bool)>, freed: Option<usize>) {
+    if allocated.is_some() && PROCESS_ENABLED.load(Ordering::Relaxed) {
+        PROCESS_CALLS.fetch_add(1, Ordering::Relaxed);
+    }
     let _ = STATE.try_with(|state| {
         if !state.enabled.get() {
             return;
@@ -162,6 +173,18 @@ pub fn measure_matching<T>(sizes: RangeInclusive<usize>, f: impl FnOnce() -> T) 
     start_matching((*sizes.start(), *sizes.end()));
     let value = f();
     (value, stop())
+}
+
+/// Runs `f` and returns its value with the allocating calls (`alloc`,
+/// `alloc_zeroed`, `realloc`) every thread of the process made meanwhile.
+/// For a test binary that runs nothing else concurrently: another test's
+/// allocations would count too.
+pub fn measure_process<T>(f: impl FnOnce() -> T) -> (T, u64) {
+    PROCESS_CALLS.store(0, Ordering::SeqCst);
+    PROCESS_ENABLED.store(true, Ordering::SeqCst);
+    let value = f();
+    PROCESS_ENABLED.store(false, Ordering::SeqCst);
+    (value, PROCESS_CALLS.load(Ordering::SeqCst))
 }
 
 /// Starts counting this thread's allocations; [`stop`] returns them. For

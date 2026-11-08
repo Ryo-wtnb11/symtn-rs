@@ -127,6 +127,15 @@ pub use owned_cat::{
 #[doc(hidden)]
 pub use owned_trace::{try_tensortrace_owned_raw, OwnedTraceTerm};
 
+#[cfg(test)]
+#[allow(unsafe_code)]
+#[path = "../../tests/support/counting_alloc.rs"]
+mod counting_alloc;
+
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: counting_alloc::CountingAllocator = counting_alloc::CountingAllocator;
+
 /// The workspace tolerance rule for arithmetic test comparisons
 /// (`docs/testing_numerics.md`).
 #[cfg(test)]

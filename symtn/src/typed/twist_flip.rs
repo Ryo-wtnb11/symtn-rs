@@ -60,7 +60,7 @@ where
         legs: &[usize],
         direction: Direction,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.twist_impl(engine, legs, direction)
     }
 
@@ -275,7 +275,7 @@ where
         legs: &[usize],
         direction: Direction,
     ) -> Result<Self, FacadeError<R>> {
-        let (engine, _) = cx.parts();
+        let engine = cx.engine();
         self.flip_impl(engine, legs, direction)
     }
 
