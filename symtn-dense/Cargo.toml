@@ -72,26 +72,26 @@ num-complex = "0.4"
 symtn-core = { version = "0.1.1", path = "../symtn-core" }
 # The BLAS provider's grouped GEMM job list (`cpueinsum::GroupedGemmJob`);
 # the version tenferro-cpu resolves. The native provider does not use it.
-cpueinsum = { version = "0.9.1", optional = true }
+cpueinsum = { version = "0.12.0", optional = true }
 # The BLAS provider's grouped GEMM plan, the BLAS counterpart of
 # `cpueinsum::GroupedPlan` (same executor vocabulary and version line).
-cpueinsum-blas = { version = "0.9.1", optional = true }
+cpueinsum-blas = { version = "0.12.0", optional = true }
 # The native block kernel's GEMM plans and factorizations (#2337, #2430).
-# Pinned to the versions tenferro-cpu 0.9.0 / tenferro-linalg 0.9.0 resolve,
+# Pinned to the versions tenferro-cpu 0.11.0 / tenferro-linalg 0.11.0 resolve,
 # so `Exec`, `Plan` and the batch vocabulary are the engine's own types;
 # tlinalg follows tenferro-linalg, which links it only with a CPU provider.
-tcontract = { version = "=0.9.1", optional = true }
-tcontract-exec = { version = "=0.9.1", optional = true }
-tlinalg = { version = "=0.8.1", optional = true }
+tcontract = { version = "=0.12.0", optional = true }
+tcontract-exec = { version = "=0.12.0", optional = true }
+tlinalg = { version = "=0.11.0", optional = true }
 # The operand descriptor tlinalg's entries take (`RawStridedRef`); the version
 # tlinalg resolves, so it is tlinalg's own type. Native provider only.
-strided-view = { version = "=0.7.0", optional = true }
-tenferro-cpu = { version = "0.9.0", default-features = false, optional = true }
-tenferro-linalg = { version = "0.9.0", default-features = false, optional = true }
+strided-view = { version = "=0.7.2", optional = true }
+tenferro-cpu = { version = "0.11.0", default-features = false, optional = true }
+tenferro-linalg = { version = "0.11.0", default-features = false, optional = true }
 # The `Engine` trait every numerical entry takes: needed by backend-free and
 # custom-executor builds too, so it is not tied to a CPU provider feature.
-tenferro-tensor = { version = "0.9.0", default-features = false }
-tenferro-gpu = { version = "0.9.0", default-features = false, optional = true }
+tenferro-tensor = { version = "0.11.0", default-features = false }
+tenferro-gpu = { version = "0.11.0", default-features = false, optional = true }
 
 [[test]]
 name = "integration"

@@ -327,14 +327,8 @@ pub(crate) fn validate(
 /// outputs.
 pub(crate) trait Element: Copy {
     /// The real counterpart, in which a spectrum is published.
-    type Spectrum: Copy + Into<f64>;
+    type Spectrum: tenferro_tensor::TensorScalar + Default + Into<f64>;
     fn conj(self) -> Self;
-    /// The real part.
-    #[cfg_attr(
-        not(all(feature = "cpu-faer", not(feature = "cpu-blas-core"))),
-        allow(dead_code)
-    )]
-    fn real(self) -> Self::Spectrum;
     /// `self * sqrt(sigma)`.
     fn scale_by_sqrt(self, sigma: Self::Spectrum) -> Self;
     /// `self * exp(lambda / 2)`.
@@ -355,17 +349,13 @@ pub(crate) trait Element: Copy {
 
 macro_rules! element {
     ($ty:ty, $real:ty, $variant:ident, $slice:ident, $into_vec:ident, $spectrum:ident,
-     |$c:ident| $conj:expr, |$r:ident| $re:expr, |$p:ident| $part:expr,
+     |$c:ident| $conj:expr, |$p:ident| $part:expr,
      |$x:ident, $s:ident| $scale:expr) => {
         impl Element for $ty {
             type Spectrum = $real;
             fn conj(self) -> Self {
                 let $c = self;
                 $conj
-            }
-            fn real(self) -> $real {
-                let $r = self;
-                $re
             }
             fn scale_by_sqrt(self, sigma: $real) -> Self {
                 let ($x, $s) = (self, sigma.sqrt());
@@ -420,7 +410,6 @@ element!(
     as_f32_slice,
     |v| v,
     |v| v,
-    |v| v,
     |x, s| x * s
 );
 element!(
@@ -430,7 +419,6 @@ element!(
     as_f64_slice,
     into_f64_vec,
     as_f64_slice,
-    |v| v,
     |v| v,
     |v| v,
     |x, s| x * s
@@ -443,7 +431,6 @@ element!(
     into_c32_vec,
     as_f32_slice,
     |v| Complex32::conj(&v),
-    |v| v.re,
     |v| Complex32::new(v.re, 0.0),
     |x, s| x * s
 );
@@ -455,7 +442,6 @@ element!(
     into_c64_vec,
     as_f64_slice,
     |v| Complex64::conj(&v),
-    |v| v.re,
     |v| Complex64::new(v.re, 0.0),
     |x, s| x * s
 );

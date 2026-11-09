@@ -188,7 +188,7 @@ where
     /// and across coupled sectors, like the Host norm: an `f32`/`Complex32`
     /// payload is widened on the device by one cast (one device allocation
     /// of twice the payload bytes and one elementwise pass), because
-    /// Tenferro 0.9.0 offers no widening reduction (#1344). Unlike the Host
+    /// Tenferro 0.11.0 offers no widening reduction (#1344). Unlike the Host
     /// norm, an `f64`/`Complex64` device sum is not rescaled: it returns
     /// `inf` once the squared norm exceeds `f64::MAX` and loses accuracy
     /// below `f64::MIN_POSITIVE`.

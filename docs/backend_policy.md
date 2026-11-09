@@ -210,12 +210,12 @@ direct-region or Checked Generic canonical output, otherwise one packed
 transient per call that is scattered by tree identity afterwards, about
 twice the factor payload on that route) and one packed real spectrum, and
 each block writes its factors straight into its slice through tlinalg's
-initialized-destination entries. Each lane allocates one provider workspace
-and one typed scratch (complex singular values and eigenvalues, and the
-provider-shaped factors of an adjoint placement or of LQ) per call, sized
-from that
-lane's blocks at its own width before its first block, and drops them when
-the lane finishes; nothing is kept across calls. Compact LQ of `X` reads
+initialized-destination entries; SVD and EIGH write their real spectra
+straight into the destination, with no staging. Each lane allocates one
+provider workspace and one typed scratch (the provider-shaped factors of an
+adjoint placement or of LQ) per call, sized from that lane's blocks at its
+own width before its first block, and drops them when the lane finishes;
+nothing is kept across calls. Compact LQ of `X` reads
 each block's transpose in place (a strided view, no adjoint copy), solves
 `X^T = Q' R'` into the lane scratch and writes `L = R'^T`, `Q = Q'^T` into
 the destination in one plain transpose pass; LQ of a lazy adjoint `A^H`
@@ -240,8 +240,10 @@ destination form; the lane lends the reused coefficient `Vec`). Columns past
 `min(m, n)` of the full `Q`, and the null basis, are any orthonormal basis
 of the complement and may differ by provider. A native polar job of an
 `m x n` block (MatrixAlgebraKit's `PolarViaSVD`, `k = min(m, n)`) solves the
-compact SVD into its lane's typed scratch (`U`, `Vh` and the spectrum,
-`(m k + k n + k)` elements per item), writes `W = U Vh` into its
+compact SVD into its lane's typed scratch (`U` and `Vh`, `(m + n) k`
+elements of `T` per item) and a separate real spectrum scratch (`S`, `k`
+elements of `Real(T)` per item), both allocated per call and dropped with the
+lane, so a polar lane owns two scratch buffers; it writes `W = U Vh` into its
 destination, scales `Vh` (left) or `U` (right) by `sqrt(S)` in that
 scratch, writes `P = X^H X` (or `X X^H`) and makes it exactly Hermitian; both
 products run on the lane's context with geometry plans resolved before the
@@ -250,7 +252,9 @@ lanes. The `P` product is a full GEMM, twice the multiply-adds of the
 full-rank block and otherwise may differ by provider or lane width. A native
 Hermitian `exp` job of an `n x n` block (MatrixAlgebraKit's
 `MatrixFunctionViaEigh`) solves the eigendecomposition into its lane's typed
-scratch (`V` and the spectrum, `(n^2 + n)` elements per item), checks the
+scratch (`V`, `n^2` elements of `T` per item) and a separate real spectrum
+scratch (`n` elements of `Real(T)` per item), both allocated per call and
+dropped with the lane (two scratch owners per lane); it checks the
 eigenvalues are finite (a nonfinite one is that block's error and skips the
 rest), scales `V`'s columns by `exp(lambda / 2)` in that scratch, writes
 `exp = Y Y^H` of the scaled `Y` into its destination and makes it exactly
