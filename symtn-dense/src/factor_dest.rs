@@ -23,8 +23,8 @@ pub enum FactorPlacement {
     /// factor order, each conjugate-transposed (per batch item), the
     /// spectrum unchanged. QR of `A` is placed as the LQ of `A^H`
     /// (`l = R^H`, `q = Q^H`); the compact SVD of `A` as the compact SVD of
-    /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`). Hermitian eigendecompositions,
-    /// LQ, full QR, the QR null basis, the polar decompositions and the
+    /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`), and the full SVD likewise.
+    /// Hermitian eigendecompositions, LQ, full QR, the QR null basis, the polar decompositions and the
     /// Hermitian exponential refuse it.
     Adjoint,
 }
@@ -76,7 +76,7 @@ impl FactorFailure {
 
 /// The destinations of one input of a batched factorization, in the op's
 /// owned output order: `Qr` and `QrFull` `[q, r, -]`, `QrNull` `[n, -, -]`,
-/// `Lq` `[l, q, -]`, `Svd` `[u, s, vt]`, `Eigh` `[values, vectors, -]`,
+/// `Lq` `[l, q, -]`, `Svd` and `SvdFull` `[u, s, vt]`, `Eigh` `[values, vectors, -]`,
 /// `LeftPolar` `[w, p, -]`, `RightPolar` `[p, wh, -]`, `ExpViaEigh`
 /// `[exp, -, -]` (`-` is `None`).
 ///
@@ -89,7 +89,8 @@ impl FactorFailure {
 /// `Adjoint` QR `[n, k, b..]`, `[k, m, b..]`; LQ is `[m, k, b..]`,
 /// `[k, n, b..]`; full QR is `[m, m, b..]`, `[m, n, b..]` and the QR null
 /// basis `[m, m - k, b..]`; SVD adds `s` of shape
-/// `[k, b..]` between them; eigh of `n x n` is `[n, b..]`, `[n, n, b..]`;
+/// `[k, b..]` between them, and full SVD is `[m, m, b..]`, `[k, b..]`,
+/// `[n, n, b..]` (`Adjoint`: `[n, n, b..]`, `[k, b..]`, `[m, m, b..]`); eigh of `n x n` is `[n, b..]`, `[n, n, b..]`;
 /// left polar is `[m, n, b..]`, `[n, n, b..]`, right polar
 /// `[m, m, b..]`, `[m, n, b..]` and the Hermitian exponential of `n x n`
 /// `[n, n, b..]`.
@@ -127,7 +128,7 @@ fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
         | DenseFactorization::Eigh
         | DenseFactorization::LeftPolar
         | DenseFactorization::RightPolar => Ok(2),
-        DenseFactorization::Svd => Ok(3),
+        DenseFactorization::Svd | DenseFactorization::SvdFull => Ok(3),
         _ => Err(DenseError::Unsupported {
             op: ENTRY,
             message: format!("{op:?} has no destination form"),
@@ -139,6 +140,7 @@ fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
 fn output_label(op: DenseFactorization) -> &'static str {
     match op {
         DenseFactorization::Svd
+        | DenseFactorization::SvdFull
         | DenseFactorization::LeftPolar
         | DenseFactorization::RightPolar => "svd_into",
         DenseFactorization::Eigh | DenseFactorization::ExpViaEigh => "eigh_into",
@@ -170,7 +172,12 @@ fn head(
     match (op, index, adjoint) {
         (DenseFactorization::Eigh, 0, _) => ([m, 0], 1),
         (DenseFactorization::Eigh, _, _) => ([m, m], 2),
-        (DenseFactorization::Svd, 1, _) => ([k, 0], 1),
+        (DenseFactorization::Svd | DenseFactorization::SvdFull, 1, _) => ([k, 0], 1),
+        // `Adjoint` places `U^H` last.
+        (DenseFactorization::SvdFull, 0, false) | (DenseFactorization::SvdFull, 2, true) => {
+            ([m, m], 2)
+        }
+        (DenseFactorization::SvdFull, _, _) => ([n, n], 2),
         (DenseFactorization::QrFull, 0, _) => ([m, m], 2),
         (DenseFactorization::QrFull, _, _) => ([m, n], 2),
         (DenseFactorization::QrNull, _, _) => ([m, m - k], 2),
@@ -190,7 +197,9 @@ fn head(
 fn is_spectrum(op: DenseFactorization, index: usize) -> bool {
     matches!(
         (op, index),
-        (DenseFactorization::Eigh, 0) | (DenseFactorization::Svd, 1)
+        (DenseFactorization::Eigh, 0)
+            | (DenseFactorization::Svd, 1)
+            | (DenseFactorization::SvdFull, 1)
     )
 }
 
@@ -536,7 +545,7 @@ pub(crate) fn place_owned(
         // The adjoint problem's outputs come in reversed factor order.
         let [first, second, third] = &mut dest.outputs;
         match op {
-            DenseFactorization::Svd => std::mem::swap(first, third),
+            DenseFactorization::Svd | DenseFactorization::SvdFull => std::mem::swap(first, third),
             _ => std::mem::swap(first, second),
         }
     }
@@ -575,7 +584,7 @@ pub(crate) fn place_owned(
     if adjoint {
         let [first, second, third] = &mut dest.outputs;
         match op {
-            DenseFactorization::Svd => std::mem::swap(first, third),
+            DenseFactorization::Svd | DenseFactorization::SvdFull => std::mem::swap(first, third),
             _ => std::mem::swap(first, second),
         }
     }

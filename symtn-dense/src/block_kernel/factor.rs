@@ -1,11 +1,12 @@
-//! The native provider's factorizations of independent blocks (compact SVD,
-//! compact and full QR, the QR null basis, LQ, Hermitian and general
-//! eigendecomposition and their values-only forms): tlinalg calls per block,
-//! the blocks spread over the lane driver's lanes on the caller's engine.
+//! The native provider's factorizations of independent blocks (compact and
+//! full SVD, compact and full QR, the QR null basis, LQ, Hermitian and
+//! general eigendecomposition and their values-only forms): tlinalg calls per
+//! block, the blocks spread over the lane driver's lanes on the caller's
+//! engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
-//! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
-//! `eig_read`, `eigvals`) does (same provider, same validation, same error
+//! (`svd_read`, `svd_full_read`, `qr_read`, `eigh_read`, `eigvalsh_read`,
+//! `svdvals_read`, `eig_read`, `eigvals`) does (same provider, same validation, same error
 //! values, and for `eig` tenferro's eigenvector normalization), but on its
 //! lane's child token limited to the block's placed width instead of the
 //! whole engine, so a block's faer width is the engine's decision within
@@ -16,7 +17,7 @@
 //! carries no recycled-buffer history (its capacity is the provider's
 //! reservation, not necessarily the length). The destination batch
 //! ([`factorize_into`], compact QR, LQ, full QR, the QR null basis, compact
-//! SVD, Hermitian eigh and the polar decompositions) writes
+//! and full SVD, Hermitian eigh and the polar decompositions) writes
 //! each block's factors into its caller-owned destination through the
 //! provider's initialized-destination entry (`*_into_init`), with one
 //! workspace and one typed scratch per lane, sized before the lane's first
@@ -62,8 +63,12 @@ use tlinalg::householder::{self, ReflectorShape};
 pub(crate) trait Factor {
     /// The per-matrix entry's `DenseError` label.
     const ENTRY: &'static str;
-    /// The provider op, whose name labels the error payloads.
+    /// The provider op, whose name labels the provider's error payloads.
     const OP: tlinalg::Op;
+
+    /// The op name of the per-matrix entry's own validation errors (rank,
+    /// squareness, dtype, layout).
+    const VALIDATION: &'static str = Self::OP.as_str();
 
     /// Whether the provider requires square matrices: tenferro checks this
     /// after the rank and before the zero-extent shortcut.
@@ -89,13 +94,37 @@ pub(crate) trait Factor {
     ) -> Result<Vec<DenseTensor>, DenseError>;
 }
 
-/// Compact SVD: `[U, S, Vh]` of shapes `[m, k, b..]`, `[k, b..]`,
-/// `[k, n, b..]` with `k = min(m, n)`; `S` is real.
-pub(crate) struct Svd;
+/// SVD: compact (`FULL` false) `[U, S, Vh]` of shapes `[m, k, b..]`,
+/// `[k, b..]`, `[k, n, b..]` with `k = min(m, n)`, or full `[m, m, b..]`,
+/// `[k, b..]`, `[n, n, b..]`; `S` is real. Both are tenferro's
+/// `svd_typed` (the provider's `svd_into` with the `full` flag, no
+/// post-processing), whose full form of an input with a zero extent is
+/// identity `U` and `Vh`.
+pub(crate) struct SvdJob<const FULL: bool>;
 
-impl Factor for Svd {
-    const ENTRY: &'static str = "svd_read";
+/// Compact SVD ([`SvdJob`]).
+pub(crate) type Svd = SvdJob<false>;
+
+/// Full SVD ([`SvdJob`]).
+pub(crate) type SvdFull = SvdJob<true>;
+
+impl<const FULL: bool> SvdJob<FULL> {
+    /// The extents of `U`'s columns and `Vh`'s rows.
+    fn vector_dims(m: usize, n: usize) -> [usize; 2] {
+        if FULL {
+            [m, n]
+        } else {
+            [m.min(n); 2]
+        }
+    }
+}
+
+impl<const FULL: bool> Factor for SvdJob<FULL> {
+    const ENTRY: &'static str = if FULL { "svd_full_read" } else { "svd_read" };
+    // tenferro reports a full SVD's provider failures under `Op::Svd` too,
+    // and only its own validation as `svd_full`.
     const OP: tlinalg::Op = tlinalg::Op::Svd;
+    const VALIDATION: &'static str = if FULL { "svd_full" } else { Self::OP.as_str() };
 
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
         use tlinalg::svd::{estimate_payback_work, estimate_work};
@@ -109,15 +138,30 @@ impl Factor for Svd {
         exec: &mut Exec<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
         let k = m.min(n);
+        let [u_cols, v_rows] = Self::vector_dims(m, n);
         let (mut u, mut s, mut vt) = (Vec::new(), Vec::new(), Vec::new());
-        if let Some(raw) = raw {
-            tlinalg::svd::svd(Self::OP, raw, false, &mut u, &mut s, &mut vt, exec)
-                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        match raw {
+            Some(raw) => tlinalg::svd::svd(Self::OP, raw, FULL, &mut u, &mut s, &mut vt, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?,
+            None if FULL => {
+                let Ok(items) = checked_len(batch) else {
+                    // The output metadata refuses the batch; an output it
+                    // would admit still cannot hold the identities.
+                    return Err(output::<Self, T>(&[m, m], batch, Vec::new())
+                        .err()
+                        .unwrap_or(DenseError::ElementCountOverflow));
+                };
+                u = vec![T::ZERO; checked_len(&[m, m, items])?];
+                vt = vec![T::ZERO; checked_len(&[n, n, items])?];
+                identity_columns(&mut u, m, m, 0);
+                identity_columns(&mut vt, n, n, 0);
+            }
+            None => {}
         }
         Ok(vec![
-            output::<Self, T>(&[m, k], batch, u)?,
+            output::<Self, T>(&[m, u_cols], batch, u)?,
             output::<Self, <T as TensorScalar>::Real>(&[k], batch, s)?,
-            output::<Self, T>(&[k, n], batch, vt)?,
+            output::<Self, T>(&[v_rows, n], batch, vt)?,
         ])
     }
 }
@@ -923,6 +967,7 @@ pub(crate) fn factorize(
     use crate::DenseFactorization as Op;
     match op {
         Op::Svd => factorize_batch::<Svd>(engine, inputs, sink),
+        Op::SvdFull => factorize_batch::<SvdFull>(engine, inputs, sink),
         Op::Qr => factorize_batch::<Qr>(engine, inputs, sink),
         Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
         Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
@@ -1319,13 +1364,13 @@ impl FactorInto for QrNull {
     }
 }
 
-impl FactorInto for Svd {
+impl<const FULL: bool> FactorInto for SvdJob<FULL> {
     fn workspace<T: Scalar>(
         [m, n]: [usize; 2],
         batch: usize,
         exec: &Exec<'_>,
     ) -> tlinalg::Result<usize> {
-        tlinalg::svd::svd_workspace::<T>(m, n, false, batch, exec)
+        tlinalg::svd::svd_workspace::<T>(m, n, FULL, batch, exec)
     }
 
     fn scratch_len<T: Scalar>(
@@ -1333,9 +1378,23 @@ impl FactorInto for Svd {
         batch: usize,
         placement: FactorPlacement,
     ) -> usize {
+        let [u_cols, v_rows] = Self::vector_dims(m, n);
         match placement {
             FactorPlacement::AsComputed => 0,
-            FactorPlacement::Adjoint => (m + n) * m.min(n) * batch,
+            FactorPlacement::Adjoint => (m * u_cols + v_rows * n) * batch,
+        }
+    }
+
+    // Full: identity `U` and `Vh` (either placement, each square).
+    fn empty_into<T: Scalar>(_: [usize; 2], outputs: &mut [Option<DenseWrite<'_>>; 3]) {
+        if !FULL {
+            return;
+        }
+        for index in [0, 2] {
+            let dim = outputs[index]
+                .as_ref()
+                .map_or(0, |output| output.shape()[0]);
+            identity_columns(slot::<T>(&mut outputs[index]), dim, dim, 0);
         }
     }
 
@@ -1360,7 +1419,7 @@ impl FactorInto for Svd {
                 Ok(tlinalg::svd::svd_into_init(
                     Self::OP,
                     raw,
-                    false,
+                    FULL,
                     u,
                     s,
                     vt,
@@ -1369,12 +1428,12 @@ impl FactorInto for Svd {
                 )?)
             }
             FactorPlacement::Adjoint => {
-                let k = m.min(n);
-                let (u, rest) = scratch.split_at_mut(m * k * batch);
-                let vt = &mut rest[..k * n * batch];
-                tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)?;
-                adjoint_items(vt, k, n, slot::<T>(first));
-                adjoint_items(u, m, k, slot::<T>(third));
+                let [u_cols, v_rows] = Self::vector_dims(m, n);
+                let (u, rest) = scratch.split_at_mut(m * u_cols * batch);
+                let vt = &mut rest[..v_rows * n * batch];
+                tlinalg::svd::svd_into_init(Self::OP, raw, FULL, u, s, vt, workspace, exec)?;
+                adjoint_items(vt, v_rows, n, slot::<T>(first));
+                adjoint_items(u, m, u_cols, slot::<T>(third));
                 Ok(())
             }
         }
@@ -2052,7 +2111,7 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
     lane: &mut LaneBuffers,
     exec: &mut Exec<'_>,
 ) -> Result<(), FactorFailure> {
-    let op = F::OP.as_str();
+    let op = F::VALIDATION;
     let shape = view.shape();
     let [m, n, batch @ ..] = shape else {
         return Err(FactorFailure::Solver(tenferro_error(
@@ -2115,6 +2174,7 @@ pub(crate) fn factorize_into(
     use crate::DenseFactorization as Op;
     match op {
         Op::Svd => factorize_into_batch::<Svd>(engine, inputs, dests, sink),
+        Op::SvdFull => factorize_into_batch::<SvdFull>(engine, inputs, dests, sink),
         Op::Qr => factorize_into_batch::<Qr>(engine, inputs, dests, sink),
         Op::Eigh => factorize_into_batch::<Eigh>(engine, inputs, dests, sink),
         Op::Lq => factorize_into_batch::<Lq>(engine, inputs, dests, sink),
@@ -2309,7 +2369,7 @@ fn preflight<F: Factor>(input: DenseRead<'_>) -> Result<StrideVec, DenseError> {
         input,
         DenseRead::F32(_) | DenseRead::F64(_) | DenseRead::C32(_) | DenseRead::C64(_)
     ) {
-        let op = F::OP.as_str();
+        let op = F::VALIDATION;
         return Err(tenferro_error(
             F::ENTRY,
             linalg_error(op, tenferro_linalg::Error::UnsupportedDType { op, dtype }),
@@ -2352,7 +2412,7 @@ fn factor_typed<F: Factor, T: Scalar>(
     strides: &[isize],
     exec: &mut Exec<'_>,
 ) -> Result<Vec<DenseTensor>, DenseError> {
-    let op = F::OP.as_str();
+    let op = F::VALIDATION;
     let shape = view.shape();
     let [m, n, batch @ ..] = shape else {
         return Err(tenferro_error(
@@ -2404,7 +2464,7 @@ fn with_provider_read<F: Factor, T, R>(
     let raw = RawStridedRef::new(view.data(), shape, strides, offset).map_err(|err| {
         tenferro_error(
             F::ENTRY,
-            tenferro_tensor::Error::invalid_argument(F::OP.as_str(), "layout", err.to_string()),
+            tenferro_tensor::Error::invalid_argument(F::VALIDATION, "layout", err.to_string()),
         )
     })?;
     solve(raw)

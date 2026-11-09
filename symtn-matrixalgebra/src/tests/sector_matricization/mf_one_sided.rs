@@ -1244,8 +1244,9 @@ where
     );
     // Q: the 9 identity after the packed sector factors; R and L: 0 (packed
     // buffers moved, charge 2 has no domain block); Q': the 4 identity after
-    // the packed sector factors; U: 36 + 9; Vh: 16 + 4 (first owners moved).
-    assert_eq!(bytes(probe.appended_elements), bytes(9 + 4 + 45 + 20));
+    // the packed sector factors; U: the 9 identity and Vh: the 4 identity
+    // after their packed sector factors.
+    assert_eq!(bytes(probe.appended_elements), bytes(9 + 4 + 9 + 4));
 }
 
 #[test]

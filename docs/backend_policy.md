@@ -120,8 +120,8 @@ Host parallelism is the engine's own decision. Dense kernels split work by
 Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
 provider's grouped block GEMMs (recoupling, block-wise contraction) and its
-block factorizations over a tensor's sector blocks (compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR and LQ, the QR
+block factorizations over a tensor's sector blocks (compact and full SVD,
+values-only SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR and LQ, the QR
 null bases of `left_null` and `right_null`, Hermitian and general
 eigendecomposition full and values-only, the polar decompositions and the
 Hermitian `exp`) are placed by one routine and run by one lane runner (the factorizations inside the
@@ -202,8 +202,8 @@ report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Compact QR, compact
-LQ, full QR and LQ, the `left_null` and `right_null` bases, compact SVD,
-full EIGH, the left and right polar decompositions and the Hermitian `exp`
+LQ, full QR and LQ, the `left_null` and `right_null` bases, compact and
+full SVD, full EIGH, the left and right polar decompositions and the Hermitian `exp`
 run through
 `DenseExecutor::factorize_batch_into`: the
 operation allocates each output once (the final packed factor for a
@@ -234,8 +234,8 @@ Householder kernel, and its reflectors applied straight onto `I_m` (onto
 `[0; I_{m-n}]`, so only the final `m x (m - n)` basis is written):
 `O(m n^2 + m^2 n)` against the `O(m^2 (n + m))` economy QR of `[X | I]`
 that every other executor, and the BLAS provider, still runs through its
-own `qr_into` (the full SVD's completion keeps that route on every
-provider). Full LQ and the `right_null` basis are the same full QR and null
+own `qr_into` (as does the full SVD's `[U1 | I]` completion on an
+executor without a native full SVD). Full LQ and the `right_null` basis are the same full QR and null
 basis batches on each block's transpose `X^T`, read in place (a strided
 view, no adjoint copy): `X^T = Q' R'` gives `L = R'^T`, `Q = Q'^T`, and the
 null basis `N'` of `X^T` gives `N = N'^T` (`X N^H = (N'^H X^T)^T = 0`), so
@@ -248,7 +248,18 @@ the final buffer after the batch. Each tall block allocates the compact
 factor's own workspace once (tlinalg has no initialized-coefficient
 destination form; the lane lends the reused coefficient `Vec`). Columns past
 `min(m, n)` of the full `Q`, and the null basis, are any orthonormal basis
-of the complement and may differ by provider. A native polar job of an
+of the complement and may differ by provider. Native full SVD of an `m x n`
+block is tlinalg's `svd_into` with its full flag straight into the
+destination `U` (`m x m`), `S` and `Vh` (`n x n`), as tenferro's
+`svd_full` runs it with no post-step (a zero extent gives identity `U` and
+`Vh`); a lazy adjoint's parent blocks are solved into the lane scratch
+(`m^2 + n^2` elements of `T` per item) and placed as the adjoint problem
+(`u = Vh^H`, `vh = U^H`), so no adjoint input is staged. The phase gauge
+then runs in place on the delivered destination. Other executors solve each
+sector with `svd_full_owned` of a compact copy when they support it, and
+otherwise solve the compact SVD with their `svd_into` and complete its `U`
+and `V` from `[U1 | I]` with `qr_into`; the columns of `U` and rows of `Vh` past `min(m, n)` may differ
+by provider. A native polar job of an
 `m x n` block (MatrixAlgebraKit's `PolarViaSVD`, `k = min(m, n)`) solves the
 compact SVD into its lane's typed scratch (`U` and `Vh`, `(m + n) k`
 elements of `T` per item) and a separate real spectrum scratch (`S`, `k`
@@ -289,7 +300,8 @@ temporaries). Every other executor, and the BLAS provider,
 reach `factorize_batch_into` through its default: the owned
 `factorize_batch` with each delivered output copied into its destination
 (for LQ, each block's adjoint written into one scratch sized for the
-largest block and factored with QR). The polar decompositions have no owned
+largest block and factored with QR; for full SVD, the per-matrix route
+above). The polar decompositions have no owned
 form (`factorize_batch` refuses them); the default instead runs, per block,
 one `svd` and two `dot_general_into` calls writing the destinations, the
 `sqrt(S)` scaling applied in place to the owned factor, and checks the block

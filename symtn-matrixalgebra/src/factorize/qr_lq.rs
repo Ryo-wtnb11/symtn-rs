@@ -161,58 +161,6 @@ where
     })
 }
 
-/// The economy QR of the `m x (n + m)` matrix `[X | I_m]`, `X` the `m x n`
-/// block `fill` writes (column-major): returns its `m x m` unitary `Q` and
-/// its `m x (n + m)` upper-trapezoidal `R`. Because `R` is upper-trapezoidal,
-/// the first `n` columns of `Q` span a superspace of `X`'s columns whatever
-/// its rank, and the last `m - n` span their orthogonal complement.
-///
-/// Through the executor's economy QR a full `Q` costs `O(m^2 (n + m))` here
-/// against MatrixAlgebraKit's `geqrf` + `unmqr`/`ungqr`
-/// `O(m n^2 + m n (m - n))`. Its one consumer is the full-SVD
-/// [`orthonormal_completion`](super::svd::orthonormal_completion).
-/// `qr_full`, `lq_full`, `left_null` and `right_null` instead submit
-/// [`DenseFactorization::QrFull`] and [`DenseFactorization::QrNull`]
-/// batches (LQ and `right_null` on each block's transpose), which the native
-/// provider solves by Householder reflectors applied to the identity at
-/// MatrixAlgebraKit's cost, and other executors by the same augmentation.
-pub(super) fn augmented_identity_qr<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    m: usize,
-    n: usize,
-    fill: impl FnOnce(&mut [D]),
-) -> Result<(Vec<D>, Vec<D>), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let mut augmented = vec![D::zero(); m * (n + m)];
-    fill(&mut augmented[..m * n]);
-    for row in 0..m {
-        augmented[m * n + row * m + row] = D::one();
-    }
-    let mut q = vec![D::zero(); m * m];
-    let mut r = vec![D::zero(); m * (n + m)];
-    qr_into_workspace(
-        engine,
-        dense,
-        &augmented,
-        m,
-        n + m,
-        m,
-        &mut q,
-        m,
-        m,
-        m,
-        &mut r,
-        m,
-        n + m,
-        m,
-    )?;
-    Ok((q, r))
-}
-
 pub(super) fn scale_col<D: FactorScalar>(
     data: &mut [D],
     rows: usize,
@@ -1416,13 +1364,6 @@ where
     Ok((left, right))
 }
 
-/// Adjoint (conjugate transpose) of a column-major `rows x cols` matrix.
-pub(super) fn adjoint_col_major<D: FactorScalar>(data: &[D], rows: usize, cols: usize) -> Vec<D> {
-    let mut adjoint = vec![D::zero(); data.len()];
-    transpose_col_major_into(data, rows, cols, &mut adjoint, FactorScalar::adjoint);
-    adjoint
-}
-
 /// Writes `map` of each entry of the column-major `rows x cols` matrix
 /// `data`, transposed, into the column-major `cols x rows` matrix `out`.
 pub(super) fn transpose_col_major_into<D: Copy>(
@@ -1454,47 +1395,6 @@ fn transpose_square_in_place<D: Copy>(data: &mut [D], n: usize, map: impl Fn(D) 
             data[lower] = map(value);
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn qr_into_workspace<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    input: &[D],
-    input_rows: usize,
-    input_cols: usize,
-    input_leading: usize,
-    q: &mut [D],
-    q_rows: usize,
-    q_cols: usize,
-    q_leading: usize,
-    r: &mut [D],
-    r_rows: usize,
-    r_cols: usize,
-    r_leading: usize,
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let input_shape = [input_rows, input_cols];
-    let input_strides = [1usize, input_leading];
-    let q_shape = [q_rows, q_cols];
-    let q_strides = [1usize, q_leading];
-    let r_shape = [r_rows, r_cols];
-    let r_strides = [1usize, r_leading];
-    let input_view =
-        DenseView::new(input, &input_shape, &input_strides, 0).map_err(OperationError::Dense)?;
-    let q_view = DenseViewMut::new(q, &q_shape, &q_strides, 0).map_err(OperationError::Dense)?;
-    let r_view = DenseViewMut::new(r, &r_shape, &r_strides, 0).map_err(OperationError::Dense)?;
-    dense
-        .qr_into(
-            engine,
-            D::dense_read(input_view),
-            D::dense_write(q_view),
-            D::dense_write(r_view),
-        )
-        .map_err(OperationError::Dense)
 }
 
 /// Compact QR of each column-major `(data, rows, cols)` block into its

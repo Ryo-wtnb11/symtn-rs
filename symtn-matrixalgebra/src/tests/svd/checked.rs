@@ -486,7 +486,12 @@ fn checked_native_full_svd_stages_before_unchanged_provider_admission() {
 
     let full = svd_full_dyn_checked_generic(engine, &mut dense, &input).unwrap();
 
-    assert_eq!(dense.counts().svd_full, 2);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 2)
+    );
     let (steps, ..) = full_svd_provider_steps();
     assert_eq!(provider.calls.get(), steps.iter().sum::<usize>());
     assert!(Arc::ptr_eq(full.u().space().provider_arc(), &provider));

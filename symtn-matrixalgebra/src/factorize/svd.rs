@@ -8,7 +8,7 @@ use symtn_dense::Engine;
 /// This is the pure device-boundary factorization: the dense per-sector SVDs
 /// run through the [`DenseExecutor`] and no truncation logic is involved.
 /// Per block the bond is `min(rows, cols)`; the square-`U` variant is
-/// MatrixAlgebraKit `svd_full` (later batch).
+/// MatrixAlgebraKit `svd_full` ([`SvdFull`]).
 #[derive(Clone, Debug)]
 pub(crate) struct SvdCompact<R, D> {
     pub u: BoundTensorMap<R, D>,
@@ -1566,16 +1566,15 @@ impl<R, D> SvdFullDyn<R, D> {
 }
 
 #[cfg(test)]
-/// Full fusion-tensor SVD through the device boundary.
-///
-/// A provider that advertises [`DenseExecutor::supports_svd_full`] factorizes
-/// the full matrices directly, one call per sector. Otherwise the unitaries
-/// are completed from the compact factors with an extra economy QR of
-/// `[U1 | I]` per sector (any orthonormal completion is exact because the
-/// corresponding rows/columns of `S` are zero), so every provider stays on the
-/// existing dense-executor boundary. The two routes agree on the reconstructed
-/// input, the spectrum and unitarity, but the basis spanning the null space is
-/// not unique and differs between them.
+/// Full fusion-tensor SVD through the device boundary: every sector in one
+/// [`DenseFactorization::SvdFull`] batch (see [`full_svd_packed`]). The
+/// native provider solves the blocks on its lanes; any other executor keeps
+/// its per-matrix route below the seam ([`DenseExecutor::svd_full_owned`]
+/// when it [`DenseExecutor::supports_svd_full`], otherwise the compact
+/// [`DenseExecutor::svd_into`] completed by an economy QR of `[U1 | I]`,
+/// exact because the matching rows/columns of `S` are zero). The routes
+/// agree on the reconstructed input, the spectrum and unitarity; the basis
+/// spanning the null space is not unique and may differ between them.
 pub(crate) fn svd_full<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -1653,156 +1652,121 @@ where
     svd_full_oriented_dyn(engine, dense, input, FactorPlacement::Adjoint)
 }
 
-#[expect(
-    clippy::type_complexity,
-    reason = "the private stage returns the fixed dense full-SVD tuple without another wrapper"
-)]
-pub(super) fn owned_full_svd_stage<E, D>(
+/// Full SVD of every coupled-sector matrix in one solver-first executor
+/// batch ([`DenseFactorization::SvdFull`]), each solved block gauged in
+/// place ([`svd_full_gauge`]), as square `u` (left) and `vh` (right) factors
+/// written once into one buffer per side in matrix order, laid out from the
+/// matrix shapes before the dense call, as TensorKit's `svd_full!` writes
+/// each block of its preallocated `U`/`Vᴴ` in place; plus each sector's
+/// spectrum. Under [`FactorPlacement::Adjoint`] the matrices are the parent
+/// blocks `A` of a lazy adjoint `X = A^H`, read in place and placed as the
+/// full SVD of `X` (`u = Vh^H`, `vh = U^H`), so no adjoint is staged.
+/// Past `min(rows, cols)`, `u`'s columns and `vh`'s rows are any
+/// orthonormal basis of the complement, which may differ by executor.
+fn full_svd_packed<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
-    data: &mut Vec<D>,
-    rows: usize,
-    cols: usize,
-) -> Result<Option<(Vec<D>, Vec<f64>, Vec<D>)>, OperationError>
+    matrices: &(impl SectorMatrices<D> + ?Sized),
+    placement: FactorPlacement,
+) -> Result<(PackedFactorPairs<D>, Vec<SectorSpectrum>), OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    if !dense.supports_svd_full() {
-        return Ok(None);
-    }
-    let input = match D::dense_into_owned(std::mem::take(data)) {
-        Ok(input) => input,
-        Err(input_data) => {
-            *data = input_data;
-            return Ok(None);
-        }
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    // `X`'s `(rows, cols)`: an adjoint parent block is `X^H`.
+    let dims = |&(_, rows, cols): &(&[D], usize, usize)| match placement {
+        FactorPlacement::Direct => (rows, cols),
+        FactorPlacement::Adjoint => (cols, rows),
     };
-    let mut outputs = dense
-        .svd_full_owned(engine, input, rows, cols)
-        .map_err(OperationError::Dense)?;
-    if outputs.len() != 3 {
-        return Err(OperationError::Dense(arity_mismatch(
-            "svd_full_owned",
-            3,
-            outputs.len(),
-        )));
-    }
-    let u = compact_factor_output_owned(outputs.remove(0), &[rows, rows], "svd_full_owned")?;
-    let singular_values =
-        compact_real_spectrum_owned::<D>(outputs.remove(0), &[rows.min(cols)], "svd_full_owned")?;
-    let vh = compact_factor_output_owned(outputs.remove(0), &[cols, cols], "svd_full_owned")?;
-    Ok(Some((u, singular_values, vh)))
-}
-
-/// The right factor of one full-SVD sector: the dense provider's `Vh`, or
-/// the completed `V` of the thin-SVD fallback. Callers place whichever they
-/// need, so neither orientation pays an extra adjoint.
-pub(super) enum FullSvdRight<D> {
-    Vh(Vec<D>),
-    V(Vec<D>),
-}
-
-/// Thin-SVD scratch for the full-SVD fallback, sized once for the largest
-/// sector and allocated on first use.
-pub(super) struct FullSvdWorkspace<D: FactorScalar> {
-    max_rows: usize,
-    max_cols: usize,
-    max_rank: usize,
-    u: Vec<D>,
-    s: Vec<D::Real>,
-    vt: Vec<D>,
-}
-
-impl<D: FactorScalar> FullSvdWorkspace<D> {
-    pub(super) fn for_sectors(shapes: impl Iterator<Item = (usize, usize)>) -> Self {
-        let (mut max_rows, mut max_cols, mut max_rank) = (0, 0, 0);
-        for (rows, cols) in shapes {
-            max_rows = max_rows.max(rows);
-            max_cols = max_cols.max(cols);
-            max_rank = max_rank.max(rows.min(cols));
-        }
-        Self {
-            max_rows,
-            max_cols,
-            max_rank,
-            u: Vec::new(),
-            s: Vec::new(),
-            vt: Vec::new(),
-        }
-    }
-}
-
-/// Full SVD of one `rows x cols` coupled-sector matrix, ungauged: the
-/// provider's owned full SVD when available (it takes `data`), otherwise the
-/// thin `svd_into` completed to square factors.
-#[allow(clippy::type_complexity)]
-pub(super) fn full_svd_numerical_stage<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    data: &mut Vec<D>,
-    rows: usize,
-    cols: usize,
-    workspace: &mut FullSvdWorkspace<D>,
-) -> Result<(Vec<D>, Vec<f64>, FullSvdRight<D>), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    if let Some((u_full, s_values, vh_full)) =
-        owned_full_svd_stage(engine, dense, data, rows, cols)?
-    {
-        return Ok((u_full, s_values, FullSvdRight::Vh(vh_full)));
-    }
-    let rank = rows.min(cols);
-    let FullSvdWorkspace {
-        max_rows,
-        max_cols,
-        max_rank,
-        ..
-    } = *workspace;
-    if workspace.u.is_empty() && max_rows != 0 && max_rank != 0 {
-        workspace.u = vec![D::zero(); max_rows * max_rank];
-        workspace.s = vec![D::Real::zero(); max_rank];
-        workspace.vt = vec![D::zero(); max_rank * max_cols];
-    }
-    let shape = [rows, cols];
-    let strides = [1usize, rows];
-    let view = DenseView::new(data, &shape, &strides, 0).map_err(OperationError::Dense)?;
-    let u_shape = [rows, rank];
-    let u_strides = [1usize, max_rows];
-    let s_shape = [rank];
-    let s_strides = [1usize];
-    let vt_shape = [rank, cols];
-    let vt_strides = [1usize, max_rank];
-    let u_view = DenseViewMut::new(&mut workspace.u, &u_shape, &u_strides, 0)
-        .map_err(OperationError::Dense)?;
-    let s_view = DenseViewMut::new(&mut workspace.s, &s_shape, &s_strides, 0)
-        .map_err(OperationError::Dense)?;
-    let vt_view = DenseViewMut::new(&mut workspace.vt, &vt_shape, &vt_strides, 0)
-        .map_err(OperationError::Dense)?;
-    dense
-        .svd_into(
-            engine,
-            D::dense_read(view),
-            D::dense_write(u_view),
-            D::Real::dense_write(s_view),
-            D::dense_write(vt_view),
-        )
-        .map_err(OperationError::Dense)?;
-    let mut u_thin = vec![D::zero(); rows * rank];
-    let mut vt_thin = vec![D::zero(); rank * cols];
-    copy_col_major_strided(&workspace.u, rows, rank, max_rows, &mut u_thin, rows);
-    copy_col_major_strided(&workspace.vt, rank, cols, max_rank, &mut vt_thin, rank);
-    let u_full = orthonormal_completion(engine, dense, &u_thin, rows, rank)?;
-    let v_thin = adjoint_col_major(&vt_thin, rank, cols);
-    let v_full = orthonormal_completion(engine, dense, &v_thin, cols, rank)?;
-    let s_values = workspace.s[..rank]
+    let left_ranges = packed_ranges(blocks.iter().map(|block| dims(block).0.pow(2)));
+    let right_ranges = packed_ranges(blocks.iter().map(|block| dims(block).1.pow(2)));
+    let s_ranges = packed_ranges(blocks.iter().map(|&(_, rows, cols)| rows.min(cols)));
+    let end = |ranges: &[std::ops::Range<usize>]| ranges.last().map_or(0, |range| range.end);
+    let mut left = vec![D::zero(); end(&left_ranges)];
+    let mut right = vec![D::zero(); end(&right_ranges)];
+    let mut s = vec![D::Real::zero(); end(&s_ranges)];
+    let mut read_layouts = Vec::new();
+    let inputs = col_major_reads(&blocks, &mut read_layouts)?;
+    let layouts = blocks
         .iter()
-        .copied()
-        .map(Into::into)
+        .map(|block| {
+            let (rows, cols) = dims(block);
+            [
+                matrix_layout(rows, rows),
+                vector_layout(rows.min(cols)),
+                matrix_layout(cols, cols),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    let dense_placement = match placement {
+        FactorPlacement::Direct => symtn_dense::FactorPlacement::AsComputed,
+        FactorPlacement::Adjoint => symtn_dense::FactorPlacement::Adjoint,
+    };
+    let mut singular_values = sectors
+        .iter()
+        .map(|&sector| SectorSpectrum {
+            sector,
+            values: Vec::new(),
+        })
         .collect::<Vec<_>>();
-    Ok((u_full, s_values, FullSvdRight::V(v_full)))
+    {
+        let mut dests = split_ranges(&mut left, &left_ranges)?
+            .into_iter()
+            .zip(split_ranges(&mut s, &s_ranges)?)
+            .zip(split_ranges(&mut right, &right_ranges)?)
+            .zip(&layouts)
+            .map(|(((u, s), vh), layout)| {
+                Ok(FactorDest::new(
+                    [
+                        Some(dest_write(u, &layout[0])?),
+                        Some(dest_write(s, &layout[1])?),
+                        Some(dest_write(vh, &layout[2])?),
+                    ],
+                    dense_placement,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        factorize_into_solver_first(
+            engine,
+            dense,
+            DenseFactorization::SvdFull,
+            &inputs,
+            &mut dests,
+            |index, dest| {
+                let (rows, cols) = dims(&blocks[index]);
+                let [u, s, vh] = dest.outputs_mut();
+                svd_full_gauge(
+                    dest_data::<D>(u, "svd_into")?,
+                    rows,
+                    rows,
+                    dest_data::<D>(vh, "svd_into")?,
+                    cols,
+                    cols,
+                );
+                singular_values[index].values =
+                    widened_spectrum(dest_data::<D::Real>(s, "svd_into")?);
+                Ok(())
+            },
+        )?;
+    }
+    let pairs = blocks
+        .iter()
+        .zip(sectors)
+        .zip(left_ranges.into_iter().zip(right_ranges))
+        .map(|((block, sector), (left, right))| {
+            let (rows, cols) = dims(block);
+            PackedFactorPair {
+                sector,
+                kept: rows,
+                left,
+                left_rows: rows,
+                right,
+                right_leading: cols,
+            }
+        })
+        .collect();
+    Ok((PackedFactorPairs { pairs, left, right }, singular_values))
 }
 
 #[cfg(test)]
@@ -1845,62 +1809,12 @@ where
     D: FactorScalar,
 {
     let space = input.space().space();
-    // Why pack rather than borrow admitted regions: `owned_full_svd_stage`
-    // moves each matrix into the dense provider, so a borrowed region would
-    // be copied into an owned buffer anyway.
-    let mut matricizations = sector_matricizations(space.structure(), input.data(), space.nout())?;
+    let matrices =
+        multiplicity_free_input_matricizations(space.structure(), input.data(), space.nout())?;
     let authority = MfAuthority(input.space());
     let row_dimensions = authority.coupled_dimensions(space.homspace().codomain())?;
     let col_dimensions = authority.coupled_dimensions(space.homspace().domain())?;
-
-    let mut pairs = Vec::with_capacity(matricizations.len());
-    let mut singular_values = Vec::with_capacity(matricizations.len());
-    let mut workspace = FullSvdWorkspace::for_sectors(
-        matricizations
-            .iter()
-            .map(|matrix| (matrix.rows, matrix.cols)),
-    );
-    for matrix in &mut matricizations {
-        let (rows, cols) = (matrix.rows, matrix.cols);
-        let (mut u_full, s_values, right) =
-            full_svd_numerical_stage(engine, dense, &mut matrix.data, rows, cols, &mut workspace)?;
-        let (mut left, left_rows, mut right, right_leading) = match (placement, right) {
-            (FactorPlacement::Direct, FullSvdRight::Vh(vh_full)) => (u_full, rows, vh_full, cols),
-            (FactorPlacement::Direct, FullSvdRight::V(v_full)) => {
-                (u_full, rows, adjoint_col_major(&v_full, cols, cols), cols)
-            }
-            (FactorPlacement::Adjoint, FullSvdRight::Vh(mut vh_full)) => {
-                adjoint_square_col_major_in_place(&mut vh_full, cols);
-                adjoint_square_col_major_in_place(&mut u_full, rows);
-                (vh_full, cols, u_full, rows)
-            }
-            (FactorPlacement::Adjoint, FullSvdRight::V(v_full)) => {
-                adjoint_square_col_major_in_place(&mut u_full, rows);
-                (v_full, cols, u_full, rows)
-            }
-        };
-        svd_full_gauge(
-            &mut left,
-            left_rows,
-            left_rows,
-            &mut right,
-            right_leading,
-            right_leading,
-        );
-
-        singular_values.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: s_values,
-        });
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: left_rows,
-            left,
-            left_rows,
-            right,
-            right_leading,
-        });
-    }
+    let (mut pairs, singular_values) = full_svd_packed(engine, dense, &matrices, placement)?;
 
     let adjoint_space = match placement {
         FactorPlacement::Direct => None,
@@ -1910,38 +1824,26 @@ where
     };
     let authority = adjoint_space.as_ref().unwrap_or(input.space());
     let homspace = authority.space().homspace();
-    let (output_row_dimensions, output_col_dimensions) = match placement {
-        FactorPlacement::Direct => (&row_dimensions, &col_dimensions),
-        FactorPlacement::Adjoint => (&col_dimensions, &row_dimensions),
-    };
-
-    // The left/right bond legs differ in the full SVD (rows vs columns), so
-    // build the two factors with separate bond dimensions.
-    let u_factor = build_bound_factor_with_placement(
-        authority,
-        homspace,
-        &matricizations,
-        &mut pairs,
-        output_row_dimensions,
-        FactorSide::Left,
-        placement,
-    )?;
-    let vh_factor = build_bound_factor_with_placement(
-        authority,
-        homspace,
-        &matricizations,
-        &mut pairs,
-        output_col_dimensions,
-        FactorSide::Right,
-        placement,
-    )?;
     let (row_dimensions, col_dimensions) = match placement {
         FactorPlacement::Direct => (row_dimensions, col_dimensions),
         FactorPlacement::Adjoint => (col_dimensions, row_dimensions),
     };
+    // The left/right bond legs differ in the full SVD (rows vs columns), so
+    // build the two factors with separate bond dimensions.
+    let (u, vh) = with_input_geometry!(&matrices, |geometry| {
+        let mut publish = |dimensions, side| {
+            build_bound_factor_with_placement(
+                authority, homspace, geometry, &mut pairs, dimensions, side, placement,
+            )
+        };
+        Ok::<_, OperationError>((
+            publish(&row_dimensions, FactorSide::Left)?,
+            publish(&col_dimensions, FactorSide::Right)?,
+        ))
+    })?;
     Ok(SvdFullFactorsDyn {
-        u: u_factor,
-        vh: vh_factor,
+        u,
+        vh,
         singular_values,
         row_dimensions,
         col_dimensions,
@@ -1994,30 +1896,6 @@ fn adjoint_col_major_in_place<D: FactorScalar>(data: &mut [D], rows: usize, cols
             }
         }
     }
-}
-
-/// Completes `k` orthonormal columns (`m x k`, column-major) to a full
-/// `m x m` orthonormal basis via [`augmented_identity_qr`] of `[Q1 | I]`;
-/// the first `k` columns are returned unchanged.
-pub(super) fn orthonormal_completion<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    thin: &[D],
-    rows: usize,
-    rank: usize,
-) -> Result<Vec<D>, OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    if rank == rows {
-        return Ok(thin.to_vec());
-    }
-    let (mut full, _) = augmented_identity_qr(engine, dense, rows, rank, |block| {
-        block.copy_from_slice(thin);
-    })?;
-    full[..rows * rank].copy_from_slice(thin);
-    Ok(full)
 }
 
 /// Rectangular diagonal `W_row <- W_col` bond factor (the `S` of the full
@@ -2591,58 +2469,13 @@ where
 {
     let provider = input.space().provider_arc();
     let space = input.space().space();
-    // Why pack rather than borrow admitted regions: `owned_full_svd_stage`
-    // moves each matrix into the dense provider, so a borrowed region would
-    // be copied into an owned buffer anyway.
-    let mut matrices = sector_matricizations(space.structure(), input.data(), space.nout())
+    let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
     let checked = CheckedAuthority(provider);
     let row_dimensions = checked.coupled_dimensions(space.homspace().codomain())?;
     let col_dimensions = checked.coupled_dimensions(space.homspace().domain())?;
-    let mut workspace =
-        FullSvdWorkspace::for_sectors(matrices.iter().map(|matrix| (matrix.rows, matrix.cols)));
-    let mut pairs = Vec::with_capacity(matrices.len());
-    let mut singular_values = Vec::with_capacity(matrices.len());
-    for matrix in &mut matrices {
-        let (rows, cols) = (matrix.rows, matrix.cols);
-        let (mut u_full, s_values, right) =
-            full_svd_numerical_stage(engine, dense, &mut matrix.data, rows, cols, &mut workspace)?;
-        let (mut left, left_rows, mut right, right_leading) = match (placement, right) {
-            (FactorPlacement::Direct, FullSvdRight::Vh(vh_full)) => (u_full, rows, vh_full, cols),
-            (FactorPlacement::Direct, FullSvdRight::V(v_full)) => {
-                (u_full, rows, adjoint_col_major(&v_full, cols, cols), cols)
-            }
-            (FactorPlacement::Adjoint, FullSvdRight::Vh(mut vh_full)) => {
-                adjoint_square_col_major_in_place(&mut vh_full, cols);
-                adjoint_square_col_major_in_place(&mut u_full, rows);
-                (vh_full, cols, u_full, rows)
-            }
-            (FactorPlacement::Adjoint, FullSvdRight::V(v_full)) => {
-                adjoint_square_col_major_in_place(&mut u_full, rows);
-                (v_full, cols, u_full, rows)
-            }
-        };
-        svd_full_gauge(
-            &mut left,
-            left_rows,
-            left_rows,
-            &mut right,
-            right_leading,
-            right_leading,
-        );
-        singular_values.push(SectorSpectrum {
-            sector: matrix.sector,
-            values: s_values,
-        });
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: left_rows,
-            left,
-            left_rows,
-            right,
-            right_leading,
-        });
-    }
+    let (mut pairs, singular_values) = full_svd_packed(engine, dense, &matrices, placement)
+        .map_err(CheckedGenericFactorPlanError::from)?;
     let (homspace, row_dimensions, col_dimensions) = match placement {
         FactorPlacement::Direct => (space.homspace().clone(), row_dimensions, col_dimensions),
         FactorPlacement::Adjoint => (
@@ -2654,24 +2487,17 @@ where
             row_dimensions,
         ),
     };
-    let u = publish_one_sided_factor(
-        &checked,
-        &homspace,
-        &matrices,
-        &mut pairs,
-        &row_dimensions,
-        FactorSide::Left,
-        placement,
-    )?;
-    let vh = publish_one_sided_factor(
-        &checked,
-        &homspace,
-        &matrices,
-        &mut pairs,
-        &col_dimensions,
-        FactorSide::Right,
-        placement,
-    )?;
+    let (u, vh) = with_input_geometry!(&matrices, |geometry| {
+        let mut publish = |dimensions, side| {
+            publish_one_sided_factor(
+                &checked, &homspace, geometry, &mut pairs, dimensions, side, placement,
+            )
+        };
+        Ok::<_, CheckedGenericFactorPlanError<R::Error>>((
+            publish(&row_dimensions, FactorSide::Left)?,
+            publish(&col_dimensions, FactorSide::Right)?,
+        ))
+    })?;
     Ok(SvdFullFactorsDyn {
         u,
         vh,

@@ -979,7 +979,9 @@ impl DenseExecutor for DefaultDenseExecutor {
         ))]
         {
             // Both compiled CPU providers factorize the full matrices
-            // natively, so neither reaches the `[U1 | I]` QR completion.
+            // natively (the faer provider's `SvdFull` batch on the lanes,
+            // BLAS through this entry), so neither reaches the `[U1 | I]`
+            // QR completion.
             true
         }
         #[cfg(any(
@@ -1210,6 +1212,15 @@ impl DenseExecutor for DefaultDenseExecutor {
                 let null = op == crate::DenseFactorization::QrNull;
                 for (index, &input) in inputs.iter().enumerate() {
                     let outcome = crate::executor::full_qr_by_qr_into(self, engine, input, null);
+                    sink(index, outcome)?;
+                }
+                return Ok(());
+            }
+            if op == crate::DenseFactorization::SvdFull {
+                // BLAS keeps the executor default's per-matrix
+                // `svd_full_owned`, one input after another.
+                for (index, &input) in inputs.iter().enumerate() {
+                    let outcome = crate::executor::full_svd_by_entries(self, engine, input);
                     sink(index, outcome)?;
                 }
                 return Ok(());
@@ -2357,6 +2368,9 @@ fn factorize_batch_serial(
         DenseFactorization::QrFull | DenseFactorization::QrNull => {
             unreachable!("full QR and its null basis run through `qr_into` (`factorize_batch`)")
         }
+        DenseFactorization::SvdFull => {
+            unreachable!("full SVD runs through `svd_full_owned` (`factorize_batch`)")
+        }
         DenseFactorization::LeftPolar
         | DenseFactorization::RightPolar
         | DenseFactorization::ExpViaEigh => {
@@ -2375,6 +2389,9 @@ fn factorize_batch_serial(
                 | DenseFactorization::Lq
                 | DenseFactorization::QrFull
                 | DenseFactorization::QrNull => input.qr_read(exec).map(|(q, r)| vec![q, r]),
+                DenseFactorization::SvdFull => {
+                    unreachable!("full SVD never reaches the serial entries (see `entry`)")
+                }
                 DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
                 | DenseFactorization::ExpViaEigh => {

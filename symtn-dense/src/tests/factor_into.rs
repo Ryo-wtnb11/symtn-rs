@@ -1,8 +1,9 @@
 //! `DenseExecutor::factorize_batch_into`: whole-batch destination
 //! validation before any solve; the compatibility default's delivery,
 //! failure provenance and owned dispatch; the native lanes' destination
-//! writes against the native owned batch, placed, and their full QR and
-//! null basis laws on strided transposed reads; and the destination-only
+//! writes against the native owned batch, placed, their full QR and null
+//! basis laws on strided transposed reads and their full SVD laws; and the
+//! destination-only
 //! polar decompositions and Hermitian exponential against their laws and
 //! closed forms.
 
@@ -96,6 +97,8 @@ fn dest_shapes(
         DenseFactorization::Qr | DenseFactorization::Lq => [with(&[m, k]), with(&[k, n]), vec![]],
         DenseFactorization::Svd if adjoint => [with(&[n, k]), with(&[k]), with(&[k, m])],
         DenseFactorization::Svd => [with(&[m, k]), with(&[k]), with(&[k, n])],
+        DenseFactorization::SvdFull if adjoint => [with(&[n, n]), with(&[k]), with(&[m, m])],
+        DenseFactorization::SvdFull => [with(&[m, m]), with(&[k]), with(&[n, n])],
         DenseFactorization::Eigh => [with(&[m]), with(&[m, m]), vec![]],
         DenseFactorization::QrFull => [with(&[m, m]), with(&[m, n]), vec![]],
         DenseFactorization::QrNull => [with(&[m, m - k]), vec![], vec![]],
@@ -113,7 +116,9 @@ impl<T: Elem> Buffers<T> {
         let len = |shape: &Vec<usize>| shape.iter().product::<usize>();
         let fill = Complex64::new(sentinel, 0.0);
         let (factor_shapes, spectrum_shape): ([&Vec<usize>; 2], &Vec<usize>) = match op {
-            DenseFactorization::Svd => ([&shapes[0], &shapes[2]], &shapes[1]),
+            DenseFactorization::Svd | DenseFactorization::SvdFull => {
+                ([&shapes[0], &shapes[2]], &shapes[1])
+            }
             DenseFactorization::Eigh => ([&shapes[1], &shapes[2]], &shapes[0]),
             _ => ([&shapes[0], &shapes[1]], &shapes[2]),
         };
@@ -151,7 +156,7 @@ impl<T: Elem> Buffers<T> {
             DenseViewMut::new(data, &self.shapes[index], &self.strides[index], 0).unwrap()
         };
         let outputs = match op {
-            DenseFactorization::Svd => [
+            DenseFactorization::Svd | DenseFactorization::SvdFull => [
                 Some(T::write(view(a, 0))),
                 Some(T::Real::write(
                     DenseViewMut::new(&mut self.spectrum, &self.shapes[1], &self.strides[1], 0)
@@ -180,7 +185,7 @@ impl<T: Elem> Buffers<T> {
         let factor = |data: &Vec<T>| data.iter().map(|&value| value.to_c64()).collect();
         let spectrum = self.spectrum.iter().map(|&value| value.to_c64()).collect();
         match op {
-            DenseFactorization::Svd => {
+            DenseFactorization::Svd | DenseFactorization::SvdFull => {
                 vec![factor(&self.factors[0]), spectrum, factor(&self.factors[1])]
             }
             DenseFactorization::Eigh => vec![spectrum, factor(&self.factors[0])],
@@ -228,7 +233,7 @@ fn placed(
     if placement == FactorPlacement::Adjoint {
         let last = outputs.len() - 1;
         for (index, tensor) in owned.iter().enumerate() {
-            if op == DenseFactorization::Svd && index == 1 {
+            if matches!(op, DenseFactorization::Svd | DenseFactorization::SvdFull) && index == 1 {
                 continue;
             }
             let shape = tensor.shape();
@@ -288,6 +293,8 @@ mod native {
             (DenseFactorization::QrNull, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::Adjoint),
+            (DenseFactorization::SvdFull, FactorPlacement::AsComputed),
+            (DenseFactorization::SvdFull, FactorPlacement::Adjoint),
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
         ];
         for (threads, policy) in policies() {
@@ -493,6 +500,107 @@ mod native {
         transposed_reads_hold_the_qr_laws::<Complex64>();
     }
 
+    /// Purpose: the full SVD of unequal tall, wide and square blocks on
+    /// separate native lanes (`Outer`, four threads): per block
+    /// `U S Vh = X` with `U` (`m x m`) and `Vh` (`n x n`) unitary and `S`
+    /// non-negative and non-increasing.
+    fn full_svd_lanes_hold_the_svd_laws<T: Elem>() {
+        let tol = 1.0e-12;
+        let mut engine = engine(
+            4,
+            tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Outer),
+        );
+        let op = DenseFactorization::SvdFull;
+        let shapes: &[[usize; 2]] = &[[5, 3], [2, 4], [3, 3], [1, 4]];
+        let data: Vec<Vec<T>> = shapes
+            .iter()
+            .enumerate()
+            .map(|(seed, shape)| input_data::<T>(shape, false, seed))
+            .collect();
+        let layouts: Vec<_> = shapes.iter().map(|shape| strides(shape)).collect();
+        let inputs: Vec<_> = data
+            .iter()
+            .zip(shapes)
+            .zip(&layouts)
+            .map(|((data, shape), strides)| {
+                T::read(DenseView::new(data, shape, strides, 0).unwrap())
+            })
+            .collect();
+        let mut buffers: Vec<Buffers<T>> = shapes
+            .iter()
+            .map(|shape| Buffers::new(op, dest_shapes(op, shape, FactorPlacement::AsComputed), 7.0))
+            .collect();
+        let mut dests: Vec<_> = buffers
+            .iter_mut()
+            .map(|b| b.dest(op, FactorPlacement::AsComputed))
+            .collect();
+        let mut delivered = Vec::new();
+        DefaultDenseExecutor::new()
+            .factorize_batch_into(
+                &mut engine,
+                op,
+                &inputs,
+                &mut dests,
+                &mut |index, _, outcome| {
+                    delivered.push((index, outcome));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        drop(dests);
+        assert_eq!(
+            delivered,
+            (0..shapes.len()).map(|i| (i, Ok(()))).collect::<Vec<_>>()
+        );
+        for (index, (buffers, &[m, n])) in buffers.iter().zip(shapes).enumerate() {
+            let k = m.min(n);
+            let outputs = buffers.widened(op);
+            let (u, s, vh) = (&outputs[0], &outputs[1], &outputs[2]);
+            assert_eq!(
+                (u.len(), s.len(), vh.len()),
+                (m * m, k, n * n),
+                "block {index}: output sizes"
+            );
+            for i in 0..k {
+                assert!(s[i].im == 0.0 && s[i].re >= 0.0, "block {index}: S sign");
+                assert!(i == 0 || s[i - 1].re >= s[i].re, "block {index}: S order");
+            }
+            for i in 0..m {
+                for j in 0..m {
+                    let dot: Complex64 = (0..m).map(|r| u[r + m * i].conj() * u[r + m * j]).sum();
+                    let want = Complex64::new(f64::from(u8::from(i == j)), 0.0);
+                    assert!((dot - want).norm() < tol, "block {index}: U not unitary");
+                }
+            }
+            for i in 0..n {
+                for j in 0..n {
+                    let dot: Complex64 = (0..n).map(|c| vh[i + n * c] * vh[j + n * c].conj()).sum();
+                    let want = Complex64::new(f64::from(u8::from(i == j)), 0.0);
+                    assert!((dot - want).norm() < tol, "block {index}: Vh not unitary");
+                }
+            }
+            for row in 0..m {
+                for col in 0..n {
+                    let usv: Complex64 = (0..k)
+                        .map(|p| u[row + m * p] * s[p] * vh[p + n * col])
+                        .sum();
+                    let x = data[index][row + m * col].to_c64();
+                    assert!((usv - x).norm() < tol, "block {index}: U S Vh != X");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_full_svd_lanes_hold_the_svd_laws_f64() {
+        full_svd_lanes_hold_the_svd_laws::<f64>();
+    }
+
+    #[test]
+    fn native_full_svd_lanes_hold_the_svd_laws_c64() {
+        full_svd_lanes_hold_the_svd_laws::<Complex64>();
+    }
+
     /// The allocation calls of one native batch of `blocks` copies of an
     /// `8 x 8` input of `T` on four threads split into two lanes: the
     /// lanes' buffer setups (summed once per lane), every block's solve
@@ -568,6 +676,8 @@ mod native {
             (DenseFactorization::Lq, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::AsComputed),
             (DenseFactorization::Svd, FactorPlacement::Adjoint),
+            (DenseFactorization::SvdFull, FactorPlacement::AsComputed),
+            (DenseFactorization::SvdFull, FactorPlacement::Adjoint),
             (DenseFactorization::Eigh, FactorPlacement::AsComputed),
             (DenseFactorization::LeftPolar, FactorPlacement::AsComputed),
             (DenseFactorization::RightPolar, FactorPlacement::AsComputed),
