@@ -314,12 +314,25 @@ pub(super) fn col_major_reads<'a, D: FactorScalar>(
     blocks: &[(&'a [D], usize, usize)],
     layouts: &'a mut Vec<([usize; 2], [usize; 2])>,
 ) -> Result<Vec<DenseRead<'a>>, OperationError> {
+    block_reads(blocks, layouts, false)
+}
+
+/// Column-major `(data, rows, cols)` blocks as dense reads, in order: each
+/// block itself, or with `transposed` its `cols x rows` transpose (extents
+/// and strides swapped, no copy).
+pub(super) fn block_reads<'a, D: FactorScalar>(
+    blocks: &[(&'a [D], usize, usize)],
+    layouts: &'a mut Vec<([usize; 2], [usize; 2])>,
+    transposed: bool,
+) -> Result<Vec<DenseRead<'a>>, OperationError> {
     layouts.clear();
-    layouts.extend(
-        blocks
-            .iter()
-            .map(|&(_, rows, cols)| ([rows, cols], [1usize, rows])),
-    );
+    layouts.extend(blocks.iter().map(|&(_, rows, cols)| {
+        if transposed {
+            ([cols, rows], [rows, 1usize])
+        } else {
+            ([rows, cols], [1usize, rows])
+        }
+    }));
     let layouts: &'a [_] = layouts;
     blocks
         .iter()

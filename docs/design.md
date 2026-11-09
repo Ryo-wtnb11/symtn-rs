@@ -48,20 +48,23 @@ These steps stay inside one public operation.
 
 Dense factorization groups the tensor into coupled-sector matrices and
 delegates the dense problems to Tenferro. On the native (faer) provider, the
-Host batches are the exception: every compact SVD, compact QR, full QR and
-compact LQ batch, the `left_null` basis, both polar decompositions, the
-Hermitian spectral `exp`
+Host batches are the exception: every compact SVD, compact QR, full QR,
+compact and full LQ batch, the `left_null` and `right_null` bases, both
+polar decompositions, the Hermitian spectral `exp`
 (direct-region, matricized and Checked Generic inputs, all of which
-submit their sector matrices as one batch; LQ reads each block's transpose,
-and a lazy adjoint's LQ runs its parent blocks through the QR batch), values-only SVD, the SVD stage of the
+submit their sector matrices as one batch; LQ and `right_null` read each
+block's transpose, and a lazy adjoint's LQ runs its parent blocks through
+the QR batch), values-only SVD, the SVD stage of the
 pseudo-inverse, every Hermitian eigendecomposition (full and values-only,
 over all three input routes) and the general eigendecomposition (full and
 values-only). For these, symtn's block kernel spreads the blocks over the engine's lanes inside
 the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
-per block; compact QR, compact LQ, full QR, the `left_null` basis, compact
-SVD, full EIGH, the left and right polar factors and the Hermitian `exp`
-write each block's factors
-into the operation's preallocated output (`factorize_batch_into`), as
+per block; compact QR, compact and full LQ, full QR, the `left_null` and
+`right_null` bases, compact SVD, full EIGH, the left and right polar
+factors and the Hermitian `exp` write each block's factors into the
+operation's preallocated output (`factorize_batch_into`; full LQ's
+triangular factor and the `right_null` basis through one packed scratch,
+transposed once), as
 TensorKit writes each block of its `initialize_output` result in place,
 except the pseudo-inverse's SVD, which keeps per-block factors as
 TensorKit's `pinv` does;

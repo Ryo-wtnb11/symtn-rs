@@ -579,8 +579,8 @@ pub(super) struct FullQrObservation {
     pub(super) values: Vec<Complex64>,
 }
 
-/// Full QR/LQ through the destination API only; checks and records each
-/// input's layout and the destination shapes.
+/// Full QR/LQ through the destination API only; records each
+/// input's logical entries and the destination shapes.
 #[derive(Default)]
 pub(super) struct FullQrInputSpy {
     pub(super) observations: Vec<FullQrObservation>,
@@ -607,27 +607,26 @@ impl Observer for FullQrInputSpy {
             return None;
         };
         let input_shape = input.shape().to_vec();
-        let (strides, offset, data_len, values) = match input {
-            DenseRead::F64(view) => (
-                view.strides().to_vec(),
-                view.offset(),
-                view.data().len(),
-                view.data()
-                    .iter()
-                    .map(|&value| Complex64::new(value, 0.0))
-                    .collect(),
-            ),
-            DenseRead::C64(view) => (
-                view.strides().to_vec(),
-                view.offset(),
-                view.data().len(),
-                view.data().to_vec(),
-            ),
+        // The logical column-major entries: an LQ input is a strided
+        // transpose read in place.
+        fn logical<T: Copy>(
+            view: &symtn_dense::DenseView<'_, T>,
+            widen: impl Fn(T) -> Complex64,
+        ) -> Vec<Complex64> {
+            let ([rows, cols], [s0, s1]) = (
+                [view.shape()[0], view.shape()[1]],
+                [view.strides()[0], view.strides()[1]],
+            );
+            (0..cols)
+                .flat_map(|col| (0..rows).map(move |row| (row, col)))
+                .map(|(row, col)| widen(view.data()[view.offset() + row * s0 + col * s1]))
+                .collect()
+        }
+        let values = match &input {
+            DenseRead::F64(view) => logical(view, |value| Complex64::new(value, 0.0)),
+            DenseRead::C64(view) => logical(view, |value| value),
             _ => panic!("full QR/LQ fixture must be f64 or c64"),
         };
-        assert_eq!(offset, 0);
-        assert_eq!(strides, [1, input_shape[0]]);
-        assert_eq!(data_len, input_shape.iter().product::<usize>());
         self.observations.push(FullQrObservation {
             input_shape,
             q_shape: writes[0].shape().to_vec(),

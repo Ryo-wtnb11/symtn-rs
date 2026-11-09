@@ -121,10 +121,10 @@ Tenferro's batch policy on the engine, an engine-owned setting symtn never
 overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
 provider's grouped block GEMMs (recoupling, block-wise contraction) and its
 block factorizations over a tensor's sector blocks (compact SVD, values-only
-SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR, the QR null basis
-of `left_null`, Hermitian and general eigendecomposition full and
-values-only, the polar decompositions and the Hermitian `exp`) are placed by
-one routine and run by one lane runner (the factorizations inside the
+SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR and LQ, the QR
+null bases of `left_null` and `right_null`, Hermitian and general
+eigendecomposition full and values-only, the polar decompositions and the
+Hermitian `exp`) are placed by one routine and run by one lane runner (the factorizations inside the
 engine's guarded linalg entry, the GEMMs inside its contraction entry).
 Each block is one provider job whose cost is the provider's work estimate:
 tcontract's per-flop rate over the block's `2 m k n` flops (four times that
@@ -202,8 +202,9 @@ report, and nothing is returned on error. Two costs differ from that loop
 and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Compact QR, compact
-LQ, full QR, the `left_null` basis, compact SVD, full EIGH, the left and
-right polar decompositions and the Hermitian `exp` run through
+LQ, full QR and LQ, the `left_null` and `right_null` bases, compact SVD,
+full EIGH, the left and right polar decompositions and the Hermitian `exp`
+run through
 `DenseExecutor::factorize_batch_into`: the
 operation allocates each output once (the final packed factor for a
 direct-region or Checked Generic canonical output, otherwise one packed
@@ -233,8 +234,17 @@ Householder kernel, and its reflectors applied straight onto `I_m` (onto
 `[0; I_{m-n}]`, so only the final `m x (m - n)` basis is written):
 `O(m n^2 + m^2 n)` against the `O(m^2 (n + m))` economy QR of `[X | I]`
 that every other executor, and the BLAS provider, still runs through its
-own `qr_into` (`lq_full`, `right_null` and the full SVD's completion keep
-that route on every provider). Each tall block allocates the compact
+own `qr_into` (the full SVD's completion keeps that route on every
+provider). Full LQ and the `right_null` basis are the same full QR and null
+basis batches on each block's transpose `X^T`, read in place (a strided
+view, no adjoint copy): `X^T = Q' R'` gives `L = R'^T`, `Q = Q'^T`, and the
+null basis `N'` of `X^T` gives `N = N'^T` (`X N^H = (N'^H X^T)^T = 0`), so
+each runs at its provider's full QR cost above. A lazy adjoint `A^H`'s full
+LQ reads its parent blocks `A` untransposed and takes `L = R'^H`,
+`Q = Q'^H`. The positive-diagonal gauge runs on `(Q', R')`; `Q'` is then
+transposed in place in its final slice, while `R'` and `N'` are solved into
+one packed scratch of the output's size per call and transposed once into
+the final buffer after the batch. Each tall block allocates the compact
 factor's own workspace once (tlinalg has no initialized-coefficient
 destination form; the lane lends the reused coefficient `Vec`). Columns past
 `min(m, n)` of the full `Q`, and the null basis, are any orthonormal basis

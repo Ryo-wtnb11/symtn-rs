@@ -664,11 +664,12 @@ fn assert_full_qr_observation(
     assert_eq!(observation.values, expected);
 }
 
-fn adjoint_complex(input: &[Complex64], rows: usize, cols: usize) -> Vec<Complex64> {
+/// The transpose, not the adjoint: full LQ factors `X^T`, read in place.
+fn transpose_complex(input: &[Complex64], rows: usize, cols: usize) -> Vec<Complex64> {
     let mut output = vec![Complex64::new(0.0, 0.0); input.len()];
     for col in 0..cols {
         for row in 0..rows {
-            output[col + cols * row] = input[row + rows * col].conj();
+            output[col + cols * row] = input[row + rows * col];
         }
     }
     output
@@ -708,8 +709,8 @@ fn full_qr_and_lq_use_original_input_only_when_economy_q_is_full() {
             .iter()
             .map(|&value| Complex64::new(value, 0.0))
             .collect::<Vec<_>>();
-        let adjoint = adjoint_complex(&matrix, *rows, *cols);
-        assert_full_qr_observation(observation, &adjoint, *cols, *rows);
+        let transpose = transpose_complex(&matrix, *rows, *cols);
+        assert_full_qr_observation(observation, &transpose, *cols, *rows);
     }
     assert_nonnegative_diagonal(&bound_factor_matrices(&l));
     assert_orthonormal_rows(&bound_factor_matrices(&q));
@@ -759,8 +760,8 @@ fn assert_checked_full_qr_lq_inputs(
     let Lq { l, q } = lq_full_dyn_checked_generic(engine, &mut lq_dense, &input).unwrap();
     assert_eq!(lq_dense.observations.len(), matrices.len());
     for (observation, (rows, cols, matrix)) in lq_dense.observations.iter().zip(matrices.iter()) {
-        let adjoint = adjoint_complex(matrix, *rows, *cols);
-        assert_full_qr_observation(observation, &adjoint, *cols, *rows);
+        let transpose = transpose_complex(matrix, *rows, *cols);
+        assert_full_qr_observation(observation, &transpose, *cols, *rows);
     }
     assert_compact_factors_reconstruct_input(&input, &l, None, &q);
     assert!(Arc::ptr_eq(l.space().provider_arc(), &provider));
@@ -1465,4 +1466,212 @@ fn positive_diagonal_gauge_complex_phase_and_zero_diagonal() {
             "product changed: {lhs} vs {rhs}"
         );
     }
+}
+
+/// Each coupled sector's `(sector, rows, cols, column-major entries)` of a
+/// one-block-per-sector bound layout, widened to `Complex64`.
+fn sector_matrices_c64<D: FactorScalar>(
+    structure: &symtn_core::BlockStructure,
+    nout: usize,
+    data: &[D],
+) -> Vec<(SectorId, usize, usize, Vec<Complex64>)> {
+    structure
+        .coupled_sector_regions(nout)
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|region| {
+            let entries = data[region.range()].iter().map(|v| v.widen_complex());
+            (
+                region.coupled(),
+                region.rows(),
+                region.cols(),
+                entries.collect(),
+            )
+        })
+        .collect()
+}
+
+/// One-block-per-sector U(1) map of sector shapes 2x5, 4x2, 3x3 and 1x4
+/// (wide, tall, square, wide) with distinct nonzero entries.
+fn unequal_sector_tensor<D: FactorScalar>() -> TestTensor<D> {
+    let codomain = SectorLeg::new(
+        [(0, 2), (1, 4), (2, 3), (3, 1)].map(|(c, d)| (U1Irrep::new(c).sector_id(), d)),
+        false,
+    );
+    let domain = SectorLeg::new(
+        [(0, 5), (1, 2), (2, 3), (3, 4)].map(|(c, d)| (U1Irrep::new(c).sector_id(), d)),
+        false,
+    );
+    let homspace = FusionTreeHomSpace::new(
+        FusionProductSpace::new([codomain]),
+        FusionProductSpace::new([domain]),
+    );
+    let space = DynamicFusionMapSpace::from_final_homspace(&U1FusionRule, homspace).unwrap();
+    let mut k = 0.0_f64;
+    TestTensor::from_block_fn_with_fusion_space(space, D::zero(), |_, _| {
+        k += 1.0;
+        D::from_complex64(Complex64::new((0.7 * k).sin(), (1.3 * k).cos()))
+    })
+    .unwrap()
+}
+
+fn full_lq_and_right_null_lane_case<D: FactorScalar>() {
+    // What: full LQ and the right null basis of several unequal tall, wide
+    // and square sectors solved together on a four-thread engine: per sector
+    // `L Q = X`, `Q Q^H = I`, `L` lower trapezoidal with a real
+    // non-negative diagonal; `X N^H = 0`, `N N^H = I` with `(n - m)+` rows,
+    // and no block for a sector without null directions.
+    let tol = 1e-12;
+    let engine =
+        &mut symtn_dense::CpuEngine::new(symtn_dense::Pool::builder().threads(4).build().unwrap());
+    let mut dense = symtn_dense::DefaultDenseExecutor::new();
+    let tensor = unequal_sector_tensor::<D>();
+    let input = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let input_ref = input.as_ref();
+    let input = input_ref.dynamic();
+    let x = sector_matrices_c64(tensor.structure(), 1, tensor.data());
+    assert_eq!(x.len(), 4);
+
+    let Lq { l, q } = lq_full_dyn(engine, &mut dense, &input).unwrap();
+    let l = sector_matrices_c64(l.space().space().structure(), 1, l.data());
+    let q = sector_matrices_c64(q.space().space().structure(), 1, q.data());
+    assert_eq!((l.len(), q.len()), (x.len(), x.len()));
+    for ((sector, m, n, x), ((l_sector, l_rows, l_cols, l), (q_sector, q_rows, q_cols, q))) in
+        x.iter().zip(l.iter().zip(&q))
+    {
+        let (m, n) = (*m, *n);
+        assert_eq!((l_sector, *l_rows, *l_cols), (sector, m, n), "L block");
+        assert_eq!((q_sector, *q_rows, *q_cols), (sector, n, n), "Q block");
+        for i in 0..m {
+            for j in 0..n {
+                let lq: Complex64 = (0..n).map(|p| l[i + m * p] * q[p + n * j]).sum();
+                assert!(
+                    (lq - x[i + m * j]).norm() < tol,
+                    "sector {sector:?}: L Q != X"
+                );
+                if j > i {
+                    assert!(l[i + m * j].norm() < tol, "sector {sector:?}: L not lower");
+                }
+            }
+            if i < n {
+                let d = l[i + m * i];
+                assert!(
+                    d.re >= 0.0 && d.im.abs() < tol,
+                    "sector {sector:?}: L diagonal {d}"
+                );
+            }
+        }
+        for i in 0..n {
+            for j in 0..n {
+                let gram: Complex64 = (0..n).map(|p| q[i + n * p] * q[j + n * p].conj()).sum();
+                let one = if i == j { 1.0 } else { 0.0 };
+                assert!((gram - one).norm() < tol, "sector {sector:?}: Q Q^H != I");
+            }
+        }
+    }
+
+    let null = right_null_dyn(engine, &mut dense, &input).unwrap();
+    let null = sector_matrices_c64(null.space().space().structure(), 1, null.data());
+    let wide = x.iter().filter(|(_, m, n, _)| n > m).collect::<Vec<_>>();
+    assert_eq!(null.len(), wide.len());
+    for ((sector, m, n, x), (null_sector, rows, cols, basis)) in wide.into_iter().zip(&null) {
+        let (m, n) = (*m, *n);
+        assert_eq!((null_sector, *rows, *cols), (sector, n - m, n));
+        for i in 0..m {
+            for r in 0..n - m {
+                let product: Complex64 = (0..n)
+                    .map(|p| x[i + m * p] * basis[r + (n - m) * p].conj())
+                    .sum();
+                assert!(product.norm() < tol, "sector {sector:?}: X N^H != 0");
+            }
+        }
+        for a in 0..n - m {
+            for b in 0..n - m {
+                let gram: Complex64 = (0..n)
+                    .map(|p| basis[a + (n - m) * p] * basis[b + (n - m) * p].conj())
+                    .sum();
+                let one = if a == b { 1.0 } else { 0.0 };
+                assert!((gram - one).norm() < tol, "sector {sector:?}: N N^H != I");
+            }
+        }
+    }
+}
+
+#[test]
+fn full_lq_and_right_null_solve_unequal_sectors_on_lanes_real() {
+    full_lq_and_right_null_lane_case::<f64>();
+}
+
+#[test]
+fn full_lq_and_right_null_solve_unequal_sectors_on_lanes_complex() {
+    full_lq_and_right_null_lane_case::<Complex64>();
+}
+
+/// Records the destination shapes each forwarded `factorize_batch_into`
+/// delivers; any per-matrix QR or owned batch is a failure.
+#[derive(Default)]
+struct DestShapeSpy {
+    shapes: Vec<Vec<Vec<usize>>>,
+}
+
+impl crate::tests::scripted_executor::Observer for DestShapeSpy {
+    fn script(script: &mut crate::tests::scripted_executor::Script) {
+        script
+            .set(Op::FactorizeBatchInto, Action::Forward)
+            .set(Op::FactorizeBatch, Action::Panic("one destination batch"))
+            .set(Op::Qr, Action::Panic("one destination batch"))
+            .set(Op::QrInto, Action::Panic("one destination batch"));
+    }
+
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut symtn_dense::FactorDest<'_>,
+        outcome: Result<(), symtn_dense::FactorFailure>,
+        sink: &mut crate::tests::scripted_executor::BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        let shapes = dest
+            .outputs_mut()
+            .iter()
+            .flatten()
+            .map(|output| output.shape().to_vec())
+            .collect();
+        self.shapes.push(shapes);
+        sink(index, dest, outcome)
+    }
+}
+
+#[test]
+fn full_lq_and_right_null_each_submit_one_transposed_destination_batch() {
+    // What: each operation solves every eligible sector in one destination
+    // batch of the transposed problem (full QR `[n x n, n x m]` per sector;
+    // the null basis `[n x (n - m)]` for each wide sector only), with no
+    // per-matrix QR.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = unequal_sector_tensor::<f64>();
+    let input = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let input_ref = input.as_ref();
+    let input = input_ref.dynamic();
+    let sectors = sector_matrices_c64(tensor.structure(), 1, tensor.data());
+
+    let mut dense = ScriptedExecutor::<DestShapeSpy>::default();
+    lq_full_dyn(engine, &mut dense, &input).unwrap();
+    assert_eq!(dense.counts().factorize_batch_into, 1);
+    let expected = sectors
+        .iter()
+        .map(|&(_, m, n, _)| vec![vec![n, n], vec![n, m]])
+        .collect::<Vec<_>>();
+    assert_eq!(dense.observer.shapes, expected);
+
+    let mut dense = ScriptedExecutor::<DestShapeSpy>::default();
+    right_null_dyn(engine, &mut dense, &input).unwrap();
+    assert_eq!(dense.counts().factorize_batch_into, 1);
+    let expected = sectors
+        .iter()
+        .filter(|&&(_, m, n, _)| n > m)
+        .map(|&(_, m, n, _)| vec![vec![n, n - m]])
+        .collect::<Vec<_>>();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(dense.observer.shapes, expected);
 }

@@ -1,7 +1,8 @@
 //! `DenseExecutor::factorize_batch_into`: whole-batch destination
 //! validation before any solve; the compatibility default's delivery,
 //! failure provenance and owned dispatch; the native lanes' destination
-//! writes against the native owned batch, placed; and the destination-only
+//! writes against the native owned batch, placed, and their full QR and
+//! null basis laws on strided transposed reads; and the destination-only
 //! polar decompositions and Hermitian exponential against their laws and
 //! closed forms.
 
@@ -368,6 +369,128 @@ mod native {
     #[test]
     fn native_destinations_match_the_owned_batch_c64() {
         destinations_match_owned::<Complex64>();
+    }
+
+    /// Purpose: full QR and the QR null basis of strided transposed reads
+    /// (the extents and strides of a column-major block swapped, no copy),
+    /// over unequal wide, tall and square blocks on separate native lanes
+    /// (`Outer`, four threads): per block `Q R = X^T` with `Q` unitary and
+    /// `R` upper trapezoidal, and `N` orthonormal with `N^H X^T = 0`.
+    fn transposed_reads_hold_the_qr_laws<T: Elem>() {
+        let tol = 1.0e-12;
+        let mut engine = engine(
+            4,
+            tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Outer),
+        );
+        // Stored `X` shapes; each read is the `n x m` transpose.
+        let stored: &[[usize; 2]] = &[[5, 3], [2, 4], [3, 3], [1, 4]];
+        let data: Vec<Vec<T>> = stored
+            .iter()
+            .enumerate()
+            .map(|(seed, shape)| input_data::<T>(shape, false, seed))
+            .collect();
+        let read_shapes: Vec<[usize; 2]> = stored.iter().map(|&[m, n]| [n, m]).collect();
+        let read_strides: Vec<[usize; 2]> = stored.iter().map(|&[m, _]| [m, 1]).collect();
+        let inputs: Vec<_> = data
+            .iter()
+            .zip(&read_shapes)
+            .zip(&read_strides)
+            .map(|((data, shape), strides)| {
+                T::read(DenseView::new(data, shape, strides, 0).unwrap())
+            })
+            .collect();
+        // `X^T` entry `(row, col)` is `X[col, row]`.
+        let xt = |index: usize, row: usize, col: usize| {
+            data[index][col + stored[index][0] * row].to_c64()
+        };
+        for op in [DenseFactorization::QrFull, DenseFactorization::QrNull] {
+            let mut buffers: Vec<Buffers<T>> = read_shapes
+                .iter()
+                .map(|shape| {
+                    Buffers::new(op, dest_shapes(op, shape, FactorPlacement::AsComputed), 7.0)
+                })
+                .collect();
+            let mut dests: Vec<_> = buffers
+                .iter_mut()
+                .map(|b| b.dest(op, FactorPlacement::AsComputed))
+                .collect();
+            let mut delivered = Vec::new();
+            DefaultDenseExecutor::new()
+                .factorize_batch_into(
+                    &mut engine,
+                    op,
+                    &inputs,
+                    &mut dests,
+                    &mut |index, _, outcome| {
+                        delivered.push((index, outcome));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            drop(dests);
+            assert_eq!(
+                delivered,
+                (0..stored.len()).map(|i| (i, Ok(()))).collect::<Vec<_>>()
+            );
+            for (index, (buffers, &[rows, cols])) in buffers.iter().zip(&read_shapes).enumerate() {
+                let outputs = buffers.widened(op);
+                let gram = |a: &[Complex64], width: usize| {
+                    for i in 0..width {
+                        for j in 0..width {
+                            let dot: Complex64 = (0..rows)
+                                .map(|r| a[r + rows * i].conj() * a[r + rows * j])
+                                .sum();
+                            let want = Complex64::new(f64::from(u8::from(i == j)), 0.0);
+                            assert!(
+                                (dot - want).norm() < tol,
+                                "{op:?} block {index}: not orthonormal"
+                            );
+                        }
+                    }
+                };
+                if op == DenseFactorization::QrFull {
+                    let (q, r) = (&outputs[0], &outputs[1]);
+                    gram(q, rows);
+                    for row in 0..rows {
+                        for col in 0..cols {
+                            let qr: Complex64 = (0..rows)
+                                .map(|j| q[row + rows * j] * r[j + rows * col])
+                                .sum();
+                            assert!(
+                                (qr - xt(index, row, col)).norm() < tol,
+                                "{op:?} block {index}: Q R != X^T"
+                            );
+                            if row > col {
+                                assert_eq!(r[row + rows * col], Complex64::new(0.0, 0.0));
+                            }
+                        }
+                    }
+                } else {
+                    let null = &outputs[0];
+                    let width = rows - rows.min(cols);
+                    assert_eq!(null.len(), rows * width);
+                    gram(null, width);
+                    for k in 0..width {
+                        for col in 0..cols {
+                            let dot: Complex64 = (0..rows)
+                                .map(|r| null[r + rows * k].conj() * xt(index, r, col))
+                                .sum();
+                            assert!(dot.norm() < tol, "{op:?} block {index}: N^H X^T != 0");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn native_transposed_reads_hold_the_qr_laws_f64() {
+        transposed_reads_hold_the_qr_laws::<f64>();
+    }
+
+    #[test]
+    fn native_transposed_reads_hold_the_qr_laws_c64() {
+        transposed_reads_hold_the_qr_laws::<Complex64>();
     }
 
     /// The allocation calls of one native batch of `blocks` copies of an
