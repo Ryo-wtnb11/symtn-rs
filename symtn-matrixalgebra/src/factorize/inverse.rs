@@ -502,22 +502,69 @@ where
         output_len,
     )?;
 
-    let mut output_data = vec![D::zero(); output_len];
-
-    for route in routes {
-        let divisor_region = &divisor_regions[route.divisor];
-        if divisor_region.rows() == 0 || output_regions[route.output].cols() == 0 {
-            continue;
+    // Every nonempty system writes its whole region and an empty region has
+    // no elements, so allocator zeroing replaces a serial fill.
+    let mut output_data = zeroed_payload::<D>(output_len);
+    let solved: Vec<_> = routes
+        .iter()
+        .filter(|route| {
+            divisor_regions[route.divisor].rows() > 0 && output_regions[route.output].cols() > 0
+        })
+        .collect();
+    if !solved.is_empty() {
+        // `[n, n]`, `[n, k]` and the column-major strides `[1, n]` of each.
+        let layouts: Vec<_> = solved
+            .iter()
+            .map(|route| {
+                let n = divisor_regions[route.divisor].rows();
+                ([n, n], [n, rhs_regions[route.rhs].cols()], [1, n])
+            })
+            .collect();
+        fn reads<'a, D: FactorScalar>(
+            data: &'a [D],
+            range: std::ops::Range<usize>,
+            shape: &'a [usize],
+            strides: &'a [usize],
+        ) -> Result<DenseRead<'a>, OperationError> {
+            DenseView::new(&data[range], shape, strides, 0)
+                .map(D::dense_read)
+                .map_err(OperationError::Dense)
         }
-        solve_left_sector(
-            engine,
-            dense,
-            &divisor.data()[divisor_region.range()],
-            &rhs.data()[rhs_regions[route.rhs].range()],
-            &mut output_data[output_regions[route.output].range()],
-            divisor_region.rows(),
-            rhs_regions[route.rhs].cols(),
-        )?;
+        let divisors = solved
+            .iter()
+            .zip(&layouts)
+            .map(|(route, (square, _, strides))| {
+                reads(
+                    divisor.data(),
+                    divisor_regions[route.divisor].range(),
+                    square,
+                    strides,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let rhs_reads = solved
+            .iter()
+            .zip(&layouts)
+            .map(|(route, (_, shape, strides))| {
+                reads(rhs.data(), rhs_regions[route.rhs].range(), shape, strides)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let ranges: Vec<_> = solved
+            .iter()
+            .map(|route| output_regions[route.output].range())
+            .collect();
+        let mut outputs = split_ranges(&mut output_data, &ranges)?
+            .into_iter()
+            .zip(&layouts)
+            .map(|(slice, (_, shape, strides))| {
+                DenseViewMut::new(slice, shape, strides, 0)
+                    .map(D::dense_write)
+                    .map_err(OperationError::Dense)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        dense
+            .solve_batch_into(engine, &divisors, &rhs_reads, &mut outputs)
+            .map_err(OperationError::Dense)?;
     }
 
     BoundDynFactor::from_bound(
@@ -589,38 +636,6 @@ pub(super) fn compile_solve_left_region_routes(
         });
     }
     Ok(routes)
-}
-
-pub(super) fn solve_left_sector<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    divisor: &[D],
-    rhs: &[D],
-    output: &mut [D],
-    order: usize,
-    columns: usize,
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let divisor_shape = [order, order];
-    let rhs_shape = [order, columns];
-    let divisor_strides = [1, order];
-    let rhs_strides = [1, order];
-    let divisor = DenseView::new(divisor, &divisor_shape, &divisor_strides, 0)
-        .map_err(OperationError::Dense)?;
-    let rhs = DenseView::new(rhs, &rhs_shape, &rhs_strides, 0).map_err(OperationError::Dense)?;
-    let output =
-        DenseViewMut::new(output, &rhs_shape, &rhs_strides, 0).map_err(OperationError::Dense)?;
-    dense
-        .solve_into(
-            engine,
-            D::dense_read(divisor),
-            D::dense_read(rhs),
-            D::dense_write(output),
-        )
-        .map_err(OperationError::Dense)
 }
 
 /// Walks the coupled-sector matricization of an endomorphism and replaces each

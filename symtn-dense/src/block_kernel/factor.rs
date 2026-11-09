@@ -2097,7 +2097,7 @@ pub(crate) mod owners {
     /// `f`'s allocation calls on this thread outside the products it runs
     /// ([`product`]), `None` inside another measurement window, which a
     /// nested count would reset.
-    pub(super) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+    pub(crate) fn measured<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
         if counting_alloc::active() {
             return (f(), None);
         }
@@ -2125,7 +2125,7 @@ pub(crate) mod owners {
         PRODUCTS.take()
     }
 
-    pub(super) fn address(input: DenseRead<'_>) -> usize {
+    pub(crate) fn address(input: DenseRead<'_>) -> usize {
         match input {
             DenseRead::F32(view) => view.data()[view.offset()..].as_ptr() as usize,
             DenseRead::F64(view) => view.data()[view.offset()..].as_ptr() as usize,
@@ -2137,7 +2137,7 @@ pub(crate) mod owners {
         }
     }
 
-    pub(super) fn record(
+    pub(crate) fn record(
         input: usize,
         lane: usize,
         setup: Option<u64>,
@@ -2608,7 +2608,10 @@ fn with_provider_read<F: Factor, T, R>(
     solve(raw)
 }
 
-fn linalg_error(op: &'static str, error: tenferro_linalg::Error) -> tenferro_tensor::Error {
+pub(super) fn linalg_error(
+    op: &'static str,
+    error: tenferro_linalg::Error,
+) -> tenferro_tensor::Error {
     tenferro_tensor::Error::extension(
         op,
         tenferro_linalg::LINALG_EXTENSION_FAMILY_ID,

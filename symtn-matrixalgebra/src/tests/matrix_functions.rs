@@ -247,6 +247,146 @@ fn solve_left_uses_one_direct_solve_per_sector_for_rectangular_rhs() {
     assert_eq!(dense.destination_ptrs[0], solved.data().as_ptr() as usize);
 }
 
+/// One recorded system: divisor shape, rhs shape, destination address.
+type RecordedSystem = (Vec<usize>, Vec<usize>, usize);
+
+/// Records each `solve_batch_into` call's systems (divisor shape, rhs
+/// shape, destination address) and forwards it to the native executor.
+#[derive(Default)]
+struct BatchRecorder {
+    inner: symtn_dense::DefaultDenseExecutor,
+    batches: Vec<Vec<RecordedSystem>>,
+}
+
+impl DenseExecutor for BatchRecorder {
+    fn svd(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.svd(engine, input)
+    }
+
+    fn qr(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.qr(engine, input)
+    }
+
+    fn eigh(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        input: DenseRead<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.inner.eigh(engine, input)
+    }
+
+    fn dot_general_into(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        output: DenseWrite<'_>,
+        lhs: DenseRead<'_>,
+        rhs: DenseRead<'_>,
+        config: &symtn_dense::DenseDotConfig,
+    ) -> Result<(), DenseError> {
+        self.inner
+            .dot_general_into(engine, output, lhs, rhs, config)
+    }
+
+    fn solve_into(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        a: DenseRead<'_>,
+        b: DenseRead<'_>,
+        x: DenseWrite<'_>,
+    ) -> Result<(), DenseError> {
+        self.inner.solve_into(engine, a, b, x)
+    }
+
+    fn solve_batch_into(
+        &mut self,
+        engine: &mut dyn symtn_dense::Engine,
+        a: &[DenseRead<'_>],
+        b: &[DenseRead<'_>],
+        x: &mut [DenseWrite<'_>],
+    ) -> Result<(), DenseError> {
+        self.batches.push(
+            a.iter()
+                .zip(b)
+                .zip(x.iter())
+                .map(|((a, b), x)| {
+                    (
+                        a.shape().to_vec(),
+                        b.shape().to_vec(),
+                        dense_write_pointer(x),
+                    )
+                })
+                .collect(),
+        );
+        self.inner.solve_batch_into(engine, a, b, x)
+    }
+}
+
+#[test]
+fn solve_left_submits_one_batch_of_the_nonempty_sectors_in_order() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: one batch holds exactly the systems of the sectors with rows and
+    // right-hand-side columns, in output-region order, each writing its own
+    // region of the returned payload; the zero-column and zero-row sectors
+    // are absent.
+    let divisor = u1_block_endomorphism(&[
+        (0, 2, vec![2.0_f64, 0.0, 1.0, 3.0]),
+        (1, 1, vec![5.0]),
+        (2, 1, vec![4.0]),
+        (3, 0, vec![]),
+    ]);
+    let rhs = u1_block_map(&[
+        (0, 2, 3, vec![4.0_f64, 6.0, 10.0, 12.0, 16.0, 18.0]),
+        (1, 1, 0, vec![]),
+        (2, 1, 2, vec![28.0, 32.0]),
+        (3, 0, 2, vec![]),
+    ]);
+    let divisor = bound_tensor(Arc::new(U1FusionRule), &divisor);
+    let rhs = bound_tensor(Arc::new(U1FusionRule), &rhs);
+    let mut dense = BatchRecorder::default();
+
+    let solved = solve_left_into_mf(
+        engine,
+        &mut dense,
+        &divisor.as_ref().dynamic(),
+        &rhs.as_ref().dynamic(),
+    )
+    .unwrap();
+
+    let solved: BoundTensorMap<_, _> = typed_from_bound_factor(solved).unwrap();
+    let base = solved.tensor().data().as_ptr() as usize;
+    let regions: Vec<_> = solved
+        .tensor()
+        .structure()
+        .coupled_sector_regions(1)
+        .unwrap()
+        .unwrap()
+        .iter()
+        .filter(|region| region.rows() > 0 && region.cols() > 0)
+        .map(|region| base + region.range().start * std::mem::size_of::<f64>())
+        .collect();
+    assert_eq!(
+        dense.batches,
+        vec![vec![
+            (vec![2, 2], vec![2, 3], regions[0]),
+            (vec![1, 1], vec![1, 2], regions[1]),
+        ]]
+    );
+    let sectors = dense_sector_matrices(1, solved.tensor());
+    let odd = sectors
+        .iter()
+        .find(|(sector, _, _, _)| *sector == U1Irrep::new(2).sector_id())
+        .unwrap();
+    numerics::assert_slices_close("charge 2", &odd.3, &[7.0, 8.0], 1);
+}
+
 #[test]
 fn solve_left_preserves_complex_values_without_adjointing() {
     let engine = &mut symtn_dense::CpuEngine::serial();

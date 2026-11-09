@@ -48,6 +48,14 @@ mod block_kernel {
     // per-block vendor calls.
     #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
     pub(crate) mod factor;
+    // The native provider's batch of linear solves; BLAS keeps the
+    // per-matrix loop.
+    #[cfg(all(
+        feature = "cpu-faer",
+        not(feature = "cpu-blas-core"),
+        not(feature = "provider-inject")
+    ))]
+    pub(crate) mod solve;
 }
 // The one placement and runner of independent block jobs, which the block
 // kernels, the tree replays and the cold tree compile run on.

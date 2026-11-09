@@ -58,7 +58,9 @@ the QR batch, and a lazy adjoint's full SVD its parent blocks through the
 full SVD batch), values-only SVD, the SVD stage of the
 pseudo-inverse, every Hermitian eigendecomposition (full and values-only,
 over all three input routes) and the general eigendecomposition (full and
-values-only). For these, symtn's block kernel spreads the blocks over the engine's lanes inside
+values-only), and the left solve `A \ B` (one `solve_batch_into` batch
+of every nonempty sector's `A_c X_c = B_c`, each solution written into its
+output region). For these, symtn's block kernel spreads the blocks over the engine's lanes inside
 the engine's guarded linalg entry and calls tlinalg (Tenferro's faer provider)
 per block; compact QR, compact and full LQ, full QR, the `left_null` and
 `right_null` bases, compact and full SVD, full EIGH, the left and right polar

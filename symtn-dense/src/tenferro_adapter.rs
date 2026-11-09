@@ -1278,6 +1278,24 @@ impl DenseExecutor for DefaultDenseExecutor {
         crate::block_kernel::factor::factorize_into(engine, op, inputs, dests, sink)
     }
 
+    // The native provider solves the valid compact rank-two systems on the
+    // lanes.
+    #[cfg(all(
+        feature = "cpu-faer",
+        not(feature = "cpu-blas-core"),
+        not(feature = "provider-inject")
+    ))]
+    fn solve_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        a: &[DenseRead<'_>],
+        b: &[DenseRead<'_>],
+        x: &mut [DenseWrite<'_>],
+    ) -> Result<(), DenseError> {
+        crate::executor::check_solve_batch(a, b, x)?;
+        crate::block_kernel::solve::solve_batch_into(self, engine, a, b, x)
+    }
+
     fn solve_into(
         &mut self,
         engine: &mut dyn Engine,

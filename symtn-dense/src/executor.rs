@@ -389,6 +389,35 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
         })
     }
 
+    /// Solves `a[i] * x[i] = b[i]` for every `i` into caller-owned `x[i]`,
+    /// each system exactly as [`Self::solve_into`] solves it (its
+    /// validation, singularity rule and errors).
+    ///
+    /// Unequal slice lengths are [`DenseError::ShapeMismatch`] with op
+    /// `solve_batch_into` (expected `a.len()`; `b` is checked, then `x`)
+    /// before any solve. Otherwise the result is the error of the
+    /// lowest-indexed failing system, or `Ok`; after an error the contents
+    /// of every `x[i]` are unspecified.
+    ///
+    /// The default calls `solve_into(a[i], b[i], x[i])` in index order and
+    /// stops at the first error. An executor may solve the systems
+    /// concurrently and report the lowest-indexed error after they ran; the
+    /// native provider solves every valid compact rank-two system on the
+    /// engine's lanes and the rest with [`Self::solve_into`].
+    fn solve_batch_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        a: &[DenseRead<'_>],
+        b: &[DenseRead<'_>],
+        x: &mut [DenseWrite<'_>],
+    ) -> Result<(), DenseError> {
+        check_solve_batch(a, b, x)?;
+        for ((&a, &b), x) in a.iter().zip(b).zip(x.iter_mut()) {
+            self.solve_into(engine, a, b, x.reborrow())?;
+        }
+        Ok(())
+    }
+
     fn svd_into(
         &mut self,
         engine: &mut dyn Engine,
@@ -707,6 +736,20 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
 /// Shared with the matrix-algebra crate: a short or long executor answer is
 /// symtn's own check, so it is a [`DenseError::ShapeMismatch`] wherever it is
 /// detected, never a backend error.
+/// [`DenseExecutor::solve_batch_into`]'s slice-length check.
+pub(crate) fn check_solve_batch(
+    a: &[DenseRead<'_>],
+    b: &[DenseRead<'_>],
+    x: &[DenseWrite<'_>],
+) -> Result<(), DenseError> {
+    for len in [b.len(), x.len()] {
+        if len != a.len() {
+            return Err(arity_mismatch("solve_batch_into", a.len(), len));
+        }
+    }
+    Ok(())
+}
+
 pub fn arity_mismatch(op: &'static str, expected: usize, actual: usize) -> DenseError {
     DenseError::ShapeMismatch {
         op,
