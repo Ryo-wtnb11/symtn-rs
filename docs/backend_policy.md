@@ -292,6 +292,28 @@ per-matrix `solve_into` makes from a copied right-hand side, with the same
 singularity check (an exactly zero pivot) and errors. This is TensorKit's
 `inv` per block (`one!` on the output block, then `ldiv!(lu(b), ·)`, LAPACK
 `getrf` + `getrs`), `O(n^3)`.
+The left solve `A \ B` submits every nonempty coupled sector as one
+`DenseExecutor::solve_batch_into` batch. On the native provider each system
+in the valid compact rank-two subset of tenferro's direct route (one
+floating dtype, `A` `[n, n]`, `B` and `X` `[n, k]` with `n, k > 0`, `X`
+strided `[1, n]`; every sector the solve builds) runs on the lanes as
+tlinalg's partial-pivot LU `solve_into` with `B` passed as its right-hand
+side, which the provider copies into `X` only after that system's
+factorization and singularity check succeed, so the copy runs on the lane
+and a singular system's `X` is left as it was; one provider workspace per
+lane, no typed scratch. `A` and `B` are read through their own strides and
+offsets. Every other system (a vector right-hand side, a padded `X`, other
+ranks, zero extents, malformed or mixed-dtype inputs) is solved by the
+executor's per-matrix `solve_into` on the caller, never inside a lane, so
+its result is that entry's. The error is the lowest original index's: the
+per-matrix systems below the first lane system run first and stop at their
+first error; a wrong engine, a refused engine entry or a refused lane fork
+is the outcome of that first lane system; the per-matrix systems after it
+run only below the lowest failing lane system. A provider panic in a lane
+system unwinds after the lanes join and leaves the engine broken, even
+where a lower lane system already failed. This is TensorKit's `\` per
+block (`copy!(b, block(t1, c) \ block(t2, c))`, LU and a solve, `O(n^3 +
+n^2 k)`), with the solution written straight into the output block.
 Values-only SVD and EIGH
 and the general eigendecomposition (values only or with vectors) keep one
 provider workspace and fresh outputs per block (tlinalg has no initialized
@@ -316,8 +338,9 @@ one `svd` and two `dot_general_into` calls writing the destinations, the
 before the next one is solved; the Hermitian `exp` likewise runs one `eigh`,
 the eigenvalue check and one `dot_general_into` per block, and the inverse
 one `solve_into` per block against one identity per scalar sized for the
-largest block.
-The other dense problems (among them the left solve `A \ B`), and every
+largest block, and `solve_batch_into` one `solve_into` per system in order,
+stopping at the first error.
+The other dense problems, and every
 BLAS factorization, still run block after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`

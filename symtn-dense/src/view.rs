@@ -192,6 +192,28 @@ pub enum DenseWrite<'a> {
 }
 
 impl DenseWrite<'_> {
+    /// The same view for a shorter borrow, so an entry taking a
+    /// `DenseWrite` by value can be called on a slot the caller keeps.
+    pub(crate) fn reborrow(&mut self) -> DenseWrite<'_> {
+        fn view<'b, T>(view: &'b mut DenseViewMut<'_, T>) -> DenseViewMut<'b, T> {
+            DenseViewMut {
+                data: &mut *view.data,
+                shape: view.shape,
+                strides: view.strides,
+                offset: view.offset,
+            }
+        }
+        match self {
+            Self::F32(v) => DenseWrite::F32(view(v)),
+            Self::F64(v) => DenseWrite::F64(view(v)),
+            Self::I32(v) => DenseWrite::I32(view(v)),
+            Self::I64(v) => DenseWrite::I64(view(v)),
+            Self::Bool(v) => DenseWrite::Bool(view(v)),
+            Self::C32(v) => DenseWrite::C32(view(v)),
+            Self::C64(v) => DenseWrite::C64(view(v)),
+        }
+    }
+
     pub fn dtype(&self) -> DenseDType {
         match self {
             Self::F32(_) => DenseDType::F32,

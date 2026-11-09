@@ -170,7 +170,7 @@ fn dense_read_pointer(read: &DenseRead<'_>) -> usize {
     }
 }
 
-fn dense_write_pointer(write: &DenseWrite<'_>) -> usize {
+pub(super) fn dense_write_pointer(write: &DenseWrite<'_>) -> usize {
     match write {
         DenseWrite::F32(view) => view.data().as_ptr() as usize,
         DenseWrite::F64(view) => view.data().as_ptr() as usize,

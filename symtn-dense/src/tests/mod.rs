@@ -28,6 +28,8 @@ mod lanes;
 mod numerics;
 #[cfg(feature = "tenferro")]
 mod placement;
+#[cfg(not(feature = "provider-inject"))]
+mod solve_batch;
 mod tensor;
 mod view;
 
