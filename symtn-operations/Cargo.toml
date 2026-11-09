@@ -18,7 +18,7 @@ strided-kernel.workspace = true
 rustc-hash = "2"
 # Recovers the caller's `CpuEngine` behind `&mut dyn Engine` for Host
 # regions (`host_pool::region`); the version symtn-dense uses.
-tenferro-cpu = { version = "0.9.0", default-features = false, optional = true }
+tenferro-cpu = { version = "0.11.0", default-features = false, optional = true }
 
 [features]
 # A compiled CPU provider: Host regions take the caller CPU engine's token.

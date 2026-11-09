@@ -79,9 +79,9 @@ where
     /// Host's is (#1344 for `norm`, #1383 for `inner`).
     ///
     /// * **Within one coupled sector** the sum runs on the device inside the
-    ///   backend GEMM, in the dtype of its operands. Tenferro 0.9.0 offers no
+    ///   backend GEMM, in the dtype of its operands. Tenferro 0.11.0 offers no
     ///   widening dot or reduction: `dot_general` dispatches on the one dtype
-    ///   shared by both operands and the destination (tenferro-gpu 0.9.0
+    ///   shared by both operands and the destination (tenferro-gpu 0.11.0
     ///   `src/cuda/structural.rs` `dot_general_read_into_accum`), and
     ///   `DotGeneralAccumulation` carries no compute type; `vdot_read` folds
     ///   the elementwise product with the same reduce kernel, which runs in

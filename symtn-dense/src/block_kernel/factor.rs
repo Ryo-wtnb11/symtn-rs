@@ -25,7 +25,9 @@
 //! Householder kernel, whose own workspace is still allocated per block. A
 //! polar job composes the provider's SVD with two products on the lane's
 //! context, a Hermitian exponential job the provider's eigh with one, their
-//! geometry plans resolved before the lanes.
+//! geometry plans resolved before the lanes; these two also keep the spectrum
+//! they consume in a separate real scratch of the lane. SVD and eigh write
+//! their real spectra straight into the destination.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -114,7 +116,7 @@ impl Factor for Svd {
         }
         Ok(vec![
             output::<Self, T>(&[m, k], batch, u)?,
-            output::<Self, <T as TensorScalar>::Real>(&[k], batch, T::real_values(s))?,
+            output::<Self, <T as TensorScalar>::Real>(&[k], batch, s)?,
             output::<Self, T>(&[k, n], batch, vt)?,
         ])
     }
@@ -544,7 +546,7 @@ impl Factor for Eigh {
                 .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
         }
         Ok(vec![
-            output::<Self, <T as TensorScalar>::Real>(&[n], batch, T::real_values(values))?,
+            output::<Self, <T as TensorScalar>::Real>(&[n], batch, values)?,
             output::<Self, T>(&[n, n], batch, vectors)?,
         ])
     }
@@ -569,11 +571,11 @@ impl Factor for EighVals {
         batch: &[usize],
         exec: &mut Exec<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        let values = match raw {
-            Some(raw) => T::eigh_values(raw, exec)
-                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?,
-            None => Vec::new(),
-        };
+        let mut values = Vec::new();
+        if let Some(raw) = raw {
+            tlinalg::eigh::eigh_values(Self::OP, raw, &mut values, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
         Ok(vec![output::<Self, <T as TensorScalar>::Real>(
             &[n],
             batch,
@@ -600,11 +602,11 @@ impl Factor for SvdVals {
         batch: &[usize],
         exec: &mut Exec<'_>,
     ) -> Result<Vec<DenseTensor>, DenseError> {
-        let s = match raw {
-            Some(raw) => T::svd_values(raw, exec)
-                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?,
-            None => Vec::new(),
-        };
+        let mut s = Vec::new();
+        if let Some(raw) = raw {
+            tlinalg::svd::svd_values(Self::OP, raw, &mut s, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+        }
         Ok(vec![output::<Self, <T as TensorScalar>::Real>(
             &[m.min(n)],
             batch,
@@ -653,32 +655,17 @@ fn output<F: Factor, T: TensorScalar>(
         .and_then(DenseTensor::from_tenferro)
 }
 
-/// A scalar the provider factors; its singular values and eigenvalues are in
-/// [`TensorScalar::Real`].
-pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
-    /// tlinalg returns the singular values and eigenvalues of a full
-    /// factorization in `Self`; tenferro publishes their real part.
-    fn real_values(values: Vec<Self>) -> Vec<<Self as TensorScalar>::Real>;
-
-    /// tlinalg's Hermitian eigenvalues only, ascending.
-    fn eigh_values(
-        raw: RawStridedRef<'_, Self>,
-        exec: &mut Exec<'_>,
-    ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
-
-    /// tlinalg's singular values only, descending.
-    fn svd_values(
-        raw: RawStridedRef<'_, Self>,
-        exec: &mut Exec<'_>,
-    ) -> tlinalg::Result<Vec<<Self as TensorScalar>::Real>>;
-
+/// A scalar the provider factors; tlinalg returns its singular values and
+/// Hermitian eigenvalues in [`TensorScalar::Real`], the type tenferro
+/// publishes them in.
+pub(crate) trait Scalar:
+    tlinalg::FaerScalar<Real = <Self as Element>::Spectrum>
+    + TensorScalar<Real = <Self as Element>::Spectrum>
+    + Element
+{
     /// The complex counterpart, in which the general eigenvalues are
     /// published.
     type EigScalar: TensorScalar;
-
-    /// Whether tlinalg's `Self`-typed spectrum differs from the published
-    /// real one, so a destination batch stages it in typed scratch.
-    const COMPLEX: bool;
 
     /// Zero and one, for identity targets and zeroed scratch.
     const ZERO: Self;
@@ -705,15 +692,6 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
         write: &'b mut DenseWrite<'_>,
     ) -> Option<&'b mut [<Self as TensorScalar>::Real]>;
 
-    /// Runs `solve` with a `Self` spectrum slot of `dest.len()` elements:
-    /// `dest` itself for a real scalar; otherwise the front of `scratch`,
-    /// whose real parts are copied into `dest` after `solve` succeeds.
-    fn with_spectrum<R>(
-        dest: &mut [<Self as TensorScalar>::Real],
-        scratch: &mut [Self],
-        solve: impl FnOnce(&mut [Self]) -> tlinalg::Result<R>,
-    ) -> tlinalg::Result<R>;
-
     /// tlinalg's general eigenvalues only, in its order.
     fn eig_values(
         raw: RawStridedRef<'_, Self>,
@@ -722,18 +700,15 @@ pub(crate) trait Scalar: tlinalg::FaerScalar + TensorScalar + Element {
     ) -> tlinalg::Result<()>;
 }
 
-// Why one impl per concrete scalar: tlinalg's values-only real type is an
-// associated type of a trait it does not export, so it equals
-// `TensorScalar::Real` only once the scalar is concrete.
+// Why one impl per concrete scalar: tlinalg's general-eigenvalue type is an
+// associated type of a trait it does not export, so it equals `EigScalar`
+// only once the scalar is concrete.
 macro_rules! scalar {
-    ($ty:ty, $complex:ty, $real_variant:ident, $slot:ident, $is_complex:expr,
-     $zero:expr, $one:expr,
-     |$values:ident| $real:expr, |$dest:ident, $scratch:ident, $solve:ident| $spectrum:expr) => {
+    ($ty:ty, $complex:ty, $real_variant:ident, $slot:ident, $zero:expr, $one:expr) => {
         impl Scalar for $ty {
             const ZERO: Self = $zero;
             const ONE: Self = $one;
             type EigScalar = $complex;
-            const COMPLEX: bool = $is_complex;
 
             fn scratch(lane: &mut TypedScratch) -> &mut ScalarScratch<Self> {
                 &mut lane.$slot
@@ -762,36 +737,6 @@ macro_rules! scalar {
                 }
             }
 
-            fn with_spectrum<R>(
-                $dest: &mut [<Self as TensorScalar>::Real],
-                $scratch: &mut [Self],
-                $solve: impl FnOnce(&mut [Self]) -> tlinalg::Result<R>,
-            ) -> tlinalg::Result<R> {
-                $spectrum
-            }
-
-            fn real_values($values: Vec<$ty>) -> Vec<<$ty as TensorScalar>::Real> {
-                $real
-            }
-
-            fn eigh_values(
-                raw: RawStridedRef<'_, $ty>,
-                exec: &mut Exec<'_>,
-            ) -> tlinalg::Result<Vec<<$ty as TensorScalar>::Real>> {
-                let mut values = Vec::new();
-                tlinalg::eigh::eigh_values(tlinalg::Op::EighValues, raw, &mut values, exec)?;
-                Ok(values)
-            }
-
-            fn svd_values(
-                raw: RawStridedRef<'_, $ty>,
-                exec: &mut Exec<'_>,
-            ) -> tlinalg::Result<Vec<<$ty as TensorScalar>::Real>> {
-                let mut values = Vec::new();
-                tlinalg::svd::svd_values(tlinalg::Op::SvdValues, raw, &mut values, exec)?;
-                Ok(values)
-            }
-
             fn eig_values(
                 raw: RawStridedRef<'_, $ty>,
                 values: &mut Vec<$complex>,
@@ -803,65 +748,24 @@ macro_rules! scalar {
     };
 }
 
-scalar!(
-    f32,
-    Complex32,
-    F32,
-    f32,
-    false,
-    0.0,
-    1.0,
-    |values| values,
-    |dest, _scratch, solve| solve(dest)
-);
-scalar!(
-    f64,
-    Complex64,
-    F64,
-    f64,
-    false,
-    0.0,
-    1.0,
-    |values| values,
-    |dest, _scratch, solve| solve(dest)
-);
+scalar!(f32, Complex32, F32, f32, 0.0, 1.0);
+scalar!(f64, Complex64, F64, f64, 0.0, 1.0);
 scalar!(
     Complex32,
     Complex32,
     F32,
     c32,
-    true,
     Complex32::new(0.0, 0.0),
-    Complex32::new(1.0, 0.0),
-    |values| values.into_iter().map(|value| value.re).collect(),
-    |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
+    Complex32::new(1.0, 0.0)
 );
 scalar!(
     Complex64,
     Complex64,
     F64,
     c64,
-    true,
     Complex64::new(0.0, 0.0),
-    Complex64::new(1.0, 0.0),
-    |values| values.into_iter().map(|value| value.re).collect(),
-    |dest, scratch, solve| complex_spectrum(dest, scratch, solve)
+    Complex64::new(1.0, 0.0)
 );
-
-/// [`Scalar::with_spectrum`] of a complex scalar: tlinalg returns the real
-/// spectrum with a zero imaginary part.
-fn complex_spectrum<T: Copy, Out>(
-    dest: &mut [T],
-    scratch: &mut [num_complex::Complex<T>],
-    solve: impl FnOnce(&mut [num_complex::Complex<T>]) -> tlinalg::Result<Out>,
-) -> tlinalg::Result<Out> {
-    let slot = &mut scratch[..dest.len()];
-    let out = solve(slot)?;
-    for (dest, value) in dest.iter_mut().zip(slot.iter()) {
-        *dest = value.re;
-    }
-    Ok(out)
-}
 
 /// One block: its validated input, its signed strides and, once run, its
 /// own outcome (factors or that block's error).
@@ -1026,10 +930,16 @@ pub(crate) trait FactorInto: Factor {
         exec: &Exec<'_>,
     ) -> tlinalg::Result<usize>;
 
-    /// The typed scratch elements one input needs: the staged complex
-    /// spectrum and, under [`FactorPlacement::Adjoint`], the provider-shaped
-    /// factors.
+    /// The typed scratch elements one input needs: the factors it stages
+    /// before writing its destinations, such as the provider-shaped factors
+    /// under [`FactorPlacement::Adjoint`].
     fn scratch_len<T: Scalar>(dims: [usize; 2], batch: usize, placement: FactorPlacement) -> usize;
+
+    /// The real scratch elements one input needs: a spectrum it consumes
+    /// instead of writing it to a destination.
+    fn spectrum_len(_dims: [usize; 2], _batch: usize) -> usize {
+        0
+    }
 
     /// The Householder coefficients one input needs (the capacity of the
     /// lane's reused coefficient `Vec`).
@@ -1066,6 +976,7 @@ pub(crate) trait FactorInto: Factor {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        spectrum: &mut [<T as Element>::Spectrum],
         coeff: &mut Vec<T>,
         plans: &Plans,
         exec: &mut Exec<'_>,
@@ -1138,6 +1049,7 @@ impl FactorInto for Qr {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
@@ -1190,6 +1102,7 @@ impl FactorInto for Lq {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
@@ -1245,6 +1158,7 @@ impl FactorInto for QrFull {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         coeff: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
@@ -1258,6 +1172,7 @@ impl FactorInto for QrFull {
                 placement,
                 workspace,
                 scratch,
+                &mut [],
                 coeff,
                 &[None, None],
                 exec,
@@ -1320,6 +1235,7 @@ impl FactorInto for QrNull {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         coeff: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
@@ -1357,11 +1273,9 @@ impl FactorInto for Svd {
         batch: usize,
         placement: FactorPlacement,
     ) -> usize {
-        let k = m.min(n);
-        let spectrum = if T::COMPLEX { k * batch } else { 0 };
         match placement {
-            FactorPlacement::AsComputed => spectrum,
-            FactorPlacement::Adjoint => spectrum + (m + n) * k * batch,
+            FactorPlacement::AsComputed => 0,
+            FactorPlacement::Adjoint => (m + n) * m.min(n) * batch,
         }
     }
 
@@ -1373,26 +1287,32 @@ impl FactorInto for Svd {
         placement: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
     ) -> Result<(), JobError> {
         let [first, values, third] = outputs;
-        let values = spectrum::<T>(values);
+        let s = spectrum::<T>(values);
         match placement {
             FactorPlacement::AsComputed => {
                 let (u, vt) = (slot::<T>(first), slot::<T>(third));
-                Ok(T::with_spectrum(values, scratch, |s| {
-                    tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)
-                })?)
+                Ok(tlinalg::svd::svd_into_init(
+                    Self::OP,
+                    raw,
+                    false,
+                    u,
+                    s,
+                    vt,
+                    workspace,
+                    exec,
+                )?)
             }
             FactorPlacement::Adjoint => {
                 let k = m.min(n);
                 let (u, rest) = scratch.split_at_mut(m * k * batch);
-                let (vt, s) = rest.split_at_mut(k * n * batch);
-                T::with_spectrum(values, s, |s| {
-                    tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)
-                })?;
+                let vt = &mut rest[..k * n * batch];
+                tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vt, workspace, exec)?;
                 adjoint_items(vt, k, n, slot::<T>(first));
                 adjoint_items(u, m, k, slot::<T>(third));
                 Ok(())
@@ -1410,12 +1330,8 @@ impl FactorInto for Eigh {
         tlinalg::eigh::eigh_workspace::<T>(n, true, batch, exec)
     }
 
-    fn scratch_len<T: Scalar>([n, _]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
-        if T::COMPLEX {
-            n * batch
-        } else {
-            0
-        }
+    fn scratch_len<T: Scalar>(_: [usize; 2], _: usize, _: FactorPlacement) -> usize {
+        0
     }
 
     fn factor_into<T: Scalar>(
@@ -1425,16 +1341,22 @@ impl FactorInto for Eigh {
         outputs: &mut [Option<DenseWrite<'_>>; 3],
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
-        scratch: &mut [T],
+        _: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         _: &Plans,
         exec: &mut Exec<'_>,
     ) -> Result<(), JobError> {
         let [values, second, _] = outputs;
-        let vectors = slot::<T>(second);
-        Ok(T::with_spectrum(spectrum::<T>(values), scratch, |w| {
-            tlinalg::eigh::eigh_into_init(Self::OP, raw, w, vectors, workspace, exec)
-        })?)
+        let (w, vectors) = (spectrum::<T>(values), slot::<T>(second));
+        Ok(tlinalg::eigh::eigh_into_init(
+            Self::OP,
+            raw,
+            w,
+            vectors,
+            workspace,
+            exec,
+        )?)
     }
 }
 
@@ -1447,10 +1369,14 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
         tlinalg::svd::svd_workspace::<T>(m, n, false, batch, exec)
     }
 
-    // `U`, `Vh` and the `Self`-typed spectrum of the SVD.
+    // `U` and `Vh` of the SVD.
     fn scratch_len<T: Scalar>([m, n]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
-        let k = m.min(n);
-        (m * k + k * n + k) * batch
+        (m + n) * m.min(n) * batch
+    }
+
+    // `S` of the SVD.
+    fn spectrum_len([m, n]: [usize; 2], batch: usize) -> usize {
+        m.min(n) * batch
     }
 
     fn admit(dims: [usize; 2]) -> Result<(), DenseError> {
@@ -1489,14 +1415,15 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        spectrum: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         plans: &Plans,
         exec: &mut Exec<'_>,
     ) -> Result<(), JobError> {
         let k = m.min(n);
         let (u, rest) = scratch.split_at_mut(m * k * batch);
-        let (vh, rest) = rest.split_at_mut(k * n * batch);
-        let s = &mut rest[..k * batch];
+        let vh = &mut rest[..k * n * batch];
+        let s = &mut spectrum[..k * batch];
         tlinalg::svd::svd_into_init(Self::OP, raw, false, u, s, vh, workspace, exec)?;
         let [Some(w_plan), Some(p_plan)] = plans else {
             unreachable!("the batch resolved every admitted job's plans")
@@ -1521,7 +1448,7 @@ impl<const LEFT: bool> FactorInto for Polar<LEFT> {
             })
             .map_err(JobError::Gemm)?;
         }
-        scale_polar_factor(LEFT, [m, n], batch, |index| s[index].real(), u, vh);
+        scale_polar_factor(LEFT, [m, n], batch, |index| s[index], u, vh);
         let order = if LEFT { n } else { m };
         for item in 0..batch {
             let x = if LEFT {
@@ -1546,9 +1473,14 @@ impl FactorInto for ExpViaEigh {
         Eigh::workspace::<T>(dims, batch, exec)
     }
 
-    // `V` and the `Self`-typed spectrum of the eigendecomposition.
+    // `V` of the eigendecomposition.
     fn scratch_len<T: Scalar>([n, _]: [usize; 2], batch: usize, _: FactorPlacement) -> usize {
-        (n * n + n) * batch
+        n * n * batch
+    }
+
+    // Its eigenvalues.
+    fn spectrum_len([n, _]: [usize; 2], batch: usize) -> usize {
+        n * batch
     }
 
     // `exp = Y Y^H`, the adjoint operand `Y` itself read transposed and
@@ -1576,17 +1508,18 @@ impl FactorInto for ExpViaEigh {
         _: FactorPlacement,
         workspace: &mut [MaybeUninit<u8>],
         scratch: &mut [T],
+        spectrum: &mut [<T as Element>::Spectrum],
         _: &mut Vec<T>,
         plans: &Plans,
         exec: &mut Exec<'_>,
     ) -> Result<(), JobError> {
-        let (vectors, rest) = scratch.split_at_mut(n * n * batch);
-        let values = &mut rest[..n * batch];
+        let vectors = &mut scratch[..n * n * batch];
+        let values = &mut spectrum[..n * batch];
         tlinalg::eigh::eigh_into_init(Self::OP, raw, values, vectors, workspace, exec)?;
         let [Some(plan), None] = plans else {
             unreachable!("the batch resolved every admitted job's plan")
         };
-        let lambda = |index: usize| values[index].real();
+        let lambda = |index: usize| values[index];
         crate::factor_dest::finite_eigenvalues((0..n * batch).map(lambda))
             .map_err(JobError::Output)?;
         scale_exp_factor(n, batch, lambda, vectors);
@@ -1619,18 +1552,21 @@ pub(crate) struct TypedScratch {
     c64: ScalarScratch<Complex64>,
 }
 
-/// One scalar's lane scratch: zero-filled values and an empty Householder
-/// coefficient `Vec` whose capacity covers every block of the lane.
+/// One scalar's lane scratch: zero-filled values and real spectrum, and an
+/// empty Householder coefficient `Vec` whose capacity covers every block of
+/// the lane.
 #[derive(Default)]
-pub(crate) struct ScalarScratch<T> {
+pub(crate) struct ScalarScratch<T: Scalar> {
     values: Vec<T>,
+    spectrum: Vec<<T as Element>::Spectrum>,
     coeff: Vec<T>,
 }
 
 impl<T: Scalar> ScalarScratch<T> {
-    fn new(values: usize, coeff: usize) -> Self {
+    fn new(values: usize, spectrum: usize, coeff: usize) -> Self {
         Self {
             values: vec![T::ZERO; values],
+            spectrum: vec![Default::default(); spectrum],
             coeff: Vec::with_capacity(coeff),
         }
     }
@@ -1680,6 +1616,7 @@ impl Drop for LaneBuffers {
 struct Needs {
     bytes: usize,
     typed: [usize; 4],
+    spectrum: [usize; 4],
     coeff: [usize; 4],
 }
 
@@ -1839,10 +1776,10 @@ impl LaneBuffers {
             (
                 vec![MaybeUninit::uninit(); needs.bytes],
                 TypedScratch {
-                    f32: ScalarScratch::new(needs.typed[0], needs.coeff[0]),
-                    f64: ScalarScratch::new(needs.typed[1], needs.coeff[1]),
-                    c32: ScalarScratch::new(needs.typed[2], needs.coeff[2]),
-                    c64: ScalarScratch::new(needs.typed[3], needs.coeff[3]),
+                    f32: ScalarScratch::new(needs.typed[0], needs.spectrum[0], needs.coeff[0]),
+                    f64: ScalarScratch::new(needs.typed[1], needs.spectrum[1], needs.coeff[1]),
+                    c32: ScalarScratch::new(needs.typed[2], needs.spectrum[2], needs.coeff[2]),
+                    c64: ScalarScratch::new(needs.typed[3], needs.spectrum[3], needs.coeff[3]),
                 },
             )
         };
@@ -2027,6 +1964,7 @@ fn needs_of<F: FactorInto>(
             .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))?;
         needs.bytes = needs.bytes.max(bytes);
         needs.typed[slot] = needs.typed[slot].max(F::scratch_len::<T>([*m, *n], items, placement));
+        needs.spectrum[slot] = needs.spectrum[slot].max(F::spectrum_len([*m, *n], items));
         needs.coeff[slot] = needs.coeff[slot].max(F::coeff_len([*m, *n], items));
         Ok(())
     }
@@ -2089,6 +2027,7 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
             placement,
             &mut lane.workspace,
             &mut scratch.values,
+            &mut scratch.spectrum,
             &mut scratch.coeff,
             plans,
             exec,
