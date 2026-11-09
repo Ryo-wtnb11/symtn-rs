@@ -469,6 +469,7 @@ fn unsigned_strided_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_numerics::numerics::nan_folded_bits;
     use num_complex::Complex64;
     use symtn_core::{BlockKey, BlockSpec, FusionTreePairKey};
 
@@ -637,8 +638,11 @@ mod tests {
             let want_im = owned_trace(&im, coefficients, 1.0);
             for (position, value) in got.iter().enumerate() {
                 assert_eq!(
-                    (value.re.to_bits(), value.im.to_bits()),
-                    (want_re[position].to_bits(), want_im[position].to_bits()),
+                    (nan_folded_bits(value.re), nan_folded_bits(value.im)),
+                    (
+                        nan_folded_bits(want_re[position]),
+                        nan_folded_bits(want_im[position])
+                    ),
                     "element {position} for {coefficients:?}"
                 );
             }

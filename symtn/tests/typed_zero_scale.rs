@@ -13,6 +13,7 @@
 //!
 //! The signed-zero regression also checks the storage-local `0 * factor` bits.
 
+use crate::numerics::nan_folded_bits;
 use num_complex::Complex64;
 use symtn::sector::{
     FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
@@ -133,7 +134,7 @@ macro_rules! check_dense {
         let bits = |values: &[$d]| -> Vec<(u64, u64)> {
             values
                 .iter()
-                .map(|v| (v.parts().0.to_bits(), v.parts().1.to_bits()))
+                .map(|v| (nan_folded_bits(v.parts().0), nan_folded_bits(v.parts().1)))
                 .collect()
         };
         let (a, b) = (real::<$d>(2.0), real::<$d>(-1.5));

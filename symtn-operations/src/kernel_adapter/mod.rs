@@ -26,6 +26,7 @@ pub use self::fused_layout::*;
 mod tests {
     use super::*;
     use crate::tensoradd_raw_strided_kernel;
+    use crate::test_numerics::numerics::nan_folded_bits;
 
     /// What: the leaf gate answers exactly Strided's
     /// `parallel_width(exec, Copy, elements) > 1`, on tokens with the host
@@ -898,7 +899,7 @@ mod tests {
             exec.reborrow(),
             &reals,
             &[(1.0, 0.0), (1.0, 1.0), (-2.0, 0.0), (0.5, -3.0)],
-            |value: f64| u128::from(value.to_bits()),
+            |value: f64| u128::from(nan_folded_bits(value)),
         );
 
         use num_complex::Complex64;
@@ -922,7 +923,8 @@ mod tests {
                 (Complex64::new(2.0, 0.0), Complex64::new(-1.0, 0.5)),
             ],
             |value: Complex64| {
-                (u128::from(value.re.to_bits()) << 64) | u128::from(value.im.to_bits())
+                (u128::from(nan_folded_bits(value.re)) << 64)
+                    | u128::from(nan_folded_bits(value.im))
             },
         );
     }
@@ -947,10 +949,7 @@ mod tests {
         let pairs = |values: &[Complex64]| {
             values
                 .iter()
-                .map(|v| {
-                    let canonical = |x: f64| if x.is_nan() { f64::NAN } else { x };
-                    (canonical(v.re).to_bits(), canonical(v.im).to_bits())
-                })
+                .map(|v| (nan_folded_bits(v.re), nan_folded_bits(v.im)))
                 .collect::<Vec<_>>()
         };
         let zero = [Complex64::zero(); 2];

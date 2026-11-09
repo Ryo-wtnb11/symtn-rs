@@ -1800,7 +1800,7 @@ fn checked_compact_braid_decline_replays_in_one_staging() {
         assert_eq!(got.len(), want.len());
         for (&x, &y) in got.iter().zip(want) {
             assert!(
-                x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan()),
+                crate::numerics::nan_folded_bits(x) == crate::numerics::nan_folded_bits(y),
                 "R = {odd_r:e}: {x} != dense {y}"
             );
         }
