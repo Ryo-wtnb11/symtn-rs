@@ -9,7 +9,7 @@
 //! binds it as a closure of its own type, so every arm's walk is a separate
 //! monomorphic body.
 
-use core::mem::MaybeUninit;
+use core::mem::{size_of, MaybeUninit};
 use core::ops::{Add, Mul};
 
 use crate::BakedFusedLayout;
@@ -157,6 +157,90 @@ pub(crate) fn span<S, A, T>(
         );
         return;
     }
+    if inner_dst == 0 && inner_src == 0 {
+        odometer(
+            dims,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            index,
+            |dst_base, src_base| {
+                let slot = &mut dst[dst_base as usize];
+                let value = src[src_base as usize];
+                // Why the bound stays `usize`: a zero-stride extent may
+                // exceed `isize::MAX`.
+                for _ in 0..len {
+                    action.element(slot, value);
+                }
+            },
+        );
+        return;
+    }
+    if size_of::<T>() == 0 || size_of::<S::Slot>() == 0 {
+        // Why zero-sized operands take the mathematical run: their slices
+        // may exceed `isize::MAX`, so a valid window bounds neither a
+        // wrapped position nor a negative base, and the windowed walk below
+        // could revisit or never leave it. Each of the `len` positions is
+        // addressed exactly, and an offset outside `isize`-scaled arithmetic
+        // or either slice panics.
+        let offset = |base: isize, stride: isize, position: usize| {
+            (stride as i128)
+                .checked_mul(position as i128)
+                .and_then(|offset| offset.checked_add(base as i128))
+                .and_then(|offset| usize::try_from(offset).ok())
+                .expect("run offset outside usize")
+        };
+        odometer(
+            dims,
+            dst_strides,
+            src_strides,
+            dst_offset,
+            src_offset,
+            index,
+            |dst_base, src_base| {
+                for position in 0..len {
+                    let slot = &mut dst[offset(dst_base, inner_dst, position)];
+                    action.element(slot, src[offset(src_base, inner_src, position)]);
+                }
+            },
+        );
+        return;
+    }
+    // Each operand's run lies in a window of `(len - 1) * |stride| + 1`
+    // slots: a layout property, so it is checked once per call (a size that
+    // overflows has no slice to address). A run starts at its window's
+    // first slot, or its last when the stride is negative.
+    let last = len - 1;
+    let size = |stride: isize| {
+        last.checked_mul(stride.unsigned_abs())
+            .and_then(|extent| extent.checked_add(1))
+            .expect("run extent overflows usize")
+    };
+    let (dst_size, src_size) = (size(inner_dst), size(inner_src));
+    let first = |stride: isize, size: usize| if stride < 0 { size - 1 } else { 0 };
+    let (dst_first, src_first) = (first(inner_dst, dst_size), first(inner_src, src_size));
+    // Why wrapping arithmetic: a slice of sized elements holds at most
+    // `isize::MAX` of them, so a negative base (at least `2^(BITS-1)` as
+    // `usize`) or a wrapped bound yields a range no such slice satisfies
+    // (`start > end` or `end > len`), and slicing panics.
+    let window = |base: isize, first: usize, size: usize| {
+        let low = (base as usize).wrapping_sub(first);
+        low..low.wrapping_add(size)
+    };
+    // Why the run is walked by two in-window positions rather than by
+    // `step_by` or `base + position * stride`: both bounds are validated
+    // once per run by slicing its windows, after which the loop condition
+    // is the only check each position needs; `step_by` checks every step
+    // against the remaining length, and indexing from the bases checks both
+    // operands as well as counting positions. Each position steps by its
+    // stride with wrapping; as a window holds at most `isize::MAX` slots, a
+    // positive stride leaves it without wrapping and a negative one wraps
+    // past zero to at least `2^(BITS-1)`, so the run ends after exactly
+    // `len` positions. A zero-stride
+    // operand stays on its one slot while the other ends the run; a
+    // repeated destination is thus updated in source order.
+    let (dst_delta, src_delta) = (inner_dst as usize, inner_src as usize);
     odometer(
         dims,
         dst_strides,
@@ -165,80 +249,13 @@ pub(crate) fn span<S, A, T>(
         src_offset,
         index,
         |dst_base, src_base| {
-            // Why iterators over once-validated runs rather than indexing
-            // `base + position * stride`: the indexed loop bound-checks both
-            // operands on every element and keeps their lengths live in the
-            // caller's register budget. Slicing each operand's run once
-            // validates its first and last offsets, and `step_by` then walks
-            // it with no per-element check.
-            //
-            // The offset `position * stride` of the run's last element; a
-            // value no slice reaches when it overflows, so slicing panics.
-            let last = len - 1;
-            let reach = |base: isize, stride: isize| {
-                isize::try_from(last)
-                    .ok()
-                    .and_then(|last| last.checked_mul(stride))
-                    .and_then(|offset| base.checked_add(offset))
-                    .unwrap_or(isize::MAX)
-            };
-            if inner_dst == 0 {
-                // A repeated destination: the source order is the update
-                // order, so the run keeps `position` ascending.
-                let slot = &mut dst[dst_base as usize];
-                if inner_src == 0 {
-                    let value = src[src_base as usize];
-                    // Why the bound stays `usize`: a zero-stride extent may
-                    // exceed `isize::MAX`.
-                    for _ in 0..len {
-                        action.element(slot, value);
-                    }
-                } else if inner_src > 0 {
-                    let run = &src[src_base as usize..=reach(src_base, inner_src) as usize];
-                    for &value in run.iter().step_by(inner_src as usize) {
-                        action.element(slot, value);
-                    }
-                } else {
-                    let run = &src[reach(src_base, inner_src) as usize..=src_base as usize];
-                    for &value in run.iter().rev().step_by(inner_src.unsigned_abs()) {
-                        action.element(slot, value);
-                    }
-                }
-            } else {
-                // Distinct destination slots: each is written once per run,
-                // so the run may be walked from its lowest destination
-                // offset, with the source stepping the opposite way when the
-                // destination stride is negative.
-                let (dst_low, dst_step, src_first, src_step) = if inner_dst > 0 {
-                    (dst_base, inner_dst, src_base, inner_src)
-                } else {
-                    (
-                        reach(dst_base, inner_dst),
-                        -inner_dst,
-                        reach(src_base, inner_src),
-                        -inner_src,
-                    )
-                };
-                let slots = dst[dst_low as usize..=reach(dst_low, dst_step) as usize]
-                    .iter_mut()
-                    .step_by(dst_step as usize);
-                if src_step == 0 {
-                    let value = src[src_first as usize];
-                    for slot in slots {
-                        action.element(slot, value);
-                    }
-                } else if src_step > 0 {
-                    let run = &src[src_first as usize..=reach(src_first, src_step) as usize];
-                    for (slot, &value) in slots.zip(run.iter().step_by(src_step as usize)) {
-                        action.element(slot, value);
-                    }
-                } else {
-                    let run = &src[reach(src_first, src_step) as usize..=src_first as usize];
-                    let values = run.iter().rev().step_by(src_step.unsigned_abs());
-                    for (slot, &value) in slots.zip(values) {
-                        action.element(slot, value);
-                    }
-                }
+            let slots = &mut dst[window(dst_base, dst_first, dst_size)];
+            let values = &src[window(src_base, src_first, src_size)];
+            let (mut slot, mut value) = (dst_first, src_first);
+            while slot < slots.len() && value < values.len() {
+                action.element(&mut slots[slot], values[value]);
+                slot = slot.wrapping_add(dst_delta);
+                value = value.wrapping_add(src_delta);
             }
         },
     );
@@ -262,6 +279,13 @@ fn odometer(
     mut run: impl FnMut(isize, isize),
 ) {
     let rank = dims.len();
+    // Why the reslices: they state the equal ranks once, so the carry loop
+    // indexes all four slices by `axis < rank` without a check per slice.
+    let (index, dst_strides, src_strides) = (
+        &mut index[..rank],
+        &dst_strides[..rank],
+        &src_strides[..rank],
+    );
     index.fill(0);
     let (mut dst_base, mut src_base) = (dst_offset, src_offset);
     loop {
@@ -399,6 +423,41 @@ mod tests {
         );
     }
 
+    /// Counts the visits of a zero-sized run.
+    struct Count<'a>(&'a core::cell::Cell<usize>);
+
+    impl Action<Init, ()> for Count<'_> {
+        fn element(&self, _: &mut (), _: ()) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    /// What: a zero-sized source longer than `isize::MAX` with a stride of a
+    /// quarter of the address space is walked as exactly its `len`
+    /// positions, where a wrapped position would cycle inside its window.
+    #[test]
+    fn span_walks_exactly_len_positions_of_a_long_zero_sized_run() {
+        let quarter = 1usize << (usize::BITS - 2);
+        let src = vec![(); 3 * quarter + 1];
+        let visits = core::cell::Cell::new(0);
+        let mut index = [0];
+        span::<Init, _, ()>(
+            &mut [()],
+            &src,
+            BakedFusedLayout::from_compiled_normalized_slices(
+                &[4],
+                &[0],
+                &[quarter as isize],
+                None,
+            ),
+            0,
+            0,
+            &mut index,
+            &Count(&visits),
+        );
+        assert_eq!(visits.get(), 4);
+    }
+
     /// Records each visited `(dst, src)` offset pair.
     struct Record<'a>(&'a core::cell::RefCell<Vec<(usize, usize)>>);
 
@@ -438,5 +497,24 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(starts, [(300, 60), (310, 40), (200, 260), (210, 240)]);
         assert_eq!(visits.borrow()[..3], [(300, 60), (301, 62), (302, 64)]);
+    }
+
+    /// What: a repeated destination with a negative source stride is
+    /// updated in source position order.
+    #[test]
+    fn span_updates_a_repeated_destination_in_source_order() {
+        let src: Vec<usize> = (0..5).collect();
+        let visits = core::cell::RefCell::new(Vec::new());
+        let mut index = [0];
+        span::<Init, _, usize>(
+            &mut [7],
+            &src,
+            BakedFusedLayout::from_compiled_normalized_slices(&[3], &[0], &[-2], None),
+            0,
+            4,
+            &mut index,
+            &Record(&visits),
+        );
+        assert_eq!(*visits.borrow(), [(7, 4), (7, 2), (7, 0)]);
     }
 }
