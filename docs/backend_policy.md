@@ -122,8 +122,8 @@ overrides. Under the default policy (`CpuBatchStrategy::Auto`) the native
 provider's grouped block GEMMs (recoupling, block-wise contraction) and its
 block factorizations over a tensor's sector blocks (compact SVD, values-only
 SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR, the QR null basis
-of `left_null`, Hermitian eigendecomposition full and values-only, general
-eigenvalues, the polar decompositions and the Hermitian `exp`) are placed by
+of `left_null`, Hermitian and general eigendecomposition full and
+values-only, the polar decompositions and the Hermitian `exp`) are placed by
 one routine and run by one lane runner (the factorizations inside the
 engine's guarded linalg entry, the GEMMs inside its contraction entry).
 Each block is one provider job whose cost is the provider's work estimate:
@@ -131,8 +131,8 @@ tcontract's per-flop rate over the block's `2 m k n` flops (four times that
 for complex scalars) for a GEMM, tlinalg's work estimate under the engine's
 work model for a factorization (SVD `m n min(m, n)`, QR `m n k - k^3/3` with
 `k = min(m, n)`, LQ that of its transpose's QR, a tall full QR or null basis
-tlinalg's Householder factor plus its reflector application, EIGH and EIG
-values `n^3`; a polar decomposition or Hermitian `exp` adds its products).
+tlinalg's Householder factor plus its reflector application, EIGH and EIG,
+full and values-only, `n^3`; a polar decomposition or Hermitian `exp` adds its products).
 The call takes its thread count from the engine's cost rule over the batch's
 estimated serial time, and its lane count is at most the engine's batch
 decision, so the work model's fan-out limits are never exceeded. Each lane
@@ -264,8 +264,11 @@ resolved before the lanes. It is a full GEMM, twice the multiply-adds of the
 GEMM too). The half exponent keeps a representable result finite where
 `exp(lambda)` alone overflows.
 Values-only SVD and EIGH
-and general eigenvalues keep one provider workspace and fresh outputs per
-block (tlinalg has no initialized destination form for them). The
+and the general eigendecomposition (values only or with vectors) keep one
+provider workspace and fresh outputs per block (tlinalg has no initialized
+destination form for them); the full one normalizes each block's
+eigenvector columns in place with Tenferro's exported
+`normalize_eig_vectors`, the gauge and failure its per-matrix `eig` reports. The
 pseudo-inverse's SVD keeps the owned batch, one provider workspace and
 fresh factors per block, which it holds until its global cutoff is known and
 then reads in place in its reconstruction GEMMs: a destination needs the
@@ -282,12 +285,8 @@ one `svd` and two `dot_general_into` calls writing the destinations, the
 `sqrt(S)` scaling applied in place to the owned factor, and checks the block
 before the next one is solved; the Hermitian `exp` likewise runs one `eigh`,
 the eigenvalue check and one `dot_general_into` per block.
-The full general eigendecomposition goes through the same batch but solves
-each sector with Tenferro's per-matrix entry on the whole engine, checking
-it before the next solve: its unit-norm eigenvector normalization is not
-exported for a lane to reuse (tensor4all/tenferro-rs#2387). The other
-factorizations, and every BLAS factorization, still run block after block on
-the whole engine.
+The other factorizations, and every BLAS factorization, still run block
+after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`
