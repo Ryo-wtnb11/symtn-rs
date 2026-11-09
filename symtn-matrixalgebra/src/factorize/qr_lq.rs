@@ -161,35 +161,6 @@ where
     })
 }
 
-pub(super) fn full_qr_numerical_stage<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    input: &[D],
-    rows: usize,
-    cols: usize,
-) -> Result<(Vec<D>, Vec<D>), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let (mut q, mut r) = if rows <= cols {
-        let mut q = vec![D::zero(); rows * rows];
-        let mut r = vec![D::zero(); rows * cols];
-        qr_into_workspace(
-            engine, dense, input, rows, cols, rows, &mut q, rows, rows, rows, &mut r, rows, cols,
-            rows,
-        )?;
-        (q, r)
-    } else {
-        let (q, work_r) = augmented_identity_qr(engine, dense, rows, cols, |block| {
-            block.copy_from_slice(input);
-        })?;
-        (q, work_r[..rows * cols].to_vec())
-    };
-    positive_diagonal_gauge(&mut q, rows, &mut r, rows, cols);
-    Ok((q, r))
-}
-
 /// The economy QR of the `m x (n + m)` matrix `[X | I_m]`, `X` the `m x n`
 /// block `fill` writes (column-major): returns its `m x m` unitary `Q` and
 /// its `m x (n + m)` upper-trapezoidal `R`. Because `R` is upper-trapezoidal,
@@ -198,14 +169,12 @@ where
 ///
 /// Through the executor's economy QR a full `Q` costs `O(m^2 (n + m))` here
 /// against MatrixAlgebraKit's `geqrf` + `unmqr`/`ungqr`
-/// `O(m n^2 + m n (m - n))`. Its consumers are the routes still built on
-/// that economy QR: the tall branch of [`full_qr_numerical_stage`]
-/// (`lq_full`), the full-SVD
-/// [`orthonormal_completion`](super::svd::orthonormal_completion), and the
-/// shape-based `right_null` kernel (`qr_null_basis`). `qr_full` and
-/// `left_null` instead submit [`DenseFactorization::QrFull`] and
-/// [`DenseFactorization::QrNull`] batches, which the native provider solves
-/// by Householder reflectors applied to the identity at
+/// `O(m n^2 + m n (m - n))`. Its one consumer is the full-SVD
+/// [`orthonormal_completion`](super::svd::orthonormal_completion).
+/// `qr_full`, `lq_full`, `left_null` and `right_null` instead submit
+/// [`DenseFactorization::QrFull`] and [`DenseFactorization::QrNull`]
+/// batches (LQ and `right_null` on each block's transpose), which the native
+/// provider solves by Householder reflectors applied to the identity at
 /// MatrixAlgebraKit's cost, and other executors by the same augmentation.
 pub(super) fn augmented_identity_qr<E, D>(
     engine: &mut dyn Engine,
@@ -330,8 +299,9 @@ where
 
 #[cfg(test)]
 /// Full LQ `t = L * Q` (MatrixAlgebraKit `lq_full`): per sector `L` is the
-/// lower-trapezoidal `m x n` and `Q` the square `n x n` unitary, via the full
-/// QR of the adjoint sector matrices.
+/// lower-trapezoidal `m x n` and `Q` the square `n x n` unitary, from one
+/// [`DenseFactorization::QrFull`] batch on the sector matrices' transposes,
+/// read in place (see [`full_lq_packed`]).
 /// The positive-diagonal gauge is applied (MAK / TensorKit 0.17 default).
 pub(crate) fn lq_full<E, R, D>(
     engine: &mut dyn Engine,
@@ -364,7 +334,7 @@ where
     let space = input.space().space();
     let matrices =
         multiplicity_free_input_matricizations(space.structure(), input.data(), space.nout())?;
-    let mut pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Direct)?;
+    let mut pairs = full_lq_packed(engine, dense, &matrices, FactorPlacement::Direct)?;
     let dimensions = MfAuthority(input.space()).coupled_dimensions(space.homspace().domain())?;
     with_input_geometry!(&matrices, |geometry| Ok(Lq {
         l: build_bound_factor(
@@ -582,25 +552,6 @@ where
     Ok(PackedFactorPairs { pairs, left, right })
 }
 
-/// The `rows x cols` matrix `X` whose LQ a sector computes, and `X^H`, the
-/// matrix its QR reads: under [`FactorPlacement::Adjoint`] `matrix` is the
-/// parent block `A` of the lazy adjoint `X = A^H`, read in place (#2070);
-/// otherwise `matrix` is `X` and `X^H` is written into `scratch`.
-fn lq_qr_input<'a, D: FactorScalar>(
-    matrix: &SectorMatrixRef<'a, D>,
-    placement: FactorPlacement,
-    scratch: &'a mut Vec<D>,
-) -> (usize, usize, &'a [D]) {
-    match placement {
-        FactorPlacement::Direct => {
-            scratch.clear();
-            extend_adjoint_col_major(scratch, matrix.data, matrix.rows, matrix.cols);
-            (matrix.rows, matrix.cols, scratch)
-        }
-        FactorPlacement::Adjoint => (matrix.cols, matrix.rows, matrix.data),
-    }
-}
-
 /// Compact LQ `X = L Q` of each column-major `(data, rows, cols)` block into
 /// its destination slices `l` (`X` rows `x k`) and `q` (`k x` `X` cols),
 /// `k = min(rows, cols)`, as one solver-first executor batch inside one
@@ -782,35 +733,121 @@ where
     Ok(PackedFactorPairs { pairs, left, right })
 }
 
-/// Full LQ of every coupled-sector matrix through the full QR of its adjoint,
-/// as `l` (left) and square `q` (right) factor pairs; `placement` as for
+/// Full LQ `X = L Q` of every coupled-sector matrix in one solver-first
+/// executor batch ([`DenseFactorization::QrFull`]), in the positive-diagonal
+/// gauge, as `l` (left) and square `q` (right) factors written into one
+/// buffer per side in matrix order; `placement` as for
 /// [`compact_lq_packed`].
-fn full_lq_pairs<E, D>(
+///
+/// Under [`FactorPlacement::Direct`] the batch reads each block's transpose
+/// in place (a strided view): `X^T = Q' R'` gives `X = R'^T Q'^T`, so
+/// `L = R'^T` and `Q = Q'^T` (`Q'^T conj(Q') = conj(Q'^H Q') = I`). Under
+/// [`FactorPlacement::Adjoint`] it reads the parent block `A = X^H`:
+/// `A = Q' R'` gives `L = R'^H`, `Q = Q'^H`. Either way `L`'s diagonal is
+/// `R'`'s, real non-negative once `(Q', R')` is gauged. `Q'` is solved into
+/// its final slice and transposed there in place; `R'` is solved into one
+/// packed scratch the size of `L` and written to `L` once.
+///
+/// Why the transpose, not a staged `X^H`: a strided read can swap axes but
+/// not conjugate, and the QR of `X^T` factors `X` itself.
+fn full_lq_packed<E, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     matrices: &(impl SectorMatrices<D> + ?Sized),
     placement: FactorPlacement,
-) -> Result<Vec<FactorPair<D>>, OperationError>
+) -> Result<PackedFactorPairs<D>, OperationError>
 where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    let mut pairs = Vec::with_capacity(matrices.len());
-    for index in 0..matrices.len() {
-        let matrix = matrices.get(index)?;
-        let mut adjoint = Vec::new();
-        let (rows, cols, qr_input) = lq_qr_input(&matrix, placement, &mut adjoint);
-        let (q_prime, r_prime) = full_qr_numerical_stage(engine, dense, qr_input, cols, rows)?;
-        pairs.push(FactorPair {
-            sector: matrix.sector,
-            kept: cols,
-            left: adjoint_col_major(&r_prime, cols, rows),
-            left_rows: rows,
-            right: adjoint_col_major(&q_prime, cols, cols),
-            right_leading: cols,
-        });
-    }
-    Ok(pairs)
+    let (sectors, blocks) = sector_blocks(matrices)?;
+    // `X`'s `(rows, cols)`; the QR input is `cols x rows`.
+    let lq_dims = |&(_, rows, cols): &(&[D], usize, usize)| match placement {
+        FactorPlacement::Direct => (rows, cols),
+        FactorPlacement::Adjoint => (cols, rows),
+    };
+    let left_ranges = packed_ranges(blocks.iter().map(|block| {
+        let (rows, cols) = lq_dims(block);
+        rows * cols
+    }));
+    let right_ranges = packed_ranges(blocks.iter().map(|block| {
+        let (_, cols) = lq_dims(block);
+        cols * cols
+    }));
+    let mut left = vec![D::zero(); left_ranges.last().map_or(0, |range| range.end)];
+    let mut right = vec![D::zero(); right_ranges.last().map_or(0, |range| range.end)];
+    let mut r_prime = vec![D::zero(); left.len()];
+    let mut read_layouts = Vec::new();
+    let transposed = matches!(placement, FactorPlacement::Direct);
+    let inputs = block_reads(&blocks, &mut read_layouts, transposed)?;
+    let layouts = blocks
+        .iter()
+        .map(|block| {
+            let (rows, cols) = lq_dims(block);
+            [
+                matrix_layout(cols, cols),
+                matrix_layout(cols, rows),
+                vector_layout(0),
+            ]
+        })
+        .collect::<Vec<DestLayouts>>();
+    let mut dests = split_ranges(&mut right, &right_ranges)?
+        .into_iter()
+        .zip(split_ranges(&mut r_prime, &left_ranges)?)
+        .zip(&layouts)
+        .map(|((q, r), layout)| {
+            Ok(FactorDest::new(
+                [
+                    Some(dest_write(q, &layout[0])?),
+                    Some(dest_write(r, &layout[1])?),
+                    None,
+                ],
+                symtn_dense::FactorPlacement::AsComputed,
+            ))
+        })
+        .collect::<Result<Vec<_>, OperationError>>()?;
+    factorize_into_solver_first(
+        engine,
+        dense,
+        DenseFactorization::QrFull,
+        &inputs,
+        &mut dests,
+        |index, dest| {
+            let (rows, cols) = lq_dims(&blocks[index]);
+            let [q, r, _] = dest.outputs_mut();
+            positive_diagonal_gauge(
+                dest_data::<D>(q, "qr_into")?,
+                cols,
+                dest_data::<D>(r, "qr_into")?,
+                cols,
+                rows,
+            );
+            Ok(())
+        },
+    )?;
+    let map: fn(D) -> D = match placement {
+        FactorPlacement::Direct => |value| value,
+        FactorPlacement::Adjoint => FactorScalar::adjoint,
+    };
+    let pairs = blocks
+        .iter()
+        .zip(sectors)
+        .zip(left_ranges.into_iter().zip(right_ranges))
+        .map(|((block, sector), (l, q))| {
+            let (rows, cols) = lq_dims(block);
+            transpose_col_major_into(&r_prime[l.clone()], cols, rows, &mut left[l.clone()], map);
+            transpose_square_in_place(&mut right[q.clone()], cols, map);
+            PackedFactorPair {
+                sector,
+                kept: cols,
+                left: l,
+                left_rows: rows,
+                right: q,
+                right_leading: cols,
+            }
+        })
+        .collect();
+    Ok(PackedFactorPairs { pairs, left, right })
 }
 
 /// The parent blocks of a lazy adjoint `X = A^H`, listed in the region order
@@ -909,7 +946,7 @@ where
     let matrices = generic_input_matricizations(space.structure(), parent.data(), space.nout())?;
     let (mut full_pairs, mut compact_pairs);
     let pairs: &mut dyn SidedFactors<D> = if full {
-        full_pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?;
+        full_pairs = full_lq_packed(engine, dense, &matrices, FactorPlacement::Adjoint)?;
         &mut full_pairs
     } else {
         compact_pairs =
@@ -1042,7 +1079,7 @@ where
         regions: &regions,
         by_adjoint: &by_adjoint,
     };
-    let mut pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?;
+    let mut pairs = full_lq_packed(engine, dense, &matrices, FactorPlacement::Adjoint)?;
     let space = adjoint_space.space();
     let dimensions = MfAuthority(adjoint_space).coupled_dimensions(space.homspace().domain())?;
     let mut publish = |side| {
@@ -1125,7 +1162,7 @@ where
         regions: &regions,
         by_adjoint: &by_adjoint,
     };
-    let pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Adjoint)?;
+    let pairs = full_lq_packed(engine, dense, &matrices, FactorPlacement::Adjoint)?;
     let provider = adjoint_space.provider_arc();
     let homspace = adjoint_space.space().homspace();
     let dimensions = CheckedAuthority(provider).coupled_dimensions(homspace.domain())?;
@@ -1379,88 +1416,42 @@ where
     Ok((left, right))
 }
 
-/// Appends the adjoint of the column-major `rows x cols` matrix `data` to
-/// `output` as a column-major `cols x rows` matrix.
-pub(super) fn extend_adjoint_col_major<D: FactorScalar>(
-    output: &mut Vec<D>,
-    data: &[D],
-    rows: usize,
-    cols: usize,
-) {
-    debug_assert_eq!(data.len(), rows * cols);
-    output.reserve(data.len());
-    for row in 0..rows {
-        // The StepBy/Take chain retained an out-of-line fold per row in Release.
-        output.extend((0..cols).map(|col| FactorScalar::adjoint(data[row + col * rows])));
-    }
-}
-
-#[test]
-fn append_adjoint_preserves_rectangular_order_conjugation_and_existing_values() {
-    macro_rules! check {
-        ($ty:ty) => {{
-            let input = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0].map(<$ty as FactorScalar>::from_real);
-            let mut output = vec![<$ty as FactorScalar>::from_real(99.0)];
-            extend_adjoint_col_major(&mut output, &input, 2, 3);
-            assert_eq!(
-                output,
-                [99.0, 1.0, 3.0, 5.0, 2.0, 4.0, 6.0].map(<$ty as FactorScalar>::from_real)
-            );
-            for (rows, cols) in [(0, 0), (0, 3), (3, 0)] {
-                let before = output.clone();
-                extend_adjoint_col_major(&mut output, &[], rows, cols);
-                assert_eq!(output, before);
-            }
-        }};
-    }
-    check!(f32);
-    check!(f64);
-    check!(num_complex::Complex32);
-    check!(Complex64);
-    let input = [
-        Complex64::new(1.0, 2.0),
-        Complex64::new(3.0, 4.0),
-        Complex64::new(5.0, 6.0),
-        Complex64::new(7.0, 8.0),
-        Complex64::new(9.0, 10.0),
-        Complex64::new(11.0, 12.0),
-    ];
-    let mut output = vec![Complex64::new(99.0, 1.0)];
-    extend_adjoint_col_major(&mut output, &input, 2, 3);
-    assert_eq!(
-        output,
-        [
-            Complex64::new(99.0, 1.0),
-            Complex64::new(1.0, -2.0),
-            Complex64::new(5.0, -6.0),
-            Complex64::new(9.0, -10.0),
-            Complex64::new(3.0, -4.0),
-            Complex64::new(7.0, -8.0),
-            Complex64::new(11.0, -12.0)
-        ]
-    );
-}
-
-/// Transposes a column-major `rows x cols` matrix into column-major
-/// `cols x rows`.
 /// Adjoint (conjugate transpose) of a column-major `rows x cols` matrix.
 pub(super) fn adjoint_col_major<D: FactorScalar>(data: &[D], rows: usize, cols: usize) -> Vec<D> {
     let mut adjoint = vec![D::zero(); data.len()];
-    adjoint_col_major_into(data, rows, cols, &mut adjoint);
+    transpose_col_major_into(data, rows, cols, &mut adjoint, FactorScalar::adjoint);
     adjoint
 }
 
-pub(super) fn adjoint_col_major_into<D: FactorScalar>(
+/// Writes `map` of each entry of the column-major `rows x cols` matrix
+/// `data`, transposed, into the column-major `cols x rows` matrix `out`.
+pub(super) fn transpose_col_major_into<D: Copy>(
     data: &[D],
     rows: usize,
     cols: usize,
-    adjoint: &mut [D],
+    out: &mut [D],
+    map: impl Fn(D) -> D,
 ) {
     debug_assert_eq!(data.len(), rows * cols);
-    debug_assert_eq!(adjoint.len(), data.len());
+    debug_assert_eq!(out.len(), data.len());
     for col in 0..cols {
         for row in 0..rows {
-            adjoint[col + cols * row] = FactorScalar::adjoint(data[row + rows * col]);
+            out[col + cols * row] = map(data[row + rows * col]);
+        }
+    }
+}
+
+/// Replaces the column-major `n x n` matrix `data` by `map` of each entry of
+/// its transpose, in place.
+fn transpose_square_in_place<D: Copy>(data: &mut [D], n: usize, map: impl Fn(D) -> D) {
+    debug_assert_eq!(data.len(), n * n);
+    for col in 0..n {
+        data[col + n * col] = map(data[col + n * col]);
+        for row in col + 1..n {
+            let (lower, upper) = (row + n * col, col + n * row);
+            let value = data[upper];
+            data[upper] = map(data[lower]);
+            data[lower] = map(value);
         }
     }
 }
@@ -1691,7 +1682,8 @@ where
     .map(|(q, r)| Qr { q, r })
 }
 
-/// Checked-Generic full LQ via the full QR of each sector's adjoint matrix.
+/// Checked-Generic full LQ: one executor batch over every sector (see
+/// [`full_lq_packed`]).
 #[doc(hidden)]
 pub(crate) fn lq_full_dyn_checked_generic<E, R, D>(
     engine: &mut dyn Engine,
@@ -1707,7 +1699,7 @@ where
     let space = input.space().space();
     let matrices = generic_input_matricizations(space.structure(), input.data(), space.nout())
         .map_err(CheckedGenericFactorPlanError::from)?;
-    let pairs = full_lq_pairs(engine, dense, &matrices, FactorPlacement::Direct)
+    let pairs = full_lq_packed(engine, dense, &matrices, FactorPlacement::Direct)
         .map_err(CheckedGenericFactorPlanError::from)?;
     let dimensions = CheckedAuthority(provider).coupled_dimensions(space.homspace().domain())?;
     with_input_geometry!(&matrices, |geometry| checked_full_factor_pair(

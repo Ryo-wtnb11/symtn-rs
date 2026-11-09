@@ -838,10 +838,16 @@ where
     /// Sector `c` has an `m_c x n_c` lower-trapezoidal `l` and a square
     /// `n_c x n_c` unitary `q`; the intermediate bond therefore has the
     /// domain's coupled-sector dimensions. The diagonal of `l` is real and
-    /// non-negative. For sector shape `m_c x n_c`, dense work is
-    /// `O(n_c² m_c)` when `n_c <= m_c`; when `n_c > m_c`, completing the
-    /// square `q` costs `O(n_c²(m_c + n_c))`. Source packing, the sectorwise
-    /// adjoint, and owned factor publication are additional costs. An owned
+    /// non-negative. Each sector is the full QR of its transpose `A_c^T`,
+    /// read in place (a lazy adjoint's, of its parent block), with every
+    /// sector in one batch: dense work is `O(n_c² m_c)` when `n_c <= m_c`;
+    /// when `n_c > m_c`, the native provider applies the Householder
+    /// reflectors of `A_c^T` to the identity, `O(n_c m_c² + n_c² m_c)`,
+    /// while other providers complete the square `q` with one economy QR of
+    /// `[A_c^T | I]`, `O(n_c²(m_c + n_c))`. Rows of `q` past
+    /// `min(m_c, n_c)` are an orthonormal basis of the complement that may
+    /// differ by provider. Source packing, one transpose of each sector's
+    /// factors, and owned factor publication are additional costs. An owned
     /// Host compact diagonal uses `W = V` and two compact factors under
     /// the boundary documented by [`Self::lq_compact`]. See [`Self::lq_compact`] for the compact alternative, storage and
     /// lazy-input behavior, errors, and example.
@@ -1285,10 +1291,14 @@ where
     ///
     /// The fresh bond contains `(n_c - m_c)+` directions per sector, the
     /// trailing rows of the sector's full LQ (TensorKit/MatrixAlgebraKit
-    /// `RightNullViaLQ`, `lq_null!`): each sector with `n_c > m_c` runs one
-    /// economy QR of the `n_c x (m_c + n_c)` block `[A_c^H | I]`,
-    /// `O(n_c^2 (m_c + n_c))`, for an owned input on every provider. The
-    /// basis is any orthonormal basis of the complement. Compact diagonals
+    /// `RightNullViaLQ`, `lq_null!`). Only sectors with `n_c > m_c` run
+    /// dense work, all in one batch on each sector's transpose `A_c^T`
+    /// read in place: on the native provider the Householder reflectors of
+    /// `A_c^T` applied to `[0; I]`, `O(n_c m_c² + n_c² m_c)`, on other
+    /// providers one economy QR of the `n_c x (m_c + n_c)` block
+    /// `[A_c^T | I]`, `O(n_c^2 (m_c + n_c))`; the basis is then transposed
+    /// once. The basis is any orthonormal basis of the complement and may
+    /// differ by provider. Compact diagonals
     /// return an empty null
     /// space directly; a lazy
     /// adjoint uses the left null space of its owned parent without

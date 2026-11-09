@@ -1242,10 +1242,10 @@ where
         (probe.canonical_publications, probe.fallback_publications),
         (6, 0)
     );
-    // Q: the 9 identity after the packed sector factors; R: 0 (packed
-    // buffer moved, charge 2 has no domain block); L: 24; Q': 16 + 4
-    // identity; U: 36 + 9; Vh: 16 + 4 (first owners moved).
-    assert_eq!(bytes(probe.appended_elements), bytes(9 + 24 + 20 + 45 + 20));
+    // Q: the 9 identity after the packed sector factors; R and L: 0 (packed
+    // buffers moved, charge 2 has no domain block); Q': the 4 identity after
+    // the packed sector factors; U: 36 + 9; Vh: 16 + 4 (first owners moved).
+    assert_eq!(bytes(probe.appended_elements), bytes(9 + 4 + 45 + 20));
 }
 
 #[test]

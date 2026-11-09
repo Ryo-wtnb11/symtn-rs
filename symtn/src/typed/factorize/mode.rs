@@ -74,12 +74,14 @@ impl FactorOp {
                 AdjointRule::Redirect
             }
             // Why not read QR's parent through LQ (TensorKit's
-            // `qr_compact!` on an `AdjointTensorMap`): full LQ is the full QR
-            // of a staged adjoint, so it would form this copy anyway; compact
-            // LQ reads the parent without a copy only on the native
-            // provider (the default and BLAS executors stage the same
-            // adjoint), and on every executor its factors would still need
-            // adjointing into QR's.
+            // `qr_compact!` on an `AdjointTensorMap`): for `X = A^H` of shape
+            // `m x n`, full LQ reads `A`'s transpose in place, but QR's
+            // factors would still be the conjugates of that QR's own
+            // factors, one more pass over `m (m + n)` elements against this
+            // materialization's `m n`; compact LQ reads the parent without a
+            // copy only on the native provider (the default and BLAS
+            // executors stage the same adjoint), and on every executor its
+            // factors would still need adjointing into QR's.
             Self::QrCompact | Self::QrFull => AdjointRule::Materialize,
             // Why not read the parent: an admitted near-Hermitian input
             // differs from its adjoint and the solver reads one triangle; the
