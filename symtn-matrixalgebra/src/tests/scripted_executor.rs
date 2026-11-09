@@ -417,8 +417,8 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
 }
 
 /// Runs the trait's default `factorize_batch_into` with this executor: it
-/// forwards the owned batch and the required entries, so the default
-/// reaches the scripted `factorize_batch`.
+/// forwards the owned batch, `solve_into` and the required entries, so the
+/// default reaches the scripted `factorize_batch` and `solve_into`.
 struct OwnedBatch<'a, O: Observer>(&'a mut ScriptedExecutor<O>);
 
 impl<O: Observer> DenseExecutor for OwnedBatch<'_, O> {
@@ -461,6 +461,16 @@ impl<O: Observer> DenseExecutor for OwnedBatch<'_, O> {
         sink: &mut BatchSink<'_>,
     ) -> Result<(), DenseError> {
         self.0.factorize_batch(engine, op, inputs, sink)
+    }
+    // The inverse's destination default solves through it.
+    fn solve_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        a: DenseRead<'_>,
+        b: DenseRead<'_>,
+        x: DenseWrite<'_>,
+    ) -> Result<(), DenseError> {
+        self.0.solve_into(engine, a, b, x)
     }
 }
 

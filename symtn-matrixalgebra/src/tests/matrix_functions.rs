@@ -183,7 +183,15 @@ fn inv_composes_to_the_identity() {
         &bound_tensor_ref!(Arc::new(rule), &tensor),
     )
     .unwrap();
-    assert_eq!(dense_executor.counts().solve, expected_sectors);
+    // One destination batch; its default solves each sector with one
+    // `solve_into`.
+    assert_eq!(
+        (
+            dense_executor.counts().factorize_batch_into,
+            dense_executor.counts().solve
+        ),
+        (1, expected_sectors)
+    );
     let identity = crate::compose::compose(engine, &mut context, &rule, &tensor, &inverse).unwrap();
     assert_identity_matrices(&dense_sector_matrices(2, &identity));
 }
@@ -700,7 +708,10 @@ fn inv_preserves_genuinely_complex_nonhermitian_sector_values() {
     for (&actual, expected) in inverse.data().iter().zip(oracle) {
         assert!((actual - expected).norm() < 1.0e-12);
     }
-    assert_eq!(dense.counts().solve, 1);
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().solve),
+        (1, 1)
+    );
 }
 
 #[test]
@@ -746,34 +757,72 @@ fn inv_dyn_reverses_isomorphic_spaces_with_different_tree_ranks() {
             assert!((inverse.data()[row + 6 * col] - expected).abs() < 1.0e-12);
         }
     }
-    assert_eq!(dense.counts().solve, 1);
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().solve),
+        (1, 1)
+    );
 }
 
 #[test]
 fn inv_route_preflight_rejects_a_missing_later_sector_before_execution() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
     // What: every sector route is checked before the first dense solve.
     let source = u1_block_endomorphism(&[(0, 1, vec![1.0_f64]), (1, 1, vec![2.0])]);
     let incomplete_output = u1_block_endomorphism(&[(0, 1, vec![1.0_f64])]);
-    let source_regions = source
+    let provider = Arc::new(U1FusionRule);
+    let source = bound_tensor(Arc::clone(&provider), &source);
+    let output = bound_tensor(provider, &incomplete_output);
+    let mut dense = ScriptedExecutor::new(RejectExecutorCalls);
+
+    let error = inv_direct_into_dyn(
+        engine,
+        &mut dense,
+        &source.as_ref().dynamic(),
+        output.space().clone(),
+    )
+    .unwrap_err();
+
+    assert!(
+        matches!(error, OperationError::SpaceMismatch { .. }),
+        "{error:?}"
+    );
+    assert_eq!(dense.counts(), Default::default());
+}
+
+#[test]
+fn inv_submits_one_destination_batch_of_square_sectors() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    // What: the inverse hands every nonempty coupled sector to one executor
+    // destination batch, an `n x n` destination per sector in sector order,
+    // and makes no per-matrix solve.
+    let tensor = u1_block_endomorphism(&[
+        (0, 2, vec![2.0_f64, 1.0, 0.0, 3.0]),
+        (1, 1, vec![4.0]),
+        (2, 3, vec![1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 5.0]),
+    ]);
+    let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
+    let orders = tensor
         .structure()
         .coupled_sector_regions(1)
         .unwrap()
-        .unwrap();
-    let output_regions = incomplete_output
-        .structure()
-        .coupled_sector_regions(1)
         .unwrap()
-        .unwrap();
+        .iter()
+        .map(|region| region.rows())
+        .collect::<Vec<_>>();
+    assert_eq!(orders.len(), 3);
+    let mut dense = ScriptedExecutor::<InvBatchSpy>::default();
 
-    let error =
-        validate_inverse_region_routes_for_test(&source_regions, &output_regions).unwrap_err();
+    inv_into_mf(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
 
-    assert!(matches!(
-        error,
-        OperationError::SpaceMismatch {
-            message: "inverse output is missing a source coupled sector"
-        }
-    ));
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().solve),
+        (1, 0)
+    );
+    let expected = orders
+        .iter()
+        .map(|&n| vec![vec![n, n], vec![], vec![]])
+        .collect::<Vec<_>>();
+    assert_eq!(dense.delivered, expected);
 }
 
 #[test]
@@ -869,7 +918,10 @@ fn inv_returns_the_backend_error_when_a_later_sector_fails() {
             ..
         })
     ));
-    assert_eq!(dense.counts().solve, 2);
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().solve),
+        (1, 2)
+    );
 }
 
 #[test]
@@ -913,7 +965,10 @@ fn inv_solves_the_rank_zero_scalar_sector() {
     .unwrap();
 
     assert_eq!(inverse.data(), &[-0.25]);
-    assert_eq!(dense.counts().solve, 1);
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().solve),
+        (1, 1)
+    );
 }
 
 #[test]

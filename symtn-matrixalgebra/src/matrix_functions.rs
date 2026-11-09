@@ -804,7 +804,8 @@ fn validate_pinv_rcond(rcond: f64) -> Result<(), OperationError> {
 /// True inverse of a nonsingular map between isomorphic spaces.
 ///
 /// The context parameter is retained for source compatibility. Inverse itself
-/// is context-free and performs one dense solve per nonempty coupled sector.
+/// is context-free: every nonempty coupled sector is one input of one dense
+/// [`symtn_dense::DenseFactorization::Inv`] destination batch.
 pub(crate) fn inv<E, RuleKey, BT, BC, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -826,7 +827,18 @@ where
 
 /// Context-free inverse execution into a caller-admitted swapped output space,
 /// in every fusion mode: the sector routing and one dense LU solve per
-/// coupled sector.
+/// nonempty coupled sector, all of them one
+/// [`symtn_dense::DenseFactorization::Inv`] destination batch writing the
+/// output regions in place: TensorKit's `inv` per block (the identity in the
+/// output block, then an in-place LU solve), `O(n^3)` per `n x n` sector.
+///
+/// # Errors
+///
+/// [`OperationError::SpaceMismatch`] for a non-square stored sector or an
+/// output whose sectors or tree bases do not transpose the input's, before
+/// any dense work; otherwise the dense solve's error of the first failing
+/// sector in sector order (an exactly singular sector is the provider's
+/// numerical failure).
 ///
 /// # Preconditions
 ///

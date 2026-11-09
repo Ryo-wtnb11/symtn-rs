@@ -939,3 +939,36 @@ impl Observer for DestinationSvdOnly {
         );
     }
 }
+
+/// The inverse through the executor's own destination batch only: forwards
+/// `factorize_batch_into` and records each delivered destination's output
+/// shapes; the per-matrix solve and the owned batch panic.
+#[derive(Default)]
+pub(super) struct InvBatchSpy {
+    pub(super) delivered: Vec<Vec<Vec<usize>>>,
+}
+
+impl Observer for InvBatchSpy {
+    fn script(script: &mut Script) {
+        script.set(Op::FactorizeBatchInto, Action::Forward).set_all(
+            &[Op::Solve, Op::FactorizeBatch],
+            Action::Panic("inverse must run as the executor's destination batch"),
+        );
+    }
+
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut symtn_dense::FactorDest<'_>,
+        outcome: Result<(), symtn_dense::FactorFailure>,
+        sink: &mut super::scripted_executor::BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        let shapes = dest
+            .outputs_mut()
+            .iter()
+            .map(|output| output.as_ref().map_or(Vec::new(), |o| o.shape().to_vec()))
+            .collect();
+        self.delivered.push(shapes);
+        sink(index, dest, outcome)
+    }
+}

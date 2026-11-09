@@ -2273,7 +2273,7 @@ pub(crate) fn tenferro_error(op: &'static str, err: tenferro_tensor::Error) -> D
 }
 
 #[cfg(not(feature = "provider-inject"))]
-fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
+pub(crate) fn tenferro_solve_error(err: tenferro_tensor::Error) -> DenseError {
     if err.kind() == tenferro_tensor::ErrorKind::NumericalFailure {
         DenseError::NumericalFailure {
             backend: DenseBackend::Tenferro,
@@ -2373,7 +2373,8 @@ fn factorize_batch_serial(
         }
         DenseFactorization::LeftPolar
         | DenseFactorization::RightPolar
-        | DenseFactorization::ExpViaEigh => {
+        | DenseFactorization::ExpViaEigh
+        | DenseFactorization::Inv => {
             unreachable!("`factorize_batch` refuses the destination-only ops")
         }
     };
@@ -2394,7 +2395,8 @@ fn factorize_batch_serial(
                 }
                 DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
-                | DenseFactorization::ExpViaEigh => {
+                | DenseFactorization::ExpViaEigh
+                | DenseFactorization::Inv => {
                     unreachable!("`factorize_batch` refuses the destination-only ops")
                 }
                 DenseFactorization::Eigh => input.eigh_read(exec).map(|(w, v)| vec![w, v]),
