@@ -406,9 +406,15 @@ jobs:
       - name: Install CUDA toolkit
         id: cuda-toolkit
         timeout-minutes: 12
+        # Why (#2411): the full `cuda-13-0` metapackage is a 3.4 GB download
+        # (driver, Nsight JDK, X11) that stalled past the timeout. cudarc is
+        # dynamic-loading with a pinned version feature and non-ignored CUDA
+        # tests use a CPU engine, so only the diagnose step's nvcc is needed.
         uses: Jimver/cuda-toolkit@v0.2.28
         with:
+          cuda: '13.0.1'
           method: network
+          sub-packages: '["nvcc"]'
       - name: Diagnose CUDA toolkit setup
         # Runs whether the setup step above succeeded, failed, or timed out,
         # so a stuck/failed toolkit install is attributable and distinct from
