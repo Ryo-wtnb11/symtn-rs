@@ -1,5 +1,6 @@
 use num_complex::{Complex32, Complex64};
 
+use crate::factor_dest::Element;
 use crate::fresh::{dispatch_fresh, fresh_serial, FRESH_OP};
 use crate::{
     DenseDType, DenseDotConfig, DenseError, DenseFreshSegments, DenseRead, DenseScalar,
@@ -80,6 +81,20 @@ pub enum DenseFactorization {
     /// [`DenseExecutor::qr_into`] on `[X I_m]` when `m > n` and keeps its
     /// `Q`'s last `m - n` columns, and solves nothing when `m <= n`.
     QrNull,
+    /// Full SVD `X = U S Vh` (MatrixAlgebraKit `svd_full`): `[U, S, Vh]` of
+    /// shapes `[m, m, b..]`, `[k, b..]` and `[n, n, b..]` with
+    /// `k = min(m, n)`, `U` and `Vh` unitary, `S` real, non-negative and
+    /// non-increasing, in the provider's gauge. Past the first `k`, `U`'s
+    /// columns and `Vh`'s rows are an orthonormal basis of the complement
+    /// and may differ by provider; an input with a zero extent has identity
+    /// `U` and `Vh`. It has no per-matrix entry; the default factors one
+    /// `m x n` matrix (a batched input is [`DenseError::Unsupported`]) with
+    /// [`DenseExecutor::svd_full_owned`] of a compact copy when
+    /// [`DenseExecutor::supports_svd_full`], otherwise with
+    /// [`DenseExecutor::svd_into`] into compact `U1`, `S`, `Vh1` and
+    /// completes `U` and `V` from `[U1 I_m]` and `[V1 I_n]` as
+    /// [`Self::QrNull`]'s default does.
+    SvdFull,
     /// Left polar decomposition `X = W P` of an `m x n` input with `m >= n`
     /// (MatrixAlgebraKit `left_polar!` via `PolarViaSVD`): `[W, P]` of shapes
     /// `[m, n, b..]` and `[n, n, b..]`, `W` with orthonormal columns and `P`
@@ -213,7 +228,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// [`DenseFactorization::Lq`], [`Self::qr`] of the input's adjoint,
     /// written into one scratch sized for the largest input; for
     /// [`DenseFactorization::QrFull`] and [`DenseFactorization::QrNull`],
-    /// [`Self::qr_into`] as each variant states) and calls
+    /// [`Self::qr_into`] as each variant states; for
+    /// [`DenseFactorization::SvdFull`], the entries that variant names) and
+    /// calls
     /// `sink(i, outcome)` before solving input `i + 1`, so an executor using
     /// it sees the same call sequence as a per-matrix loop that checks each
     /// output before the next solve. An executor whose per-call entry carries
@@ -245,6 +262,7 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::Lq => lq.factor(input, |adjoint| self.qr(engine, adjoint)),
                 DenseFactorization::QrFull => full_qr_by_qr_into(self, engine, input, false),
                 DenseFactorization::QrNull => full_qr_by_qr_into(self, engine, input, true),
+                DenseFactorization::SvdFull => full_svd_by_entries(self, engine, input),
                 DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
                 | DenseFactorization::ExpViaEigh => {
@@ -257,7 +275,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     }
 
     /// [`Self::factorize_batch`] of the compact QR, compact LQ, full QR, QR
-    /// null basis, compact SVD or Hermitian eigendecomposition `op` with each
+    /// null basis, compact or full SVD or Hermitian eigendecomposition `op`
+    /// with each
     /// input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
     /// shapes, dtypes and [`crate::FactorPlacement`]), and the
@@ -1048,6 +1067,7 @@ trait AdjointScalar: Copy {
     fn read(view: DenseView<'_, Self>) -> DenseRead<'_>;
     fn write(view: DenseViewMut<'_, Self>) -> DenseWrite<'_>;
     fn owned(shape: Vec<usize>, data: Vec<Self>) -> Result<DenseTensor, DenseError>;
+    fn owned_input(data: Vec<Self>) -> DenseOwned;
     fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError>;
     fn tensor(
         like: &DenseTensor,
@@ -1073,6 +1093,9 @@ macro_rules! adjoint_scalar {
             }
             fn owned(shape: Vec<usize>, data: Vec<Self>) -> Result<DenseTensor, DenseError> {
                 DenseTensor::host_col_major(shape, data)
+            }
+            fn owned_input(data: Vec<Self>) -> DenseOwned {
+                DenseOwned::$variant(data)
             }
             fn slice(tensor: &DenseTensor) -> Result<&[Self], DenseError> {
                 tensor.$slice()
@@ -1339,4 +1362,103 @@ fn full_qr_of<E: DenseExecutor + ?Sized, T: AdjointScalar>(
     } else {
         Ok(vec![T::owned(q_shape, q)?, T::owned(dims(m, n), kept)?])
     }
+}
+
+/// [`DenseFactorization::SvdFull`] of one input through `executor`'s
+/// per-matrix entries, as the variant documents. An input the staging cannot
+/// read (rank below 2, or a dtype without a factorization) goes to
+/// [`DenseExecutor::svd`] unchanged, so it is refused with `svd`'s own error.
+pub(crate) fn full_svd_by_entries<E: DenseExecutor + ?Sized>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+) -> Result<Vec<DenseTensor>, DenseError> {
+    let batched = || DenseError::Unsupported {
+        op: "svd_full",
+        message: format!("batched full SVD input of shape {:?}", input.shape()),
+    };
+    match input {
+        _ if input.shape().len() > 2 => Err(batched()),
+        DenseRead::F32(view) if view.shape().len() == 2 => full_svd_of(executor, engine, view),
+        DenseRead::F64(view) if view.shape().len() == 2 => full_svd_of(executor, engine, view),
+        DenseRead::C32(view) if view.shape().len() == 2 => full_svd_of(executor, engine, view),
+        DenseRead::C64(view) if view.shape().len() == 2 => full_svd_of(executor, engine, view),
+        other => {
+            executor.svd(engine, other)?;
+            Err(DenseError::Unsupported {
+                op: "svd_full",
+                message: format!(
+                    "full SVD input of dtype {:?} and rank {}",
+                    other.dtype(),
+                    other.shape().len()
+                ),
+            })
+        }
+    }
+}
+
+fn full_svd_of<E: DenseExecutor + ?Sized, T: AdjointScalar + Element>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    view: DenseView<'_, T>,
+) -> Result<Vec<DenseTensor>, DenseError>
+where
+    T::Spectrum: Element,
+{
+    let (m, n) = (view.shape()[0], view.shape()[1]);
+    if executor.supports_svd_full() {
+        let (data, strides) = (view.data(), view.strides());
+        let mut compact = Vec::with_capacity(checked_count(&[m, n])?);
+        for col in 0..n {
+            compact.extend(
+                (0..m).map(|row| data[view.offset() + row * strides[0] + col * strides[1]]),
+            );
+        }
+        return executor.svd_full_owned(engine, T::owned_input(compact), m, n);
+    }
+    // The compact factors through the executor's destination entry, which an
+    // executor may implement apart from its owned `svd`.
+    let k = m.min(n);
+    let mut u1 = vec![<T as AdjointScalar>::ZERO; checked_count(&[m, k])?];
+    let mut s = vec![T::Spectrum::default(); k];
+    let mut vh1 = vec![<T as AdjointScalar>::ZERO; checked_count(&[k, n])?];
+    executor.svd_into(
+        engine,
+        <T as AdjointScalar>::read(view),
+        <T as AdjointScalar>::write(DenseViewMut::new(&mut u1, &[m, k], &[1, m], 0)?),
+        <T::Spectrum as Element>::write(DenseViewMut::new(&mut s, &[k], &[1], 0)?),
+        <T as AdjointScalar>::write(DenseViewMut::new(&mut vh1, &[k, n], &[1, k], 0)?),
+    )?;
+    let v1 = adjoint_items(&vh1, k, n);
+    let u = complete_columns(executor, engine, u1, m, k)?;
+    let v = complete_columns(executor, engine, v1, n, k)?;
+    let vh = adjoint_items(&v, n, n);
+    let s = DenseTensor::host_col_major(vec![k], s)?;
+    Ok(vec![T::owned(vec![m, m], u)?, s, T::owned(vec![n, n], vh)?])
+}
+
+/// `thin`'s `rank` orthonormal columns (`rows x rank`, column-major)
+/// followed by the null basis of `[thin I]` ([`full_qr_of`] with `null`), a
+/// square unitary whose first columns are `thin` unchanged.
+fn complete_columns<E: DenseExecutor + ?Sized, T: AdjointScalar>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    mut thin: Vec<T>,
+    rows: usize,
+    rank: usize,
+) -> Result<Vec<T>, DenseError> {
+    if rank == rows {
+        return Ok(thin);
+    }
+    let shape = [rows, rank];
+    let strides = [1, rows];
+    let null = full_qr_of(
+        executor,
+        engine,
+        DenseView::new(&thin, &shape, &strides, 0)?,
+        true,
+    )?;
+    let null = T::slice(&null[0])?;
+    thin.extend_from_slice(null);
+    Ok(thin)
 }

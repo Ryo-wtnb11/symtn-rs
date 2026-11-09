@@ -869,3 +869,73 @@ fn scripted_default_eig_vals_reaches_the_forwarded_eig() {
     assert_eq!(dense.counts().eig_vals, 1);
     assert_eq!(dense.counts().eig, 1);
 }
+
+/// Full SVD through the executor's own destination batch only: forwards
+/// `factorize_batch_into` and records each delivered destination's
+/// placement and output shapes; every per-matrix entry panics.
+#[derive(Default)]
+pub(super) struct FullSvdBatchSpy {
+    pub(super) delivered: Vec<(symtn_dense::FactorPlacement, Vec<Vec<usize>>)>,
+}
+
+impl Observer for FullSvdBatchSpy {
+    fn script(script: &mut Script) {
+        script.set(Op::FactorizeBatchInto, Action::Forward).set_all(
+            &[
+                Op::Svd,
+                Op::SvdInto,
+                Op::SvdFullOwned,
+                Op::Qr,
+                Op::QrInto,
+                Op::FactorizeBatch,
+            ],
+            Action::Panic("full SVD must run as the executor's destination batch"),
+        );
+    }
+
+    fn batch_into_outcome(
+        &mut self,
+        index: usize,
+        dest: &mut symtn_dense::FactorDest<'_>,
+        outcome: Result<(), symtn_dense::FactorFailure>,
+        sink: &mut super::scripted_executor::BatchIntoSink<'_>,
+    ) -> Result<(), DenseError> {
+        let shapes = dest
+            .outputs_mut()
+            .iter()
+            .map(|output| output.as_ref().map_or(Vec::new(), |o| o.shape().to_vec()))
+            .collect();
+        self.delivered.push((dest.placement(), shapes));
+        sink(index, dest, outcome)
+    }
+}
+
+/// No native full SVD; its destination `svd_into` fails while the owned
+/// `svd` works.
+#[derive(Default)]
+pub(super) struct FailingSvdInto;
+
+impl Observer for FailingSvdInto {
+    fn script(script: &mut Script) {
+        script.set(Op::Svd, Action::Forward).fail(
+            &[Op::SvdInto],
+            None,
+            "svd_into",
+            "injected destination SVD failure",
+        );
+    }
+}
+
+/// No native full SVD; its destination `svd_into` works while the owned
+/// `svd` must not be called.
+#[derive(Default)]
+pub(super) struct DestinationSvdOnly;
+
+impl Observer for DestinationSvdOnly {
+    fn script(script: &mut Script) {
+        script.set(Op::SvdInto, Action::Forward).set(
+            Op::Svd,
+            Action::Panic("full SVD completion must use svd_into"),
+        );
+    }
+}

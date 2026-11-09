@@ -24,8 +24,8 @@ fn full_svd_late_error_preserves_input_and_publishes_no_factors() {
 fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the production full SVD (direct and adjoint engines) admits U and
-    // Vh layouts that the staged per-sector factors already occupy, so both
-    // factors are transferred instead of zero-filled and scattered.
+    // Vh layouts that the packed per-sector factors already occupy, so both
+    // factor buffers move whole instead of being zero-filled and scattered.
     let rule = Z2FusionRule;
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -38,7 +38,7 @@ fn full_svd_publishes_owned_factors_without_scatter_in_both_orientations() {
         (probe.canonical_publications, probe.fallback_publications),
         (2, 0)
     );
-    assert!(probe.appended_elements > 0);
+    assert_eq!(probe.appended_elements, 0);
 
     let one_sided_rec = crate::probe::record();
     let adjoint = svd_full_adjoint_dyn(engine, &mut dense, &bound.as_ref().dynamic()).unwrap();
@@ -176,8 +176,94 @@ fn svd_full_uses_native_owned_full_svd_without_orthonormal_completion() {
 
     let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
-    assert_eq!(dense.counts().svd_full, 1);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 1)
+    );
     assert!(!full.singular_values().is_empty());
+}
+
+#[test]
+fn svd_full_completion_solves_the_compact_factors_through_svd_into() {
+    // What: an executor without native full SVD has its compact factors
+    // solved by its own destination entry `svd_into`, not the owned `svd`:
+    // an `svd_into` failure is the result, and an executor whose owned `svd`
+    // is unavailable still factors.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = rectangular_svd_tensor(2, 3);
+    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+
+    let mut failing = ScriptedExecutor::<FailingSvdInto>::default();
+    let result = svd_full_dyn(engine, &mut failing, &input.as_ref().dynamic());
+    assert!(matches!(
+        result,
+        Err(OperationError::Dense(DenseError::Backend {
+            op: "svd_into",
+            ..
+        }))
+    ));
+
+    let mut destination_only = ScriptedExecutor::<DestinationSvdOnly>::default();
+    let full = svd_full_dyn(engine, &mut destination_only, &input.as_ref().dynamic()).unwrap();
+    // One 2x3 block: `U` 2x2, `S` 2x3, `Vh` 3x3, column-major.
+    let (u, sigma, vh) = (full.u().data(), full.s().data(), full.vh().data());
+    assert_eq!((u.len(), sigma.len(), vh.len()), (4, 6, 9));
+    for col in 0..3 {
+        for row in 0..2 {
+            let usv = (0..2)
+                .map(|mid| {
+                    (0..3)
+                        .map(|inner| {
+                            u[row + 2 * mid] * sigma[mid + 2 * inner] * vh[inner + 3 * col]
+                        })
+                        .sum::<f64>()
+                })
+                .sum::<f64>();
+            assert!((usv - tensor.data()[row + 2 * col]).abs() < 1e-10);
+        }
+    }
+}
+
+#[test]
+fn svd_full_submits_one_destination_batch_of_square_factors_in_both_orientations() {
+    // What: direct and lazy-adjoint full SVD hand every sector to one
+    // executor destination batch, with `U [m, m]`, `S [k]`, `Vh [n, n]` per
+    // sector (the adjoint's `[n, n]`, `[k]`, `[m, m]`, placed by the
+    // executor), and no per-matrix SVD or completion call.
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let tensor = mixed_rectangular_c32_tensor();
+    let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let shapes = tensor
+        .structure()
+        .coupled_sector_regions(1)
+        .unwrap()
+        .unwrap()
+        .iter()
+        .map(|region| (region.rows(), region.cols()))
+        .collect::<Vec<_>>();
+    assert_eq!(shapes.len(), 2);
+    for (placement, adjoint) in [
+        (symtn_dense::FactorPlacement::AsComputed, false),
+        (symtn_dense::FactorPlacement::Adjoint, true),
+    ] {
+        let mut dense = ScriptedExecutor::<FullSvdBatchSpy>::default();
+        if adjoint {
+            svd_full_adjoint_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
+        } else {
+            svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
+        }
+        assert_eq!(dense.counts().factorize_batch_into, 1);
+        let expected = shapes
+            .iter()
+            .map(|&(m, n)| {
+                let (u, vh) = if adjoint { (n, m) } else { (m, n) };
+                (placement, vec![vec![u, u], vec![m.min(n)], vec![vh, vh]])
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dense.delivered, expected);
+    }
 }
 
 fn assert_native_full_svd_uses_builtin_owned_dtype<D: FactorScalar>() {
@@ -199,7 +285,12 @@ fn assert_native_full_svd_uses_builtin_owned_dtype<D: FactorScalar>() {
 
     let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
-    assert_eq!(dense.counts().svd_full, 2);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 2)
+    );
     assert_eq!(full.singular_values().len(), 2);
     assert!(full
         .singular_values()
@@ -234,7 +325,12 @@ fn native_full_svd_reconstructs_complex_mixed_rectangular_sectors() {
     };
 
     let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
-    assert_eq!(dense.counts().svd_full, 2);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 2)
+    );
 
     let input_regions = tensor
         .structure()
@@ -427,9 +523,9 @@ fn assert_native_full_svd_oracle<D: FactorScalar>(tol: f64) {
 
             let context = format!("{kind} {rows}x{cols}");
             assert_eq!(
-                dense.counts().svd_full,
-                1,
-                "{context}: direct provider call"
+                (dense.counts().factorize_batch_into, dense.counts().svd_full),
+                (1, 1),
+                "{context}: one batch, one direct provider call"
             );
             let (u_rows, u_cols, u) = single_sector_block(full.u());
             let (s_rows, s_cols, s) = single_sector_block(full.s());
@@ -540,7 +636,12 @@ fn native_full_svd_late_failure_does_not_publish_or_retry_compatibility() {
     let result = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic());
 
     assert!(matches!(result, Err(OperationError::Dense(_))));
-    assert_eq!(dense.counts().svd_full, 2);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 2)
+    );
     assert_eq!(input.data(), before);
     assert_eq!(buffer_builds_rec.factor_buffer_builds(), (0, 0));
 }
@@ -565,7 +666,12 @@ fn native_full_svd_reconstructs_complex_square_input() {
 
     let full = svd_full_dyn(engine, &mut dense, &input.as_ref().dynamic()).unwrap();
 
-    assert_eq!(dense.counts().svd_full, 1);
+    // One destination batch; its default solves each sector with one
+    // `svd_full_owned`.
+    assert_eq!(
+        (dense.counts().factorize_batch_into, dense.counts().svd_full),
+        (1, 1)
+    );
     assert_compact_factors_reconstruct_input(
         &input.as_ref().dynamic(),
         full.u(),

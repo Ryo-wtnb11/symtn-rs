@@ -450,6 +450,39 @@ fn lowest_failing_input_reports_the_per_matrix_error() {
     }
 }
 
+/// Purpose: the full SVD batch's validation errors (rank, dtype) are
+/// tenferro's `svd_full_read` errors exactly, labelled `svd_full`, not the
+/// compact SVD's.
+#[test]
+fn full_svd_validation_errors_match_tenferro() {
+    use tenferro_linalg::TensorReadLinalgExt;
+    let good = vec![1.0_f64, 2.0, 3.0, 4.0];
+    let ints = vec![1_i32, 2, 3, 4];
+    let rank_one = DenseRead::F64(DenseView::new(&good, &[4], &[1], 0).unwrap());
+    let integer = DenseRead::I32(DenseView::new(&ints, &[2, 2], &[1, 2], 0).unwrap());
+    let mut engine = engine(1, BatchPolicy::default());
+    for input in [rank_one, integer] {
+        let batch = factorize_all(
+            &mut DefaultDenseExecutor::new(),
+            &mut engine,
+            DenseFactorization::SvdFull,
+            &[input],
+        )
+        .unwrap_err();
+        let view = crate::tenferro_adapter::tenferro_view(input).unwrap();
+        let reference = tenferro_tensor::TensorRead::from_view(view)
+            .svd_full_read(&mut engine)
+            .unwrap_err();
+        assert_eq!(
+            batch,
+            crate::tenferro_adapter::tenferro_error("svd_full_read", reference),
+            "{:?} {:?}",
+            input.dtype(),
+            input.shape()
+        );
+    }
+}
+
 /// Every outcome `factorize_batch` delivers to a sink that accepts errors,
 /// with its index, and the batch's own result.
 #[allow(clippy::type_complexity)]

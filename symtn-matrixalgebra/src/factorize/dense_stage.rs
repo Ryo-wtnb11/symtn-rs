@@ -377,22 +377,6 @@ pub(super) fn concat_owned_factor_regions<D>(
     output.unwrap_or_default()
 }
 
-pub(super) fn copy_col_major_strided<D: Copy>(
-    source: &[D],
-    rows: usize,
-    cols: usize,
-    source_leading: usize,
-    destination: &mut [D],
-    destination_leading: usize,
-) {
-    for col in 0..cols {
-        let src_start = source_leading * col;
-        let dst_start = destination_leading * col;
-        destination[dst_start..dst_start + rows]
-            .copy_from_slice(&source[src_start..src_start + rows]);
-    }
-}
-
 pub(super) fn advance_outer_index(index: &mut [usize], shape: &[usize]) {
     for axis in 1..shape.len() {
         index[axis] += 1;

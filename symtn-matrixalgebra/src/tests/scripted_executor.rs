@@ -353,7 +353,30 @@ impl<O: Observer> DenseExecutor for Defaulted<'_, O> {
         self.0.dot_general_into(engine, output, lhs, rhs, config)
     }
     // The provided entries other default bodies call (`eig_vals`, and
-    // `factorize_batch` for its general, values-only and full-QR variants).
+    // `factorize_batch` for its general, values-only, full-QR and full-SVD
+    // variants).
+    fn svd_into(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseRead<'_>,
+        u: DenseWrite<'_>,
+        s: DenseWrite<'_>,
+        vt: DenseWrite<'_>,
+    ) -> Result<(), DenseError> {
+        self.0.svd_into(engine, input, u, s, vt)
+    }
+    fn supports_svd_full(&self) -> bool {
+        self.0.supports_svd_full()
+    }
+    fn svd_full_owned(
+        &mut self,
+        engine: &mut dyn Engine,
+        input: DenseOwned,
+        rows: usize,
+        cols: usize,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        self.0.svd_full_owned(engine, input, rows, cols)
+    }
     fn qr_into(
         &mut self,
         engine: &mut dyn Engine,
@@ -442,8 +465,9 @@ impl<O: Observer> DenseExecutor for OwnedBatch<'_, O> {
 }
 
 /// Runs a values-only entry's or `qr_into`'s trait default body:
-/// [`Defaulted`] without its values-only and `qr_into` forwards, which would
-/// route that entry back into itself.
+/// [`Defaulted`] without its values-only, `qr_into`, `svd_into` and full-SVD
+/// forwards,
+/// which would route that entry back into itself.
 struct ValuesDefault<'d, 'a, O: Observer>(&'d mut Defaulted<'a, O>);
 
 impl<O: Observer> DenseExecutor for ValuesDefault<'_, '_, O> {
@@ -691,7 +715,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
         }
         match action {
             Action::Forward => self.script.inner.svd_into(engine, input, u, s, vt),
-            _ => Defaulted(self).svd_into(engine, input, u, s, vt),
+            _ => ValuesDefault(&mut Defaulted(self)).svd_into(engine, input, u, s, vt),
         }
     }
 
@@ -790,7 +814,7 @@ impl<O: Observer> DenseExecutor for ScriptedExecutor<O> {
     ) -> Result<Vec<DenseTensor>, DenseError> {
         match self.script.enter(Op::SvdFullOwned)? {
             Action::Forward => self.script.inner.svd_full_owned(engine, input, rows, cols),
-            _ => Defaulted(self).svd_full_owned(engine, input, rows, cols),
+            _ => ValuesDefault(&mut Defaulted(self)).svd_full_owned(engine, input, rows, cols),
         }
     }
 
