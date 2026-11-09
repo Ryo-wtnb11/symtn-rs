@@ -2,36 +2,20 @@ use super::*;
 use symtn_dense::Engine;
 
 #[derive(Clone, Copy)]
-pub(super) struct InverseSectorRoute {
-    pub(super) source: usize,
-    pub(super) output: usize,
-}
-
-#[derive(Clone, Copy)]
 pub(super) struct SolveLeftSectorRoute {
     pub(super) divisor: usize,
     pub(super) rhs: usize,
     pub(super) output: usize,
 }
 
-pub(super) struct InverseMatrixRoute {
-    pub(super) source: usize,
-    pub(super) output: usize,
-    pub(super) rows: Vec<InverseBasisExtent>,
-    pub(super) cols: Vec<InverseBasisExtent>,
-}
-
-#[derive(Clone, Copy)]
-pub(super) struct InverseBasisExtent {
-    pub(super) source_offset: usize,
-    pub(super) output_offset: usize,
-    pub(super) extent: usize,
-}
-
-/// Coefficient-free inverse execution into an already admitted swapped output.
+/// The inverse (TensorKit `inv`) of a map between isomorphic spaces, every
+/// coupled sector of nonzero order one input of a [`DenseFactorization::Inv`]
+/// destination batch writing its output region in place. One scope spans the
+/// batch, and the first solver failure in sector order is the error.
 ///
 /// The caller owns categorical admission; this body only routes the existing
-/// coupled-sector layout and performs the dense solves.
+/// coupled-sector layout: the output's rows are the input's column trees and
+/// its columns the input's row trees, at the same offsets.
 pub(crate) fn inverse_by_sector_dyn_into<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
@@ -43,9 +27,6 @@ where
     D: FactorScalar,
 {
     let source_space = input.space().space();
-    let mut output_data = vec![D::zero(); output_space.space().required_len()?];
-
-    let source_regions = checked_sector_regions(source_space.structure(), source_space.nout())?;
     let output_regions = checked_sector_regions(
         output_space.space().structure(),
         output_space.space().nout(),
@@ -53,80 +34,65 @@ where
     .ok_or(OperationError::UnsupportedTensorContractScope {
         message: "inverse derived output requires canonical coupled-sector storage",
     })?;
-    match source_regions {
-        Some(source) => {
-            let routes = compile_inverse_region_routes(
-                &source,
-                &output_regions,
-                input.data().len(),
-                output_data.len(),
-            )?;
-            let max_order = routes
-                .iter()
-                .map(|route| source[route.source].rows())
-                .max()
-                .unwrap_or(0);
-            let identity = identity_workspace::<D>(max_order)?;
-            for route in routes {
-                let source_region = &source[route.source];
-                if source_region.rows() == 0 {
-                    continue;
-                }
-                let source_matrix = &input.data()[source_region.range()];
-                let output_matrix = &mut output_data[output_regions[route.output].range()];
-                solve_inverse_sector(
-                    engine,
-                    dense,
-                    source_matrix,
-                    output_matrix,
-                    source_region.rows(),
-                    source_region.rows(),
-                    &identity,
-                    max_order,
-                )?;
-            }
-        }
-        None => {
-            let source_matrices =
-                sector_matricizations(source_space.structure(), input.data(), source_space.nout())?;
-            let routes = compile_inverse_matrix_routes(
-                &source_matrices,
-                &output_regions,
-                output_data.len(),
-            )?;
-            let max_order = routes
-                .iter()
-                .map(|route| source_matrices[route.source].rows)
-                .max()
-                .unwrap_or(0);
-            let identity = identity_workspace::<D>(max_order)?;
-            let mut solution = vec![D::zero(); identity.len()];
-            for route in routes {
-                let source = &source_matrices[route.source];
-                if source.rows == 0 {
-                    continue;
-                }
-                solve_inverse_sector(
-                    engine,
-                    dense,
-                    &source.data,
-                    &mut solution,
-                    source.rows,
-                    max_order,
-                    &identity,
-                    max_order,
-                )?;
-                let output = &output_regions[route.output];
-                reorder_inverse_solution(
-                    &solution,
-                    max_order,
-                    &mut output_data[output.range()],
-                    output.rows(),
-                    &route.rows,
-                    &route.cols,
-                );
-            }
-        }
+    let output_len = output_space.space().required_len()?;
+    let matrices =
+        generic_input_matricizations(source_space.structure(), input.data(), source_space.nout())?;
+    let (_, blocks) = sector_blocks(&matrices)?;
+    if blocks.iter().any(|&(_, rows, cols)| rows != cols) {
+        return Err(OperationError::SpaceMismatch {
+            message: "inverse coupled-sector matrix is not square",
+        });
+    }
+    let landings = with_input_geometry!(&matrices, |geometry| compile_sector_landings(
+        geometry,
+        &output_regions,
+        output_len,
+        FactorSide::Right,
+        FactorSide::Left,
+    ))?;
+    let solved: Vec<usize> = (0..blocks.len())
+        .filter(|&index| blocks[index].1 > 0)
+        .collect();
+    let solved_blocks: Vec<_> = solved.iter().map(|&index| blocks[index]).collect();
+    let mut layouts = Vec::new();
+    let inputs = col_major_reads(&solved_blocks, &mut layouts)?;
+    // Why allocator zeroing rather than uninitialized outputs: see
+    // `exp_via_eigh_dyn_into`.
+    let mut output_data = zeroed_payload::<D>(output_len);
+    if !inputs.is_empty() {
+        let ranges: Vec<_> = landings
+            .iter()
+            .map(|landing| output_regions[landing.output].range())
+            .collect();
+        let mut slices = split_ranges(&mut output_data, &ranges)?;
+        let dest_layouts: Vec<_> = solved_blocks
+            .iter()
+            .map(|&(_, order, _)| matrix_layout(order, order))
+            .collect();
+        let mut dests = solved
+            .iter()
+            .zip(&dest_layouts)
+            .map(|(&index, layout)| {
+                Ok(FactorDest::new(
+                    [
+                        Some(dest_write(std::mem::take(&mut slices[index]), layout)?),
+                        None,
+                        None,
+                    ],
+                    symtn_dense::FactorPlacement::AsComputed,
+                ))
+            })
+            .collect::<Result<Vec<_>, OperationError>>()?;
+        in_linalg_scope(engine, dense, |dense, engine| {
+            factorize_into_solver_first(
+                engine,
+                dense,
+                DenseFactorization::Inv,
+                &inputs,
+                &mut dests,
+                |_, _| Ok(()),
+            )
+        })?;
     }
 
     BoundDynFactor::from_bound(
@@ -873,77 +839,6 @@ where
     )
 }
 
-pub(super) fn compile_inverse_region_routes(
-    source: &[CoupledSectorRegion],
-    output: &[CoupledSectorRegion],
-    source_len: usize,
-    output_len: usize,
-) -> Result<Vec<InverseSectorRoute>, OperationError> {
-    let output_by_sector = sector_region_index_map(output)?;
-    let mut used = vec![false; output.len()];
-    let mut routes = Vec::with_capacity(source.len());
-    for (source_index, source_region) in source.iter().enumerate() {
-        let output_index = output_by_sector
-            .get(&source_region.coupled())
-            .copied()
-            .ok_or(OperationError::SpaceMismatch {
-                message: "inverse output is missing a source coupled sector",
-            })?;
-        validate_inverse_region(source_region, &output[output_index])?;
-        validate_region_range(source_region, source_len)?;
-        validate_region_range(&output[output_index], output_len)?;
-        used[output_index] = true;
-        routes.push(InverseSectorRoute {
-            source: source_index,
-            output: output_index,
-        });
-    }
-    if used.iter().any(|used| !used) {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse output contains a coupled sector absent from the source",
-        });
-    }
-    Ok(routes)
-}
-
-#[cfg(test)]
-pub(crate) fn validate_inverse_region_routes_for_test(
-    source: &[CoupledSectorRegion],
-    output: &[CoupledSectorRegion],
-) -> Result<(), OperationError> {
-    let source_len = source
-        .iter()
-        .map(|region| region.range().end)
-        .max()
-        .unwrap_or(0);
-    let output_len = output
-        .iter()
-        .map(|region| region.range().end)
-        .max()
-        .unwrap_or(0);
-    compile_inverse_region_routes(source, output, source_len, output_len).map(|_| ())
-}
-
-pub(super) fn validate_inverse_region(
-    source: &CoupledSectorRegion,
-    output: &CoupledSectorRegion,
-) -> Result<(), OperationError> {
-    if source.rows() != source.cols()
-        || output.rows() != source.cols()
-        || output.cols() != source.rows()
-    {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse coupled-sector matrix is not square",
-        });
-    }
-    if source.col_trees() != output.row_trees() || source.row_trees() != output.col_trees() {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse output tree basis does not transpose the source basis",
-        });
-    }
-    Ok(())
-}
-
 pub(super) fn validate_region_range(
     region: &CoupledSectorRegion,
     data_len: usize,
@@ -956,169 +851,4 @@ pub(super) fn validate_region_range(
         });
     }
     Ok(())
-}
-
-pub(super) fn compile_inverse_matrix_routes<D>(
-    source: &[SectorMatricization<D>],
-    output: &[CoupledSectorRegion],
-    output_len: usize,
-) -> Result<Vec<InverseMatrixRoute>, OperationError> {
-    let output_by_sector = sector_region_index_map(output)?;
-    let mut used = vec![false; output.len()];
-    let mut routes = Vec::with_capacity(source.len());
-    for (source_index, source_matrix) in source.iter().enumerate() {
-        let output_index = output_by_sector.get(&source_matrix.sector).copied().ok_or(
-            OperationError::SpaceMismatch {
-                message: "inverse output is missing a source coupled sector",
-            },
-        )?;
-        let output_region = &output[output_index];
-        if source_matrix.rows != source_matrix.cols
-            || output_region.rows() != source_matrix.cols
-            || output_region.cols() != source_matrix.rows
-        {
-            return Err(OperationError::SpaceMismatch {
-                message: "inverse coupled-sector matrix is not square",
-            });
-        }
-        validate_region_range(output_region, output_len)?;
-        let rows =
-            compile_basis_extents(source_matrix, FactorSide::Right, output_region.row_trees())?;
-        let cols =
-            compile_basis_extents(source_matrix, FactorSide::Left, output_region.col_trees())?;
-        used[output_index] = true;
-        routes.push(InverseMatrixRoute {
-            source: source_index,
-            output: output_index,
-            rows,
-            cols,
-        });
-    }
-    if used.iter().any(|used| !used) {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse output contains a coupled sector absent from the source",
-        });
-    }
-    Ok(routes)
-}
-
-/// Maps every tree of `side` of `matrix` onto its extent in `output`, which
-/// must list each of those trees once with the same degeneracy shape.
-fn compile_basis_extents<M: SectorGeometry>(
-    matrix: &M,
-    side: FactorSide,
-    output: &[CoupledTreeExtent],
-) -> Result<Vec<InverseBasisExtent>, OperationError> {
-    let output_by_tree = output
-        .iter()
-        .enumerate()
-        .map(|(index, extent)| (extent.tree(), index))
-        .collect::<FxHashMap<_, _>>();
-    if output_by_tree.len() != output.len() {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse output contains a duplicate tree basis",
-        });
-    }
-    let mut used = vec![false; output.len()];
-    let count = matrix.tree_count(side);
-    let mut extents = Vec::with_capacity(count);
-    for index in 0..count {
-        let Some(source) = matrix.tree(side, index) else {
-            break;
-        };
-        let output_index =
-            output_by_tree
-                .get(source.tree)
-                .copied()
-                .ok_or(OperationError::SpaceMismatch {
-                    message: "inverse output is missing a source tree basis",
-                })?;
-        let output_extent = &output[output_index];
-        if source.shape != output_extent.shape() {
-            return Err(OperationError::SpaceMismatch {
-                message: "inverse output tree basis has an unexpected shape",
-            });
-        }
-        let extent = output_extent
-            .extent()
-            .map_err(OperationError::from_core_preserving_context)?;
-        used[output_index] = true;
-        extents.push(InverseBasisExtent {
-            source_offset: source.offset,
-            output_offset: output_extent.offset(),
-            extent,
-        });
-    }
-    if used.iter().any(|used| !used) {
-        return Err(OperationError::SpaceMismatch {
-            message: "inverse output contains a tree basis absent from the source",
-        });
-    }
-    Ok(extents)
-}
-
-pub(super) fn identity_workspace<D: FactorScalar>(order: usize) -> Result<Vec<D>, OperationError> {
-    let elements = order
-        .checked_mul(order)
-        .ok_or(OperationError::ElementCountOverflow)?;
-    let mut identity = vec![D::zero(); elements];
-    for index in 0..order {
-        identity[index + order * index] = D::from_real(1.0);
-    }
-    Ok(identity)
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(super) fn solve_inverse_sector<E, D>(
-    engine: &mut dyn Engine,
-    dense: &mut E,
-    source: &[D],
-    output: &mut [D],
-    order: usize,
-    output_leading: usize,
-    identity: &[D],
-    identity_order: usize,
-) -> Result<(), OperationError>
-where
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    let shape = [order, order];
-    let matrix_strides = [1, order];
-    let output_strides = [1, output_leading];
-    let identity_strides = [1, identity_order];
-    let source =
-        DenseView::new(source, &shape, &matrix_strides, 0).map_err(OperationError::Dense)?;
-    let identity =
-        DenseView::new(identity, &shape, &identity_strides, 0).map_err(OperationError::Dense)?;
-    let output =
-        DenseViewMut::new(output, &shape, &output_strides, 0).map_err(OperationError::Dense)?;
-    dense
-        .solve_into(
-            engine,
-            D::dense_read(source),
-            D::dense_read(identity),
-            D::dense_write(output),
-        )
-        .map_err(OperationError::Dense)
-}
-
-pub(super) fn reorder_inverse_solution<D: Copy>(
-    source: &[D],
-    source_rows: usize,
-    output: &mut [D],
-    output_rows: usize,
-    row_extents: &[InverseBasisExtent],
-    col_extents: &[InverseBasisExtent],
-) {
-    for rows in row_extents {
-        for cols in col_extents {
-            for col in 0..cols.extent {
-                let source_start = rows.source_offset + source_rows * (cols.source_offset + col);
-                let output_start = rows.output_offset + output_rows * (cols.output_offset + col);
-                output[output_start..output_start + rows.extent]
-                    .copy_from_slice(&source[source_start..source_start + rows.extent]);
-            }
-        }
-    }
 }

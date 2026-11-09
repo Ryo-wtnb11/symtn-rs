@@ -2,7 +2,8 @@
 //! ([`crate::DenseExecutor::factorize_batch_into`]): their validation, the
 //! placement of a factorization's outputs into them, the compatibility
 //! route through the owned batch, and the per-matrix composite of the
-//! destination-only polar decompositions and Hermitian exponential.
+//! destination-only polar decompositions, Hermitian exponential and
+//! inverse.
 
 use num_complex::{Complex32, Complex64};
 
@@ -24,8 +25,8 @@ pub enum FactorPlacement {
     /// spectrum unchanged. QR of `A` is placed as the LQ of `A^H`
     /// (`l = R^H`, `q = Q^H`); the compact SVD of `A` as the compact SVD of
     /// `A^H` (`u = Vh^H`, `s`, `vt = U^H`), and the full SVD likewise.
-    /// Hermitian eigendecompositions, LQ, full QR, the QR null basis, the polar decompositions and the
-    /// Hermitian exponential refuse it.
+    /// Hermitian eigendecompositions, LQ, full QR, the QR null basis, the polar decompositions, the
+    /// Hermitian exponential and the inverse refuse it.
     Adjoint,
 }
 
@@ -78,7 +79,7 @@ impl FactorFailure {
 /// owned output order: `Qr` and `QrFull` `[q, r, -]`, `QrNull` `[n, -, -]`,
 /// `Lq` `[l, q, -]`, `Svd` and `SvdFull` `[u, s, vt]`, `Eigh` `[values, vectors, -]`,
 /// `LeftPolar` `[w, p, -]`, `RightPolar` `[p, wh, -]`, `ExpViaEigh`
-/// `[exp, -, -]` (`-` is `None`).
+/// `[exp, -, -]`, `Inv` `[inv, -, -]` (`-` is `None`).
 ///
 /// Each factor view has the input's dtype and each spectrum (`s`, eigh
 /// `values`) the input's real counterpart (`f32` for `f32`/`c32`, `f64` for
@@ -92,8 +93,8 @@ impl FactorFailure {
 /// `[k, b..]` between them, and full SVD is `[m, m, b..]`, `[k, b..]`,
 /// `[n, n, b..]` (`Adjoint`: `[n, n, b..]`, `[k, b..]`, `[m, m, b..]`); eigh of `n x n` is `[n, b..]`, `[n, n, b..]`;
 /// left polar is `[m, n, b..]`, `[n, n, b..]`, right polar
-/// `[m, m, b..]`, `[m, n, b..]` and the Hermitian exponential of `n x n`
-/// `[n, n, b..]`.
+/// `[m, m, b..]`, `[m, n, b..]` and the Hermitian exponential and the
+/// inverse of `n x n` `[n, n, b..]`.
 #[derive(Debug)]
 pub struct FactorDest<'a> {
     pub(crate) outputs: [Option<DenseWrite<'a>>; 3],
@@ -121,7 +122,9 @@ const ENTRY: &str = "factorize_batch_into";
 /// without a destination form.
 fn arity(op: DenseFactorization) -> Result<usize, DenseError> {
     match op {
-        DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => Ok(1),
+        DenseFactorization::QrNull | DenseFactorization::ExpViaEigh | DenseFactorization::Inv => {
+            Ok(1)
+        }
         DenseFactorization::Qr
         | DenseFactorization::Lq
         | DenseFactorization::QrFull
@@ -145,6 +148,7 @@ fn output_label(op: DenseFactorization) -> &'static str {
         | DenseFactorization::RightPolar => "svd_into",
         DenseFactorization::Eigh | DenseFactorization::ExpViaEigh => "eigh_into",
         DenseFactorization::Lq => "lq",
+        DenseFactorization::Inv => "solve_into",
         _ => "qr_into",
     }
 }
@@ -185,7 +189,7 @@ fn head(
         (DenseFactorization::LeftPolar, _, _) => ([n, n], 2),
         (DenseFactorization::RightPolar, 0, _) => ([m, m], 2),
         (DenseFactorization::RightPolar, _, _) => ([m, n], 2),
-        (DenseFactorization::ExpViaEigh, _, _) => ([m, m], 2),
+        (DenseFactorization::ExpViaEigh | DenseFactorization::Inv, _, _) => ([m, m], 2),
         (_, 0, false) => ([m, k], 2),
         (_, 0, true) => ([n, k], 2),
         (_, _, false) => ([k, n], 2),
@@ -292,6 +296,7 @@ pub(crate) fn validate(
                 | DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
                 | DenseFactorization::ExpViaEigh
+                | DenseFactorization::Inv
         ) && dest.placement == FactorPlacement::Adjoint
         {
             return Err(DenseError::Unsupported {
@@ -308,7 +313,7 @@ pub(crate) fn validate(
         };
         if matches!(
             op,
-            DenseFactorization::Eigh | DenseFactorization::ExpViaEigh
+            DenseFactorization::Eigh | DenseFactorization::ExpViaEigh | DenseFactorization::Inv
         ) && m != n
         {
             continue;
@@ -671,6 +676,8 @@ fn factorize_batch_into_owned<E: DenseExecutor + ?Sized>(
 /// - Hermitian exponential: [`DenseExecutor::eigh`], the finite-eigenvalue
 ///   check, the `exp(lambda / 2)` column scaling of the owned `V` in place,
 ///   the product `exp = Y Y^H` of that scaled factor, and `copytri`.
+/// - Inverse: [`DenseExecutor::solve_into`] against the identity
+///   (`crate::executor::inverse_by_solve_into`).
 ///
 /// A solver or product failure is [`FactorFailure::Solver`]; owned outputs
 /// that do not fit (`svd_into`'s or `eigh_into`'s checks) and a nonfinite
@@ -683,6 +690,9 @@ pub(crate) fn factorize_batch_into_composite<E: DenseExecutor + ?Sized>(
     dests: &mut [FactorDest<'_>],
     sink: &mut FactorSink<'_>,
 ) -> Result<(), DenseError> {
+    if op == DenseFactorization::Inv {
+        return crate::executor::inverse_by_solve_into(executor, engine, inputs, dests, sink);
+    }
     for (index, (&input, dest)) in inputs.iter().zip(dests.iter_mut()).enumerate() {
         let shape = input.shape();
         let outcome = match input {

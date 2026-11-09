@@ -4,8 +4,8 @@
 //! writes against the native owned batch, placed, their full QR and null
 //! basis laws on strided transposed reads and their full SVD laws; and the
 //! destination-only
-//! polar decompositions and Hermitian exponential against their laws and
-//! closed forms.
+//! polar decompositions, Hermitian exponential and inverse against their
+//! laws and closed forms.
 
 use super::*;
 use crate::{FactorDest, FactorFailure, FactorPlacement};
@@ -104,7 +104,7 @@ fn dest_shapes(
         DenseFactorization::QrNull => [with(&[m, m - k]), vec![], vec![]],
         DenseFactorization::LeftPolar => [with(&[m, n]), with(&[n, n]), vec![]],
         DenseFactorization::RightPolar => [with(&[m, m]), with(&[m, n]), vec![]],
-        DenseFactorization::ExpViaEigh => [with(&[m, m]), vec![], vec![]],
+        DenseFactorization::ExpViaEigh | DenseFactorization::Inv => [with(&[m, m]), vec![], vec![]],
         _ => unreachable!(),
     }
 }
@@ -135,6 +135,7 @@ impl<T: Elem> Buffers<T> {
                         | DenseFactorization::LeftPolar
                         | DenseFactorization::RightPolar
                         | DenseFactorization::ExpViaEigh
+                        | DenseFactorization::Inv
                 ) {
                     0
                 } else {
@@ -172,9 +173,9 @@ impl<T: Elem> Buffers<T> {
                 Some(T::write(view(a, 1))),
                 None,
             ],
-            DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => {
-                [Some(T::write(view(a, 0))), None, None]
-            }
+            DenseFactorization::QrNull
+            | DenseFactorization::ExpViaEigh
+            | DenseFactorization::Inv => [Some(T::write(view(a, 0))), None, None],
             _ => [Some(T::write(view(a, 0))), Some(T::write(view(b, 1))), None],
         };
         FactorDest::new(outputs, placement)
@@ -189,7 +190,9 @@ impl<T: Elem> Buffers<T> {
                 vec![factor(&self.factors[0]), spectrum, factor(&self.factors[1])]
             }
             DenseFactorization::Eigh => vec![spectrum, factor(&self.factors[0])],
-            DenseFactorization::QrNull | DenseFactorization::ExpViaEigh => {
+            DenseFactorization::QrNull
+            | DenseFactorization::ExpViaEigh
+            | DenseFactorization::Inv => {
                 vec![factor(&self.factors[0])]
             }
             _ => vec![factor(&self.factors[0]), factor(&self.factors[1])],
@@ -601,6 +604,208 @@ mod native {
         full_svd_lanes_hold_the_svd_laws::<Complex64>();
     }
 
+    /// Runs one native inverse batch of the column-major square `blocks` on
+    /// separate lanes (`Outer`, four threads) and returns each delivered
+    /// outcome with the block's widened destination.
+    fn inverse_batch<T: Elem>(
+        blocks: &[Vec<T>],
+        orders: &[usize],
+    ) -> Vec<(usize, Result<(), FactorFailure>, Vec<Complex64>)> {
+        let mut engine = engine(
+            4,
+            tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Outer),
+        );
+        let op = DenseFactorization::Inv;
+        let shapes: Vec<[usize; 2]> = orders.iter().map(|&n| [n, n]).collect();
+        let layouts: Vec<_> = shapes.iter().map(|shape| strides(shape)).collect();
+        let inputs: Vec<_> = blocks
+            .iter()
+            .zip(&shapes)
+            .zip(&layouts)
+            .map(|((data, shape), strides)| {
+                T::read(DenseView::new(data, shape, strides, 0).unwrap())
+            })
+            .collect();
+        let mut buffers: Vec<Buffers<T>> = shapes
+            .iter()
+            .map(|shape| Buffers::new(op, dest_shapes(op, shape, FactorPlacement::AsComputed), 7.0))
+            .collect();
+        let mut dests: Vec<_> = buffers
+            .iter_mut()
+            .map(|b| b.dest(op, FactorPlacement::AsComputed))
+            .collect();
+        let mut delivered = Vec::new();
+        DefaultDenseExecutor::new()
+            .factorize_batch_into(
+                &mut engine,
+                op,
+                &inputs,
+                &mut dests,
+                &mut |index, _, outcome| {
+                    delivered.push((index, outcome));
+                    Ok(())
+                },
+            )
+            .unwrap();
+        drop(dests);
+        assert_eq!(delivered.len(), blocks.len());
+        delivered
+            .into_iter()
+            .zip(&buffers)
+            .map(|((index, outcome), buffers)| (index, outcome, buffers.widened(op).swap_remove(0)))
+            .collect()
+    }
+
+    /// Purpose: the native inverse of unequal square blocks on separate
+    /// lanes: per block `X Y = I` and `Y X = I`; and a singular block is
+    /// that block's solver failure, exactly the per-matrix `solve_into`
+    /// error of `X Y = I`, while the blocks around it are still solved.
+    fn inverse_lanes_hold_the_inverse_laws<T: Elem>() {
+        let tol = 1.0e-10;
+        let orders = [4usize, 1, 3, 2];
+        // Diagonally dominant, so every block is well conditioned.
+        let blocks: Vec<Vec<T>> = orders
+            .iter()
+            .enumerate()
+            .map(|(seed, &n)| {
+                let mut data = input_data::<T>(&[n, n], false, seed);
+                for diagonal in 0..n {
+                    let value = data[diagonal * (n + 1)].to_c64();
+                    data[diagonal * (n + 1)] = T::make(value + Complex64::new(3.0, 0.0));
+                }
+                data
+            })
+            .collect();
+        let solved = inverse_batch(&blocks, &orders);
+        for ((index, outcome, y), (x, &n)) in solved.iter().zip(blocks.iter().zip(&orders)) {
+            assert_eq!(*outcome, Ok(()), "block {index}");
+            assert_eq!(y.len(), n * n, "block {index}: output size");
+            let x: Vec<Complex64> = x.iter().map(|value| value.to_c64()).collect();
+            for row in 0..n {
+                for col in 0..n {
+                    let want = Complex64::new(f64::from(u8::from(row == col)), 0.0);
+                    let xy: Complex64 = (0..n).map(|p| x[row + n * p] * y[p + n * col]).sum();
+                    let yx: Complex64 = (0..n).map(|p| y[row + n * p] * x[p + n * col]).sum();
+                    assert!((xy - want).norm() < tol, "block {index}: X Y != I");
+                    assert!((yx - want).norm() < tol, "block {index}: Y X != I");
+                }
+            }
+        }
+
+        // `[[1, 2], [2, 4]]`: partial pivoting leaves an exactly zero pivot.
+        let singular: Vec<T> = [1.0, 2.0, 2.0, 4.0]
+            .map(|value| T::make(Complex64::new(value, 0.0)))
+            .to_vec();
+        let one = vec![T::make(Complex64::new(2.0, 0.0))];
+        let identity: Vec<T> = [1.0, 0.0, 0.0, 1.0]
+            .map(|value| T::make(Complex64::new(value, 0.0)))
+            .to_vec();
+        let mut scratch = identity.clone();
+        let expected = DefaultDenseExecutor::new()
+            .solve_into(
+                &mut CpuEngine::serial(),
+                T::read(DenseView::new(&singular, &[2, 2], &[1, 2], 0).unwrap()),
+                T::read(DenseView::new(&identity, &[2, 2], &[1, 2], 0).unwrap()),
+                T::write(DenseViewMut::new(&mut scratch, &[2, 2], &[1, 2], 0).unwrap()),
+            )
+            .unwrap_err();
+        assert!(matches!(expected, DenseError::NumericalFailure { .. }));
+        let outcomes: Vec<_> = inverse_batch(&[one.clone(), singular, one], &[1, 2, 1])
+            .into_iter()
+            .map(|(index, outcome, _)| (index, outcome))
+            .collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                (0, Ok(())),
+                (1, Err(FactorFailure::Solver(expected))),
+                (2, Ok(()))
+            ]
+        );
+    }
+
+    /// Purpose: the native inverse's failure of each tenferro route is the
+    /// per-matrix `solve_into(A, I)` error in full: a singular rank-two
+    /// input (the direct `solve_read_into` route), a batch holding a
+    /// singular item, a rank-one input and a rank-two input with a zero
+    /// extent (all on the `solve_read` fallback).
+    #[test]
+    fn native_inverse_errors_match_the_per_matrix_solve() {
+        let cases: [(Vec<f64>, Vec<usize>, Vec<usize>); 4] = [
+            (vec![1.0, 2.0, 2.0, 4.0], vec![2, 2], vec![2, 2]),
+            (
+                vec![2.0, 0.0, 0.0, 3.0, 1.0, 2.0, 2.0, 4.0],
+                vec![2, 2, 2],
+                vec![2, 2, 2],
+            ),
+            (vec![1.0, 2.0], vec![2], vec![2, 2]),
+            (vec![], vec![2, 0], vec![2, 2]),
+        ];
+        for (data, shape, out_shape) in cases {
+            let input_strides = strides(&shape);
+            let out_strides = strides(&out_shape);
+            let read = || DenseRead::F64(DenseView::new(&data, &shape, &input_strides, 0).unwrap());
+            let mut identity = vec![0.0_f64; out_shape.iter().product()];
+            for item in identity.as_chunks_mut::<4>().0 {
+                item[0] = 1.0;
+                item[3] = 1.0;
+            }
+            let mut out = identity.clone();
+            let expected = DefaultDenseExecutor::new()
+                .solve_into(
+                    &mut CpuEngine::serial(),
+                    read(),
+                    DenseRead::F64(DenseView::new(&identity, &out_shape, &out_strides, 0).unwrap()),
+                    DenseWrite::F64(
+                        DenseViewMut::new(&mut out, &out_shape, &out_strides, 0).unwrap(),
+                    ),
+                )
+                .unwrap_err();
+            let mut dest_data = vec![7.0_f64; out_shape.iter().product()];
+            let mut dests = vec![FactorDest::new(
+                [
+                    Some(DenseWrite::F64(
+                        DenseViewMut::new(&mut dest_data, &out_shape, &out_strides, 0).unwrap(),
+                    )),
+                    None,
+                    None,
+                ],
+                FactorPlacement::AsComputed,
+            )];
+            let mut delivered = Vec::new();
+            DefaultDenseExecutor::new()
+                .factorize_batch_into(
+                    &mut engine(
+                        4,
+                        tcontract_exec::BatchPolicy::new(tcontract_exec::BatchStrategy::Outer),
+                    ),
+                    DenseFactorization::Inv,
+                    &[read()],
+                    &mut dests,
+                    &mut |index, _, outcome| {
+                        delivered.push((index, outcome));
+                        Ok(())
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                delivered,
+                vec![(0, Err(FactorFailure::Solver(expected)))],
+                "{shape:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn native_inverse_lanes_hold_the_inverse_laws_f64() {
+        inverse_lanes_hold_the_inverse_laws::<f64>();
+    }
+
+    #[test]
+    fn native_inverse_lanes_hold_the_inverse_laws_c64() {
+        inverse_lanes_hold_the_inverse_laws::<Complex64>();
+    }
+
     /// The allocation calls of one native batch of `blocks` copies of an
     /// `8 x 8` input of `T` on four threads split into two lanes: the
     /// lanes' buffer setups (summed once per lane), every block's solve
@@ -682,6 +887,7 @@ mod native {
             (DenseFactorization::LeftPolar, FactorPlacement::AsComputed),
             (DenseFactorization::RightPolar, FactorPlacement::AsComputed),
             (DenseFactorization::ExpViaEigh, FactorPlacement::AsComputed),
+            (DenseFactorization::Inv, FactorPlacement::AsComputed),
         ];
         for (op, placement) in cases {
             let (small_lanes, small_setup, small_solves, small_products) =
@@ -1121,6 +1327,7 @@ fn no_destination_form() {
         DenseFactorization::LeftPolar,
         DenseFactorization::RightPolar,
         DenseFactorization::ExpViaEigh,
+        DenseFactorization::Inv,
     ] {
         let mut buffers: Buffers<f64> = Buffers::new(
             op,

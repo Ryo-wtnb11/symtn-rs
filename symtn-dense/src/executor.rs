@@ -128,13 +128,27 @@ pub enum DenseFactorization {
     /// [`DenseExecutor::dot_general_into`] once, straight into the
     /// destination.
     ExpViaEigh,
+    /// Inverse of a square `n x n` input: `[inv]` of shape `[n, n, b..]`,
+    /// the solution `Y` of `X Y = I` by partial-pivot LU, the provider's
+    /// solve semantics exactly (its singularity rule and error, typically a
+    /// [`DenseError::NumericalFailure`] for an exactly zero pivot). An input
+    /// with a zero extent writes nothing. Destination form only
+    /// ([`DenseExecutor::factorize_batch_into`]); a non-square input is
+    /// refused. The default calls [`DenseExecutor::solve_into`] once per
+    /// input with the identity as right-hand side, read from one identity
+    /// per scalar sized for the batch's largest input, straight into the
+    /// destination; a batched input is [`DenseError::Unsupported`].
+    Inv,
 }
 
 impl DenseFactorization {
     /// Whether `self` has only a destination form, which the owned
     /// [`DenseExecutor::factorize_batch`] refuses.
     pub(crate) fn destination_only(self) -> bool {
-        matches!(self, Self::LeftPolar | Self::RightPolar | Self::ExpViaEigh)
+        matches!(
+            self,
+            Self::LeftPolar | Self::RightPolar | Self::ExpViaEigh | Self::Inv
+        )
     }
 }
 
@@ -239,8 +253,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// delivering their outcomes in order.
     ///
     /// A destination-only `op` ([`DenseFactorization::LeftPolar`],
-    /// [`DenseFactorization::RightPolar`], [`DenseFactorization::ExpViaEigh`])
-    /// is [`DenseError::Unsupported`] before any solve.
+    /// [`DenseFactorization::RightPolar`], [`DenseFactorization::ExpViaEigh`],
+    /// [`DenseFactorization::Inv`]) is [`DenseError::Unsupported`] before any
+    /// solve.
     fn factorize_batch(
         &mut self,
         engine: &mut dyn Engine,
@@ -265,7 +280,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
                 DenseFactorization::SvdFull => full_svd_by_entries(self, engine, input),
                 DenseFactorization::LeftPolar
                 | DenseFactorization::RightPolar
-                | DenseFactorization::ExpViaEigh => {
+                | DenseFactorization::ExpViaEigh
+                | DenseFactorization::Inv => {
                     unreachable!("destination-only ops are refused above")
                 }
             };
@@ -280,8 +296,9 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// input's outputs written into its
     /// caller-owned destination `dests[i]` (see [`FactorDest`] for the
     /// shapes, dtypes and [`crate::FactorPlacement`]), and the
-    /// destination-only left and right polar decompositions and Hermitian
-    /// exponential; any other `op` is [`DenseError::Unsupported`].
+    /// destination-only left and right polar decompositions, Hermitian
+    /// exponential and inverse; any other `op` is
+    /// [`DenseError::Unsupported`].
     ///
     /// Every destination is validated before any input is solved or any
     /// destination written: the count, each destination's outputs, then
@@ -308,7 +325,8 @@ pub trait DenseExecutor: sealed::AsDynDenseExecutor {
     /// then call `sink` before the next input is solved; the Hermitian
     /// exponential likewise runs [`Self::eigh`] (checked as `eigh_into`
     /// checks it, then its eigenvalues' finiteness, each a
-    /// [`FactorFailure::Output`]) and one [`Self::dot_general_into`]. An
+    /// [`FactorFailure::Output`]) and one [`Self::dot_general_into`], and the
+    /// inverse one [`Self::solve_into`] against the identity. An
     /// executor that solves the inputs on lanes may write the destinations
     /// directly and deliver every outcome after the lanes join.
     #[expect(
@@ -1435,6 +1453,105 @@ where
     let vh = adjoint_items(&v, n, n);
     let s = DenseTensor::host_col_major(vec![k], s)?;
     Ok(vec![T::owned(vec![m, m], u)?, s, T::owned(vec![n, n], vh)?])
+}
+
+/// [`DenseFactorization::Inv`]'s default destination batch over validated
+/// `dests`: per input one [`DenseExecutor::solve_into`] of `X Y = I` straight
+/// into the destination, `I` the leading `n x n` corner of one identity per
+/// scalar built at the batch's largest square order; `sink(i, ..)` runs
+/// before input `i + 1` is solved. A solve failure is
+/// [`FactorFailure::Solver`]; an input other than a square floating matrix is
+/// refused as [`DenseError::Unsupported`].
+pub(crate) fn inverse_by_solve_into<E: DenseExecutor + ?Sized>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    inputs: &[DenseRead<'_>],
+    dests: &mut [FactorDest<'_>],
+    sink: &mut crate::factor_dest::FactorSink<'_>,
+) -> Result<(), DenseError> {
+    let order = inputs
+        .iter()
+        .filter_map(|input| match *input.shape() {
+            [m, n] if m == n => Some(m),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    let mut identities = AdjointScratch::default();
+    for (index, (&input, dest)) in inputs.iter().zip(dests.iter_mut()).enumerate() {
+        let outcome = match input {
+            DenseRead::F32(_) => {
+                inverse_of(executor, engine, input, &mut identities.f32, order, dest)
+            }
+            DenseRead::F64(_) => {
+                inverse_of(executor, engine, input, &mut identities.f64, order, dest)
+            }
+            DenseRead::C32(_) => {
+                inverse_of(executor, engine, input, &mut identities.c32, order, dest)
+            }
+            DenseRead::C64(_) => {
+                inverse_of(executor, engine, input, &mut identities.c64, order, dest)
+            }
+            other => Err(FactorFailure::Solver(inverse_refusal(other))),
+        };
+        sink(index, dest, outcome)?;
+    }
+    Ok(())
+}
+
+fn inverse_refusal(input: DenseRead<'_>) -> DenseError {
+    DenseError::Unsupported {
+        op: "solve_into",
+        message: format!(
+            "inverse input of dtype {:?} and shape {:?}",
+            input.dtype(),
+            input.shape()
+        ),
+    }
+}
+
+/// One input of [`inverse_by_solve_into`] of scalar `T`; `identity` is built
+/// at `order` on its first use.
+fn inverse_of<E: DenseExecutor + ?Sized, T: AdjointScalar + Element>(
+    executor: &mut E,
+    engine: &mut dyn Engine,
+    input: DenseRead<'_>,
+    identity: &mut Vec<T>,
+    order: usize,
+    dest: &mut FactorDest<'_>,
+) -> Result<(), FactorFailure> {
+    let n = match *input.shape() {
+        [m, n] if m == n => n,
+        _ => return Err(FactorFailure::Solver(inverse_refusal(input))),
+    };
+    if n == 0 {
+        return Ok(());
+    }
+    if identity.is_empty() {
+        // `order` is the extent of an existing `order x order` view, so its
+        // square fits.
+        *identity = vec![<T as AdjointScalar>::ZERO; order * order];
+        for diagonal in 0..order {
+            identity[diagonal * (order + 1)] = <T as AdjointScalar>::ONE;
+        }
+    }
+    let shape = [n, n];
+    let (identity_strides, strides) = ([1, order], [1, n]);
+    let rhs =
+        DenseView::new(identity, &shape, &identity_strides, 0).map_err(FactorFailure::Output)?;
+    let out = dest.outputs[0]
+        .as_mut()
+        .and_then(<T as Element>::compact)
+        .expect("validation checked the destination dtype");
+    let out = DenseViewMut::new(out, &shape, &strides, 0).map_err(FactorFailure::Output)?;
+    executor
+        .solve_into(
+            engine,
+            input,
+            <T as AdjointScalar>::read(rhs),
+            <T as AdjointScalar>::write(out),
+        )
+        .map_err(FactorFailure::Solver)
 }
 
 /// `thin`'s `rank` orthonormal columns (`rows x rank`, column-major)

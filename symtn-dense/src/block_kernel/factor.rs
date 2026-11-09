@@ -17,7 +17,8 @@
 //! carries no recycled-buffer history (its capacity is the provider's
 //! reservation, not necessarily the length). The destination batch
 //! ([`factorize_into`], compact QR, LQ, full QR, the QR null basis, compact
-//! and full SVD, Hermitian eigh and the polar decompositions) writes
+//! and full SVD, Hermitian eigh, the polar decompositions, the Hermitian
+//! exponential and the inverse) writes
 //! each block's factors into its caller-owned destination through the
 //! provider's initialized-destination entry (`*_into_init`), with one
 //! workspace and one typed scratch per lane, sized before the lane's first
@@ -28,7 +29,10 @@
 //! context, a Hermitian exponential job the provider's eigh with one, their
 //! geometry plans resolved before the lanes; these two also keep the spectrum
 //! they consume in a separate real scratch of the lane. SVD and eigh write
-//! their real spectra straight into the destination.
+//! their real spectra straight into the destination. An inverse job writes
+//! the identity into its destination and runs the provider's LU solve there
+//! in place, as tenferro's `solve_read_into` does from a copied right-hand
+//! side.
 
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -37,7 +41,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use num_complex::{Complex32, Complex64};
-use strided_view::RawStridedRef;
+use strided_view::{RawStridedMut, RawStridedRef};
 use tcontract_exec::Exec;
 use tenferro_cpu::{with_cpu_engine, CpuEngine};
 use tenferro_tensor::{ShapeVec, StrideVec, Tensor, TensorScalar};
@@ -50,7 +54,9 @@ use crate::factor_dest::{
 };
 use crate::lanes::{GrantKey, LaneTables};
 use crate::layout::strides_to_isize;
-use crate::tenferro_adapter::{tenferro_error, tenferro_view, NOT_A_CPU_ENGINE};
+use crate::tenferro_adapter::{
+    tenferro_error, tenferro_solve_error, tenferro_view, NOT_A_CPU_ENGINE,
+};
 use crate::{
     DenseError, DenseGemmBatchJob, DenseRead, DenseTensor, DenseView, DenseWrite, FactorDest,
     FactorFailure, FactorPlacement, MatrixOp,
@@ -82,6 +88,19 @@ pub(crate) trait Factor {
     /// weighted multiply-adds: its total work and the part a team inside the
     /// item can pay back (`estimate_work`, `estimate_payback_work`).
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2];
+
+    /// The op name of the per-matrix entry's rank and squareness errors for
+    /// an input of `shape`: [`Self::VALIDATION`] unless the entry routes
+    /// inputs of some ranks elsewhere.
+    fn validation(_shape: &[usize]) -> &'static str {
+        Self::VALIDATION
+    }
+
+    /// The per-matrix entry's error for a provider failure (also of its
+    /// workspace query) on an input of `shape`.
+    fn provider_failure(error: tlinalg::Error, _shape: &[usize]) -> DenseError {
+        tenferro_error(Self::ENTRY, provider_error(Self::OP, error))
+    }
 
     /// The factors of one input of matrix extents `dims = [m, n]` and batch
     /// dimensions `batch`, from the provider, or empty ones when `raw` is
@@ -564,6 +583,68 @@ impl Factor for ExpViaEigh {
     }
 }
 
+/// Inverse (TensorKit `inv` per block): `[inv]` of shape `[n, n, b..]`.
+/// Destination form only: one job writes `I_n` into each destination item
+/// and solves `X Y = I` there in place, tlinalg's partial-pivot LU
+/// `solve_into` with no separate right-hand side. tenferro's
+/// `solve_read_into` (the per-matrix `solve_into` entry) is the same call on
+/// a copied right-hand side, with the same validation, singularity check and
+/// errors: those of its direct route for a nonempty rank-two input
+/// (`solve_read_into`), and for any other rank or a zero extent those of the
+/// `solve_read` it falls back to (`solve`).
+pub(crate) struct Inv;
+
+impl Factor for Inv {
+    const ENTRY: &'static str = "solve_into";
+    const OP: tlinalg::Op = tlinalg::Op::Solve;
+    const VALIDATION: &'static str = "solve_read_into";
+    const SQUARE: bool = true;
+
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, _: usize) -> [f64; 2] {
+        use tlinalg::lu::{estimate_solve_payback_work, estimate_solve_work};
+        [
+            estimate_solve_work::<T>(n, n),
+            estimate_solve_payback_work::<T>(n, n),
+        ]
+    }
+
+    // tenferro's `solve_read_into` solves a nonempty rank-two input directly
+    // and hands any other rank or a zero extent to `solve_read`, whose errors
+    // name `solve`.
+    fn validation(shape: &[usize]) -> &'static str {
+        if shape.len() == 2 && !shape.contains(&0) {
+            Self::VALIDATION
+        } else {
+            Self::OP.as_str()
+        }
+    }
+
+    // tenferro's `solve_in_place_view` names a singular pivot after the route
+    // the caller used and maps every other failure as the provider op; the
+    // `solve_into` entry then types a numerical failure.
+    fn provider_failure(error: tlinalg::Error, shape: &[usize]) -> DenseError {
+        let error = match error {
+            tlinalg::Error::Singular { .. } => {
+                let op = Self::validation(shape);
+                linalg_error(op, tenferro_linalg::Error::Singular { op })
+            }
+            other => provider_error(Self::OP, other),
+        };
+        tenferro_solve_error(error)
+    }
+
+    fn factor<T: Scalar>(
+        _: Option<RawStridedRef<'_, T>>,
+        _: [usize; 2],
+        _: &[usize],
+        _: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        Err(crate::executor::destination_only_error(
+            crate::DenseFactorization::Inv,
+        ))
+    }
+}
+
 /// Hermitian eigendecomposition: `[values, vectors]` of shapes `[n, b..]`
 /// (real) and `[n, n, b..]`.
 pub(crate) struct Eigh;
@@ -977,7 +1058,7 @@ pub(crate) fn factorize(
         Op::Lq => factorize_batch::<Lq>(engine, inputs, sink),
         Op::QrFull => factorize_batch::<QrFull>(engine, inputs, sink),
         Op::QrNull => factorize_batch::<QrNull>(engine, inputs, sink),
-        Op::LeftPolar | Op::RightPolar | Op::ExpViaEigh => {
+        Op::LeftPolar | Op::RightPolar | Op::ExpViaEigh | Op::Inv => {
             Err(crate::executor::destination_only_error(op))
         }
     }
@@ -1653,6 +1734,64 @@ impl FactorInto for ExpViaEigh {
     }
 }
 
+impl FactorInto for Inv {
+    fn workspace<T: Scalar>(
+        [n, _]: [usize; 2],
+        batch: usize,
+        exec: &Exec<'_>,
+    ) -> tlinalg::Result<usize> {
+        tlinalg::lu::lu_solve_workspace::<T>(n, n, false, batch, exec)
+    }
+
+    fn scratch_len<T: Scalar>(_: [usize; 2], _: usize, _: FactorPlacement) -> usize {
+        0
+    }
+
+    // A singular item leaves its destination item holding `I_n`.
+    fn factor_into<T: Scalar>(
+        raw: RawStridedRef<'_, T>,
+        [n, _]: [usize; 2],
+        _: usize,
+        outputs: &mut [Option<DenseWrite<'_>>; 3],
+        _: FactorPlacement,
+        workspace: &mut [MaybeUninit<u8>],
+        _: &mut [T],
+        _: &mut [<T as Element>::Spectrum],
+        _: &mut Vec<T>,
+        _: &Plans,
+        exec: &mut Exec<'_>,
+    ) -> Result<(), JobError> {
+        let out = slot::<T>(&mut outputs[0]);
+        identity_columns(out, n, n, 0);
+        let mut step = 1usize;
+        // The destination is a compact allocation, so every stride fits.
+        let strides: StrideVec = raw
+            .dims()
+            .iter()
+            .map(|&extent| {
+                let stride = step as isize;
+                step = step.saturating_mul(extent);
+                stride
+            })
+            .collect();
+        let out = RawStridedMut::new(out, raw.dims(), &strides, 0).map_err(|err| {
+            JobError::Output(tenferro_error(
+                Self::ENTRY,
+                tenferro_tensor::Error::invalid_argument(Self::VALIDATION, "out", err.to_string()),
+            ))
+        })?;
+        Ok(tlinalg::lu::solve_into(
+            Self::OP,
+            raw,
+            None,
+            out,
+            false,
+            workspace,
+            exec,
+        )?)
+    }
+}
+
 /// Runs one dependency product of a destination job; tests count its
 /// allocations apart from the job's own owners.
 fn product<R>(f: impl FnOnce() -> R) -> R {
@@ -2080,7 +2219,7 @@ fn needs_of<F: FactorInto>(
         // The view's element count fits, so its batch product does.
         let items = batch.iter().product::<usize>();
         let bytes = F::workspace::<T>([*m, *n], items, exec)
-            .map_err(|err| tenferro_error(F::ENTRY, provider_error(F::OP, err)))?;
+            .map_err(|err| F::provider_failure(err, shape))?;
         needs.bytes = needs.bytes.max(bytes);
         needs.typed[slot] = needs.typed[slot].max(F::scratch_len::<T>([*m, *n], items, placement));
         needs.spectrum[slot] = needs.spectrum[slot].max(F::spectrum_len([*m, *n], items));
@@ -2111,8 +2250,8 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
     lane: &mut LaneBuffers,
     exec: &mut Exec<'_>,
 ) -> Result<(), FactorFailure> {
-    let op = F::VALIDATION;
     let shape = view.shape();
+    let op = F::validation(shape);
     let [m, n, batch @ ..] = shape else {
         return Err(FactorFailure::Solver(tenferro_error(
             F::ENTRY,
@@ -2152,9 +2291,7 @@ fn factor_into_typed<F: FactorInto, T: Scalar>(
             exec,
         );
         Ok(solved.map_err(|error| match error {
-            JobError::Provider(err) => {
-                FactorFailure::Solver(tenferro_error(F::ENTRY, provider_error(F::OP, err)))
-            }
+            JobError::Provider(err) => FactorFailure::Solver(F::provider_failure(err, shape)),
             JobError::Gemm(err) => FactorFailure::Solver(err),
             JobError::Output(err) => FactorFailure::Output(err),
         }))
@@ -2183,6 +2320,7 @@ pub(crate) fn factorize_into(
         Op::LeftPolar => factorize_into_batch::<Polar<true>>(engine, inputs, dests, sink),
         Op::RightPolar => factorize_into_batch::<Polar<false>>(engine, inputs, dests, sink),
         Op::ExpViaEigh => factorize_into_batch::<ExpViaEigh>(engine, inputs, dests, sink),
+        Op::Inv => factorize_into_batch::<Inv>(engine, inputs, dests, sink),
         _ => unreachable!("validation admits the ops with a destination form only"),
     }
 }

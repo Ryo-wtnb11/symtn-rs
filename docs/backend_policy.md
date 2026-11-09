@@ -123,8 +123,8 @@ provider's grouped block GEMMs (recoupling, block-wise contraction) and its
 block factorizations over a tensor's sector blocks (compact and full SVD,
 values-only SVD, the pseudo-inverse's SVD, compact QR and LQ, full QR and LQ, the QR
 null bases of `left_null` and `right_null`, Hermitian and general
-eigendecomposition full and values-only, the polar decompositions and the
-Hermitian `exp`) are placed by one routine and run by one lane runner (the factorizations inside the
+eigendecomposition full and values-only, the polar decompositions, the
+Hermitian `exp` and the inverse) are placed by one routine and run by one lane runner (the factorizations inside the
 engine's guarded linalg entry, the GEMMs inside its contraction entry).
 Each block is one provider job whose cost is the provider's work estimate:
 tcontract's per-flop rate over the block's `2 m k n` flops (four times that
@@ -132,7 +132,8 @@ for complex scalars) for a GEMM, tlinalg's work estimate under the engine's
 work model for a factorization (SVD `m n min(m, n)`, QR `m n k - k^3/3` with
 `k = min(m, n)`, LQ that of its transpose's QR, a tall full QR or null basis
 tlinalg's Householder factor plus its reflector application, EIGH and EIG,
-full and values-only, `n^3`; a polar decomposition or Hermitian `exp` adds its products).
+full and values-only, `n^3`; a polar decomposition or Hermitian `exp` adds its products;
+an inverse its LU factorization and solve against `I_n`, `n^3/3 + n^3`).
 The call takes its thread count from the engine's cost rule over the batch's
 estimated serial time, and its lane count is at most the engine's batch
 decision, so the work model's fan-out limits are never exceeded. Each lane
@@ -203,8 +204,8 @@ and are accepted: blocks after a failing one are still solved, and a
 provider panic in such a later block unwinds and leaves the engine broken
 where the loop would have returned the earlier error. Compact QR, compact
 LQ, full QR and LQ, the `left_null` and `right_null` bases, compact and
-full SVD, full EIGH, the left and right polar decompositions and the Hermitian `exp`
-run through
+full SVD, full EIGH, the left and right polar decompositions, the Hermitian `exp`
+and the inverse run through
 `DenseExecutor::factorize_batch_into`: the
 operation allocates each output once (the final packed factor for a
 direct-region or Checked Generic canonical output, otherwise one packed
@@ -283,7 +284,14 @@ Hermitian (`copytri`); the product runs on the lane's context with its plan
 resolved before the lanes. It is a full GEMM, twice the multiply-adds of the
 `syrk` MatrixAlgebraKit's real branch calls (its complex branch is a general
 GEMM too). The half exponent keeps a representable result finite where
-`exp(lambda)` alone overflows.
+`exp(lambda)` alone overflows. A native inverse job of an `n x n` block
+writes `I_n` into its destination and solves `X Y = I` there in place with
+tlinalg's partial-pivot LU `solve_into` (no separate right-hand side, no
+typed scratch; only the provider workspace per lane), the call tenferro's
+per-matrix `solve_into` makes from a copied right-hand side, with the same
+singularity check (an exactly zero pivot) and errors. This is TensorKit's
+`inv` per block (`one!` on the output block, then `ldiv!(lu(b), ·)`, LAPACK
+`getrf` + `getrs`), `O(n^3)`.
 Values-only SVD and EIGH
 and the general eigendecomposition (values only or with vectors) keep one
 provider workspace and fresh outputs per block (tlinalg has no initialized
@@ -306,9 +314,11 @@ form (`factorize_batch` refuses them); the default instead runs, per block,
 one `svd` and two `dot_general_into` calls writing the destinations, the
 `sqrt(S)` scaling applied in place to the owned factor, and checks the block
 before the next one is solved; the Hermitian `exp` likewise runs one `eigh`,
-the eigenvalue check and one `dot_general_into` per block.
-The other factorizations, and every BLAS factorization, still run block
-after block on the whole engine.
+the eigenvalue check and one `dot_general_into` per block, and the inverse
+one `solve_into` per block against one identity per scalar sized for the
+largest block.
+The other dense problems (among them the left solve `A \ B`), and every
+BLAS factorization, still run block after block on the whole engine.
 Callers can still give each GEMM the whole pool with
 `CpuEngine::new(pool).with_batch_policy(CpuBatchPolicy::new(CpuBatchStrategy::Inner))`
 (or `CpuEngine::set_batch_policy`; `CpuBatchPolicy` and `CpuBatchStrategy`
