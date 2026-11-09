@@ -2067,6 +2067,121 @@ fn default_executor_eigen_and_values_batches_match_the_per_matrix_entries() {
     }
 }
 
+#[cfg(not(feature = "provider-inject"))]
+#[test]
+fn eig_batch_returns_unit_norm_eigenpairs_at_every_engine_width() {
+    // What: the batched general eigendecomposition of unequal real and
+    // complex blocks returns, at engine widths 1 and 4 and with the blocks
+    // on separate native lanes (`Outer`), each block's closed-form spectrum with
+    // `A v = λ v` and unit 2-norm columns `v` (the per-matrix `eig` gauge),
+    // and a block with a NaN entry reports the per-matrix entry's error (the
+    // native solver refuses it; LAPACK solves it on both routes).
+    let c = Complex64::new;
+    // [[1, -2], [2, 1]]: 1 ± 2i.
+    let rotation = [1.0_f64, 2.0, -2.0, 1.0];
+    // Upper triangular, diagonal (2, -1, 5).
+    let triangular = [2.0_f64, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 3.0, 5.0];
+    // Upper triangular, diagonal (1 + i, -2, 3i, 0.5).
+    let mut complex = vec![c(0.0, 0.0); 16];
+    for (k, value) in [c(1.0, 1.0), c(-2.0, 0.0), c(0.0, 3.0), c(0.5, 0.0)]
+        .into_iter()
+        .enumerate()
+    {
+        complex[k + 4 * k] = value;
+        for row in 0..k {
+            complex[row + 4 * k] = c(1.0 + row as f64, -0.5 * k as f64);
+        }
+    }
+    let inputs = [
+        DenseRead::F64(DenseView::new(&rotation, &[2, 2], &[1, 2], 0).unwrap()),
+        DenseRead::F64(DenseView::new(&triangular, &[3, 3], &[1, 3], 0).unwrap()),
+        DenseRead::C64(DenseView::new(&complex, &[4, 4], &[1, 4], 0).unwrap()),
+    ];
+    let widen = |data: &[f64]| data.iter().map(|&x| c(x, 0.0)).collect::<Vec<_>>();
+    let matrices = [widen(&rotation), widen(&triangular), complex.clone()];
+    let spectra: [Vec<Complex64>; 3] = [
+        vec![c(1.0, -2.0), c(1.0, 2.0)],
+        vec![c(-1.0, 0.0), c(2.0, 0.0), c(5.0, 0.0)],
+        vec![c(-2.0, 0.0), c(0.0, 3.0), c(0.5, 0.0), c(1.0, 1.0)],
+    ];
+    let by_parts = |a: &Complex64, b: &Complex64| a.re.total_cmp(&b.re).then(a.im.total_cmp(&b.im));
+    let nan = [1.0_f64, f64::NAN, 0.0, 1.0];
+    let nan = DenseRead::F64(DenseView::new(&nan, &[2, 2], &[1, 2], 0).unwrap());
+    #[allow(unused_mut)]
+    let mut policies = vec![(1, None), (4, None)];
+    // The BLAS lane refuses `Outer`: its vendor call owns the threading.
+    #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+    policies.push((
+        4,
+        Some(tcontract_exec::BatchPolicy::new(
+            tcontract_exec::BatchStrategy::Outer,
+        )),
+    ));
+    for (threads, policy) in policies {
+        let engine = CpuEngine::new(crate::Pool::builder().threads(threads).build().unwrap());
+        let engine = &mut match policy {
+            Some(policy) => engine.with_batch_policy(policy),
+            None => engine,
+        };
+        let mut executor = DefaultDenseExecutor::new();
+        let outputs =
+            factorize_all(&mut executor, engine, DenseFactorization::Eig, &inputs).unwrap();
+        assert_eq!(outputs.len(), inputs.len(), "{threads} threads");
+        for ((got, a), spectrum) in outputs.iter().zip(&matrices).zip(&spectra) {
+            let n = spectrum.len();
+            assert_eq!(got[0].shape(), [n], "{threads} threads");
+            assert_eq!(got[1].shape(), [n, n], "{threads} threads");
+            let (w, v) = (
+                got[0].as_c64_slice().unwrap(),
+                got[1].as_c64_slice().unwrap(),
+            );
+            let mut sorted = w.to_vec();
+            sorted.sort_by(by_parts);
+            for (got, want) in sorted.iter().zip(spectrum) {
+                assert_c64_close(*got, *want, 1.0e-12);
+            }
+            for (k, column) in v.chunks_exact(n).enumerate() {
+                let norm: f64 = column.iter().map(|x| x.norm_sqr()).sum();
+                assert_f64_close(norm, 1.0, 1.0e-12);
+                for row in 0..n {
+                    let av: Complex64 = (0..n).map(|j| a[row + n * j] * column[j]).sum();
+                    assert_c64_close(av, w[k] * column[row], 1.0e-11);
+                }
+            }
+        }
+        let batch = factorize_all(&mut executor, engine, DenseFactorization::Eig, &[nan]);
+        let per_matrix = executor.eig(engine, nan);
+        #[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+        assert!(batch.is_err() && per_matrix.is_err(), "{threads} threads");
+        assert_eq!(batch.err(), per_matrix.err(), "{threads} threads");
+    }
+}
+
+/// Purpose: a normalizer failure (an eigenvector column with no unit gauge,
+/// which no public input is known to reach through the solver) reaches the
+/// caller as tenferro's `eig_read` publishes it: its `DenseError` under the
+/// `eig_read` label, carrying the normalizer's own failure.
+#[cfg(all(feature = "cpu-faer", not(feature = "cpu-blas-core")))]
+#[test]
+fn eig_normalization_failure_is_the_eig_read_error() {
+    use crate::block_kernel::factor::Scalar;
+    let zero_column = || [Complex64::new(0.0, 0.0); 4];
+    let error = <f64 as Scalar>::normalize_eig(&mut zero_column(), 2, 1).unwrap_err();
+    let normalizer = tenferro_linalg::normalize_eig_vectors(&mut zero_column(), 2, 1).unwrap_err();
+    let DenseError::Backend { message, .. } = &error else {
+        panic!("expected a backend error, got {error:?}")
+    };
+    assert!(message.contains("eigenvector column"), "{message}");
+    assert_eq!(
+        error,
+        DenseError::Backend {
+            backend: DenseBackend::Tenferro,
+            op: "eig_read",
+            message: normalizer.to_string(),
+        }
+    );
+}
+
 /// Purpose: the native QR null basis is retained at its final size: the
 /// owned outcome of an `m x (m - 1)` input holds exactly `m` scalars of
 /// capacity, not a full `m x m` `Q` with its leading columns dropped.

@@ -1,14 +1,14 @@
 //! The native provider's factorizations of independent blocks (compact SVD,
-//! compact and full QR, the QR null basis, LQ, Hermitian eigendecomposition,
-//! their values-only forms and general eigenvalues): tlinalg calls per
-//! block, the blocks spread over the lane driver's lanes on the caller's
-//! engine.
+//! compact and full QR, the QR null basis, LQ, Hermitian and general
+//! eigendecomposition and their values-only forms): tlinalg calls per block,
+//! the blocks spread over the lane driver's lanes on the caller's engine.
 //!
 //! Each block reaches tlinalg exactly as tenferro's per-matrix entry
 //! (`svd_read`, `qr_read`, `eigh_read`, `eigvalsh_read`, `svdvals_read`,
-//! `eigvals`) does (same provider, same validation, same error values), but
-//! on its lane's child token limited to the block's placed width instead of
-//! the whole engine, so a block's faer width is the engine's decision within
+//! `eig_read`, `eigvals`) does (same provider, same validation, same error
+//! values, and for `eig` tenferro's eigenvector normalization), but on its
+//! lane's child token limited to the block's placed width instead of the
+//! whole engine, so a block's faer width is the engine's decision within
 //! that offer.
 //!
 //! The owned batch ([`factorize`]) returns each factor as a fresh `Vec` from
@@ -644,6 +644,39 @@ impl Factor for EigVals {
     }
 }
 
+/// General eigendecomposition: `[values, vectors]` of shapes `[n, b..]` and
+/// `[n, n, b..]` in the input's complex counterpart, the eigenvector columns
+/// in tenferro's unit 2-norm gauge.
+pub(crate) struct Eig;
+
+impl Factor for Eig {
+    const ENTRY: &'static str = "eig_read";
+    const OP: tlinalg::Op = tlinalg::Op::Eig;
+    const SQUARE: bool = true;
+
+    fn estimates<T: tlinalg::FaerScalar>(n: usize, m: usize) -> [f64; 2] {
+        EigVals::estimates::<T>(n, m)
+    }
+
+    fn factor<T: Scalar>(
+        raw: Option<RawStridedRef<'_, T>>,
+        [n, _]: [usize; 2],
+        batch: &[usize],
+        exec: &mut Exec<'_>,
+    ) -> Result<Vec<DenseTensor>, DenseError> {
+        let (mut values, mut vectors) = (Vec::new(), Vec::new());
+        if let Some(raw) = raw {
+            T::eig(raw, &mut values, &mut vectors, exec)
+                .map_err(|err| tenferro_error(Self::ENTRY, provider_error(Self::OP, err)))?;
+            T::normalize_eig(&mut vectors, n, checked_len(batch)?)?;
+        }
+        Ok(vec![
+            output::<Self, T::EigScalar>(&[n], batch, values)?,
+            output::<Self, T::EigScalar>(&[n, n], batch, vectors)?,
+        ])
+    }
+}
+
 /// A column-major factor of shape `dims` followed by `batch`.
 fn output<F: Factor, T: TensorScalar>(
     dims: &[usize],
@@ -698,6 +731,22 @@ pub(crate) trait Scalar:
         values: &mut Vec<Self::EigScalar>,
         exec: &mut Exec<'_>,
     ) -> tlinalg::Result<()>;
+
+    /// tlinalg's general eigenpairs, in its order and gauge.
+    fn eig(
+        raw: RawStridedRef<'_, Self>,
+        values: &mut Vec<Self::EigScalar>,
+        vectors: &mut Vec<Self::EigScalar>,
+        exec: &mut Exec<'_>,
+    ) -> tlinalg::Result<()>;
+
+    /// tenferro's unit 2-norm gauge on `items` column-major `n x n`
+    /// eigenvector blocks (`n > 0`), failing as tenferro's `eig_read` does.
+    fn normalize_eig(
+        vectors: &mut [Self::EigScalar],
+        n: usize,
+        items: usize,
+    ) -> Result<(), DenseError>;
 }
 
 // Why one impl per concrete scalar: tlinalg's general-eigenvalue type is an
@@ -743,6 +792,24 @@ macro_rules! scalar {
                 exec: &mut Exec<'_>,
             ) -> tlinalg::Result<()> {
                 tlinalg::eig::eig_values(tlinalg::Op::EigValues, raw, values, exec)
+            }
+
+            fn eig(
+                raw: RawStridedRef<'_, $ty>,
+                values: &mut Vec<$complex>,
+                vectors: &mut Vec<$complex>,
+                exec: &mut Exec<'_>,
+            ) -> tlinalg::Result<()> {
+                tlinalg::eig::eig(tlinalg::Op::Eig, raw, values, vectors, exec)
+            }
+
+            fn normalize_eig(
+                vectors: &mut [$complex],
+                n: usize,
+                items: usize,
+            ) -> Result<(), DenseError> {
+                tenferro_linalg::normalize_eig_vectors(vectors, n, items)
+                    .map_err(|err| tenferro_error(Eig::ENTRY, err))
             }
         }
     };
@@ -824,8 +891,8 @@ pub(crate) type Sink<'s> =
 /// Factorization `F` of every input, delivering each input's outcome to
 /// `sink` in input order exactly as the per-matrix entry
 /// ([`crate::DenseExecutor::svd`], `qr`, `eigh`, `eigh_vals`, `svd_vals`,
-/// `eig_vals`) returns it; LQ, which has no per-matrix entry, reports the
-/// QR entry's errors.
+/// `eig`, `eig_vals`) returns it; LQ, which has no per-matrix entry,
+/// reports the QR entry's errors.
 ///
 /// Checks run in the per-matrix entry's order: the engine kind, then per
 /// input the view and the dtype (before the engine is entered), then rank,
@@ -860,14 +927,7 @@ pub(crate) fn factorize(
         Op::Eigh => factorize_batch::<Eigh>(engine, inputs, sink),
         Op::EighVals => factorize_batch::<EighVals>(engine, inputs, sink),
         Op::SvdVals => factorize_batch::<SvdVals>(engine, inputs, sink),
-        // Why not on the lanes: tenferro's eig publishes unit-norm
-        // eigenvectors through a normalization it does not export
-        // (tensor4all/tenferro-rs#2387), and symtn does not duplicate it, so
-        // each input takes the per-matrix route on the whole engine and is
-        // delivered before the next is solved.
-        Op::Eig => inputs.iter().enumerate().try_for_each(|(index, &input)| {
-            sink(index, crate::tenferro_adapter::eig_read(engine, input))
-        }),
+        Op::Eig => factorize_batch::<Eig>(engine, inputs, sink),
         Op::EigVals => factorize_batch::<EigVals>(engine, inputs, sink),
         Op::Lq => factorize_batch::<Lq>(engine, inputs, sink),
         Op::QrFull => factorize_batch::<QrFull>(engine, inputs, sink),
