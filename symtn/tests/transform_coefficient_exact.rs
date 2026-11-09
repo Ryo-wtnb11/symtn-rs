@@ -26,6 +26,7 @@ use symtn::typed::BlockFusionTrees;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::legs::{su2_on, u1_on};
+use crate::numerics::nan_folded_bits;
 
 /// A deterministic component per `(tree pair, index, salt)`, with signed
 /// zeros, infinities, NaN payloads and subnormals mixed into ordinary values.
@@ -119,10 +120,10 @@ macro_rules! assert_componentwise {
         assert_eq!(got.dense_data().unwrap().len(), want_imaginary.dense_data().unwrap().len());
         for (position, value) in got.dense_data().unwrap().iter().enumerate() {
             assert_eq!(
-                (value.re.to_bits(), value.im.to_bits()),
+                (nan_folded_bits(value.re), nan_folded_bits(value.im)),
                 (
-                    want_real.dense_data().unwrap()[position].to_bits(),
-                    want_imaginary.dense_data().unwrap()[position].to_bits(),
+                    nan_folded_bits(want_real.dense_data().unwrap()[position]),
+                    nan_folded_bits(want_imaginary.dense_data().unwrap()[position]),
                 ),
                 "element {position} of {} <- {}",
                 stringify!([$($codomain),*]),
@@ -171,7 +172,7 @@ fn a_complex_multiply_by_one_cannot_reproduce_the_payloads() {
 
 fn bits(data: &[Complex64]) -> Vec<(u64, u64)> {
     data.iter()
-        .map(|v| (v.re.to_bits(), v.im.to_bits()))
+        .map(|v| (nan_folded_bits(v.re), nan_folded_bits(v.im)))
         .collect()
 }
 

@@ -14,6 +14,19 @@
 
 use super::{Complex32, Complex64};
 
+/// The bits a bit-exact comparison checks: every NaN maps to one value,
+/// because NaN sign and payload are unspecified through Rust arithmetic and
+/// are not part of the library contract. Every other bit, the sign of zero
+/// included, is kept; an `f32` widens exactly.
+pub fn nan_folded_bits(value: impl Into<f64>) -> u64 {
+    let value = value.into();
+    if value.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
 /// `K` of the `K * sqrt(terms) * eps * scale` bound.
 pub const K: f64 = 32.0;
 

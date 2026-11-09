@@ -1,5 +1,6 @@
 use super::*;
 use crate::kernel_adapter::observed::ObservedKernels;
+use crate::test_numerics::numerics::nan_folded_bits;
 use std::ops::{Add, Mul};
 
 use num_complex::Complex64;
@@ -1901,7 +1902,7 @@ fn three_block_group<C: Copy>(coefficients: [C; 3]) -> FusionBlockMatrixGroup<C>
 fn component_bits(values: &[Complex64]) -> Vec<(u64, u64)> {
     values
         .iter()
-        .map(|v| (v.re.to_bits(), v.im.to_bits()))
+        .map(|v| (nan_folded_bits(v.re), nan_folded_bits(v.im)))
         .collect()
 }
 
@@ -1909,7 +1910,7 @@ fn pair_bits(re: &[f64], im: &[f64]) -> Vec<(u64, u64)> {
     let _exec = strided_kernel::Exec::serial();
     re.iter()
         .zip(im)
-        .map(|(re, im)| (re.to_bits(), im.to_bits()))
+        .map(|(&re, &im)| (nan_folded_bits(re), nan_folded_bits(im)))
         .collect()
 }
 
@@ -2031,8 +2032,8 @@ fn pack_keeps_complex_coefficients_complex_and_skips_one() {
                 };
                 let got = packed[4 * block + row + 2 * col];
                 assert_eq!(
-                    (got.re.to_bits(), got.im.to_bits()),
-                    (want.re.to_bits(), want.im.to_bits()),
+                    (nan_folded_bits(got.re), nan_folded_bits(got.im)),
+                    (nan_folded_bits(want.re), nan_folded_bits(want.im)),
                     "block {block} ({row}, {col})"
                 );
             }

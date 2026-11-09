@@ -23,6 +23,7 @@ use symtn::typed::{Engine, GradedSpace, SectorSpectrum, TensorMap};
 use single_precision_oracle::{fermion_su2_leg, runtime, u1_leg, u1_leg_with};
 
 use crate::counting_alloc;
+use crate::numerics::nan_folded_bits;
 #[cfg(feature = "cgc-gen")]
 use crate::report;
 
@@ -685,7 +686,11 @@ fn narrowing_rounds_like_as_f32_per_element() {
         .enumerate()
     {
         let oracle = narrow(value);
-        assert_eq!(got.to_bits(), oracle.to_bits(), "entry {index}: {value:e}");
+        assert_eq!(
+            nan_folded_bits(got),
+            nan_folded_bits(oracle),
+            "entry {index}: {value:e}"
+        );
         assert_eq!(got.is_nan(), value.is_nan(), "entry {index}: NaN stays NaN");
     }
     // Hand values, independent of `as`: the documented rounding and range.

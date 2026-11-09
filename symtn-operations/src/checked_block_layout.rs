@@ -546,6 +546,7 @@ mod tests {
     use super::*;
     use crate::probe::{take_checked_block_passes, CheckedBlockPasses};
     use crate::tensoradd_raw_strided_kernel;
+    use crate::test_numerics::numerics::nan_folded_bits;
     use num_complex::Complex64;
 
     /// What: a zero-stride extent above `isize::MAX` still visits its first
@@ -847,7 +848,7 @@ mod tests {
     }
 
     /// The fused walk is bit-identical to the two scalar-kernel passes it
-    /// replaces, including signed zeros, infinities, NaN and subnormals,
+    /// replaces, including signed zeros, infinities, NaN-ness and subnormals,
     /// where `1 * x`, `0 + x` or a skipped `beta = 1` scale would not be.
     #[test]
     fn two_source_walk_is_bit_identical_to_two_scalar_kernel_passes() {
@@ -872,7 +873,7 @@ mod tests {
                 (0.5, -3.0),
                 (0.0, 2.0),
             ],
-            |value: f64| u128::from(value.to_bits()),
+            |value: f64| u128::from(nan_folded_bits(value)),
         );
         let complexes = [
             Complex64::new(1.5, -0.0),
@@ -894,7 +895,8 @@ mod tests {
                 (Complex64::new(2.0, 0.0), Complex64::new(-1.0, 0.5)),
             ],
             |value: Complex64| {
-                (u128::from(value.re.to_bits()) << 64) | u128::from(value.im.to_bits())
+                (u128::from(nan_folded_bits(value.re)) << 64)
+                    | u128::from(nan_folded_bits(value.im))
             },
         );
     }

@@ -117,6 +117,7 @@ where
 #[cfg(test)]
 mod owned_overwrite_tests {
     use super::*;
+    use crate::test_numerics::numerics::nan_folded_bits;
     use crate::{StridedHostKernelAdapter, TreeTransformBlockSpec};
     use num_complex::Complex64;
     use symtn_core::{
@@ -253,7 +254,7 @@ mod owned_overwrite_tests {
             let bits = |values: &[Complex64]| {
                 values
                     .iter()
-                    .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                    .map(|v| (nan_folded_bits(v.re), nan_folded_bits(v.im)))
                     .collect::<Vec<_>>()
             };
             let componentwise = non_finite

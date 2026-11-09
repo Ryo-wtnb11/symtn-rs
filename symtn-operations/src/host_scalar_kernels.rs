@@ -1418,6 +1418,7 @@ fn strided_linear_offset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_numerics::numerics::nan_folded_bits;
     use num_complex::Complex64;
 
     // What: the offset helper family's Result must stay pointer-small so the
@@ -1738,8 +1739,11 @@ mod tests {
             run_trace_terms(&mut want_im, &im, 1.0, coefficients);
             for (position, value) in got.iter().enumerate() {
                 assert_eq!(
-                    (value.re.to_bits(), value.im.to_bits()),
-                    (want_re[position].to_bits(), want_im[position].to_bits()),
+                    (nan_folded_bits(value.re), nan_folded_bits(value.im)),
+                    (
+                        nan_folded_bits(want_re[position]),
+                        nan_folded_bits(want_im[position])
+                    ),
                     "element {position} for {coefficients:?}"
                 );
             }
@@ -2135,16 +2139,14 @@ mod tests {
     /// between optimization levels of the same kernel. Copies and
     /// conjugation (a sign flip) are exact and keep full bit comparison.
     fn arithmetic_patterns<T: BitPattern>(values: &[T]) -> Vec<(u64, u64)> {
-        let canonical = |bits: u64| {
-            if f64::from_bits(bits).is_nan() {
-                f64::NAN.to_bits()
-            } else {
-                bits
-            }
-        };
         patterns(values)
             .into_iter()
-            .map(|(re, im)| (canonical(re), canonical(im)))
+            .map(|(re, im)| {
+                (
+                    nan_folded_bits(f64::from_bits(re)),
+                    nan_folded_bits(f64::from_bits(im)),
+                )
+            })
             .collect()
     }
 

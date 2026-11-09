@@ -643,6 +643,7 @@ where
 mod tests {
     use super::*;
     use crate::probe::take_owned_block_prefills;
+    use crate::test_numerics::numerics::nan_folded_bits;
     use num_complex::Complex64;
     use symtn_core::{BlockKey, BlockSpec};
 
@@ -695,18 +696,9 @@ mod tests {
     }
 
     fn bits(values: &[Complex64]) -> Vec<(u64, u64)> {
-        // Why canonicalize under Miri only: Miri picks arithmetic NaN sign
-        // and payload nondeterministically; native runs compare them exactly.
-        let bits = |value: f64| {
-            if cfg!(miri) && value.is_nan() {
-                f64::NAN.to_bits()
-            } else {
-                value.to_bits()
-            }
-        };
         values
             .iter()
-            .map(|value| (bits(value.re), bits(value.im)))
+            .map(|value| (nan_folded_bits(value.re), nan_folded_bits(value.im)))
             .collect()
     }
 
