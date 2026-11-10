@@ -95,7 +95,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst: &mut [T],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 
@@ -112,7 +112,7 @@ pub(super) trait DestinationWriter<T, D>: Sync {
         dst: &mut [T],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError>;
 }
@@ -149,7 +149,7 @@ where
         dst: &mut [D],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -219,7 +219,7 @@ where
         dst: &mut [D],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -270,7 +270,7 @@ where
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;
@@ -329,7 +329,7 @@ where
         dst: &mut [MaybeUninit<D>],
         dst_start: isize,
         exec: Exec<'_>,
-        gate: &mut LeafGate,
+        gate: &mut LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.task.layouts;

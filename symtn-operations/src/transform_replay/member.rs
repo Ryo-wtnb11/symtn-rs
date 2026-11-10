@@ -300,18 +300,321 @@ where
     )
 }
 
+/// One worker's member-axis move scratch, kept by the workspace: the moved
+/// shape, its two stride lists, and the zero source strides of a fill.
+#[derive(Clone, Debug, Default)]
+pub(super) struct MemberScratch {
+    shape: Vec<usize>,
+    dst_strides: Vec<isize>,
+    src_strides: Vec<isize>,
+    zero_strides: Vec<isize>,
+}
+
+impl MemberScratch {
+    pub(super) fn retained_bytes(&self) -> usize {
+        self.shape
+            .capacity()
+            .saturating_mul(core::mem::size_of::<usize>())
+            .saturating_add(
+                (self.dst_strides.capacity()
+                    + self.src_strides.capacity()
+                    + self.zero_strides.capacity())
+                .saturating_mul(core::mem::size_of::<isize>()),
+            )
+    }
+}
+
+/// The read-only parts of a member batch's moves: the task, the strides
+/// between members of every buffer, and the destination scale of every
+/// Single and scatter column, resolved once per call.
+#[derive(Clone, Copy)]
+struct MemberMoves<'a, D, C> {
+    parts: super::writers::ReplayParts<'a, C>,
+    plan: &'a crate::transform_structure::TreeTransformRecouplingPlan,
+    inactive: &'a [usize],
+    src: &'a [D],
+    /// The scale of each Single, in block order, then of each scatter
+    /// column, in plan order.
+    alpha: &'a [D],
+    singles: usize,
+    src_stride: isize,
+    dst_stride: isize,
+    packed_src_stride: isize,
+    packed_dst_stride: isize,
+}
+
+impl<D, C> MemberMoves<'_, D, C>
+where
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy,
+{
+    /// The moves before the grouped GEMM for `members` members from member
+    /// `first`: inactive fills and Singles into `dst`, and the pack columns
+    /// into `packed`; `dst` and `packed` start at member `first`.
+    #[allow(clippy::too_many_arguments)]
+    fn pack<A: HostKernelAdapter<D>>(
+        &self,
+        mut exec: Exec<'_>,
+        kernels: &mut A,
+        scratch: &mut MemberScratch,
+        dst: &mut [D],
+        packed: &mut [D],
+        first: usize,
+        members: usize,
+    ) -> Result<(), OperationError> {
+        let layouts = self.parts.layouts;
+        let src_shift = offset_to_isize(first)?
+            .checked_mul(self.src_stride)
+            .ok_or(OperationError::ElementCountOverflow)?;
+        let MemberScratch {
+            shape,
+            dst_strides,
+            src_strides,
+            zero_strides,
+        } = scratch;
+        for &index in self.inactive {
+            let (dims, strides) = layouts.inactive_role(index)?;
+            let zero = [D::zero()];
+            zero_strides.clear();
+            zero_strides.resize(dims.len(), 0);
+            move_members(
+                exec.reborrow(),
+                kernels,
+                shape,
+                dst_strides,
+                src_strides,
+                dst,
+                &zero,
+                dims,
+                strides,
+                zero_strides,
+                self.dst_stride,
+                0,
+                layouts.entry(index).offset,
+                0,
+                members,
+                false,
+                D::one(),
+            )?;
+        }
+        let mut single = 0;
+        for block in self.parts.blocks {
+            let TreeTransformBlock::Single {
+                dst_layout,
+                src_layout,
+                coefficient,
+            } = *block
+            else {
+                continue;
+            };
+            let role = layouts.role(dst_layout)?;
+            let dst_entry = layouts.entry(dst_layout);
+            let src_entry = layouts.entry(src_layout);
+            shape.clear();
+            shape.extend_from_slice(role.dims());
+            shape.push(members);
+            dst_strides.clear();
+            dst_strides.extend_from_slice(role.dst_strides());
+            dst_strides.push(self.dst_stride);
+            src_strides.clear();
+            src_strides.extend_from_slice(role.src_strides());
+            src_strides.push(self.src_stride);
+            kernels.transform_strided_baked(
+                exec.reborrow(),
+                zero_strides,
+                dst,
+                self.src,
+                shape,
+                dst_strides,
+                src_strides,
+                dst_entry.offset,
+                src_entry.offset + src_shift,
+                self.parts.storage_conjugate,
+                TransformScale::new(
+                    self.alpha[single],
+                    self.parts.single_coefficients[coefficient],
+                ),
+                None,
+                None,
+                None,
+            )?;
+            single += 1;
+        }
+        for (block_index, job) in self.plan.entries() {
+            let &TreeTransformBlock::Multi {
+                src_layout_start,
+                src_count,
+                element_count,
+                ..
+            } = multi_block(self.parts.blocks, block_index)?
+            else {
+                unreachable!()
+            };
+            for column in 0..src_count {
+                let entry = src_layout_start + column;
+                let role = layouts.role(entry)?;
+                move_members(
+                    exec.reborrow(),
+                    kernels,
+                    shape,
+                    dst_strides,
+                    src_strides,
+                    packed,
+                    self.src,
+                    role.dims(),
+                    role.dst_strides(),
+                    role.src_strides(),
+                    self.packed_src_stride,
+                    self.src_stride,
+                    offset_to_isize(job.lhs_offset + column * element_count)?,
+                    layouts.entry(entry).offset + src_shift,
+                    members,
+                    self.parts.storage_conjugate,
+                    D::one(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The scatter after the grouped GEMM for `members` members from member
+    /// `first`, from the whole packed destination into `dst`, which starts
+    /// at member `first`.
+    #[allow(clippy::too_many_arguments)]
+    fn scatter<A: HostKernelAdapter<D>>(
+        &self,
+        mut exec: Exec<'_>,
+        kernels: &mut A,
+        scratch: &mut MemberScratch,
+        dst: &mut [D],
+        packed: &[D],
+        first: usize,
+        members: usize,
+    ) -> Result<(), OperationError> {
+        let layouts = self.parts.layouts;
+        let packed_shift = offset_to_isize(first)?
+            .checked_mul(self.packed_dst_stride)
+            .ok_or(OperationError::ElementCountOverflow)?;
+        let mut column_index = self.singles;
+        for (block_index, job) in self.plan.entries() {
+            let &TreeTransformBlock::Multi {
+                dst_layout_start,
+                dst_count,
+                element_count,
+                ..
+            } = multi_block(self.parts.blocks, block_index)?
+            else {
+                unreachable!()
+            };
+            for column in 0..dst_count {
+                let entry = dst_layout_start + column;
+                let role = layouts.role(entry)?;
+                move_members(
+                    exec.reborrow(),
+                    kernels,
+                    &mut scratch.shape,
+                    &mut scratch.dst_strides,
+                    &mut scratch.src_strides,
+                    dst,
+                    packed,
+                    role.dims(),
+                    role.dst_strides(),
+                    role.src_strides(),
+                    self.dst_stride,
+                    self.packed_dst_stride,
+                    layouts.entry(entry).offset,
+                    offset_to_isize(job.dst_offset + column * element_count)? + packed_shift,
+                    members,
+                    false,
+                    self.alpha[column_index],
+                )?;
+                column_index += 1;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The Multi block `index` of `blocks`.
+fn multi_block(
+    blocks: &[TreeTransformBlock],
+    index: usize,
+) -> Result<&TreeTransformBlock, OperationError> {
+    match blocks.get(index) {
+        Some(block @ TreeTransformBlock::Multi { .. }) => Ok(block),
+        _ => Err(OperationError::InvalidArgument {
+            message: "tree transform recoupling plan references a single block",
+        }),
+    }
+}
+
+/// Resolves the destination scale of every Single (block order) and every
+/// scatter column (plan order) into `out`, once per call: `θ_b` of the
+/// role's within-member destination offset.
+fn resolve_member_alpha<D, C>(
+    task: TreeTransformTaskView<'_, C>,
+    alpha: DestinationAlpha<'_, D, C>,
+    out: &mut Vec<D>,
+) -> Result<usize, OperationError>
+where
+    D: Copy + RecouplingCoefficientAction<C>,
+    C: Copy,
+{
+    let layouts = task.layouts();
+    out.clear();
+    // Why one exact reserve: a fresh workspace would otherwise grow the
+    // table by doubling, a few calls more per call as the roles grow.
+    let roles = task
+        .blocks()
+        .iter()
+        .map(|block| match *block {
+            TreeTransformBlock::Single { .. } => 1,
+            TreeTransformBlock::Multi { dst_count, .. } => dst_count,
+        })
+        .sum::<usize>();
+    out.reserve_exact(roles);
+    for block in task.blocks() {
+        if let TreeTransformBlock::Single { dst_layout, .. } = *block {
+            out.push(alpha.at(layouts.entry(dst_layout).offset));
+        }
+    }
+    let singles = out.len();
+    for (block_index, _) in task.recoupling_plan().entries() {
+        let &TreeTransformBlock::Multi {
+            dst_layout_start,
+            dst_count,
+            ..
+        } = recoupling_multi_block(task, block_index)?
+        else {
+            unreachable!()
+        };
+        for column in 0..dst_count {
+            out.push(alpha.at(layouts.entry(dst_layout_start + column).offset));
+        }
+    }
+    Ok(singles)
+}
+
 /// Overwrite a fixed-stride Host batch with one completed tree transform.
 /// Each member uses the exact structure passed at compilation; the workspace
 /// owns only execution scratch and can be reused at a different batch size.
 /// One member replays on the ordinary route. A larger batch refuses a
 /// forced batch policy `dense` cannot honor, as the ordinary route does,
 /// and is admitted whole (every member's ranges) before any write; then the
-/// caller's token moves every member at once (the member axis one more
-/// strided dimension of each move) around one dense submission of the
-/// member-expanded GEMM jobs, plan job outer and member inner, stopping at
-/// the first failure. `destination_scales` folds `θ_b` into the moves writing
-/// destination block `b` of every member, as in
-/// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`].
+/// member axis is one more strided dimension of each move around one dense
+/// submission of the member-expanded GEMM jobs, plan job outer and member
+/// inner, stopping at the first failure. `destination_scales` folds `θ_b`
+/// into the moves writing destination block `b` of every member, as in
+/// [`tree_transform_structure_overwrite_with_structural_recoupling_raw`],
+/// each scale resolved once per role for the whole batch.
+///
+/// The moves before and after the GEMM each run in one engine entry at the
+/// width [`symtn_dense::lanes::flat_width`] admits over the members: under
+/// `Auto` the engine's width when a copy of the whole batch destination
+/// pays for it, under a forced policy its batch decision, and one under
+/// `Sequential`. At width one every member moves on the caller's token;
+/// above it the members split into at most that many contiguous ranges,
+/// each moving its members as one member-axis move per role.
 #[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn tree_transform_members_overwrite_raw<A, E, D, C>(
@@ -367,12 +670,8 @@ where
     // Why the member axis, not the one-member replay per member: the call
     // then makes one dense submission for every member, as the provider's
     // batch entry expects, instead of one per member and group.
-    let layouts = task.layouts();
     let plan = task.recoupling_plan();
-    let src_stride = offset_to_isize(src_structure.required_len()?)?;
-    let dst_stride = offset_to_isize(dst_structure.required_len()?)?;
-    let packed_src_stride = offset_to_isize(plan.source_len())?;
-    let packed_dst_stride = offset_to_isize(plan.destination_len())?;
+    let dst_len = dst_structure.required_len()?;
     let packed_src_len = plan.source_len() * members;
     let packed_dst_len = plan.destination_len() * members;
     workspace.prepare_packed_buffers(packed_src_len, packed_dst_len, D::zero());
@@ -387,116 +686,53 @@ where
         }
     }
     strided_batch_runs_into(&workspace.chunk_jobs, &mut workspace.chunk_runs);
-    let (shape, dst_strides, src_strides) = (
-        &mut workspace.member_shape,
-        &mut workspace.member_dst_strides,
-        &mut workspace.member_src_strides,
-    );
-    // Host moves before and after the one grouped GEMM, each phase on the
-    // caller engine's token.
-    crate::host_pool::with_exec(engine, |mut exec| {
-        for &index in task.inactive_destination_layouts() {
-            let (dims, strides) = layouts.inactive_role(index)?;
-            let zero = [D::zero()];
-            workspace.zero_strides.clear();
-            workspace.zero_strides.resize(dims.len(), 0);
-            move_members(
-                exec.reborrow(),
-                kernels,
-                shape,
-                dst_strides,
-                src_strides,
-                dst_data,
-                &zero,
-                dims,
-                strides,
-                &workspace.zero_strides,
-                dst_stride,
-                0,
-                layouts.entry(index).offset,
-                0,
-                members,
-                false,
-                D::one(),
-            )?;
-        }
-        for block in task.blocks() {
-            let TreeTransformBlock::Single {
-                dst_layout,
-                src_layout,
-                coefficient,
-            } = *block
-            else {
-                continue;
-            };
-            let role = layouts.role(dst_layout)?;
-            let dst = layouts.entry(dst_layout);
-            let src = layouts.entry(src_layout);
-            shape.clear();
-            shape.extend_from_slice(role.dims());
-            shape.push(members);
-            dst_strides.clear();
-            dst_strides.extend_from_slice(role.dst_strides());
-            dst_strides.push(dst_stride);
-            src_strides.clear();
-            src_strides.extend_from_slice(role.src_strides());
-            src_strides.push(src_stride);
-            kernels.transform_strided_baked(
-                exec.reborrow(),
-                &mut workspace.zero_strides,
-                dst_data,
-                src_data,
-                shape,
-                dst_strides,
-                src_strides,
-                dst.offset,
-                src.offset,
-                task.storage_conjugate(),
-                TransformScale::new(
-                    alpha.at(dst.offset),
-                    task.single_coefficients()[coefficient],
-                ),
-                None,
-                None,
-                None,
-            )?;
-        }
-        for (block_index, job) in plan.entries() {
-            let &TreeTransformBlock::Multi {
-                src_layout_start,
-                src_count,
-                element_count,
-                ..
-            } = recoupling_multi_block(task, block_index)?
-            else {
-                unreachable!()
-            };
-            for column in 0..src_count {
-                let entry = src_layout_start + column;
-                let role = layouts.role(entry)?;
-                move_members(
-                    exec.reborrow(),
-                    kernels,
-                    shape,
-                    dst_strides,
-                    src_strides,
-                    workspace.packed.source_mut().as_mut_slice(),
-                    src_data,
-                    role.dims(),
-                    role.dst_strides(),
-                    role.src_strides(),
-                    packed_src_stride,
-                    src_stride,
-                    offset_to_isize(job.lhs_offset + column * element_count)?,
-                    layouts.entry(entry).offset,
-                    members,
-                    task.storage_conjugate(),
-                    D::one(),
-                )?;
-            }
-        }
-        Ok(())
-    })?;
+    let singles = resolve_member_alpha(task, alpha, &mut workspace.member_alpha)?;
+    if workspace.member_scratch.is_empty() {
+        workspace.member_scratch.push(MemberScratch::default());
+    }
+    let strides = [
+        offset_to_isize(src_structure.required_len()?)?,
+        offset_to_isize(dst_len)?,
+        offset_to_isize(plan.source_len())?,
+        offset_to_isize(plan.destination_len())?,
+    ];
+    let geometry = MemberMoves {
+        parts: super::writers::ReplayParts::new(task),
+        plan,
+        inactive: task.inactive_destination_layouts(),
+        src: src_data,
+        alpha: &[],
+        singles,
+        src_stride: strides[0],
+        dst_stride: strides[1],
+        packed_src_stride: strides[2],
+        packed_dst_stride: strides[3],
+    };
+    let HostTreeTransformWorkspace {
+        packed,
+        member_alpha,
+        member_scratch,
+        ..
+    } = &mut *workspace;
+    let lens = MemberLens {
+        dst: dst_len,
+        packed_src: plan.source_len(),
+    };
+    let threads = member_moves(
+        engine,
+        &MemberMoves {
+            alpha: member_alpha,
+            ..geometry
+        },
+        kernels,
+        member_scratch,
+        dst_data,
+        packed.source_mut().as_mut_slice(),
+        &[],
+        lens,
+        members,
+        None,
+    )?;
     if !workspace.chunk_jobs.is_empty() {
         let (source, destination) = workspace.packed.source_and_destination_mut();
         recoupling_gemm_batch(
@@ -509,43 +745,245 @@ where
             &workspace.chunk_runs,
         )?;
     }
-    crate::host_pool::with_exec(engine, |mut exec| {
-        for (block_index, job) in plan.entries() {
-            let &TreeTransformBlock::Multi {
-                dst_layout_start,
-                dst_count,
-                element_count,
-                ..
-            } = recoupling_multi_block(task, block_index)?
-            else {
-                unreachable!()
-            };
-            for column in 0..dst_count {
-                let entry = dst_layout_start + column;
-                let role = layouts.role(entry)?;
-                move_members(
-                    exec.reborrow(),
-                    kernels,
-                    shape,
-                    dst_strides,
-                    src_strides,
-                    dst_data,
-                    workspace.packed.destination().as_slice(),
-                    role.dims(),
-                    role.dst_strides(),
-                    role.src_strides(),
-                    dst_stride,
-                    packed_dst_stride,
-                    layouts.entry(entry).offset,
-                    offset_to_isize(job.dst_offset + column * element_count)?,
-                    members,
-                    false,
-                    alpha.at(layouts.entry(entry).offset),
-                )?;
+    let HostTreeTransformWorkspace {
+        packed,
+        member_alpha,
+        member_scratch,
+        ..
+    } = &mut *workspace;
+    member_moves(
+        engine,
+        &MemberMoves {
+            alpha: member_alpha,
+            ..geometry
+        },
+        kernels,
+        member_scratch,
+        dst_data,
+        &mut [],
+        packed.destination().as_slice(),
+        lens,
+        members,
+        Some(threads),
+    )?;
+    Ok(())
+}
+
+/// Elements per member of the destination and of the packed source.
+#[derive(Clone, Copy)]
+struct MemberLens {
+    dst: usize,
+    packed_src: usize,
+}
+
+/// One member phase in one engine entry: the pack phase when `packed_dst`
+/// is empty and `threads` is `None` (which admits the width and returns
+/// it), the scatter phase from `packed_dst` at that width otherwise. At
+/// width one every member moves on the caller's token with the caller's
+/// kernels; above it, the members split into `min(threads, members)`
+/// contiguous ranges over a [`lanes::Split`] of `threads`.
+#[allow(clippy::too_many_arguments)]
+fn member_moves<A, D, C>(
+    engine: &mut dyn Engine,
+    moves: &MemberMoves<'_, D, C>,
+    kernels: &mut A,
+    scratch: &mut Vec<MemberScratch>,
+    dst: &mut [D],
+    packed_src: &mut [D],
+    packed_dst: &[D],
+    lens: MemberLens,
+    members: usize,
+    threads: Option<usize>,
+) -> Result<usize, OperationError>
+where
+    A: HostKernelAdapter<D> + Clone + Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    let scatter = threads.is_some();
+    #[cfg(feature = "tenferro")]
+    {
+        use symtn_dense::lanes;
+        let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
+        crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Strided, |exec| {
+            let width = threads.unwrap_or_else(|| lanes::flat_width(&exec, estimate, members));
+            if width <= 1 {
+                let token = exec.into_token();
+                return if scatter {
+                    moves.scatter(token, kernels, &mut scratch[0], dst, packed_dst, 0, members)
+                } else {
+                    moves.pack(token, kernels, &mut scratch[0], dst, packed_src, 0, members)
+                }
+                .map(|()| width);
             }
+            if scratch.len() < width {
+                scratch.resize_with(width, MemberScratch::default);
+            }
+            let ranges = width.min(members);
+            let work = MemberPhase {
+                moves,
+                packed_dst,
+                lens,
+                members,
+                ranges,
+                scatter,
+                kernels: &*kernels,
+                lane: core::marker::PhantomData,
+            };
+            let mut lane = MemberLane {
+                dst,
+                packed: packed_src,
+                first: 0,
+                kernels: kernels.clone(),
+                scratch: &mut scratch[..width],
+            };
+            let mut states = vec![(); ranges];
+            super::chunk::outcome(lanes::run_native(
+                exec,
+                &work,
+                super::chunk::split(width, |lane, cut| work.cut(lane, cut)),
+                &mut states,
+                core::slice::from_mut(&mut lane),
+            ))
+            .map(|()| width)
+        })?
+    }
+    #[cfg(not(feature = "tenferro"))]
+    {
+        let _ = (packed_dst, lens);
+        crate::host_pool::with_exec(engine, |exec| {
+            if scatter {
+                moves.scatter(exec, kernels, &mut scratch[0], dst, packed_dst, 0, members)
+            } else {
+                moves.pack(exec, kernels, &mut scratch[0], dst, packed_src, 0, members)
+            }
+        })?;
+        Ok(1)
+    }
+}
+
+/// A member phase split over contiguous member ranges: range `j` of
+/// `ranges` holds members `floor(j N / ranges)..floor((j + 1) N / ranges)`.
+#[cfg(feature = "tenferro")]
+struct MemberPhase<'a, 'm, 'd, D, C, A> {
+    moves: &'a MemberMoves<'m, D, C>,
+    packed_dst: &'a [D],
+    lens: MemberLens,
+    members: usize,
+    ranges: usize,
+    scatter: bool,
+    kernels: &'a A,
+    lane: core::marker::PhantomData<fn(&'d mut [D])>,
+}
+
+/// One worker of a member phase: its members' destination and packed
+/// source (the pack phase only) from member `first`, its kernels and its
+/// scratch (one per logical thread of its part; it uses the first).
+#[cfg(feature = "tenferro")]
+struct MemberLane<'d, D, A> {
+    dst: &'d mut [D],
+    packed: &'d mut [D],
+    first: usize,
+    kernels: A,
+    scratch: &'d mut [MemberScratch],
+}
+
+#[cfg(feature = "tenferro")]
+impl<'d, D, C, A: Clone> MemberPhase<'_, '_, 'd, D, C, A> {
+    /// The first member of range `job`: `floor(job N / ranges)`.
+    ///
+    /// Why the quotient-remainder form: `job N` can exceed `usize` for an
+    /// admitted batch of empty members, while each term below stays at most
+    /// `N`.
+    fn start(&self, job: usize) -> usize {
+        let (quotient, remainder) = (self.members / self.ranges, self.members % self.ranges);
+        job * quotient + job * remainder / self.ranges
+    }
+
+    /// Cuts `lane` before range `cut.job`: `lane` keeps the members before
+    /// it and its first `cut.left` scratch entries.
+    fn cut(
+        &self,
+        lane: &mut MemberLane<'d, D, A>,
+        cut: symtn_dense::lanes::Cut,
+    ) -> Result<MemberLane<'d, D, A>, OperationError> {
+        let first = self.start(cut.job);
+        let members = first
+            .checked_sub(lane.first)
+            .ok_or(OperationError::ElementCountOverflow)?;
+        let (dst_left, dst_right) =
+            core::mem::take(&mut lane.dst).split_at_mut(members * self.lens.dst);
+        lane.dst = dst_left;
+        let packed_at = if self.scatter {
+            0
+        } else {
+            members * self.lens.packed_src
+        };
+        let (packed_left, packed_right) = core::mem::take(&mut lane.packed).split_at_mut(packed_at);
+        lane.packed = packed_left;
+        let (scratch_left, scratch_right) =
+            core::mem::take(&mut lane.scratch).split_at_mut(cut.left);
+        lane.scratch = scratch_left;
+        Ok(MemberLane {
+            dst: dst_right,
+            packed: packed_right,
+            first,
+            kernels: self.kernels.clone(),
+            scratch: scratch_right,
+        })
+    }
+}
+
+#[cfg(feature = "tenferro")]
+impl<'d, D, C, A> symtn_dense::lanes::Work for MemberPhase<'_, '_, 'd, D, C, A>
+where
+    A: HostKernelAdapter<D> + Clone + Send + Sync,
+    D: DenseRecouplingScalar + RecouplingCoefficientAction<C> + ConjugateValue,
+    C: Copy + Sync,
+{
+    type Job = ();
+    type Lane = MemberLane<'d, D, A>;
+    type Error = OperationError;
+
+    fn count(&self) -> usize {
+        self.ranges
+    }
+
+    fn run(
+        &self,
+        job: usize,
+        _: &mut (),
+        lane: &mut Self::Lane,
+        exec: symtn_dense::lanes::Exec<'_>,
+    ) -> Result<(), OperationError> {
+        let (first, end) = (self.start(job), self.start(job + 1));
+        let skip = first - lane.first;
+        let dst = &mut lane.dst[skip * self.lens.dst..(end - lane.first) * self.lens.dst];
+        let scratch = &mut lane.scratch[0];
+        if self.scatter {
+            self.moves.scatter(
+                exec.into_token(),
+                &mut lane.kernels,
+                scratch,
+                dst,
+                self.packed_dst,
+                first,
+                end - first,
+            )
+        } else {
+            let packed = &mut lane.packed
+                [skip * self.lens.packed_src..(end - lane.first) * self.lens.packed_src];
+            self.moves.pack(
+                exec.into_token(),
+                &mut lane.kernels,
+                scratch,
+                dst,
+                packed,
+                first,
+                end - first,
+            )
         }
-        Ok(())
-    })
+    }
 }
 
 #[cfg(test)]

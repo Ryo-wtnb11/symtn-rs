@@ -2,10 +2,10 @@ use super::*;
 
 /// Compiles the pack and scatter replay columns and main's replay dispatch
 /// metadata from the raw layout table: the Direct lists in destination
-/// address order with the Singles' slice-disjointness, each plan group's
-/// scatter span, and the runnable clamp. O(I log I + B) time and O(I)
-/// retained metadata for I intervals and B blocks: one sort of the Singles,
-/// one of the inactive layouts and one per group's columns.
+/// address order with their hull runs, each plan group's scatter hull, and
+/// the runnable clamp. O(I log I + B) time and O(I) retained metadata for I
+/// intervals and B blocks: one sort of the Singles, one of the inactive
+/// layouts and one per group's columns, and one linear sweep per list.
 pub(super) fn compile_parallel_schedule(
     blocks: &[TreeTransformBlock],
     inactive_dst_layouts: &[usize],
@@ -128,19 +128,21 @@ pub(super) fn compile_parallel_schedule(
         });
     }
 
-    // Main's replay metadata: the Direct lists in address order, each
-    // group's span, and the runnable clamp.
-    let singles_slice_disjoint = slice_disjoint(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
+    // Main's replay metadata: the Direct lists in address order with their
+    // hull runs, each group's hull, and the runnable clamp.
+    let single_runs = hull_runs(ranges.iter().map(|&(lo, hi, _)| (lo, hi)));
+    let singles_slice_disjoint = single_runs.len() == ranges.len();
     let mut singles = Vec::with_capacity(ranges.len());
     singles.extend(ranges.iter().map(|&(_, _, block)| block));
     let mut inactive = Vec::with_capacity(inactive_dst_layouts.len());
     for &layout in inactive_dst_layouts {
-        if let Some((lo, _)) = destination_span(layouts, layout) {
-            inactive.push((lo, checked_u32(layout)?));
+        if let Some(span) = destination_span(layouts, layout) {
+            inactive.push((span, checked_u32(layout)?));
         }
     }
     // Why the order is total: compilation rejects aliased destinations.
-    inactive.sort_unstable_by_key(|&(lo, _)| lo);
+    inactive.sort_unstable_by_key(|&((lo, _), _)| lo);
+    let inactive_runs = hull_runs(inactive.iter().map(|&(span, _)| span));
     let inactive = inactive.into_iter().map(|(_, layout)| layout).collect();
     let group_spans = scatter_groups
         .iter()
@@ -149,8 +151,7 @@ pub(super) fn compile_parallel_schedule(
             let ranges = columns.iter().map(|&(range, _)| range);
             TreeTransformGroupSpan {
                 lo: columns.first().map_or(0, |&((lo, _), _)| lo),
-                hi: ranges.clone().map(|(_, hi)| hi).max().unwrap_or(-1),
-                slice_disjoint: slice_disjoint(ranges),
+                hi: ranges.map(|(_, hi)| hi).max().unwrap_or(-1),
             }
         })
         .collect();
@@ -171,8 +172,9 @@ pub(super) fn compile_parallel_schedule(
         scatter_columns,
         scatter_groups,
         inactive,
+        inactive_runs,
         singles,
-        singles_slice_disjoint,
+        single_runs,
         group_spans,
         replay_runnable,
     })
@@ -182,17 +184,27 @@ fn checked_u32(value: usize) -> Result<u32, OperationError> {
     u32::try_from(value).map_err(|_| OperationError::ElementCountOverflow)
 }
 
-/// Whether the inclusive destination ranges, in their order, are
-/// slice-disjoint: each nonnegative and starting after the previous one ends.
-fn slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
-    let mut previous_hi = None;
-    for (lo, hi) in ranges {
-        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
-            return false;
+/// The start index of each hull run of the inclusive destination ranges,
+/// in their (ascending `lo`) order: a run ends where the next range starts
+/// after the largest end so far.
+///
+/// Why the running maximum, not the previous end: a long range followed by
+/// short ones inside it (`[0, 100], [1, 2], [3, 4]`) is one run.
+fn hull_runs<N: Copy + Ord>(ranges: impl IntoIterator<Item = (N, N)>) -> Vec<u32> {
+    let mut starts = Vec::new();
+    let mut end: Option<N> = None;
+    for (index, (lo, hi)) in ranges.into_iter().enumerate() {
+        match end {
+            Some(last) if lo <= last => end = Some(last.max(hi)),
+            _ => {
+                // Indices fit `u32`: the lists are indexed by `u32` already.
+                starts.push(index as u32);
+                end = Some(hi);
+            }
         }
-        previous_hi = Some(hi);
     }
-    true
+    starts.shrink_to_fit();
+    starts
 }
 
 /// The first and last element a destination `layout` writes, or `None` when
@@ -218,4 +230,85 @@ fn destination_span(layouts: &RawLayoutTable, layout_index: usize) -> Option<(i1
         }
     }
     Some((lo, hi))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{TreeTransformBlockSpec, TreeTransformStructure};
+    use symtn_core::{BlockKey, BlockSpec, BlockStructure};
+
+    /// What: a run ends only where a range starts after the largest end so
+    /// far, so a long range followed by ranges inside it is one run, chained
+    /// overlapping ranges are one run, and disjoint ranges are one run each.
+    #[test]
+    fn hull_runs_follow_the_running_maximum() {
+        assert_eq!(hull_runs([(0, 100), (1, 2), (3, 4)]), [0]);
+        assert_eq!(hull_runs([(0, 3), (3, 6), (6, 9), (10, 11)]), [0, 3]);
+        assert_eq!(hull_runs([(0, 1), (2, 3), (4, 5)]), [0, 1, 2]);
+        assert!(hull_runs(core::iter::empty::<(isize, isize)>()).is_empty());
+    }
+
+    /// What: two coupled matrices of 4 rows by 3 columns (column-major,
+    /// stride 4), each with three one-tree specs on rows 0 to 2 (compiled
+    /// as Singles; matrix 0's row 2 one column wide) and an inactive row 3,
+    /// all interleaved in its columns: the Singles form one run per matrix,
+    /// so they are not slice-disjoint, and the inactive rows one run each.
+    #[test]
+    fn interleaved_matrices_compile_one_run_each() {
+        let mut shapes = Vec::new();
+        let mut blocks = Vec::new();
+        for matrix in 0..2 {
+            for row in 0..4 {
+                let cols = if matrix == 0 && row == 2 { 1 } else { 3 };
+                shapes.push(vec![1, cols]);
+                blocks.push(
+                    BlockSpec::with_key(
+                        BlockKey::ordinal(blocks.len()),
+                        vec![1, cols],
+                        vec![1, 4],
+                        12 * matrix + row,
+                    )
+                    .unwrap(),
+                );
+            }
+        }
+        let dst = BlockStructure::from_blocks_with_rank(2, blocks).unwrap();
+        let src = BlockStructure::packed_column_major(2, shapes).unwrap();
+        let specs = (0..2)
+            .flat_map(|matrix| {
+                (0..3).map(move |row| {
+                    let key = 4 * matrix + row;
+                    TreeTransformBlockSpec::multi(vec![key], vec![key], vec![1.0])
+                })
+            })
+            .collect::<Vec<_>>();
+        let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+        let schedule = transform.parallel_schedule();
+        assert_eq!(schedule.singles.len(), 6);
+        assert_eq!(schedule.single_runs, [0, 3]);
+        assert!(!schedule.singles_slice_disjoint());
+        assert_eq!(schedule.inactive_runs, [0, 1]);
+    }
+
+    /// What: a group whose second column by start (three elements of stride
+    /// 1 from element 2) ends before its first (stride 4 from element 1):
+    /// the group's hull ends at the first column's end, 9, not at its last
+    /// column's, 4.
+    #[test]
+    fn a_group_hull_ends_at_its_largest_column_end() {
+        let dst = BlockStructure::from_blocks_with_rank(
+            2,
+            vec![
+                BlockSpec::with_key(BlockKey::ordinal(0), vec![1, 3], vec![1, 4], 1).unwrap(),
+                BlockSpec::with_key(BlockKey::ordinal(1), vec![1, 3], vec![1, 1], 2).unwrap(),
+            ],
+        )
+        .unwrap();
+        let src = BlockStructure::packed_column_major(2, [vec![1, 3], vec![1, 3]]).unwrap();
+        let spec = TreeTransformBlockSpec::multi(vec![0, 1], vec![0, 1], vec![1.0, 0.5, 0.5, 1.0]);
+        let transform = TreeTransformStructure::compile_structures(&dst, &src, &[spec]).unwrap();
+        let span = transform.parallel_schedule().group_spans[0];
+        assert_eq!((span.lo, span.hi), (1, 9));
+    }
 }

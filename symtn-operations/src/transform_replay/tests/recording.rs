@@ -84,7 +84,7 @@ impl<const FIRST_TOUCH: bool> DestinationWriter<Mark, f64> for Recorder<'_, FIRS
         dst: &mut [Mark],
         dst_start: isize,
         exec: crate::host_pool::Exec<'_>,
-        _: &mut crate::kernel_adapter::sealed::LeafGate,
+        _: &mut crate::kernel_adapter::sealed::LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
@@ -132,7 +132,7 @@ impl<const FIRST_TOUCH: bool> DestinationWriter<Mark, f64> for Recorder<'_, FIRS
         dst: &mut [Mark],
         dst_start: isize,
         exec: crate::host_pool::Exec<'_>,
-        _: &mut crate::kernel_adapter::sealed::LeafGate,
+        _: &mut crate::kernel_adapter::sealed::LeafGate<'_>,
         index: &mut [usize],
     ) -> Result<(), OperationError> {
         let layouts = self.parts.layouts;
@@ -385,4 +385,65 @@ pub(super) fn group_of(error: OperationError) -> String {
         OperationError::Dense(DenseError::Unsupported { op: "spy", message }) => message,
         other => panic!("not an injected error: {other:?}"),
     }
+}
+
+/// A `threads`-worker engine under `strategy` whose every dispatch kind
+/// costs `ns` at every width.
+pub(super) fn flat_engine(threads: usize, ns: u64, strategy: CpuBatchStrategy) -> CpuEngine {
+    let flat = tenferro_cpu::threadteam::WidthCosts::flat(Duration::from_nanos(ns));
+    CpuEngine::new(
+        symtn_dense::Pool::builder()
+            .threads(threads)
+            .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
+                flat, flat, flat,
+            ))
+            .build()
+            .unwrap(),
+    )
+    .with_batch_policy(CpuBatchPolicy::new(strategy))
+}
+
+/// A coefficient whose action on the source value `40` panics.
+#[derive(Clone, Copy)]
+pub(super) struct Panicking(pub(super) f64);
+
+impl RecouplingCoefficientAction<Panicking> for f64 {
+    fn scale_by_coefficient(self, coefficient: Panicking) -> Self {
+        assert!(self != 40.0, "a failing movement");
+        self * coefficient.0
+    }
+
+    fn coefficient_as_data(coefficient: Panicking) -> Self {
+        coefficient.0
+    }
+}
+
+/// The recording replay of `transform`: the budget each Single and scatter
+/// column was offered, in destination order, and every element's mark.
+pub(super) fn recorded(
+    engine: &mut CpuEngine,
+    transform: &TreeTransformStructure<f64>,
+    dst: &Arc<BlockStructure>,
+    src: &Arc<BlockStructure>,
+) -> (Vec<usize>, Vec<Mark>) {
+    let task = transform.task_view().unwrap();
+    let mut workspace = TreeTransformWorkspace::default();
+    ensure_recoupling_coefficients(&mut workspace, task, transform.identity_marker()).unwrap();
+    let source = vec![0.0; src.required_len().unwrap()];
+    let mut marks = vec![Mark::default(); dst.required_len().unwrap()];
+    let recorder = Recorder::new(task);
+    super::super::replay(
+        engine,
+        &mut DefaultDenseExecutor::new(),
+        &mut workspace,
+        task,
+        transform.parallel_schedule(),
+        &mut marks,
+        &source,
+        &recorder,
+        &mut (),
+        None,
+    )
+    .unwrap();
+    (recorder.offers(), marks)
 }

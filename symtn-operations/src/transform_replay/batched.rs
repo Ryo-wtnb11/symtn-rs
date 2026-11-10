@@ -6,13 +6,14 @@ use crate::transform_structure::TreeTransformDirectItem;
 /// Replays a validated task into `dst` through `writer` (main's replay):
 ///
 /// - first the direct items, in one engine entry that also fixes the replay
-///   width `t` ([`super::chunk::direct`]): the inactive layouts inline, then
-///   the Singles, split over `t` workers when they are slice-disjoint and
-///   inline otherwise;
+///   width `t` ([`super::chunk::direct`]): the inactive layouts, split over
+///   their hull runs or inline, then the Singles, split over `t` workers when
+///   they are slice-disjoint, over their hull runs when they form several,
+///   and inline otherwise;
 /// - then the plan groups: at `t > 1` in chunks of `t` consecutive groups
 ///   ([`super::chunk::groups`]), each a parallel pack, one grouped GEMM and
-///   a scatter split over `t` workers when the chunk's groups are
-///   slice-disjoint (inline otherwise); at `t = 1` one group at a time
+///   a scatter split over `t` workers when the chunk's groups form two or
+///   more hull runs (inline otherwise); at `t = 1` one group at a time
 ///   ([`replay_serial_groups`]).
 ///
 /// Every inline move runs on the caller's whole token (one slot under a
@@ -60,6 +61,7 @@ where
             inline_direct(
                 exec,
                 schedule,
+                true,
                 InlineSingles::ordered(W::FIRST_TOUCH, task, 1),
                 dst,
                 src,
@@ -130,12 +132,13 @@ impl<'a> InlineSingles<'a> {
 }
 
 /// The direct items on the caller's token `exec`: the inactive layouts in
-/// destination address order, then the `singles`, each through the caller
-/// gate.
+/// destination address order when `inactive` (a split wrote them
+/// otherwise), then the `singles`, each through the caller gate.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn inline_direct<W, T, D>(
     mut exec: Exec<'_>,
     schedule: &TreeTransformParallelSchedule,
+    inactive: bool,
     singles: InlineSingles<'_>,
     dst: &mut [T],
     src: &[D],
@@ -143,7 +146,7 @@ pub(super) fn inline_direct<W, T, D>(
     kernels: &mut W::Kernels,
     zero_strides: &mut Vec<isize>,
     index: &mut [usize],
-    gate: &mut LeafGate,
+    gate: &mut LeafGate<'_>,
 ) -> Result<(), OperationError>
 where
     W: DestinationWriter<T, D>,
@@ -156,8 +159,7 @@ where
             (&[][..], Some((blocks, layouts)))
         }
     };
-    let inactive = schedule
-        .inactive
+    let inactive = schedule.inactive[..if inactive { schedule.inactive.len() } else { 0 }]
         .iter()
         .map(|&layout| TreeTransformDirectItem::Inactive {
             layout: layout as usize,
@@ -217,7 +219,7 @@ fn replay_serial_groups<E, W, T, D, C>(
     src: &[D],
     writer: &W,
     kernels: &mut W::Kernels,
-    gate: &mut LeafGate,
+    gate: &mut LeafGate<'_>,
     sequential: bool,
     mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(), OperationError>

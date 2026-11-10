@@ -29,15 +29,12 @@ pub(crate) struct TreeTransformScatterGroupReplay {
     pub columns: Range<usize>,
 }
 
-/// The destination span of one plan group's scatter columns, ordered by
-/// destination start: its first and last written element and whether the
-/// columns are slice-disjoint (each starts after the previous one ends). A
-/// group without columns spans `(0, -1)`, disjoint.
+/// The destination hull of one plan group's scatter columns: its first and
+/// last written element. A group without columns spans `(0, -1)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformGroupSpan {
     pub lo: isize,
     pub hi: isize,
-    pub slice_disjoint: bool,
 }
 
 /// A destination write that does not go through a packed GEMM column.
@@ -52,8 +49,14 @@ pub(crate) enum TreeTransformDirectItem {
 
 /// The replay schedule of a compiled structure, built eagerly with it and
 /// immutable afterwards, so derived equality compares every field: the pack
-/// and scatter columns, the address-ordered direct lists, the Singles'
-/// slice-disjointness, the group spans and the runnable clamp.
+/// and scatter columns, the address-ordered direct lists and their hull
+/// runs, the group spans and the runnable clamp.
+///
+/// A hull run is a maximal stretch of consecutive items of an address-ordered
+/// list whose destination hulls overlap transitively (each item starts at or
+/// before the largest hull end so far). Distinct items never share an
+/// element, and distinct runs occupy disjoint address intervals, so a replay
+/// may cut the destination at run starts and give each part one writer.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TreeTransformParallelSchedule {
     pub pack_columns: Vec<TreeTransformPackReplay>,
@@ -66,9 +69,10 @@ pub(crate) struct TreeTransformParallelSchedule {
     /// The non-empty Single blocks, by index into the block list, in
     /// destination address order.
     pub singles: Vec<u32>,
-    /// Whether the Singles' destinations are slice-disjoint in `singles`
-    /// order, so a replay may split them between workers.
-    pub singles_slice_disjoint: bool,
+    /// The start, in `inactive`, of each of its hull runs.
+    pub inactive_runs: Vec<u32>,
+    /// The start, in `singles`, of each of its hull runs.
+    pub single_runs: Vec<u32>,
     /// Per plan group, its scatter columns' destination span.
     pub group_spans: Vec<TreeTransformGroupSpan>,
     /// The most workers a replay can keep busy on one phase: the Singles
@@ -78,6 +82,12 @@ pub(crate) struct TreeTransformParallelSchedule {
 }
 
 impl TreeTransformParallelSchedule {
+    /// Whether the Singles' destinations are slice-disjoint in `singles`
+    /// order (every run one Single), so main's Singles split applies.
+    pub(crate) fn singles_slice_disjoint(&self) -> bool {
+        self.single_runs.len() == self.singles.len()
+    }
+
     /// The bytes of the vectors this schedule retains, each allocated at its
     /// exact length.
     pub(crate) fn retained_bytes(&self) -> usize {
@@ -96,6 +106,10 @@ impl TreeTransformParallelSchedule {
         ))
         .saturating_add(bytes(self.inactive.capacity(), core::mem::size_of::<u32>()))
         .saturating_add(bytes(self.singles.capacity(), core::mem::size_of::<u32>()))
+        .saturating_add(bytes(
+            self.inactive_runs.capacity() + self.single_runs.capacity(),
+            core::mem::size_of::<u32>(),
+        ))
         .saturating_add(bytes(
             self.group_spans.capacity(),
             core::mem::size_of::<TreeTransformGroupSpan>(),

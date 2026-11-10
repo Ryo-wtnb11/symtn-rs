@@ -7,10 +7,15 @@
 //! their destinations are slice-disjoint, and the Multi groups replay in
 //! chunks of `t` consecutive groups, each a parallel pack, one grouped GEMM
 //! between its pack and scatter phases, and a scatter split over the chunk's
-//! groups when those are slice-disjoint. Disjointness is structural: every
-//! split cuts the destination (or pack scratch) at a compiled boundary with
-//! `split_at_mut`, so interleaved layouts whose bounding slices overlap stay
-//! inline on the caller.
+//! groups. Disjointness is structural: every split cuts the destination (or
+//! pack scratch) at the start of a hull run (see
+//! [`TreeTransformParallelSchedule`]) with `split_at_mut`, and a part writes
+//! its runs whole, so interleaved layouts whose bounding slices overlap share
+//! one writer; a phase of one run stays inline on the caller.
+//!
+//! Why runs rather than TensorKit's per-group tasks: distinct blocks never
+//! share an element, but safe Rust can only hand workers disjoint contiguous
+//! slices, and a run is the smallest contiguous owner of overlapping hulls.
 //!
 //! A split part of `n` logical threads and `k` items splits at
 //! `parallel_split(k, n)` items, `n / 2` threads to the left, as a two-child
@@ -24,7 +29,10 @@ use super::writers::{scheduled_single, DestinationWriter};
 use super::*;
 use crate::host_scratch::PackColumnWriter;
 use crate::kernel_adapter::movement::with_conjugation;
-use crate::transform_structure::{TreeTransformDirectItem, TreeTransformPackReplay};
+use crate::kernel_adapter::sealed::GateKeys;
+use crate::transform_structure::{
+    TreeTransformDirectItem, TreeTransformGroupSpan, TreeTransformPackReplay,
+};
 
 /// The direct items of a replay in one engine entry, and the replay width
 /// `t` it admits there, with whether the policy is a forced `Sequential`.
@@ -33,10 +41,19 @@ use crate::transform_structure::{TreeTransformDirectItem, TreeTransformPackRepla
 /// compiled runnable parts (main's `effective_tree_transform_threads`):
 /// under `Auto` the engine's width when that copy pays for it, at most the
 /// runnable parts, else one; a forced policy's decision, at most the runnable
-/// parts. The inactive layouts
-/// then run inline on the caller's token, followed by the Singles: split over
-/// `t` workers when `t > 1` and they are slice-disjoint, inline otherwise
-/// in [`InlineSingles::ordered`]'s order.
+/// parts. It fixes the chunks of the plan groups, and the Singles' split
+/// when they are slice-disjoint.
+///
+/// The inactive layouts run first: split over their hull runs when there
+/// are two or more and the run width `t_A` (the same rule over the new run
+/// routes' runnable parts) exceeds one, inline on the caller's token
+/// otherwise. Then the Singles: split over `t` workers when `t > 1` and they
+/// are slice-disjoint (main's split); split over their runs at `t_A` when
+/// they form at least two runs that are not all singletons; inline in
+/// [`InlineSingles::ordered`]'s order otherwise.
+///
+/// The call's gate cost keys are prepared here, before any split, for
+/// every leaf gate of the call (none when no role retains a plan).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn direct<W, T, D, C>(
     engine: &mut dyn Engine,
@@ -47,7 +64,7 @@ pub(super) fn direct<W, T, D, C>(
     src: &[D],
     writer: &W,
     kernels: &mut W::Kernels,
-    gate: &mut LeafGate,
+    gate: &mut LeafGate<'_>,
 ) -> Result<(usize, bool), OperationError>
 where
     W: DestinationWriter<T, D>,
@@ -58,6 +75,15 @@ where
     let layouts = task.layouts();
     let rank = layouts.max_fused_rank();
     let estimate = strided_kernel::execution::KernelClass::Copy.estimate(dst.len());
+    let inactive_runs = schedule.inactive_runs.len();
+    let singles_disjoint = schedule.singles_slice_disjoint();
+    // Runs of the new routes: the inactive layouts, and Singles that are
+    // not slice-disjoint but still form two or more runs.
+    let single_runs = if singles_disjoint {
+        0
+    } else {
+        schedule.single_runs.len()
+    };
     let admitted = crate::host_pool::lane_region(
         engine,
         crate::host_pool::HostPoolSite::Replay,
@@ -65,20 +91,60 @@ where
             let sequential =
                 exec.batch_policy().strategy == tenferro_cpu::CpuBatchStrategy::Sequential;
             let threads = lanes::flat_width(&exec, estimate, schedule.replay_runnable);
-            workspace.prepare_fused_indices(threads, rank)?;
-            let split = threads > 1 && schedule.singles_slice_disjoint;
+            let run_runnable = [inactive_runs, single_runs]
+                .into_iter()
+                .filter(|&runs| runs >= 2)
+                .max()
+                .unwrap_or(0);
+            let run_threads = if run_runnable >= 2 {
+                lanes::flat_width(&exec, estimate, run_runnable)
+            } else {
+                1
+            };
+            workspace.prepare_fused_indices(threads.max(run_threads), rank)?;
+            workspace.gate_keys.prepare(
+                &mut exec.reborrow().into_token(),
+                layouts.max_planned_elements(),
+            );
+            let split_inactive = run_threads > 1 && inactive_runs >= 2;
+            let (split_singles, singles_width) = if singles_disjoint {
+                (threads > 1, threads)
+            } else {
+                (run_threads > 1 && single_runs >= 2, run_threads)
+            };
             let HostTreeTransformWorkspace {
                 zero_strides,
                 fused_indices,
+                gate_keys,
                 ..
             } = &mut *workspace;
+            if split_inactive {
+                let items = Items::Direct {
+                    list: &schedule.inactive,
+                    runs: &schedule.inactive_runs,
+                    singles: false,
+                    blocks: task.blocks(),
+                    src,
+                };
+                run_moves(
+                    exec.reborrow(),
+                    writer,
+                    layouts,
+                    schedule,
+                    gate_keys,
+                    items,
+                    run_threads,
+                    dst,
+                    fused_indices,
+                )?;
+            }
             let token = exec.reborrow().into_token();
             let token = if sequential {
                 token.limit(core::num::NonZeroUsize::MIN)
             } else {
                 token
             };
-            let inline = if split {
+            let inline = if split_singles {
                 InlineSingles::None
             } else {
                 InlineSingles::ordered(W::FIRST_TOUCH, task, threads)
@@ -86,6 +152,7 @@ where
             inline_direct(
                 token,
                 schedule,
+                !split_inactive,
                 inline,
                 dst,
                 src,
@@ -95,9 +162,11 @@ where
                 fused_indices,
                 gate,
             )?;
-            if split {
-                let items = Items::Singles {
-                    singles: &schedule.singles,
+            if split_singles {
+                let items = Items::Direct {
+                    list: &schedule.singles,
+                    runs: &schedule.single_runs,
+                    singles: true,
                     blocks: task.blocks(),
                     src,
                 };
@@ -106,30 +175,30 @@ where
                     writer,
                     layouts,
                     schedule,
+                    gate_keys,
                     items,
-                    threads,
+                    singles_width,
                     dst,
                     fused_indices,
                 )?;
             }
-            Ok::<_, OperationError>((threads, sequential))
+            Ok::<_, OperationError>((threads, sequential, split_inactive || split_singles))
         },
     )??;
     #[cfg(any(test, feature = "testing"))]
-    if admitted.0 > 1 {
+    if admitted.0 > 1 || admitted.2 {
         workspace.movement_phases += 1;
     }
-    Ok(admitted)
+    Ok((admitted.0, admitted.1))
 }
 
 /// The plan groups of a replay at width `threads > 1`, in chunks of
 /// `threads` consecutive groups (main's `replay_multi_chunk` and its
 /// scatter): per chunk the rebased jobs, a pack split over `threads`
 /// workers, one grouped GEMM, and the scatter of the chunk's non-empty
-/// groups in destination order, split when they are slice-disjoint (each
-/// group's columns, and each group before the next) and inline on the
-/// caller's token through the caller gate otherwise. The first failing
-/// phase or GEMM stops the replay.
+/// groups in destination order, split over their hull runs when there are
+/// two or more and inline on the caller's token through the caller gate
+/// otherwise. The first failing phase or GEMM stops the replay.
 ///
 /// The packed scratch is sized once for the largest chunk. A packed
 /// destination too small for it is initialized inside the first chunk's
@@ -147,7 +216,7 @@ pub(super) fn groups<E, W, T, D, C>(
     src: &[D],
     writer: &W,
     kernels: &mut W::Kernels,
-    gate: &mut LeafGate,
+    gate: &mut LeafGate<'_>,
     threads: usize,
     mut profile: Option<&mut TreeTransformReplayProfile>,
 ) -> Result<(), OperationError>
@@ -254,7 +323,9 @@ where
             packed,
             zero_strides,
             fused_indices,
+            gate_keys,
             chunk_scatter_groups: ordered,
+            chunk_scatter_runs: runs,
             ..
         } = &mut *workspace;
         let spans = &schedule.group_spans;
@@ -266,16 +337,15 @@ where
         // Why not sort every scatter column: only the at-most-t group indices
         // need destination order for one safe split tree.
         ordered.sort_unstable_by_key(|&group| spans[group].lo);
-        let disjoint = ordered.iter().all(|&group| spans[group].slice_disjoint)
-            && ordered
-                .windows(2)
-                .all(|pair| spans[pair[0]].hi < spans[pair[1]].lo);
+        group_runs(ordered, spans, runs);
         let packed = &packed.destination().as_slice()[..destination_len];
         let groups = &ordered[..];
+        let runs = &runs[..];
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
-            if disjoint {
+            if runs.len() >= 2 {
                 let items = Items::Groups {
                     groups,
+                    runs,
                     packed,
                     packed_start: destination_start,
                 };
@@ -284,6 +354,7 @@ where
                     writer,
                     layouts,
                     schedule,
+                    gate_keys,
                     items,
                     threads,
                     dst,
@@ -321,6 +392,25 @@ where
         }
     }
     Ok(())
+}
+
+/// The start of each hull run of `ordered` (groups ascending by hull start)
+/// into `runs`: a run ends where the next group starts after the largest
+/// hull end so far. O(`ordered.len()`).
+fn group_runs(ordered: &[usize], spans: &[TreeTransformGroupSpan], runs: &mut Vec<u32>) {
+    runs.clear();
+    let mut end = None;
+    for (index, &group) in ordered.iter().enumerate() {
+        let span = spans[group];
+        match end {
+            Some(last) if span.lo <= last => end = Some(span.hi.max(last)),
+            _ => {
+                // At most `threads` groups per chunk, so the index fits.
+                runs.push(index as u32);
+                end = Some(span.hi);
+            }
+        }
+    }
 }
 
 /// The largest chunk's packed source and destination lengths over chunks
@@ -419,7 +509,7 @@ where
 /// The runner's result as the replay's: a job's error as it failed, and a
 /// refusal, which a split with one lane per call never meets, as an invalid
 /// argument.
-fn outcome(
+pub(super) fn outcome(
     ran: Result<lanes::Outcome<OperationError>, lanes::Refusal<tenferro_cpu::threadteam::Error>>,
 ) -> Result<(), OperationError> {
     match ran {
@@ -431,12 +521,17 @@ fn outcome(
     }
 }
 
-/// The items of one split destination phase.
+/// The items of one split destination phase, in hull runs: a job of the
+/// phase is one run, `runs[job]..runs[job + 1]` of its list (the last run
+/// ends with the list), and a part writes its runs whole.
 #[derive(Clone, Copy)]
 enum Items<'a, D> {
-    /// Singles by block index, in destination address order, from `src`.
-    Singles {
-        singles: &'a [u32],
+    /// Singles by block index (`singles`) or inactive layouts by layout
+    /// index, in destination address order, from `src`.
+    Direct {
+        list: &'a [u32],
+        runs: &'a [u32],
+        singles: bool,
         blocks: &'a [TreeTransformBlock],
         src: &'a [D],
     },
@@ -444,9 +539,37 @@ enum Items<'a, D> {
     /// destination whose first element is packed offset `packed_start`.
     Groups {
         groups: &'a [usize],
+        runs: &'a [u32],
         packed: &'a [D],
         packed_start: usize,
     },
+}
+
+impl<D> Items<'_, D> {
+    fn runs(&self) -> (&[u32], usize) {
+        match *self {
+            Items::Direct { list, runs, .. } => (runs, list.len()),
+            Items::Groups { groups, runs, .. } => (runs, groups.len()),
+        }
+    }
+
+    /// The list positions of run `job`.
+    fn run(&self, job: usize) -> core::ops::Range<usize> {
+        let (runs, len) = self.runs();
+        let end = runs.get(job + 1).map_or(len, |&end| end as usize);
+        runs[job] as usize..end
+    }
+}
+
+/// The direct item at position `index` of a direct list.
+fn direct_item(list: &[u32], singles: bool, index: usize) -> TreeTransformDirectItem {
+    if singles {
+        TreeTransformDirectItem::Single { block: list[index] }
+    } else {
+        TreeTransformDirectItem::Inactive {
+            layout: list[index] as usize,
+        }
+    }
 }
 
 /// A split destination phase: each item written whole through `writer`.
@@ -454,6 +577,7 @@ struct Moves<'a, 'd, W, T, D> {
     writer: &'a W,
     layouts: &'a TreeTransformLayoutTable,
     schedule: &'a TreeTransformParallelSchedule,
+    keys: &'d GateKeys,
     items: Items<'a, D>,
     rank: usize,
     target: core::marker::PhantomData<fn(&'d mut [T])>,
@@ -468,7 +592,7 @@ struct MoveLane<'d, T, K> {
     kernels: K,
     zero_strides: Vec<isize>,
     index: LaneIndex<'d>,
-    gate: LeafGate,
+    gate: LeafGate<'d>,
 }
 
 /// Runs `items` split over `threads` workers on `exec`, into `dst`.
@@ -478,6 +602,7 @@ fn run_moves<W, T, D>(
     writer: &W,
     layouts: &TreeTransformLayoutTable,
     schedule: &TreeTransformParallelSchedule,
+    keys: &GateKeys,
     items: Items<'_, D>,
     threads: usize,
     dst: &mut [T],
@@ -492,6 +617,7 @@ where
         writer,
         layouts,
         schedule,
+        keys,
         items,
         rank: layouts.max_fused_rank(),
         target: core::marker::PhantomData,
@@ -510,7 +636,7 @@ where
 
 /// A [`Split`] over `threads` logical threads whose cut is `cut`; the
 /// signature makes the closure generic over its lane borrow.
-fn split<L, E, F>(threads: usize, cut: F) -> Split<F>
+pub(super) fn split<L, E, F>(threads: usize, cut: F) -> Split<F>
 where
     F: Fn(&mut L, Cut) -> Result<L, E> + Sync,
 {
@@ -536,19 +662,27 @@ where
             kernels: self.writer.kernels(),
             zero_strides: Vec::new(),
             index,
-            gate: LeafGate::new(self.layouts.max_planned_elements()),
+            gate: LeafGate::shared(self.keys),
         }
     }
 
-    /// The first destination element item `item` writes.
-    fn lo(&self, item: usize) -> Result<isize, OperationError> {
+    /// The first destination element run `job` writes: its first item's,
+    /// since a run's items ascend by hull start.
+    fn lo(&self, job: usize) -> Result<isize, OperationError> {
+        let first = self.items.run(job).start;
         match self.items {
-            Items::Singles {
-                singles, blocks, ..
+            Items::Direct {
+                list,
+                singles: true,
+                blocks,
+                ..
             } => self
                 .layouts
-                .destination_lo(scheduled_single(blocks, singles[item])?.0),
-            Items::Groups { groups, .. } => Ok(self.schedule.group_spans[groups[item]].lo),
+                .destination_lo(scheduled_single(blocks, list[first])?.0),
+            // Destination strides are nonnegative, so an inactive layout
+            // starts at its offset.
+            Items::Direct { list, .. } => Ok(self.layouts.entry(list[first] as usize).offset),
+            Items::Groups { groups, .. } => Ok(self.schedule.group_spans[groups[first]].lo),
         }
     }
 
@@ -583,10 +717,7 @@ where
     type Error = OperationError;
 
     fn count(&self) -> usize {
-        match self.items {
-            Items::Singles { singles, .. } => singles.len(),
-            Items::Groups { groups, .. } => groups.len(),
-        }
+        self.items.runs().0.len()
     }
 
     fn run(
@@ -606,39 +737,48 @@ where
         } = lane;
         let index = &mut index.get()[..self.rank];
         let mut exec = exec.into_token();
+        let run = self.items.run(job);
         match self.items {
-            Items::Singles { singles, src, .. } => self.writer.direct(
-                kernels,
-                zero_strides,
-                TreeTransformDirectItem::Single {
-                    block: singles[job],
-                },
-                src,
-                dst,
-                *dst_start,
-                exec,
-                gate,
-                index,
-            ),
-            Items::Groups {
-                groups,
-                packed,
-                packed_start,
+            Items::Direct {
+                list, singles, src, ..
             } => {
-                let columns = self.schedule.scatter_groups[groups[job]].columns.clone();
-                for column in &self.schedule.scatter_columns[columns] {
-                    self.writer.scatter(
+                for position in run {
+                    self.writer.direct(
                         kernels,
                         zero_strides,
-                        column.dst_layout,
-                        packed,
-                        column.packed_offset - packed_start,
+                        direct_item(list, singles, position),
+                        src,
                         dst,
                         *dst_start,
                         exec.reborrow(),
                         gate,
                         index,
                     )?;
+                }
+                Ok(())
+            }
+            Items::Groups {
+                groups,
+                packed,
+                packed_start,
+                ..
+            } => {
+                for &group in &groups[run] {
+                    let columns = self.schedule.scatter_groups[group].columns.clone();
+                    for column in &self.schedule.scatter_columns[columns] {
+                        self.writer.scatter(
+                            kernels,
+                            zero_strides,
+                            column.dst_layout,
+                            packed,
+                            column.packed_offset - packed_start,
+                            dst,
+                            *dst_start,
+                            exec.reborrow(),
+                            gate,
+                            index,
+                        )?;
+                    }
                 }
                 Ok(())
             }
