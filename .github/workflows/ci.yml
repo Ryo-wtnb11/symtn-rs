@@ -41,8 +41,8 @@ jobs:
         run: |
           git -C symtn log -1 --format='symtn %H'
       # MSRV first so the stable install below remains the default toolchain;
-      # the MSRV step selects 1.96.0 via RUSTUP_TOOLCHAIN.
-      - uses: dtolnay/rust-toolchain@1.96.0
+      # the MSRV step selects 1.99.1 via RUSTUP_TOOLCHAIN.
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -68,12 +68,12 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo clippy --locked --workspace -- -D warnings
         working-directory: symtn
-      - name: cargo check (Rust 1.96)
+      - name: cargo check (Rust 1.99)
         if: ${{ !cancelled() }}
         run: cargo check --locked --workspace
         working-directory: symtn
         env:
-          RUSTUP_TOOLCHAIN: 1.96.0
+          RUSTUP_TOOLCHAIN: 1.99.1
       # A separate consumer builds core without its dev-dependency's testing tier.
       - name: Run production category contract
         run: cargo run --locked -p symtn-production-contract
