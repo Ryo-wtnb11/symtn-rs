@@ -343,8 +343,13 @@ impl Factor for QrNull {
     const ENTRY: &'static str = Qr::ENTRY;
     const OP: tlinalg::Op = Qr::OP;
 
+    // An input with no null direction (`m <= n`) runs no provider call: its
+    // empty basis is written without a factorization.
     fn estimates<T: tlinalg::FaerScalar>(m: usize, n: usize) -> [f64; 2] {
-        householder_estimates::<T>(m, n, m - m.min(n))
+        if m <= n {
+            return [0.0; 2];
+        }
+        householder_estimates::<T>(m, n, m - n)
     }
 
     fn factor<T: Scalar>(
@@ -3672,6 +3677,68 @@ mod tests {
             assert_eq!(run(true), groups, "{op:?} {dims:?} through the entry");
             assert!(groups.len() > 1, "the whole-job model's one lane");
         }
+    }
+
+    /// Purpose: a null-basis batch whose every input has no null direction
+    /// (`m <= n`) runs no provider call, so it is priced as no work and kept
+    /// on one lane, owned and into destinations, however its extents
+    /// differ: here one `512 x 512` and 63 `32 x 32` inputs on 48 slots,
+    /// where pricing the skipped factorization of the `512` would reserve it
+    /// a 47-slot lane of its own and the others one slot.
+    #[test]
+    fn empty_null_bases_cost_nothing_and_keep_one_lane() {
+        use crate::lanes::LaneAllocationCache;
+        use symtn_core::StructureCacheKind;
+        assert_eq!(QrNull::estimates::<f64>(512, 512), [0.0; 2]);
+        assert_eq!(QrNull::estimates::<Complex64>(32, 40), [0.0; 2]);
+        let dims: Vec<[usize; 2]> = std::iter::once([512, 512])
+            .chain(std::iter::repeat_n([32, 32], 63))
+            .collect();
+        let data = vec![0.0_f64; 512 * 512];
+        let strides: Vec<[usize; 2]> = dims.iter().map(|&[m, _]| [1, m]).collect();
+        let inputs: Vec<DenseRead<'_>> = (0..dims.len())
+            .map(|j| {
+                let len = dims[j][0] * dims[j][1];
+                DenseRead::F64(DenseView::new(&data[..len], &dims[j], &strides[j], 0).unwrap())
+            })
+            .collect();
+        let owned: Vec<Job<'_>> = inputs
+            .iter()
+            .map(|&input| Job {
+                input,
+                strides: preflight::<QrNull>(input).unwrap(),
+                outcome: None,
+            })
+            .collect();
+        let mut dests: Vec<FactorDest<'_>> = inputs
+            .iter()
+            .map(|_| FactorDest::new([None, None, None], FactorPlacement::AsComputed))
+            .collect();
+        let into = into_jobs::<QrNull>(&inputs, &mut dests);
+        let mut engine = flat_engine(48);
+        let cache = LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0);
+        engine
+            .with_linalg_pool(|exec, _| {
+                let mut tables = LaneTables::default();
+                driver::place(
+                    exec,
+                    &Blocks::<QrNull>(PhantomData),
+                    &owned,
+                    &cache,
+                    &mut tables,
+                );
+                assert_eq!(tables.placement().lanes(), 1, "owned");
+                driver::place(
+                    exec,
+                    &IntoBlocks::<QrNull>(PhantomData),
+                    &into,
+                    &cache,
+                    &mut tables,
+                );
+                assert_eq!(tables.placement().lanes(), 1, "into destinations");
+                Ok(())
+            })
+            .unwrap();
     }
 
     /// Counts its `serial` calls; otherwise a modeled single-stage op.
