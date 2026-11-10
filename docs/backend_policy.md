@@ -359,12 +359,20 @@ destinations are slice-disjoint, else one, or the pack columns, whichever is
 more), when Strided's copy estimate of the whole destination pays for that
 section, and one otherwise; under a forced policy its batch decision
 (`lanes * item_threads`, one for `Sequential`), at most the runnable parts,
-on the caller's whole token. In that region the inactive
-blocks are written inline on the caller's token, in destination address
-order, and then the Singles: at `t > 1` with slice-disjoint destinations
-split over `t` workers, otherwise inline: in block order into a
-caller-provided destination at `t = 1` (main's one-worker replay), in
-address order into an owned output or at `t > 1`. A split part of
+on the caller's whole token. Destinations are grouped into hull runs:
+maximal address-ordered stretches whose bounding slices overlap
+transitively, so distinct runs occupy disjoint address ranges and one
+writer owns each run. In that region the inactive blocks are split over
+their runs when there are two or more and the same copy rule admits more
+than one worker for that many runs, otherwise written inline on the
+caller's token in destination address order; then the Singles: at `t > 1`
+with slice-disjoint destinations split over `t` workers, when they are not
+slice-disjoint but form two or more runs split over those runs unless the
+caller's gate would admit the largest Single with a retained Strided plan
+on the caller's token (then inline, where that plan fans the move out), otherwise
+inline: in block order into a caller-provided destination at `t = 1`
+(main's one-worker replay), in address order into an owned output or at
+`t > 1`. A split part of
 `n` workers and `k` items gives `ceil(k (n / 2) / n)` items and `n / 2`
 workers to its left half and forks its token in two (the odd slot to the
 left); a part of one worker or one item is a leaf, which writes its items
@@ -372,8 +380,10 @@ whole on its token. The Multi groups then replay in chunks of `t`
 consecutive groups: each chunk's pack is split the same way over its
 columns, its jobs go to the executor as one grouped GEMM, and its non-empty
 groups, ordered by destination, are scattered split by group when every
-group's columns and every pair of consecutive groups are slice-disjoint,
-and inline on the caller's token otherwise. At `t = 1` each group is packed,
+group's columns and every pair of groups are slice-disjoint, over their hull
+runs when they form two or more and the caller's gate would not admit the
+chunk's largest planned column on the caller's token, and inline on the
+caller's token otherwise. At `t = 1` each group is packed,
 multiplied and scattered in plan order. Every inline move is offered the
 caller's whole token (one slot under a forced `Sequential`), so Strided's
 own rule decides whether one large block's move fans out; an overwrite of a
@@ -382,17 +392,26 @@ Strided's rule (`execution::parallel_width` for a copy of its elements)
 gives it more than one worker. One leaf gate per call on the caller, and
 one per split leaf, answers that rule exactly, scanning the token's
 dispatch costs once and searching widths only for a role at or above the
-smallest paying size. A leaf stops at its first failure, a split runs both
+smallest paying size; the split leaves of one call share that smallest
+size per cost of their cheapest width, which the caller prepares for every
+leaf budget before the first split, so each such cost is searched at most
+once per call among the leaves, and only when a leaf needs it (the
+caller's own gate may search once more, as before). A leaf stops at its first failure, a split runs both
 halves and returns the left failure first, and the first failing phase or
 GEMM stops the replay. The packed destination of the chunks is sized once
 for the largest chunk; when it must grow it is zero-initialized inside the
 first chunk's pack, each split part its own range.
 A fixed-stride member batch (several members of one transform)
-admits every member's ranges before any write, then, at every engine
-width, moves all its members at once on the caller's token (the member
-axis one more strided dimension of each move) around one dense submission
-of every member's GEMMs, ordered plan job outer, member inner, and returns
-the first failure in that order. An executor that cannot honor a forced
+admits every member's ranges before any write and resolves each
+destination scale once per role, then moves its members (the member axis
+one more strided dimension of each move) around one dense submission of
+every member's GEMMs, ordered plan job outer, member inner, and returns
+the first failure in that order. Each move phase takes the width the
+replay rule admits over the members (under `Auto` the engine's width when
+Strided's copy estimate of the whole batch destination pays for it, under
+a forced policy its batch decision): at one every member moves on the
+caller's token, above it the members split into at most that many
+contiguous ranges, each moving its members as one move per role. An executor that cannot honor a forced
 batch policy (the BLAS provider and every custom executor) refuses a
 tree-transform replay, owned overwrite or member batch under a forced
 `Inner`, `Outer` or `Split` policy with a typed `Unsupported` before any

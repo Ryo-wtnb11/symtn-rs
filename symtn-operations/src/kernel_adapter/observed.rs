@@ -22,8 +22,13 @@ pub(crate) struct ObservedKernels<F = fn(KernelCall)> {
     observe: F,
     pub(crate) calls: Vec<KernelCall>,
     /// With [`Self::addressing`], every element a write primitive writes:
-    /// its destination buffer's address and its index in that buffer.
-    pub(crate) writes: Option<Vec<(usize, isize)>>,
+    /// its absolute address, in elements (the buffer address over the
+    /// element size, plus its index there). Clones share it, so the kernel
+    /// clones of a split replay record into one list.
+    pub(crate) writes: Option<std::sync::Arc<std::sync::Mutex<Vec<usize>>>>,
+    /// With [`Self::failing_at`], the absolute element address whose write
+    /// fails: the primitive that would write it returns an error instead.
+    fail_at: Option<usize>,
 }
 
 impl ObservedKernels {
@@ -34,8 +39,17 @@ impl ObservedKernels {
     /// [`Self::recording`] that also records every written element.
     pub(crate) fn addressing() -> Self {
         Self {
-            writes: Some(Vec::new()),
+            writes: Some(Default::default()),
             ..Self::recording()
+        }
+    }
+
+    /// [`Self::addressing`] whose write primitive that would write the
+    /// element at absolute address `at` (in elements) fails before writing.
+    pub(crate) fn failing_at(at: usize) -> Self {
+        Self {
+            fail_at: Some(at),
+            ..Self::addressing()
         }
     }
 }
@@ -47,6 +61,7 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
             observe,
             calls: Vec::new(),
             writes: None,
+            fail_at: None,
         }
     }
 
@@ -56,10 +71,16 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
     }
 
     /// Records the elements `shape` / `strides` from `offset` address in
-    /// `dst`, when addressing.
-    fn record_writes<T>(&mut self, dst: &[T], shape: &[usize], strides: &[isize], offset: isize) {
-        let Some(writes) = self.writes.as_mut() else {
-            return;
+    /// `dst`, when addressing; fails when one is the failing address.
+    fn record_writes<T>(
+        &mut self,
+        dst: &[T],
+        shape: &[usize],
+        strides: &[isize],
+        offset: isize,
+    ) -> Result<(), OperationError> {
+        let Some(writes) = self.writes.as_ref() else {
+            return Ok(());
         };
         let mut at = vec![offset];
         for (&extent, &stride) in shape.iter().zip(strides) {
@@ -68,8 +89,21 @@ impl<F: FnMut(KernelCall)> ObservedKernels<F> {
                 .flat_map(|&base| (0..extent as isize).map(move |i| base + i * stride))
                 .collect();
         }
-        let buffer = dst.as_ptr() as usize;
-        writes.extend(at.into_iter().map(|index| (buffer, index)));
+        let base = dst.as_ptr() as usize / core::mem::size_of::<T>().max(1);
+        let at = at
+            .into_iter()
+            .map(|index| base.wrapping_add_signed(index))
+            .collect::<Vec<_>>();
+        if self.fail_at.is_some_and(|fail| at.contains(&fail)) {
+            return Err(OperationError::InvalidArgument {
+                message: "observed kernels injected a movement failure",
+            });
+        }
+        writes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(at);
+        Ok(())
     }
 
     pub(crate) fn count(&self, call: KernelCall) -> usize {
@@ -122,7 +156,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Add);
-        self.record_writes(dst_data, shape, dst_strides, dst_offset);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset)?;
         self.inner.add_strided_baked(
             exec,
             zero_strides,
@@ -157,7 +191,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Axpby);
-        self.record_writes(dst_data, shape, dst_strides, dst_offset);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset)?;
         self.inner.axpby_strided_baked(
             exec,
             dst_data,
@@ -190,7 +224,7 @@ where
         index: Option<&mut [usize]>,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::CopyScale { dst_offset });
-        self.record_writes(dst_data, shape, dst_strides, dst_offset);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset)?;
         self.inner.copy_scale_strided_baked(
             exec,
             dst_data,
@@ -217,7 +251,7 @@ where
         beta: T,
     ) -> Result<(), OperationError> {
         self.record(KernelCall::Scale { dst_offset });
-        self.record_writes(dst_data, shape, dst_strides, dst_offset);
+        self.record_writes(dst_data, shape, dst_strides, dst_offset)?;
         self.inner
             .scale_strided(exec, dst_data, shape, dst_strides, dst_offset, beta)
     }

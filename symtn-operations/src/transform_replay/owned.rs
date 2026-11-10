@@ -88,7 +88,7 @@ where
 #[inline]
 pub(super) fn write_role_uninit<D, F>(
     exec: Exec<'_>,
-    gate: &mut LeafGate,
+    gate: &mut LeafGate<'_>,
     role: crate::BakedFusedLayout<'_>,
     elements: usize,
     dst: &mut [MaybeUninit<D>],

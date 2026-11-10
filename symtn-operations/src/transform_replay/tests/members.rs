@@ -152,7 +152,7 @@ fn members_equal_the_single_member_replay_of_each_member() {
 /// What: on a four-worker engine, through the built-in executor and a
 /// custom one, a two-member overwrite of the interleaved family
 /// writes every addressed element of each member exactly once and nothing
-/// else, counted at the kernel adapter.
+/// else, counted at the kernel adapter and its clones.
 #[test]
 fn every_element_of_every_member_is_written_once() {
     let (blocks, dst, src, transform) = interleaved_blocks(true);
@@ -203,10 +203,10 @@ fn every_element_of_every_member_is_written_once() {
         };
         ran.unwrap();
         let mut writes = vec![0u32; members * len];
-        let buffer = out.as_ptr() as usize;
-        for &(written, at) in kernels.writes.as_deref().unwrap() {
-            if written == buffer {
-                writes[usize::try_from(at).unwrap()] += 1;
+        let base = out.as_ptr() as usize / core::mem::size_of::<f64>();
+        for &at in kernels.writes.as_ref().unwrap().lock().unwrap().iter() {
+            if let Some(index) = at.checked_sub(base).filter(|&index| index < writes.len()) {
+                writes[index] += 1;
             }
         }
         for (at, &count) in writes.iter().enumerate() {
@@ -274,4 +274,225 @@ fn member_failures_follow_the_plan_job_outer_member_inner_order() {
         assert_eq!(dense.attempts(), order[..=at], "{what}");
         assert_eq!(group_of(error), format!("group {second}"), "{what}");
     }
+}
+
+/// What: a member batch resolves each call-dependent destination
+/// scale once per role for the whole batch, before its member ranges fork:
+/// with a scale on every block of the injective interleaved family (two
+/// Singles and one two-destination group), batches of 2, 5 and 8 members
+/// on four workers under `Auto` and, where the executor honors it, `Outer`
+/// look the table up `Singles + scatter columns = 4` times, whatever the
+/// members and their split.
+#[test]
+fn member_scales_are_resolved_once_per_role() {
+    let (layout, dst, src, transform) = interleaved_blocks(true);
+    let scales = layout
+        .iter()
+        .enumerate()
+        .map(|(block, &(offset, _, _))| (offset, 0.5 + block as f64))
+        .collect::<Vec<_>>();
+    let roles = 2 + 2;
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
+    for strategy in [CpuBatchStrategy::Auto, CpuBatchStrategy::Outer] {
+        if strategy != CpuBatchStrategy::Auto && !honors {
+            continue;
+        }
+        for members in [2, 5, 8] {
+            let source = (0..members * src.required_len().unwrap())
+                .map(|v| v as f64)
+                .collect::<Vec<_>>();
+            let mut out = vec![f64::NAN; members * dst.required_len().unwrap()];
+            let watch = crate::transform_replay::alpha_lookups::watch(scales.as_ptr() as usize);
+            tree_transform_members_overwrite_raw(
+                &mut engine(4, strategy),
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &transform,
+                &dst,
+                &src,
+                &mut out,
+                &source,
+                members,
+                &scales,
+            )
+            .unwrap();
+            assert_eq!(watch.take(), roles, "{strategy:?}, {members} members");
+        }
+    }
+}
+
+/// What: a batch of no-element members large enough that `j N` overflows
+/// `usize` at a range boundary (`N = isize::MAX`) succeeds when its moves
+/// split over four member ranges (forced `Outer` on four workers) and
+/// leaves the engine usable.
+#[test]
+#[cfg_attr(
+    any(
+        feature = "cpu-blas",
+        feature = "blas-accelerate",
+        feature = "blas-openblas",
+        feature = "blas-mkl",
+        feature = "provider-inject"
+    ),
+    ignore = "only a forced policy splits empty members (no copy estimate pays), and a BLAS provider refuses forced policies"
+)]
+fn a_huge_batch_of_empty_members_splits_without_overflow() {
+    let blocks = Arc::new(BlockStructure::packed_column_major(1, [vec![0]]).unwrap());
+    let transform =
+        TreeTransformStructure::<f64>::compile_structures(&blocks, &blocks, &[]).unwrap();
+    let mut engine = engine(4, CpuBatchStrategy::Outer);
+    let mut workspace = TreeTransformWorkspace::<f64>::default();
+    tree_transform_members_overwrite_raw(
+        &mut engine,
+        &mut StridedHostKernelAdapter::default(),
+        &mut DefaultDenseExecutor::new(),
+        &mut workspace,
+        &transform,
+        &blocks,
+        &blocks,
+        &mut [],
+        &[],
+        isize::MAX as usize,
+        &[],
+    )
+    .unwrap();
+    assert!(workspace.member_scratch.len() >= 2, "the moves split");
+    assert!(!engine.is_broken());
+    assert!(engine.with_exec(|exec| exec.budget()).is_ok());
+}
+
+/// Four packed `[8]` blocks, each a Single of coefficient `c`.
+fn four_singles<C: Copy>(c: C) -> (Arc<BlockStructure>, TreeTransformStructure<C>) {
+    let structure = Arc::new(BlockStructure::packed_column_major(1, vec![vec![8]; 4]).unwrap());
+    let specs = (0..4)
+        .map(|b| TreeTransformBlockSpec::single(b, b, c))
+        .collect::<Vec<_>>();
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &specs).unwrap();
+    (structure, transform)
+}
+
+/// What: when a member-range move fails (the write of member 2's first
+/// Single, injected at the kernel adapter) on four cheap-dispatch workers
+/// split into four member ranges, the batch returns that error; the
+/// sibling range of member 3 still runs its moves, no grouped GEMM is
+/// submitted and no scatter writes a group destination; the engine stays
+/// usable.
+#[test]
+fn a_failing_member_range_move_stops_the_batch_before_its_gemm() {
+    let (layout, dst, src, transform) = interleaved_blocks(true);
+    let members = 4;
+    let len = dst.required_len().unwrap();
+    let source = (0..members * src.required_len().unwrap())
+        .map(|v| v as f64)
+        .collect::<Vec<_>>();
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let mut workspace = TreeTransformWorkspace::default();
+    let mut out = vec![f64::NAN; members * len];
+    tree_transform_members_overwrite_raw(
+        &mut engine,
+        &mut StridedHostKernelAdapter::default(),
+        &mut DefaultDenseExecutor::new(),
+        &mut workspace,
+        &transform,
+        &dst,
+        &src,
+        &mut out,
+        &source,
+        members,
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        workspace.member_scratch.len(),
+        members,
+        "four member ranges"
+    );
+
+    let base = out.as_ptr() as usize / core::mem::size_of::<f64>();
+    let element = |member: usize, block: usize| base + member * len + layout[block].0;
+    let mut kernels = ObservedKernels::failing_at(element(2, 0));
+    let mut dense = Forwarding::default();
+    let error = tree_transform_members_overwrite_raw(
+        &mut engine,
+        &mut kernels,
+        &mut dense,
+        &mut workspace,
+        &transform,
+        &dst,
+        &src,
+        &mut out,
+        &source,
+        members,
+        &[],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, OperationError::InvalidArgument { message } if message.contains("injected")),
+        "{error:?}"
+    );
+    assert!(dense.attempts().is_empty());
+    let writes = kernels.writes.as_ref().unwrap().lock().unwrap().clone();
+    assert!(writes.contains(&element(3, 0)), "member 3's range ran");
+    let group = (1..=2)
+        .flat_map(|block| {
+            let (offset, dims, strides) = layout[block];
+            addresses(offset, &dims, &strides)
+        })
+        .collect::<Vec<_>>();
+    for member in 0..members {
+        for &at in &group {
+            assert!(
+                !writes.contains(&(base + member * len + at)),
+                "a scatter ran"
+            );
+        }
+    }
+    assert!(!engine.is_broken());
+    assert!(engine.with_exec(|exec| exec.budget()).is_ok());
+}
+
+/// What: a movement panic in one member range (member 2's Single meets
+/// the source value 40) on four cheap-dispatch workers, split into four
+/// member ranges, unwinds out of the batch after the fork joined and
+/// leaves the engine broken.
+#[test]
+fn a_member_range_panic_breaks_the_engine() {
+    let (structure, transform) = four_singles(Panicking(2.0));
+    let members = 4;
+    let len = structure.required_len().unwrap();
+    let mut engine = flat_engine(4, 1, CpuBatchStrategy::Auto);
+    let mut workspace = TreeTransformWorkspace::default();
+    let run =
+        |engine: &mut CpuEngine, workspace: &mut TreeTransformWorkspace<f64>, source: &[f64]| {
+            tree_transform_members_overwrite_raw(
+                engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                workspace,
+                &transform,
+                &structure,
+                &structure,
+                &mut vec![0.0; members * len],
+                source,
+                members,
+                &[],
+            )
+        };
+    let calm = vec![1.0; members * len];
+    run(&mut engine, &mut workspace, &calm).unwrap();
+    assert_eq!(
+        workspace.member_scratch.len(),
+        members,
+        "four member ranges"
+    );
+    let mut source = calm;
+    source[2 * len + 5] = 40.0;
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        run(&mut engine, &mut workspace, &source)
+    }));
+    assert!(unwind.is_err());
+    assert!(engine.is_broken());
+    assert!(engine.with_exec(|exec| exec.budget()).is_err());
 }

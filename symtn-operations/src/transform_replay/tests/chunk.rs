@@ -295,21 +295,6 @@ fn the_first_failing_gemm_in_plan_order_stops_the_replay() {
     }
 }
 
-/// A coefficient whose action on the source value `40` panics.
-#[derive(Clone, Copy)]
-struct Panicking(f64);
-
-impl RecouplingCoefficientAction<Panicking> for f64 {
-    fn scale_by_coefficient(self, coefficient: Panicking) -> Self {
-        assert!(self != 40.0, "a failing movement");
-        self * coefficient.0
-    }
-
-    fn coefficient_as_data(coefficient: Panicking) -> Self {
-        coefficient.0
-    }
-}
-
 /// What: a movement panic on a split worker (the second of two
 /// slice-disjoint Singles, split over two workers of a free-dispatch
 /// engine) unwinds out of the replay after the fork joined, leaves the
@@ -326,7 +311,7 @@ fn a_split_worker_panic_breaks_the_engine() {
         ],
     )
     .unwrap();
-    assert!(transform.parallel_schedule().singles_slice_disjoint);
+    assert!(transform.parallel_schedule().singles_slice_disjoint());
     let source = (1..=64).map(f64::from).collect::<Vec<_>>();
     let mut engine = engine(2, CpuBatchStrategy::Auto);
     let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

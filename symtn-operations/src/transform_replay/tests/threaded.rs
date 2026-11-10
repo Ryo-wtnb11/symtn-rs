@@ -91,7 +91,7 @@ fn threaded_interleaved_singles_write_their_own_elements() {
         ],
     )
     .unwrap();
-    assert!(!structure.parallel_schedule().singles_slice_disjoint);
+    assert!(!structure.parallel_schedule().singles_slice_disjoint());
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -205,7 +205,9 @@ fn threaded_multi_scatter_writes_interleaved_destinations() {
     )
     .unwrap();
     assert_eq!(transform.parallel_schedule().scatter_groups.len(), 1);
-    assert!(!transform.parallel_schedule().group_spans[0].slice_disjoint);
+    // One group whose two columns interleave: one hull over both.
+    let span = transform.parallel_schedule().group_spans[0];
+    assert_eq!((span.lo, span.hi), (0, 3));
     let src = [1.0, 2.0, 3.0, 4.0];
     let mut serial = [10.0, 20.0, 30.0, 40.0];
     let mut threaded = serial;
@@ -282,10 +284,10 @@ fn recoupling_fixture() -> (
 
 /// What: the compiled replay metadata of [`recoupling_fixture`], by hand.
 /// Destination block `d` spans elements `24 d..=24 d + 23`: the Singles
-/// (blocks 0, 1) in address order and slice-disjoint, the group writing
-/// blocks 2 and 3 spans `48..=95` and the one writing block 4 `96..=119`
-/// (first in plan order), each disjoint, the inactive block 5 starts at 120, and the four pack
-/// columns outnumber the two Singles.
+/// (blocks 0, 1) in address order and slice-disjoint (one run each), the
+/// group writing blocks 2 and 3 spans `48..=95` and the one writing block 4
+/// `96..=119` (first in plan order), the inactive block 5 starts at 120 (one
+/// run), and the four pack columns outnumber the two Singles.
 #[test]
 fn replay_metadata_lists_direct_items_in_address_order() {
     let (_, _, replay) = recoupling_fixture();
@@ -301,7 +303,8 @@ fn replay_metadata_lists_direct_items_in_address_order() {
         })
         .collect();
     assert_eq!(single_starts, [0, 24]);
-    assert!(schedule.singles_slice_disjoint);
+    assert!(schedule.singles_slice_disjoint());
+    assert_eq!(schedule.single_runs, [0, 1]);
     let inactive: Vec<isize> = schedule
         .inactive
         .iter()
@@ -312,9 +315,10 @@ fn replay_metadata_lists_direct_items_in_address_order() {
     let spans: Vec<_> = schedule
         .group_spans
         .iter()
-        .map(|span| (span.lo, span.hi, span.slice_disjoint))
+        .map(|span| (span.lo, span.hi))
         .collect();
-    assert_eq!(spans, [(96, 119, true), (48, 95, true)]);
+    assert_eq!(spans, [(96, 119), (48, 95)]);
+    assert_eq!(schedule.inactive_runs, [0]);
     assert_eq!(schedule.replay_runnable, 4);
 }
 
@@ -690,5 +694,525 @@ fn replay_matches_the_block_oracle_on_interleaved_su2_blocks() {
         assert_eq!(overwritten, expected, "threads {threads}");
         assert_eq!(accumulated, axpby, "threads {threads}");
         assert_eq!(owned, Some(expected.clone()), "threads {threads}");
+    }
+}
+
+/// Coupled column-major matrices of `(cols, trees)`, each tree a row range
+/// `(rows, role)` whose role is `'S'` (a Single), `'I'` (inactive) or a
+/// digit (a member of that matrix's Multi group); every tree of a matrix
+/// interleaves with the others in its columns. Returns the structure
+/// (destination = source), the transform, and the specs as
+/// `(destination blocks, source blocks, coefficients)` for the oracle.
+#[allow(clippy::type_complexity)]
+fn coupled_matrices(
+    mats: &[(usize, Vec<(usize, char)>)],
+) -> (
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+    Vec<(Vec<usize>, Vec<usize>, Vec<f64>)>,
+) {
+    let coefficient = |i: usize| 0.25 + ((i * 7919) % 97) as f64 / 97.0;
+    let (mut blocks, mut specs, mut offset, mut next) = (Vec::new(), Vec::new(), 0, 0);
+    for (cols, trees) in mats {
+        let rows: usize = trees.iter().map(|tree| tree.0).sum();
+        let mut row = 0;
+        let mut groups = std::collections::BTreeMap::<char, Vec<usize>>::new();
+        for &(r, role) in trees {
+            let b = blocks.len();
+            blocks.push(
+                BlockSpec::with_key(
+                    BlockKey::ordinal(b),
+                    vec![r, *cols],
+                    vec![1, rows],
+                    offset + row,
+                )
+                .unwrap(),
+            );
+            row += r;
+            match role {
+                'S' => {
+                    specs.push((vec![b], vec![b], vec![coefficient(next)]));
+                    next += 1;
+                }
+                'I' => {}
+                g => groups.entry(g).or_default().push(b),
+            }
+        }
+        for members in groups.into_values() {
+            let m = members.len();
+            let c = (0..m * m)
+                .map(|i| {
+                    next += 1;
+                    if i / m == i % m {
+                        1.0
+                    } else {
+                        0.1 * coefficient(next)
+                    }
+                })
+                .collect();
+            specs.push((members.clone(), members, c));
+        }
+        offset += rows * cols;
+    }
+    let structure = Arc::new(BlockStructure::from_blocks_with_rank(2, blocks).unwrap());
+    let compiled = specs
+        .iter()
+        .map(|(dst, src, c)| {
+            if dst.len() == 1 && src.len() == 1 {
+                TreeTransformBlockSpec::single(dst[0], src[0], c[0])
+            } else {
+                TreeTransformBlockSpec::multi(dst.clone(), src.clone(), c.clone())
+            }
+        })
+        .collect::<Vec<_>>();
+    let transform =
+        TreeTransformStructure::compile_structures(&structure, &structure, &compiled).unwrap();
+    (structure, transform, specs)
+}
+
+/// The dense oracle of [`coupled_matrices`]: destination block `d` of a
+/// spec is `sum_s c[d, s] src_s` element by element (members share their
+/// layout shape), an inactive block is zero (overwrite) or `beta dst`.
+fn coupled_matrices_expected(
+    structure: &BlockStructure,
+    specs: &[(Vec<usize>, Vec<usize>, Vec<f64>)],
+    source: &[f64],
+    initial: &[f64],
+    beta: Option<f64>,
+) -> Vec<f64> {
+    let addresses = |block: usize| {
+        let block = structure.block(block).unwrap();
+        let (shape, strides, offset) = (block.shape(), block.strides(), block.offset());
+        (0..shape[1])
+            .flat_map(move |j| (0..shape[0]).map(move |i| offset + i * strides[0] + j * strides[1]))
+            .collect::<Vec<_>>()
+    };
+    let mut expected = match beta {
+        Some(beta) => initial.iter().map(|value| beta * value).collect::<Vec<_>>(),
+        None => vec![0.0; initial.len()],
+    };
+    for (dst, src, c) in specs {
+        for (d, &dst_block) in dst.iter().enumerate() {
+            let out = addresses(dst_block);
+            for (s, &src_block) in src.iter().enumerate() {
+                for (&at, &from) in out.iter().zip(&addresses(src_block)) {
+                    expected[at] += c[d * src.len() + s] * source[from];
+                }
+            }
+        }
+    }
+    expected
+}
+
+/// What: on coupled matrices whose trees interleave in their
+/// columns (inactive trees beside Singles and a group pair, as `inact`;
+/// two-, three-member groups and a Single, as `hetero`), the hull-run
+/// splits write the dense oracle for an overwrite and a `beta = 0.5`
+/// accumulation, at one, two, three and eight cheap-dispatch workers under
+/// `Auto`, and under `Outer` where the executor honors it.
+#[test]
+fn interleaved_coupled_matrices_replay_the_dense_oracle() {
+    let inact = (0..6)
+        .map(|_| (4, vec![(3, 'S'), (3, '0'), (3, '0'), (3, 'I')]))
+        .collect::<Vec<_>>();
+    let hetero = (0..5)
+        .map(|m| {
+            (
+                3 + m,
+                vec![(2, '0'), (5, 'S'), (1, '1'), (2, '0'), (1, '1'), (1, '1')],
+            )
+        })
+        .collect::<Vec<_>>();
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
+    for mats in [inact, hetero] {
+        let (structure, transform, specs) = coupled_matrices(&mats);
+        let len = structure.required_len().unwrap();
+        let source = (0..len).map(|v| v as f64 * 0.5 - 3.0).collect::<Vec<_>>();
+        let initial = (0..len).map(|v| 1.0 - v as f64).collect::<Vec<_>>();
+        let overwrite = coupled_matrices_expected(&structure, &specs, &source, &initial, None);
+        let axpby = coupled_matrices_expected(&structure, &specs, &source, &initial, Some(0.5));
+        for threads in [1, 2, 3, 8] {
+            for strategy in [
+                tenferro_cpu::CpuBatchStrategy::Auto,
+                tenferro_cpu::CpuBatchStrategy::Outer,
+            ] {
+                if strategy != tenferro_cpu::CpuBatchStrategy::Auto && !honors {
+                    continue;
+                }
+                let flat = tenferro_cpu::threadteam::WidthCosts::flat(Duration::from_nanos(1));
+                let mut engine = symtn_dense::CpuEngine::new(
+                    symtn_dense::Pool::builder()
+                        .threads(threads)
+                        .dispatch_costs(tenferro_cpu::threadteam::DispatchCosts::new(
+                            flat, flat, flat,
+                        ))
+                        .build()
+                        .unwrap(),
+                )
+                .with_batch_policy(tenferro_cpu::CpuBatchPolicy::new(strategy));
+                let mut overwritten = vec![f64::NAN; len];
+                let mut accumulated = initial.clone();
+                tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                    &mut engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut overwritten,
+                    &source,
+                    1.0,
+                    &[],
+                )
+                .unwrap();
+                tree_transform_structure_with_structural_recoupling_raw(
+                    &mut engine,
+                    &mut StridedHostKernelAdapter::default(),
+                    &mut DefaultDenseExecutor::new(),
+                    &mut TreeTransformWorkspace::default(),
+                    &transform,
+                    &structure,
+                    &structure,
+                    &mut accumulated,
+                    &source,
+                    1.0,
+                    0.5,
+                )
+                .unwrap();
+                let what = format!("{} matrices, {threads} threads, {strategy:?}", mats.len());
+                let close = |a: &[f64], b: &[f64]| {
+                    a.iter()
+                        .zip(b)
+                        .all(|(a, b)| (a - b).abs() <= 1e-12 * a.abs().max(1.0))
+                };
+                assert!(close(&overwritten, &overwrite), "{what}");
+                assert!(close(&accumulated, &axpby), "{what}");
+            }
+        }
+    }
+}
+
+/// A canonical U(1) structure (four codomain legs of charges `0, 1`, one
+/// domain leg of charges `0..=4` and degeneracy 2): each coupled matrix's
+/// codomain trees interleave in its columns. In every matrix, by offset,
+/// the trees take the roles Single, group, group, inactive in turn (a
+/// group short of its pair is inactive instead). Returns the structure, the
+/// specs as `(destination blocks, source blocks, coefficients)`, the
+/// groups and the inactive blocks.
+#[allow(clippy::type_complexity)]
+fn canonical_runs() -> (
+    Arc<BlockStructure>,
+    Vec<(Vec<usize>, Vec<usize>, Vec<f64>)>,
+    Vec<[usize; 2]>,
+    Vec<usize>,
+) {
+    use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
+    let bit = || SectorLeg::new([(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)], false);
+    let out = SectorLeg::new((0..=4).map(|q| (U1Irrep::new(q), 2)), false);
+    let structure = FusionTreeHomSpace::new(
+        FusionProductSpace::new([bit(), bit(), bit(), bit()]),
+        FusionProductSpace::new([out]),
+    )
+    .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
+    .unwrap();
+    let regions = structure.coupled_sector_regions(4).unwrap().unwrap();
+    let (mut specs, mut groups, mut inactive) = (Vec::new(), Vec::new(), Vec::new());
+    for region in regions.iter() {
+        let mut blocks = (0..structure.block_count())
+            .filter(|&b| {
+                region
+                    .range()
+                    .contains(&structure.block(b).unwrap().offset())
+            })
+            .collect::<Vec<_>>();
+        blocks.sort_by_key(|&b| structure.block(b).unwrap().offset());
+        let mut position = 0;
+        while position < blocks.len() {
+            let b = blocks[position];
+            match position % 4 {
+                0 => specs.push((vec![b], vec![b], vec![0.5 + b as f64])),
+                1 if position + 1 < blocks.len() => {
+                    let pair = [b, blocks[position + 1]];
+                    specs.push((pair.to_vec(), pair.to_vec(), vec![1.0, -0.5, 0.25, 2.0]));
+                    groups.push(pair);
+                    position += 1;
+                }
+                _ => inactive.push(b),
+            }
+            position += 1;
+        }
+    }
+    (structure, specs, groups, inactive)
+}
+
+/// The elements of `structure`'s block `block`, in its iteration order.
+fn block_addresses(structure: &BlockStructure, block: usize) -> Vec<usize> {
+    let block = structure.block(block).unwrap();
+    let mut at = vec![block.offset()];
+    for (&extent, &stride) in block.shape().iter().zip(block.strides()) {
+        at = at
+            .iter()
+            .flat_map(|&base| (0..extent).map(move |i| base + i * stride))
+            .collect();
+    }
+    at
+}
+
+/// The dense oracle over `specs` with source map `map` (identity or
+/// conjugation): destination block `d` is `sum_s c[d, s] map(src_s)`, an
+/// inactive block zero, or the old value times `beta` when given.
+fn spec_oracle<D>(
+    structure: &BlockStructure,
+    specs: &[(Vec<usize>, Vec<usize>, Vec<f64>)],
+    source: &[D],
+    initial: &[D],
+    beta: Option<D>,
+    map: fn(D) -> D,
+) -> Vec<D>
+where
+    D: Copy + core::ops::Add<Output = D> + core::ops::Mul<Output = D> + From<f64>,
+{
+    let mut expected = match beta {
+        Some(beta) => initial
+            .iter()
+            .map(|&value| beta * value)
+            .collect::<Vec<_>>(),
+        None => vec![D::from(0.0); initial.len()],
+    };
+    for (dst, src, c) in specs {
+        for (d, &dst_block) in dst.iter().enumerate() {
+            let out = block_addresses(structure, dst_block);
+            for (s, &src_block) in src.iter().enumerate() {
+                for (&at, &from) in out.iter().zip(&block_addresses(structure, src_block)) {
+                    expected[at] = expected[at] + D::from(c[d * src.len() + s]) * map(source[from]);
+                }
+            }
+        }
+    }
+    expected
+}
+
+/// What: on canonical coupled matrices whose trees interleave (Singles that
+/// are not slice-disjoint, groups whose two blocks overlap, inactive trees
+/// beside them), eight cheap-dispatch workers split the Singles, the
+/// inactive trees and each chunk's scatter over their hull runs, which
+/// main wrote inline: the Singles and the inactive trees are each written
+/// by more than one worker and every scatter column is offered fewer than
+/// the eight slots. On one, three and eight workers under `Auto` (and
+/// `Outer` where the executor honors it), f64 and conjugated c64 replays
+/// write the dense oracle for an initialized overwrite, a `beta = 0.5`
+/// accumulation and the owned output.
+#[test]
+fn canonical_interleaved_runs_replay_the_dense_oracle() {
+    use num_complex::Complex64;
+    use tenferro_cpu::CpuBatchStrategy;
+    let (structure, specs, groups, inactive) = canonical_runs();
+    let compiled = |conjugate| {
+        let specs = specs
+            .iter()
+            .map(|(dst, src, c)| {
+                if dst.len() == 1 {
+                    TreeTransformBlockSpec::single(dst[0], src[0], c[0])
+                } else {
+                    TreeTransformBlockSpec::multi(dst.clone(), src.clone(), c.clone())
+                }
+            })
+            .collect::<Vec<_>>();
+        TreeTransformStructure::compile_structures_with_storage_conjugation(
+            &structure, &structure, &specs, conjugate,
+        )
+        .unwrap()
+    };
+    let (real, complex) = (compiled(false), compiled(true));
+    let schedule = real.parallel_schedule();
+    assert!(!schedule.singles_slice_disjoint());
+    assert!(schedule.single_runs.len() >= 2 && schedule.inactive_runs.len() >= 2);
+    let hull = |block| {
+        let at = block_addresses(&structure, block);
+        (*at.iter().min().unwrap(), *at.iter().max().unwrap())
+    };
+    assert!(groups.len() >= 2);
+    for &[left, right] in &groups {
+        let ((lo, hi), (other_lo, other_hi)) = (hull(left), hull(right));
+        assert!(
+            lo <= other_hi && other_lo <= hi,
+            "the group's blocks overlap"
+        );
+    }
+
+    let mut engine = super::recording::flat_engine(8, 1, CpuBatchStrategy::Auto);
+    let (offers, marks) = super::recording::recorded(&mut engine, &real, &structure, &structure);
+    assert!(offers.iter().all(|&offer| offer < 8), "{offers:?}");
+    let workers = |blocks: &mut dyn Iterator<Item = usize>| {
+        let mut seen = blocks
+            .flat_map(|block| block_addresses(&structure, block))
+            .filter_map(|at| marks[at].worker)
+            .collect::<Vec<_>>();
+        seen.sort_unstable_by_key(|worker| format!("{worker:?}"));
+        seen.dedup();
+        seen.len()
+    };
+    let singles = specs
+        .iter()
+        .filter(|spec| spec.0.len() == 1)
+        .map(|spec| spec.0[0]);
+    assert!(workers(&mut singles.into_iter()) >= 2, "the Singles split");
+    assert!(
+        workers(&mut inactive.iter().copied()) >= 2,
+        "the inactive trees split"
+    );
+
+    let len = structure.required_len().unwrap();
+    let source = (0..len).map(|v| v as f64 * 0.5 - 3.0).collect::<Vec<_>>();
+    let initial = (0..len).map(|v| 1.0 - v as f64).collect::<Vec<_>>();
+    let csource = source
+        .iter()
+        .map(|&v| Complex64::new(v, 0.25 * v - 1.0))
+        .collect::<Vec<_>>();
+    let cinitial = initial
+        .iter()
+        .map(|&v| Complex64::new(v, -v))
+        .collect::<Vec<_>>();
+    let half = Complex64::new(0.5, 0.0);
+    let expected = (
+        spec_oracle(&structure, &specs, &source, &initial, None, |v| v),
+        spec_oracle(&structure, &specs, &source, &initial, Some(0.5), |v| v),
+        spec_oracle(
+            &structure,
+            &specs,
+            &csource,
+            &cinitial,
+            None,
+            |v: Complex64| v.conj(),
+        ),
+        spec_oracle(
+            &structure,
+            &specs,
+            &csource,
+            &cinitial,
+            Some(half),
+            |v: Complex64| v.conj(),
+        ),
+    );
+    let close = |a: &[f64], b: &[f64]| {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(a, b)| (a - b).abs() <= 1e-12 * a.abs().max(1.0))
+    };
+    let cclose = |a: &[Complex64], b: &[Complex64]| {
+        a.len() == b.len()
+            && a.iter()
+                .zip(b)
+                .all(|(a, b)| (a - b).norm() <= 1e-12 * a.norm().max(1.0))
+    };
+    let honors = DefaultDenseExecutor::new().honors_forced_batch_policy();
+    for threads in [1, 3, 8] {
+        for strategy in [CpuBatchStrategy::Auto, CpuBatchStrategy::Outer] {
+            if strategy != CpuBatchStrategy::Auto && !honors {
+                continue;
+            }
+            let what = format!("{threads} threads, {strategy:?}");
+            let mut engine = super::recording::flat_engine(threads, 1, strategy);
+            let mut overwritten = vec![f64::NAN; len];
+            let mut accumulated = initial.clone();
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                &mut engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &real,
+                &structure,
+                &structure,
+                &mut overwritten,
+                &source,
+                1.0,
+                &[],
+            )
+            .unwrap();
+            tree_transform_structure_with_structural_recoupling_raw(
+                &mut engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &real,
+                &structure,
+                &structure,
+                &mut accumulated,
+                &source,
+                1.0,
+                0.5,
+            )
+            .unwrap();
+            let owned = try_tree_transform_structure_overwrite_owned_raw(
+                &mut engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &real,
+                &structure,
+                &structure,
+                4,
+                &source,
+                1.0,
+                None,
+            )
+            .unwrap()
+            .expect("canonical storage admits the owned output");
+            assert!(close(&overwritten, &expected.0), "f64 overwrite, {what}");
+            assert!(close(&accumulated, &expected.1), "f64 accumulation, {what}");
+            assert!(close(&owned, &expected.0), "f64 owned, {what}");
+
+            let mut overwritten = vec![Complex64::new(f64::NAN, 0.0); len];
+            let mut accumulated = cinitial.clone();
+            tree_transform_structure_overwrite_with_structural_recoupling_raw(
+                &mut engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &complex,
+                &structure,
+                &structure,
+                &mut overwritten,
+                &csource,
+                Complex64::new(1.0, 0.0),
+                &[],
+            )
+            .unwrap();
+            tree_transform_structure_with_structural_recoupling_raw(
+                &mut engine,
+                &mut StridedHostKernelAdapter::default(),
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &complex,
+                &structure,
+                &structure,
+                &mut accumulated,
+                &csource,
+                Complex64::new(1.0, 0.0),
+                half,
+            )
+            .unwrap();
+            let owned = try_tree_transform_structure_overwrite_owned_raw(
+                &mut engine,
+                &mut DefaultDenseExecutor::new(),
+                &mut TreeTransformWorkspace::default(),
+                &complex,
+                &structure,
+                &structure,
+                4,
+                &csource,
+                Complex64::new(1.0, 0.0),
+                None,
+            )
+            .unwrap()
+            .expect("canonical storage admits the owned output");
+            assert!(cclose(&overwritten, &expected.2), "c64 overwrite, {what}");
+            assert!(
+                cclose(&accumulated, &expected.3),
+                "c64 accumulation, {what}"
+            );
+            assert!(cclose(&owned, &expected.2), "c64 owned, {what}");
+        }
     }
 }

@@ -24,17 +24,21 @@ pub(crate) mod sealed {
     /// accumulating blocks pays nothing. A gate serves the blocks of one
     /// thread, because a token's dispatch cost depends on the calling
     /// thread: one per call for the calling thread's unsplit lists, one per
-    /// forked leaf otherwise.
+    /// forked leaf otherwise. A leaf of a replay split shares its call's
+    /// [`GateKeys`], so the leaves of one call search each cost key at most
+    /// once between them.
     ///
     /// Why the memo is a plain field behind `&mut self` rather than a `Cell`:
     /// a forked leaf's gate travels inside its lane through the replay
     /// split's `Sync` slots before the leaf runs; exclusive access gives the
     /// same single-owner memo.
-    pub struct LeafGate {
+    pub struct LeafGate<'k> {
         /// The largest element count any planned role this gate admits has.
         bound: usize,
         /// The last scan, keyed by the token shape it was taken on.
         memo: Option<GateScan>,
+        /// The call's prepared cost keys, shared by its split leaves.
+        keys: Option<&'k GateKeys>,
     }
 
     #[derive(Clone, Copy)]
@@ -44,19 +48,31 @@ pub(crate) mod sealed {
         min_elements: Option<usize>,
     }
 
-    impl LeafGate {
+    impl<'k> LeafGate<'k> {
         /// A gate for roles of at most `bound` elements.
         pub(crate) fn new(bound: usize) -> Self {
-            Self { bound, memo: None }
+            Self {
+                bound,
+                memo: None,
+                keys: None,
+            }
         }
 
-        /// The smallest element count up to `bound` whose copy estimate pays
-        /// at the token's cheapest width, or `None` when none does. A copy
-        /// estimate is monotone in the element count, so a binary search over
-        /// `pays` at that one width finds it in O(log bound).
-        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
-            #[cfg(test)]
-            gate_counts::add(bound, |counts| counts.scans += 1);
+        /// A gate for roles of at most `keys`' bound that takes a team
+        /// token's scan from `keys` when `keys` prepared its budget, running
+        /// the scan there if no gate of the call has yet.
+        pub(crate) fn shared(keys: &'k GateKeys) -> Self {
+            Self {
+                bound: keys.bound,
+                memo: None,
+                keys: Some(keys),
+            }
+        }
+
+        /// The cheapest width of `exec` above one and its dispatch cost.
+        fn cheapest(
+            exec: &crate::host_pool::Exec<'_>,
+        ) -> Option<(core::num::NonZeroUsize, core::time::Duration)> {
             let mut cheapest = None;
             let mut best = core::time::Duration::MAX;
             for width in 2..=exec.budget().get() {
@@ -66,10 +82,20 @@ pub(crate) mod sealed {
                 let cost = exec.dispatch_cost(width);
                 if cost < best {
                     best = cost;
-                    cheapest = Some(width);
+                    cheapest = Some((width, cost));
                 }
             }
-            let cheapest = cheapest?;
+            cheapest
+        }
+
+        /// The smallest element count up to `bound` whose copy estimate pays
+        /// at the token's cheapest width, or `None` when none does. A copy
+        /// estimate is monotone in the element count, so a binary search over
+        /// `pays` at that one width finds it in O(log bound).
+        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
+            #[cfg(test)]
+            gate_counts::add(bound, |counts| counts.scans += 1);
+            let (cheapest, _) = Self::cheapest(exec)?;
             let class = execution::KernelClass::Copy;
             let pays = |elements: usize| {
                 #[cfg(test)]
@@ -116,7 +142,21 @@ pub(crate) mod sealed {
             let min_elements = match self.memo {
                 Some(scan) if scan.budget == budget && scan.team == team => scan.min_elements,
                 _ => {
-                    let min_elements = Self::scan(exec, self.bound);
+                    let shared = self
+                        .keys
+                        .filter(|_| team)
+                        .and_then(|keys| keys.slot(budget.get()));
+                    let min_elements = match shared {
+                        Some((cost, scan)) => {
+                            debug_assert_eq!(
+                                Self::cheapest(exec).map(|(_, cost)| cost),
+                                Some(*cost),
+                                "a prepared gate key differs from its token's"
+                            );
+                            *scan.get_or_init(|| Self::scan(exec, self.bound))
+                        }
+                        None => Self::scan(exec, self.bound),
+                    };
                     self.memo = Some(GateScan {
                         budget,
                         team,
@@ -134,6 +174,97 @@ pub(crate) mod sealed {
                 }
                 _ => false,
             }
+        }
+    }
+
+    /// The gate cost keys of one replay call, prepared by its caller before
+    /// any split: for each budget a split leaf of the call's root token can
+    /// get, the dispatch cost of its cheapest width, and one lazily filled
+    /// scan per distinct cost.
+    ///
+    /// Why the caller can prepare them: a team token's dispatch cost is read
+    /// from its team's cost row whatever thread runs it, and a fork, a
+    /// reborrow and a limit all keep the team authority (threadteam
+    /// `Exec::dispatch_cost`, `fork`, `limit`), so a leaf of budget `b` has
+    /// the cheapest cost the caller reads from its own token limited to `b`.
+    /// A scan depends only on the bound and that cost, so leaves with equal
+    /// costs share it; `OnceLock` runs it at most once and only when a leaf
+    /// asks, so a call whose leaves admit nothing searches nothing.
+    #[derive(Debug, Default)]
+    pub(crate) struct GateKeys {
+        bound: usize,
+        /// Each prepared budget and the index of its cost's slot.
+        budgets: Vec<(usize, usize)>,
+        slots: Vec<(core::time::Duration, std::sync::OnceLock<Option<usize>>)>,
+    }
+
+    /// Scratch only: a clone starts empty.
+    impl Clone for GateKeys {
+        fn clone(&self) -> Self {
+            Self::default()
+        }
+    }
+
+    impl GateKeys {
+        /// Prepares the keys of `exec`'s halving budgets for gates of
+        /// `bound`, or none when no role is planned (`bound` zero) or
+        /// `exec` carries no team.
+        pub(crate) fn prepare(&mut self, exec: &mut crate::host_pool::Exec<'_>, bound: usize) {
+            self.bound = bound;
+            self.budgets.clear();
+            self.slots.clear();
+            if bound == 0 || exec.is_serial() || !exec.carries_team() {
+                return;
+            }
+            // Split halves a token as threadteam's even fork does, so the
+            // budgets at depth d are the floor and ceil of `root / 2^d`.
+            let root = exec.budget().get();
+            let mut divisor = 1usize;
+            while root.div_ceil(divisor) >= 2 {
+                for budget in [root / divisor, root.div_ceil(divisor)] {
+                    if budget < 2 || self.budgets.iter().any(|&(b, _)| b == budget) {
+                        continue;
+                    }
+                    let limited = exec
+                        .reborrow()
+                        .limit(core::num::NonZeroUsize::new(budget).expect("budget >= 2"));
+                    let Some((_, cost)) = LeafGate::cheapest(&limited) else {
+                        continue;
+                    };
+                    let slot = match self.slots.iter().position(|&(c, _)| c == cost) {
+                        Some(slot) => slot,
+                        None => {
+                            self.slots.push((cost, std::sync::OnceLock::new()));
+                            self.slots.len() - 1
+                        }
+                    };
+                    self.budgets.push((budget, slot));
+                }
+                let Some(next) = divisor.checked_mul(2) else {
+                    break;
+                };
+                divisor = next;
+            }
+        }
+
+        /// The cost and scan slot of a prepared `budget`.
+        fn slot(
+            &self,
+            budget: usize,
+        ) -> Option<&(core::time::Duration, std::sync::OnceLock<Option<usize>>)> {
+            let &(_, slot) = self.budgets.iter().find(|&&(b, _)| b == budget)?;
+            self.slots.get(slot)
+        }
+
+        /// Bytes of the tables' capacity.
+        pub(crate) fn retained_bytes(&self) -> usize {
+            self.budgets
+                .capacity()
+                .saturating_mul(core::mem::size_of::<(usize, usize)>())
+                .saturating_add(self.slots.capacity().saturating_mul(core::mem::size_of::<(
+                    core::time::Duration,
+                    std::sync::OnceLock<Option<usize>>,
+                )>()))
         }
     }
 

@@ -7,8 +7,10 @@
 //! more, and an overwrite of many high-rank inactive blocks allocates no
 //! more than one of few, as does a general-`beta` update of many such
 //! blocks in Multi groups. A custom executor, under `Auto` since it honors
-//! no forced policy, keeps the same contract, as does a member batch of
-//! several members, every member moved at once around one dense submission.
+//! no forced policy, keeps the same contract, as do member batches of
+//! several members, whose moves split into contiguous member ranges on the
+//! four workers around one dense submission (including a five-member batch
+//! over four ranges, one of them two members wide).
 //!
 //! Its own test binary with one test, so the shared counting allocator's
 //! process-wide measurement sees only that test.
@@ -258,11 +260,12 @@ fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
     }
 
     // Member batches on the same four workers: three members of the small
-    // fixture, two of the large, three of the small.
+    // fixture, two of the large, three of the small; then five of the small,
+    // which split into four member ranges.
     let mut workspace = TreeTransformWorkspace::default();
     let mut dense = DefaultDenseExecutor::new();
     let mut kernels = StridedHostKernelAdapter::default();
-    let batches = [(&small, 3usize), (&large, 2)];
+    let batches = [(&small, 3usize), (&large, 2), (&small, 5)];
     let mut buffers = batches
         .iter()
         .map(|&((structure, _, source), members)| {
@@ -307,6 +310,13 @@ fn warm_parallel_tree_replay_allocates_nothing_but_provider_locks() {
     } else {
         assert_eq!(warm, 0);
         assert_eq!(after_large, 0);
+    }
+    members(2);
+    let warm = members(2);
+    if cfg!(target_vendor = "apple") {
+        assert_eq!(members(2), warm, "warm uneven member-range calls grow");
+    } else {
+        assert_eq!(warm, 0);
     }
 
     // High-rank inactive overwrites: four and eight blocks on the same four

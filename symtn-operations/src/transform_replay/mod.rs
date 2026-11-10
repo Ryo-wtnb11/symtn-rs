@@ -15,7 +15,7 @@ use symtn_dense::{strided_batch_runs_into, DenseExecutor, DenseGemmBatchJob};
 
 use crate::host_scratch::HostScratchBuffer;
 use crate::kernel_adapter::movement::{span, with_payload_map, with_transform_map, Uninit, Write};
-use crate::kernel_adapter::sealed::LeafGate;
+use crate::kernel_adapter::sealed::{GateKeys, LeafGate};
 use crate::kernel_adapter::{admitted_plan, planned_write_uninit};
 use crate::owned_overwrite_buffer::initialize_owned;
 use crate::storage_scratch::TreeTransformScratchBuffers;
@@ -103,6 +103,8 @@ where
         if self.scales.is_empty() {
             return self.alpha;
         }
+        #[cfg(test)]
+        alpha_lookups::add(self.scales.as_ptr() as usize);
         usize::try_from(offset)
             .ok()
             .and_then(|offset| {
@@ -182,13 +184,19 @@ pub struct HostTreeTransformWorkspace<T> {
     chunk_runs: Vec<usize>,
     // One chunk's non-empty scatter groups, in destination order.
     chunk_scatter_groups: Vec<usize>,
+    // The start, in `chunk_scatter_groups`, of each hull run of that order.
+    chunk_scatter_runs: Vec<u32>,
+    // The call's prepared gate cost keys, shared by its split leaves.
+    gate_keys: GateKeys,
     // The fused traversal indices of the replay's lanes ([`fused_index_lanes`]):
     // inline up to eight, the rank metadata width, so a fresh per-call
     // workspace of low rank allocates none.
     fused_indices: smallvec::SmallVec<[usize; INLINE_FUSED_RANK]>,
-    member_shape: Vec<usize>,
-    member_dst_strides: Vec<isize>,
-    member_src_strides: Vec<isize>,
+    // One member-axis move scratch per worker of a member batch.
+    member_scratch: Vec<member::MemberScratch>,
+    // A member batch's destination scale per Single and scatter column,
+    // resolved once per call before any member range forks.
+    member_alpha: Vec<T>,
     member_ranges: Vec<(usize, usize)>,
 }
 
@@ -210,10 +218,11 @@ impl<T> Default for HostTreeTransformWorkspace<T> {
             chunk_jobs: Vec::new(),
             chunk_runs: Vec::new(),
             chunk_scatter_groups: Vec::new(),
+            chunk_scatter_runs: Vec::new(),
+            gate_keys: GateKeys::default(),
             fused_indices: smallvec::SmallVec::new(),
-            member_shape: Vec::new(),
-            member_dst_strides: Vec::new(),
-            member_src_strides: Vec::new(),
+            member_scratch: Vec::new(),
+            member_alpha: Vec::new(),
             member_ranges: Vec::new(),
         }
     }
@@ -229,7 +238,7 @@ impl<T> HostTreeTransformWorkspace<T> {
             self.packed.source().capacity() + self.packed.destination().capacity(),
             std::mem::size_of::<T>(),
         ) + bytes(
-            self.coefficient_scratch.capacity(),
+            self.coefficient_scratch.capacity() + self.member_alpha.capacity(),
             std::mem::size_of::<T>(),
         ) + bytes(
             self.chunk_jobs.capacity(),
@@ -237,18 +246,26 @@ impl<T> HostTreeTransformWorkspace<T> {
         ) + bytes(
             self.chunk_runs.capacity()
                 + self.chunk_scatter_groups.capacity()
-                + self.fused_indices_heap_capacity()
-                + self.member_shape.capacity(),
+                + self.fused_indices_heap_capacity(),
             std::mem::size_of::<usize>(),
         ) + bytes(
-            self.zero_strides.capacity()
-                + self.member_dst_strides.capacity()
-                + self.member_src_strides.capacity(),
-            std::mem::size_of::<isize>(),
-        ) + bytes(
-            self.member_ranges.capacity(),
-            std::mem::size_of::<(usize, usize)>(),
-        )
+            self.chunk_scatter_runs.capacity(),
+            std::mem::size_of::<u32>(),
+        ) + bytes(self.zero_strides.capacity(), std::mem::size_of::<isize>())
+            + self.gate_keys.retained_bytes()
+            + bytes(
+                self.member_scratch.capacity(),
+                std::mem::size_of::<member::MemberScratch>(),
+            )
+            + self
+                .member_scratch
+                .iter()
+                .map(member::MemberScratch::retained_bytes)
+                .sum::<usize>()
+            + bytes(
+                self.member_ranges.capacity(),
+                std::mem::size_of::<(usize, usize)>(),
+            )
     }
 
     /// Coefficient packs this workspace has converted: a warm replay of the
@@ -455,5 +472,48 @@ impl<T> ReportsPlacement for HostTreeTransformWorkspace<T> {
     #[inline]
     fn placement(&self) -> Placement {
         Placement::Host
+    }
+}
+
+/// Test observation of the destination-scale lookups of one watched scale
+/// table, on every thread; a test watches a table no other test passes.
+#[cfg(test)]
+pub(crate) mod alpha_lookups {
+    use std::sync::{Mutex, MutexGuard, PoisonError};
+
+    static WATCHED: Mutex<Option<(usize, usize)>> = Mutex::new(None);
+    static WATCHERS: Mutex<()> = Mutex::new(());
+
+    pub(super) fn add(table: usize) {
+        let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((watched, count)) = watched.as_mut() {
+            if *watched == table {
+                *count += 1;
+            }
+        }
+    }
+
+    /// Counts the lookups in `table` (its address) until the watch drops.
+    pub(crate) struct Watch {
+        _one_at_a_time: MutexGuard<'static, ()>,
+    }
+
+    pub(crate) fn watch(table: usize) -> Watch {
+        let guard = WATCHERS.lock().unwrap_or_else(PoisonError::into_inner);
+        *WATCHED.lock().unwrap_or_else(PoisonError::into_inner) = Some((table, 0));
+        Watch {
+            _one_at_a_time: guard,
+        }
+    }
+
+    impl Watch {
+        /// The lookups counted so far.
+        pub(crate) fn take(self) -> usize {
+            WATCHED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take()
+                .map_or(0, |(_, count)| count)
+        }
     }
 }
