@@ -49,8 +49,10 @@ use crate::transform_structure::{
 /// routes' runnable parts) exceeds one, inline on the caller's token
 /// otherwise. Then the Singles: split over `t` workers when `t > 1` and they
 /// are slice-disjoint (main's split); split over their runs at `t_A` when
-/// they form at least two runs that are not all singletons; inline in
-/// [`InlineSingles::ordered`]'s order otherwise.
+/// they form at least two runs that are not all singletons and the caller's
+/// gate would not admit the largest planned Single on the caller's token
+/// (see [`inline_admits`]); inline in [`InlineSingles::ordered`]'s order
+/// otherwise.
 ///
 /// The call's gate cost keys are prepared here, before any split, for
 /// every leaf gate of the call (none when no role retains a plan).
@@ -110,7 +112,10 @@ where
             let (split_singles, singles_width) = if singles_disjoint {
                 (threads > 1, threads)
             } else {
-                (run_threads > 1 && single_runs >= 2, run_threads)
+                let split = run_threads > 1
+                    && single_runs >= 2
+                    && !inline_admits(gate, exec.token_ref(), schedule.singles_planned);
+                (split, run_threads)
             };
             let HostTreeTransformWorkspace {
                 zero_strides,
@@ -196,9 +201,12 @@ where
 /// `threads` consecutive groups (main's `replay_multi_chunk` and its
 /// scatter): per chunk the rebased jobs, a pack split over `threads`
 /// workers, one grouped GEMM, and the scatter of the chunk's non-empty
-/// groups in destination order, split over their hull runs when there are
-/// two or more and inline on the caller's token through the caller gate
-/// otherwise. The first failing phase or GEMM stops the replay.
+/// groups in destination order: split by group when every group and every
+/// pair of them is slice-disjoint (main's split), over their hull runs when
+/// there are two or more and the caller's gate would not admit the chunk's
+/// largest planned column on the caller's token, and inline on the caller's
+/// token through the caller gate otherwise. The first failing phase or GEMM
+/// stops the replay.
 ///
 /// The packed scratch is sized once for the largest chunk. A packed
 /// destination too small for it is initialized inside the first chunk's
@@ -341,8 +349,21 @@ where
         let packed = &packed.destination().as_slice()[..destination_len];
         let groups = &ordered[..];
         let runs = &runs[..];
+        // Main's split when every group is slice-disjoint and so is every
+        // pair of them; otherwise a split over two or more runs unless main's
+        // inline route would admit the chunk's largest planned column on
+        // the caller's token.
+        let main_disjoint =
+            runs.len() == groups.len() && groups.iter().all(|&group| spans[group].slice_disjoint);
+        let planned = groups
+            .iter()
+            .map(|&group| spans[group].planned)
+            .max()
+            .unwrap_or(0);
         crate::host_pool::lane_region(engine, crate::host_pool::HostPoolSite::Replay, |exec| {
-            if runs.len() >= 2 {
+            let split = main_disjoint
+                || (runs.len() >= 2 && !inline_admits(gate, exec.token_ref(), planned));
+            if split {
                 let items = Items::Groups {
                     groups,
                     runs,
@@ -392,6 +413,24 @@ where
         }
     }
     Ok(())
+}
+
+/// Whether main's inline route would write an item of `planned` elements
+/// (the largest role with a retained Strided plan, zero for none) through
+/// its plan on the caller's token `exec`, by the caller's gate.
+///
+/// Why a new run split defers to it: inline, such an item takes the
+/// caller's whole token and its plan fans the move out; on a run split
+/// leaf's smaller token the gate rejects the plan and the item takes the
+/// serial walk, so the split can only lose against main there. Without
+/// such an item main writes the phase serially, which a split never loses
+/// to.
+fn inline_admits(
+    gate: &mut LeafGate<'_>,
+    exec: &crate::host_pool::Exec<'_>,
+    planned: usize,
+) -> bool {
+    planned > 0 && gate.widens(exec, planned)
 }
 
 /// The start of each hull run of `ordered` (groups ascending by hull start)

@@ -154,21 +154,23 @@ fn partial_overlap(
 /// What: on the partial-overlap fixture at four workers and
 /// flat 100 ns dispatch, each chunk of four groups forms two hull runs, so
 /// its scatter splits over them: each column is offered a two-slot leaf
-/// token, the Single its whole four-slot leaf. Every token's cheapest
-/// dispatch costs 100 ns, one cost key, so all the call's gates together
-/// search once, within `log2 M + 2` `pays` queries, for `G` 8, 32 and 128
-/// and two bounds `M` alike.
+/// token, the Single its whole four-slot leaf (the caller's gate rejects
+/// every planned `[3, 32]` column on the caller's token, so no chunk keeps
+/// main's inline route). Every token's cheapest dispatch costs 100 ns, one
+/// cost key: the split leaves search it once between them and the caller's
+/// gate once more, each within `log2 M + 2` `pays` queries, for `G` 8, 32
+/// and 128 and two bounds `M` alike.
 #[test]
 fn partially_overlapping_scatters_search_once_per_cost_key() {
     for m in [8192usize, 65536] {
-        let bound = (2 * m).ilog2() as usize + 2;
+        let bound = 2 * ((2 * m).ilog2() as usize + 2);
         for groups in [8, 32, 128] {
             let (dst, src, transform) = partial_overlap(groups, m);
             assert_eq!(transform.layouts().retained_plan_count(), groups + 1);
             assert_eq!(transform.layouts().max_planned_elements(), 2 * m);
             let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
             let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
-            assert_eq!(counts.scans, 1, "m {m}, {groups} groups");
+            assert_eq!(counts.scans, 2, "m {m}, {groups} groups");
             assert!(counts.pays <= bound, "m {m}, {groups} groups: {counts:?}");
 
             let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
@@ -909,4 +911,67 @@ fn a_chain_of_overlapping_groups_scatters_inline() {
         offers[1..offers.len() - 1].iter().all(|&offer| offer == 4),
         "{offers:?}"
     );
+}
+
+/// `pairs` coupled pairs of `[2, cols]` Singles whose destinations
+/// interleave (strides `[1, 4]`, offsets `4 cols p` and `4 cols p + 2`):
+/// the Singles are not slice-disjoint and form one hull run per pair.
+fn interleaved_single_pairs(
+    pairs: usize,
+    cols: usize,
+) -> (
+    Arc<BlockStructure>,
+    Arc<BlockStructure>,
+    TreeTransformStructure<f64>,
+) {
+    let dst = blocks(
+        &(0..pairs)
+            .flat_map(|p| {
+                [
+                    ([2, cols], [1, 4], 4 * cols * p),
+                    ([2, cols], [1, 4], 4 * cols * p + 2),
+                ]
+            })
+            .collect::<Vec<_>>(),
+    );
+    let src =
+        Arc::new(BlockStructure::packed_column_major(2, vec![vec![2, cols]; 2 * pairs]).unwrap());
+    let specs = (0..2 * pairs)
+        .map(|b| TreeTransformBlockSpec::single(b, b, 1.0))
+        .collect::<Vec<_>>();
+    let transform = TreeTransformStructure::compile_structures(&dst, &src, &specs).unwrap();
+    let schedule = transform.parallel_schedule();
+    assert!(!schedule.singles_slice_disjoint());
+    assert_eq!(schedule.single_runs.len(), pairs);
+    assert_eq!(schedule.singles_planned, 2 * cols);
+    (dst, src, transform)
+}
+
+/// What: when the caller's gate admits the plan of the largest planned
+/// Single on the caller's token, Singles that are not slice-disjoint keep
+/// main's inline route even though they form two runs: on four flat-cost
+/// workers each `[2, m]` Single is offered the caller's whole four-slot
+/// token and its plan is admitted.
+#[test]
+fn an_admitted_planned_single_keeps_mains_inline_route() {
+    // A bound no other gate-counting test uses.
+    let (dst, src, transform) = interleaved_single_pairs(2, 8250);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    assert_eq!(offers, [4; 4]);
+    let counts = overwrite_counts(&mut engine, &transform, &dst, &src);
+    assert!(counts.widths > 0, "{counts:?}");
+}
+
+/// What: when the caller's gate rejects the plan of the largest planned
+/// Single on the caller's token, Singles that are not slice-disjoint split
+/// over their runs: on four flat-cost workers every one of 64 interleaved
+/// pairs of `[2, 64]` Singles is written on a split leaf's smaller token.
+#[test]
+fn a_rejected_planned_single_splits_over_its_runs() {
+    let (dst, src, transform) = interleaved_single_pairs(64, 64);
+    let mut engine = flat_engine(4, 100, CpuBatchStrategy::Auto);
+    let (offers, _) = recorded(&mut engine, &transform, &dst, &src);
+    assert_eq!(offers.len(), 128);
+    assert!(offers.iter().all(|&offer| offer < 4), "{offers:?}");
 }

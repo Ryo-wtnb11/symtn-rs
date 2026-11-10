@@ -30,11 +30,16 @@ pub(crate) struct TreeTransformScatterGroupReplay {
 }
 
 /// The destination hull of one plan group's scatter columns: its first and
-/// last written element. A group without columns spans `(0, -1)`.
+/// last written element, whether its columns are slice-disjoint (each starts
+/// after the previous one ends), and the element count of its largest column
+/// whose role retains a Strided plan (zero when none does). A group without
+/// columns spans `(0, -1)`, disjoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct TreeTransformGroupSpan {
     pub lo: isize,
     pub hi: isize,
+    pub slice_disjoint: bool,
+    pub planned: usize,
 }
 
 /// A destination write that does not go through a packed GEMM column.
@@ -73,6 +78,9 @@ pub(crate) struct TreeTransformParallelSchedule {
     pub inactive_runs: Vec<u32>,
     /// The start, in `singles`, of each of its hull runs.
     pub single_runs: Vec<u32>,
+    /// The element count of the largest Single whose role retains a
+    /// Strided plan (zero when none does).
+    pub singles_planned: usize,
     /// Per plan group, its scatter columns' destination span.
     pub group_spans: Vec<TreeTransformGroupSpan>,
     /// The most workers a replay can keep busy on one phase: the Singles

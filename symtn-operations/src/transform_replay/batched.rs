@@ -8,12 +8,13 @@ use crate::transform_structure::TreeTransformDirectItem;
 /// - first the direct items, in one engine entry that also fixes the replay
 ///   width `t` ([`super::chunk::direct`]): the inactive layouts, split over
 ///   their hull runs or inline, then the Singles, split over `t` workers when
-///   they are slice-disjoint, over their hull runs when they form several,
-///   and inline otherwise;
+///   they are slice-disjoint, over their hull runs when they form several
+///   and inline would not fan out a planned Single, and inline otherwise;
 /// - then the plan groups: at `t > 1` in chunks of `t` consecutive groups
 ///   ([`super::chunk::groups`]), each a parallel pack, one grouped GEMM and
-///   a scatter split over `t` workers when the chunk's groups form two or
-///   more hull runs (inline otherwise); at `t = 1` one group at a time
+///   a scatter split over `t` workers when the chunk's groups are
+///   slice-disjoint, or form two or more hull runs and inline would not fan
+///   out a planned column (inline otherwise); at `t = 1` one group at a time
 ///   ([`replay_serial_groups`]).
 ///
 /// Every inline move runs on the caller's whole token (one slot under a

@@ -367,7 +367,9 @@ their runs when there are two or more and the same copy rule admits more
 than one worker for that many runs, otherwise written inline on the
 caller's token in destination address order; then the Singles: at `t > 1`
 with slice-disjoint destinations split over `t` workers, when they are not
-slice-disjoint but form two or more runs split over those runs, otherwise
+slice-disjoint but form two or more runs split over those runs unless the
+caller's gate would admit the largest Single with a retained Strided plan
+on the caller's token (then inline, where that plan fans the move out), otherwise
 inline: in block order into a caller-provided destination at `t = 1`
 (main's one-worker replay), in address order into an owned output or at
 `t > 1`. A split part of
@@ -377,8 +379,11 @@ left); a part of one worker or one item is a leaf, which writes its items
 whole on its token. The Multi groups then replay in chunks of `t`
 consecutive groups: each chunk's pack is split the same way over its
 columns, its jobs go to the executor as one grouped GEMM, and its non-empty
-groups, ordered by destination, are scattered split over their hull runs
-when they form two or more, and inline on the caller's token otherwise. At `t = 1` each group is packed,
+groups, ordered by destination, are scattered split by group when every
+group's columns and every pair of groups are slice-disjoint, over their hull
+runs when they form two or more and the caller's gate would not admit the
+chunk's largest planned column on the caller's token, and inline on the
+caller's token otherwise. At `t = 1` each group is packed,
 multiplied and scattered in plan order. Every inline move is offered the
 caller's whole token (one slot under a forced `Sequential`), so Strided's
 own rule decides whether one large block's move fans out; an overwrite of a

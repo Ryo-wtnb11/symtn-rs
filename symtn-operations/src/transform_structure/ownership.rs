@@ -151,7 +151,9 @@ pub(super) fn compile_parallel_schedule(
             let ranges = columns.iter().map(|&(range, _)| range);
             TreeTransformGroupSpan {
                 lo: columns.first().map_or(0, |&((lo, _), _)| lo),
-                hi: ranges.map(|(_, hi)| hi).max().unwrap_or(-1),
+                hi: ranges.clone().map(|(_, hi)| hi).max().unwrap_or(-1),
+                slice_disjoint: slice_disjoint(ranges),
+                planned: 0,
             }
         })
         .collect();
@@ -175,6 +177,7 @@ pub(super) fn compile_parallel_schedule(
         inactive_runs,
         singles,
         single_runs,
+        singles_planned: 0,
         group_spans,
         replay_runnable,
     })
@@ -182,6 +185,51 @@ pub(super) fn compile_parallel_schedule(
 
 fn checked_u32(value: usize) -> Result<u32, OperationError> {
     u32::try_from(value).map_err(|_| OperationError::ElementCountOverflow)
+}
+
+/// Records, from the retained layout table, the largest planned Single and
+/// each group's largest planned scatter column of `schedule`: a role is
+/// planned when the table retains a Strided plan for it.
+pub(super) fn record_planned(
+    schedule: &mut TreeTransformParallelSchedule,
+    blocks: &[TreeTransformBlock],
+    layouts: &TreeTransformLayoutTable,
+) -> Result<(), OperationError> {
+    let planned = |layout: usize| -> Result<usize, OperationError> {
+        Ok(if layouts.role(layout)?.plan.is_some() {
+            layouts.entry(layout).element_count
+        } else {
+            0
+        })
+    };
+    let mut singles = 0;
+    for &block in &schedule.singles {
+        if let TreeTransformBlock::Single { dst_layout, .. } = blocks[block as usize] {
+            singles = singles.max(planned(dst_layout)?);
+        }
+    }
+    schedule.singles_planned = singles;
+    for (group, span) in schedule.group_spans.iter_mut().enumerate() {
+        let columns = schedule.scatter_groups[group].columns.clone();
+        span.planned = schedule.scatter_columns[columns]
+            .iter()
+            .map(|column| planned(column.dst_layout))
+            .try_fold(0, |max, planned| planned.map(|planned| max.max(planned)))?;
+    }
+    Ok(())
+}
+
+/// Whether the inclusive destination ranges, in their order, are
+/// slice-disjoint: each nonnegative and starting after the previous one ends.
+fn slice_disjoint(ranges: impl IntoIterator<Item = (isize, isize)>) -> bool {
+    let mut previous_hi = None;
+    for (lo, hi) in ranges {
+        if lo < 0 || hi < lo || previous_hi.is_some_and(|previous| previous >= lo) {
+            return false;
+        }
+        previous_hi = Some(hi);
+    }
+    true
 }
 
 /// The start index of each hull run of the inclusive destination ranges,
