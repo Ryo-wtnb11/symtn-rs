@@ -1,15 +1,22 @@
-//! The block kernels' one lane driver: a kernel describes one block's work
-//! and execution ([`BlockOp`]); the driver enters the kernel's guarded engine
-//! entry, turns the work into times with the one cost function, allocates the
-//! lanes with [`lanes::allocate`] and runs every block on
-//! [`lanes::run_native`], returning the lowest-indexed failure.
+//! The block kernels' one lane driver: a kernel describes one block's work,
+//! model and execution ([`BlockOp`]); the driver enters the kernel's guarded
+//! engine entry, turns the work into times with the one cost function (a
+//! composite block summing its stages', see [`BlockOp::serial`]), allocates
+//! the lanes with [`lanes::allocate`] under the kernel's model and runs every
+//! block on [`lanes::run_native`], returning the lowest-indexed failure.
+//!
+//! The model reaches the placement along one path: [`BlockOp::serial`] gives
+//! the per-block times, and [`BlockOp::grant`] with [`BlockOp::item`] the
+//! stage widths and the modeled time at every lane width, which every
+//! candidate scores with and the reservations widen by. The weighted work
+//! ([`BlockOp::work`]) feeds only the batch decision's query.
 
 use std::time::Duration;
 
 use tcontract_exec::{Exec, WorkModel};
 use tenferro_cpu::CpuEngine;
 
-use crate::lanes::{self, GrantKey, LaneAllocationCache, LaneTables};
+use crate::lanes::{self, Grant, GrantKey, JobModel, LaneAllocationCache, LaneTables};
 use crate::tenferro_adapter::tenferro_error;
 use crate::DenseError;
 
@@ -25,7 +32,9 @@ pub(crate) enum Entry {
 }
 
 /// The dependency whose own model turns a block's work into time, and the
-/// family of its grant.
+/// family of its grant. A composite factorization block is of the
+/// factorization kind; its products are priced at the GEMM rate within it
+/// (see [`BlockOp::serial`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OpKind {
     /// tcontract's GEMM rate: the plan that runs the block is tcontract's.
@@ -91,8 +100,16 @@ pub(crate) trait BlockOp: Sync {
     /// The `DenseError` label of a refused entry.
     const LABEL: &'static str;
 
-    /// The block's weighted multiply-adds, as its provider estimates them.
+    /// The block's weighted multiply-adds, as its provider estimates them:
+    /// the batch decision's mean work, not a time.
     fn work(&self, index: usize, job: &Self::Job) -> f64;
+
+    /// Block `index`'s serial time, from its weighted work `work`: the
+    /// kind's [`cost`], or for a composite block of sequential stages the
+    /// saturating sum of its stages' own costs.
+    fn serial(&self, _: usize, _: &Self::Job, model: &WorkModel, work: f64) -> Duration {
+        cost(Self::KIND, work, model)
+    }
 
     /// Whether [`grant`](Self::grant) models block `index`'s provider
     /// width. A batch holding a block it does not model keeps the baseline
@@ -101,11 +118,12 @@ pub(crate) trait BlockOp: Sync {
         true
     }
 
-    /// The width block `index`'s provider takes on a lane of `budget`
+    /// The widths block `index`'s stages take on a lane of `budget`
     /// reserved slots of `exec`, for a block of serial time `serial`: the
-    /// placement's model of that provider's own width decision, composed from
-    /// the provider's public decisions. Consulted only for a batch whose
-    /// every block is [`modeled`](Self::modeled).
+    /// placement's model of each stage provider's own width decision,
+    /// composed from that provider's public decisions ([`lanes::single`]
+    /// for a single-stage block). Consulted only for a batch whose every
+    /// block is [`modeled`](Self::modeled).
     fn grant(
         &self,
         index: usize,
@@ -113,7 +131,22 @@ pub(crate) trait BlockOp: Sync {
         exec: &Exec<'_>,
         budget: usize,
         serial: Duration,
-    ) -> usize;
+    ) -> Grant;
+
+    /// Block `index`'s modeled time on a lane of `exec` where its stages
+    /// take `grant` (see [`lanes::item_time`]): a composite block sums its
+    /// stages' times at their own widths, each parallel stage paying its own
+    /// dispatch.
+    fn item(
+        &self,
+        _: usize,
+        _: &Self::Job,
+        exec: &Exec<'_>,
+        serial: Duration,
+        grant: Grant,
+    ) -> Duration {
+        lanes::item_time(exec, serial, grant[0])
+    }
 
     /// What block `index`'s [`grant`](Self::grant) depends on besides its
     /// serial time, the context and the op's [`OpKind`] (see [`GrantKey`]).
@@ -180,9 +213,15 @@ pub(crate) fn drive<B: BlockOp>(
 }
 
 /// Places `jobs` of `op` on `exec` into `tables`: each block's work turned
-/// into its serial time by [`cost`], and [`lanes::allocate`] offered the
-/// blocks' grants only where it can search and every block is modeled,
-/// through `cache` (the process-global lane-allocation cache in production).
+/// into its serial time by [`BlockOp::serial`], and [`lanes::allocate`]
+/// offered the blocks' model only where it can search and every block is
+/// modeled, through `cache` (the process-global lane-allocation cache in
+/// production).
+///
+/// On a context of one slot every block is priced by the kind's [`cost`]
+/// alone: whatever the policy, its batch decision is one lane, so the
+/// placement is one sequential lane and no time is read but the total, whose
+/// width is one; a composite block's stages are not priced there.
 pub(crate) fn place<B: BlockOp>(
     exec: &Exec<'_>,
     op: &B,
@@ -190,14 +229,19 @@ pub(crate) fn place<B: BlockOp>(
     cache: &LaneAllocationCache,
     tables: &mut LaneTables,
 ) {
-    let model = exec.batch_policy().model;
+    let work_model = exec.batch_policy().model;
+    let staged = exec.budget() >= 2;
     let mut total_work = 0.0;
     let mut times = tables.take_times();
     // One `extend` reserves from the job iterator's size hint up front.
     times.extend(jobs.iter().enumerate().map(|(index, job)| {
         let work = op.work(index, job);
         total_work += work;
-        cost(B::KIND, work, &model)
+        if staged {
+            op.serial(index, job, &work_model, work)
+        } else {
+            cost(B::KIND, work, &work_model)
+        }
     }));
     let mean_work = total_work / jobs.len().max(1) as f64;
     // Admission is read only where the allocation can search, so a serial or
@@ -207,19 +251,34 @@ pub(crate) fn place<B: BlockOp>(
             .iter()
             .enumerate()
             .all(|(index, job)| op.modeled(index, job));
-    let grant = modeled.then_some(|j: usize, serial: Duration, budget: usize| {
-        op.grant(j, &jobs[j], exec, budget, serial)
-    });
+    let model = modeled.then_some(Modeled { op, jobs, exec });
     lanes::allocate(
         exec,
         &times,
         (B::KIND, |j| op.grant_key(j, &jobs[j])),
         mean_work,
-        grant,
+        model,
         cache,
         tables,
     );
     tables.keep_times(times);
+}
+
+/// A kernel's blocks as the placement's [`JobModel`].
+struct Modeled<'a, 'e, B: BlockOp> {
+    op: &'a B,
+    jobs: &'a [B::Job],
+    exec: &'a Exec<'e>,
+}
+
+impl<B: BlockOp> JobModel for Modeled<'_, '_, B> {
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant {
+        self.op.grant(j, &self.jobs[j], self.exec, width, serial)
+    }
+
+    fn item(&self, exec: &Exec<'_>, j: usize, serial: Duration, grant: Grant) -> Duration {
+        self.op.item(j, &self.jobs[j], exec, serial, grant)
+    }
 }
 
 fn on_lanes<B: BlockOp>(

@@ -24,7 +24,7 @@ use tenferro_tensor::StrideVec;
 
 use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
 use super::factor::{grant, linalg_error};
-use crate::lanes::{GrantKey, LaneTables};
+use crate::lanes::{self, Grant, GrantKey, LaneTables};
 use crate::layout::strides_to_isize;
 use crate::tenferro_adapter::{tenferro_solve_error, NOT_A_CPU_ENGINE};
 use crate::{DenseError, DenseExecutor, DenseRead, DenseView, DenseViewMut, DenseWrite, Engine};
@@ -168,12 +168,13 @@ impl<'a, 'x, 'w: 'x> BlockOp for SolveBlocks<'a, 'x, 'w> {
         exec: &Exec<'_>,
         budget: usize,
         _: Duration,
-    ) -> usize {
-        grant(exec, budget, estimates(job))
+    ) -> Grant {
+        lanes::single(grant(exec, budget, estimates(job)))
     }
 
     fn grant_key(&self, _: usize, job: &Self::Job) -> GrantKey {
-        estimates(job).map(f64::to_bits)
+        let [total, payback] = estimates(job).map(f64::to_bits);
+        [total, payback, 0]
     }
 
     fn lane(&self, jobs: &mut LaneMembers<'_, Self::Job>, exec: &Exec<'_>) -> SolveLane {

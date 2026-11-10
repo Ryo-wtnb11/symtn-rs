@@ -118,7 +118,7 @@ pub(crate) fn allocate(
     times: &[Duration],
     (family, key): (OpKind, impl Fn(usize) -> GrantKey),
     mean_work: f64,
-    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+    model: Option<impl JobModel>,
     cache: &LaneAllocationCache,
     tables: &mut LaneTables,
 ) {
@@ -133,7 +133,7 @@ pub(crate) fn allocate(
     // reads no grant input.
     let mut keys = std::mem::take(&mut scratch.keys);
     keys.clear();
-    if grant.is_some() && searchable(exec, times, mean_work) {
+    if model.is_some() && searchable(exec, times, mean_work) {
         keys.extend((0..times.len()).map(key));
     }
     // Staged keys mean a search: `searchable` admits only lane counts of two
@@ -148,7 +148,7 @@ pub(crate) fn allocate(
     if let Some(entry) = query.as_ref().and_then(|query| cache.get(query)) {
         placement.restore(&entry);
     } else {
-        place(exec, times, &keys, mean_work, grant, placement, scratch);
+        place(exec, times, &keys, mean_work, model, placement, scratch);
         if let Some(query) = query {
             let bytes = charge(exec.budget(), times.len(), placement.lanes());
             if bytes > cache.info().max_entry_bytes() {
@@ -166,7 +166,7 @@ fn place(
     times: &[Duration],
     keys: &[GrantKey],
     mean_work: f64,
-    grant: Option<impl Fn(usize, Duration, usize) -> usize>,
+    model: Option<impl JobModel>,
     placement: &mut Placement,
     scratch: &mut PlaceScratch,
 ) {
@@ -215,11 +215,13 @@ fn place(
     placement
         .shares
         .extend((0..lanes).map(|k| slots / lanes + usize::from(k < slots % lanes)));
-    if let (BatchStrategy::Auto, Some(grant)) = (exec.batch_policy().strategy, grant) {
-        let fill = |j: usize, width: usize| item_time(exec, times[j], grant(j, times[j], width));
+    if let (BatchStrategy::Auto, Some(model)) = (exec.batch_policy().strategy, model) {
+        let grant = |j: usize, width: usize| model.grant(j, times[j], width);
+        let item_of = |j: usize, grant: Grant| model.item(exec, j, times[j], grant);
+        let fill = |j: usize, width: usize| item_of(j, grant(j, width));
         let mut columns = std::mem::take(&mut scratch.columns);
         let mut narrow = std::mem::take(&mut scratch.narrow);
-        columns.begin(times, keys, |j| grant(j, times[j], slots) > 1);
+        columns.begin(times, keys, |j| grows(grant(j, slots), [1; STAGES]));
         columns.prepare((slots, lanes), &fill);
         let lane_load = &mut scratch.lane_load;
         lane_load.clear();
@@ -245,15 +247,7 @@ fn place(
             }
         }
         let mut moldable = std::mem::take(&mut scratch.moldable);
-        let provider = |r: usize, width: usize| grant(r, times[r], width);
-        let item_of = |serial: Duration, width: usize| item_time(exec, serial, width);
-        let score = moldable.place(
-            (slots, lanes),
-            &order,
-            times,
-            &columns,
-            (&item_of, &provider),
-        );
+        let score = moldable.place((slots, lanes), &order, times, &columns, (&item_of, &grant));
         // Ties keep the baseline and the equal shares.
         if score.is_some_and(|score| score < best.0) {
             best.1 = None;
@@ -296,14 +290,18 @@ fn place(
 /// grant and every item time read only those), whether the token carries a
 /// team (the Faer GEMM and the factorization grants), the jobs' serial times
 /// in canonical order (the slot count, the order, the placements and the
-/// scores), their grant keys (every other grant input) and the op kind,
-/// which fixes the grant function: every GEMM block op grants through
-/// `gemm::grant` (keys: the plan's algorithm and the work) and every
-/// factorization through `factor::grant` (keys: the item's total and payback
-/// work), so equal keys of different kinds never share a placement. Every
-/// job is one stage, so the job count fixes the stage boundaries. Floats are
-/// keyed by their bits, so equality is reflexive and a differently signed
-/// zero only searches again.
+/// scores), their grant keys (every other input of a job's stage widths and
+/// item times) and the op kind, which fixes the model: every GEMM block op
+/// grants through `gemm::grant` (keys: the plan's algorithm and the work,
+/// last word zero); a single-stage factorization through `factor::grant`
+/// (keys: the item's total and payback work, last word zero), and a
+/// composite factorization job per stage, its factorization through
+/// `factor::grant` and each product through `gemm::grant` on its plan (keys:
+/// its extents and a nonzero tag of its op, its scalar and whether its plans
+/// resolved, which fix its stages' work, geometries and plans), so equal keys
+/// of different kinds or models never share a placement. Floats are keyed by
+/// their bits, so equality is reflexive and a differently signed zero only
+/// searches again.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LaneAllocationKey {
     family: OpKind,
@@ -580,7 +578,10 @@ impl Columns {
     /// and a Packed plan's is its narrowed width (`packed_auto`, one item,
     /// no lanes), both width rules within that smaller ceiling. Hence a
     /// grant of one at S is one at every share, and such a job's item time is
-    /// its serial time at every candidate width.
+    /// its serial time at every candidate width. A composite job's stages are
+    /// each one such grant, so a job whose every stage is one at S is serial
+    /// at every share, its item time the sum of its stages' serial times,
+    /// which is its serial time.
     fn begin(&mut self, times: &[Duration], keys: &[GrantKey], widens: impl Fn(usize) -> bool) {
         self.width = [0; 2];
         for column in &mut self.items {
@@ -701,27 +702,40 @@ impl Columns {
     }
 }
 
-/// Candidate M, large-job reservation: its target search tables and its
-/// lanes (each job's lane and each lane's share), kept for reuse.
+/// Whether some stage of `wider` takes more slots than in `narrower`.
+fn grows(wider: Grant, narrower: Grant) -> bool {
+    wider.iter().zip(&narrower).any(|(a, b)| a > b)
+}
+
+/// The large-job reservations: their target search tables (shared by both
+/// layouts), and each layout's lanes (each job's lane and each lane's
+/// share), kept for reuse.
 #[derive(Debug, Default)]
 struct Moldable {
     /// Row `i` holds the item time of the `i`-th largest job at every width
     /// `1..=S`, for the jobs above the mean load only.
     table: Vec<Duration>,
     targets: Vec<Duration>,
+    /// `tail[r]`: the serial time of the jobs from the `r`-th largest on,
+    /// in ns.
+    tail: Vec<u128>,
     /// Each reserved lane's load and job count.
     wide: Vec<(Duration, usize)>,
     /// The width-one lanes, by `(load, jobs, lane)`.
     thin: Vec<Reverse<(Duration, usize, usize)>>,
     shares: Vec<usize>,
     lane_of: Vec<usize>,
+    /// The other layout's lanes, swapped into `shares` and `lane_of` when it
+    /// wins.
+    other_shares: Vec<usize>,
+    other_lane_of: Vec<usize>,
     grants: Grants,
 }
 
-/// The grants the reservation queried, each at most once per
+/// The grants the reservations queried, each at most once per
 /// (representative, width), in dense tables, so their capacities are their
-/// whole allocation. A zero cell is not yet queried (no width rule grants
-/// zero slots; such a grant would only be queried again).
+/// whole allocation. A cell whose first stage is zero is not yet queried (no
+/// width rule grants zero slots; such a grant would only be queried again).
 #[derive(Debug, Default)]
 struct Grants {
     /// S, the length of a `heavy` row.
@@ -732,11 +746,11 @@ struct Grants {
     heavy_rows: usize,
     tail_rows: usize,
     /// The jobs above the mean load: every width `1..=S`, row-major.
-    heavy: Vec<usize>,
+    heavy: Vec<Grant>,
     /// Each width's column of `tail`, or `usize::MAX`.
     column: Vec<usize>,
     /// The other widened jobs, column-major over the widths they meet.
-    tail: Vec<usize>,
+    tail: Vec<Grant>,
 }
 
 impl Grants {
@@ -763,24 +777,25 @@ impl Grants {
             }
         }
         self.heavy.clear();
-        self.heavy.resize(self.heavy_rows * slots, 0);
+        self.heavy.resize(self.heavy_rows * slots, [0; STAGES]);
         self.column.clear();
         self.column.resize(slots + 1, usize::MAX);
         self.tail.clear();
     }
 
-    /// Job `j`'s grant at `width <= S`: one slot for a job the provider keeps
-    /// serial at S (see [`Columns::begin`]), otherwise its representative's
-    /// grant, queried with `query(representative, width)` on first use.
+    /// Job `j`'s stage widths at `width <= S`: one slot per stage for a job
+    /// whose providers keep every stage serial at S (see [`Columns::begin`]),
+    /// otherwise its representative's, queried with `query(representative,
+    /// width)` on first use.
     fn get(
         &mut self,
         columns: &Columns,
         j: usize,
         width: usize,
-        query: &impl Fn(usize, usize) -> usize,
-    ) -> usize {
+        query: &impl Fn(usize, usize) -> Grant,
+    ) -> Grant {
         if !columns.widens[j] {
-            return 1;
+            return [1; STAGES];
         }
         let r = columns.rep[j];
         let row = self.row[r];
@@ -789,22 +804,24 @@ impl Grants {
         } else {
             if self.column[width] == usize::MAX {
                 self.column[width] = self.tail.len() / self.tail_rows;
-                self.tail.resize(self.tail.len() + self.tail_rows, 0);
+                self.tail
+                    .resize(self.tail.len() + self.tail_rows, [0; STAGES]);
             }
             &mut self.tail[self.column[width] * self.tail_rows + row - self.heavy_rows]
         };
-        if *cell == 0 {
+        if cell[0] == 0 {
             *cell = query(r, width);
         }
         *cell
     }
 
     fn retained_bytes(&self) -> usize {
-        [&self.row, &self.heavy, &self.column, &self.tail]
-            .into_iter()
-            .map(Vec::capacity)
-            .fold(0, usize::saturating_add)
-            .saturating_mul(std::mem::size_of::<usize>())
+        words(self.row.capacity() + self.column.capacity()).saturating_add(
+            self.heavy
+                .capacity()
+                .saturating_add(self.tail.capacity())
+                .saturating_mul(std::mem::size_of::<Grant>()),
+        )
     }
 }
 
@@ -816,36 +833,105 @@ fn from_nanos(n: u128) -> Duration {
     )
 }
 
+/// What both reservation layouts read: the slot count and lane cap, the
+/// order, the serial times and the item-time table of the jobs above the
+/// mean load.
+struct Reservation<'a> {
+    slots: usize,
+    cap: usize,
+    order: &'a [usize],
+    times: &'a [Duration],
+    table: &'a [Duration],
+    targets: &'a [Duration],
+    tail: &'a [u128],
+    large: usize,
+}
+
+impl Reservation<'_> {
+    fn row(&self, i: usize) -> &[Duration] {
+        &self.table[i * self.slots..(i + 1) * self.slots]
+    }
+
+    /// The least width at which the `i`-th largest job meets `target`
+    /// (every target is at least each large job's least item time).
+    fn need(&self, i: usize, target: Duration) -> usize {
+        1 + self
+            .row(i)
+            .iter()
+            .position(|&t| t <= target)
+            .unwrap_or(self.slots - 1)
+    }
+
+    /// The large jobs above `target`, a prefix of the order.
+    fn reserved(&self, target: Duration) -> usize {
+        self.order[..self.large]
+            .iter()
+            .take_while(|&&j| self.times[j] > target)
+            .count()
+    }
+
+    /// Whether `target` passes: the reserved jobs' least widths fit in S,
+    /// and, for the exclusive layout, the other jobs' serial time fits on
+    /// the one-slot lanes left, `tail <= (S - used) * target`.
+    ///
+    /// Why the least passing target is found by bisection: as the target
+    /// rises each least width can only fall, and each job that leaves the
+    /// reservation frees at least one slot while adding at most the new
+    /// target to the tail, so a passing target keeps passing.
+    fn passes(&self, target: Duration, exclusive: bool) -> bool {
+        let reserved = self.reserved(target);
+        let used = (0..reserved)
+            .map(|i| self.need(i, target))
+            .fold(0usize, usize::saturating_add);
+        if used > self.slots {
+            return false;
+        }
+        if !exclusive {
+            return true;
+        }
+        let free = (self.slots - used) as u128;
+        (reserved == self.order.len() || free >= 1)
+            && self.tail[reserved] <= free.saturating_mul(target.as_nanos())
+    }
+}
+
 impl Moldable {
     /// Places the jobs, `order` largest first, on lanes of uneven widths
-    /// over `slots`, and returns the lanes with the modeled makespan, or no
-    /// score when more than `cap` lanes hold jobs (the batch decision's lane
-    /// count, which the candidate must not exceed). `query(r, w)` is the
-    /// provider's width for representative job `r` (see `columns`) on a lane
-    /// of `w` slots, queried at most once per pair, and `item_of(t, q)` the
-    /// modeled time of a job of serial time `t` granted `q` slots. The lanes
-    /// are written to `self.shares` and `self.lane_of`, including the empty
-    /// one-slot lanes, which the caller's compaction drops.
+    /// over `slots` with two reservations, and returns the better one's
+    /// modeled makespan (ties keep the shared layout), its lanes in
+    /// `self.shares` and `self.lane_of`, including the empty one-slot lanes,
+    /// which the caller's compaction drops; or no score when both put jobs on
+    /// more than `cap` lanes (the batch decision's lane count, which a
+    /// candidate must not exceed). `query(r, w)` is representative job `r`'s
+    /// stage widths (see `columns`) on a lane of `w` slots, queried at most
+    /// once per pair, and `item_of(j, q)` job `j`'s modeled time under stage
+    /// widths `q`.
     ///
     /// 1. The target's lower bound is `LB = max(ceil(sum t / S), max_j
     ///    min_w item(j, w))`. Only jobs above the mean load can raise the
     ///    second term, and fewer than S jobs are above it.
     /// 2. For a target `T >= LB`, each job with `t_j > T` needs the least
     ///    width `p_j(T)` with `item(j, p_j(T)) <= T`; the others take one
-    ///    slot. `T` passes when the needed widths sum to at most S, which is
-    ///    monotone in `T`, so a binary search over `LB` and the item times
-    ///    at least `LB` finds the least passing target (the largest job's
-    ///    serial time, if above `LB`, passes with no reservation).
+    ///    slot. The least `T` among `LB` and the item times at least `LB`
+    ///    that [passes](Reservation::passes) is found by bisection (the
+    ///    largest job's serial time, if above `LB`, passes with no
+    ///    reservation).
     /// 3. Each job above the target gets a lane of its width, the remaining
     ///    slots become one-slot lanes, and every other job, largest first,
-    ///    goes to the lane minimising `(load + item, jobs, lane)`.
+    ///    goes to the lane minimising `(load + item, jobs, lane)`: any lane
+    ///    in the shared layout, a one-slot lane in the exclusive one, whose
+    ///    target also had to fit the tail on those lanes.
     /// 4. Empty one-slot lanes are dropped, and their slots widen the
-    ///    reserved lanes, largest job first, while that job's grant still
-    ///    grows. Any slot left stays idle.
+    ///    reserved lanes, largest job first, while some stage of that job's
+    ///    grant still grows. Any slot left stays idle.
     ///
     /// The score is the completed placement's, not the target: a passing
     /// target does not prove that the tail fits under it.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Why the exclusive layout: the shared one's target counts only the
+    /// reserved widths, so a target that reserves every slot forces the
+    /// tail onto the reserved lanes, behind the largest jobs; the exclusive
+    /// layout is the one whose tail fits beside them.
     fn place(
         &mut self,
         (slots, cap): (usize, usize),
@@ -853,24 +939,30 @@ impl Moldable {
         times: &[Duration],
         columns: &Columns,
         (item_of, query): (
-            &impl Fn(Duration, usize) -> Duration,
-            &impl Fn(usize, usize) -> usize,
+            &impl Fn(usize, Grant) -> Duration,
+            &impl Fn(usize, usize) -> Grant,
         ),
     ) -> Option<Duration> {
         let Self {
             table,
             targets,
+            tail,
             wide,
             thin,
             shares,
             lane_of,
+            other_shares,
+            other_lane_of,
             grants,
         } = self;
         let grant = |g: &mut Grants, j: usize, w: usize| g.get(columns, j, w, query);
-        let item = |g: &mut Grants, j: usize, w: usize| item_of(times[j], grant(g, j, w));
-        let total = times
-            .iter()
-            .fold(0u128, |sum, t| sum.saturating_add(t.as_nanos()));
+        let item = |g: &mut Grants, j: usize, w: usize| item_of(j, grant(g, j, w));
+        tail.clear();
+        tail.resize(order.len() + 1, 0);
+        for (i, &j) in order.iter().enumerate().rev() {
+            tail[i] = tail[i + 1].saturating_add(times[j].as_nanos());
+        }
+        let total = tail[0];
         let mean = total.div_ceil(slots as u128);
         let heavy = order
             .iter()
@@ -883,8 +975,8 @@ impl Moldable {
                 table.push(item(grants, j, width));
             }
         }
-        let table = &*table;
-        let row = |i: usize| &table[i * slots..(i + 1) * slots];
+        let rows = &*table;
+        let row = |i: usize| &rows[i * slots..(i + 1) * slots];
         let bound = (0..heavy)
             .filter_map(|i| row(i).iter().min())
             .fold(from_nanos(mean), |bound, &least| bound.max(least));
@@ -900,92 +992,43 @@ impl Moldable {
         targets.sort_unstable();
         sorted();
         targets.dedup();
-        // Every target is at least each large job's least item time.
-        let need = |i: usize, target: Duration| {
-            1 + row(i)
-                .iter()
-                .position(|&t| t <= target)
-                .unwrap_or(slots - 1)
+        let reservation = Reservation {
+            slots,
+            cap,
+            order,
+            times,
+            table: rows,
+            targets,
+            tail,
+            large,
         };
-        let reserved = |target: Duration| {
-            order[..large]
-                .iter()
-                .take_while(|&&j| times[j] > target)
-                .count()
-        };
-        let passes = |target: Duration| {
-            (0..reserved(target))
-                .map(|i| need(i, target))
-                .fold(0usize, usize::saturating_add)
-                <= slots
-        };
-        let target = targets[targets.partition_point(|&t| !passes(t))];
-        let reserved = reserved(target);
-        let used: usize = (0..reserved).map(|i| need(i, target)).sum();
-
-        let count = reserved + (slots - used);
-        shares.clear();
-        lane_of.clear();
-        lane_of.resize(times.len(), 0);
-        wide.clear();
-        for (i, &j) in order.iter().take(reserved).enumerate() {
-            let width = need(i, target);
-            shares.push(width);
-            lane_of[j] = i;
-            wide.push((row(i)[width - 1], 1));
-        }
-        let mut heap = BinaryHeap::from(std::mem::take(thin));
-        heap.clear();
-        for k in reserved..count {
-            shares.push(1);
-            heap.push(Reverse((Duration::ZERO, 0, k)));
-        }
-        for &j in &order[reserved..] {
-            let mut best = heap.peek().map(|&Reverse((load, jobs, k))| {
-                (load.saturating_add(item(grants, j, 1)), jobs, k)
-            });
-            for (k, &(load, jobs)) in wide.iter().enumerate() {
-                let key = (load.saturating_add(item(grants, j, shares[k])), jobs, k);
-                best = Some(best.map_or(key, |best| best.min(key)));
+        let shared = layout(
+            &reservation,
+            false,
+            (wide, thin),
+            (shares, lane_of),
+            grants,
+            &item,
+            &grant,
+        );
+        let exclusive = layout(
+            &reservation,
+            true,
+            (wide, thin),
+            (other_shares, other_lane_of),
+            grants,
+            &item,
+            &grant,
+        );
+        // Ties keep the shared layout.
+        match (shared, exclusive) {
+            (shared, Some(x)) if shared.is_none_or(|shared| x < shared) => {
+                std::mem::swap(shares, other_shares);
+                std::mem::swap(lane_of, other_lane_of);
+                Some(x)
             }
-            let Some((load, jobs, k)) = best else {
-                unreachable!("a target passes with at least one lane")
-            };
-            if k < reserved {
-                wide[k] = (load, jobs + 1);
-            } else {
-                heap.pop();
-                heap.push(Reverse((load, jobs + 1, k)));
-            }
-            lane_of[j] = k;
+            (shared, _) => shared,
         }
-        let mut idle = heap
-            .iter()
-            .filter(|Reverse((_, jobs, _))| *jobs == 0)
-            .count();
-        let score = heap
-            .iter()
-            .map(|&Reverse((load, _, _))| load)
-            .max()
-            .unwrap_or(Duration::ZERO);
-        *thin = heap.into_vec();
-        if count - idle > cap {
-            return None;
-        }
-        for (k, &j) in order.iter().take(reserved).enumerate() {
-            while idle > 0 && grant(grants, j, shares[k] + 1) > grant(grants, j, shares[k]) {
-                shares[k] += 1;
-                idle -= 1;
-            }
-            wide[k].0 = Duration::ZERO;
-        }
-        // Each reserved lane's load at its final width, in one job pass.
-        for (j, &k) in lane_of.iter().enumerate() {
-            if k < reserved {
-                wide[k].0 = wide[k].0.saturating_add(item(grants, j, shares[k]));
-            }
-        }
-        Some(wide.iter().fold(score, |score, &(load, _)| score.max(load)))
     }
 
     fn retained_bytes(&self) -> usize {
@@ -994,6 +1037,7 @@ impl Moldable {
             .capacity()
             .saturating_add(self.targets.capacity())
             .saturating_mul(size_of::<Duration>())
+            .saturating_add(self.tail.capacity().saturating_mul(size_of::<u128>()))
             .saturating_add(
                 self.wide
                     .capacity()
@@ -1005,8 +1049,101 @@ impl Moldable {
                     .saturating_mul(size_of::<Reverse<(Duration, usize, usize)>>()),
             )
             .saturating_add(self.grants.retained_bytes())
-            .saturating_add(words(self.shares.capacity() + self.lane_of.capacity()))
+            .saturating_add(words(
+                self.shares.capacity()
+                    + self.lane_of.capacity()
+                    + self.other_shares.capacity()
+                    + self.other_lane_of.capacity(),
+            ))
     }
+}
+
+/// One-slot lanes by `(load, jobs, lane)`, as a heap's storage.
+type ThinLanes = Vec<Reverse<(Duration, usize, usize)>>;
+
+/// One reservation layout (steps 2 to 4 of [`Moldable::place`]) into
+/// `shares` and `lane_of`, with `wide` and `thin` as scratch; its score, or
+/// none when more than the cap of its lanes hold jobs.
+#[allow(clippy::too_many_arguments)]
+fn layout(
+    r: &Reservation<'_>,
+    exclusive: bool,
+    (wide, thin): (&mut Vec<(Duration, usize)>, &mut ThinLanes),
+    (shares, lane_of): (&mut Vec<usize>, &mut Vec<usize>),
+    grants: &mut Grants,
+    item: &impl Fn(&mut Grants, usize, usize) -> Duration,
+    grant: &impl Fn(&mut Grants, usize, usize) -> Grant,
+) -> Option<Duration> {
+    let (slots, order) = (r.slots, r.order);
+    let target = r.targets[r.targets.partition_point(|&t| !r.passes(t, exclusive))];
+    let reserved = r.reserved(target);
+    let used: usize = (0..reserved).map(|i| r.need(i, target)).sum();
+
+    let count = reserved + (slots - used);
+    shares.clear();
+    lane_of.clear();
+    lane_of.resize(r.times.len(), 0);
+    wide.clear();
+    for (i, &j) in order.iter().take(reserved).enumerate() {
+        let width = r.need(i, target);
+        shares.push(width);
+        lane_of[j] = i;
+        wide.push((r.row(i)[width - 1], 1));
+    }
+    let mut heap = BinaryHeap::from(std::mem::take(thin));
+    heap.clear();
+    for k in reserved..count {
+        shares.push(1);
+        heap.push(Reverse((Duration::ZERO, 0, k)));
+    }
+    for &j in &order[reserved..] {
+        let mut best = heap
+            .peek()
+            .map(|&Reverse((load, jobs, k))| (load.saturating_add(item(grants, j, 1)), jobs, k));
+        if !exclusive {
+            for (k, &(load, jobs)) in wide.iter().enumerate() {
+                let key = (load.saturating_add(item(grants, j, shares[k])), jobs, k);
+                best = Some(best.map_or(key, |best| best.min(key)));
+            }
+        }
+        let Some((load, jobs, k)) = best else {
+            unreachable!("a target passes with a lane for every job")
+        };
+        if k < reserved {
+            wide[k] = (load, jobs + 1);
+        } else {
+            heap.pop();
+            heap.push(Reverse((load, jobs + 1, k)));
+        }
+        lane_of[j] = k;
+    }
+    let mut idle = heap
+        .iter()
+        .filter(|Reverse((_, jobs, _))| *jobs == 0)
+        .count();
+    let score = heap
+        .iter()
+        .map(|&Reverse((load, _, _))| load)
+        .max()
+        .unwrap_or(Duration::ZERO);
+    *thin = heap.into_vec();
+    if count - idle > r.cap {
+        return None;
+    }
+    for (k, &j) in order.iter().take(reserved).enumerate() {
+        while idle > 0 && grows(grant(grants, j, shares[k] + 1), grant(grants, j, shares[k])) {
+            shares[k] += 1;
+            idle -= 1;
+        }
+        wide[k].0 = Duration::ZERO;
+    }
+    // Each reserved lane's load at its final width, in one job pass.
+    for (j, &k) in lane_of.iter().enumerate() {
+        if k < reserved {
+            wide[k].0 = wide[k].0.saturating_add(item(grants, j, shares[k]));
+        }
+    }
+    Some(wide.iter().fold(score, |score, &(load, _)| score.max(load)))
 }
 
 /// The modeled makespan of the equal-share placement over `count` lanes of

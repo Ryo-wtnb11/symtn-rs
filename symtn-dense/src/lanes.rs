@@ -22,15 +22,21 @@
 //! The baseline is `L0` lanes of equal shares of S (the remainder one slot
 //! each to the lowest lanes), jobs largest serial time first on the lane of
 //! least accumulated serial time, then fewest jobs, then lowest index.
-//! Under Auto, given a grant model (the width `grant(j, t_j, w)` a job's
-//! provider takes on a lane of `w` slots), the baseline is scored, then an
-//! equal-share placement for every lane count from `L0` down to one, and a
-//! large-job reservation on uneven lanes (discarded when more than `L0` of
-//! its lanes hold jobs), all under one model, and the lowest score is kept;
-//! ties keep the baseline, then the larger lane count, then the equal
-//! shares. A job's modeled time on a lane is its serial time when its
+//! Under Auto, given a job model (`JobModel`: the widths a job's stages'
+//! providers take on a lane of `w` slots and its modeled time there), the
+//! baseline is scored, then an equal-share placement for every lane count
+//! from `L0` down to one, and two large-job reservations on uneven lanes
+//! (each discarded when more than `L0` of its lanes hold jobs), all under
+//! one model, and the lowest score is kept; ties keep the baseline, then the
+//! larger lane count, then the equal shares, then the shared reservation. A
+//! single-stage job's modeled time on a lane is its serial time when its
 //! provider would run it on one thread there, otherwise its time over the
-//! provider's granted width plus the token's dispatch cost at that width.
+//! provider's granted width plus the token's dispatch cost at that width
+//! (`item_time`); a composite job of sequential stages sums that time over
+//! its stages, each at its own provider's width, and its serial time is its
+//! stages' sum. The shared reservation places the jobs below its target on
+//! any lane; the exclusive one gives each reserved job a lane of its own and
+//! requires the other jobs' serial time to fit the one-slot lanes left.
 //! The granted width is itself an estimate composed from the provider's
 //! public decisions (for a Packed GEMM plan an optimistic upper bound on its
 //! grid), and the model has no sublinear speedup, so a lower score is a
@@ -48,11 +54,13 @@
 //! count for the J' widened jobs, the others entering it as one precomputed
 //! sum and maximum, and only the `P <= L0` counts whose bound is below the
 //! best score so far are placed, with one heap per width class. The
-//! reservation adds, for the fewer than S jobs above the mean load, one
-//! query per width up to S (`O(S^3)` with the width scans), an
-//! `O(S^2 log S)` sort and binary search of its targets, and one placement
-//! of `O(J (R + log S))` steps for its R < S reserved lanes, querying each
-//! widened (time, key) group once per reserved width it evaluates. The
+//! reservations add, for the fewer than S jobs above the mean load, one
+//! query per width up to S (`O(S^3)` with the width scans), shared by both;
+//! an `O(J)` suffix of serial times; an `O(S^2 log S)` sort of the shared
+//! targets and one binary search of them per reservation; and one placement
+//! each of `O(J (R + log S))` steps for its R < S reserved lanes, querying
+//! each widened (time, key) group once per reserved width it evaluates and
+//! widening a reserved lane while some stage's grant still grows. The
 //! winner is written as flat tables in `O(J + L)`.
 //!
 //! A searched placement is kept in the process-global
@@ -75,7 +83,6 @@ mod placement;
 mod runner;
 
 pub use placement::flat_width;
-#[cfg(test)]
 pub(crate) use placement::item_time;
 pub(crate) use placement::{allocate, lane_allocations, searchable, LaneAllocationCache};
 use placement::{parallel_split, words, PlaceScratch};
@@ -84,10 +91,49 @@ use runner::Arena;
 pub(crate) use runner::Placed;
 pub use runner::{run_native, Assignment, Cut, Each, Outcome, Refusal, Split, Work};
 
-/// What a job's grant depends on besides its serial time, the execution
+/// What a job's model depends on besides its serial time, the execution
 /// context and its op's kind: jobs with equal keys and equal serial times get
-/// equal grants at every width.
-pub(crate) type GrantKey = [u64; 2];
+/// equal stage widths and equal item times at every width.
+pub(crate) type GrantKey = [u64; 3];
+
+/// The most sequential stages one job's model prices: a factorization and
+/// its two products (a polar decomposition).
+pub(crate) const STAGES: usize = 3;
+
+/// The widths a job's sequential stages take on one lane, in stage order: a
+/// single-stage job's provider width first, the unused stages at one slot.
+pub(crate) type Grant = [usize; STAGES];
+
+/// `width` as the grant of a single-stage job.
+pub(crate) fn single(width: usize) -> Grant {
+    let mut grant = [1; STAGES];
+    grant[0] = width;
+    grant
+}
+
+/// The placement's model of each job: the widths its stages' providers take
+/// on a lane, and its modeled time there. A single-stage closure
+/// `grant(j, serial, w) -> width` is a model whose time is [`item_time`]'s.
+pub(crate) trait JobModel {
+    /// The stage widths job `j` of serial time `serial` takes on a lane of
+    /// `width` reserved slots. A stage's width never grows as the lane
+    /// narrows.
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant;
+
+    /// Job `j`'s modeled time on a lane of `exec` where its stages take
+    /// `grant`: its serial time `serial` when every stage takes one slot.
+    fn item(&self, exec: &Exec<'_>, j: usize, serial: Duration, grant: Grant) -> Duration;
+}
+
+impl<F: Fn(usize, Duration, usize) -> usize> JobModel for F {
+    fn grant(&self, j: usize, serial: Duration, width: usize) -> Grant {
+        single(self(j, serial, width))
+    }
+
+    fn item(&self, exec: &Exec<'_>, _: usize, serial: Duration, grant: Grant) -> Duration {
+        item_time(exec, serial, grant[0])
+    }
+}
 
 /// A placed batch: lanes of nonzero shares summing to at most the budget,
 /// every job in exactly one lane, each lane's jobs ascending.

@@ -147,19 +147,29 @@ the lane of least accumulated serial time; a single lane takes every block
 before any ordering. When every block's provider width is modeled (every
 GEMM; a factorization whose every input is one matrix), the placement also scores
 an equal-share placement for every lane count from `L0` down to one and a
-large-block reservation under one model, and keeps the lowest score; ties
-keep the baseline, then the equal shares. The reservation finds the least
-target time at which the blocks above it, each on the narrowest lane that
-brings it under the target, fit in the thread count; it gives each such
-block that lane, makes the remaining threads one-thread lanes, places the
-other blocks largest first on the lane where they finish earliest, then
-widens the reserved lanes with the threads of unused one-thread lanes while
-the provider's width still grows. It is discarded when more than `L0` of its
-lanes hold blocks, and it is scored as placed, since a block below the
-target can still finish above it. The model charges a block its serial time
-where the provider would run it on one thread in that lane, otherwise its
-time over the provider's granted width plus the engine's dispatch cost at
-that width. The granted width is an estimate composed from the provider's
+two large-block reservations under one model, and keeps the lowest score;
+ties keep the baseline, then the equal shares, then the shared reservation.
+A reservation finds the least target time at which the blocks above it,
+each on the narrowest lane that brings it under the target, fit in the
+thread count; it gives each such block that lane, makes the remaining
+threads one-thread lanes, places the other blocks largest first on the lane
+where they finish earliest, then widens the reserved lanes with the threads
+of unused one-thread lanes while some stage's provider width still grows.
+The shared reservation may place the other blocks on a reserved lane; the
+exclusive one keeps each reserved block alone on its lane, and its target
+must also leave one-thread lanes enough for the other blocks' serial time.
+Each is discarded when more than `L0` of its lanes hold blocks, and scored
+as placed, since a block below the target can still finish above it. The
+model charges a block its serial time where the provider would run it on
+one thread in that lane, otherwise its time over the provider's granted
+width plus the engine's dispatch cost at that width. A composite block (a
+polar decomposition or a Hermitian `exp`) is charged per sequential stage:
+its factorization (SVD or eigh) and each product, each its own serial time
+(the factorization's under the engine's work model, a product's at
+tcontract's GEMM rate) over its own provider's width plus its own dispatch
+cost, summed; its serial time is the stages' sum. On a one-thread context
+the driver prices every block by its kind's cost alone, since the placement
+is then one sequential lane. The granted width is an estimate composed from the provider's
 public decisions: for a GEMM the plan's own two decisions (its `width_for`
 narrowing, then a Faer plan's one-item batch decision with the token's team
 capability, or a Packed plan's balanced-lanes decision, an optimistic upper
@@ -170,8 +180,9 @@ and one thread on a token without a team. The model has no sublinear
 speedup, so the choice is a scheduling estimate, not a promise of a faster
 run. The search queries the provider width of each group of blocks with the
 same estimated time and the same grant inputs (for GEMM, the plan's
-algorithm and the work; for a factorization, its total and payback work)
-once, at the full thread count; only the groups the provider widens there
+algorithm and the work; for a factorization, its total and payback work;
+for a composite block, its op, scalar, extents and whether its plans
+resolved, which fix every stage) once, at the full thread count; only the groups the provider widens there
 are queried again, once per distinct share width during the sweep, since a
 block the provider keeps serial at the full count stays serial at every
 narrower share; a lane count whose proved lower bound on its score is not

@@ -630,7 +630,7 @@ fn allocation(threads: usize, policy: BatchPolicy, work: &[f64]) -> (Vec<usize>,
             let mut tables = LaneTables::default();
             let grant = Some(|_, _, _| 1);
             let cache = lanes::LaneAllocationCache::new(StructureCacheKind::LaneAllocations, 0);
-            let key = (OpKind::Factorization, |_| [0; 2]);
+            let key = (OpKind::Factorization, |_| [0; 3]);
             lanes::allocate(exec, &times, key, mean, grant, &cache, &mut tables);
             let placement = tables.placement();
             let shares = (0..placement.lanes()).map(|l| placement.share(l)).collect();
@@ -713,12 +713,12 @@ impl BlockOp for PanicsAt {
         1.0
     }
 
-    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> usize {
-        1
+    fn grant(&self, _: usize, _: &(), _: &Exec<'_>, _: usize, _: Duration) -> crate::lanes::Grant {
+        [1; crate::lanes::STAGES]
     }
 
     fn grant_key(&self, _: usize, _: &()) -> GrantKey {
-        [0; 2]
+        [0; 3]
     }
 
     fn run(&self, index: usize, _: &mut (), (): &mut (), _: Exec<'_>) -> Result<(), DenseError> {

@@ -25,7 +25,7 @@ use tenferro_cpu::CpuEngine;
 
 use super::driver::{self, BlockOp, Entry, LaneMembers, OpKind};
 use crate::fresh::{split_fresh_segments, FreshParts};
-use crate::lanes::{recycle, GrantKey, LaneTables};
+use crate::lanes::{self, recycle, Grant, GrantKey, LaneTables};
 use crate::tenferro_adapter::{grouped_error, grouped_operand_lens, grouped_validate};
 use crate::{DenseError, DenseGemmBatchJob, DenseView, DenseViewMut, MatrixOp};
 
@@ -297,7 +297,21 @@ fn grant_key<T: Scalar>(plan: &Plan<T>, work: f64) -> GrantKey {
         Algorithm::Packed => 2,
         _ => 3,
     };
-    [algorithm, work.to_bits()]
+    [algorithm, work.to_bits(), 0]
+}
+
+/// [`grant`] of a plan from [`erased_plan`] at `T`.
+pub(crate) fn erased_grant<T: Scalar>(
+    plan: &ErasedPlan,
+    work: f64,
+    exec: &Exec<'_>,
+    budget: usize,
+    serial: Duration,
+) -> usize {
+    let plan = plan
+        .downcast_ref::<Plan<T>>()
+        .unwrap_or_else(|| unreachable!("the caller resolved the plan at this scalar"));
+    grant(plan, work, exec, budget, serial)
 }
 
 fn plan_of<T: Scalar>(plans: &[Arc<ErasedPlan>], index: usize) -> &Plan<T> {
@@ -338,9 +352,15 @@ impl<'a, T: Scalar> BlockOp for GemmBlocks<'a, T> {
         exec: &Exec<'_>,
         budget: usize,
         serial: Duration,
-    ) -> usize {
+    ) -> Grant {
         let work = work::<T>(&self.jobs[index]);
-        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+        lanes::single(grant(
+            plan_of::<T>(self.plans, *plan),
+            work,
+            exec,
+            budget,
+            serial,
+        ))
     }
 
     fn grant_key(&self, index: usize, (plan, _): &Self::Job) -> GrantKey {
@@ -411,9 +431,15 @@ impl<'a, T: Scalar + Default> BlockOp for FreshGemmBlocks<'_, 'a, T> {
         exec: &Exec<'_>,
         budget: usize,
         serial: Duration,
-    ) -> usize {
+    ) -> Grant {
         let work = work::<T>(&self.jobs[index]);
-        grant(plan_of::<T>(self.plans, *plan), work, exec, budget, serial)
+        lanes::single(grant(
+            plan_of::<T>(self.plans, *plan),
+            work,
+            exec,
+            budget,
+            serial,
+        ))
     }
 
     fn grant_key(&self, index: usize, (plan, _, _): &Self::Job) -> GrantKey {
