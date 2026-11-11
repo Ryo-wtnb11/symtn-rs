@@ -193,12 +193,17 @@ mod coefficient_cache_tests {
         )
         .unwrap());
 
-        assert!(ensure_recoupling_coefficients(
-            &mut workspace,
-            corrupt.task_view().unwrap(),
-            corrupt.identity_marker(),
-        )
-        .is_err());
+        assert!(matches!(
+            ensure_recoupling_coefficients(
+                &mut workspace,
+                corrupt.task_view().unwrap(),
+                corrupt.identity_marker(),
+            ),
+            Err(OperationError::CoefficientCountMismatch {
+                expected: 4,
+                actual: 0
+            })
+        ));
         assert_eq!(workspace.coefficient_scratch.len(), 4);
 
         assert!(ensure_recoupling_coefficients(
