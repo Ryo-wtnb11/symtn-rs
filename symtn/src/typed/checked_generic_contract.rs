@@ -636,7 +636,7 @@ where
     let (lease, resolution) = match staged.try_core::<S::Caps>()? {
         symtn_tensors::CoreRoute::Hit(core) => (None, core),
         symtn_tensors::CoreRoute::Miss(miss) => {
-            let mut lease = crate::runtime::ContextLease::new();
+            let mut lease = crate::runtime::ContextLease::checkout(engine);
             let resolution = D::lane(lease.context())?
                 .plan_staged_contract_beyond_core::<S::Caps, R>(engine, &mut staged, miss)?;
             (Some(lease), resolution)
@@ -708,7 +708,7 @@ where
     S: ContractExec<R, D>,
 {
     let output_axes = spec.output_axes();
-    let mut lease = crate::runtime::ContextLease::new();
+    let mut lease = crate::runtime::ContextLease::checkout(engine);
     D::lane(lease.context())?;
     let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
     let mut staged = symtn_tensors::StagedContract::multiplicity_free(

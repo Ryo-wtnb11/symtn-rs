@@ -3,9 +3,10 @@
 //! `contract(spec)` and by `Network::contract`: the network step passes the
 //! output split as its `ContractSpec` (TensorOperations `pAB`), so no separate
 //! permute pass and no third output-sized buffer follow the contraction. Both
-//! take TensorKit's `copyC` route: its per-call temporary (the Runtime keeps
-//! no execution pool, as TensorKit allocates it per call) and the result,
-//! the two buffers contract-then-permute also costs.
+//! take TensorKit's `copyC` route. On an engine that keeps no scratch it
+//! allocates its temporary and the result, the two buffers
+//! contract-then-permute also costs; the engine keeps the temporary, so a
+//! warm call allocates the result alone.
 
 use symtn::sector::{U1FusionRule, U1Irrep};
 use symtn::typed::Engine;
@@ -84,22 +85,25 @@ fn mixed_output_partition_costs_no_permute_pass() {
     );
 
     let (a, b) = operands(engine);
-    let mut moved = || {
-        a.contract(
-            engine,
-            &b,
-            &ContractSpec {
-                lhs: &[2],
-                rhs: &[0],
-                codomain: &[0, 2],
-                domain: &[1],
-            },
-        )
-        .unwrap()
+    let moved = |engine: &mut dyn Engine| {
+        output_sized_allocs(|| {
+            a.contract(
+                engine,
+                &b,
+                &ContractSpec {
+                    lhs: &[2],
+                    rhs: &[0],
+                    codomain: &[0, 2],
+                    domain: &[1],
+                },
+            )
+            .unwrap()
+        })
     };
-    // The result and the per-call copyC temporary, cold and warm.
-    assert_eq!(output_sized_allocs(&mut moved), 2);
-    assert_eq!(output_sized_allocs(&mut moved), 2);
+    // Cold, the result and the copyC temporary; warm, the result.
+    symtn::scratch::trim(engine);
+    assert_eq!(moved(engine), 2);
+    assert_eq!(moved(engine), 1);
 
     let (a, b) = operands(engine);
     assert_eq!(
@@ -113,18 +117,21 @@ fn mixed_output_partition_costs_no_permute_pass() {
         1
     );
     let (a, b) = operands(engine);
-    let mut mixed = || {
-        net(
-            &[op(&["p", "q"], &["c"]), op(&["c"], &["r"])],
-            &["p", "r"],
-            &["q"],
-        )
-        .contract(engine, &[&a, &b])
-        .unwrap()
+    let mixed = |engine: &mut dyn Engine| {
+        output_sized_allocs(|| {
+            net(
+                &[op(&["p", "q"], &["c"]), op(&["c"], &["r"])],
+                &["p", "r"],
+                &["q"],
+            )
+            .contract(engine, &[&a, &b])
+            .unwrap()
+        })
     };
-    // The step's spec is that same contract: its temporary and the result,
-    // cold and warm; no permute pass follows.
-    assert_eq!(output_sized_allocs(&mut mixed), 2);
-    assert_eq!(output_sized_allocs(&mut mixed), 2);
-    assert_eq!(output_sized_allocs(&mut mixed), 2);
+    // The step's spec is that same contract: its temporary and the result
+    // cold, the result warm; no permute pass follows.
+    symtn::scratch::trim(engine);
+    assert_eq!(mixed(engine), 2);
+    assert_eq!(mixed(engine), 1);
+    assert_eq!(mixed(engine), 1);
 }

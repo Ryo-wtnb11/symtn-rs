@@ -2390,6 +2390,7 @@ dependencies = [
  "symtn-sectors",
  "symtn-tensors",
  "tenferro-cpu",
+ "tenferro-runtime",
 ]
 
 [[package]]
@@ -2419,6 +2420,7 @@ dependencies = [
  "tenferro-cpu",
  "tenferro-gpu",
  "tenferro-linalg",
+ "tenferro-runtime",
  "tenferro-tensor",
  "tlinalg",
 ]

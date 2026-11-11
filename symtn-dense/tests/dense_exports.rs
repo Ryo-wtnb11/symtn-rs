@@ -1,8 +1,8 @@
 //! Export firewall for `symtn-dense`.
 //!
-//! Pins the exact names `lib.rs` re-exports and its one public module
-//! (`lanes`), under every feature combination at once, so adding or removing
-//! one fails here and is reviewed as an API change.
+//! Pins the exact names `lib.rs` re-exports and its public modules (`lanes`
+//! and `engine_slot`), under every feature combination at once, so adding or
+//! removing one fails here and is reviewed as an API change.
 //!
 //! Why a source scan and not an import list: an import list only proves
 //! presence, not absence.
@@ -14,11 +14,17 @@ use crate::export_scan::{not_unrestricted_pub, reexports, strip, use_leaves};
 /// Leaf names re-exported by `pub use` in `source`.
 fn exported_names(source: &str) -> Result<BTreeSet<String>, String> {
     let exports = reexports(source)?;
-    // The one public module: the `#[doc(hidden)]` lane runner that
-    // symtn-operations and symtn-tensors drive their block jobs through,
-    // whose own declarations `the_lanes_module_declares_exactly_the_pinned_names`
-    // pins.
-    if let Some(module) = exports.modules.iter().find(|module| *module != "lanes") {
+    // The public modules, both `#[doc(hidden)]`: the lane runner that
+    // symtn-operations and symtn-tensors drive their block jobs through, and
+    // the engine slot symtn keeps its eager contraction scratch in. Their
+    // own declarations are pinned by
+    // `the_lanes_module_declares_exactly_the_pinned_names` and
+    // `the_engine_slot_module_declares_exactly_the_pinned_names`.
+    if let Some(module) = exports
+        .modules
+        .iter()
+        .find(|module| !matches!(module.as_str(), "lanes" | "engine_slot"))
+    {
         return Err(format!("lib.rs gained a `pub mod {module}`"));
     }
     Ok(exports.names.into_keys().collect())
@@ -249,4 +255,13 @@ fn the_lanes_module_declares_exactly_the_pinned_names() {
     ] {
         assert_eq!(public_declarations(source), expected, "{file}");
     }
+}
+
+/// The engine slot's public surface is exactly its four free functions.
+#[test]
+fn the_engine_slot_module_declares_exactly_the_pinned_names() {
+    assert_eq!(
+        public_declarations(include_str!("../src/engine_slot.rs")),
+        ["fn checkout", "fn checkin", "fn retained_bytes", "fn clear"]
+    );
 }

@@ -20,8 +20,9 @@
 //! **Execution.** Every numerical operation takes the caller's execution
 //! context as its first argument ([`typed::ExecContext`]): an engine
 //! ([`typed::Engine`]), a [`typed::CpuEngine`] (serial, or over a
-//! [`typed::Pool`] of threads) for Host tensors. The caller owns the engine; symtn stores none, and the
-//! dense provider (faer or a linked BLAS/LAPACK) is the one compiled in by
+//! [`typed::Pool`] of threads) for Host tensors. The caller owns the engine; symtn stores none.
+//! An eager Host contraction keeps its execution scratch in the caller's CPU
+//! engine between calls ([`scratch`]). The dense provider (faer or a linked BLAS/LAPACK) is the one compiled in by
 //! cargo feature. A [`typed::Runtime`] holds prepared structural state only:
 //! the per-rule contraction/tree-transform contexts, reusable scratch, and
 //! the contraction-plan cache `symtn-network` keys by network topology.
@@ -101,6 +102,7 @@ pub mod expert;
 #[cfg(feature = "krylov")]
 pub mod krylov;
 mod runtime;
+pub mod scratch;
 pub mod sector;
 mod tensor_product;
 #[cfg(test)]

@@ -139,6 +139,7 @@ fn facade_exports_are_exactly_the_listed_names() {
     assert_exports("symtn::sector", &module_exports("sector.rs").0, SECTOR);
     assert_exports("symtn::expert", &module_exports("expert.rs").0, EXPERT);
     assert_exports("symtn::cache", &module_exports("cache.rs").0, CACHE);
+    assert_exports("symtn::scratch", &module_exports("scratch.rs").0, SCRATCH);
     assert_exports(
         "symtn::typed::__network",
         &module_exports("typed/__network.rs").0,
@@ -171,6 +172,7 @@ fn each_name_has_one_path() {
         ("sector", SECTOR),
         ("expert", EXPERT),
         ("cache", CACHE),
+        ("scratch", SCRATCH),
         ("typed::__network", NETWORK),
     ];
     for (index, (left, left_names)) in modules.iter().enumerate() {
@@ -211,6 +213,7 @@ const ROOT: &[&str] = &[
     "expert",
     "krylov",
     "mathematics",
+    "scratch",
     "sector",
     "typed",
 ];
@@ -467,6 +470,8 @@ const EXPERT: &[&str] = &[
     "is_diagonal",
     "reset_cuda_transfer_stats",
 ];
+/// The engine-kept eager contraction scratch.
+const SCRATCH: &[&str] = &["retained_bytes", "trim"];
 /// The one public control of the process-global structure caches.
 const CACHE: &[&str] = &[
     "StructureCacheInfo",

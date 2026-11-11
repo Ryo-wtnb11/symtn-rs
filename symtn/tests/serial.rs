@@ -44,6 +44,7 @@ mod contract_route_host_allocations;
 mod contraction_output_allocations;
 mod direct_factor_publication;
 mod eager_copy_c_pool;
+mod engine_scratch;
 mod exp_pade_allocations;
 mod factorization_leg_roles;
 mod identity_adjoint_borrow_allocations;

@@ -100,7 +100,52 @@ where
         .saturating_add(lane.contract_backend().dense().retained_bytes())
 }
 
+/// The whole retained ledger of one lane: its own buffers and both dense
+/// executors' staging.
+fn lane_retained_bytes<D, Key, C>(lane: &CoefficientCtx<D, Key, C>) -> usize
+where
+    D: symtn_tensors::DenseBlockScalar + symtn_tensors::RecouplingCoefficientAction<C>,
+    C: symtn_tensors::DenseBlockScalar,
+    Key: 'static + Clone + Eq + Hash + Send + Sync,
+    DenseTreeTransformOperations: symtn_tensors::TreeTransformBackend<
+        D,
+        C,
+        Workspace = symtn_tensors::TreeTransformWorkspace<D>,
+    >,
+{
+    lane.retained_bytes()
+        .saturating_add(dense_scratch_bytes(lane))
+}
+
+/// [`lane_retained_bytes`] of a boxed lane, plus its box.
+fn boxed_lane_retained_bytes<T>(lane: &Option<Box<T>>, bytes: impl Fn(&T) -> usize) -> usize {
+    lane.as_deref().map_or(0, |lane| {
+        bytes(lane).saturating_add(std::mem::size_of::<T>())
+    })
+}
+
 impl<Key: Clone + Eq + Hash + Send + Sync + 'static> Ctxs<Key> {
+    /// The retained ledger of every built lane, the boxes of later lanes
+    /// included (the first lane is stored inline).
+    pub(crate) fn retained_bytes(&self) -> usize {
+        let first = match &self.first {
+            None => 0,
+            Some(FirstLane::F64(lane)) => lane_retained_bytes(lane),
+            Some(FirstLane::C64(lane)) => lane_retained_bytes(lane),
+            Some(FirstLane::F32(lane)) => lane_retained_bytes(lane),
+            Some(FirstLane::C32(lane)) => lane_retained_bytes(lane),
+        };
+        [
+            first,
+            boxed_lane_retained_bytes(&self.f64, lane_retained_bytes),
+            boxed_lane_retained_bytes(&self.c64, lane_retained_bytes),
+            boxed_lane_retained_bytes(&self.f32, lane_retained_bytes),
+            boxed_lane_retained_bytes(&self.c32, lane_retained_bytes),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+
     /// The dense executors' kept call scratch of every built lane.
     pub(crate) fn dense_scratch_bytes(&self) -> usize {
         let first = match &self.first {
@@ -180,6 +225,16 @@ macro_rules! define_tensor_execution_context {
             pub(crate) fn dense_scratch_bytes(&self) -> usize {
                 [$(self.$field.dense_scratch_bytes(),)+
                     self.mf_c64_coeff_c64.as_deref().map_or(0, dense_scratch_bytes)]
+                .into_iter()
+                .fold(0, usize::saturating_add)
+            }
+
+            /// The retained ledger of every built lane, with the boxes of
+            /// boxed lanes. The context itself lives wherever its owner
+            /// keeps it, and is charged there.
+            pub(crate) fn retained_bytes(&self) -> usize {
+                [$(self.$field.retained_bytes(),)+
+                    boxed_lane_retained_bytes(&self.mf_c64_coeff_c64, lane_retained_bytes)]
                 .into_iter()
                 .fold(0, usize::saturating_add)
             }

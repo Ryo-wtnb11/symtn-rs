@@ -75,36 +75,42 @@ fn warm_cached_pool_reuses_receiver_sized_dense_payloads() {
 
     // Depending on the greedy tie break, the sole receiver is either 5x11
     // (A*B) or 7x11 (A*C). Both are distinct from the 11x11 escaped output.
-    // After the pool is warm the receiver itself is reused; the one
-    // receiver-sized allocation left is its step's `copyC` temporary, which
-    // is per-call scratch (the Runtime keeps no execution pool).
-    let mut receiver_sized = 0;
-    for receiver_elements in [5 * 11, 7 * 11] {
-        reset_event_counters();
-        PAYLOAD_SIZE.store(
-            receiver_elements * std::mem::size_of::<f64>(),
-            Ordering::Relaxed,
-        );
-        reset_live_registry();
-        ENABLED.store(true, Ordering::SeqCst);
-        let output = net(
-            &[
-                op(&["a_leg"], &["b_leg"]),
-                op(&["b_leg"], &["c_out"]),
-                op(&["a_leg"], &["d"]),
-            ],
-            &["c_out"],
-            &["d"],
-        )
-        .contract(engine, &[&a, &b, &c])
-        .unwrap();
-        assert_eq!(output.dense_data().unwrap().len(), 11 * 11);
-        drop(output);
-        ENABLED.store(false, Ordering::SeqCst);
-        receiver_sized += PAYLOAD_ALLOC_CALLS.load(Ordering::Relaxed);
-        assert_eq!(REGISTRY_OVERFLOWS.load(Ordering::Relaxed), 0);
-    }
-    assert_eq!(receiver_sized, 1);
+    // After the pool is warm the receiver itself is reused, and the engine
+    // keeps the step's `copyC` temporary, so a warm call allocates nothing
+    // receiver-sized; released, the temporary is the one receiver-sized
+    // allocation.
+    let receiver_sized = |engine: &mut dyn Engine| {
+        let mut calls = 0;
+        for receiver_elements in [5 * 11, 7 * 11] {
+            reset_event_counters();
+            PAYLOAD_SIZE.store(
+                receiver_elements * std::mem::size_of::<f64>(),
+                Ordering::Relaxed,
+            );
+            reset_live_registry();
+            ENABLED.store(true, Ordering::SeqCst);
+            let output = net(
+                &[
+                    op(&["a_leg"], &["b_leg"]),
+                    op(&["b_leg"], &["c_out"]),
+                    op(&["a_leg"], &["d"]),
+                ],
+                &["c_out"],
+                &["d"],
+            )
+            .contract(engine, &[&a, &b, &c])
+            .unwrap();
+            assert_eq!(output.dense_data().unwrap().len(), 11 * 11);
+            drop(output);
+            ENABLED.store(false, Ordering::SeqCst);
+            calls += PAYLOAD_ALLOC_CALLS.load(Ordering::Relaxed);
+            assert_eq!(REGISTRY_OVERFLOWS.load(Ordering::Relaxed), 0);
+        }
+        calls
+    };
+    assert_eq!(receiver_sized(engine), 0);
+    symtn::scratch::trim(engine);
+    assert_eq!(receiver_sized(engine), 1);
 }
 
 struct CountingAllocator;
@@ -519,8 +525,9 @@ fn temporary_order_fixture(engine: &mut dyn Engine, runtime: &Runtime) -> (Vec<U
 /// layout of `T`, so a first execution allocates exactly two `dim(T)`
 /// payloads: `T` and the producer's one layout pass (the output transform into
 /// the rhs layout, or the repartition into the lhs layout). A source copy of
-/// `T` in the consuming step adds more. It runs on a fresh runtime because the
-/// contraction scratch is retained across calls.
+/// `T` in the consuming step adds more. Each execution runs on a fresh
+/// runtime and on an engine that keeps no contraction scratch (both are
+/// retained across calls), so it is a first execution.
 fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
     let (oracle_inputs, terms) =
         temporary_order_fixture(engine, &Runtime::builder().build().unwrap());
@@ -657,6 +664,7 @@ fn temporary_contracted_order_worker(engine: &mut dyn Engine) {
         let plan = ContractionPlan::from_steps(&ir, steps).unwrap();
         let planned = network.plan_with(&refs, plan).unwrap();
 
+        symtn::scratch::trim(engine);
         reset_event_counters();
         PAYLOAD_SIZE.store(t_bytes, Ordering::Relaxed);
         reset_live_registry();
@@ -994,8 +1002,12 @@ where
     sample_overwrite_replays(
         chi,
         reuse,
-        |workspace| planned.execute(engine, &refs, workspace).unwrap(),
+        |workspace| planned.execute(&mut *engine, &refs, workspace).unwrap(),
         &oracle,
+    );
+    println!(
+        "SYMTN_TYPED_ENGINE_SCRATCH_BYTES {}",
+        symtn::scratch::retained_bytes(engine)
     );
 }
 
@@ -1114,7 +1126,7 @@ fn run_typed_overwrite_worker(
     let output = Command::new(std::env::current_exe().unwrap())
         .args([
             "--exact",
-            "typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm",
+            "typed_overwrite_replay_allocates_the_output_alone_in_a_kept_workspace",
             "--nocapture",
         ])
         .env("SYMTN_TYPED_ALLOC_RULE", rule)
@@ -1297,7 +1309,7 @@ fn warm_lazy_conj_replay_does_not_materialize_the_input() {
 }
 
 #[test]
-fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
+fn typed_overwrite_replay_allocates_the_output_alone_in_a_kept_workspace() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let _test_guard = lock_unpoisoned(&TEST_LOCK);
     if let Ok(dtype) = std::env::var("SYMTN_TYPED_ALLOC_DTYPE") {
@@ -1324,7 +1336,14 @@ fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
     }
 
     for dtype in ["f64", "c64"] {
-        for chi in [8, 16, 32, 64] {
+        // Why not chi = 32 or 31: the counter matches by size, and those
+        // payloads collide with dependency buffers. A 33² f64 payload is the
+        // 8712-byte LRU table of the placeholder store each
+        // `take_extension_caches` allocates (tensor4all/tenferro-rs#2587); a
+        // 32² one is faer's per-call GEMM packing buffer
+        // (`gemm_common::gemm::gemm_basic_generic` → `MemBuffer::new`,
+        // tensor4all/faer#402).
+        for chi in [8, 16, 30, 64] {
             let fresh = run_typed_overwrite_worker("u1", dtype, chi, false);
             let warm = run_typed_overwrite_worker("u1", dtype, chi, true);
             assert_eq!(fresh.len(), 3);
@@ -1348,16 +1367,17 @@ fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
                 median3(fresh_payload_retained),
                 median3(warm_payload_retained),
             );
+            // The engine keeps the first step's `copyC` temporary from the
+            // warm-up calls, so no measured replay allocates it. Retained
+            // bytes count only allocations made during the measurement; the
+            // engine's own scratch ledger is reported by the worker.
             assert!(
                 fresh.iter().all(|sample| {
                     sample.payload_retained_live_bytes == sample.payload_size_bytes
                         && sample.payload_output_live_bytes == sample.payload_size_bytes
-                        // The first step's reordered output is the default order plus
-                        // a permute (TensorKit `copyC`): its per-call temporary
-                        // (the Runtime keeps no execution pool, as TensorKit allocates
-                        // the `copyC` temporary per call), that step's result and the
-                        // network output allocate.
-                        && sample.payload_alloc_calls == 3
+                        // A fresh workspace allocates the first step's
+                        // result, which it keeps, and the network output.
+                        && sample.payload_alloc_calls == 2
                         && sample.registry_overflows == 0
                 }),
                 "{diagnostics}; fresh samples={fresh:?}"
@@ -1366,8 +1386,9 @@ fn typed_overwrite_replay_allocates_three_payloads_fresh_and_two_warm() {
                 warm.iter().all(|sample| {
                     sample.payload_retained_live_bytes == 0
                         && sample.payload_output_live_bytes == sample.payload_size_bytes
-                        // The `copyC` temporary and the network output.
-                        && sample.payload_alloc_calls == 2
+                        // The kept workspace reuses the step's result: the
+                        // network output alone.
+                        && sample.payload_alloc_calls == 1
                         && sample.registry_overflows == 0
                 }),
                 "{diagnostics}; warm samples={warm:?}"

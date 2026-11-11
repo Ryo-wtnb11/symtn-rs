@@ -54,6 +54,9 @@ symtn-operations = { version = "0.1.1", path = "../symtn-operations", default-fe
 symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features = false }
 
 [dev-dependencies]
+# The CPU engine's extension-store limits, set by the engine-scratch tests and
+# the `symtn::scratch` example; the version tenferro-cpu 0.11.0 resolves.
+tenferro-runtime = { version = "=0.11.0", default-features = false }
 # External categories of the typed-facade extension tests.
 fusion-symbols = { version = "0.10.0", default-features = false }
 rayon = "1.10"

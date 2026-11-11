@@ -627,3 +627,80 @@ fn runtimes_share_completed_transformers_and_expired_weak_handles_run_eagerly() 
         .unwrap();
     assert_eq!(actual, expected_data);
 }
+
+/// The Unique planning scratch a cold transform compile grows is charged to
+/// the engine-kept lease and released by trim. Fresh U(1) charges make the
+/// operand transform a completed-transformer miss; the same call on a second
+/// fresh engine then hits, so its lease holds every other buffer at the same
+/// capacity and no planning scratch.
+#[test]
+fn unique_planning_scratch_is_charged_and_released() {
+    // Isolated: a concurrent test's cache clear would turn the hit a miss.
+    if crate::test_cache::run_isolated_or_return(
+        "SYMTN_UNIQUE_PLANNING_SCRATCH_ISOLATED",
+        "runtime::tests::unique_planning_scratch_is_charged_and_released",
+    ) {
+        return;
+    }
+    use symtn_core::{U1FusionRule, U1Irrep};
+    let runtime = Runtime::builder().build().unwrap();
+    // (planning bytes, the whole lease's ledger)
+    let ledger = |engine: &mut symtn_dense::CpuEngine| {
+        let mut lease = ContextLease::checkout(engine);
+        let planning = lease
+            .context()
+            .multiplicity_free_lane::<f64>()
+            .unwrap()
+            .tree_context()
+            .planning_retained_bytes();
+        let total = lease.retained_bytes();
+        lease.checkin(engine);
+        (planning, total)
+    };
+    let fixture = |charge: i32| {
+        let engine = &mut symtn_dense::CpuEngine::serial();
+        let leg = GradedSpace::try_new(
+            Arc::new(U1FusionRule),
+            [(U1Irrep::new(charge), 1), (U1Irrep::new(-charge), 1)],
+        )
+        .unwrap();
+        let a: TensorMap<_, f64> =
+            TensorMap::rand_with_seed(engine, &runtime, [&leg, &leg, &leg], [&leg, &leg, &leg], 1)
+                .unwrap();
+        let b: TensorMap<_, f64> =
+            TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 2).unwrap();
+        (a, b)
+    };
+    let spec = crate::typed::ContractSpec {
+        lhs: &[0],
+        rhs: &[1],
+        codomain: &[0, 1, 2],
+        domain: &[3, 4, 5],
+    };
+    let run = |engine: &mut symtn_dense::CpuEngine,
+               (a, b): &(TensorMap<_, f64>, TensorMap<_, f64>)| {
+        drop(a.contract(engine, b, &spec).unwrap());
+    };
+    let operands = fixture(7_311);
+    let misses = crate::test_cache::completed().misses();
+    let missed = &mut symtn_dense::CpuEngine::serial();
+    run(missed, &operands);
+    assert!(
+        crate::test_cache::completed().misses() > misses,
+        "a transform miss"
+    );
+    let (planning, missed_total) = ledger(missed);
+    let hit = &mut symtn_dense::CpuEngine::serial();
+    run(hit, &operands);
+    let (hit_planning, hit_total) = ledger(hit);
+    // What: the miss grew the planning scratch, and the lease charges
+    // exactly it on top of the buffers the hit lane also holds.
+    assert!(planning > 0);
+    assert_eq!(hit_planning, 0);
+    assert_eq!(missed_total - hit_total, planning);
+    crate::scratch::trim(missed);
+    assert_eq!(crate::scratch::retained_bytes(missed), 0);
+    // What: after trim the next miss reallocates it.
+    run(missed, &fixture(7_312));
+    assert!(ledger(missed).0 > 0);
+}

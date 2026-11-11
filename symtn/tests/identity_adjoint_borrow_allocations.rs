@@ -92,10 +92,11 @@ macro_rules! assert_close {
     }};
 }
 
-/// Asserts, at two degeneracy scales, that one warm call
-/// allocates nothing of exactly `|p|` bytes and at least one buffer of
-/// `|u|` bytes, and (oracle: materialize `a`, then contract) that its value
-/// is unchanged; `$spaces(scale)` gives `(V, X)`.
+/// Asserts, at two degeneracy scales, that a call on an engine keeping no
+/// scratch allocates nothing of exactly `|p|` bytes and at least one buffer
+/// of `|u|` bytes, that a warm call allocates neither, and (oracle:
+/// materialize `a`, then contract) that its value is unchanged;
+/// `$spaces(scale)` gives `(V, X)`.
 macro_rules! assert_borrowed {
     ($engine:ident, $name:expr, $fixture:ident, $spaces:expr) => {{
         for scale in [1, 4] {
@@ -131,9 +132,12 @@ macro_rules! assert_borrowed {
                 .unwrap();
             assert_close!($engine, &got, &want);
             call($engine);
-            call($engine);
+            // Cold (the engine keeps no scratch): `u` is copied into fresh
+            // scratch, the positive control, while `a` never is.
+            symtn::scratch::trim($engine);
             let ((), p_allocs) =
                 counting_alloc::measure_matching(p_bytes..=p_bytes, || call($engine));
+            symtn::scratch::trim($engine);
             let ((), u_allocs) =
                 counting_alloc::measure_matching(u_bytes..=u_bytes, || call($engine));
             let (p_copies, u_copies) = (p_allocs.matched_calls, u_allocs.matched_calls);
@@ -152,6 +156,17 @@ macro_rules! assert_borrowed {
             let what = format!("{} {} x{scale}", $name, stringify!($fixture));
             assert_eq!(p_copies, 0, "{what}");
             assert!(u_copies >= 1, "{what}");
+            // What: warm, the engine-kept scratch takes `u`'s copy, and `a`
+            // is still never copied.
+            let ((), warm_p) =
+                counting_alloc::measure_matching(p_bytes..=p_bytes, || call($engine));
+            let ((), warm_u) =
+                counting_alloc::measure_matching(u_bytes..=u_bytes, || call($engine));
+            assert_eq!(
+                warm_p.matched_calls + warm_u.matched_calls,
+                0,
+                "{what} warm"
+            );
         }
     }};
 }

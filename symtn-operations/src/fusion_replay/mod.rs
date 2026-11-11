@@ -153,6 +153,27 @@ impl<T> Default for HostFusionBlockContractWorkspace<T> {
     }
 }
 
+impl<T> HostFusionBlockContractWorkspace<T> {
+    /// Bytes of every buffer's capacity: the irregular groups' packed payload
+    /// scratch and the zero-stride and fresh-report bookkeeping.
+    #[doc(hidden)]
+    pub fn retained_bytes(&self) -> usize {
+        self.scratch
+            .capacity()
+            .saturating_mul(std::mem::size_of::<T>())
+            .saturating_add(
+                self.zero_strides
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<isize>()),
+            )
+            .saturating_add(
+                self.fresh_reported
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<bool>()),
+            )
+    }
+}
+
 impl<T> ReportsPlacement for HostFusionBlockContractWorkspace<T> {
     #[inline]
     fn placement(&self) -> Placement {

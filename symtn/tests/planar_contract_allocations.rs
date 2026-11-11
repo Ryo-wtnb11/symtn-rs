@@ -1,13 +1,14 @@
-//! Allocation ledger of `planar_contract`, warm, one dense thread.
+//! Allocation ledger of `planar_contract`, one dense thread.
 //!
 //! Payload-sized allocations only (at least half the smallest payload), so
 //! per-call plan metadata is not counted. The reference is the core alone:
 //! `compose` of the operands already transposed by hand, whose payload
 //! allocations are its output plus whatever the dense provider's GEMM owns.
-//! The hand-written sequence owns every transposed payload. `planar_contract`
-//! takes the same work: its operand and output transposes write per-call
-//! scratch, as TensorOperations allocates its temporaries per call, so it
-//! must match the hand sequence and `planar_contract_into` must match it less
+//! The hand-written sequence owns every transposed payload. On an engine
+//! that keeps no scratch, `planar_contract` takes the same work: its operand
+//! and output transposes write fresh scratch, so it matches the hand
+//! sequence. The engine keeps that scratch, so a warm `planar_contract`
+//! allocates only what the core does, and `planar_contract_into` that less
 //! the output.
 
 use crate::counting_alloc;
@@ -119,10 +120,7 @@ fn planar_contract_owns_only_its_output() {
         let core = payloads(payload, || {
             drop(lhs_core.compose(engine, &rhs_core).unwrap())
         });
-        let eager = payloads(payload, || {
-            drop(a.planar_contract(engine, rhs, &spec).unwrap())
-        });
-        let into = payloads(payload, || {
+        let warm_into = payloads(payload, || {
             a.planar_contract_into(
                 engine,
                 rhs,
@@ -133,6 +131,13 @@ fn planar_contract_owns_only_its_output() {
             )
             .unwrap()
         });
+        let warm = payloads(payload, || {
+            drop(a.planar_contract(engine, rhs, &spec).unwrap())
+        });
+        symtn::scratch::trim(engine);
+        let cold = payloads(payload, || {
+            drop(a.planar_contract(engine, rhs, &spec).unwrap())
+        });
         let hand_written = payloads(payload, || {
             let lhs = a.transpose(engine, lhs_steps.0, lhs_steps.1).unwrap();
             let rhs = rhs.transpose(engine, rhs_steps.0, rhs_steps.1).unwrap();
@@ -140,12 +145,13 @@ fn planar_contract_owns_only_its_output() {
         });
         assert!(core >= 1, "{spec:?}: the core owns its output");
         assert_eq!(
-            eager, hand_written,
-            "{spec:?}: eager = the hand sequence's transposes and core"
+            cold, hand_written,
+            "{spec:?}: cold = the hand sequence's transposes and core"
         );
+        assert_eq!(warm, core, "{spec:?}: warm = the core alone");
         assert_eq!(
-            into,
-            hand_written - 1,
+            warm_into,
+            core - 1,
             "{spec:?}: the destination form owns no output payload"
         );
         // An identity `transpose` returns its input, so the golden-chain

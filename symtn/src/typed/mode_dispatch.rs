@@ -820,7 +820,7 @@ where
         beta: D,
     ) -> Result<(), Self::FacadeError> {
         let output_axes = spec.output_axes();
-        let mut lease = crate::runtime::ContextLease::new();
+        let mut lease = crate::runtime::ContextLease::checkout(engine);
         lease.context().generic_lane::<D>()?;
         let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
         let mut staged = symtn_tensors::StagedContract::checked_generic(
@@ -891,7 +891,7 @@ where
     S: ContractExec<R, D>,
 {
     // The kernel resolves the generic lane under this lease, once.
-    let lease = crate::runtime::ContextLease::new();
+    let lease = crate::runtime::ContextLease::checkout(engine);
     let (lhs_operand, rhs_operand) = (lhs.fusion_operand(), rhs.fusion_operand());
     let mut staged = symtn_tensors::StagedContract::checked_generic(
         (

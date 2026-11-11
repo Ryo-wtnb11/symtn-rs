@@ -472,7 +472,8 @@ impl PlannedNetwork {
     /// ([`Error::PlacementMismatch`]) or a compact (diagonal) operand. Every
     /// rejection is decided before any allocation or kernel, and nothing
     /// falls back to Host or transfers. Pass the same `workspace` to repeated
-    /// calls to reuse its intermediates.
+    /// calls to reuse its intermediates; each step's Host execution scratch
+    /// is kept in the caller's CPU engine ([`symtn::scratch`]).
     ///
     /// This does not accept or preserve a caller-owned output destination;
     /// successful execution returns a new owned tensor.

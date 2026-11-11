@@ -234,23 +234,25 @@ fn eager_complex_copy_c_scratch_is_allocator_zeroed() {
         Complex64::new(0.0, 0.0),
     )
     .unwrap();
-    let ((), allocs) = counting_alloc::measure_matching(out_bytes..=out_bytes, || {
-        a.contract_into(
-            engine,
-            &b,
-            &spec,
-            &mut out,
-            Complex64::new(1.0, 0.0),
-            Complex64::new(0.0, 0.0),
-        )
-        .unwrap()
-    });
-    assert!(
-        allocs.matched_calls >= 1,
-        "premise: per-call scratch {allocs:?}"
-    );
-    assert_eq!(
-        allocs.matched_zeroed_calls, allocs.matched_calls,
-        "{allocs:?}"
-    );
+    let into = |engine: &mut symtn_dense::CpuEngine, out: &mut TensorMap<_, Complex64>| {
+        counting_alloc::measure_matching(out_bytes..=out_bytes, || {
+            a.contract_into(
+                engine,
+                &b,
+                &spec,
+                out,
+                Complex64::new(1.0, 0.0),
+                Complex64::new(0.0, 0.0),
+            )
+            .unwrap()
+        })
+        .1
+    };
+    // The engine keeps the temporary; released, the next call allocates it.
+    symtn::scratch::trim(engine);
+    let cold = into(engine, &mut out);
+    assert!(cold.matched_calls >= 1, "premise: cold scratch {cold:?}");
+    assert_eq!(cold.matched_zeroed_calls, cold.matched_calls, "{cold:?}");
+    // What: warm, the kept temporary is reused.
+    assert_eq!(into(engine, &mut out).matched_calls, 0);
 }

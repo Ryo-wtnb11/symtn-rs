@@ -1,10 +1,10 @@
 //! An eager `contract(spec)` that takes TensorKit `blas_contract!`'s `copyC`
 //! route (a zero-copy contraction into a temporary, then one permute into the
-//! result) allocates exactly two output-sized buffers, warm or cold: the
-//! temporary and the returned tensor. `contract_into` takes the same
-//! route and allocates only the temporary. Like TensorKit, whose `copyC`
-//! temporary is allocated per call, the temporary is per-call scratch: the
-//! Runtime keeps no execution pool, because the engine is caller-owned.
+//! result) allocates two output-sized buffers on an engine that keeps no
+//! scratch: the temporary and the returned tensor; `contract_into` takes the
+//! same route and allocates only the temporary. The caller's engine keeps the
+//! temporary between calls (`symtn::scratch`), so a warm call allocates only
+//! its result, and `contract_into` nothing output-sized.
 
 use std::sync::Arc;
 
@@ -36,7 +36,7 @@ fn operands(runtime: &Runtime) -> (Map, Map) {
 }
 
 #[test]
-fn warm_split_moving_eager_contract_allocates_only_its_result() {
+fn split_moving_eager_contract_keeps_its_copy_c_temporary_in_the_engine() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
@@ -50,30 +50,44 @@ fn warm_split_moving_eager_contract_allocates_only_its_result() {
         codomain: &[0, 2],
         domain: &[1],
     };
-    // What: the result and the temporary, never an operand-sized copy or a
-    // second temporary.
-    for _ in 0..4 {
+    // What: cold, the result and the temporary, never an operand-sized copy
+    // or a second temporary; warm, the result alone.
+    assert_eq!(
+        sized_allocs(output_bytes, || a.contract(engine, &b, &spec).unwrap()),
+        2
+    );
+    for _ in 0..3 {
         assert_eq!(
             sized_allocs(output_bytes, || a.contract(engine, &b, &spec).unwrap()),
-            2
+            1
         );
     }
 
-    // What: `contract_into` takes the same route, so it allocates
-    // the temporary and nothing else output-sized.
+    // What: `contract_into` takes the same route: the temporary when cold,
+    // nothing output-sized when warm.
     let mut destination = a.contract(engine, &b, &spec).unwrap();
-    for _ in 0..2 {
-        a.contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
-            .unwrap();
-    }
+    symtn::scratch::trim(engine);
+    assert_eq!(
+        sized_allocs(output_bytes, || a
+            .contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
+            .unwrap()),
+        1
+    );
     for _ in 0..3 {
         assert_eq!(
             sized_allocs(output_bytes, || a
                 .contract_into(engine, &b, &spec, &mut destination, 1.0, 0.0)
                 .unwrap()),
-            1
+            0
         );
     }
+
+    // What: trim releases the temporary, so the next call is cold again.
+    symtn::scratch::trim(engine);
+    assert_eq!(
+        sized_allocs(output_bytes, || a.contract(engine, &b, &spec).unwrap()),
+        2
+    );
 
     // What: bit-identical to the literal copyC sequence spelled with public
     // operations — the default-split contraction, then the permute.

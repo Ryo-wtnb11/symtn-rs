@@ -262,34 +262,29 @@ where
     C: DenseBlockScalar,
     RuleKey: 'static + Clone + Eq + Hash + Send + Sync,
     BT: TreeTransformBackend<D, C, Workspace = TreeTransformWorkspace<D>>,
-    BC: TensorContractBackend<D, C>,
+    BC: TensorContractBackend<D, C, Workspace = super::backend::TensorContractWorkspace<D>>,
 {
-    /// Allocated Host capacity retained by fusion lhs/rhs/destination scratch,
-    /// the `copyC` temporary, and the tree-transform workspaces (the tree
-    /// context's and one per contraction stage, coefficient packs included).
+    /// Allocated Host capacity this lane retains between calls: the fusion
+    /// lhs/rhs/destination scratch, the `copyC` temporary, the fusion-core
+    /// payload and bookkeeping, the tree-transform workspaces (the tree
+    /// context's and one per contraction stage, coefficient packs included),
+    /// the planning scratch and the contract workspace. The dense executors'
+    /// staging is reported by the executors themselves.
     #[doc(hidden)]
-    pub fn retained_host_scratch_bytes(&self) -> usize {
+    pub fn retained_bytes(&self) -> usize {
         std::iter::once(self.tree_context.workspace())
             .chain(&self.stage_workspaces)
             .map(TreeTransformWorkspace::retained_bytes)
-            .fold(
-                self.fusion_scratch.retained_bytes().saturating_add(
-                    self.copy_c_scratch
-                        .capacity()
-                        .saturating_mul(std::mem::size_of::<D>()),
-                ),
-                usize::saturating_add,
-            )
-    }
-
-    /// Releases this context's retained Host fusion, `copyC` and
-    /// tree-transform buffers.
-    #[doc(hidden)]
-    pub fn trim_host_scratch(&mut self) {
-        self.fusion_scratch.clear();
-        self.copy_c_scratch = HostScratchBuffer::default();
-        *self.tree_context.backend_workspace_mut().1 = TreeTransformWorkspace::default();
-        self.stage_workspaces = Default::default();
+            .chain([
+                self.fusion_scratch.retained_bytes(),
+                self.copy_c_scratch
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<D>()),
+                self.fusion_block_workspace.retained_bytes(),
+                self.tree_context.planning_retained_bytes(),
+                self.contract_workspace.retained_bytes(),
+            ])
+            .fold(0, usize::saturating_add)
     }
 }
 
@@ -967,11 +962,12 @@ where
     /// (`tensoroperations.jl:436-446` @cfaa073): `mul!(Cnew, A, B)` into the
     /// context's `copyC` temporary, then
     /// `tensoradd!(C, Cnew, pAB, false, α, β)`. TensorKit allocates `Cnew` per
-    /// call (`tensoralloc_add(..., Val(true))`); so does an eager call here,
-    /// whose context is per-call scratch, while a context a caller keeps
-    /// reuses it. Stale values are never read: eager scratch carries no core
-    /// slot, so the core writes the temporary with a strong-zero `beta = 0`,
-    /// inactive blocks included.
+    /// call (`tensoralloc_add(..., Val(true))`); here the context, and with it
+    /// the temporary, is reused: an eager call's context is kept in the
+    /// caller's CPU engine between calls (`symtn::scratch`), a prepared
+    /// context by its owner. Stale values are never read: eager scratch
+    /// carries no core slot, so the core writes the temporary with a
+    /// strong-zero `beta = 0`, inactive blocks included.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn execute_contract_route_host(
         &mut self,

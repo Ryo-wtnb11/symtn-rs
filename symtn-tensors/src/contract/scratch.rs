@@ -49,10 +49,6 @@ impl<T> HostDynamicFusionScratchWorkspace<T> {
             })
     }
 
-    pub(crate) fn clear(&mut self) {
-        *self = Self::default();
-    }
-
     #[cfg(test)]
     pub(crate) fn dst_data_mut(&mut self) -> Option<&mut [T]> {
         (!self.dst.is_empty()).then(|| self.dst.as_mut_slice())
@@ -115,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_fusion_scratch_retained_bytes_use_capacity_and_clear_releases_it() {
+    fn dynamic_fusion_scratch_retained_bytes_use_capacity() {
         let mut workspace = HostDynamicFusionScratchWorkspace::<f64>::default();
         prepare(&mut workspace.lhs, 3);
         prepare(&mut workspace.rhs, 5);
@@ -125,7 +121,5 @@ mod tests {
             workspace.retained_bytes(),
             (3 + 5 + 7) * std::mem::size_of::<f64>()
         );
-        workspace.clear();
-        assert_eq!(workspace.retained_bytes(), 0);
     }
 }

@@ -448,8 +448,14 @@ BLAS-internal threads remain separate.
 An eager operation builds its execution scratch (tree-transform pack
 scratch, contraction lanes, a factorization's dense executor) for the call and drops
 it on return, as TensorKit allocates its temporaries per call; a prepared
-plan's workspace keeps that scratch for its replays. Structural and plan
-caches take short lookup and publication locks.
+plan's workspace keeps that scratch for its replays. The exception is an
+eager Host contraction (`contract`, `contract_into`, `compose`, the planar
+contractions and every network step): its contraction lanes are one entry of
+the caller's `CpuEngine` extension store, kept between calls under that
+store's entry and byte limits (64 MiB by default) and released by
+[`symtn::scratch::trim`](../symtn/src/scratch.rs); a ledger that does not
+fit is dropped, so that workload allocates its scratch per call. Structural
+and plan caches take short lookup and publication locks.
 
 A CUDA operation borrows the caller's `CudaEngine` for its duration and
 stores nothing of it. The engine owns its stream, its allocation domain and
