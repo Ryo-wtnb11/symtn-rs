@@ -10,10 +10,21 @@ use symtn_dense::Engine;
 /// on the caller's engine.
 pub(crate) struct ContextLease(TensorExecutionContext);
 
-// The engine's extension store keeps only `Send` values.
+/// An eager contraction's lease, as the caller's CPU engine keeps it.
+///
+/// Why boxed: the context is about 9.7 KB inline, and checkout, check-in and
+/// every hand-off between them move the lease by value; inline, those moves
+/// cost more per small contraction than the warm lease saves
+/// (`reviews/symtn-2516-overhead.md`). Why only here: a standalone transform
+/// builds its lease per call, where a box would be one more allocation.
+pub(crate) type EngineLease = Box<ContextLease>;
+
+// The engine's extension store keeps only `Send` values, and an engine lease
+// must stay one pointer.
+const _: () = assert!(std::mem::size_of::<Option<EngineLease>>() == std::mem::size_of::<usize>());
 const _: fn() = || {
     fn send<T: Send>() {}
-    send::<ContextLease>();
+    send::<EngineLease>();
 };
 
 impl ContextLease {
@@ -22,17 +33,26 @@ impl ContextLease {
     }
 
     /// The lease the caller's CPU engine keeps from an earlier eager
-    /// contraction, else a fresh one (which allocates nothing). The engine
+    /// contraction, else a fresh one (one allocation, its box). The engine
     /// keeps an empty slot meanwhile, so a nested call builds its own.
-    pub(crate) fn checkout(engine: &mut dyn Engine) -> Self {
-        symtn_dense::engine_slot::checkout::<Self>(engine).unwrap_or_else(Self::new)
+    pub(crate) fn checkout(engine: &mut dyn Engine) -> EngineLease {
+        symtn_dense::engine_slot::checkout::<EngineLease>(engine)
+            .unwrap_or_else(|| Box::new(Self::new()))
     }
 
     /// Returns this lease to the caller's CPU engine, which keeps it when its
-    /// whole ledger fits the engine's extension-store limits next to every
-    /// other entry, and drops it otherwise.
-    pub(crate) fn checkin(self, engine: &mut dyn Engine) {
-        symtn_dense::engine_slot::checkin(engine, self, Self::retained_bytes);
+    /// whole ledger, its box included, fits the engine's extension-store
+    /// limits next to every other entry, and drops it otherwise.
+    pub(crate) fn checkin(self: EngineLease, engine: &mut dyn Engine) {
+        symtn_dense::engine_slot::checkin(engine, self, Self::engine_charge);
+    }
+
+    #[allow(
+        clippy::borrowed_box,
+        reason = "the engine slot charges the value it keeps, which is the box"
+    )]
+    fn engine_charge(lease: &EngineLease) -> usize {
+        std::mem::size_of::<Self>().saturating_add(lease.retained_bytes())
     }
 
     /// Every buffer this lease retains: each built lane's ledger and the

@@ -65,8 +65,8 @@
 use crate::typed::Engine;
 
 /// The bytes of scratch the engine keeps between calls: every kept buffer
-/// at capacity, the boxes of its payload-type lanes and the fixed slot that
-/// holds them. While a contraction has the scratch checked out, and after a
+/// at capacity, the box that holds its execution context, the boxes of its
+/// later payload-type lanes, and the fixed slot that holds them. While a contraction has the scratch checked out, and after a
 /// call that failed in planning or whose scratch did not fit, only the fixed
 /// slot is reported. It is 0 when no slot exists (never created, or
 /// [`trim`]med) and on a non-CPU engine. It is not peak or in-flight memory.

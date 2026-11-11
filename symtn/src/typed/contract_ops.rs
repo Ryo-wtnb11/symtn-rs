@@ -1137,7 +1137,7 @@ where
 /// Internal and unstable despite being public for [`ContractExec`].
 #[doc(hidden)]
 pub struct ContractReplay<'a, D, C> {
-    pub(super) lease: Option<crate::runtime::ContextLease>,
+    pub(super) lease: Option<crate::runtime::EngineLease>,
     execute: RouteReplay<D, C>,
     execute_owned: OwnedRouteReplay<D, C>,
     pub(super) resolution: &'a symtn_tensors::StorageContractResolution<C>,
@@ -1160,7 +1160,7 @@ where
     /// The replay of `resolution` on lane `L` into `destination`
     /// (`destination_len` elements) from the stored `operands`.
     pub(super) fn new<L: HostTreeLane<D, C>>(
-        lease: Option<crate::runtime::ContextLease>,
+        lease: Option<crate::runtime::EngineLease>,
         resolution: &'a symtn_tensors::StorageContractResolution<C>,
         (destination, destination_len): (&'a DynamicFusionMapSpace, usize),
         (lhs, rhs): (
