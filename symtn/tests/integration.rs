@@ -35,6 +35,7 @@ mod stacked_fixtures;
 #[macro_use]
 #[path = "support/table_fixture.rs"]
 mod table_fixture;
+mod engine_admission_roots;
 mod engine_ownership;
 #[path = "engine_suites/main.rs"]
 mod engine_suites;

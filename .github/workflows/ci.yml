@@ -505,6 +505,11 @@ jobs:
       - name: Run workspace doctests
         run: cargo test --locked --workspace --doc
         working-directory: symtn
+      # The engine ledger allocates per token, so its tests run alone rather
+      # than unify into the workspace run's allocation tests.
+      - name: Run the engine ledger-root tests
+        run: cargo test --locked -p symtn --features ledger-roots --test integration engine_admission_roots
+        working-directory: symtn
       - name: Run primitive examples
         run: |
           for example in spaces_and_tensors permute_braid_twist factorize_and_truncate eigh_and_matrix_functions trace_inner_norm dense_roundtrip; do

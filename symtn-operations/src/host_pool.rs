@@ -91,13 +91,7 @@ fn enter<R>(
         } else {
             cpu.exec().map(&mut run)
         };
-        ran.map_err(|err| {
-            OperationError::Dense(DenseError::Backend {
-                backend: symtn_dense::DenseBackend::Tenferro,
-                op: "host_region",
-                message: err.to_string(),
-            })
-        })
+        ran.map_err(host_region_error)
     });
     match ran {
         Some(result) => result,
@@ -107,11 +101,51 @@ fn enter<R>(
         None if site == HostPoolSite::PlanCompile && is_cuda_engine(engine) => {
             Ok(run(symtn_dense::lanes::Exec::serial()))
         }
-        None => Err(OperationError::Dense(DenseError::Unsupported {
-            op: "host_region",
-            message: "a Host region needs the caller's CPU engine".to_string(),
-        })),
+        None => Err(not_a_cpu_engine()),
     }
+}
+
+/// Refuses `engine` exactly as a Host region does, without taking its token:
+/// the admission of an entry whose arithmetic needs no token.
+#[doc(hidden)]
+pub fn admit(engine: &mut dyn Engine) -> Result<(), OperationError> {
+    #[cfg(feature = "tenferro")]
+    {
+        // Why `exec()` only when broken: it refuses before it mints, so the
+        // error is the region's own, and an `Err` holds no token.
+        match tenferro_cpu::with_cpu_engine(engine, |cpu| {
+            if cpu.is_broken() {
+                cpu.exec().map(drop)
+            } else {
+                Ok(())
+            }
+        }) {
+            Some(result) => result.map_err(host_region_error),
+            None => Err(not_a_cpu_engine()),
+        }
+    }
+    #[cfg(not(feature = "tenferro"))]
+    {
+        let _ = engine;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "tenferro")]
+fn host_region_error(err: impl std::fmt::Display) -> OperationError {
+    OperationError::Dense(DenseError::Backend {
+        backend: symtn_dense::DenseBackend::Tenferro,
+        op: "host_region",
+        message: err.to_string(),
+    })
+}
+
+#[cfg(feature = "tenferro")]
+fn not_a_cpu_engine() -> OperationError {
+    OperationError::Dense(DenseError::Unsupported {
+        op: "host_region",
+        message: "a Host region needs the caller's CPU engine".to_string(),
+    })
 }
 
 /// Whether `engine` is a CUDA engine, whose Host structural work runs on a

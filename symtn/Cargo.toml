@@ -26,6 +26,11 @@ cgc-gen = ["symtn-core/cgc-gen", "symtn-tensors/cgc-gen"]
 # krylov declares LAPACK symbols: the final binary must link a provider
 # (a `blas-*` feature, or one linked by the application).
 krylov = ["dep:krylov"]
+# Unstable, internal: the CPU engine's ledger, which records the execution
+# resources an operation takes from its engine; production code never uses it.
+# Its per-token record allocates, so only in-workspace tests may enable it,
+# never a `--workspace` run whose allocation tests it would break.
+ledger-roots = ["dep:tenferro-cpu"]
 
 # The CUDA batch timing harness needs a device runtime.
 [[bench]]
@@ -39,6 +44,7 @@ required-features = ["cuda"]
 
 [dependencies]
 krylov = { version = "0.3", optional = true, default-features = false }
+tenferro-cpu = { version = "0.11.0", optional = true, default-features = false, features = ["ledger"] }
 num-complex = "0.4"
 smallvec = { version = "1", features = ["const_generics", "union"] }
 symtn-core = { version = "0.1.1", path = "../symtn-core" }
