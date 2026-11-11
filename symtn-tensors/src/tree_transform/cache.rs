@@ -866,6 +866,11 @@ impl std::fmt::Debug for TreeTransformPlanning {
 }
 
 impl TreeTransformPlanning {
+    /// Bytes of the Unique compile's tree-pair scratch capacity.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.unique_scratch.retained_bytes()
+    }
+
     /// The ordinary multiplicity-free tree-pair transformer.
     ///
     /// Fusion-tree block keys in `dst` and `src` follow

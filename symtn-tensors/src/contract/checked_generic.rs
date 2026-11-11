@@ -1697,7 +1697,7 @@ mod tests {
                 .1;
             let jobs = context.contract_backend_mut().jobs;
             let resident = cache_entries();
-            let retained = context.retained_host_scratch_bytes();
+            let retained = context.retained_bytes();
             let backend = context.contract_backend_mut();
             backend.fail_at = Some(backend.jobs + (jobs - 1) / 2);
             let error = context
@@ -1717,7 +1717,7 @@ mod tests {
                 "{name}"
             );
             assert_eq!(cache_entries(), resident, "{name}");
-            assert_eq!(context.retained_host_scratch_bytes(), retained, "{name}");
+            assert_eq!(context.retained_bytes(), retained, "{name}");
             context.contract_backend_mut().fail_at = None;
             let repeat = context
                 .tensorcontract_checked_generic_in(

@@ -254,6 +254,18 @@ impl<T> HostTensorContractWorkspace<T> {
         self.output.len()
     }
 
+    /// Bytes of the output and zero-stride buffers' capacity.
+    pub fn retained_bytes(&self) -> usize {
+        self.output
+            .capacity()
+            .saturating_mul(std::mem::size_of::<T>())
+            .saturating_add(
+                self.zero_strides
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<isize>()),
+            )
+    }
+
     fn prepare_output(&mut self, len: usize, zero: T)
     where
         T: Clone,

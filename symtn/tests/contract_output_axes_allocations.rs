@@ -72,9 +72,9 @@ macro_rules! assert_no_costlier_than_permute {
              contract + permute {separate_cost:?}"
         );
         // What: no more allocation calls or output-sized buffers than the
-        // two-step route. Equality is TensorKit's `copyC`: a zero-copy
-        // candidate contracts into a per-call temporary that one permute moves
-        // into the result. Total bytes are not compared here: the copyC route
+        // two-step route. A zero-copy candidate is TensorKit's `copyC`: it
+        // contracts into a temporary that one permute moves into the result,
+        // and a warm call reuses the temporary the engine keeps. Total bytes are not compared here: the copyC route
         // builds its temporary's space (a few hundred bytes of metadata) where
         // the two-step route builds the permute's.
         assert!(
@@ -82,11 +82,10 @@ macro_rules! assert_no_costlier_than_permute {
             "contract({lhs_axes:?}, {rhs_axes:?}; {codomain:?} <- {domain:?}) {fused_cost:?} \
              vs contract + permute {separate_cost:?}"
         );
-        // Why not fewer output buffers on the DynamicTree route: its single
-        // output transform replaces the two-step route's second owned output,
-        // but its transformed operand is per-call scratch (the Runtime keeps
-        // no execution pool), so the two routes allocate as many output-sized
-        // buffers; the bound above is what stays.
+        // Why only a bound: a warm fused route reuses the engine-kept
+        // temporary and transformed operand, so it can allocate fewer
+        // output-sized buffers than the two-step route, by how many depends
+        // on the route the candidate selection takes.
     }};
 }
 

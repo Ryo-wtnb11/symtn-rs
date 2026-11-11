@@ -85,6 +85,14 @@ impl UniqueTreePairScratch {
         }
     }
 
+    /// Bytes of the three trees' buffer capacity.
+    pub fn retained_bytes(&self) -> usize {
+        [&self.codomain, &self.domain, &self.spare]
+            .into_iter()
+            .map(UnhashedFusionTree::retained_bytes)
+            .fold(0, usize::saturating_add)
+    }
+
     /// The pair the last execution left, as a key holding it would compare.
     pub fn pair_view(&self) -> FusionTreePairRef<'_> {
         FusionTreePairRef::new(self.codomain.view(), self.domain.view())

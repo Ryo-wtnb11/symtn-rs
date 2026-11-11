@@ -57,6 +57,9 @@ mod block_kernel {
     ))]
     pub(crate) mod solve;
 }
+// The value symtn keeps in the caller's CPU engine between calls.
+#[doc(hidden)]
+pub mod engine_slot;
 // The one placement and runner of independent block jobs, which the block
 // kernels, the tree replays and the cold tree compile run on.
 #[cfg(feature = "tenferro")]

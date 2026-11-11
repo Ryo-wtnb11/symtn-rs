@@ -117,6 +117,13 @@ where
         &self.workspace
     }
 
+    /// Bytes of the planning scratch this context keeps across cache misses
+    /// (the Unique compile's tree pair).
+    #[doc(hidden)]
+    pub fn planning_retained_bytes(&self) -> usize {
+        self.planning.retained_bytes()
+    }
+
     #[inline]
     pub(crate) fn backend_workspace_mut(&mut self) -> (&mut B, &mut B::Workspace) {
         (&mut self.backend, &mut self.workspace)

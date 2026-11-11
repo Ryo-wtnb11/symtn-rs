@@ -350,15 +350,11 @@ fn a_warm_eager_contraction_converts_no_coefficient_pack() {
             assert_eq!(run(&mut context), cold, "{what}");
         }
         // The stage workspaces are retained Host scratch: counted, and
-        // released by trim (a fresh workspace has converted no pack).
+        // released with the lane (a fresh one has converted no pack).
         let stage_bytes = context.stage_workspace_retained_bytes();
         assert!(stage_bytes > 0, "{what}");
-        assert!(
-            context.retained_host_scratch_bytes() >= stage_bytes,
-            "{what}"
-        );
-        context.trim_host_scratch();
-        assert_eq!(context.retained_host_scratch_bytes(), 0, "{what}");
+        assert!(context.retained_bytes() >= stage_bytes, "{what}");
+        context = Context::<f64>::default();
         assert_eq!(context.eager_coefficient_pack_builds(), [0; 3], "{what}");
         assert_eq!(run(&mut context), cold, "{what}");
     }

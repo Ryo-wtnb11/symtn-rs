@@ -46,6 +46,10 @@ impl Network {
     /// Use [`Network::plan`] and [`PlannedNetwork::execute`] instead to pick
     /// the optimizer per call or to own the plan and workspace.
     ///
+    /// Each step is an eager contraction on the caller's engine, so its Host
+    /// execution scratch is kept in a CPU engine between calls
+    /// ([`symtn::scratch`]).
+    ///
     /// Every metadata rejection — operand count, labels against ranks and
     /// `;` splits, contracted spaces, Runtime and rule identity, braiding,
     /// and on a device the placement and dense payloads — is decided before

@@ -364,8 +364,9 @@ impl Network {
     /// Counted payloads are compact sliced inputs, live planned contraction
     /// and permutation destinations, the current partial, the private
     /// accumulator, and path-owned dense buffers. Small metadata, external
-    /// backend scratch, and symtn Runtime context scratch are excluded. The
-    /// latter includes the pooled output-sized `copyC` temporary used by
+    /// backend scratch, and the eager contraction scratch the caller's CPU
+    /// engine keeps ([`symtn::scratch`]) are excluded. The latter includes
+    /// the output-sized `copyC` temporary used by
     /// split-moving and in-split reorder contractions, so
     /// [`SymmetricSliceStats::peak_total_bytes`] can be below the process peak
     /// by that temporary's capacity. The ceiling is checked against observed

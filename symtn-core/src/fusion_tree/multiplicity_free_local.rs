@@ -34,6 +34,14 @@ impl UnhashedFusionTree {
         }
     }
 
+    /// Bytes of the buffers' capacity.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        use std::mem::size_of;
+        (self.sectors.capacity() * size_of::<SectorId>())
+            .saturating_add(self.is_dual.capacity() * size_of::<bool>())
+            .saturating_add(self.vertices.capacity() * size_of::<MultiplicityIndex>())
+    }
+
     /// Grow each buffer to at least [`Self::with_widths`]' capacity.
     pub(crate) fn reserve_widths(&mut self, (sectors, vertices, duals): (usize, usize, usize)) {
         self.sectors
@@ -1156,4 +1164,31 @@ where
         .into_iter()
         .map(|(local, coefficient)| (prepared.output_frame.materialize(local), coefficient))
         .collect())
+}
+
+#[cfg(test)]
+mod retained_bytes_tests {
+    use super::*;
+
+    /// The capacities of one tree's three buffers, read field by field.
+    fn capacity_bytes(tree: &UnhashedFusionTree) -> usize {
+        tree.sectors.capacity() * std::mem::size_of::<SectorId>()
+            + tree.is_dual.capacity() * std::mem::size_of::<bool>()
+            + tree.vertices.capacity() * std::mem::size_of::<MultiplicityIndex>()
+    }
+
+    #[test]
+    fn unique_scratch_retained_bytes_is_its_trees_buffer_capacity() {
+        let mut scratch = UniqueTreePairScratch::default();
+        assert_eq!(scratch.retained_bytes(), 0);
+        for rank in [5, 3, 8] {
+            scratch.reserve_rank(rank);
+            let summed = [&scratch.codomain, &scratch.domain, &scratch.spare]
+                .into_iter()
+                .map(capacity_bytes)
+                .sum::<usize>();
+            assert!(summed > 0, "rank {rank}");
+            assert_eq!(scratch.retained_bytes(), summed, "rank {rank}");
+        }
+    }
 }

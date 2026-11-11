@@ -1,15 +1,44 @@
 use super::*;
+use symtn_dense::Engine;
 
-/// The execution scratch of one standalone operation (tree-transform and
-/// contraction lanes), built for the call and dropped when it returns, or kept
-/// by a prepared workspace for its replays. It holds only the lanes the
-/// operation used (the first inline, any later one boxed; see [`Ctxs`]),
-/// structural state and scratch; the operation runs on the caller's engine.
+/// The execution scratch of one operation (tree-transform and contraction
+/// lanes): built for a standalone call and dropped when it returns, kept by a
+/// prepared workspace for its replays, or, for an eager contraction, checked
+/// out of the caller's CPU engine and checked back in ([`crate::scratch`]).
+/// It holds only the lanes the operation used (the first inline, any later
+/// one boxed; see [`Ctxs`]), structural state and scratch; the operation runs
+/// on the caller's engine.
 pub(crate) struct ContextLease(TensorExecutionContext);
+
+// The engine's extension store keeps only `Send` values.
+const _: fn() = || {
+    fn send<T: Send>() {}
+    send::<ContextLease>();
+};
 
 impl ContextLease {
     pub(crate) fn new() -> Self {
         Self(TensorExecutionContext::new())
+    }
+
+    /// The lease the caller's CPU engine keeps from an earlier eager
+    /// contraction, else a fresh one (which allocates nothing). The engine
+    /// keeps an empty slot meanwhile, so a nested call builds its own.
+    pub(crate) fn checkout(engine: &mut dyn Engine) -> Self {
+        symtn_dense::engine_slot::checkout::<Self>(engine).unwrap_or_else(Self::new)
+    }
+
+    /// Returns this lease to the caller's CPU engine, which keeps it when its
+    /// whole ledger fits the engine's extension-store limits next to every
+    /// other entry, and drops it otherwise.
+    pub(crate) fn checkin(self, engine: &mut dyn Engine) {
+        symtn_dense::engine_slot::checkin(engine, self, Self::retained_bytes);
+    }
+
+    /// Every buffer this lease retains: each built lane's ledger and the
+    /// boxes of boxed lanes.
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.0.retained_bytes()
     }
 
     /// The context for one call.

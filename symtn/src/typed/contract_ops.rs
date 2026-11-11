@@ -266,6 +266,15 @@ where
     /// [`crate::sector::FusionRule::rule_identity`], which makes the choice of
     /// allocation immaterial to the algebra.
     ///
+    /// # Host scratch
+    ///
+    /// The transformed operands, the core destination or `copyC` temporary
+    /// and the other execution scratch of a Host contraction are kept in the
+    /// caller's CPU engine between calls ([`crate::scratch`]): a warm repeated
+    /// call allocates no operand or core scratch, only its owned output,
+    /// when the engine's kept ledger fits its extension-store limits;
+    /// otherwise it is correct and allocates them per call.
+    ///
     /// # CUDA storage
     ///
     /// Device tensors run this same body: the destination, the route, the
@@ -461,6 +470,9 @@ where
     /// staging failures in [`GenericTensorError::Plan`], as for
     /// [`Self::contract`].
     ///
+    /// Host execution scratch is kept in the caller's CPU engine as for
+    /// [`Self::contract`], so a warm call allocates no operand or core scratch.
+    ///
     /// # CUDA storage
     ///
     /// The same body and route as [`Self::contract`]. On the core route the
@@ -616,8 +628,10 @@ where
     /// Planarity is checked for every style, Bosonic included (stricter than
     /// `planarcontract!`, which skips it for Bosonic, and equal to `@planar`).
     ///
-    /// **Cost.** The owned output is the only allocation; each operand
-    /// transpose writes scratch allocated for this call and is skipped when the
+    /// **Cost.** The owned output is the only payload allocation of a warm
+    /// call: each operand transpose writes execution scratch the caller's CPU
+    /// engine keeps between calls, as for [`Self::contract`] (TensorKit
+    /// allocates these temporaries per call), and is skipped when the
     /// operand already has its planar core layout (TensorKit `A′ = A`), and
     /// the output transpose is skipped when the requested order is the
     /// core's. The work is TensorKit's `transpose!` ×2 + `mul!` +
@@ -713,7 +727,8 @@ where
     /// destination's provider, space, body and dense host allocation.
     /// `destination` must have the space of that result. It takes every
     /// operand [`Self::planar_contract`] takes and allocates no owned output;
-    /// its scratch is allocated for this call, as TensorKit's temporaries.
+    /// its scratch is kept in the caller's CPU engine, as for
+    /// [`Self::planar_contract`].
     ///
     /// `alpha` and `beta` ride the epilogue of whatever writes each element
     /// (the core GEMMs, as `mul!(C, A′, B′, α, β)`, or the output transpose),
@@ -969,6 +984,9 @@ where
     /// [`crate::sector::FusionRule::rule_identity`] for the composition to be
     /// legal at all, so the choice is immaterial to the algebra.
     ///
+    /// Host execution scratch is kept in the caller's CPU engine as for
+    /// [`Self::contract`].
+    ///
     /// # Compact fast paths
     ///
     /// When either operand carries compact diagonal storage — an `s` from
@@ -1111,10 +1129,10 @@ where
 /// answered and none was built), the route, and the staged destination and
 /// stored operand block structures it maps between.
 ///
-/// Host replays in that context, building one only when planning built none,
-/// so a Host contraction builds one context; CUDA drops it before taking the
-/// device lease. The Host replay of the staging mode's lane is bound here,
-/// where that lane's scalar bounds are proved.
+/// Host replays in that context, checking one out of the caller's CPU engine
+/// only when planning took none, and checks it back in afterwards; CUDA drops
+/// it before taking the device lease. The Host replay of the staging mode's
+/// lane is bound here, where that lane's scalar bounds are proved.
 ///
 /// Internal and unstable despite being public for [`ContractExec`].
 #[doc(hidden)]
@@ -1349,18 +1367,20 @@ impl<R, D: TensorScalar> ContractExec<R, D> for Vec<D> {
             rhs: rhs_structure,
             ..
         } = replay;
-        let mut lease = lease.unwrap_or_else(crate::runtime::ContextLease::new);
+        let mut lease = lease.unwrap_or_else(|| crate::runtime::ContextLease::checkout(engine));
         host_contract_probe(resolution);
         let (_, lhs_data) = lhs.fusion_operand_and_data();
         let (_, rhs_data) = rhs.fusion_operand_and_data();
-        execute_owned(
+        let result = execute_owned(
             engine,
             lease.context(),
             resolution,
             destination,
             (lhs_structure, &lhs_data),
             (rhs_structure, &rhs_data),
-        )
+        );
+        lease.checkin(engine);
+        result
     }
 
     fn contract_into<C: symtn_tensors::DenseBlockScalar>(
@@ -1416,11 +1436,11 @@ fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
         rhs: rhs_structure,
         ..
     } = replay;
-    let mut lease = lease.unwrap_or_else(crate::runtime::ContextLease::new);
+    let mut lease = lease.unwrap_or_else(|| crate::runtime::ContextLease::checkout(engine));
     host_contract_probe(resolution);
     let (_, lhs_data) = lhs.fusion_operand_and_data();
     let (_, rhs_data) = rhs.fusion_operand_and_data();
-    execute(
+    let result = execute(
         engine,
         lease.context(),
         resolution,
@@ -1429,5 +1449,7 @@ fn host_contract<R, D: TensorScalar, C: symtn_tensors::DenseBlockScalar>(
         (rhs_structure, &rhs_data),
         alpha,
         init,
-    )
+    );
+    lease.checkin(engine);
+    result
 }
