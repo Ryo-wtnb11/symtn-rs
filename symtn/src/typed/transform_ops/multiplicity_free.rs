@@ -89,7 +89,7 @@ where
         let destination_structure = Arc::clone(destination.logical_space().space().structure());
         let nout = destination.codomain_rank();
         let replay = TreeReplay::new::<MultiplicityFreeTreeLane>(
-            lease,
+            &mut lease,
             &structure,
             &destination_structure,
             body.space.space().structure(),
@@ -126,7 +126,7 @@ where
         S::replay_into(
             engine,
             EXEC,
-            TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(lease, &staged),
+            TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(&mut lease, &staged),
             input,
             destination_data,
             alpha,
@@ -190,7 +190,7 @@ where
     let data = S::replay_owned(
         engine,
         EXEC,
-        TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(lease, &staged),
+        TreeReplay::staged::<MultiplicityFreeTreeLane, _, _>(&mut lease, &staged),
         tensor,
         D::from_real(1.0),
     )?;

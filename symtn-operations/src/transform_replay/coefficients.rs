@@ -22,6 +22,10 @@ where
         return Ok(false);
     }
 
+    // Why first: a refill that fails partway must not leave the previous
+    // structure's identity over a partly rewritten pack, which a later call of
+    // that structure would reuse whenever the partial length equals its own.
+    workspace.coefficient_structure_identity = None;
     workspace.coefficient_scratch.clear();
     workspace
         .coefficient_scratch
@@ -161,6 +165,54 @@ mod coefficient_cache_tests {
         )
         .unwrap());
         assert_eq!(workspace.coefficient_scratch, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn a_failed_refill_leaves_no_identity_over_its_partial_pack() {
+        // What: after a refill fails partway, the previously installed
+        // structure is repacked rather than served the failed refill's partial
+        // pack, even when that pack has exactly its length.
+        let installed = multi_recoupling_structure([9.0, 10.0, 11.0, 12.0]);
+        let blocks =
+            BlockStructure::packed_column_major(1, [vec![1], vec![1], vec![1], vec![1]]).unwrap();
+        let mut corrupt = TreeTransformStructure::compile_structures(
+            &blocks,
+            &blocks,
+            &[
+                TreeTransformBlockSpec::multi(vec![0, 1], vec![0, 1], vec![1.0, 2.0, 3.0, 4.0]),
+                TreeTransformBlockSpec::multi(vec![2, 3], vec![2, 3], vec![5.0, 6.0, 7.0, 8.0]),
+            ],
+        )
+        .unwrap();
+        corrupt.drop_last_recoupling_matrix();
+        let mut workspace = TreeTransformWorkspace::<f64>::default();
+        assert!(ensure_recoupling_coefficients(
+            &mut workspace,
+            installed.task_view().unwrap(),
+            installed.identity_marker(),
+        )
+        .unwrap());
+
+        assert!(matches!(
+            ensure_recoupling_coefficients(
+                &mut workspace,
+                corrupt.task_view().unwrap(),
+                corrupt.identity_marker(),
+            ),
+            Err(OperationError::CoefficientCountMismatch {
+                expected: 4,
+                actual: 0
+            })
+        ));
+        assert_eq!(workspace.coefficient_scratch.len(), 4);
+
+        assert!(ensure_recoupling_coefficients(
+            &mut workspace,
+            installed.task_view().unwrap(),
+            installed.identity_marker(),
+        )
+        .unwrap());
+        assert_eq!(workspace.coefficient_scratch, vec![9.0, 10.0, 11.0, 12.0]);
     }
 
     #[test]
