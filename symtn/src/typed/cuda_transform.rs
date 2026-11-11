@@ -3,8 +3,8 @@ use super::*;
 /// The device replay of the one tree-transform body
 /// ([`TensorMap::permute`], [`TensorMap::permute_into`] and their siblings).
 ///
-/// The staging's context lease is dropped before the device lease is taken,
-/// and nothing reached under the device lease leases again
+/// The device replay does not use the staging's Host context, and nothing
+/// reached under the device lease leases again
 /// (`std::sync::Mutex` is not re-entrant); the placement check is the first
 /// thing under it, before any device write.
 ///
@@ -65,13 +65,11 @@ where
         let source = cuda_transform_source(t.owned_body().map(|body| body.data.as_ref()))?;
         let required_len = replay.destination.required_len().map_err(Error::from)?;
         let TreeReplay {
-            lease,
             structure,
             destination,
             source: source_structure,
             ..
         } = replay;
-        drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
         ensure_cuda_owns(cuda, "transform", &[&source.0])?;
@@ -124,13 +122,11 @@ where
             return Err(internal_layout_error("CUDA tensors hold no compact data").into());
         };
         let TreeReplay {
-            lease,
             structure,
             destination: destination_structure,
             source: source_structure,
             ..
         } = replay;
-        drop(lease);
         let mut lease = crate::runtime::cuda_call(engine)?;
         let (cuda, executor) = lease.split();
         ensure_cuda_owns(cuda, "transform_into", &[&source.0, &destination.0])?;

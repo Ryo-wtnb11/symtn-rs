@@ -486,7 +486,7 @@ where
         let data = S::replay_owned(
             engine,
             EXEC,
-            TreeReplay::staged::<CheckedGenericTreeLane, _, _>(lease, &staged),
+            TreeReplay::staged::<CheckedGenericTreeLane, _, _>(&mut lease, &staged),
             tensor,
             D::from_real(1.0),
         )
@@ -529,7 +529,7 @@ where
             S::replay_into(
                 engine,
                 EXEC,
-                TreeReplay::staged::<CheckedGenericTreeLane, _, _>(lease, &staged),
+                TreeReplay::staged::<CheckedGenericTreeLane, _, _>(&mut lease, &staged),
                 input,
                 destination_data,
                 alpha,

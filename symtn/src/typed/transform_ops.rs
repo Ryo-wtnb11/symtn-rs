@@ -112,8 +112,8 @@ where
     /// # CUDA storage
     ///
     /// The admission, staging and exact-layout memo are the ones above; the
-    /// staging's context lease is released before the device lease, and
-    /// nothing under the device lease leases again.
+    /// device replay does not use the staging's Host context, and nothing
+    /// under the device lease leases again.
     ///
     /// `beta` rides the `dot_general` epilogue of the move or scatter that
     /// writes each destination layout, once per element; the layouts no move
@@ -469,9 +469,9 @@ where
     /// Everything categorical is the Host's, unchanged: the same operation,
     /// rule validation, staged destination, `RuleIdentity`-keyed transform
     /// cache and completed transformer. Only the replay differs, so a device
-    /// result is the Host result up to dtype tolerance. The staging's context
-    /// lease is released before the device lease is taken, and nothing under
-    /// the device lease leases again: one device lease per replay.
+    /// result is the Host result up to dtype tolerance. The device replay does
+    /// not use the staging's Host context, and nothing under the device lease
+    /// leases again: one device lease per replay.
     ///
     /// A call downloads nothing. It uploads the output initialisation (#740),
     /// one H2D of `required_len * size_of::<D>()` bytes from one host `Vec` of

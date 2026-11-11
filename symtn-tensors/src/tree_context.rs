@@ -134,62 +134,6 @@ where
     }
 }
 
-impl<D, RuleKey, C>
-    TreeTransformExecutionContext<D, RuleKey, C, DenseTreeTransformOperations<DefaultDenseExecutor>>
-where
-    D: crate::DenseRecouplingScalar + RecouplingCoefficientAction<C> + crate::ConjugateValue,
-    C: 'static + Copy + Clone + Add<Output = C> + Mul<Output = C> + Zero + Send + Sync,
-    RuleKey: 'static + Clone + Eq + Hash + Send + Sync,
-{
-    /// Attempts the built-in uninitialised writer used by owned tensor
-    /// transforms. `Ok(None)` means the proof was unavailable and no output
-    /// was allocated. The writer runs on the backend's replay route: on a
-    /// multi-slot engine each joint component writes its own atoms of the
-    /// destination, so the thread count never forces the zero-then-replay
-    /// fallback.
-    ///
-    /// This concrete cross-crate entrypoint is internal and unstable despite
-    /// being public for `symtn`; downstream callers must not rely on it.
-    #[doc(hidden)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_tree_transform_dyn_overwrite_owned<R>(
-        &mut self,
-        engine: &mut dyn Engine,
-        rule: &R,
-        operation: &TreeTransformOperation,
-        dst_structure: &Arc<BlockStructure>,
-        src_structure: &Arc<BlockStructure>,
-        nout: usize,
-        src_data: &[D],
-        alpha: D,
-    ) -> Result<Option<Vec<D>>, OperationError>
-    where
-        R: MultiplicityFreeRigidSymbols<Scalar = C> + TreeTransformRuleCacheKey<Key = RuleKey>,
-    {
-        let structure = self.tree_structure(
-            engine,
-            rule,
-            operation,
-            dst_structure,
-            TreeStructureSource::Stored {
-                structure: src_structure,
-                storage_conjugate: false,
-            },
-        )?;
-        self.backend
-            .try_tree_transform_structure_overwrite_owned_raw(
-                engine,
-                &mut self.workspace,
-                &structure,
-                dst_structure,
-                src_structure,
-                nout,
-                src_data,
-                alpha,
-            )
-    }
-}
-
 impl<D, C>
     TreeTransformExecutionContext<
         D,

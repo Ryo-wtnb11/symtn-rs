@@ -348,6 +348,17 @@ impl<T: Copy> TreeTransformStructure<T> {
         &self.core.identity
     }
 
+    /// Test seam: drops this unshared structure's last recoupling matrix, so a
+    /// coefficient refill of it fails after packing the earlier blocks.
+    #[cfg(test)]
+    pub(crate) fn drop_last_recoupling_matrix(&mut self) {
+        let core = Arc::get_mut(&mut self.core).expect("a freshly compiled core is unshared");
+        Arc::get_mut(&mut core.coefficients)
+            .expect("a freshly compiled payload is unshared")
+            .matrices
+            .pop();
+    }
+
     /// The coefficient payload's identity: shared by every core bound to one
     /// payload.
     #[inline]

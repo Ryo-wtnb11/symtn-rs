@@ -139,18 +139,20 @@ where
 }
 
 /// One staged tree-transform replay, handed to the storage kernel by value:
-/// the execution context the transform was staged in, the completed
-/// transformer, and the stored block structures it maps between.
+/// a borrow of the execution context the transform was staged in, the
+/// completed transformer, and the stored block structures it maps between.
 ///
 /// Host replays in that context, so a Host transform builds one context;
-/// CUDA drops it before taking the device lease. The Host replay of the
-/// staging mode's lane is bound here, where that lane's scalar bounds are
-/// proved.
+/// CUDA does not use it. The Host replay of the staging mode's lane is bound
+/// here, where that lane's scalar bounds are proved.
+///
+/// Why a borrow: the context is about 9.7 KB inline, and a replay that held
+/// it moved it twice per call, into the replay and out of it again.
 ///
 /// Internal and unstable despite being public for [`TransformExec`].
 #[doc(hidden)]
 pub struct TreeReplay<'a, D, C> {
-    pub(in crate::typed) lease: crate::runtime::ContextLease,
+    pub(in crate::typed) lease: &'a mut crate::runtime::ContextLease,
     owned: OwnedReplay<D, C>,
     into: IntoReplay<D, C>,
     pub(in crate::typed) structure: &'a symtn_tensors::TreeTransformStructure<C>,
@@ -158,6 +160,15 @@ pub struct TreeReplay<'a, D, C> {
     pub(in crate::typed) source: &'a Arc<BlockStructure>,
     pub(in crate::typed) nout: usize,
 }
+
+// A replay borrows its context and stays a few words: a by-value context
+// field fails both checks.
+const _: () = assert!(
+    std::mem::size_of::<TreeReplay<'static, f64, f64>>()
+        < std::mem::size_of::<crate::runtime::ContextLease>() / 8
+);
+const _: for<'a> fn(TreeReplay<'a, f64, f64>) -> &'a mut crate::runtime::ContextLease =
+    |replay| replay.lease;
 
 impl<'a, D, C> TreeReplay<'a, D, C>
 where
@@ -168,7 +179,7 @@ where
 {
     /// A replay of `structure` on lane `L`, `destination <- source`.
     pub(in crate::typed) fn new<L: HostTreeLane<D, C>>(
-        lease: crate::runtime::ContextLease,
+        lease: &'a mut crate::runtime::ContextLease,
         structure: &'a symtn_tensors::TreeTransformStructure<C>,
         destination: &'a Arc<BlockStructure>,
         source: &'a Arc<BlockStructure>,
@@ -187,7 +198,7 @@ where
 
     /// The replay of a staged transform on lane `L`.
     pub(in crate::typed) fn staged<L: HostTreeLane<D, C>, R, T>(
-        lease: crate::runtime::ContextLease,
+        lease: &'a mut crate::runtime::ContextLease,
         staged: &'a symtn_tensors::StagedTreeTransform<'_, R, T, C>,
     ) -> Self {
         Self::new::<L>(
@@ -312,7 +323,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
             .ok_or_else(|| internal_layout_error("owned transform input"))?
             .materialized_dense_data();
         let TreeReplay {
-            mut lease,
+            lease,
             owned,
             structure,
             destination,
@@ -342,7 +353,7 @@ impl<R, D: TensorScalar> TransformExec<R, D> for Vec<D> {
         beta: D,
     ) -> Result<(), TransformExecError> {
         let TreeReplay {
-            mut lease,
+            lease,
             into,
             structure,
             destination: destination_structure,
