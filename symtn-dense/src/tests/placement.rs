@@ -118,7 +118,7 @@ fn read_back(
 
 /// [`allocate_with`] with every job's grant serial.
 fn allocate(exec: &Exec<'_>, times: &[Duration], mean_work: f64) -> Allocation {
-    allocate_with(exec, times, |_| [0; 2], mean_work, Some(|_, _, _| 1))
+    allocate_with(exec, times, |_| [0; 3], mean_work, Some(|_, _, _| 1))
 }
 
 /// Jobs of one body `F` over states `S` failing with `E`, each with no lane
@@ -425,7 +425,7 @@ fn allocation_is_total_legal_and_deterministic() {
             let a = allocate_with(
                 exec,
                 &t,
-                |_| [0; 2],
+                |_| [0; 3],
                 1e6,
                 Some(|_, t: Duration, w| if t.as_nanos() >= 300 { w } else { 1 }),
             );
@@ -480,7 +480,7 @@ fn chosen(engine: &mut CpuEngine, times: &[Duration], mean_work: f64) -> Allocat
             Ok(allocate_with(
                 exec,
                 times,
-                |_| [0; 2],
+                |_| [0; 3],
                 mean_work,
                 Some(grant),
             ))
@@ -634,8 +634,70 @@ mod oracle {
         finish(widths, jobs, t, d)
     }
 
-    /// `best`, or the reservation when it scores strictly lower on at
-    /// most `cap` lanes and `cap` allows fan-out.
+    /// Exclusive reservation: the least target T, as [`moldable`]'s, at
+    /// which the jobs above T fit their least widths into S and the other
+    /// jobs' serial time fits the one-slot lanes left, `sum <= (S - used)
+    /// T`; each job above T alone on a lane of its width, the others,
+    /// largest first, on the least loaded one-slot lane (then fewest jobs,
+    /// then lowest lane); empty one-slot lanes then widen the reserved
+    /// lanes, largest job first, while the grant grows.
+    pub(super) fn exclusive(t: &[u64], slots: usize, d: u64) -> (u64, Lanes) {
+        let items = |j: usize| (1..=slots).map(move |w| item(t[j], w, d));
+        let lb = (0..t.len())
+            .map(|j| items(j).min().unwrap())
+            .fold(t.iter().sum::<u64>().div_ceil(slots as u64), u64::max);
+        let mut targets = vec![lb];
+        for j in (0..t.len()).filter(|&j| t[j] > lb) {
+            targets.extend(items(j).filter(|&x| x >= lb));
+        }
+        targets.sort();
+        let need = |j: usize, target: u64| (1..=slots).find(|&w| item(t[j], w, d) <= target);
+        let target = targets
+            .into_iter()
+            .find(|&target| {
+                let (big, rest): (Vec<usize>, Vec<usize>) =
+                    order(t).into_iter().partition(|&j| t[j] > target);
+                let used: usize = big.iter().map(|&j| need(j, target).unwrap()).sum();
+                let tail: u64 = rest.iter().map(|&j| t[j]).sum();
+                used <= slots
+                    && (rest.is_empty() || used < slots)
+                    && tail as u128 <= (slots - used) as u128 * target as u128
+            })
+            .unwrap();
+        let big: Vec<usize> = order(t).into_iter().filter(|&j| t[j] > target).collect();
+        let mut widths: Vec<usize> = big.iter().map(|&j| need(j, target).unwrap()).collect();
+        let used: usize = widths.iter().sum();
+        let thin = slots - used;
+        let mut jobs: Vec<Vec<usize>> = big.iter().map(|&j| vec![j]).collect();
+        let (mut load, mut thin_jobs) = (vec![0u64; thin], vec![Vec::new(); thin]);
+        for j in order(t).into_iter().skip(big.len()) {
+            let k = (0..thin)
+                .min_by_key(|&k| (load[k] + t[j], thin_jobs[k].len(), k))
+                .unwrap();
+            load[k] += t[j];
+            thin_jobs[k].push(j);
+        }
+        let mut idle = thin_jobs.iter().filter(|js| js.is_empty()).count();
+        for (k, &j) in big.iter().enumerate() {
+            while idle > 0 && grant(t[j], widths[k] + 1, d) > grant(t[j], widths[k], d) {
+                widths[k] += 1;
+                idle -= 1;
+            }
+        }
+        widths.extend(std::iter::repeat_n(1, thin));
+        jobs.extend(thin_jobs);
+        let (widths, jobs) = widths
+            .into_iter()
+            .zip(jobs)
+            .filter(|(_, js)| !js.is_empty())
+            .unzip();
+        finish(widths, jobs, t, d)
+    }
+
+    /// `best`, or the better reservation (the exclusive one only when it
+    /// scores strictly lower than the shared one) when it scores strictly
+    /// lower on at most `cap` lanes and `cap` allows fan-out; a reservation
+    /// on more than `cap` lanes is discarded.
     fn or_moldable(
         best: (u64, Lanes),
         t: &[u64],
@@ -643,11 +705,14 @@ mod oracle {
         cap: usize,
         d: u64,
     ) -> (u64, Lanes) {
-        let m = moldable(t, slots, d);
-        if cap > 1 && m.1.len() <= cap && m.0 < best.0 {
-            m
-        } else {
-            best
+        let fits = |m: (u64, Lanes)| (m.1.len() <= cap).then_some(m);
+        let m = match (fits(moldable(t, slots, d)), fits(exclusive(t, slots, d))) {
+            (Some(m), Some(x)) => Some(if x.0 < m.0 { x } else { m }),
+            (m, x) => m.or(x),
+        };
+        match m {
+            Some(m) if cap > 1 && m.0 < best.0 => m,
+            _ => best,
         }
     }
 
@@ -774,7 +839,7 @@ fn caller_min_items_keeps_one_lane() {
             let exec: &Exec<'_> = exec;
             let key = |_| {
                 keys.set(keys.get() + 1);
-                [0; 2]
+                [0; 3]
             };
             let grant = |_, t: Duration, w| {
                 grants.set(grants.get() + 1);
@@ -875,6 +940,29 @@ fn allocation_dominates_main_under_model() {
     assert_eq!(one.0, 6650);
     assert_eq!(oracle::choose(&tail, 4, 4, d), one);
     assert_eq!(lanes(&chosen(&mut flat4(), &nanos(&tail), 1e9)), one.1);
+
+    // One large job and a tail: the shared reservation takes all six slots
+    // (`30000 / 6 + 100 = 5100`) and queues the tail on that lane at width
+    // six (`5 * (1000 / 6 + 100) = 1330`), 6430 like one equal share; the
+    // exclusive one leaves a slot for the tail (`5 * 1000 = 5000 <= 1 *
+    // 6100`) and scores `30000 / 5 + 100 = 6100`.
+    let alone = [30000, 1000, 1000, 1000, 1000, 1000];
+    let excl = (6100, vec![(5, vec![0]), (1, vec![1, 2, 3, 4, 5])]);
+    assert_eq!(
+        oracle::moldable(&alone, 6, d),
+        (6430, vec![(6, vec![0, 1, 2, 3, 4, 5])])
+    );
+    assert_eq!(oracle::equal(&alone, 6, 1, d).0, 6430);
+    assert_eq!(oracle::exclusive(&alone, 6, d), excl);
+    assert_eq!(oracle::choose(&alone, 6, 6, d), excl);
+    assert_eq!(
+        lanes(&chosen(
+            &mut flat(6, BatchPolicy::default(), d),
+            &nanos(&alone),
+            1e9
+        )),
+        excl.1
+    );
 
     let mut many = vec![10000];
     many.extend([100; 120]);
@@ -1044,7 +1132,7 @@ fn warm_cached_allocation_allocates_nothing_and_scratch_is_charged() {
         (nanos(&[40000, 100, 100, 101]), 1),
         (nanos(&[100, 100, 1000, 2000]), 2),
     ];
-    let keys = [[0; 2]; 4];
+    let keys = [[0; 3]; 4];
     let model = WorkModel::default()
         .with_muladds_per_ns(1.0)
         .with_item_overhead_ns(0.0);
@@ -1115,8 +1203,8 @@ fn equal_grant_inputs_are_queried_once() {
     };
     let mut engine = flat(6, BatchPolicy::default(), 100);
     let t = nanos(&[9000, 9000, 9000, 4000, 4000, 4000, 100, 100, 100]);
-    let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0]).collect();
-    let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0]).collect();
+    let grouped: Vec<GrantKey> = (0..9).map(|j| [j as u64 / 3, 0, 0]).collect();
+    let distinct: Vec<GrantKey> = (0..9).map(|j| [j as u64, 0, 0]).collect();
     let (shared, few) = run(&mut engine, &t, &grouped);
     let (separate, all) = run(&mut engine, &t, &distinct);
     assert_eq!(shared, separate);
@@ -1125,7 +1213,7 @@ fn equal_grant_inputs_are_queried_once() {
 
     let tiny: Vec<u64> = (0..200).map(|j| 50 + (j * 37) % 200).collect();
     let times: std::collections::BTreeSet<u64> = tiny.iter().copied().collect();
-    let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 2]; 200]);
+    let (_, count) = run(&mut engine, &nanos(&tiny), &[[0; 3]; 200]);
     assert_eq!(count, times.len());
 }
 
@@ -1139,7 +1227,7 @@ fn equal_grant_inputs_are_queried_once() {
 #[test]
 fn unchanged_inputs_hit_and_any_change_searches() {
     let t = nanos(&[40000, 100, 100, 100]);
-    let keys = [[0; 2]; 4];
+    let keys = [[0; 3]; 4];
     let model = WorkModel::default()
         .with_muladds_per_ns(1.0)
         .with_item_overhead_ns(0.0);
@@ -1174,7 +1262,7 @@ fn unchanged_inputs_hit_and_any_change_searches() {
     other_time[3] = Duration::from_nanos(101);
     assert!(on(&mut base, &other_time, &keys, 10075.0).1);
     let mut other_key = keys;
-    other_key[2] = [1, 0];
+    other_key[2] = [1, 0, 0];
     assert!(on(&mut base, &t, &other_key, 10075.0).1);
     assert!(on(&mut base, &t, &keys, 10076.0).1);
     let other_model = BatchPolicy::default().with_model(model.with_min_items(3));
@@ -1197,7 +1285,7 @@ fn unchanged_inputs_hit_and_any_change_searches() {
     assert!(on(&mut base, &t, &keys, 10075.0).1);
     let work: Vec<GrantKey> = [40000.0_f64, 100.0, 100.0, 100.0]
         .iter()
-        .map(|&w| [w.to_bits(), (w * 6e-4).to_bits()])
+        .map(|&w| [w.to_bits(), (w * 6e-4).to_bits(), 0])
         .collect();
     assert!(on(&mut base, &t, &work, 10075.0).1);
     assert!(!on(&mut base, &t, &work, 10075.0).1);
@@ -1250,7 +1338,7 @@ fn admission_respects_the_byte_budget() {
         .with_muladds_per_ns(1.0)
         .with_item_overhead_ns(0.0);
     let mut engine = flat(4, BatchPolicy::default().with_model(model), 100);
-    let keys = [[0; 2]; 4];
+    let keys = [[0; 3]; 4];
     let bounded = cache(4096);
     let tiny = cache(64);
     engine
@@ -1324,7 +1412,7 @@ fn a_racing_duplicate_search_counts_and_keeps_the_winner() {
         .with_item_overhead_ns(0.0);
     let policy = BatchPolicy::default().with_model(model);
     let t = nanos(&[100, 100, 1000, 2000]);
-    let keys = [[0; 2]; 4];
+    let keys = [[0; 3]; 4];
     let cache = cache(1 << 20);
     let both = std::sync::Barrier::new(2);
     let search = || {

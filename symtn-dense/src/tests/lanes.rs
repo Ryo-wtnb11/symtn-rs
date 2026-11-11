@@ -48,7 +48,7 @@ fn place(exec: &Exec<'_>, times: &[Duration], tables: &mut LaneTables) {
     allocate(
         exec,
         times,
-        (OpKind::Gemm, |_| [0; 2]),
+        (OpKind::Gemm, |_| [0; 3]),
         1e9,
         grant,
         cache,
@@ -353,7 +353,7 @@ fn the_tables_charge_covers_what_they_retain() {
         let shared: &Exec<'_> = &exec;
         let grant = |_, t: Duration, w| shared.width_for_within(w, t.as_nanos() as f64, 1);
         let cache = LaneAllocationCache::new(symtn_core::StructureCacheKind::LaneAllocations, 0);
-        let key = (OpKind::Gemm, |_| [0; 2]);
+        let key = (OpKind::Gemm, |_| [0; 3]);
         allocate(shared, &times, key, 1e9, Some(grant), &cache, &mut tables);
         let lanes = tables.placement().lanes();
         run_native(
