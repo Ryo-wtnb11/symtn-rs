@@ -1,0 +1,1315 @@
+pub mod symtn
+pub mod symtn::cache
+pub use symtn::cache::StructureCacheInfo
+pub use symtn::cache::StructureCacheKind
+pub fn symtn::cache::clear()
+pub fn symtn::cache::configure_budgets(impl core::iter::traits::collect::IntoIterator<Item = (symtn_core::cache::StructureCacheKind, u64)>)
+pub fn symtn::cache::stats() -> alloc::vec::Vec<symtn_core::cache::StructureCacheInfo>
+pub mod symtn::expert
+pub use symtn::expert::BlockLayout
+pub use symtn::expert::BlockRef
+pub use symtn::expert::BlockView
+pub use symtn::expert::CudaDenseContext
+pub use symtn::expert::CudaDenseStorage
+pub use symtn::expert::CudaTransferStats
+pub use symtn::expert::DefaultDenseExecutor
+pub use symtn::expert::DenseBackend
+pub use symtn::expert::DenseDType
+pub use symtn::expert::DenseDotConfig
+pub use symtn::expert::DenseError
+pub use symtn::expert::DenseExecutor
+pub use symtn::expert::DenseFactorization
+pub use symtn::expert::DenseGemmBatchJob
+pub use symtn::expert::DenseLinalgScopeBody
+pub use symtn::expert::DenseOwned
+pub use symtn::expert::DenseRead
+pub use symtn::expert::DenseScalar
+pub use symtn::expert::DenseTensor
+pub use symtn::expert::DenseView
+pub use symtn::expert::DenseViewMut
+pub use symtn::expert::DenseWrite
+pub use symtn::expert::FactorDest
+pub use symtn::expert::FactorFailure
+pub use symtn::expert::FactorPlacement
+pub use symtn::expert::HostReadableStorage
+pub use symtn::expert::MatrixOp
+pub use symtn::expert::Placement
+pub use symtn::expert::SectorLeg
+pub use symtn::expert::SectorLegConstructionError
+pub use symtn::expert::TensorStorage
+pub use symtn::expert::TreeTransformOperation
+pub use symtn::expert::TreeTransformOperationKind
+pub use symtn::expert::cuda_transfer_stats
+pub use symtn::expert::reset_cuda_transfer_stats
+pub fn symtn::expert::diagonal_spectrum<R, D>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::TensorMap<R, D>) -> core::result::Result<core::option::Option<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, D>>>, symtn::typed::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::expert::is_diagonal<R, D>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::TensorMap<R, D>, f64) -> core::result::Result<bool, symtn::typed::Error> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar
+pub mod symtn::krylov
+pub use symtn::krylov::<<::krylov::*>>
+pub mod symtn::mathematics
+pub mod symtn::scratch
+pub fn symtn::scratch::retained_bytes(&mut dyn tenferro_tensor::backend::Engine) -> usize
+pub fn symtn::scratch::trim(&mut dyn tenferro_tensor::backend::Engine)
+pub mod symtn::sector
+pub use symtn::sector::BraidingStyleKind
+pub use symtn::sector::CU1FusionRule
+pub use symtn::sector::CU1Irrep
+pub use symtn::sector::CanonicalUnitAdmission
+pub use symtn::sector::CanonicalUnitFusionRule
+pub use symtn::sector::CategoricalScalar
+pub use symtn::sector::CategoryAdapterError
+pub use symtn::sector::CategoryAdmissionError
+pub use symtn::sector::CategoryCodec
+pub use symtn::sector::CategoryFailure
+pub use symtn::sector::CategoryOperation
+pub use symtn::sector::CategoryProvider
+pub use symtn::sector::CategoryRule
+pub use symtn::sector::CheckedCanonicalUnitFusionRule
+pub use symtn::sector::CheckedFusionAlgebra
+pub use symtn::sector::CheckedGenericAdmissionMode
+pub use symtn::sector::CheckedGenericFusion
+pub use symtn::sector::CheckedGenericPivotal
+pub use symtn::sector::CheckedGenericRigidSymbols
+pub use symtn::sector::CoupledSectorFold
+pub use symtn::sector::EnumeratedCodec
+pub use symtn::sector::FermionParityFusionRule
+pub use symtn::sector::FusionRule
+pub use symtn::sector::FusionStyleKind
+pub use symtn::sector::Fz2SectorLayout
+pub use symtn::sector::GenericFArray
+pub use symtn::sector::GenericRMatrix
+pub use symtn::sector::LieGroupFusionRule
+pub use symtn::sector::LieGroupFusionRuleError
+pub use symtn::sector::MultiplicityFreeAdmissionMode
+pub use symtn::sector::MultiplicityFreeFusionRule
+pub use symtn::sector::MultiplicityFreeFusionSymbols
+pub use symtn::sector::MultiplicityFreeRigidSymbols
+pub use symtn::sector::PackedProductCodec
+pub use symtn::sector::PackedSectorLayout
+pub use symtn::sector::PhysicalBasisError
+pub use symtn::sector::PhysicalFusionBasis
+pub use symtn::sector::ProductAdmission
+pub use symtn::sector::ProductFusionRule
+pub use symtn::sector::ProductFusionRuleError
+pub use symtn::sector::ProductSector
+pub use symtn::sector::ProductSectorCodec
+pub use symtn::sector::ProductSectorCodecError
+pub use symtn::sector::ProductSectorComponent
+pub use symtn::sector::ProductSectorLayout
+pub use symtn::sector::RuleIdentity
+pub use symtn::sector::SU2CoefficientError
+pub use symtn::sector::SU2FusionRule
+pub use symtn::sector::SU2Irrep
+pub use symtn::sector::SectorCodec
+pub use symtn::sector::SectorId
+pub use symtn::sector::SectorOrderKey
+pub use symtn::sector::SectorVec
+pub use symtn::sector::Su2SectorLayout
+pub use symtn::sector::SymbolShapeError
+pub use symtn::sector::TableRule
+pub use symtn::sector::TableRuleError
+pub use symtn::sector::TableSector
+pub use symtn::sector::TensorKitProductCodec
+pub use symtn::sector::TypedSectorAdmission
+pub use symtn::sector::U1FusionRule
+pub use symtn::sector::U1Irrep
+pub use symtn::sector::U1SectorLayout
+pub use symtn::sector::UncertifiedUnitAdmission
+pub use symtn::sector::Z2FusionRule
+pub use symtn::sector::Z2Irrep
+pub use symtn::sector::ZNFusionRule
+pub use symtn::sector::ZNIrrep
+pub use symtn::sector::product_sector
+pub mod symtn::typed
+pub use symtn::typed::BlockKey
+pub use symtn::typed::BlockKeyKind
+pub use symtn::typed::CheckedFusionSpaceError
+pub use symtn::typed::CheckedGenericPlanError
+pub use symtn::typed::CheckedGenericStructureError
+pub use symtn::typed::Complex32
+pub use symtn::typed::Complex64
+pub use symtn::typed::CoreError
+pub use symtn::typed::CpuEngine
+pub use symtn::typed::CudaDeviceId
+pub use symtn::typed::CudaEngine
+pub use symtn::typed::CudaRealScalar
+pub use symtn::typed::CudaScalar
+pub use symtn::typed::CudaStorage
+pub use symtn::typed::Eig
+pub use symtn::typed::Eigh
+pub use symtn::typed::Engine
+pub use symtn::typed::FactorScalar
+pub use symtn::typed::FusionAlgebraError
+pub use symtn::typed::FusionTreeGroupKey
+pub use symtn::typed::FusionTreeKey
+pub use symtn::typed::FusionTreePairKey
+pub use symtn::typed::HermitianTol
+pub use symtn::typed::LeftPolar
+pub use symtn::typed::Lq
+pub use symtn::typed::MultiplicityIndex
+pub use symtn::typed::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED
+pub use symtn::typed::OpaqueBlockKey
+pub use symtn::typed::OperationError
+pub use symtn::typed::Pool
+pub use symtn::typed::Qr
+pub use symtn::typed::RecouplingCoefficientAction
+pub use symtn::typed::RightPolar
+pub use symtn::typed::SpectrumMagnitude
+pub use symtn::typed::Svd
+pub use symtn::typed::Truncation
+pub use symtn::typed::TruncationError
+pub use symtn::typed::TruncationSpace
+pub use symtn::typed::reject_non_symmetric_contraction
+pub mod symtn::typed::__network
+pub enum symtn::typed::__network::NetworkReuseClass
+pub symtn::typed::__network::NetworkReuseClass::Compact
+pub symtn::typed::__network::NetworkReuseClass::LazyAdjoint
+pub symtn::typed::__network::NetworkReuseClass::OwnedDense
+impl core::clone::Clone for symtn::typed::__network::NetworkReuseClass
+pub fn symtn::typed::__network::NetworkReuseClass::clone(&self) -> symtn::typed::__network::NetworkReuseClass
+impl core::clone::TrivialClone for symtn::typed::__network::NetworkReuseClass
+impl core::cmp::Eq for symtn::typed::__network::NetworkReuseClass
+pub fn symtn::typed::__network::NetworkReuseClass::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::__network::NetworkReuseClass
+pub fn symtn::typed::__network::NetworkReuseClass::eq(&self, &symtn::typed::__network::NetworkReuseClass) -> bool
+impl core::marker::Copy for symtn::typed::__network::NetworkReuseClass
+impl core::marker::StructuralPartialEq for symtn::typed::__network::NetworkReuseClass
+pub struct symtn::typed::__network::ExtensionSlot
+impl symtn::typed::__network::ExtensionSlot
+pub fn symtn::typed::__network::ExtensionSlot::get_mut<T: core::any::Any + core::marker::Send>(&mut self) -> core::option::Option<&mut T>
+pub fn symtn::typed::__network::ExtensionSlot::get_or_insert_with<T: core::any::Any + core::marker::Send>(&mut self, impl core::ops::function::FnOnce() -> T) -> &mut T
+impl core::default::Default for symtn::typed::__network::ExtensionSlot
+pub fn symtn::typed::__network::ExtensionSlot::default() -> symtn::typed::__network::ExtensionSlot
+pub struct symtn::typed::__network::NetworkDegeneracyRestriction
+pub symtn::typed::__network::NetworkDegeneracyRestriction::authority_sector: symtn_sectors::SectorId
+pub symtn::typed::__network::NetworkDegeneracyRestriction::effective_axis: usize
+pub symtn::typed::__network::NetworkDegeneracyRestriction::partner: bool
+pub symtn::typed::__network::NetworkDegeneracyRestriction::range: core::ops::range::Range<usize>
+pub struct symtn::typed::__network::RuntimeDetachedTensorMap<D, S>
+impl<D, S> symtn::typed::__network::RuntimeDetachedTensorMap<D, S>
+pub fn symtn::typed::__network::RuntimeDetachedTensorMap<D, S>::attach_runtime<R>(self, &symtn::typed::Runtime, &symtn::typed::TensorMap<R, D, S>) -> core::result::Result<symtn::typed::TensorMap<R, D, S>, symtn::typed::Error>
+pub fn symtn::typed::__network::RuntimeDetachedTensorMap<D, S>::can_attach<R>(&self, &symtn::typed::Runtime, &symtn::typed::TensorMap<R, D, S>) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn::typed::__network::RuntimeDetachedTensorMap<D, S>::matches_runtime(&self, &symtn::typed::Runtime) -> bool
+pub fn symtn::typed::__network::RuntimeDetachedTensorMap<D, S>::retained_dense_capacity_bytes(&self) -> usize where S: symtn::typed::__network::NetworkPayloadStorage<D>
+pub struct symtn::typed::__network::RuntimeIdentity
+impl symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::RuntimeIdentity::is_alive(&self) -> bool
+pub fn symtn::typed::__network::RuntimeIdentity::matches(&self, &symtn::typed::Runtime) -> bool
+impl core::clone::Clone for symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::RuntimeIdentity::clone(&self) -> symtn::typed::__network::RuntimeIdentity
+impl core::cmp::Eq for symtn::typed::__network::RuntimeIdentity
+impl core::cmp::PartialEq for symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::RuntimeIdentity::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::RuntimeIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::RuntimeIdentity::hash<H: core::hash::Hasher>(&self, &mut H)
+pub trait symtn::typed::__network::NetworkPayloadStorage<D>: symtn_core::storage::TensorStorage<D> + symtn::typed::tensor_repr::network_payload_sealed::Sealed + 'static
+pub fn symtn::typed::__network::NetworkPayloadStorage::network_retained_bytes(&self) -> usize
+impl<D: 'static> symtn::typed::__network::NetworkPayloadStorage<D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::network_retained_bytes(&self) -> usize
+impl<D: symtn::typed::CudaPayload> symtn::typed::__network::NetworkPayloadStorage<D> for symtn_operations::cuda::CudaStorage<D>
+pub fn symtn_operations::cuda::CudaStorage<D>::network_retained_bytes(&self) -> usize
+pub fn symtn::typed::__network::cuda_engine_device<R, D: symtn::typed::CudaPayload>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[&symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>]) -> core::result::Result<usize, symtn::typed::Error>
+pub fn symtn::typed::__network::detach_runtime<R, D, S>(symtn::typed::TensorMap<R, D, S>) -> core::option::Option<symtn::typed::__network::RuntimeDetachedTensorMap<D, S>>
+pub fn symtn::typed::__network::network_has_compact_payload<R, D>(&symtn::typed::TensorMap<R, D>) -> bool where D: symtn::typed::TensorScalar
+pub fn symtn::typed::__network::network_input_metadata_matches<R, D, S>(&symtn::typed::TensorMap<R, D, S>, bool, &[symtn_core::sector::SectorLeg], symtn::typed::__network::NetworkReuseClass) -> bool where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::__network::network_owned_payload<R, D, S>(&symtn::typed::TensorMap<R, D, S>) -> core::option::Option<(usize, usize)> where S: symtn::typed::__network::NetworkPayloadStorage<D>
+pub fn symtn::typed::__network::network_restrict_degeneracies<R, D>(&symtn::typed::TensorMap<R, D>, bool, &[symtn::typed::__network::NetworkDegeneracyRestriction]) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::__network::network_reuse_class<R, D, S>(&symtn::typed::TensorMap<R, D, S>, bool) -> symtn::typed::__network::NetworkReuseClass
+pub fn symtn::typed::__network::network_scatter_add_assign<R, D>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &mut symtn::typed::TensorMap<R, D>, &symtn::typed::TensorMap<R, D>, &[core::option::Option<core::ops::range::Range<usize>>]) -> core::result::Result<(), symtn::typed::Error> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar
+pub fn symtn::typed::__network::network_sector_leg<R>(&symtn::typed::GradedSpace<R>) -> &symtn_core::sector::SectorLeg
+pub fn symtn::typed::__network::network_source_leg<R, D, S>(&symtn::typed::TensorMap<R, D, S>, usize) -> core::option::Option<&symtn_core::sector::SectorLeg>
+pub fn symtn::typed::__network::network_zeros_from_effective_legs<R, D>(&symtn::typed::TensorMap<R, D>, &[symtn::typed::GradedSpace<R>], &[symtn::typed::GradedSpace<R>]) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::__network::runtime_identity(&symtn::typed::Runtime) -> symtn::typed::__network::RuntimeIdentity
+pub fn symtn::typed::__network::with_extension_slot<T>(&symtn::typed::Runtime, impl core::ops::function::FnOnce(&mut symtn::typed::__network::ExtensionSlot) -> T) -> T
+pub enum symtn::typed::Alternative
+pub symtn::typed::Alternative::Materialize
+impl core::clone::Clone for symtn::typed::Alternative
+pub fn symtn::typed::Alternative::clone(&self) -> symtn::typed::Alternative
+impl core::clone::TrivialClone for symtn::typed::Alternative
+impl core::cmp::Eq for symtn::typed::Alternative
+pub fn symtn::typed::Alternative::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::Alternative
+pub fn symtn::typed::Alternative::eq(&self, &symtn::typed::Alternative) -> bool
+impl core::fmt::Debug for symtn::typed::Alternative
+pub fn symtn::typed::Alternative::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn::typed::Alternative
+pub fn symtn::typed::Alternative::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::Alternative
+impl core::marker::StructuralPartialEq for symtn::typed::Alternative
+#[non_exhaustive] pub enum symtn::typed::BatchError
+pub symtn::typed::BatchError::MemberRejected
+pub symtn::typed::BatchError::MemberRejected::members: alloc::vec::Vec<(usize, symtn::typed::MemberFault)>
+pub symtn::typed::BatchError::Operation(symtn::typed::Error)
+pub symtn::typed::BatchError::Solver
+pub symtn::typed::BatchError::Solver::block: usize
+pub symtn::typed::BatchError::Solver::source: symtn::typed::Error
+impl core::clone::Clone for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::clone(&self) -> symtn::typed::BatchError
+impl core::cmp::PartialEq for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::eq(&self, &symtn::typed::BatchError) -> bool
+impl core::convert::From<symtn::typed::Error> for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::from(symtn::typed::Error) -> Self
+impl core::error::Error for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn::typed::BatchError
+#[non_exhaustive] pub enum symtn::typed::BatchMemberRepresentation
+pub symtn::typed::BatchMemberRepresentation::CompactDiagonal
+pub symtn::typed::BatchMemberRepresentation::LazyAdjoint
+impl core::clone::Clone for symtn::typed::BatchMemberRepresentation
+pub fn symtn::typed::BatchMemberRepresentation::clone(&self) -> symtn::typed::BatchMemberRepresentation
+impl core::clone::TrivialClone for symtn::typed::BatchMemberRepresentation
+impl core::cmp::Eq for symtn::typed::BatchMemberRepresentation
+pub fn symtn::typed::BatchMemberRepresentation::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::BatchMemberRepresentation
+pub fn symtn::typed::BatchMemberRepresentation::eq(&self, &symtn::typed::BatchMemberRepresentation) -> bool
+impl core::fmt::Debug for symtn::typed::BatchMemberRepresentation
+pub fn symtn::typed::BatchMemberRepresentation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::BatchMemberRepresentation
+impl core::marker::StructuralPartialEq for symtn::typed::BatchMemberRepresentation
+pub enum symtn::typed::BondOutput<D>
+pub symtn::typed::BondOutput::Dense(alloc::vec::Vec<D>)
+pub symtn::typed::BondOutput::Spectrum(alloc::vec::Vec<symtn_matrixalgebra::factorize::scalar::SectorSpectrum<D>>)
+pub enum symtn::typed::CheckedGenericTensorProductError<E>
+pub symtn::typed::CheckedGenericTensorProductError::Core(symtn_core::error::CoreError)
+pub symtn::typed::CheckedGenericTensorProductError::Operation(symtn_operations::error::OperationError)
+pub symtn::typed::CheckedGenericTensorProductError::Provider(E)
+pub symtn::typed::CheckedGenericTensorProductError::SymbolShape
+pub symtn::typed::CheckedGenericTensorProductError::SymbolShape::actual: alloc::vec::Vec<usize>
+pub symtn::typed::CheckedGenericTensorProductError::SymbolShape::expected: alloc::vec::Vec<usize>
+pub symtn::typed::CheckedGenericTensorProductError::SymbolShape::symbol: &'static str
+impl<E: core::error::Error + 'static> core::error::Error for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn::typed::CheckedGenericTensorProductError<E>> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn::typed::CheckedGenericTensorProductError<E>) -> Self
+impl<E> core::convert::From<symtn_core::error::CoreError> for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::from(symtn_core::error::CoreError) -> Self
+impl<E> core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>> for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::from(symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>) -> Self
+impl<E> core::convert::From<symtn_operations::error::OperationError> for symtn::typed::CheckedGenericTensorProductError<E>
+pub fn symtn::typed::CheckedGenericTensorProductError<E>::from(symtn_operations::error::OperationError) -> Self
+#[non_exhaustive] pub enum symtn::typed::CoupledBlockPayload<'a, D, S>
+pub symtn::typed::CoupledBlockPayload::Dense
+pub symtn::typed::CoupledBlockPayload::Dense::adjoint: bool
+pub symtn::typed::CoupledBlockPayload::Dense::offset: usize
+pub symtn::typed::CoupledBlockPayload::Dense::storage: &'a S
+pub symtn::typed::CoupledBlockPayload::Diagonal(&'a [D])
+impl<'a, D: core::fmt::Debug, S: core::fmt::Debug> core::fmt::Debug for symtn::typed::CoupledBlockPayload<'a, D, S>
+pub fn symtn::typed::CoupledBlockPayload<'a, D, S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<D, S> core::clone::Clone for symtn::typed::CoupledBlockPayload<'_, D, S>
+pub fn symtn::typed::CoupledBlockPayload<'_, D, S>::clone(&self) -> Self
+impl<D, S> core::marker::Copy for symtn::typed::CoupledBlockPayload<'_, D, S>
+pub enum symtn::typed::DecodeError<C, F>
+pub symtn::typed::DecodeError::Codec(C)
+pub symtn::typed::DecodeError::Facade(F)
+pub symtn::typed::DecodeError::InvalidFormat(alloc::string::String)
+pub symtn::typed::DecodeError::LimitExceeded
+pub symtn::typed::DecodeError::LimitExceeded::actual: usize
+pub symtn::typed::DecodeError::LimitExceeded::limit: usize
+pub symtn::typed::DecodeError::LimitExceeded::resource: &'static str
+pub symtn::typed::DecodeError::ProviderMismatch
+pub symtn::typed::DecodeError::ScalarMismatch
+pub symtn::typed::DecodeError::ScalarMismatch::actual: symtn::typed::PersistedScalar
+pub symtn::typed::DecodeError::ScalarMismatch::expected: symtn::typed::PersistedScalar
+pub symtn::typed::DecodeError::UnsupportedVersion
+pub symtn::typed::DecodeError::UnsupportedVersion::actual: u16
+pub symtn::typed::DecodeError::UnsupportedVersion::supported: u16
+impl<C, F> core::error::Error for symtn::typed::DecodeError<C, F> where C: core::error::Error + 'static, F: core::error::Error + 'static
+pub fn symtn::typed::DecodeError<C, F>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<C: core::fmt::Debug, F: core::fmt::Debug> core::fmt::Debug for symtn::typed::DecodeError<C, F>
+pub fn symtn::typed::DecodeError<C, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<C: core::fmt::Display, F: core::fmt::Display> core::fmt::Display for symtn::typed::DecodeError<C, F>
+pub fn symtn::typed::DecodeError<C, F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum symtn::typed::Direction
+pub symtn::typed::Direction::Forward
+pub symtn::typed::Direction::Inverse
+impl core::clone::Clone for symtn::typed::Direction
+pub fn symtn::typed::Direction::clone(&self) -> symtn::typed::Direction
+impl core::clone::TrivialClone for symtn::typed::Direction
+impl core::cmp::Eq for symtn::typed::Direction
+pub fn symtn::typed::Direction::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::Direction
+pub fn symtn::typed::Direction::eq(&self, &symtn::typed::Direction) -> bool
+impl core::fmt::Debug for symtn::typed::Direction
+pub fn symtn::typed::Direction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::Direction
+pub fn symtn::typed::Direction::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn::typed::Direction
+impl core::marker::StructuralPartialEq for symtn::typed::Direction
+pub enum symtn::typed::Duality
+pub symtn::typed::Duality::Dual
+pub symtn::typed::Duality::Plain
+impl core::clone::Clone for symtn::typed::Duality
+pub fn symtn::typed::Duality::clone(&self) -> symtn::typed::Duality
+impl core::clone::TrivialClone for symtn::typed::Duality
+impl core::cmp::Eq for symtn::typed::Duality
+pub fn symtn::typed::Duality::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::Duality
+pub fn symtn::typed::Duality::eq(&self, &symtn::typed::Duality) -> bool
+impl core::fmt::Debug for symtn::typed::Duality
+pub fn symtn::typed::Duality::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::Duality
+pub fn symtn::typed::Duality::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn::typed::Duality
+impl core::marker::StructuralPartialEq for symtn::typed::Duality
+pub enum symtn::typed::EncodeError<C, P>
+pub symtn::typed::EncodeError::Codec(C)
+pub symtn::typed::EncodeError::InvalidState(alloc::string::String)
+pub symtn::typed::EncodeError::LengthOverflow
+pub symtn::typed::EncodeError::Provider(P)
+impl<C, P> core::error::Error for symtn::typed::EncodeError<C, P> where C: core::error::Error + 'static, P: core::error::Error + 'static
+pub fn symtn::typed::EncodeError<C, P>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<C: core::fmt::Debug, P: core::fmt::Debug> core::fmt::Debug for symtn::typed::EncodeError<C, P>
+pub fn symtn::typed::EncodeError<C, P>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<C: core::fmt::Display, P: core::fmt::Display> core::fmt::Display for symtn::typed::EncodeError<C, P>
+pub fn symtn::typed::EncodeError<C, P>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum symtn::typed::Error
+pub symtn::typed::Error::BatchMemberOutOfRange
+pub symtn::typed::Error::BatchMemberOutOfRange::len: usize
+pub symtn::typed::Error::BatchMemberOutOfRange::member: usize
+pub symtn::typed::Error::BatchSignatureMismatch
+pub symtn::typed::Error::BatchSignatureMismatch::field: symtn::typed::SignatureField
+pub symtn::typed::Error::BatchSignatureMismatch::member: core::option::Option<usize>
+pub symtn::typed::Error::Core(alloc::boxed::Box<symtn_core::error::CoreError>)
+pub symtn::typed::Error::DestinationShared
+pub symtn::typed::Error::FusionAlgebra(alloc::boxed::Box<symtn_sectors::algebra::FusionAlgebraError>)
+pub symtn::typed::Error::InvalidArgument(alloc::string::String)
+pub symtn::typed::Error::Operation(alloc::boxed::Box<symtn_operations::error::OperationError>)
+pub symtn::typed::Error::PlacementMismatch
+pub symtn::typed::Error::RuleMismatch
+pub symtn::typed::Error::RuntimeMismatch
+pub symtn::typed::Error::Unsupported
+pub symtn::typed::Error::Unsupported::alternative: symtn::typed::Alternative
+pub symtn::typed::Error::Unsupported::operation: &'static str
+pub symtn::typed::Error::UnsupportedBatchMember
+pub symtn::typed::Error::UnsupportedBatchMember::member: usize
+pub symtn::typed::Error::UnsupportedBatchMember::representation: symtn::typed::BatchMemberRepresentation
+pub symtn::typed::Error::UnsupportedOnDevice(alloc::string::String)
+impl core::clone::Clone for symtn::typed::Error
+pub fn symtn::typed::Error::clone(&self) -> symtn::typed::Error
+impl core::cmp::PartialEq for symtn::typed::Error
+pub fn symtn::typed::Error::eq(&self, &symtn::typed::Error) -> bool
+impl core::convert::From<symtn::typed::Error> for symtn::typed::BatchError
+pub fn symtn::typed::BatchError::from(symtn::typed::Error) -> Self
+impl core::convert::From<symtn::typed::Error> for symtn::typed::TransformExecError
+pub fn symtn::typed::TransformExecError::from(symtn::typed::Error) -> Self
+impl core::convert::From<symtn::typed::TransformExecError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn::typed::TransformExecError) -> Self
+impl core::convert::From<symtn_core::error::CoreError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn_core::error::CoreError) -> Self
+impl core::convert::From<symtn_matrixalgebra::truncation::TruncationError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn_matrixalgebra::truncation::TruncationError) -> Self
+impl core::convert::From<symtn_operations::error::OperationError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn_operations::error::OperationError) -> Self
+impl core::convert::From<symtn_sectors::algebra::FusionAlgebraError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn_sectors::algebra::FusionAlgebraError) -> Self
+impl core::error::Error for symtn::typed::Error
+pub fn symtn::typed::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for symtn::typed::Error
+pub fn symtn::typed::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn::typed::Error
+pub fn symtn::typed::Error::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn::typed::Error
+impl<E> core::convert::From<symtn::typed::Error> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn::typed::Error) -> Self
+#[non_exhaustive] pub enum symtn::typed::GenericTensorError<E>
+pub symtn::typed::GenericTensorError::Facade(symtn::typed::Error)
+pub symtn::typed::GenericTensorError::Plan(symtn_tensors::tree_transform::plan::CheckedGenericPlanError<E>)
+pub symtn::typed::GenericTensorError::Structure(symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>)
+pub symtn::typed::GenericTensorError::TensorProduct(symtn::typed::CheckedGenericTensorProductError<E>)
+impl<E: core::error::Error + 'static> core::error::Error for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn::typed::CheckedGenericTensorProductError<E>> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn::typed::CheckedGenericTensorProductError<E>) -> Self
+impl<E> core::convert::From<symtn::typed::Error> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn::typed::Error) -> Self
+impl<E> core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>) -> Self
+impl<E> core::convert::From<symtn_matrixalgebra::factorize::compact_plan::CheckedGenericFactorPlanError<E>> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn_matrixalgebra::factorize::compact_plan::CheckedGenericFactorPlanError<E>) -> Self
+impl<E> core::convert::From<symtn_operations::error::OperationError> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn_operations::error::OperationError) -> Self
+impl<E> core::convert::From<symtn_tensors::tree_transform::plan::CheckedGenericPlanError<E>> for symtn::typed::GenericTensorError<E>
+pub fn symtn::typed::GenericTensorError<E>::from(symtn_tensors::tree_transform::plan::CheckedGenericPlanError<E>) -> Self
+#[non_exhaustive] pub enum symtn::typed::MemberFault
+pub symtn::typed::MemberFault::NonFiniteEigenvalue
+pub symtn::typed::MemberFault::NotHermitian
+impl core::clone::Clone for symtn::typed::MemberFault
+pub fn symtn::typed::MemberFault::clone(&self) -> symtn::typed::MemberFault
+impl core::clone::TrivialClone for symtn::typed::MemberFault
+impl core::cmp::Eq for symtn::typed::MemberFault
+pub fn symtn::typed::MemberFault::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::MemberFault
+pub fn symtn::typed::MemberFault::eq(&self, &symtn::typed::MemberFault) -> bool
+impl core::fmt::Debug for symtn::typed::MemberFault
+pub fn symtn::typed::MemberFault::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::MemberFault
+impl core::marker::StructuralPartialEq for symtn::typed::MemberFault
+pub enum symtn::typed::PersistedScalar
+pub symtn::typed::PersistedScalar::Complex32
+pub symtn::typed::PersistedScalar::Complex64
+pub symtn::typed::PersistedScalar::F32
+pub symtn::typed::PersistedScalar::F64
+impl core::clone::Clone for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::clone(&self) -> symtn::typed::PersistedScalar
+impl core::clone::TrivialClone for symtn::typed::PersistedScalar
+impl core::cmp::Eq for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::eq(&self, &symtn::typed::PersistedScalar) -> bool
+impl core::fmt::Debug for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::PersistedScalar
+pub fn symtn::typed::PersistedScalar::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn::typed::PersistedScalar
+impl core::marker::StructuralPartialEq for symtn::typed::PersistedScalar
+pub enum symtn::typed::Side
+pub symtn::typed::Side::Codomain
+pub symtn::typed::Side::Domain
+impl core::clone::Clone for symtn::typed::Side
+pub fn symtn::typed::Side::clone(&self) -> symtn::typed::Side
+impl core::clone::TrivialClone for symtn::typed::Side
+impl core::cmp::Eq for symtn::typed::Side
+pub fn symtn::typed::Side::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::Side
+pub fn symtn::typed::Side::eq(&self, &symtn::typed::Side) -> bool
+impl core::fmt::Debug for symtn::typed::Side
+pub fn symtn::typed::Side::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::Side
+pub fn symtn::typed::Side::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn::typed::Side
+impl core::marker::StructuralPartialEq for symtn::typed::Side
+#[non_exhaustive] pub enum symtn::typed::SignatureField
+pub symtn::typed::SignatureField::BlockStructure
+pub symtn::typed::SignatureField::HomSpace
+pub symtn::typed::SignatureField::Placement
+pub symtn::typed::SignatureField::Rule
+pub symtn::typed::SignatureField::Runtime
+impl core::clone::Clone for symtn::typed::SignatureField
+pub fn symtn::typed::SignatureField::clone(&self) -> symtn::typed::SignatureField
+impl core::clone::TrivialClone for symtn::typed::SignatureField
+impl core::cmp::Eq for symtn::typed::SignatureField
+pub fn symtn::typed::SignatureField::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::SignatureField
+pub fn symtn::typed::SignatureField::eq(&self, &symtn::typed::SignatureField) -> bool
+impl core::fmt::Debug for symtn::typed::SignatureField
+pub fn symtn::typed::SignatureField::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::SignatureField
+impl core::marker::StructuralPartialEq for symtn::typed::SignatureField
+pub enum symtn::typed::TransformExecError
+pub symtn::typed::TransformExecError::Replay(symtn_operations::error::OperationError)
+pub symtn::typed::TransformExecError::Storage(symtn::typed::Error)
+impl core::convert::From<symtn::typed::Error> for symtn::typed::TransformExecError
+pub fn symtn::typed::TransformExecError::from(symtn::typed::Error) -> Self
+impl core::convert::From<symtn::typed::TransformExecError> for symtn::typed::Error
+pub fn symtn::typed::Error::from(symtn::typed::TransformExecError) -> Self
+impl core::convert::From<symtn_operations::error::OperationError> for symtn::typed::TransformExecError
+pub fn symtn::typed::TransformExecError::from(symtn_operations::error::OperationError) -> Self
+pub enum symtn::typed::TransformIntoSource<'s, D, S, C>
+pub symtn::typed::TransformIntoSource::Bond
+pub symtn::typed::TransformIntoSource::Bond::dense_source: &'s dyn core::ops::function::Fn() -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError>
+pub symtn::typed::TransformIntoSource::Bond::read: &'s mut dyn core::ops::function::FnMut(&symtn_operations::transform_structure::TreeTransformStructure<C>, &symtn_core::block_structure::structure::BlockStructure, &mut [D]) -> core::result::Result<bool, symtn::typed::Error>
+pub symtn::typed::TransformIntoSource::Stored(&'s S)
+pub struct symtn::typed::BlockFusionTrees<S>
+impl<S> symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::codomain_innerlines(&self) -> &[S]
+pub fn symtn::typed::BlockFusionTrees<S>::codomain_uncoupled(&self) -> &[S]
+pub fn symtn::typed::BlockFusionTrees<S>::codomain_vertices(&self) -> &[symtn_core::sector::MultiplicityIndex]
+pub fn symtn::typed::BlockFusionTrees<S>::coupled(&self) -> &S
+pub fn symtn::typed::BlockFusionTrees<S>::domain_innerlines(&self) -> &[S]
+pub fn symtn::typed::BlockFusionTrees<S>::domain_uncoupled(&self) -> &[S]
+pub fn symtn::typed::BlockFusionTrees<S>::domain_vertices(&self) -> &[symtn_core::sector::MultiplicityIndex]
+impl<S: core::clone::Clone> core::clone::Clone for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::clone(&self) -> symtn::typed::BlockFusionTrees<S>
+impl<S: core::cmp::Eq> core::cmp::Eq for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::assert_fields_are_eq(&self)
+impl<S: core::cmp::Ord> core::cmp::Ord for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::cmp(&self, &symtn::typed::BlockFusionTrees<S>) -> core::cmp::Ordering
+impl<S: core::cmp::PartialEq> core::cmp::PartialEq for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::eq(&self, &symtn::typed::BlockFusionTrees<S>) -> bool
+impl<S: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn::typed::BlockFusionTrees<S>
+impl<S: core::cmp::PartialOrd> core::cmp::PartialOrd for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::partial_cmp(&self, &symtn::typed::BlockFusionTrees<S>) -> core::option::Option<core::cmp::Ordering>
+impl<S: core::fmt::Debug> core::fmt::Debug for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<S: core::hash::Hash> core::hash::Hash for symtn::typed::BlockFusionTrees<S>
+pub fn symtn::typed::BlockFusionTrees<S>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+pub struct symtn::typed::BondTransform<R, D>
+pub symtn::typed::BondTransform::destination: symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
+pub symtn::typed::BondTransform::output: symtn::typed::BondOutput<D>
+pub struct symtn::typed::ComposePlan<R, D, S>(_)
+impl<R, D, S> symtn::typed::ComposePlan<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar, S: symtn::typed::PreparedExec<R, D>
+pub fn symtn::typed::ComposePlan<R, D, S>::execute<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>, &'a mut symtn::typed::ContractWorkspace<R, D, S>) -> core::result::Result<&'a symtn::typed::StackedTensorMap<R, D, S>, symtn::typed::Error>
+pub fn symtn::typed::ComposePlan<R, D, S>::execute_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>, &mut symtn::typed::StackedTensorMap<R, D, S>, &mut symtn::typed::ContractWorkspace<R, D, S>) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn::typed::ComposePlan<R, D, S>::new(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>) -> core::result::Result<Self, symtn::typed::Error>
+pub fn symtn::typed::ComposePlan<R, D, S>::output_signature(&self) -> &symtn::typed::StructureSignature
+pub fn symtn::typed::ComposePlan<R, D, S>::workspace(&self) -> core::result::Result<symtn::typed::ContractWorkspace<R, D, S>, symtn::typed::Error>
+pub struct symtn::typed::ContractPlan<R, D, S>
+impl<R, D, S> symtn::typed::ContractPlan<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar, S: symtn::typed::PreparedExec<R, D>
+pub fn symtn::typed::ContractPlan<R, D, S>::execute<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>, &'a mut symtn::typed::ContractWorkspace<R, D, S>) -> core::result::Result<&'a symtn::typed::StackedTensorMap<R, D, S>, symtn::typed::Error>
+pub fn symtn::typed::ContractPlan<R, D, S>::execute_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>, &mut symtn::typed::StackedTensorMap<R, D, S>, &mut symtn::typed::ContractWorkspace<R, D, S>) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn::typed::ContractPlan<R, D, S>::new(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::StackedTensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>) -> core::result::Result<Self, symtn::typed::Error>
+pub fn symtn::typed::ContractPlan<R, D, S>::output_signature(&self) -> &symtn::typed::StructureSignature
+pub fn symtn::typed::ContractPlan<R, D, S>::workspace(&self) -> core::result::Result<symtn::typed::ContractWorkspace<R, D, S>, symtn::typed::Error>
+pub struct symtn::typed::ContractReplay<'a, D, C>
+pub struct symtn::typed::ContractSpec<'a>
+pub symtn::typed::ContractSpec::codomain: &'a [usize]
+pub symtn::typed::ContractSpec::domain: &'a [usize]
+pub symtn::typed::ContractSpec::lhs: &'a [usize]
+pub symtn::typed::ContractSpec::rhs: &'a [usize]
+impl<'a> core::clone::Clone for symtn::typed::ContractSpec<'a>
+pub fn symtn::typed::ContractSpec<'a>::clone(&self) -> symtn::typed::ContractSpec<'a>
+impl<'a> core::clone::TrivialClone for symtn::typed::ContractSpec<'a>
+impl<'a> core::cmp::Eq for symtn::typed::ContractSpec<'a>
+pub fn symtn::typed::ContractSpec<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::PartialEq for symtn::typed::ContractSpec<'a>
+pub fn symtn::typed::ContractSpec<'a>::eq(&self, &symtn::typed::ContractSpec<'a>) -> bool
+impl<'a> core::fmt::Debug for symtn::typed::ContractSpec<'a>
+pub fn symtn::typed::ContractSpec<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn::typed::ContractSpec<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn::typed::ContractSpec<'a>
+pub struct symtn::typed::ContractWorkspace<R, D, S>
+impl<R, D, S: symtn::typed::PreparedExec<R, D>> symtn::typed::ContractWorkspace<R, D, S>
+pub fn symtn::typed::ContractWorkspace<R, D, S>::retained_bytes(&self) -> usize
+impl<R, D, S> symtn::typed::ContractWorkspace<R, D, S>
+pub fn symtn::typed::ContractWorkspace<R, D, S>::take_output(&mut self) -> core::option::Option<symtn::typed::StackedTensorMap<R, D, S>>
+pub struct symtn::typed::CoupledBlock<'a, R, D, S>
+impl<'a, R, D, S> symtn::typed::CoupledBlock<'a, R, D, S>
+pub fn symtn::typed::CoupledBlock<'a, R, D, S>::cols(&self) -> usize
+pub fn symtn::typed::CoupledBlock<'a, R, D, S>::payload(&self) -> symtn::typed::CoupledBlockPayload<'a, D, S>
+pub fn symtn::typed::CoupledBlock<'a, R, D, S>::rows(&self) -> usize
+impl<R, D, S> symtn::typed::CoupledBlock<'_, R, D, S> where D: symtn::typed::TensorScalar, S: symtn_core::storage::HostReadableStorage<D>
+pub fn symtn::typed::CoupledBlock<'_, R, D, S>::get(&self, usize, usize) -> core::option::Option<D>
+impl<R, D, S> symtn::typed::CoupledBlock<'_, R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::CoupledBlock<'_, R, D, S>::col_trees(&self) -> core::result::Result<alloc::vec::Vec<(symtn::typed::FusionTreeLabels<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, core::ops::range::Range<usize>)>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::CoupledBlock<'_, R, D, S>::row_trees(&self) -> core::result::Result<alloc::vec::Vec<(symtn::typed::FusionTreeLabels<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, core::ops::range::Range<usize>)>, symtn::typed::FacadeError<R>>
+impl<'a, R: core::fmt::Debug, D: core::fmt::Debug, S: core::fmt::Debug> core::fmt::Debug for symtn::typed::CoupledBlock<'a, R, D, S>
+pub fn symtn::typed::CoupledBlock<'a, R, D, S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<R, D, S> core::clone::Clone for symtn::typed::CoupledBlock<'_, R, D, S>
+pub fn symtn::typed::CoupledBlock<'_, R, D, S>::clone(&self) -> Self
+pub struct symtn::typed::DecodeLimits
+pub symtn::typed::DecodeLimits::max_blob_bytes: usize
+pub symtn::typed::DecodeLimits::max_blocks: usize
+pub symtn::typed::DecodeLimits::max_bytes: usize
+pub symtn::typed::DecodeLimits::max_elements: usize
+pub symtn::typed::DecodeLimits::max_rank: usize
+pub symtn::typed::DecodeLimits::max_sectors_per_leg: usize
+impl core::clone::Clone for symtn::typed::DecodeLimits
+pub fn symtn::typed::DecodeLimits::clone(&self) -> symtn::typed::DecodeLimits
+impl core::clone::TrivialClone for symtn::typed::DecodeLimits
+impl core::cmp::Eq for symtn::typed::DecodeLimits
+pub fn symtn::typed::DecodeLimits::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn::typed::DecodeLimits
+pub fn symtn::typed::DecodeLimits::eq(&self, &symtn::typed::DecodeLimits) -> bool
+impl core::default::Default for symtn::typed::DecodeLimits
+pub fn symtn::typed::DecodeLimits::default() -> Self
+impl core::fmt::Debug for symtn::typed::DecodeLimits
+pub fn symtn::typed::DecodeLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn::typed::DecodeLimits
+impl core::marker::StructuralPartialEq for symtn::typed::DecodeLimits
+pub struct symtn::typed::EighFullPlan<R: symtn_sectors::algebra::SectorCodec, D, S>
+impl<R, D, S> symtn::typed::EighFullPlan<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::FactorizationScalar, S: symtn::typed::FactorExec<R, D>
+pub fn symtn::typed::EighFullPlan<R, D, S>::execute<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &'a mut symtn::typed::EighFullWorkspace<R, D, S>) -> core::result::Result<symtn::typed::EighStackOutput<'a, R, D, S>, symtn::typed::BatchError>
+impl<R, D, S> symtn::typed::EighFullPlan<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar, S: symtn_core::storage::TensorStorage<D>
+pub fn symtn::typed::EighFullPlan<R, D, S>::new(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::StackedTensorMap<R, D, S>, &[usize], &[usize], symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<Self, symtn::typed::Error>
+pub fn symtn::typed::EighFullPlan<R, D, S>::workspace(&self) -> core::result::Result<symtn::typed::EighFullWorkspace<R, D, S>, symtn::typed::Error>
+pub struct symtn::typed::EighFullWorkspace<R: symtn_sectors::algebra::SectorCodec, D, S>
+impl<R: symtn_sectors::algebra::SectorCodec, D, S> symtn::typed::EighFullWorkspace<R, D, S>
+pub fn symtn::typed::EighFullWorkspace<R, D, S>::retained_bytes(&self) -> usize
+pub fn symtn::typed::EighFullWorkspace<R, D, S>::take_output(&mut self) -> core::option::Option<(symtn::typed::StackedTensorMap<R, D, S>, symtn::typed::StackedTensorMap<R, D, S>)>
+pub struct symtn::typed::EighStackOutput<'a, R: symtn_sectors::algebra::SectorCodec, D, S>
+pub symtn::typed::EighStackOutput::d: &'a symtn::typed::StackedTensorMap<R, D, S>
+pub symtn::typed::EighStackOutput::spectra: &'a [alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::SectorCodec>::Sector>>]
+pub symtn::typed::EighStackOutput::v: &'a symtn::typed::StackedTensorMap<R, D, S>
+pub struct symtn::typed::FusionTreeLabels<S>
+impl<S> symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::coupled(&self) -> &S
+pub fn symtn::typed::FusionTreeLabels<S>::innerlines(&self) -> &[S]
+pub fn symtn::typed::FusionTreeLabels<S>::uncoupled(&self) -> &[S]
+pub fn symtn::typed::FusionTreeLabels<S>::vertices(&self) -> &[symtn_core::sector::MultiplicityIndex]
+impl<S: core::clone::Clone> core::clone::Clone for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::clone(&self) -> symtn::typed::FusionTreeLabels<S>
+impl<S: core::cmp::Eq> core::cmp::Eq for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::assert_fields_are_eq(&self)
+impl<S: core::cmp::Ord> core::cmp::Ord for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::cmp(&self, &symtn::typed::FusionTreeLabels<S>) -> core::cmp::Ordering
+impl<S: core::cmp::PartialEq> core::cmp::PartialEq for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::eq(&self, &symtn::typed::FusionTreeLabels<S>) -> bool
+impl<S: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn::typed::FusionTreeLabels<S>
+impl<S: core::cmp::PartialOrd> core::cmp::PartialOrd for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::partial_cmp(&self, &symtn::typed::FusionTreeLabels<S>) -> core::option::Option<core::cmp::Ordering>
+impl<S: core::fmt::Debug> core::fmt::Debug for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<S: core::hash::Hash> core::hash::Hash for symtn::typed::FusionTreeLabels<S>
+pub fn symtn::typed::FusionTreeLabels<S>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+pub struct symtn::typed::GradedSpace<R>
+impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedSpaceModeDispatch<R>
+pub fn symtn::typed::GradedSpace<R>::dim(&self) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::fuse(&self, &Self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::oplus(&self, &Self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::unitspace(&self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::GradedSpace<R>::degeneracy(&self, &<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector) -> core::result::Result<usize, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::sectors(&self) -> core::result::Result<alloc::vec::Vec<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::truncspace(&self) -> symtn_matrixalgebra::truncation::TruncationSpace
+pub fn symtn::typed::GradedSpace<R>::try_dual(&self) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::GradedSpace<R>::try_new<Pairs>(alloc::sync::Arc<R>, Pairs) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Pairs: core::iter::traits::collect::IntoIterator<Item = (<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, usize)>
+impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::GradedSpace<R>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTruncationDispatch<R>
+pub fn symtn::typed::GradedSpace<R>::extend_spectrum<V>(&self, &[symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, V>]) -> core::result::Result<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, f64>>, symtn::typed::FacadeError<R>> where V: symtn_matrixalgebra::factorize::scalar::SpectrumMagnitude
+pub fn symtn::typed::GradedSpace<R>::find_truncated<V>(&self, &[symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, V>], &symtn_matrixalgebra::truncation::Truncation) -> core::result::Result<symtn::typed::TruncatedSelection<R>, symtn::typed::FacadeError<R>> where V: symtn_matrixalgebra::factorize::scalar::SpectrumMagnitude
+impl<R> symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::GradedSpace<R>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::GradedSpace<R>
+pub fn symtn::typed::GradedSpace<R>::degeneracies(&self) -> &[usize]
+pub fn symtn::typed::GradedSpace<R>::is_dual(&self) -> bool
+pub fn symtn::typed::GradedSpace<R>::provider(&self) -> &R
+impl<R> core::clone::Clone for symtn::typed::GradedSpace<R>
+pub fn symtn::typed::GradedSpace<R>::clone(&self) -> Self
+impl<R> core::cmp::Eq for symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission
+impl<R> core::cmp::PartialEq for symtn::typed::GradedSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::GradedSpace<R>::eq(&self, &Self) -> bool
+impl<R> core::fmt::Debug for symtn::typed::GradedSpace<R>
+pub fn symtn::typed::GradedSpace<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::LegSelection<R>
+impl<R> symtn::typed::LegSelection<R> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::LegSelection<R>::positions(&self, &<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector) -> core::result::Result<alloc::vec::Vec<usize>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::LegSelection<R>::try_new<Pairs, P>(&symtn::typed::GradedSpace<R>, Pairs) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Pairs: core::iter::traits::collect::IntoIterator<Item = (<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, P)>, P: core::iter::traits::collect::IntoIterator<Item = usize>
+impl<R> symtn::typed::LegSelection<R>
+pub fn symtn::typed::LegSelection<R>::is_full(&self) -> bool
+pub fn symtn::typed::LegSelection<R>::parent(&self) -> &symtn::typed::GradedSpace<R>
+pub fn symtn::typed::LegSelection<R>::subspace(&self) -> &symtn::typed::GradedSpace<R>
+impl<R> core::clone::Clone for symtn::typed::LegSelection<R>
+pub fn symtn::typed::LegSelection<R>::clone(&self) -> Self
+impl<R> core::fmt::Debug for symtn::typed::LegSelection<R>
+pub fn symtn::typed::LegSelection<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::PhysicalDense<D>
+pub symtn::typed::PhysicalDense::data: alloc::vec::Vec<D>
+pub symtn::typed::PhysicalDense::shape: alloc::vec::Vec<usize>
+impl<D: core::clone::Clone> core::clone::Clone for symtn::typed::PhysicalDense<D>
+pub fn symtn::typed::PhysicalDense<D>::clone(&self) -> symtn::typed::PhysicalDense<D>
+impl<D: core::cmp::PartialEq> core::cmp::PartialEq for symtn::typed::PhysicalDense<D>
+pub fn symtn::typed::PhysicalDense<D>::eq(&self, &symtn::typed::PhysicalDense<D>) -> bool
+impl<D: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn::typed::PhysicalDense<D>
+impl<D: core::fmt::Debug> core::fmt::Debug for symtn::typed::PhysicalDense<D>
+pub fn symtn::typed::PhysicalDense<D>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::Runtime
+impl symtn::typed::Runtime
+pub fn symtn::typed::Runtime::builder() -> symtn::typed::RuntimeBuilder
+impl core::clone::Clone for symtn::typed::Runtime
+pub fn symtn::typed::Runtime::clone(&self) -> symtn::typed::Runtime
+impl core::fmt::Debug for symtn::typed::Runtime
+pub fn symtn::typed::Runtime::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::RuntimeBuilder
+impl symtn::typed::RuntimeBuilder
+pub fn symtn::typed::RuntimeBuilder::build(self) -> core::result::Result<symtn::typed::Runtime, symtn::typed::Error>
+impl core::default::Default for symtn::typed::RuntimeBuilder
+pub fn symtn::typed::RuntimeBuilder::default() -> symtn::typed::RuntimeBuilder
+impl core::fmt::Debug for symtn::typed::RuntimeBuilder
+pub fn symtn::typed::RuntimeBuilder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::SectorSpectrum<S, V>
+pub symtn::typed::SectorSpectrum::sector: S
+pub symtn::typed::SectorSpectrum::values: alloc::vec::Vec<V>
+impl<S: core::clone::Clone, V: core::clone::Clone> core::clone::Clone for symtn::typed::SectorSpectrum<S, V>
+pub fn symtn::typed::SectorSpectrum<S, V>::clone(&self) -> symtn::typed::SectorSpectrum<S, V>
+impl<S: core::cmp::PartialEq, V: core::cmp::PartialEq> core::cmp::PartialEq for symtn::typed::SectorSpectrum<S, V>
+pub fn symtn::typed::SectorSpectrum<S, V>::eq(&self, &symtn::typed::SectorSpectrum<S, V>) -> bool
+impl<S: core::cmp::PartialEq, V: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn::typed::SectorSpectrum<S, V>
+impl<S: core::fmt::Debug, V: core::fmt::Debug> core::fmt::Debug for symtn::typed::SectorSpectrum<S, V>
+pub fn symtn::typed::SectorSpectrum<S, V>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn::typed::StackedTensorMap<R, D, S>
+impl<R, D, S: symtn::typed::StackExec<D>> symtn::typed::StackedTensorMap<R, D, S>
+pub fn symtn::typed::StackedTensorMap<R, D, S>::select(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize]) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D, S> symtn::typed::StackedTensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar, S: symtn::typed::StackExec<D>
+pub fn symtn::typed::StackedTensorMap<R, D, S>::restrict_leg(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[(usize, &symtn::typed::LegSelection<R>)]) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>
+impl<R, D, S> symtn::typed::StackedTensorMap<R, D, S>
+pub fn symtn::typed::StackedTensorMap<R, D, S>::len(&self) -> usize
+pub fn symtn::typed::StackedTensorMap<R, D, S>::signature(&self) -> &symtn::typed::StructureSignature
+impl<R, D: symtn::typed::CudaPayload> symtn::typed::StackedTensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>
+pub fn symtn::typed::StackedTensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>::to_host(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::StackedTensorMap<R, D>, symtn::typed::Error>
+impl<R, D: symtn::typed::CudaPayload> symtn::typed::StackedTensorMap<R, D>
+pub fn symtn::typed::StackedTensorMap<R, D>::to_cuda(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::StackedTensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>, symtn::typed::Error>
+impl<R, D> symtn::typed::StackedTensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: core::marker::Copy
+pub fn symtn::typed::StackedTensorMap<R, D>::member(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, usize) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::Error>
+pub fn symtn::typed::StackedTensorMap<R, D>::pack<T: core::convert::AsRef<symtn::typed::TensorMap<R, D>>>(&[T]) -> core::result::Result<Self, symtn::typed::Error>
+pub struct symtn::typed::StructureSignature
+impl core::clone::Clone for symtn::typed::StructureSignature
+pub fn symtn::typed::StructureSignature::clone(&self) -> symtn::typed::StructureSignature
+impl core::cmp::Eq for symtn::typed::StructureSignature
+impl core::cmp::PartialEq for symtn::typed::StructureSignature
+pub fn symtn::typed::StructureSignature::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn::typed::StructureSignature
+pub fn symtn::typed::StructureSignature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn::typed::StructureSignature
+pub fn symtn::typed::StructureSignature::hash<H: core::hash::Hasher>(&self, &mut H)
+pub struct symtn::typed::TensorMap<R, D, S>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where D: symtn::typed::TensorScalar, S: symtn::typed::MaterializeExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::materialize(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64>
+pub fn symtn::typed::TensorMap<R, D, S>::leg_dims(&self) -> core::result::Result<alloc::vec::Vec<usize>, symtn::typed::Error>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar, S: symtn::typed::FactorExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::eigh_full(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<symtn_matrixalgebra::results::Eigh<Self>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::qr_compact(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Qr<Self>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::svd_compact(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Svd<Self>, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedAdjointSpace<R>, D: symtn::typed::TensorScalar, S: symtn::typed::ElementwiseExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::axpby<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, D, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>, D) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::axpby_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::scale(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, D) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedAdjointSpace<R>, D: symtn::typed::TensorScalar, S: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::adjoint(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::adjoint_view(&self) -> symtn::typed::TensorRef<'_, R, D, S>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedSpaceModeDispatch<R>, D: symtn::typed::TensorScalar, S: symtn::typed::ReduceExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::inner<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>) -> core::result::Result<D, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::norm(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, f64) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorContractDispatch<R, D>, D: symtn::typed::TensorScalar, S: symtn::typed::ContractExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::compose<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorContractDispatch<R, D>, D: symtn::typed::TensorScalar, S: symtn::typed::ContractExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::contract<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>, &symtn::typed::ContractSpec<'_>) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::contract_into<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>, &symtn::typed::ContractSpec<'_>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::planar_contract<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>, &symtn::typed::ContractSpec<'_>) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::planar_contract_into<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D, S>>, &symtn::typed::ContractSpec<'_>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>, D: symtn::typed::TensorScalar, S: symtn::typed::ElementwiseExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::zeros_like(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>, S: symtn_core::storage::TensorStorage<D>
+pub fn symtn::typed::TensorMap<R, D, S>::block(&self, &<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector) -> core::result::Result<symtn::typed::CoupledBlock<'_, R, D, S>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::blocks<'a>(&'a self) -> core::result::Result<impl core::iter::traits::exact_size::ExactSizeIterator<Item = (<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, symtn::typed::CoupledBlock<'a, R, D, S>)> + 'a, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorTraceDispatch<R, D>, D: symtn::typed::TensorScalar, S: symtn::typed::TraceExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::trace_pairs(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[(usize, usize)]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::trace_pairs_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[(usize, usize)], &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::TensorScalar, S: symtn::typed::TransformExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::braid(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::braid_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], &[usize], &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::permute(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::permute_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::repartition(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, usize) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::repartition_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::transpose(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::transpose_into(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], &mut Self, D, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorTwistDispatch<R, D>, D: symtn::typed::TensorScalar, S: symtn::typed::TwistExec<R, D>
+pub fn symtn::typed::TensorMap<R, D, S>::twist(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], symtn::typed::Direction) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission, S: symtn_core::storage::TensorStorage<D>
+pub fn symtn::typed::TensorMap<R, D, S>::structure_signature(&self) -> symtn::typed::StructureSignature
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where S: symtn_core::storage::HostReadableStorage<D>
+pub fn symtn::typed::TensorMap<R, D, S>::dense_data(&self) -> core::result::Result<&[D], symtn::typed::Error>
+impl<R, D, S> symtn::typed::TensorMap<R, D, S> where S: symtn_core::storage::TensorStorage<D>
+pub fn symtn::typed::TensorMap<R, D, S>::placement(&self) -> symtn_core::storage::Placement
+impl<R, D, S> symtn::typed::TensorMap<R, D, S>
+pub fn symtn::typed::TensorMap<R, D, S>::codomain(&self) -> alloc::vec::Vec<symtn::typed::GradedSpace<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::codomain_rank(&self) -> usize
+pub fn symtn::typed::TensorMap<R, D, S>::domain(&self) -> alloc::vec::Vec<symtn::typed::GradedSpace<R>>
+pub fn symtn::typed::TensorMap<R, D, S>::domain_rank(&self) -> usize
+pub fn symtn::typed::TensorMap<R, D, S>::provider(&self) -> &R
+pub fn symtn::typed::TensorMap<R, D, S>::rank(&self) -> usize
+pub fn symtn::typed::TensorMap<R, D, S>::runtime(&self) -> &symtn::typed::Runtime
+pub fn symtn::typed::TensorMap<R, D, S>::subblock(&self, usize) -> core::result::Result<symtn_core::block_structure::content::BlockRef<'_>, symtn::typed::Error>
+pub fn symtn::typed::TensorMap<R, D, S>::subblock_count(&self) -> usize
+impl<R, D: symtn::typed::CudaPayload> symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>
+pub fn symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>::to_host(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::Error>
+impl<R, D: symtn::typed::CudaPayload> symtn::typed::TensorMap<R, D>
+pub fn symtn::typed::TensorMap<R, D>::to_cuda(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>>, symtn::typed::Error>
+impl<R, D> symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaFactorizationPayload
+impl<R, D> symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaFactorizationPayload
+impl<R, D> symtn::typed::TensorMap<R, D, symtn_operations::cuda::CudaStorage<D>> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+impl<R, D> symtn::typed::TensorMap<R, D> where D: symtn::typed::TensorScalar + symtn_matrixalgebra::factorize::scalar::FactorScalar
+pub fn symtn::typed::TensorMap<R, D>::convert<To>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, To>, symtn::typed::Error> where D: symtn::typed::PayloadConversion<To>
+impl<R, D> symtn::typed::TensorMap<R, D> where D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::embed_leg(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, usize, &symtn::typed::LegSelection<R>) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>
+pub fn symtn::typed::TensorMap<R, D>::restrict_leg(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[(usize, &symtn::typed::LegSelection<R>)]) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::scalar(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<D, symtn::typed::Error>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::PhysicalFusionBasis<Scalar = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, D: symtn::typed::TensorScalar + symtn_operations::scalar::RecouplingCoefficientAction<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn::typed::TensorMap<R, D>::project_physical_dense(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::PhysicalDense<D>) -> core::result::Result<Self, symtn::typed::PhysicalDenseError<<R as symtn_sectors::algebra::PhysicalFusionBasis>::Error>>
+pub fn symtn::typed::TensorMap<R, D>::to_physical_dense(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::PhysicalDense<D>, symtn::typed::PhysicalDenseError<<R as symtn_sectors::algebra::PhysicalFusionBasis>::Error>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::deligne_product<'a, R2, C>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R2, D>>, alloc::sync::Arc<symtn_sectors::product_rule::ProductFusionRule<R, R2, C>>) -> core::result::Result<symtn::typed::TensorMap<symtn_sectors::product_rule::ProductFusionRule<R, R2, C>, D>, symtn::typed::Error> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::CanonicalUnitFusionRule + symtn_sectors::category_rule::CategoryProvider, R2: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R2 as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec + symtn_sectors::algebra::CanonicalUnitFusionRule + symtn_sectors::category_rule::CategoryProvider, C: symtn_sectors::algebra::ProductSectorCodec + core::marker::Sync + 'static, symtn_sectors::product_rule::ProductFusionRule<R, R2, C>: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::CanonicalUnitFusionRule + symtn_sectors::algebra::SectorCodec<Sector = symtn_sectors::algebra::ProductSector<<R as symtn_sectors::algebra::SectorCodec>::Sector, <R2 as symtn_sectors::algebra::SectorCodec>::Sector>> + symtn_sectors::algebra::TypedSectorAdmission<Sector = symtn_sectors::algebra::ProductSector<<R as symtn_sectors::algebra::SectorCodec>::Sector, <R2 as symtn_sectors::algebra::SectorCodec>::Sector>, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedAdjointSpace<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar
+pub fn symtn::typed::TensorMap<R, D>::inv(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedAdjointSpace<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar
+pub fn symtn::typed::TensorMap<R, D>::pinv(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], f64) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedAdjointSpace<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::left_null(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D>::right_null(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedAdjointSpace<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::lq_compact(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Lq<Self>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedAdjointSpace<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::lq_full(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Lq<Self>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar, <D as symtn_matrixalgebra::factorize::scalar::FactorScalar>::Eig: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::eig_full(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Eig<symtn::typed::TensorMap<R, <D as symtn_matrixalgebra::factorize::scalar::FactorScalar>::Eig>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar, <D as symtn_matrixalgebra::factorize::scalar::FactorScalar>::Eig: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::eig_vals(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, num_complex::Complex64>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar
+pub fn symtn::typed::TensorMap<R, D>::exp(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::AdvancedLinalgScalar
+pub fn symtn::typed::TensorMap<R, D>::solve<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], impl core::convert::Into<symtn::typed::TensorRef<'a, R, D>>, &[usize], &[usize]) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::eigh_vals(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize], symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, f64>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::left_polar(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::LeftPolar<Self>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D>::right_polar(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::RightPolar<Self>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::qr_full(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Qr<Self>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::svd_full(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<symtn_matrixalgebra::results::Svd<Self>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn symtn::typed::TensorMap<R, D>::svd_vals(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, f64>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedAdjointSpace<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::scale_assign(&mut self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, D) -> core::result::Result<(), symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedSpaceModeDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::tr(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<D, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorConstructionDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::diagonal<I>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, &symtn::typed::GradedSpace<R>, I) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where I: core::iter::traits::collect::IntoIterator<Item = symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, D>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorConstructionDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::from_subblock_fn<'a, Codomain, Domain, F>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, Codomain, Domain, F) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Codomain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, Domain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, F: core::ops::function::FnMut(&symtn::typed::BlockFusionTrees<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, &[usize]) -> D, R: 'a
+pub fn symtn::typed::TensorMap<R, D>::rand_with_seed<'a, Codomain, Domain>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, Codomain, Domain, u64) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Codomain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, Domain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, R: 'a
+pub fn symtn::typed::TensorMap<R, D>::zeros<'a, Codomain, Domain>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, Codomain, Domain) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where Codomain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, Domain: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, R: 'a
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorConstructionDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::isometry<'a, C, M>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, C, M) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where C: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, M: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, R: 'a
+pub fn symtn::typed::TensorMap<R, D>::isomorphism<'a, C, M>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, C, M) -> core::result::Result<Self, symtn::typed::FacadeError<R>> where C: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, M: core::iter::traits::collect::IntoIterator<Item = &'a symtn::typed::GradedSpace<R>>, R: 'a
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorFlipDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::flip(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, &[usize], symtn::typed::Direction) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::subblock_fusion_trees(&self, usize) -> core::result::Result<symtn::typed::BlockFusionTrees<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D>::subblocks<'a>(&'a self) -> core::result::Result<impl core::iter::traits::exact_size::ExactSizeIterator<Item = (symtn::typed::BlockFusionTrees<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector>, symtn_core::block_view::BlockView<'a, D>)> + 'a, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorProductDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::otimes<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D>>) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::cat<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D>>, symtn::typed::Side) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::diagview(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<alloc::vec::Vec<symtn::typed::SectorSpectrum<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, D>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorUnitDispatch<R, D>, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::insert_unit(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, usize, symtn::typed::Side, symtn::typed::Duality) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::TensorMap<R, D>::remove_unit(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, usize) -> core::result::Result<Self, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::absorb<'a>(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::convert::Into<symtn::typed::TensorRef<'a, R, D>>) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D> symtn::typed::TensorMap<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar
+pub fn symtn::typed::TensorMap<R, D>::map_diagonal(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized, impl core::ops::function::Fn(D) -> D) -> core::result::Result<Self, symtn::typed::Error>
+impl<R> symtn::typed::TensorMap<R, f32> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R> + symtn::typed::TypedAdjointSpace<R>
+pub fn symtn::typed::TensorMap<R, f32>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, f32> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::TensorMap<R, f32>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, f64> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R> + symtn::typed::TypedAdjointSpace<R>
+pub fn symtn::typed::TensorMap<R, f64>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, f64> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::TensorMap<R, f64>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, num_complex::Complex32> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R> + symtn::typed::TypedAdjointSpace<R>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, num_complex::Complex32> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, num_complex::Complex64> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorRootDispatch<R> + symtn::typed::TypedAdjointSpace<R>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::from_bytes_with<C>(&mut impl symtn::typed::ExecContext + ?core::marker::Sized, &symtn::typed::Runtime, &[u8], symtn::typed::DecodeLimits, &C) -> core::result::Result<Self, symtn::typed::DecodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, symtn::typed::FacadeError<R>>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, num_complex::Complex64> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::to_bytes_with<C>(&self, &C) -> core::result::Result<alloc::vec::Vec<u8>, symtn::typed::EncodeError<<C as symtn::typed::TypedPersistenceCodec>::Error, <R as symtn_sectors::algebra::TypedSectorAdmission>::Error>> where C: symtn::typed::TypedPersistenceCodec<R>
+impl<R> symtn::typed::TensorMap<R, num_complex::Complex64>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::im(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::re(&self, &mut impl symtn::typed::ExecContext + ?core::marker::Sized) -> core::result::Result<symtn::typed::TensorMap<R, f64>, symtn::typed::Error>
+impl<'a, R, D, S> core::convert::From<&'a symtn::typed::TensorMap<R, D, S>> for symtn::typed::TensorRef<'a, R, D, S>
+pub fn symtn::typed::TensorRef<'a, R, D, S>::from(&'a symtn::typed::TensorMap<R, D, S>) -> Self
+impl<R, D, S> core::clone::Clone for symtn::typed::TensorMap<R, D, S>
+pub fn symtn::typed::TensorMap<R, D, S>::clone(&self) -> Self
+impl<R, D, S> core::convert::AsRef<symtn::typed::TensorMap<R, D, S>> for symtn::typed::TensorMap<R, D, S>
+pub fn symtn::typed::TensorMap<R, D, S>::as_ref(&self) -> &Self
+impl<R, D, S> core::fmt::Debug for symtn::typed::TensorMap<R, D, S> where S: symtn_core::storage::TensorStorage<D>
+pub fn symtn::typed::TensorMap<R, D, S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<R> krylov::traits::Vector for symtn::typed::TensorMap<R, f32> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedSpaceModeDispatch<R> + symtn::typed::TypedAdjointSpace<R>, alloc::vec::Vec<f32>: symtn::typed::ElementwiseExec<R, f32> + symtn::typed::ReduceExec<R, f32>
+pub type symtn::typed::TensorMap<R, f32>::Context = dyn symtn::typed::ExecContext
+pub type symtn::typed::TensorMap<R, f32>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError
+pub type symtn::typed::TensorMap<R, f32>::Scalar = f32
+pub fn symtn::typed::TensorMap<R, f32>::axpby(&mut self, &mut Self::Context, f32, &Self, f32) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, f32>::copy_from(&mut self, &mut Self::Context, &Self) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, f32>::inner(&self, &mut Self::Context, &Self) -> core::result::Result<f32, Self::Error>
+pub fn symtn::typed::TensorMap<R, f32>::norm(&self, &mut Self::Context) -> core::result::Result<f32, Self::Error>
+pub fn symtn::typed::TensorMap<R, f32>::similar(&self, &mut Self::Context) -> core::result::Result<Self, Self::Error>
+impl<R> krylov::traits::Vector for symtn::typed::TensorMap<R, f64> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedSpaceModeDispatch<R> + symtn::typed::TypedAdjointSpace<R>, alloc::vec::Vec<f64>: symtn::typed::ElementwiseExec<R, f64> + symtn::typed::ReduceExec<R, f64>
+pub type symtn::typed::TensorMap<R, f64>::Context = dyn symtn::typed::ExecContext
+pub type symtn::typed::TensorMap<R, f64>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError
+pub type symtn::typed::TensorMap<R, f64>::Scalar = f64
+pub fn symtn::typed::TensorMap<R, f64>::axpby(&mut self, &mut Self::Context, f64, &Self, f64) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, f64>::copy_from(&mut self, &mut Self::Context, &Self) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, f64>::inner(&self, &mut Self::Context, &Self) -> core::result::Result<f64, Self::Error>
+pub fn symtn::typed::TensorMap<R, f64>::norm(&self, &mut Self::Context) -> core::result::Result<f64, Self::Error>
+pub fn symtn::typed::TensorMap<R, f64>::similar(&self, &mut Self::Context) -> core::result::Result<Self, Self::Error>
+impl<R> krylov::traits::Vector for symtn::typed::TensorMap<R, num_complex::Complex32> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedSpaceModeDispatch<R> + symtn::typed::TypedAdjointSpace<R>, alloc::vec::Vec<num_complex::Complex32>: symtn::typed::ElementwiseExec<R, num_complex::Complex32> + symtn::typed::ReduceExec<R, num_complex::Complex32>
+pub type symtn::typed::TensorMap<R, num_complex::Complex32>::Context = dyn symtn::typed::ExecContext
+pub type symtn::typed::TensorMap<R, num_complex::Complex32>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError
+pub type symtn::typed::TensorMap<R, num_complex::Complex32>::Scalar = num_complex::Complex<f32>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::axpby(&mut self, &mut Self::Context, num_complex::Complex32, &Self, num_complex::Complex32) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::copy_from(&mut self, &mut Self::Context, &Self) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::inner(&self, &mut Self::Context, &Self) -> core::result::Result<num_complex::Complex32, Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::norm(&self, &mut Self::Context) -> core::result::Result<f32, Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex32>::similar(&self, &mut Self::Context) -> core::result::Result<Self, Self::Error>
+impl<R> krylov::traits::Vector for symtn::typed::TensorMap<R, num_complex::Complex64> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedTensorModeDispatch<R> + symtn::typed::TypedSpaceModeDispatch<R> + symtn::typed::TypedAdjointSpace<R>, alloc::vec::Vec<num_complex::Complex64>: symtn::typed::ElementwiseExec<R, num_complex::Complex64> + symtn::typed::ReduceExec<R, num_complex::Complex64>
+pub type symtn::typed::TensorMap<R, num_complex::Complex64>::Context = dyn symtn::typed::ExecContext
+pub type symtn::typed::TensorMap<R, num_complex::Complex64>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError
+pub type symtn::typed::TensorMap<R, num_complex::Complex64>::Scalar = num_complex::Complex<f64>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::axpby(&mut self, &mut Self::Context, num_complex::Complex64, &Self, num_complex::Complex64) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::copy_from(&mut self, &mut Self::Context, &Self) -> core::result::Result<(), Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::inner(&self, &mut Self::Context, &Self) -> core::result::Result<num_complex::Complex64, Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::norm(&self, &mut Self::Context) -> core::result::Result<f64, Self::Error>
+pub fn symtn::typed::TensorMap<R, num_complex::Complex64>::similar(&self, &mut Self::Context) -> core::result::Result<Self, Self::Error>
+pub struct symtn::typed::TensorRef<'a, R, D, S>
+impl<'a, R, D, S> core::convert::From<&'a symtn::typed::TensorMap<R, D, S>> for symtn::typed::TensorRef<'a, R, D, S>
+pub fn symtn::typed::TensorRef<'a, R, D, S>::from(&'a symtn::typed::TensorMap<R, D, S>) -> Self
+impl<R, D, S> core::clone::Clone for symtn::typed::TensorRef<'_, R, D, S>
+pub fn symtn::typed::TensorRef<'_, R, D, S>::clone(&self) -> Self
+impl<R, D, S> core::marker::Copy for symtn::typed::TensorRef<'_, R, D, S>
+pub struct symtn::typed::TreeReplay<'a, D, C>
+pub struct symtn::typed::TruncatedSelection<R>
+pub symtn::typed::TruncatedSelection::error: f64
+pub symtn::typed::TruncatedSelection::selection: symtn::typed::LegSelection<R>
+impl<R> core::clone::Clone for symtn::typed::TruncatedSelection<R>
+pub fn symtn::typed::TruncatedSelection<R>::clone(&self) -> Self
+impl<R> core::fmt::Debug for symtn::typed::TruncatedSelection<R>
+pub fn symtn::typed::TruncatedSelection<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait symtn::typed::AdvancedLinalgScalar: symtn::typed::FactorizationScalar
+impl symtn::typed::AdvancedLinalgScalar for f32
+impl symtn::typed::AdvancedLinalgScalar for f64
+impl symtn::typed::AdvancedLinalgScalar for num_complex::Complex32
+impl symtn::typed::AdvancedLinalgScalar for num_complex::Complex64
+pub trait symtn::typed::ContractExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub type symtn::typed::ContractExec::Caps: symtn_tensors::contract::resolution::ExecCaps
+pub fn symtn::typed::ContractExec::contract_into<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn::typed::ContractExec::contract_owned<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<Self, symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::ContractExec<R, D> for alloc::vec::Vec<D>
+pub type alloc::vec::Vec<D>::Caps = symtn_tensors::contract::resolution::HostEagerExecutor
+pub fn alloc::vec::Vec<D>::contract_into<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D>, &symtn::typed::TensorMap<R, D>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn alloc::vec::Vec<D>::contract_owned<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D>, &symtn::typed::TensorMap<R, D>) -> core::result::Result<Self, symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+impl<R, D> symtn::typed::ContractExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub type symtn_operations::cuda::CudaStorage<D>::Caps = symtn_tensors::contract::resolution::DirectCoreExecutor
+pub fn symtn_operations::cuda::CudaStorage<D>::contract_into<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_operations::cuda::CudaStorage<D>::contract_owned<C: symtn_operations::scalar::DenseBlockScalar>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::ContractReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<Self, symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub trait symtn::typed::CudaFactorizationPayload: symtn::typed::CudaPayload + symtn::typed::FactorizationScalar
+impl symtn::typed::CudaFactorizationPayload for f32
+impl symtn::typed::CudaFactorizationPayload for f64
+impl symtn::typed::CudaFactorizationPayload for num_complex::Complex32
+impl symtn::typed::CudaFactorizationPayload for num_complex::Complex64
+pub trait symtn::typed::CudaPayload: symtn::typed::TensorScalar + symtn_dense::cuda_adapter::CudaScalar
+impl symtn::typed::CudaPayload for f32
+impl symtn::typed::CudaPayload for f64
+impl symtn::typed::CudaPayload for num_complex::Complex32
+impl symtn::typed::CudaPayload for num_complex::Complex64
+pub trait symtn::typed::ElementwiseExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::ElementwiseExec::axpby_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &mut symtn::typed::TensorMap<R, D, Self>, D, D) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn::typed::ElementwiseExec::combine(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, D, core::option::Option<(&symtn::typed::TensorMap<R, D, Self>, D)>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+pub fn symtn::typed::ElementwiseExec::zeros(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::ElementwiseExec<R, D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::axpby_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, &mut symtn::typed::TensorMap<R, D>, D, D) -> core::result::Result<(), symtn::typed::Error>
+pub fn alloc::vec::Vec<D>::combine(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, D, core::option::Option<(&symtn::typed::TensorMap<R, D>, D)>) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::Error>
+pub fn alloc::vec::Vec<D>::zeros(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::Error>
+impl<R, D> symtn::typed::ElementwiseExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::axpby_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &mut symtn::typed::TensorMap<R, D, Self>, D, D) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::combine(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, D, core::option::Option<(&symtn::typed::TensorMap<R, D, Self>, D)>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::zeros(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+pub trait symtn::typed::ExecContext
+pub fn symtn::typed::ExecContext::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+impl symtn::typed::ExecContext for (dyn tenferro_tensor::backend::Engine + '_)
+pub fn (dyn tenferro_tensor::backend::Engine + '_)::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+impl symtn::typed::ExecContext for (dyn tenferro_tensor::backend::Engine + core::marker::Send + '_)
+pub fn (dyn tenferro_tensor::backend::Engine + core::marker::Send + '_)::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+impl symtn::typed::ExecContext for (dyn tenferro_tensor::backend::Engine + core::marker::Send + core::marker::Sync + '_)
+pub fn (dyn tenferro_tensor::backend::Engine + core::marker::Send + core::marker::Sync + '_)::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+impl symtn::typed::ExecContext for (dyn tenferro_tensor::backend::Engine + core::marker::Sync + '_)
+pub fn (dyn tenferro_tensor::backend::Engine + core::marker::Sync + '_)::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+impl<E: tenferro_tensor::backend::Engine> symtn::typed::ExecContext for E
+pub fn E::engine(&mut self) -> &mut dyn tenferro_tensor::backend::Engine
+pub trait symtn::typed::FactorExec<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R>: symtn::typed::TransformExec<R, D>
+pub fn symtn::typed::FactorExec::eigh_full(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<symtn_matrixalgebra::results::Eigh<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::FactorExec::eigh_full_stack(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::EighFullPlan<R, D, Self>, &symtn::typed::StackedTensorMap<R, D, Self>, &mut core::option::Option<(symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::StackedTensorMap<R, D, Self>)>, &mut symtn::typed::EighFullWorkspace<R, D, Self>) -> core::result::Result<(), symtn::typed::BatchError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec
+pub fn symtn::typed::FactorExec::qr_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn_matrixalgebra::results::Qr<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::FactorExec::svd_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn_matrixalgebra::results::Svd<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::FactorExec<R, D> for alloc::vec::Vec<D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::FusionMode<R> + symtn::typed::TypedTensorTransformDispatch<R, D>, D: symtn::typed::FactorizationScalar
+pub fn alloc::vec::Vec<D>::eigh_full(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<symtn_matrixalgebra::results::Eigh<symtn::typed::TensorMap<R, D>>, symtn::typed::FacadeError<R>>
+pub fn alloc::vec::Vec<D>::eigh_full_stack(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::EighFullPlan<R, D>, &symtn::typed::StackedTensorMap<R, D>, &mut core::option::Option<(symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::StackedTensorMap<R, D, Self>)>, &mut symtn::typed::EighFullWorkspace<R, D>) -> core::result::Result<(), symtn::typed::BatchError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec
+pub fn alloc::vec::Vec<D>::qr_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn_matrixalgebra::results::Qr<symtn::typed::TensorMap<R, D>>, symtn::typed::FacadeError<R>>
+pub fn alloc::vec::Vec<D>::svd_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn_matrixalgebra::results::Svd<symtn::typed::TensorMap<R, D>>, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::FactorExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaFactorizationPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::eigh_full(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, symtn_matrixalgebra::factorize::eig::HermitianTol) -> core::result::Result<symtn_matrixalgebra::results::Eigh<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::eigh_full_stack(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::EighFullPlan<R, D, Self>, &symtn::typed::StackedTensorMap<R, D, Self>, &mut core::option::Option<(symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::StackedTensorMap<R, D, Self>)>, &mut symtn::typed::EighFullWorkspace<R, D, Self>) -> core::result::Result<(), symtn::typed::BatchError>
+pub fn symtn_operations::cuda::CudaStorage<D>::qr_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn_matrixalgebra::results::Qr<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::svd_compact(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<symtn_matrixalgebra::results::Svd<symtn::typed::TensorMap<R, D, Self>>, symtn::typed::Error>
+pub trait symtn::typed::FactorizationScalar: symtn::typed::TensorScalar
+impl symtn::typed::FactorizationScalar for f32
+impl symtn::typed::FactorizationScalar for f64
+impl symtn::typed::FactorizationScalar for num_complex::Complex32
+impl symtn::typed::FactorizationScalar for num_complex::Complex64
+pub trait symtn::typed::FusionMode<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::TypedAdjointSpace<R> + symtn_matrixalgebra::factorize::authority::FactorMode<R>
+pub fn symtn::typed::FusionMode::decode_label(&R, symtn_sectors::SectorId) -> core::result::Result<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, Self::FacadeError>
+pub fn symtn::typed::FusionMode::map_factor_error(<Self as symtn_matrixalgebra::factorize::authority::FactorMode<R>>::Error) -> Self::FacadeError
+pub fn symtn::typed::FusionMode::map_root_error(<Self as symtn_matrixalgebra::factorize::authority::FactorMode<R>>::RootError) -> Self::FacadeError
+impl<R> symtn::typed::FusionMode<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::decode_label(&R, symtn_sectors::SectorId) -> core::result::Result<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::map_factor_error(symtn_matrixalgebra::factorize::compact_plan::CheckedGenericFactorPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>) -> Self::FacadeError
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::map_root_error(symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>) -> Self::FacadeError
+impl<R> symtn::typed::FusionMode<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::decode_label(&R, symtn_sectors::SectorId) -> core::result::Result<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::map_factor_error(symtn_operations::error::OperationError) -> symtn::typed::Error
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::map_root_error(symtn_operations::error::OperationError) -> symtn::typed::Error
+pub trait symtn::typed::MaterializeExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::MaterializeExec::materialize(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &Self, core::option::Option<&symtn_tensors::adjoint::AdjointBlockMap<'_>>) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::MaterializeExec<R, D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::materialize(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, &Self, core::option::Option<&symtn_tensors::adjoint::AdjointBlockMap<'_>>) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D> symtn::typed::MaterializeExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::materialize(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &Self, core::option::Option<&symtn_tensors::adjoint::AdjointBlockMap<'_>>) -> core::result::Result<Self, symtn::typed::Error>
+pub trait symtn::typed::PayloadConversion<To>: core::marker::Copy + symtn::typed::tensor_repr::typed_payload_conversion_private::Sealed<To>
+pub fn symtn::typed::PayloadConversion::convert_value(self) -> To
+impl symtn::typed::PayloadConversion<f32> for f64
+pub fn f64::convert_value(self) -> f32
+impl symtn::typed::PayloadConversion<f64> for f32
+pub fn f32::convert_value(self) -> f64
+impl symtn::typed::PayloadConversion<num_complex::Complex<f32>> for f32
+pub fn f32::convert_value(self) -> num_complex::Complex32
+impl symtn::typed::PayloadConversion<num_complex::Complex<f32>> for num_complex::Complex64
+pub fn num_complex::Complex64::convert_value(self) -> num_complex::Complex32
+impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for f32
+pub fn f32::convert_value(self) -> num_complex::Complex64
+impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for f64
+pub fn f64::convert_value(self) -> num_complex::Complex64
+impl symtn::typed::PayloadConversion<num_complex::Complex<f64>> for num_complex::Complex32
+pub fn num_complex::Complex32::convert_value(self) -> num_complex::Complex64
+pub trait symtn::typed::PreparedExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub type symtn::typed::PreparedExec::MembersLease<'e>
+pub fn symtn::typed::PreparedExec::contract_members(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractPlan<R, D, Self>, &mut symtn::typed::ContractWorkspace<R, D, Self>, &mut Self::MembersLease, &mut Self, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), usize, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn::typed::PreparedExec::lease_members<'e>(symtn::typed::storage::sealed::ExecToken, &'e mut dyn tenferro_tensor::backend::Engine, &mut symtn::typed::ContractWorkspace<R, D, Self>) -> core::result::Result<Self::MembersLease, symtn::typed::Error>
+pub fn symtn::typed::PreparedExec::owns_output(symtn::typed::storage::sealed::ExecToken, &Self::MembersLease, &Self) -> bool
+pub fn symtn::typed::PreparedExec::retained_payload_bytes(symtn::typed::storage::sealed::ExecToken, &Self, usize) -> usize
+pub fn symtn::typed::PreparedExec::retained_scratch_bytes(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractWorkspace<R, D, Self>) -> usize
+pub fn symtn::typed::PreparedExec::zeroed_members(symtn::typed::storage::sealed::ExecToken, &mut Self::MembersLease, usize, usize, usize) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::PreparedExec<R, D> for alloc::vec::Vec<D>
+pub type alloc::vec::Vec<D>::MembersLease<'e> = &'e mut dyn tenferro_tensor::backend::Engine
+pub fn alloc::vec::Vec<D>::contract_members(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractPlan<R, D>, &mut symtn::typed::ContractWorkspace<R, D>, &mut &mut dyn tenferro_tensor::backend::Engine, &mut Self, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), usize, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn::typed::Error>
+pub fn alloc::vec::Vec<D>::lease_members<'e>(symtn::typed::storage::sealed::ExecToken, &'e mut dyn tenferro_tensor::backend::Engine, &mut symtn::typed::ContractWorkspace<R, D>) -> core::result::Result<&'e mut dyn tenferro_tensor::backend::Engine, symtn::typed::Error>
+pub fn alloc::vec::Vec<D>::owns_output(symtn::typed::storage::sealed::ExecToken, &&mut dyn tenferro_tensor::backend::Engine, &Self) -> bool
+pub fn alloc::vec::Vec<D>::retained_payload_bytes(symtn::typed::storage::sealed::ExecToken, &Self, usize) -> usize
+pub fn alloc::vec::Vec<D>::retained_scratch_bytes(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractWorkspace<R, D>) -> usize
+pub fn alloc::vec::Vec<D>::zeroed_members(symtn::typed::storage::sealed::ExecToken, &mut &mut dyn tenferro_tensor::backend::Engine, usize, usize, usize) -> core::result::Result<Self, symtn::typed::Error>
+impl<R, D> symtn::typed::PreparedExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub type symtn_operations::cuda::CudaStorage<D>::MembersLease<'e> = symtn::typed::cuda_contract::CudaMembersLease<'e>
+pub fn symtn_operations::cuda::CudaStorage<D>::contract_members(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractPlan<R, D, Self>, &mut symtn::typed::ContractWorkspace<R, D, Self>, &mut symtn::typed::cuda_contract::CudaMembersLease<'_>, &mut Self, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &Self), usize, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::lease_members<'e>(symtn::typed::storage::sealed::ExecToken, &'e mut dyn tenferro_tensor::backend::Engine, &mut symtn::typed::ContractWorkspace<R, D, Self>) -> core::result::Result<symtn::typed::cuda_contract::CudaMembersLease<'e>, symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::owns_output(symtn::typed::storage::sealed::ExecToken, &symtn::typed::cuda_contract::CudaMembersLease<'_>, &Self) -> bool
+pub fn symtn_operations::cuda::CudaStorage<D>::retained_payload_bytes(symtn::typed::storage::sealed::ExecToken, &Self, usize) -> usize
+pub fn symtn_operations::cuda::CudaStorage<D>::retained_scratch_bytes(symtn::typed::storage::sealed::ExecToken, &symtn::typed::ContractWorkspace<R, D, Self>) -> usize
+pub fn symtn_operations::cuda::CudaStorage<D>::zeroed_members(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::cuda_contract::CudaMembersLease<'_>, usize, usize, usize) -> core::result::Result<Self, symtn::typed::Error>
+pub trait symtn::typed::ReduceExec<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedSpaceModeDispatch<R>: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::ReduceExec::dense_inner(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<D, symtn::typed::FacadeError<R>>
+pub fn symtn::typed::ReduceExec::dense_norm(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, f64) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::ReduceExec<R, D> for alloc::vec::Vec<D> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn::typed::TypedSpaceModeDispatch<R>, D: symtn::typed::TensorScalar
+pub fn alloc::vec::Vec<D>::dense_inner(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, &symtn::typed::TensorMap<R, D>) -> core::result::Result<D, symtn::typed::FacadeError<R>>
+pub fn alloc::vec::Vec<D>::dense_norm(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, f64) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+impl<R, D> symtn::typed::ReduceExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::dense_inner(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &symtn::typed::TensorMap<R, D, Self>) -> core::result::Result<D, symtn::typed::Error>
+pub fn symtn_operations::cuda::CudaStorage<D>::dense_norm(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, f64) -> core::result::Result<f64, symtn::typed::Error>
+pub trait symtn::typed::StackExec<D>: symtn_core::storage::TensorStorage<D> + symtn::typed::storage::sealed::Sealed + core::marker::Sized
+pub fn symtn::typed::StackExec::restrict_members<R: symtn_sectors::algebra::TypedSectorAdmission>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D, Self>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[(usize, &symtn::typed::LegSelection<R>)]) -> core::result::Result<symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::Error> where D: symtn::typed::TensorScalar
+pub fn symtn::typed::StackExec::select_members<R>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D, Self>, &[usize], usize) -> core::result::Result<symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::Error>
+impl<D: core::marker::Copy> symtn::typed::StackExec<D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::restrict_members<R: symtn_sectors::algebra::TypedSectorAdmission>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[(usize, &symtn::typed::LegSelection<R>)]) -> core::result::Result<symtn::typed::StackedTensorMap<R, D>, symtn::typed::Error> where D: symtn::typed::TensorScalar
+pub fn alloc::vec::Vec<D>::select_members<R>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D>, &[usize], usize) -> core::result::Result<symtn::typed::StackedTensorMap<R, D>, symtn::typed::Error>
+impl<D: symtn::typed::CudaPayload> symtn::typed::StackExec<D> for symtn_operations::cuda::CudaStorage<D>
+pub fn symtn_operations::cuda::CudaStorage<D>::restrict_members<R: symtn_sectors::algebra::TypedSectorAdmission>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D, Self>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[(usize, &symtn::typed::LegSelection<R>)]) -> core::result::Result<symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::Error> where D: symtn::typed::TensorScalar
+pub fn symtn_operations::cuda::CudaStorage<D>::select_members<R>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::StackedTensorMap<R, D, Self>, &[usize], usize) -> core::result::Result<symtn::typed::StackedTensorMap<R, D, Self>, symtn::typed::Error>
+pub trait symtn::typed::TensorScalar: ScalarOps
+impl symtn::typed::TensorScalar for f32
+impl symtn::typed::TensorScalar for f64
+impl symtn::typed::TensorScalar for num_complex::Complex32
+impl symtn::typed::TensorScalar for num_complex::Complex64
+pub trait symtn::typed::TraceExec<R, D>: symtn::typed::ElementwiseExec<R, D>
+pub fn symtn::typed::TraceExec::trace_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, core::option::Option<D>, &symtn::typed::TensorMap<R, D, Self>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError>
+pub fn symtn::typed::TraceExec::trace_owned(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, usize, core::option::Option<D>, &symtn::typed::TensorMap<R, D, Self>, D) -> core::result::Result<Self, symtn::typed::TransformExecError>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::TraceExec<R, D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::trace_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, core::option::Option<D>, &symtn::typed::TensorMap<R, D>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError>
+pub fn alloc::vec::Vec<D>::trace_owned(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, usize, core::option::Option<D>, &symtn::typed::TensorMap<R, D>, D) -> core::result::Result<Self, symtn::typed::TransformExecError>
+impl<R, D> symtn::typed::TraceExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::TypedSectorAdmission<Sector = <R as symtn_sectors::algebra::SectorCodec>::Sector, Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::trace_into(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, core::option::Option<D>, &symtn::typed::TensorMap<R, D, Self>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError>
+pub fn symtn_operations::cuda::CudaStorage<D>::trace_owned(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>, usize, core::option::Option<D>, &symtn::typed::TensorMap<R, D, Self>, D) -> core::result::Result<Self, symtn::typed::TransformExecError>
+pub trait symtn::typed::TransformExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::TransformExec::replay_into<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, symtn::typed::TransformIntoSource<'_, D, Self, C>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn::typed::TransformExec::replay_owned<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, D) -> core::result::Result<Self, symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::TransformExec<R, D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::replay_into<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, symtn::typed::TransformIntoSource<'_, D, Self, C>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError>
+pub fn alloc::vec::Vec<D>::replay_owned<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, &symtn::typed::TensorMap<R, D>, D) -> core::result::Result<Self, symtn::typed::TransformExecError>
+impl<R, D> symtn::typed::TransformExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::replay_into<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, symtn::typed::TransformIntoSource<'_, D, Self, C>, &mut Self, D, D) -> core::result::Result<(), symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_operations::cuda::CudaStorage<D>::replay_owned<C: core::marker::Copy>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, symtn::typed::TreeReplay<'_, D, C>, &symtn::typed::TensorMap<R, D, Self>, D) -> core::result::Result<Self, symtn::typed::TransformExecError> where D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub trait symtn::typed::TwistExec<R, D>: symtn::typed::TypedStorage<R, D>
+pub fn symtn::typed::TwistExec::scale_blocks<C: symtn::typed::dispatch::TwistCoefficient<D>>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &dyn core::ops::function::Fn(&symtn_core::block_structure::block_key::BlockKey) -> C, &'static str) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+impl<R, D: symtn::typed::TensorScalar> symtn::typed::TwistExec<R, D> for alloc::vec::Vec<D>
+pub fn alloc::vec::Vec<D>::scale_blocks<C: symtn::typed::dispatch::TwistCoefficient<D>>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D>, &dyn core::ops::function::Fn(&symtn_core::block_structure::block_key::BlockKey) -> C, &'static str) -> core::result::Result<symtn::typed::TensorMap<R, D>, symtn::typed::Error>
+impl<R, D> symtn::typed::TwistExec<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub fn symtn_operations::cuda::CudaStorage<D>::scale_blocks<C: symtn::typed::dispatch::TwistCoefficient<D>>(&mut dyn tenferro_tensor::backend::Engine, symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>, &dyn core::ops::function::Fn(&symtn_core::block_structure::block_key::BlockKey) -> C, &'static str) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+pub trait symtn::typed::TypedAdjointSpace<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedAdjointSpace::adjoint_space(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R, M> symtn::typed::TypedAdjointSpace<R> for M where R: symtn_sectors::algebra::TypedSectorAdmission, M: symtn::typed::TypedTensorModeDispatch<R> + symtn_tensors::mode::CoefficientAlgebra<R>, <M as symtn::typed::TypedTensorModeDispatch>::FacadeError: core::convert::From<<M as symtn_tensors::mode::CoefficientAlgebra<R>>::Error>
+pub fn M::adjoint_space(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub trait symtn::typed::TypedPersistenceCodec<R> where R: symtn_sectors::algebra::TypedSectorAdmission
+pub type symtn::typed::TypedPersistenceCodec::Error: core::error::Error + core::marker::Send + core::marker::Sync + 'static
+pub fn symtn::typed::TypedPersistenceCodec::decode_sector(&self, &R, &[u8]) -> core::result::Result<<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector, Self::Error>
+pub fn symtn::typed::TypedPersistenceCodec::encode_sector(&self, &R, &<R as symtn_sectors::algebra::TypedSectorAdmission>::Sector) -> core::result::Result<alloc::vec::Vec<u8>, Self::Error>
+pub fn symtn::typed::TypedPersistenceCodec::provider_key(&self, &R) -> core::result::Result<alloc::vec::Vec<u8>, Self::Error>
+pub fn symtn::typed::TypedPersistenceCodec::resolve_provider(&self, &[u8]) -> core::result::Result<alloc::sync::Arc<R>, Self::Error>
+pub trait symtn::typed::TypedSpaceModeDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedSpaceModeDispatch::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, <Self as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError>
+pub fn symtn::typed::TypedSpaceModeDispatch::fusion_channels(&R, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<symtn_sectors::SectorId>, <Self as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError>
+pub fn symtn::typed::TypedSpaceModeDispatch::nsymbol(&R, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, <Self as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError>
+pub fn symtn::typed::TypedSpaceModeDispatch::vacuum(&R) -> symtn_sectors::SectorId
+impl<R> symtn::typed::TypedSpaceModeDispatch<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::fusion_channels(&R, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<symtn_sectors::SectorId>, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::nsymbol(&R, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::vacuum(&R) -> symtn_sectors::SectorId
+impl<R> symtn::typed::TypedSpaceModeDispatch<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, symtn_sectors::algebra::MultiplicityFreeAdmissionMode: symtn_tensors::mode::RigidCoefficientAlgebra<R> + symtn_tensors::mode::CoefficientAlgebra<R, Error = symtn_operations::error::OperationError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::fusion_channels(&R, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<symtn_sectors::SectorId>, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::nsymbol(&R, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, symtn::typed::FacadeError<R>>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::vacuum(&R) -> symtn_sectors::SectorId
+pub trait symtn::typed::TypedStorage<R, D>: symtn_core::storage::TensorStorage<D> + symtn::typed::storage::sealed::Sealed + core::marker::Sized + 'static
+pub const symtn::typed::TypedStorage::NOUN: &'static str
+pub fn symtn::typed::TypedStorage::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
+pub fn symtn::typed::TypedStorage::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
+pub fn symtn::typed::TypedStorage::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+impl<R, D: 'static> symtn::typed::TypedStorage<R, D> for alloc::vec::Vec<D>
+pub const alloc::vec::Vec<D>::NOUN: &'static str
+pub fn alloc::vec::Vec<D>::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
+pub fn alloc::vec::Vec<D>::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
+pub fn alloc::vec::Vec<D>::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+impl<R, D> symtn::typed::TypedStorage<R, D> for symtn_operations::cuda::CudaStorage<D> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::CudaPayload
+pub const symtn_operations::cuda::CudaStorage<D>::NOUN: &'static str
+pub fn symtn_operations::cuda::CudaStorage<D>::as_host(symtn::typed::storage::sealed::ExecToken, &symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&symtn::typed::TensorMap<R, D>>
+pub fn symtn_operations::cuda::CudaStorage<D>::as_host_mut(symtn::typed::storage::sealed::ExecToken, &mut symtn::typed::TensorMap<R, D, Self>) -> core::option::Option<&mut symtn::typed::TensorMap<R, D>>
+pub fn symtn_operations::cuda::CudaStorage<D>::from_host(symtn::typed::storage::sealed::ExecToken, symtn::typed::TensorMap<R, D>) -> core::result::Result<symtn::typed::TensorMap<R, D, Self>, symtn::typed::Error>
+pub trait symtn::typed::TypedTensorConstructionDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorConstructionDispatch::build_construction_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorConstructionDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericFusion, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::build_construction_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorConstructionDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar + symtn_operations::scalar::DenseRecouplingScalar, D: symtn::typed::TensorScalar + symtn_operations::scalar::RecouplingCoefficientAction<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::build_construction_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub trait symtn::typed::TypedTensorContractDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorTransformDispatch<R, D>
+pub fn symtn::typed::TypedTensorContractDispatch::compose<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn::typed::TypedTensorContractDispatch::contract<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn::typed::TypedTensorContractDispatch::contract_into<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorContractDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::compose<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::contract<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::contract_into<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorContractDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar + symtn_operations::scalar::DenseRecouplingScalar, D: symtn::typed::TensorScalar + MultiplicityFreeContractExecution<R> + MultiplicityFreeTransformExecution<R>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::compose<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::contract<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::contract_into<S: symtn::typed::ContractExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::TensorMap<R, D, S>, &symtn::typed::ContractSpec<'_>, core::option::Option<&symtn_tensors::contract::planar::PlanarContractOrders>, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), symtn::typed::Error>
+pub trait symtn::typed::TypedTensorFlipDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub type symtn::typed::TypedTensorFlipDispatch::Coeff: symtn::typed::dispatch::TwistCoefficient<D>
+pub fn symtn::typed::TypedTensorFlipDispatch::pivotal_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[(usize, bool)]) -> core::result::Result<impl core::ops::function::Fn(symtn_sectors::SectorId) -> (Self::Coeff, Self::Coeff) + 'a, Self::FacadeError>
+pub fn symtn::typed::TypedTensorFlipDispatch::root(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorFlipDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>, D: symtn::typed::TensorScalar
+pub type symtn_sectors::algebra::CheckedGenericAdmissionMode::Coeff = f64
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::pivotal_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[(usize, bool)]) -> core::result::Result<impl core::ops::function::Fn(symtn_sectors::SectorId) -> (f64, f64) + 'a, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::root(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorFlipDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn::typed::dispatch::TwistCoefficient<D>, D: symtn::typed::TensorScalar
+pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::Coeff = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::pivotal_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[(usize, bool)]) -> core::result::Result<impl core::ops::function::Fn(symtn_sectors::SectorId) -> (<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar) + 'a, symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::root(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn::typed::Error>
+pub trait symtn::typed::TypedTensorModeDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::dispatch::typed_admission_private::Sealed
+pub type symtn::typed::TypedTensorModeDispatch::FacadeError: core::error::Error + core::convert::From<symtn::typed::Error> + core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn::typed::TypedTensorModeDispatch::braiding_style(&R) -> symtn_sectors::BraidingStyleKind
+pub fn symtn::typed::TypedTensorModeDispatch::coupled_block_dimension(&R, &symtn_core::fusion_space::product_space::FusionProductSpace, symtn_sectors::SectorId) -> core::result::Result<usize, Self::FacadeError>
+pub fn symtn::typed::TypedTensorModeDispatch::facade_error_into_error(Self::FacadeError) -> symtn::typed::Error
+pub fn symtn::typed::TypedTensorModeDispatch::fuse_sector_content(&R, &[(symtn_sectors::SectorId, usize)], &[(symtn_sectors::SectorId, usize)]) -> core::result::Result<alloc::vec::Vec<(symtn_sectors::SectorId, usize)>, Self::FacadeError>
+pub fn symtn::typed::TypedTensorModeDispatch::fusion_style(&R) -> symtn_sectors::FusionStyleKind
+pub fn symtn::typed::TypedTensorModeDispatch::map_provider_error(<R as symtn_sectors::algebra::TypedSectorAdmission>::Error) -> Self::FacadeError
+pub fn symtn::typed::TypedTensorModeDispatch::sector_order_key(&R, symtn_sectors::SectorId) -> symtn_sectors::algebra::SectorOrderKey
+impl<R> symtn::typed::TypedTensorModeDispatch<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericFusion
+pub type symtn_sectors::algebra::CheckedGenericAdmissionMode::FacadeError = symtn::typed::GenericTensorError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::braiding_style(&R) -> symtn_sectors::BraidingStyleKind
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::coupled_block_dimension(&R, &symtn_core::fusion_space::product_space::FusionProductSpace, symtn_sectors::SectorId) -> core::result::Result<usize, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::facade_error_into_error(Self::FacadeError) -> symtn::typed::Error
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::fuse_sector_content(&R, &[(symtn_sectors::SectorId, usize)], &[(symtn_sectors::SectorId, usize)]) -> core::result::Result<alloc::vec::Vec<(symtn_sectors::SectorId, usize)>, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::fusion_style(&R) -> symtn_sectors::FusionStyleKind
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::map_provider_error(<R as symtn_sectors::algebra::TypedSectorAdmission>::Error) -> Self::FacadeError
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::sector_order_key(&R, symtn_sectors::SectorId) -> symtn_sectors::algebra::SectorOrderKey
+impl<R> symtn::typed::TypedTensorModeDispatch<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::CheckedFusionAlgebra
+pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::FacadeError = symtn::typed::Error
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::braiding_style(&R) -> symtn_sectors::BraidingStyleKind
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::coupled_block_dimension(&R, &symtn_core::fusion_space::product_space::FusionProductSpace, symtn_sectors::SectorId) -> core::result::Result<usize, Self::FacadeError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::facade_error_into_error(symtn::typed::Error) -> symtn::typed::Error
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::fuse_sector_content(&R, &[(symtn_sectors::SectorId, usize)], &[(symtn_sectors::SectorId, usize)]) -> core::result::Result<alloc::vec::Vec<(symtn_sectors::SectorId, usize)>, Self::FacadeError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::fusion_style(&R) -> symtn_sectors::FusionStyleKind
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::map_provider_error(<R as symtn_sectors::algebra::TypedSectorAdmission>::Error) -> Self::FacadeError
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::sector_order_key(&R, symtn_sectors::SectorId) -> symtn_sectors::algebra::SectorOrderKey
+pub trait symtn::typed::TypedTensorProductDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorProductDispatch::product(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D], &symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorProductDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::product(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D], &symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorProductDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec + symtn_sectors::algebra::CanonicalUnitFusionRule, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar + symtn_operations::scalar::DenseRecouplingScalar, D: symtn::typed::TensorScalar + symtn_operations::scalar::RecouplingCoefficientAction<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::product(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D], &symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn::typed::Error>
+pub trait symtn::typed::TypedTensorRootDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorRootDispatch::build_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub fn symtn::typed::TypedTensorRootDispatch::build_root_with(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, Self::FacadeError>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R> symtn::typed::TypedTensorRootDispatch<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::build_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::build_root_with(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, Self::FacadeError>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+impl<R> symtn::typed::TypedTensorRootDispatch<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::build_root(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::build_root_with(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, Self::FacadeError>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::FacadeError>
+pub trait symtn::typed::TypedTensorTraceDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorTraceDispatch::trace<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn::typed::TypedTensorTraceDispatch::trace_into<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTraceDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>, D: symtn::typed::TensorScalar + symtn_operations::scalar::RecouplingCoefficientAction<f64>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::trace<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::trace_into<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTraceDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::trace<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::trace_into<S: symtn::typed::TraceExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, impl core::ops::function::FnOnce(&symtn_tensors::tensortrace::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize, &mut symtn::typed::TensorMap<R, D, S>, D, D) -> core::result::Result<(), symtn::typed::Error>
+pub trait symtn::typed::TypedTensorTransformDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorTransformDispatch::transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn::typed::TypedTensorTransformDispatch::transform_bond_spectrum(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<D>], &symtn_operations::transform_key::TreeTransformOperation, bool) -> core::result::Result<symtn::typed::BondTransform<R, D>, Self::FacadeError>
+pub fn symtn::typed::TypedTensorTransformDispatch::transform_into<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &mut symtn::typed::TensorMap<R, D, S>, D, D, impl core::ops::function::FnOnce() -> core::result::Result<symtn_operations::transform_key::TreeTransformOperation, symtn::typed::Error>, impl core::ops::function::FnOnce(&mut dyn core::ops::function::FnMut(symtn_tensors::tree_transform::cache::TreeTransformOperationView<'_>))) -> core::result::Result<(), Self::FacadeError>
+pub fn symtn::typed::TypedTensorTransformDispatch::try_lazy_adjoint_transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<core::option::Option<symtn::typed::TensorMap<R, D, S>>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTransformDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::transform_bond_spectrum(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<D>], &symtn_operations::transform_key::TreeTransformOperation, bool) -> core::result::Result<symtn::typed::BondTransform<R, D>, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::transform_into<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &mut symtn::typed::TensorMap<R, D, S>, D, D, impl core::ops::function::FnOnce() -> core::result::Result<symtn_operations::transform_key::TreeTransformOperation, symtn::typed::Error>, impl core::ops::function::FnOnce(&mut dyn core::ops::function::FnMut(symtn_tensors::tree_transform::cache::TreeTransformOperationView<'_>))) -> core::result::Result<(), Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::try_lazy_adjoint_transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<core::option::Option<symtn::typed::TensorMap<R, D, S>>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTransformDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar + symtn_operations::scalar::DenseRecouplingScalar, D: symtn::typed::TensorScalar + MultiplicityFreeTransformExecution<R>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<(symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, S), symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::transform_bond_spectrum(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<D>], &symtn_operations::transform_key::TreeTransformOperation, bool) -> core::result::Result<symtn::typed::BondTransform<R, D>, symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::transform_into<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &mut symtn::typed::TensorMap<R, D, S>, D, D, impl core::ops::function::FnOnce() -> core::result::Result<symtn_operations::transform_key::TreeTransformOperation, symtn::typed::Error>, impl core::ops::function::FnOnce(&mut dyn core::ops::function::FnMut(symtn_tensors::tree_transform::cache::TreeTransformOperationView<'_>))) -> core::result::Result<(), symtn::typed::Error>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::try_lazy_adjoint_transform<S: symtn::typed::TransformExec<R, D>>(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D, S>, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<core::option::Option<symtn::typed::TensorMap<R, D, S>>, symtn::typed::Error>
+pub trait symtn::typed::TypedTensorTwistDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedSpaceModeDispatch<R>
+pub type symtn::typed::TypedTensorTwistDispatch::Coeff: symtn::typed::dispatch::TwistCoefficient<D>
+pub fn symtn::typed::TypedTensorTwistDispatch::twist_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[usize]) -> core::result::Result<core::option::Option<impl core::ops::function::Fn(symtn_sectors::SectorId) -> Self::Coeff + 'a>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTwistDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>, D: symtn::typed::TensorScalar
+pub type symtn_sectors::algebra::CheckedGenericAdmissionMode::Coeff = f64
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::twist_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[usize]) -> core::result::Result<core::option::Option<impl core::ops::function::Fn(symtn_sectors::SectorId) -> f64 + 'a>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorTwistDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn::typed::dispatch::TwistCoefficient<D>, symtn_sectors::algebra::MultiplicityFreeAdmissionMode: symtn_tensors::mode::RigidCoefficientAlgebra<R> + symtn_tensors::mode::CoefficientAlgebra<R, Error = symtn_operations::error::OperationError>, D: symtn::typed::TensorScalar
+pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::Coeff = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::twist_values<'a>(&'a R, &symtn_core::block_structure::structure::BlockStructure, usize, &[usize]) -> core::result::Result<core::option::Option<impl core::ops::function::Fn(symtn_sectors::SectorId) -> <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar + 'a>, symtn::typed::Error>
+pub trait symtn::typed::TypedTensorUnitDispatch<R, D> where R: symtn_sectors::algebra::TypedSectorAdmission, D: symtn::typed::TensorScalar: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTensorUnitDispatch::insert_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, symtn_core::fusion_space::hom_space::UnitLegInsertion) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+pub fn symtn::typed::TypedTensorUnitDispatch::remove_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, usize) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorUnitDispatch<R, D> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedCanonicalUnitFusionRule, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::insert_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, symtn_core::fusion_space::hom_space::UnitLegInsertion) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::remove_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, usize) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+impl<R, D> symtn::typed::TypedTensorUnitDispatch<R, D> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::SectorCodec + symtn_sectors::algebra::CanonicalUnitFusionRule, D: symtn::typed::TensorScalar
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::insert_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, symtn_core::fusion_space::hom_space::UnitLegInsertion) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::remove_unit(&mut dyn tenferro_tensor::backend::Engine, &symtn::typed::TensorMap<R, D>, usize) -> core::result::Result<symtn::typed::TensorMap<R, D>, Self::FacadeError>
+pub trait symtn::typed::TypedTruncationDispatch<R> where R: symtn_sectors::algebra::TypedSectorAdmission: symtn::typed::TypedTensorModeDispatch<R>
+pub fn symtn::typed::TypedTruncationDispatch::decide_bond_truncation<V>(&R, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<V>], &symtn_matrixalgebra::truncation::Truncation) -> core::result::Result<symtn_matrixalgebra::truncation::TruncationDecision, Self::FacadeError> where V: symtn_matrixalgebra::factorize::scalar::SpectrumMagnitude
+impl<R> symtn::typed::TypedTruncationDispatch<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = <R as symtn_sectors::algebra::CheckedGenericFusion>::Error, Mode = symtn_sectors::algebra::CheckedGenericAdmissionMode> + symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::decide_bond_truncation<V>(&R, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<V>], &symtn_matrixalgebra::truncation::Truncation) -> core::result::Result<symtn_matrixalgebra::truncation::TruncationDecision, Self::FacadeError> where V: symtn_matrixalgebra::factorize::scalar::SpectrumMagnitude
+impl<R> symtn::typed::TypedTruncationDispatch<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::TypedSectorAdmission<Error = symtn_sectors::algebra::FusionAlgebraError, Mode = symtn_sectors::algebra::MultiplicityFreeAdmissionMode> + symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra, symtn_sectors::algebra::MultiplicityFreeAdmissionMode: symtn_tensors::mode::RigidCoefficientAlgebra<R> + symtn_tensors::mode::CoefficientAlgebra<R, Error = symtn_operations::error::OperationError>
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::decide_bond_truncation<V>(&R, &[symtn_matrixalgebra::factorize::scalar::SectorSpectrum<V>], &symtn_matrixalgebra::truncation::Truncation) -> core::result::Result<symtn_matrixalgebra::truncation::TruncationDecision, symtn::typed::Error> where V: symtn_matrixalgebra::factorize::scalar::SpectrumMagnitude
+pub type symtn::typed::FacadeError<R> = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::TypedTensorModeDispatch<R>>::FacadeError
+pub type symtn::typed::PhysicalDenseError<E> = symtn_tensors::physical::PhysicalConversionError<E>
