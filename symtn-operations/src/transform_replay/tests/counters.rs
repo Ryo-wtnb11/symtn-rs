@@ -34,7 +34,7 @@ fn blocks(blocks: &[([usize; 2], [usize; 2], usize)]) -> Arc<BlockStructure> {
 }
 
 /// The initialized overwrite of `transform` through the built-in executor,
-/// and the counts of the gates of bound `M` it built.
+/// and the counts of the gates it built.
 fn overwrite_counts(
     engine: &mut CpuEngine,
     transform: &TreeTransformStructure<f64>,
@@ -45,7 +45,7 @@ fn overwrite_counts(
         .map(|v| v as f64 + 1.0)
         .collect::<Vec<_>>();
     let mut out = vec![f64::NAN; dst.required_len().unwrap()];
-    let watch = gate_counts::watch(transform.layouts().max_planned_elements());
+    let watch = gate_counts::watch();
     tree_transform_structure_overwrite_with_structural_recoupling_raw(
         engine,
         &mut StridedHostKernelAdapter::default(),

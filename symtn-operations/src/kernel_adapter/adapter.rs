@@ -39,6 +39,9 @@ pub(crate) mod sealed {
         memo: Option<GateScan>,
         /// The call's prepared cost keys, shared by its split leaves.
         keys: Option<&'k GateKeys>,
+        /// Whether this gate belongs to a watched call.
+        #[cfg(test)]
+        watched: bool,
     }
 
     #[derive(Clone, Copy)]
@@ -55,6 +58,8 @@ pub(crate) mod sealed {
                 bound,
                 memo: None,
                 keys: None,
+                #[cfg(test)]
+                watched: gate_counts::watching(),
             }
         }
 
@@ -66,6 +71,8 @@ pub(crate) mod sealed {
                 bound: keys.bound,
                 memo: None,
                 keys: Some(keys),
+                #[cfg(test)]
+                watched: keys.watched,
             }
         }
 
@@ -92,14 +99,15 @@ pub(crate) mod sealed {
         /// at the token's cheapest width, or `None` when none does. A copy
         /// estimate is monotone in the element count, so a binary search over
         /// `pays` at that one width finds it in O(log bound).
-        fn scan(exec: &crate::host_pool::Exec<'_>, bound: usize) -> Option<usize> {
+        fn scan(&self, exec: &crate::host_pool::Exec<'_>) -> Option<usize> {
+            let bound = self.bound;
             #[cfg(test)]
-            gate_counts::add(bound, |counts| counts.scans += 1);
+            gate_counts::add(self.watched, |counts| counts.scans += 1);
             let (cheapest, _) = Self::cheapest(exec)?;
             let class = execution::KernelClass::Copy;
             let pays = |elements: usize| {
                 #[cfg(test)]
-                gate_counts::add(bound, |counts| counts.pays += 1);
+                gate_counts::add(self.watched, |counts| counts.pays += 1);
                 exec.pays(class.estimate(elements), 1, cheapest)
             };
             if !pays(bound) {
@@ -153,9 +161,9 @@ pub(crate) mod sealed {
                                 Some(*cost),
                                 "a prepared gate key differs from its token's"
                             );
-                            *scan.get_or_init(|| Self::scan(exec, self.bound))
+                            *scan.get_or_init(|| self.scan(exec))
                         }
-                        None => Self::scan(exec, self.bound),
+                        None => self.scan(exec),
                     };
                     self.memo = Some(GateScan {
                         budget,
@@ -168,7 +176,7 @@ pub(crate) mod sealed {
             match min_elements {
                 Some(min) if elements >= min => {
                     #[cfg(test)]
-                    gate_counts::add(self.bound, |counts| counts.widths += 1);
+                    gate_counts::add(self.watched, |counts| counts.widths += 1);
                     execution::parallel_width(exec, execution::KernelClass::Copy, elements).get()
                         > 1
                 }
@@ -196,6 +204,9 @@ pub(crate) mod sealed {
         /// Each prepared budget and the index of its cost's slot.
         budgets: Vec<(usize, usize)>,
         slots: Vec<(core::time::Duration, std::sync::OnceLock<Option<usize>>)>,
+        /// Whether the call that prepared the keys is watched.
+        #[cfg(test)]
+        watched: bool,
     }
 
     /// Scratch only: a clone starts empty.
@@ -245,6 +256,12 @@ pub(crate) mod sealed {
                 };
                 divisor = next;
             }
+        }
+
+        /// Marks the keys as `gate`'s call's, for the gates shared from them.
+        #[cfg(test)]
+        pub(crate) fn watch_as(&mut self, gate: &LeafGate<'_>) {
+            self.watched = gate.watched;
         }
 
         /// The cost and scan slot of a prepared `budget`.
@@ -344,11 +361,19 @@ pub(crate) mod sealed {
         }
     }
 
-    /// Test observation of the gates of one watched bound, on every thread:
-    /// a forked leaf's gate runs on a worker. A test watches a bound no other
-    /// test's planned roles reach, so concurrent tests do not count.
+    /// Test observation of the gates of one watched call, on every thread:
+    /// a forked leaf's gate runs on a worker.
+    ///
+    /// Why a flag carried by the gate rather than a key matched at the count:
+    /// a size key such as the gate's bound is shared by any concurrent test
+    /// whose planned roles reach the same size, and a thread-local key misses
+    /// the forked leaves that run on pool workers. A gate built on the
+    /// watching thread is marked watched, and the call's shared gate keys
+    /// take that mark from the call's gate, so every gate of the watched call
+    /// counts wherever it runs and no gate of another call does.
     #[cfg(test)]
     pub(crate) mod gate_counts {
+        use std::cell::Cell;
         use std::sync::{Mutex, MutexGuard, PoisonError};
 
         /// What the watched gates did.
@@ -362,28 +387,38 @@ pub(crate) mod sealed {
             pub widths: usize,
         }
 
-        static WATCHED: Mutex<Option<(usize, Counts)>> = Mutex::new(None);
+        static COUNTS: Mutex<Counts> = Mutex::new(Counts {
+            scans: 0,
+            pays: 0,
+            widths: 0,
+        });
         static WATCHERS: Mutex<()> = Mutex::new(());
 
-        pub(super) fn add(bound: usize, count: impl FnOnce(&mut Counts)) {
-            let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some((watched, counts)) = watched.as_mut() {
-                if *watched == bound {
-                    count(counts);
-                }
+        std::thread_local! {
+            static WATCHING: Cell<bool> = const { Cell::new(false) };
+        }
+
+        /// Whether a gate built on this thread belongs to a watched call.
+        pub(super) fn watching() -> bool {
+            WATCHING.with(Cell::get)
+        }
+
+        pub(super) fn add(watched: bool, count: impl FnOnce(&mut Counts)) {
+            if watched {
+                count(&mut COUNTS.lock().unwrap_or_else(PoisonError::into_inner));
             }
         }
 
-        /// Counts the gates of `bound` until the watch drops; one watch at a
-        /// time.
+        /// Counts the gates built on this thread until the watch drops; one
+        /// watch at a time.
         pub(crate) struct Watch {
             _one_at_a_time: MutexGuard<'static, ()>,
         }
 
-        pub(crate) fn watch(bound: usize) -> Watch {
+        pub(crate) fn watch() -> Watch {
             let guard = WATCHERS.lock().unwrap_or_else(PoisonError::into_inner);
-            *WATCHED.lock().unwrap_or_else(PoisonError::into_inner) =
-                Some((bound, Counts::default()));
+            *COUNTS.lock().unwrap_or_else(PoisonError::into_inner) = Counts::default();
+            WATCHING.with(|watching| watching.set(true));
             Watch {
                 _one_at_a_time: guard,
             }
@@ -392,17 +427,13 @@ pub(crate) mod sealed {
         impl Watch {
             /// The counts so far, reset to zero.
             pub(crate) fn take(&self) -> Counts {
-                let mut watched = WATCHED.lock().unwrap_or_else(PoisonError::into_inner);
-                watched
-                    .as_mut()
-                    .map(|(_, counts)| std::mem::take(counts))
-                    .unwrap_or_default()
+                std::mem::take(&mut *COUNTS.lock().unwrap_or_else(PoisonError::into_inner))
             }
         }
 
         impl Drop for Watch {
             fn drop(&mut self) {
-                *WATCHED.lock().unwrap_or_else(PoisonError::into_inner) = None;
+                WATCHING.with(|watching| watching.set(false));
             }
         }
     }
