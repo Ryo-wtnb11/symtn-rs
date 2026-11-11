@@ -108,6 +108,8 @@ where
                 &mut exec.reborrow().into_token(),
                 layouts.max_planned_elements(),
             );
+            #[cfg(test)]
+            workspace.gate_keys.watch_as(gate);
             let split_inactive = run_threads > 1 && inactive_runs >= 2;
             let (split_singles, singles_width) = if singles_disjoint {
                 (threads > 1, threads)
