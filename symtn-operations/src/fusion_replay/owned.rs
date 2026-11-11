@@ -271,7 +271,7 @@ where
         // empty output, or a zero alpha, runs none, yet the caller's engine
         // must still be refused before anything is written, as initialized
         // replay refuses it in its inactive-block region.
-        crate::host_pool::with_exec(engine, |_| Ok(()))?;
+        crate::host_pool::admit(engine)?;
         self.prepare_irregular_scratch(fusion_workspace);
         let mut data = initialize_owned(len, |spare| {
             self.write_fresh(

@@ -564,11 +564,7 @@ where
         &self,
         engine: &mut dyn Engine,
     ) -> Result<PhysicalDense<D>, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
-        symtn_operations::host_pool::region(
-            engine,
-            symtn_operations::host_pool::HostPoolSite::Strided,
-            |_| (),
-        )?;
+        symtn_operations::host_pool::admit(engine)?;
         // Why an operation-local copy rather than `Unsupported`: the physical
         // output is never smaller than the reduced payload, so the copy at
         // most doubles the bytes this conversion already writes, and
@@ -612,11 +608,7 @@ where
         engine: &mut dyn Engine,
         physical: &PhysicalDense<D>,
     ) -> Result<Self, PhysicalDenseError<<R as PhysicalFusionBasis>::Error>> {
-        symtn_operations::host_pool::region(
-            engine,
-            symtn_operations::host_pool::HostPoolSite::Strided,
-            |_| (),
-        )?;
+        symtn_operations::host_pool::admit(engine)?;
         let data = project_physical_host(
             self.logical_space(),
             physical.shape.as_slice(),

@@ -1706,10 +1706,14 @@ impl DefaultDenseExecutor {
         }
         #[cfg(feature = "cpu-blas-core")]
         {
-            let exec = cpu.exec().map_err(|err| tenferro_error(FRESH_OP, err))?;
-            let vendor_loop = cpueinsum::VendorLoopRoute::resolve(exec.batch_policy().strategy)
+            // Why `exec()` only when broken: it is this route's refusal point,
+            // ahead of the `zeroed` callback below; a healthy engine needs no
+            // token to read its policy.
+            if cpu.is_broken() {
+                cpu.exec().map_err(|err| tenferro_error(FRESH_OP, err))?;
+            }
+            let vendor_loop = cpueinsum::VendorLoopRoute::resolve(cpu.batch_policy().strategy)
                 == cpueinsum::VendorLoopRoute::Loop;
-            drop(exec);
             if vendor_loop && typed_alpha != T::default() {
                 return self
                     .matmul_batch_fresh_zeroed_typed(cpu, parts, lhs, rhs, jobs, ops, alpha);

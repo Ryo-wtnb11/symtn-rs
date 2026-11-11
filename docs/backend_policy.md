@@ -362,6 +362,10 @@ library starts are outside the engine's lanes. Forcing `Inner` (or another
 lane strategy) on a BLAS provider runs those GEMMs on the native kernels, not
 the vendor library. A backend-free Host region (plan compile, strided
 moves) takes the engine's placement token; a serial engine never forks.
+An entry whose arithmetic needs no token (vector arithmetic, the
+physical-basis conversions, the up-front engine check of an owned
+contraction) only admits the engine, with the Host region's refusals, and
+takes no token from it.
 
 A tree-transform replay follows TensorKit's threaded kernels and main's
 replay. One Host region fixes its width `t`: under `Auto` the engine's

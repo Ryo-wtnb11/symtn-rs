@@ -769,3 +769,103 @@ mod default_executor {
         ));
     }
 }
+
+/// The BLAS fresh route's policy read: a broken engine is refused at that
+/// point, before any segment is zero-filled or any job reported, whatever
+/// the policy; a healthy engine keeps the policy's route, which the zero
+/// fill shows (the vendor loop zero-fills every segment, the lanes none).
+#[cfg(feature = "cpu-blas-core")]
+mod blas_policy_read {
+    use std::cell::Cell;
+
+    use tcontract_exec::{BatchPolicy, BatchStrategy};
+
+    use super::*;
+
+    thread_local! {
+        static ZERO_FILLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    // Why a thread-local count: the fill is a plain `fn`, and these calls run
+    // on a serial engine, so every fill happens on the calling thread.
+    fn counted_zeroed(piece: &mut [MaybeUninit<f64>]) -> &mut [f64] {
+        ZERO_FILLS.with(|count| count.set(count.get() + 1));
+        zeroed(piece)
+    }
+
+    /// Two jobs of different shapes in one segment, so no strided run
+    /// bypasses the policy read.
+    fn jobs() -> [DenseGemmBatchJob; 2] {
+        [
+            batch_job((1, 1, 1), (0, 0, 0)),
+            batch_job((2, 1, 1), (1, 1, 1)),
+        ]
+    }
+
+    /// One fresh call over one segment: its result, zero fills and reports.
+    fn fresh_call(engine: &mut CpuEngine) -> (Result<(), DenseError>, usize, usize) {
+        let jobs = jobs();
+        let (lhs, rhs) = ([2.0, 3.0, 5.0], [7.0, 11.0]);
+        let mut buffer = [MaybeUninit::<f64>::uninit(); 3];
+        let mut parts = vec![(0, &mut buffer[..])];
+        let mut reports = 0;
+        let mut written = |_: usize, _: &mut [f64]| reports += 1;
+        ZERO_FILLS.with(|count| count.set(0));
+        let result = DefaultDenseExecutor::new().matmul_batch_fresh(
+            engine,
+            DenseFreshSegments::F64 {
+                segments: &mut parts,
+                zeroed: counted_zeroed,
+                written: &mut written,
+            },
+            DenseRead::F64(DenseView::new(&lhs, &[3], &[1], 0).unwrap()),
+            DenseRead::F64(DenseView::new(&rhs, &[2], &[1], 0).unwrap()),
+            &jobs,
+            [MatrixOp::Identity; 2],
+            DenseScalar::F64(1.0),
+        );
+        (result, ZERO_FILLS.with(Cell::get), reports)
+    }
+
+    fn engine(strategy: BatchStrategy) -> CpuEngine {
+        CpuEngine::serial().with_batch_policy(BatchPolicy::new(strategy))
+    }
+
+    #[test]
+    fn a_broken_engine_is_refused_before_any_fill_or_report() {
+        for strategy in [BatchStrategy::Auto, BatchStrategy::Outer] {
+            let mut engine = engine(strategy);
+            let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+            }));
+            assert!(panicked.is_err() && engine.is_broken());
+            let (result, fills, reports) = fresh_call(&mut engine);
+            assert!(
+                matches!(
+                    result,
+                    Err(DenseError::Backend {
+                        op: "matmul_batch_fresh",
+                        ..
+                    })
+                ),
+                "{strategy:?}: {result:?}"
+            );
+            assert_eq!((fills, reports), (0, 0), "{strategy:?}");
+        }
+    }
+
+    #[test]
+    fn a_healthy_engine_keeps_its_policy_route() {
+        let jobs = jobs().len();
+        let (result, fills, reports) = fresh_call(&mut engine(BatchStrategy::Auto));
+        result.unwrap();
+        assert_eq!(
+            (fills, reports),
+            (1, jobs),
+            "Auto zero-fills its one segment"
+        );
+        let (result, fills, reports) = fresh_call(&mut engine(BatchStrategy::Outer));
+        result.unwrap();
+        assert_eq!((fills, reports), (0, jobs), "Outer fills nothing");
+    }
+}

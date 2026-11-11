@@ -445,6 +445,51 @@ fn a_broken_engine_is_refused_with_a_typed_error() {
     }
 }
 
+/// The physical-basis export and import admit the caller's engine like every
+/// Host entry: a broken engine is the Host region's typed backend refusal,
+/// reported through the conversion error.
+#[test]
+fn physical_conversions_refuse_a_broken_engine() {
+    let runtime = Runtime::builder().build().unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        [
+            (U1Irrep::new(-1), 2),
+            (U1Irrep::new(0), 3),
+            (U1Irrep::new(1), 2),
+        ],
+    )
+    .unwrap();
+    let good = &mut CpuEngine::serial();
+    let t: TensorMap<_, f64> =
+        TensorMap::rand_with_seed(good, &runtime, [&leg, &leg], [&leg], 5).unwrap();
+    let physical = t.to_physical_dense(good).unwrap();
+    let mut engine = engine(4);
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        engine.with_linalg_pool(|_, _| -> Result<(), _> { panic!("break the engine") })
+    }));
+    assert!(panicked.is_err() && engine.is_broken());
+    let refused = |result: Result<(), symtn::typed::PhysicalDenseError<_>>| {
+        matches!(
+            result,
+            Err(symtn::typed::PhysicalDenseError::Operation(
+                symtn::typed::OperationError::Dense(symtn_dense::DenseError::Backend {
+                    op: "host_region",
+                    ..
+                })
+            ))
+        )
+    };
+    assert!(
+        refused(t.to_physical_dense(&mut engine).map(drop)),
+        "export"
+    );
+    assert!(
+        refused(t.project_physical_dense(&mut engine, &physical).map(drop)),
+        "import"
+    );
+}
+
 /// What: every compact (diagonal) numerical arm admits the caller's engine
 /// before its spectrum arithmetic, so a broken engine is refused whatever
 /// the representation: clone shortcuts, a swap read straight off the

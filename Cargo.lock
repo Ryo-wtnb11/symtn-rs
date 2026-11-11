@@ -2389,6 +2389,7 @@ dependencies = [
  "symtn-operations",
  "symtn-sectors",
  "symtn-tensors",
+ "tenferro-cpu",
 ]
 
 [[package]]
