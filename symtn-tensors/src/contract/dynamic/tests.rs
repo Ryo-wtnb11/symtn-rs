@@ -145,10 +145,11 @@ fn run_nan_poisoned_destination_case(
     );
     let mut actual = vec![0.0; expected.len()];
     execute(&mut tree_context, scratch, &mut actual);
+    // The scratch never shrinks: only the prefix this replay reads is its own.
     assert!(
         scratch
             .dst_data_mut()
-            .expect("replay retains destination scratch")
+            .expect("replay retains destination scratch")[..core_len]
             .iter()
             .all(|value| value.is_finite()),
         "strong zero must initialize active and inactive core blocks"

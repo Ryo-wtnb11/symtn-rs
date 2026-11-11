@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use crate::kernel_adapter::movement::{span, Uninit, Write};
 use crate::kernel_adapter::BakedFusedLayout;
 use crate::storage_scratch::SamePlacementScratchAllocator;
-use crate::OperationError;
+use crate::{zeroed_payload, OperationError, ZeroBytes};
 use symtn_core::{HostReadableStorage, HostWritableStorage, Placement, TensorStorage};
 
 /// Host-owned scratch buffer used by current raw host-slice replay paths.
@@ -75,6 +75,17 @@ impl<T> HostScratchBuffer<T> {
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         &mut self.data
+    }
+}
+
+impl<T: ZeroBytes> HostScratchBuffer<T> {
+    /// `len` zeros obtained from the allocator (calloc), for complex scalars
+    /// as well: no element loop writes them.
+    #[inline]
+    pub fn zeroed(len: usize) -> Self {
+        Self {
+            data: zeroed_payload(len),
+        }
     }
 }
 

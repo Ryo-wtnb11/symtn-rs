@@ -23,7 +23,7 @@ use std::ops::Neg;
 use std::sync::Arc;
 use symtn_dense::Engine;
 
-use num_traits::{One, Zero};
+use num_traits::One;
 use symtn_core::{BlockStructure, Placement, TensorStorage};
 use symtn_dense::DenseExecutor;
 use symtn_operations::fusion_replay::FusionBlockContractPlan;
@@ -415,13 +415,14 @@ impl<C: Copy + PartialEq + One> CoreReplay<C> {
 /// A caller-owned core replay and the proof that its workspace core
 /// destination's inactive blocks are zero (#1747).
 ///
-/// `inactive_zero` is cleared whenever a different replay is installed and
-/// set only after a successful core replay into the workspace core
-/// destination. GEMMs never write inactive blocks, so a later failure keeps
-/// it valid. A core writing the caller's destination never consults it.
+/// `inactive_zero` holds the core-destination length the proof covers. It is
+/// cleared whenever a different replay is installed and set only after a
+/// successful core replay into the workspace core destination. GEMMs never
+/// write inactive blocks, so a later failure keeps it valid. A core writing
+/// the caller's destination never consults it.
 pub(super) struct CoreSlot<C> {
     replay: CoreReplay<C>,
-    inactive_zero: bool,
+    inactive_zero: Option<usize>,
     #[cfg(test)]
     builds: usize,
     #[cfg(test)]
@@ -439,7 +440,7 @@ impl<C> Default for CoreSlot<C> {
     fn default() -> Self {
         Self {
             replay: CoreReplay::Empty,
-            inactive_zero: false,
+            inactive_zero: None,
             #[cfg(test)]
             builds: 0,
             #[cfg(test)]
@@ -455,7 +456,7 @@ impl<C> Default for CoreSlot<C> {
 impl<C: Copy + PartialEq + One> CoreSlot<C> {
     fn install(&mut self, replay: CoreReplay<C>) {
         self.replay = replay;
-        self.inactive_zero = false;
+        self.inactive_zero = None;
         #[cfg(test)]
         {
             self.builds += 1;
@@ -472,8 +473,8 @@ impl<C: Copy + PartialEq + One> CoreSlot<C> {
 
 /// The Host scratch one route replay writes: owned source copies, the core
 /// destination of a non-identity output, and — for a caller-owned member
-/// workspace — the core slot. Eager scratch carries no slot, so its core
-/// destination is zero-filled on every call.
+/// workspace — the core slot. Eager scratch carries no slot, so the inactive
+/// blocks of its core destination are written with zeros on every call.
 pub(super) struct HostRouteScratch<'a, D, C> {
     pub(super) lhs: &'a mut HostScratchBuffer<D>,
     pub(super) rhs: &'a mut HostScratchBuffer<D>,
@@ -481,13 +482,19 @@ pub(super) struct HostRouteScratch<'a, D, C> {
     pub(super) core: Option<&'a mut CoreSlot<C>>,
 }
 
-/// Exact capacity when cold, then grow-only without clearing: every reader
-/// first runs a replay that writes the logical length itself.
-pub(super) fn prepare<D: Clone + Zero>(buffer: &mut HostScratchBuffer<D>, len: usize) {
-    if buffer.capacity() == 0 {
-        *buffer = HostScratchBuffer::filled(len, D::zero());
-    } else {
-        buffer.resize_filled(len, D::zero());
+/// Makes the initialized prefix `[..len]` available: kept as is when it is
+/// long enough (never shrunk, never cleared), otherwise replaced by `len`
+/// allocator zeros. Every reader first runs a replay that writes the `[..len]`
+/// prefix it reads, so stale contents are never observed.
+///
+/// Why not `resize_filled`: growing in place copies old contents nothing
+/// reads and writes the new tail with an element loop, and shrinking makes a
+/// later regrowth refill the tail. Why the initialized length rather than the
+/// capacity: a buffer handed back through `restore_copy_c_scratch` may hold
+/// spare capacity past its length.
+pub(super) fn prepare<D: crate::ZeroBytes>(buffer: &mut HostScratchBuffer<D>, len: usize) {
+    if buffer.len() < len {
+        *buffer = HostScratchBuffer::zeroed(len);
     }
 }
 
@@ -843,7 +850,7 @@ where
     } else {
         let proved = core
             .as_deref()
-            .is_some_and(|slot| slot.inactive_zero && core_dst.len() == core_dst_len);
+            .is_some_and(|slot| slot.inactive_zero == Some(core_dst_len));
         prepare(core_dst, core_dst_len);
         if proved {
             ContractDestinationInit::Zeroed
@@ -869,7 +876,7 @@ where
             source.transform,
             lhs_core,
             source.payload_structure,
-            lhs_scratch.as_mut_slice(),
+            &mut lhs_scratch.as_mut_slice()[..lhs_core_len],
             lhs_data,
             members,
             source.scales,
@@ -883,7 +890,7 @@ where
             source.transform,
             rhs_core,
             source.payload_structure,
-            rhs_scratch.as_mut_slice(),
+            &mut rhs_scratch.as_mut_slice()[..rhs_core_len],
             rhs_data,
             members,
             source.scales,
@@ -891,12 +898,12 @@ where
     }
 
     let physical_lhs = if route.lhs_source.is_some() {
-        lhs_scratch.as_slice()
+        &lhs_scratch.as_slice()[..lhs_core_len]
     } else {
         lhs_data
     };
     let physical_rhs = if route.rhs_source.is_some() {
-        rhs_scratch.as_slice()
+        &rhs_scratch.as_slice()[..rhs_core_len]
     } else {
         rhs_data
     };
@@ -904,7 +911,7 @@ where
     let (left_structure, right_structure) = route.core_order(lhs_core, rhs_core);
     // `None`: the core writes a fresh owned output.
     let core_out = if route.output.is_some() {
-        Some(core_dst.as_mut_slice())
+        Some(&mut core_dst.as_mut_slice()[..core_dst_len])
     } else {
         dst_data.as_deref_mut()
     };
@@ -985,7 +992,7 @@ where
         return Ok(());
     };
     if let Some(slot) = core {
-        slot.inactive_zero = true;
+        slot.inactive_zero = Some(core_dst_len);
         #[cfg(test)]
         {
             slot.output_overwrites +=
@@ -1003,13 +1010,13 @@ where
             dst_structure,
             core_dst_structure,
             dst_data,
-            core_dst.as_slice(),
+            &core_dst.as_slice()[..core_dst_len],
             members,
             &[],
         );
     }
     let (backend, workspace) = stage.ordinary(Stage::Output);
-    let source = core_dst.as_slice();
+    let source = &core_dst.as_slice()[..core_dst_len];
     let mut zeroed_output = None;
     let dst_data = match (dst_data, owned.as_mut()) {
         (Some(data), _) => data,
