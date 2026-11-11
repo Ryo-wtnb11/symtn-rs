@@ -9,6 +9,8 @@
 //!   block: a larger structure of the same family (more sectors, so more
 //!   blocks) adds fewer allocation calls than it adds blocks;
 //! - dropping a warmed workspace frees no more than its `retained_bytes`;
+//! - an eager complex CopyC call takes its output-sized scratch zeroed from
+//!   the allocator, never from an element loop;
 //!
 //! Exact counts are printed, not pinned: they move with platform and
 //! dependency internals. The blocks stay small enough that the dense
@@ -189,4 +191,66 @@ fn core_and_copy_c_route_allocations_follow_their_contracts() {
             );
         }
     }
+}
+
+#[test]
+fn eager_complex_copy_c_scratch_is_allocator_zeroed() {
+    // What: std's `vec![zero; len]` reaches `alloc_zeroed` only for real
+    // scalars; a `Complex64` scratch filled element by element would show up
+    // here as an output-sized allocation that is not zeroed.
+    use num_complex::Complex64;
+    let _serial = crate::counting_alloc::serial();
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let runtime = Runtime::builder().build().unwrap();
+    let rule = Arc::new(U1FusionRule);
+    let v = GradedSpace::try_new(
+        Arc::clone(&rule),
+        [
+            (U1Irrep::new(-1), 5),
+            (U1Irrep::new(0), 7),
+            (U1Irrep::new(1), 6),
+        ],
+    )
+    .unwrap();
+    let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 4), (U1Irrep::new(1), 3)]).unwrap();
+    let a = TensorMap::<_, Complex64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
+    let b = TensorMap::<_, Complex64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
+    // The swapped codomain is a CopyC route: the core writes a default-layout
+    // temporary of the output's size, then permutes it into `out`.
+    let spec = ContractSpec {
+        lhs: &[2],
+        rhs: &[0],
+        codomain: &[1, 0],
+        domain: &[2],
+    };
+    let mut out = a.contract(engine, &b, &spec).unwrap();
+    let out_bytes = std::mem::size_of_val(out.dense_data().unwrap());
+    a.contract_into(
+        engine,
+        &b,
+        &spec,
+        &mut out,
+        Complex64::new(1.0, 0.0),
+        Complex64::new(0.0, 0.0),
+    )
+    .unwrap();
+    let ((), allocs) = counting_alloc::measure_matching(out_bytes..=out_bytes, || {
+        a.contract_into(
+            engine,
+            &b,
+            &spec,
+            &mut out,
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, 0.0),
+        )
+        .unwrap()
+    });
+    assert!(
+        allocs.matched_calls >= 1,
+        "premise: per-call scratch {allocs:?}"
+    );
+    assert_eq!(
+        allocs.matched_zeroed_calls, allocs.matched_calls,
+        "{allocs:?}"
+    );
 }

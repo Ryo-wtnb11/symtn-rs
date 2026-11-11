@@ -72,30 +72,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn route_scratch_cold_is_exact_and_reuse_keeps_initialized_contents() {
-        // What: cold scratch has exact capacity; same-length reuse neither
-        // clears nor reallocates (the next replay overwrites it).
+    fn route_scratch_reuses_a_long_enough_prefix_without_writing_it() {
+        // What: a warm request up to the initialized length keeps the same
+        // allocation and its contents (the next replay overwrites them); a
+        // shorter request does not shrink the buffer.
         let mut buffer = HostScratchBuffer::default();
         prepare(&mut buffer, 3);
         assert_eq!(buffer.capacity(), 3);
         buffer.as_mut_slice().copy_from_slice(&[1.0, f64::NAN, 3.0]);
+        let data = buffer.as_slice().as_ptr();
 
-        prepare(&mut buffer, 3);
-
-        assert_eq!(buffer.capacity(), 3);
-        assert_eq!(buffer.as_slice()[0], 1.0);
-        assert!(buffer.as_slice()[1].is_nan());
+        for len in [3, 2] {
+            prepare(&mut buffer, len);
+            assert_eq!(buffer.as_slice().as_ptr(), data);
+            assert_eq!(buffer.len(), 3);
+            assert_eq!(buffer.as_slice()[0], 1.0);
+            assert!(buffer.as_slice()[1].is_nan());
+        }
     }
 
     #[test]
-    fn route_scratch_growth_initializes_only_the_new_tail() {
-        let mut buffer = HostScratchBuffer::default();
-        prepare(&mut buffer, 3);
-        buffer.as_mut_slice().copy_from_slice(&[1.0, 2.0, 3.0]);
+    fn route_scratch_growth_is_judged_by_initialized_length_and_is_fresh_zeros() {
+        // What: a short initialized length with spare capacity (as
+        // `restore_copy_c_scratch` may hand in) still grows to the request,
+        // and growth yields exact-length zeros for real and complex scalars
+        // instead of copying the old contents.
+        let mut buffer = HostScratchBuffer::filled(8, 7.0_f64);
+        buffer.resize_filled(2, 0.0);
+        assert!(buffer.capacity() >= 4);
 
-        prepare(&mut buffer, 5);
+        prepare(&mut buffer, 4);
 
-        assert_eq!(buffer.as_slice(), &[1.0, 2.0, 3.0, 0.0, 0.0]);
+        assert_eq!(buffer.as_slice(), &[0.0; 4]);
+        assert_eq!(buffer.capacity(), 4);
+
+        let mut complex = HostScratchBuffer::filled(2, num_complex::Complex64::new(1.0, -1.0));
+        prepare(&mut complex, 5);
+        assert_eq!(
+            complex.as_slice(),
+            &[num_complex::Complex64::new(0.0, 0.0); 5]
+        );
     }
 
     #[test]

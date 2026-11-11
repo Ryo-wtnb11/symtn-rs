@@ -4,6 +4,8 @@ use num_complex::{Complex32, Complex64};
 use num_traits::{One, Zero};
 use symtn_dense::{DenseRead, DenseScalar, DenseView, DenseViewMut, DenseWrite};
 
+use crate::ZeroBytes;
+
 pub trait ConjugateValue: Copy + strided_kernel::ElementOpApply {
     fn maybe_conj(self, conjugate: bool) -> Self;
 }
@@ -291,9 +293,11 @@ where
     }
 }
 
+/// `ZeroBytes`: a dense block's zero is the all-zero byte pattern, so Host
+/// scratch of any payload dtype is zeroed by the allocator, not by a loop.
 #[doc(hidden)]
 pub trait DenseBlockScalar:
-    Copy
+    ZeroBytes
     + Add<Self, Output = Self>
     + Mul<Self, Output = Self>
     + PartialEq
@@ -451,5 +455,19 @@ impl WideScalar for Complex32 {
     #[inline]
     fn narrow(wide: Self::Wide) -> Self {
         Self::new(wide.re as f32, wide.im as f32)
+    }
+}
+
+#[cfg(test)]
+mod zero_bytes_bound_tests {
+    use super::{DenseBlockScalar, RecouplingCoefficientAction};
+    use crate::{DenseTreeTransformOperations, TreeTransformBackend};
+
+    // What: the base payload bounds alone still imply the recoupling scalar
+    // a tree-transform backend needs; this must compile.
+    #[allow(dead_code)]
+    fn replay_backend<D: DenseBlockScalar + RecouplingCoefficientAction<D>>(
+    ) -> impl TreeTransformBackend<D, D> {
+        DenseTreeTransformOperations::default()
     }
 }
