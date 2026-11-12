@@ -2,14 +2,13 @@
 //!
 //! Each type only names the factors; it neither computes nor converts them.
 //! The type parameter is the factor type: `symtn::typed::TensorMap` on the
-//! user facade (Host or CUDA storage), [`crate::BoundDynFactor`] on this
-//! crate's expert entry points.
+//! user facade (Host or CUDA storage), the storage-tagged factors of
+//! `seam::factor` on this crate.
 
 /// Singular-value decomposition `t = u * s * vh`.
 ///
 /// Returned by the facade's `svd_compact` and `svd_full` (Host and CUDA,
-/// multiplicity-free and checked-Generic providers) and by
-/// `crate::svd_compact_dyn_checked_generic`.
+/// multiplicity-free and checked-Generic providers).
 ///
 /// # Order
 ///

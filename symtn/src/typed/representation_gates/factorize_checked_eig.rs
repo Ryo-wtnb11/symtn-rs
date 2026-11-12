@@ -198,14 +198,16 @@ fn checked_compact_diagonal_eigh_vals_rejects_inconsistent_spectrum_admission() 
     let spectrum = input.spectrum().unwrap();
     // A spectrum that does not cover the bond is misuse: a typed error.
     let mut admit = |entries: &[symtn_matrixalgebra::SectorSpectrum<f64>]| {
-        symtn_matrixalgebra::seam::eigh_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
             engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            symtn_matrixalgebra::seam::op::EighVals {
+                hermitian_tol: HermitianTol::DEFAULT,
+            },
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: input.logical_space(),
                 spectrum: entries,
             },
-            HermitianTol::DEFAULT,
         )
     };
     assert!(admit(spectrum).is_ok());
@@ -643,9 +645,10 @@ fn checked_compact_diagonal_eig_vals_rejects_inconsistent_spectrum_admission() {
     let spectrum = input.spectrum().unwrap();
     // A spectrum that does not cover the bond is misuse: a typed error.
     let mut admit = |entries: &[symtn_matrixalgebra::SectorSpectrum<Complex64>]| {
-        symtn_matrixalgebra::seam::eig_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
             engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            symtn_matrixalgebra::seam::op::EigVals,
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: input.logical_space(),
                 spectrum: entries,
@@ -1492,9 +1495,10 @@ fn checked_compact_diagonal_eig_full_rejects_inconsistent_spectrum_admission() {
     // A spectrum that does not cover the bond is misuse, refused with a typed
     // error; no dense executor is used.
     let mut admit = |entries: &[symtn_matrixalgebra::SectorSpectrum<Complex64>]| {
-        symtn_matrixalgebra::seam::eig_full_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
             engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            symtn_matrixalgebra::seam::op::EigFull,
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: input.logical_space(),
                 spectrum: entries,
@@ -1646,14 +1650,16 @@ fn checked_compact_diagonal_eigh_full_rejects_inconsistent_spectrum_admission() 
     // A spectrum that does not cover the bond is misuse, refused with a typed
     // error; no dense executor is used.
     let mut admit = |entries: &[symtn_matrixalgebra::SectorSpectrum<f64>]| {
-        symtn_matrixalgebra::seam::eigh_full_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
             engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            symtn_matrixalgebra::seam::op::EighFull {
+                hermitian_tol: HermitianTol::DEFAULT,
+            },
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: input.logical_space(),
                 spectrum: entries,
             },
-            HermitianTol::DEFAULT,
         )
         .is_ok()
     };

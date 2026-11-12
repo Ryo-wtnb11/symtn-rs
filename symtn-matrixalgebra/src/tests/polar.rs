@@ -523,7 +523,9 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
     type Mf = symtn_core::MultiplicityFreeAdmissionMode;
     let dense_factor = |output| match output {
         FactorOutput::Dense(factor) => factor,
-        FactorOutput::Diagonal { .. } => panic!("a dense source has dense polar factors"),
+        FactorOutput::Diagonal { .. } | FactorOutput::DenseAdjoint(_) => {
+            panic!("a dense source has dense polar factors")
+        }
     };
     fn parent<D>(
         bound: &BoundTensorMap<SU2FusionRule, D>,
@@ -531,51 +533,61 @@ fn check_polar_laws_on_su2<D: FactorScalar>(value: fn(f64, f64) -> D) {
         BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap()
     }
     let source = |bound| FactorSource::Dense(parent(bound));
+    // Polar reads only the parent; the adjoint's own layout is not consulted.
+    fn adjoint_of<D>(
+        bound: &BoundTensorMap<SU2FusionRule, D>,
+    ) -> FactorSource<'_, SU2FusionRule, D> {
+        FactorSource::AdjointOf {
+            parent: BoundDynamicTensorRef::try_new(bound.space(), bound.data()).unwrap(),
+            adjoint_space: bound.space(),
+        }
+    }
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let (tall, wide) = (su2_polar_input(true, value), su2_polar_input(false, value));
 
     let LeftPolar { w, p } =
-        left_polar_from_source::<Mf, _, _, _, _>(engine, &mut dense, source(&tall)).unwrap();
+        factor::<Mf, _, _, _, _>(engine, &mut dense, op::LeftPolar, source(&tall)).unwrap();
     assert_eq!(
         assert_polar_laws(&tall, &dense_factor(w), &dense_factor(p), true),
         3
     );
     let RightPolar { p, wh } =
-        right_polar_from_source::<Mf, _, _, _, _>(engine, &mut dense, source(&wide)).unwrap();
+        factor::<Mf, _, _, _, _>(engine, &mut dense, op::RightPolar, source(&wide)).unwrap();
     assert_eq!(
         assert_polar_laws(&wide, &dense_factor(wh), &dense_factor(p), false),
         3
     );
 
-    // The lazy-adjoint seams factor the dense parent in the opposite
+    // A lazy adjoint is factored as the dense parent in the opposite
     // direction: the view `wideᴴ` is tall, so its left polar is the
-    // parent's right polar, and `tallᴴ`'s right polar is the parent's left.
-    let RightPolar { p, wh } =
-        left_polar_adjoint_from_parent::<Mf, _, _, _, _>(engine, &mut dense, &parent(&wide))
-            .unwrap();
+    // parent's right polar with `w = whᴴ`, and `tallᴴ`'s right polar is the
+    // parent's left with `wh = wᴴ`.
+    let LeftPolar {
+        w: FactorOutput::DenseAdjoint(wh),
+        p: FactorOutput::Dense(p),
+    } = factor::<Mf, _, _, _, _>(engine, &mut dense, op::LeftPolar, adjoint_of(&wide)).unwrap()
+    else {
+        panic!("a lazy adjoint's left polar adjoints the parent's isometry")
+    };
     assert_eq!(assert_polar_laws(&wide, &wh, &p, false), 3);
-    let LeftPolar { w, p } =
-        right_polar_adjoint_from_parent::<Mf, _, _, _, _>(engine, &mut dense, &parent(&tall))
-            .unwrap();
+    let RightPolar {
+        p: FactorOutput::Dense(p),
+        wh: FactorOutput::DenseAdjoint(w),
+    } = factor::<Mf, _, _, _, _>(engine, &mut dense, op::RightPolar, adjoint_of(&tall)).unwrap()
+    else {
+        panic!("a lazy adjoint's right polar adjoints the parent's isometry")
+    };
     assert_eq!(assert_polar_laws(&tall, &w, &p, true), 3);
 
     // A view whose shape forbids the requested direction is refused under
     // the view's operation name, not the parent's.
     for (left, parent_bound) in [(true, &tall), (false, &wide)] {
         let error = if left {
-            left_polar_adjoint_from_parent::<Mf, _, _, _, _>(
-                engine,
-                &mut dense,
-                &parent(parent_bound),
-            )
-            .map(drop)
+            factor::<Mf, _, _, _, _>(engine, &mut dense, op::LeftPolar, adjoint_of(parent_bound))
+                .map(drop)
         } else {
-            right_polar_adjoint_from_parent::<Mf, _, _, _, _>(
-                engine,
-                &mut dense,
-                &parent(parent_bound),
-            )
-            .map(drop)
+            factor::<Mf, _, _, _, _>(engine, &mut dense, op::RightPolar, adjoint_of(parent_bound))
+                .map(drop)
         }
         .unwrap_err();
         let operation = if left { "left_polar" } else { "right_polar" };

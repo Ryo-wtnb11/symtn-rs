@@ -202,8 +202,10 @@ fn checked_generic_full_svd_keeps_the_provider_and_emits_the_unmatched_coupled_s
     // A non-bond space is misuse for diagonal storage, refused before any
     // provider query (MAK `@assert m == n && isdiag(A)`).
     assert!(matches!(
-        svd_compact_from_source::<CheckedGenericAdmissionMode, _, _, _, f64>(engine,
+        factor::<CheckedGenericAdmissionMode, _, _, _, f64>(
+            engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            op::SvdCompact,
             FactorSource::Diagonal {
                 space: &checked,
                 spectrum: &[],

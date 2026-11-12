@@ -4,7 +4,185 @@ use symtn_dense::Engine;
 use symtn_core::PreparedBlockStructure;
 
 mod sealed {
+    use super::*;
+
     pub trait Sealed {}
+
+    /// The dense and diagonal stages of a fusion mode's factorizations. Only
+    /// [`factor`](super::factor) runs them (the [`Token`] proves it); they are
+    /// unnameable outside the crate.
+    pub trait Stages<R> {
+        // The dense QR/LQ stages publish through this mode's own factor-space
+        // builders. Why not one builder generic over the authority: #1830
+        // measured it and kept publication mode-specific (the multiplicity-free
+        // one-sided pair is cheaper; checked has no direct-region plan, #1960).
+        fn qr_compact_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn qr_full_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn lq_compact_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn lq_full_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        /// LQ of the lazy adjoint of `parent`, whose own layout is
+        /// `adjoint_space`, read in place (#2070).
+        fn lq_compact_adjoint_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            parent: &BoundDynamicTensorRef<'_, R, D>,
+            adjoint_space: &BoundDynamicFusionMapSpace<R>,
+        ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn lq_full_adjoint_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            parent: &BoundDynamicTensorRef<'_, R, D>,
+            adjoint_space: &BoundDynamicFusionMapSpace<R>,
+        ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        // SVD: the multiplicity-free and checked diagonal and dense stages
+        // publish `U`/`Vh` through their own builders.
+
+        fn svd_compact_diagonal<D: FactorScalar>(
+            _: Token,
+            space: &BoundDynamicFusionMapSpace<R>,
+            spectrum: &[SectorSpectrum<D>],
+        ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>;
+
+        fn svd_compact_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn svd_compact_adjoint_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            parent: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn svd_full_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn svd_full_adjoint_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            parent: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        // Eigendecomposition stages, publishing through each mode's own
+        // builders.
+        fn eigh_full_diagonal<D: FactorScalar>(
+            _: Token,
+            space: &BoundDynamicFusionMapSpace<R>,
+            spectrum: &[SectorSpectrum<D>],
+            hermitian_tol: HermitianTol,
+        ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>;
+
+        fn eigh_full_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+            hermitian_tol: HermitianTol,
+        ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+
+        fn eig_full_diagonal<D: FactorScalar>(
+            _: Token,
+            space: &BoundDynamicFusionMapSpace<R>,
+            spectrum: &[SectorSpectrum<D>],
+        ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>;
+
+        fn eig_full_dense<E, D>(
+            _: Token,
+            engine: &mut dyn Engine,
+            dense: &mut E,
+            input: &BoundDynamicTensorRef<'_, R, D>,
+        ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error>
+        where
+            Self: FactorMode<R>,
+            E: DenseExecutor + ?Sized,
+            D: FactorScalar;
+    }
 }
 
 /// The only mode-dependent step of a factor publication: the provider queries
@@ -78,7 +256,7 @@ pub trait FactorSpaceAuthority<R>: sealed::Sealed {
 /// Why not a runtime flag or one entry per mode: the two authorities have
 /// different provider bounds and error types, and monomorphizing over the
 /// marker keeps the multiplicity-free path free of the checked one's costs.
-pub trait FactorMode<R>: sealed::Sealed {
+pub trait FactorMode<R>: sealed::Stages<R> {
     type Error: From<OperationError> + From<Self::RootError>;
 
     /// The error of [`FactorSpaceAuthority::output_space`].
@@ -88,148 +266,7 @@ pub trait FactorMode<R>: sealed::Sealed {
     fn authority(
         space: &BoundDynamicFusionMapSpace<R>,
     ) -> impl FactorSpaceAuthority<R, Error = Self::Error, RootError = Self::RootError> + '_;
-
-    // The dense QR/LQ stages publish through this mode's own factor-space
-    // builders. Why not one builder generic over the authority: #1830
-    // measured it and kept publication mode-specific (the multiplicity-free
-    // one-sided pair is cheaper; checked has no direct-region plan, #1960).
-    fn qr_compact_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn qr_full_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn lq_compact_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn lq_full_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    /// LQ of the lazy adjoint of `parent`, whose own layout is
-    /// `adjoint_space`, read in place (#2070).
-    fn lq_compact_adjoint_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        parent: &BoundDynamicTensorRef<'_, R, D>,
-        adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn lq_full_adjoint_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        parent: &BoundDynamicTensorRef<'_, R, D>,
-        adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    // SVD: the multiplicity-free and checked diagonal and dense stages
-    // publish `U`/`Vh` through their own builders.
-
-    fn svd_compact_diagonal<D: FactorScalar>(
-        space: &BoundDynamicFusionMapSpace<R>,
-        spectrum: &[SectorSpectrum<D>],
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>;
-
-    fn svd_compact_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn svd_compact_adjoint_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn svd_full_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn svd_full_adjoint_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    // Eigendecomposition stages, publishing through each mode's own
-    // builders.
-    fn eigh_full_diagonal<D: FactorScalar>(
-        space: &BoundDynamicFusionMapSpace<R>,
-        spectrum: &[SectorSpectrum<D>],
-        hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error>;
-
-    fn eigh_full_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-        hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
-
-    fn eig_full_diagonal<D: FactorScalar>(
-        space: &BoundDynamicFusionMapSpace<R>,
-        spectrum: &[SectorSpectrum<D>],
-    ) -> Result<EigFullDyn<R, D>, Self::Error>;
-
-    fn eig_full_dense<E, D>(
-        engine: &mut dyn Engine,
-        dense: &mut E,
-        input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<EigFullDyn<R, D>, Self::Error>
-    where
-        E: DenseExecutor + ?Sized,
-        D: FactorScalar;
 }
-
-impl sealed::Sealed for MultiplicityFreeAdmissionMode {}
-impl sealed::Sealed for CheckedGenericAdmissionMode {}
 
 impl<R> FactorMode<R> for MultiplicityFreeAdmissionMode
 where
@@ -243,19 +280,26 @@ where
     ) -> impl FactorSpaceAuthority<R, Error = Self::Error, RootError = Self::RootError> + '_ {
         MfAuthority(space)
     }
+}
 
+impl<R> sealed::Stages<R> for MultiplicityFreeAdmissionMode
+where
+    R: MultiplicityFreeRigidSymbols,
+{
     fn svd_compact_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error> {
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error> {
         svd_compact_diagonal_factors_dyn(space, spectrum)
     }
 
     fn svd_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -264,10 +308,11 @@ where
     }
 
     fn svd_compact_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -276,10 +321,11 @@ where
     }
 
     fn svd_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -288,10 +334,11 @@ where
     }
 
     fn svd_full_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -300,10 +347,11 @@ where
     }
 
     fn qr_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -312,10 +360,11 @@ where
     }
 
     fn qr_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -324,10 +373,11 @@ where
     }
 
     fn lq_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -336,10 +386,11 @@ where
     }
 
     fn lq_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -348,11 +399,12 @@ where
     }
 
     fn lq_compact_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -361,11 +413,12 @@ where
     }
 
     fn lq_full_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -374,19 +427,21 @@ where
     }
 
     fn eigh_full_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
         hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error> {
+    ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error> {
         eigh_full_diagonal_dyn(space, spectrum, hermitian_tol)
     }
 
     fn eigh_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
         hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error>
+    ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -395,17 +450,19 @@ where
     }
 
     fn eig_full_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
-    ) -> Result<EigFullDyn<R, D>, Self::Error> {
+    ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error> {
         eig_full_diagonal_dyn(space, spectrum)
     }
 
     fn eig_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<EigFullDyn<R, D>, Self::Error>
+    ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -426,19 +483,26 @@ where
     ) -> impl FactorSpaceAuthority<R, Error = Self::Error, RootError = Self::RootError> + '_ {
         CheckedAuthority(space.provider_arc())
     }
+}
 
+impl<R> sealed::Stages<R> for CheckedGenericAdmissionMode
+where
+    R: CheckedGenericFusion,
+{
     fn svd_compact_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error> {
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error> {
         svd_compact_diagonal_factors_dyn_checked_generic(space, spectrum)
     }
 
     fn svd_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -447,10 +511,11 @@ where
     }
 
     fn svd_compact_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -459,10 +524,11 @@ where
     }
 
     fn svd_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -471,10 +537,11 @@ where
     }
 
     fn svd_full_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<SvdFullFactorsDyn<R, D>, Self::Error>
+    ) -> Result<SvdFullFactorsDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -483,10 +550,11 @@ where
     }
 
     fn qr_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -495,10 +563,11 @@ where
     }
 
     fn qr_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Qr<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Qr<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -507,10 +576,11 @@ where
     }
 
     fn lq_compact_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -519,10 +589,11 @@ where
     }
 
     fn lq_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -531,11 +602,12 @@ where
     }
 
     fn lq_compact_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -544,11 +616,12 @@ where
     }
 
     fn lq_full_adjoint_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         parent: &BoundDynamicTensorRef<'_, R, D>,
         adjoint_space: &BoundDynamicFusionMapSpace<R>,
-    ) -> Result<Lq<BoundDynFactor<R, D>>, Self::Error>
+    ) -> Result<Lq<BoundDynFactor<R, D>>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -557,19 +630,21 @@ where
     }
 
     fn eigh_full_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
         hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error> {
+    ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error> {
         eigh_full_diagonal_dyn_checked_generic(space, spectrum, hermitian_tol)
     }
 
     fn eigh_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
         hermitian_tol: HermitianTol,
-    ) -> Result<EighFullDyn<R, D>, Self::Error>
+    ) -> Result<EighFullDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
@@ -578,17 +653,19 @@ where
     }
 
     fn eig_full_diagonal<D: FactorScalar>(
+        _: Token,
         space: &BoundDynamicFusionMapSpace<R>,
         spectrum: &[SectorSpectrum<D>],
-    ) -> Result<EigFullDyn<R, D>, Self::Error> {
+    ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error> {
         eig_full_diagonal_dyn_checked_generic(space, spectrum)
     }
 
     fn eig_full_dense<E, D>(
+        _: Token,
         engine: &mut dyn Engine,
         dense: &mut E,
         input: &BoundDynamicTensorRef<'_, R, D>,
-    ) -> Result<EigFullDyn<R, D>, Self::Error>
+    ) -> Result<EigFullDyn<R, D>, <Self as FactorMode<R>>::Error>
     where
         E: DenseExecutor + ?Sized,
         D: FactorScalar,
