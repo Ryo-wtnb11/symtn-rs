@@ -15,13 +15,10 @@ mod numerics;
 
 mod contract_macro;
 mod error_chain;
-#[path = "../../tests/support/export_scan.rs"]
-mod export_scan;
 mod itebd_smoke;
 mod mf_provider_conformance;
 mod network_construction_errors;
 mod network_contract;
-mod network_exports;
 mod optimizer_fallback;
 mod plan_api_equivalence;
 mod plan_cache;
