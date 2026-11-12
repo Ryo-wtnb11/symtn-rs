@@ -4,7 +4,8 @@
 //! but not absence, so each firewall test reads `lib.rs` (or a module file)
 //! as text. This module owns what every scan shares: blanking comments and
 //! literals, reading `pub use` trees, and recognising the `testing` gate. A
-//! firewall test keeps only its pinned name list and the rule for its crate.
+//! firewall test keeps only the rule for its crate; exact name lists are the
+//! API snapshot's (`api/`).
 //!
 //! Test targets include this file with
 //! `#[path = ".../tests/support/export_scan.rs"] mod export_scan;`.
@@ -144,15 +145,6 @@ pub struct Exports {
 }
 
 impl Exports {
-    /// The ungated `pub use` names.
-    pub fn production(&self) -> BTreeSet<String> {
-        self.names
-            .iter()
-            .filter(|&(_, &gated)| !gated)
-            .map(|(name, _)| name.clone())
-            .collect()
-    }
-
     /// Fails if the root declares a `pub mod`, for crates whose root only
     /// re-exports.
     pub fn without_modules(self) -> Result<Self, String> {

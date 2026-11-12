@@ -31,7 +31,3 @@ blas-mkl = ["symtn-tensors/blas-mkl"]
 # Test-only: admits `LieGroupFusionRule` so checked-Generic SU(3) fixtures run here.
 cgc-gen = ["symtn-tensors/cgc-gen"]
 
-[[test]]
-name = "integration"
-path = "tests/integration.rs"
-

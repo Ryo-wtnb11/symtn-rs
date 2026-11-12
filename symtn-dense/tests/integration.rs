@@ -14,7 +14,4 @@ mod cuda_scalar_dtypes;
 mod cuda_spectrum_download;
 mod cuda_strided_region_probe;
 mod cuda_svd_gauge;
-mod dense_exports;
 mod eig_equation;
-#[path = "../../tests/support/export_scan.rs"]
-mod export_scan;

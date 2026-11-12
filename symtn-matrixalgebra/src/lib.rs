@@ -38,9 +38,8 @@ pub use truncation::{
 };
 
 /// The dynamic-rank entry points the `symtn` facade dispatches to. Not a
-/// stable API: every item here exists because a `symtn` module, example or
-/// this crate's own integration tests and examples call it, and the export
-/// firewall test (`tests/exports.rs`) pins the exact list.
+/// stable API: every item here exists because a `symtn` module or example
+/// calls it, and the public API snapshot (`api/`) records the exact list.
 #[doc(hidden)]
 pub mod seam {
     pub use crate::factorize::{
