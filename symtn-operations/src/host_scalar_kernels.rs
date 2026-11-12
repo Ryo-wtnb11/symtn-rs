@@ -954,38 +954,6 @@ where
     if crate::strided::element_count(shape)? == 0 {
         return Ok(());
     }
-    if raw_rank_within_strided_limit_routed(
-        exec.reborrow(),
-        dst_data,
-        src_data,
-        shape,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        source_conjugate,
-        action,
-    )? {
-        return Ok(());
-    }
-    // Why not normalize every layout: normalization orders axes by
-    // destination stride, and on a destination whose axes are not separated
-    // (possibly aliasing) that reorder would change the overwrite winner and
-    // the accumulation order of symtn's column-major loop.
-    if !destination_axes_separated(shape, dst_strides) {
-        return raw_strided_combine_recurse_mapped(
-            shape.len() - 1,
-            dst_data,
-            src_data,
-            shape,
-            |axis| Ok(dst_strides[axis]),
-            |axis| Ok(src_strides[axis]),
-            dst_offset,
-            src_offset,
-            source_conjugate,
-            action,
-        );
-    }
     combine_fused_layout(
         exec.reborrow(),
         dst_data,
@@ -1002,57 +970,25 @@ where
     )
 }
 
-/// Strided's raw kernels on the raw layout when its rank is within
-/// [`RAW_FUSED_RANK_LIMIT`]: Strided then fuses the layout itself, so
-/// symtn's normalization would only repeat that work. Callers follow a
-/// `false` with [`combine_fused_layout`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn raw_rank_within_strided_limit_routed<T>(
-    exec: crate::host_pool::Exec<'_>,
-    dst_data: &mut [T],
-    src_data: &[T],
-    shape: &[usize],
-    dst_strides: &[isize],
-    src_strides: &[isize],
-    dst_offset: isize,
-    src_offset: isize,
-    source_conjugate: bool,
-    action: RawStridedAction<T>,
-) -> Result<bool, OperationError>
-where
-    T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
-{
-    if shape.len() > RAW_FUSED_RANK_LIMIT {
-        return Ok(false);
-    }
-    strided_raw_action(
-        dst_data,
-        src_data,
-        shape,
-        dst_strides,
-        src_strides,
-        dst_offset,
-        src_offset,
-        source_conjugate,
-        action,
-        exec,
-    )
-}
-
-/// Normalizes the layout with [`normalize_fused_layout`] (unit axes
-/// dropped, axes ordered by destination stride, axes contiguous in both
-/// operands merged) and chooses the kernel by the fused rank: up to
+/// The one combine entry of the raw loop and the checked adapter.
+///
+/// A destination whose axes are not separated (see
+/// [`destination_axes_separated`]) runs symtn's column-major loop over the
+/// original axes. Otherwise a raw rank within [`RAW_FUSED_RANK_LIMIT`] is
+/// first offered to Strided's raw kernels on the raw layout, which Strided
+/// fuses itself. What remains is normalized with [`normalize_fused_layout`]
+/// (unit axes dropped, axes ordered by destination stride, axes contiguous
+/// in both operands merged) and chooses the kernel by the fused rank: up to
 /// [`RAW_FUSED_RANK_LIMIT`] Strided's raw kernels, otherwise one span walk
 /// over the fused axes.
 ///
 /// Strided gates on the rank it is given, before dropping unit axes, so a
 /// raw rank above its limit must be fused here first. A raw rank within the
-/// limit was already offered to Strided by
-/// [`raw_rank_within_strided_limit_routed`], and fusion changes neither the
-/// action nor destination separation, so it is not offered again.
+/// limit was already offered, and fusion changes neither the action nor
+/// destination separation, so it is not offered again.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn combine_fused_layout<T>(
-    exec: crate::host_pool::Exec<'_>,
+    mut exec: crate::host_pool::Exec<'_>,
     dst_data: &mut [T],
     src_data: &[T],
     shape: &[usize],
@@ -1068,6 +1004,43 @@ pub(crate) fn combine_fused_layout<T>(
 where
     T: Copy + Add<T, Output = T> + Mul<T, Output = T> + Zero + ConjugateValue + Send + Sync,
 {
+    // Why not normalize every layout: normalization orders axes by
+    // destination stride, and on a destination whose axes are not separated
+    // (possibly aliasing) that reorder would change the overwrite winner and
+    // the accumulation order of symtn's column-major loop.
+    if !destination_axes_separated(shape, raw_dst_strides) {
+        // The loop visits every logical element, so their count must fit
+        // `usize` before the first write (normalization checks it otherwise).
+        crate::strided::element_count(shape)?;
+        return raw_strided_combine_recurse_mapped(
+            shape.len() - 1,
+            dst_data,
+            src_data,
+            shape,
+            |axis| Ok(raw_dst_strides[axis]),
+            |axis| Ok(raw_src_strides[axis]),
+            dst_offset,
+            src_offset,
+            source_conjugate,
+            action,
+        );
+    }
+    if shape.len() <= RAW_FUSED_RANK_LIMIT
+        && strided_raw_action(
+            dst_data,
+            src_data,
+            shape,
+            raw_dst_strides,
+            raw_src_strides,
+            dst_offset,
+            src_offset,
+            source_conjugate,
+            action,
+            exec.reborrow(),
+        )?
+    {
+        return Ok(());
+    }
     normalize_fused_layout(shape, raw_dst_strides, raw_src_strides, layout)?;
     let (dims, dst_strides, src_strides) =
         (layout.dims(), layout.dst_strides(), layout.src_strides());
@@ -1227,11 +1200,13 @@ where
 /// - rank above [`RAW_FUSED_RANK_LIMIT`], where Strided falls back to
 ///   allocating view kernels. Strided gates on the rank it is given, before
 ///   dropping unit axes, so [`combine_fused_layout`] passes the fused layout
-///   of a larger raw rank;
-/// - a destination whose axes are not separated (see
-///   [`destination_axes_separated`]). Strided replays axes in destination
-///   stride order, so on an aliasing destination the overwrite winner and the
-///   accumulation order would differ from symtn's column-major loop.
+///   of a larger raw rank.
+///
+/// The caller proves that the destination axes are separated (see
+/// [`destination_axes_separated`]), as [`combine_fused_layout`] does once
+/// for both of its offers. Strided replays axes in destination stride
+/// order, so on an aliasing destination the overwrite winner and the
+/// accumulation order would differ from symtn's column-major loop.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn strided_raw_action<T>(
     dst_data: &mut [T],
@@ -1254,7 +1229,7 @@ where
             if !alpha.is_zero() => {}
         _ => return Ok(false),
     }
-    if shape.len() > RAW_FUSED_RANK_LIMIT || !destination_axes_separated(shape, dst_strides) {
+    if shape.len() > RAW_FUSED_RANK_LIMIT {
         return Ok(false);
     }
     let src =
@@ -1271,6 +1246,9 @@ where
                 plan.execute(dst, src, exec)
             }
         }
+        // Why not `replay_map_raw` with the caller's token: it takes axes
+        // unfused, and Strided exposes no public pair fusion; see the
+        // upstream request.
         (RawStridedAction::CopyScale { alpha }, false) => copy_scale_raw(dst, src, alpha),
         (RawStridedAction::CopyScale { alpha }, true) => copy_scale_conj_raw(dst, src, alpha),
         (RawStridedAction::Axpy { alpha }, false) => axpy_raw(dst, src, alpha),
@@ -2513,6 +2491,60 @@ mod tests {
         )
         .unwrap();
         assert_ne!(reordered[2].to_bits(), expected[2].to_bits());
+    }
+
+    /// What: the checked adapter keeps the column-major overwrite winner on
+    /// an overlapping destination. With `shape = [2, 3]`, destination strides
+    /// `[2, 1]` and source strides `[1, 2]`, slot 2 receives `src[1]` at
+    /// `(1, 0)` and then `src[4]` at `(0, 2)`, so the copy is
+    /// `[0, 2, 4, 3, 5]`.
+    #[test]
+    fn checked_adapter_keeps_column_major_order_on_overlapping_destination() {
+        let src: Vec<f64> = (0..6).map(f64::from).collect();
+        let mut dst = [0.0; 5];
+        crate::kernel_adapter::StridedHostKernelAdapter::default()
+            .tensoradd_strided_checked(
+                strided_kernel::Exec::serial(),
+                &mut dst,
+                &src,
+                &[2, 3],
+                &[2, 1],
+                &[1, 2],
+                0,
+                0,
+                false,
+                1.0,
+                0.0,
+            )
+            .unwrap();
+        assert_eq!(dst, [0.0, 2.0, 4.0, 3.0, 5.0]);
+    }
+
+    /// What: the checked adapter refuses an overlapping destination whose
+    /// logical element count overflows `usize` before writing: shape
+    /// `[2^32, 2^32]` with zero strides over one slot gives
+    /// `ElementCountOverflow`.
+    #[test]
+    fn checked_adapter_rejects_element_count_overflow_on_overlapping_destination() {
+        let shape = [1usize << 32, 1usize << 32];
+        let mut dst = [0.0];
+        let err = crate::kernel_adapter::StridedHostKernelAdapter::default()
+            .tensoradd_strided_checked(
+                strided_kernel::Exec::serial(),
+                &mut dst,
+                &[1.0],
+                &shape,
+                &[0, 0],
+                &[0, 0],
+                0,
+                0,
+                false,
+                1.0,
+                0.0,
+            )
+            .unwrap_err();
+        assert_eq!(err, OperationError::ElementCountOverflow);
+        assert_eq!(dst, [0.0]);
     }
 
     /// What: the separation test accepts exactly the layouts whose axes
