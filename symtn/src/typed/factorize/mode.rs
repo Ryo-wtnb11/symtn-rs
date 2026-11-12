@@ -63,16 +63,19 @@ impl FactorOp {
             // would; and `(A^H)^+ = U S^+ Vh` from the same parent SVD.
             // LQ of `A^H` is computed as the QR of its adjoint, which is the
             // parent `A` itself, so the stage reads `A` and publishes
-            // `A^H = R^H Q^H` (#2070).
-            Self::SvdCompact | Self::SvdFull | Self::Pinv | Self::LqCompact | Self::LqFull => {
-                AdjointRule::AdjointSeam
-            }
+            // `A^H = R^H Q^H` (#2070). `left_polar(A^H)` is the
+            // adjoint-swapped `right_polar(A) = p wh`, `(wh^H, p)` (and vice
+            // versa): the stage reads `A` and returns `wh` to be adjointed.
+            Self::SvdCompact
+            | Self::SvdFull
+            | Self::Pinv
+            | Self::LqCompact
+            | Self::LqFull
+            | Self::LeftPolar
+            | Self::RightPolar => AdjointRule::AdjointSeam,
             // The null space of `A^H` is the adjoint of the opposite null
-            // space of `A`, `left_polar(A^H)` is the adjoint-swapped
-            // `right_polar(A)` (and vice versa), and `(A^H)^-1 = (A^-1)^H`.
-            Self::LeftNull | Self::RightNull | Self::LeftPolar | Self::RightPolar | Self::Inv => {
-                AdjointRule::Redirect
-            }
+            // space of `A`, and `(A^H)^-1 = (A^-1)^H`.
+            Self::LeftNull | Self::RightNull | Self::Inv => AdjointRule::Redirect,
             // Why not read QR's parent through LQ (TensorKit's
             // `qr_compact!` on an `AdjointTensorMap`): for `X = A^H` of shape
             // `m x n`, full LQ reads `A`'s transpose in place, but QR's
@@ -111,7 +114,8 @@ pub enum AdjointRule {
     /// space of `t`).
     Redirect,
     /// The dense parent through the factorization's adjoint-aware stage,
-    /// which returns the factors of the adjoint without forming it.
+    /// which returns the factors of the adjoint without forming it, or
+    /// (polar) as the adjoint of a parent factor.
     AdjointSeam,
 }
 

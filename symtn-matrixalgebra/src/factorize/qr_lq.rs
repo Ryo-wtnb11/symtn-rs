@@ -2,13 +2,14 @@ use super::*;
 use symtn_dense::Engine;
 
 /// QR of `source` in fusion mode `M`: a compact diagonal factors directly on
-/// its bond (`family` names its finite-input error), dense storage runs
-/// `dense_qr` with a leased executor.
+/// its bond, dense storage runs `dense_qr` with a leased executor. A lazy
+/// adjoint is refused; the facade materializes it.
 fn qr_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
-    family: FactorFamily,
     dense_qr: impl FnOnce(
+        &mut dyn Engine,
         &mut E,
         &BoundDynamicTensorRef<'_, R, D>,
     ) -> Result<Qr<BoundDynFactor<R, D>>, M::Error>,
@@ -20,12 +21,17 @@ where
     D: FactorScalar,
 {
     factor_from_source(
+        engine,
         lease,
         source,
-        Some(family),
+        Some(FactorFamily::Qr),
         |space, spectrum| {
-            let (q, r) =
-                diagonal_phase_magnitude_spectra(&M::authority(space), space, spectrum, family)?;
+            let (q, r) = diagonal_phase_magnitude_spectra(
+                &M::authority(space),
+                space,
+                spectrum,
+                FactorFamily::Qr,
+            )?;
             let on_input = |values| FactorOutput::Diagonal {
                 space: space.clone(),
                 values,
@@ -35,59 +41,81 @@ where
                 r: on_input(r),
             })
         },
-        |dense, input| {
-            dense_qr(dense, input).map(|Qr { q, r }| Qr {
+        |engine, dense, input| {
+            dense_qr(engine, dense, input).map(|Qr { q, r }| Qr {
                 q: FactorOutput::Dense(q),
                 r: FactorOutput::Dense(r),
             })
         },
+        no_adjoint(),
     )
 }
 
-/// Compact QR of `source` in fusion mode `M`.
-#[doc(hidden)]
-pub fn qr_compact_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Qr<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, |dense, input| {
-        M::qr_compact_dense(engine, dense, input)
-    })
+impl<R, D: FactorScalar> FactorOp<R, D> for op::QrCompact {
+    type Output = Qr<FactorOutput<R, D>>;
 }
 
-/// Full QR of `source` in fusion mode `M`.
-#[doc(hidden)]
-pub fn qr_full_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Qr<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    qr_from_source::<M, _, _, _, _>(lease, source, FactorFamily::Qr, |dense, input| {
-        M::qr_full_dense(engine, dense, input)
-    })
+/// Compact QR in fusion mode `M`.
+impl<R, D: FactorScalar> Run<R, D> for op::QrCompact {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        qr_from_source::<M, _, _, _, _>(engine, lease, source, |engine, dense, input| {
+            M::qr_compact_dense(TOKEN, engine, dense, input)
+        })
+    }
+}
+
+impl<R, D: FactorScalar> FactorOp<R, D> for op::QrFull {
+    type Output = Qr<FactorOutput<R, D>>;
+}
+
+/// Full QR in fusion mode `M`.
+impl<R, D: FactorScalar> Run<R, D> for op::QrFull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        qr_from_source::<M, _, _, _, _>(engine, lease, source, |engine, dense, input| {
+            M::qr_full_dense(TOKEN, engine, dense, input)
+        })
+    }
 }
 
 /// LQ of `source` in fusion mode `M`: a compact diagonal's `l` holds the
 /// magnitudes and `q` the phases (see [`diagonal_phase_magnitude_spectra`]).
+/// A lazy adjoint's dense parent is read in place by `adjoint_lq`, which
+/// also receives the adjoint's own layout, on which LQ of the materialized
+/// adjoint would publish (see [`lq_adjoint_by_tree`]).
 fn lq_from_source<M, L, E, R, D>(
+    engine: &mut dyn Engine,
     lease: L,
     source: FactorSource<'_, R, D>,
     dense_lq: impl FnOnce(
+        &mut dyn Engine,
         &mut E,
         &BoundDynamicTensorRef<'_, R, D>,
+    ) -> Result<Lq<BoundDynFactor<R, D>>, M::Error>,
+    adjoint_lq: impl FnOnce(
+        &mut dyn Engine,
+        &mut E,
+        &BoundDynamicTensorRef<'_, R, D>,
+        &BoundDynamicFusionMapSpace<R>,
     ) -> Result<Lq<BoundDynFactor<R, D>>, M::Error>,
 ) -> Result<Lq<FactorOutput<R, D>>, M::Error>
 where
@@ -96,7 +124,12 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
+    let dense = |Lq { l, q }| Lq {
+        l: FactorOutput::Dense(l),
+        q: FactorOutput::Dense(q),
+    };
     factor_from_source(
+        engine,
         lease,
         source,
         Some(FactorFamily::Lq),
@@ -116,49 +149,74 @@ where
                 q: on_input(q),
             })
         },
-        |dense, input| {
-            dense_lq(dense, input).map(|Lq { l, q }| Lq {
-                l: FactorOutput::Dense(l),
-                q: FactorOutput::Dense(q),
-            })
-        },
+        |engine, executor, input| dense_lq(engine, executor, input).map(dense),
+        Some(
+            |engine: &mut dyn Engine,
+             executor: &mut E,
+             parent: &BoundDynamicTensorRef<'_, R, D>,
+             adjoint_space: &BoundDynamicFusionMapSpace<R>| {
+                adjoint_lq(engine, executor, parent, adjoint_space).map(dense)
+            },
+        ),
     )
 }
 
-/// Compact LQ of `source` in fusion mode `M`.
-#[doc(hidden)]
-pub fn lq_compact_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Lq<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    lq_from_source::<M, _, _, _, _>(lease, source, |dense, input| {
-        M::lq_compact_dense(engine, dense, input)
-    })
+impl<R, D: FactorScalar> FactorOp<R, D> for op::LqCompact {
+    type Output = Lq<FactorOutput<R, D>>;
 }
 
-/// Full LQ of `source` in fusion mode `M`.
-#[doc(hidden)]
-pub fn lq_full_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Lq<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    lq_from_source::<M, _, _, _, _>(lease, source, |dense, input| {
-        M::lq_full_dense(engine, dense, input)
-    })
+/// Compact LQ in fusion mode `M`.
+impl<R, D: FactorScalar> Run<R, D> for op::LqCompact {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        lq_from_source::<M, _, _, _, _>(
+            engine,
+            lease,
+            source,
+            |engine, dense, input| M::lq_compact_dense(TOKEN, engine, dense, input),
+            |engine, dense, parent, adjoint_space| {
+                M::lq_compact_adjoint_dense(TOKEN, engine, dense, parent, adjoint_space)
+            },
+        )
+    }
+}
+
+impl<R, D: FactorScalar> FactorOp<R, D> for op::LqFull {
+    type Output = Lq<FactorOutput<R, D>>;
+}
+
+/// Full LQ in fusion mode `M`.
+impl<R, D: FactorScalar> Run<R, D> for op::LqFull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        lq_from_source::<M, _, _, _, _>(
+            engine,
+            lease,
+            source,
+            |engine, dense, input| M::lq_full_dense(TOKEN, engine, dense, input),
+            |engine, dense, parent, adjoint_space| {
+                M::lq_full_adjoint_dense(TOKEN, engine, dense, parent, adjoint_space)
+            },
+        )
+    }
 }
 
 pub(super) fn scale_col<D: FactorScalar>(
@@ -1116,46 +1174,6 @@ where
     let dimensions = CheckedAuthority(provider).coupled_dimensions(homspace.domain())?;
     checked_full_factor_pair(provider, homspace, geometry.as_ref(), pairs, &dimensions)
         .map(|(l, q)| Lq { l, q })
-}
-
-/// Compact LQ of the lazy adjoint of the dense `parent`, read in place, in
-/// fusion mode `M`; `adjoint_space` is the adjoint's own layout, on which LQ
-/// of the materialized adjoint would publish (see [`lq_adjoint_by_tree`]).
-#[doc(hidden)]
-pub fn lq_compact_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: BoundDynamicTensorRef<'_, R, D>,
-    adjoint_space: &BoundDynamicFusionMapSpace<R>,
-) -> Result<Lq<BoundDynFactor<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    // The adjoint is finite exactly when its parent is.
-    require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Lq)?;
-    lease.run(|dense| M::lq_compact_adjoint_dense(engine, dense, &parent, adjoint_space))
-}
-
-/// Full LQ of the lazy adjoint of the dense `parent`, read in place, in
-/// fusion mode `M` (see [`lq_compact_adjoint_from_parent`]).
-#[doc(hidden)]
-pub fn lq_full_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: BoundDynamicTensorRef<'_, R, D>,
-    adjoint_space: &BoundDynamicFusionMapSpace<R>,
-) -> Result<Lq<BoundDynFactor<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Lq)?;
-    lease.run(|dense| M::lq_full_adjoint_dense(engine, dense, &parent, adjoint_space))
 }
 
 pub(super) fn qr_compact_direct_regions<E, R, D>(

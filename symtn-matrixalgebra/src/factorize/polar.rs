@@ -171,8 +171,13 @@ where
 /// The `(W, P)` factors of one polar decomposition.
 type PolarOutputs<R, D> = (FactorOutput<R, D>, FactorOutput<R, D>);
 
-/// Polar factors of `source` in fusion mode `M`, as `(W, P)`. A compact
-/// diagonal's phases and magnitudes stay compact on the input space.
+/// Polar factors of `source` in fusion mode `M` in `direction`, as `(W, P)`
+/// (`(Wh, P)` for the right polar). A compact diagonal's phases and
+/// magnitudes stay compact on the input space. A lazy adjoint `A^H` is the
+/// parent's opposite polar, `left_polar(A^H) = (wh^H, p)` of
+/// `right_polar(A) = (p, wh)`: the parent's isometry is returned as
+/// [`FactorOutput::DenseAdjoint`], and direction errors name the requested
+/// operation, not the parent's.
 fn polar_from_source<M, L, E, R, D>(
     engine: &mut dyn Engine,
     lease: L,
@@ -185,15 +190,17 @@ where
     E: DenseExecutor + ?Sized,
     D: FactorScalar,
 {
-    // The dense route checks values after its direction admission.
+    // Every dense route checks values after its direction admission.
     factor_from_source(
+        engine,
         lease,
         source,
         None,
         |space, spectrum| {
-            left_polar_of_diagonal::<M, R, D>(space, spectrum).map(|LeftPolar { w, p }| (w, p))
+            let LeftPolar { w, p } = left_polar_of_diagonal::<M, R, D>(space, spectrum)?;
+            Ok((w, p))
         },
-        |dense, input| {
+        |engine, dense, input| {
             polar_dense(
                 engine,
                 dense,
@@ -204,101 +211,69 @@ where
             )
             .map(|(w, p)| (FactorOutput::Dense(w), FactorOutput::Dense(p)))
         },
+        Some(
+            |engine: &mut dyn Engine,
+             dense: &mut E,
+             parent: &BoundDynamicTensorRef<'_, R, D>,
+             _: &BoundDynamicFusionMapSpace<R>| {
+                polar_dense(
+                    engine,
+                    dense,
+                    &M::authority(parent.space()),
+                    parent,
+                    direction.opposite(),
+                    direction,
+                )
+                .map(|(w, p)| (FactorOutput::DenseAdjoint(w), FactorOutput::Dense(p)))
+            },
+        ),
     )
 }
 
-/// Left polar decomposition `W * P` of `source` in fusion mode `M`
-/// (MatrixAlgebraKit `left_polar!` via `PolarViaSVD`).
-#[doc(hidden)]
-pub fn left_polar_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<LeftPolar<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Left)
-        .map(|(w, p)| LeftPolar { w, p })
+impl<R, D: FactorScalar> FactorOp<R, D> for op::LeftPolar {
+    type Output = LeftPolar<FactorOutput<R, D>>;
 }
 
-/// Right polar decomposition `P * Wh` of `source` in fusion mode `M`
-/// (MatrixAlgebraKit `right_polar!` via `PolarViaSVD`).
-#[doc(hidden)]
-pub fn right_polar_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<RightPolar<FactorOutput<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Right)
-        .map(|(wh, p)| RightPolar { p, wh })
+/// Left polar decomposition `W * P` in fusion mode `M` (MatrixAlgebraKit
+/// `left_polar!` via `PolarViaSVD`).
+impl<R, D: FactorScalar> Run<R, D> for op::LeftPolar {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Left)
+            .map(|(w, p)| LeftPolar { w, p })
+    }
 }
 
-/// Left polar of a lazy adjoint, as the dense *parent's* right polar
-/// factors in fusion mode `M`: the view's left polar is `w = wh^H` and the
-/// returned `p`. Direction errors name the requested left polar.
-#[doc(hidden)]
-pub fn left_polar_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: &BoundDynamicTensorRef<'_, R, D>,
-) -> Result<RightPolar<BoundDynFactor<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    lease
-        .run(|dense| {
-            polar_dense(
-                engine,
-                dense,
-                &M::authority(parent.space()),
-                parent,
-                PolarDirection::Right,
-                PolarDirection::Left,
-            )
-        })
-        .map(|(wh, p)| RightPolar { p, wh })
+impl<R, D: FactorScalar> FactorOp<R, D> for op::RightPolar {
+    type Output = RightPolar<FactorOutput<R, D>>;
 }
 
-/// Right polar of a lazy adjoint, as the dense *parent's* left polar factors
-/// in fusion mode `M`: the view's right polar is the returned `p` and `wh =
-/// w^H`. Direction errors name the requested right polar.
-#[doc(hidden)]
-pub fn right_polar_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: &BoundDynamicTensorRef<'_, R, D>,
-) -> Result<LeftPolar<BoundDynFactor<R, D>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    lease
-        .run(|dense| {
-            polar_dense(
-                engine,
-                dense,
-                &M::authority(parent.space()),
-                parent,
-                PolarDirection::Left,
-                PolarDirection::Right,
-            )
-        })
-        .map(|(w, p)| LeftPolar { w, p })
+/// Right polar decomposition `P * Wh` in fusion mode `M` (MatrixAlgebraKit
+/// `right_polar!` via `PolarViaSVD`).
+impl<R, D: FactorScalar> Run<R, D> for op::RightPolar {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        polar_from_source::<M, _, _, _, _>(engine, lease, source, PolarDirection::Right)
+            .map(|(wh, p)| RightPolar { p, wh })
+    }
 }
 
 /// The one dense polar kernel, `(W, P)` per coupled sector from its compact
@@ -463,6 +438,15 @@ pub(super) enum PolarDirection {
 }
 
 impl PolarDirection {
+    /// The direction of the parent's polar that yields this one of its
+    /// adjoint.
+    fn opposite(self) -> Self {
+        match self {
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+
     pub(super) fn accepts(self, rows: usize, cols: usize) -> bool {
         match self {
             Self::Left => rows >= cols,

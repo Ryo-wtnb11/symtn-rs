@@ -196,7 +196,7 @@ where
 
 /// Dynamic-rank `eigh_full`: the shared core, admitting Hermitian blocks
 /// at `hermitian_tol`.
-pub fn eigh_full_dyn<E, R, D>(
+pub(crate) fn eigh_full_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -1157,7 +1157,7 @@ where
     result
 }
 
-/// The finite-input admission of [`eigh_full_dyn`], for a prepared caller.
+/// The finite-input admission of [`op::EighFull`](super::op::EighFull), for a prepared caller.
 #[doc(hidden)]
 pub fn require_finite_eigh_input<D: FactorScalar>(data: &[D]) -> Result<(), OperationError> {
     require_finite_factor_input(data.iter().copied(), FactorFamily::Eigh)
@@ -1891,96 +1891,134 @@ where
     Ok(EigFullDyn { v, eigenvalues })
 }
 
-/// Hermitian eigenvalues of `source` in fusion mode `M`, ascending per
-/// coupled sector. A compact diagonal is read directly; only
-/// dense storage leases an executor.
-#[doc(hidden)]
-pub fn eigh_vals_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-    hermitian_tol: HermitianTol,
-) -> Result<Vec<SectorSpectrum>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        None,
-        |space, spectrum| eigh_vals_diagonal(&M::authority(space), space, spectrum, hermitian_tol),
-        |dense, input| Ok(eigh_vals_dyn(engine, dense, input, hermitian_tol)?),
-    )
+impl<R, D: FactorScalar> FactorOp<R, D> for op::EighVals {
+    type Output = Vec<SectorSpectrum>;
 }
 
-/// General eigenvalues of `source` in fusion mode `M`, in
-/// [`lexicographic_eig_order`] per coupled sector. A compact diagonal is read directly; only
-/// dense storage leases an executor.
-#[doc(hidden)]
-pub fn eig_vals_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Vec<SectorSpectrum<Complex64>>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        None,
-        |space, spectrum| eig_vals_diagonal(&M::authority(space), space, spectrum),
-        |dense, input| Ok(eig_vals_dyn(engine, dense, input)?),
-    )
+/// Hermitian eigenvalues in fusion mode `M`, ascending per coupled sector.
+/// A compact diagonal is read directly; only dense storage leases an
+/// executor. A lazy adjoint is refused; the facade
+/// materializes it.
+impl<R, D: FactorScalar> Run<R, D> for op::EighVals {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        let hermitian_tol = self.hermitian_tol;
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            None,
+            |space, spectrum| {
+                eigh_vals_diagonal(&M::authority(space), space, spectrum, hermitian_tol)
+            },
+            |engine, dense, input| Ok(eigh_vals_dyn(engine, dense, input, hermitian_tol)?),
+            no_adjoint(),
+        )
+    }
 }
 
-/// Hermitian eigendecomposition of `source` in fusion mode `M`;
-/// only dense storage leases an executor.
-#[doc(hidden)]
-pub fn eigh_full_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-    hermitian_tol: HermitianTol,
-) -> Result<EighFullDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        None,
-        |space, spectrum| M::eigh_full_diagonal(space, spectrum, hermitian_tol),
-        |dense, input| M::eigh_full_dense(engine, dense, input, hermitian_tol),
-    )
+impl<R, D: FactorScalar> FactorOp<R, D> for op::EigVals {
+    type Output = Vec<SectorSpectrum<Complex64>>;
 }
 
-/// General eigendecomposition of `source` in fusion mode `M`;
-/// only dense storage leases an executor.
-#[doc(hidden)]
-pub fn eig_full_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<EigFullDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(lease, source, None, M::eig_full_diagonal, |dense, input| {
-        M::eig_full_dense(engine, dense, input)
-    })
+/// General eigenvalues in fusion mode `M`, in [`lexicographic_eig_order`]
+/// per coupled sector. A compact diagonal is read directly; only dense
+/// storage leases an executor. A lazy adjoint is refused; the facade
+/// materializes it.
+impl<R, D: FactorScalar> Run<R, D> for op::EigVals {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            None,
+            |space, spectrum| eig_vals_diagonal(&M::authority(space), space, spectrum),
+            |engine, dense, input| Ok(eig_vals_dyn(engine, dense, input)?),
+            no_adjoint(),
+        )
+    }
+}
+
+impl<R, D: FactorScalar> FactorOp<R, D> for op::EighFull {
+    type Output = EighFullDyn<R, D>;
+}
+
+/// Hermitian eigendecomposition in fusion mode `M`; only dense storage
+/// leases an executor. A lazy adjoint is refused; the facade
+/// materializes it.
+impl<R, D: FactorScalar> Run<R, D> for op::EighFull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        let hermitian_tol = self.hermitian_tol;
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            None,
+            |space, spectrum| M::eigh_full_diagonal(TOKEN, space, spectrum, hermitian_tol),
+            |engine, dense, input| M::eigh_full_dense(TOKEN, engine, dense, input, hermitian_tol),
+            no_adjoint(),
+        )
+    }
+}
+
+impl<R, D: FactorScalar> FactorOp<R, D> for op::EigFull {
+    type Output = EigFullDyn<R, D>;
+}
+
+/// General eigendecomposition in fusion mode `M`; only dense storage leases
+/// an executor. A lazy adjoint is refused; the facade
+/// materializes it.
+impl<R, D: FactorScalar> Run<R, D> for op::EigFull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            None,
+            |space, spectrum| M::eig_full_diagonal(TOKEN, space, spectrum),
+            |engine, dense, input| M::eig_full_dense(TOKEN, engine, dense, input),
+            no_adjoint(),
+        )
+    }
 }
 
 /// The dense route's eigenvalue check (`validate_complex_eigenvalues`) on a

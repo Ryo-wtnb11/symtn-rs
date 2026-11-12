@@ -49,9 +49,10 @@ fn checked_compact_diagonal_svd_vals_skips_materialization_and_solver() {
     // A spectrum that does not cover the bond is misuse: a typed error.
     let stored = real.spectrum().unwrap();
     let mut values_of = |spectrum| {
-        symtn_matrixalgebra::seam::svd_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+        symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
             engine,
             &mut symtn_dense::DefaultDenseExecutor::new(),
+            symtn_matrixalgebra::seam::op::SvdVals,
             symtn_matrixalgebra::seam::FactorSource::Diagonal {
                 space: &owned(&real).space,
                 spectrum,
@@ -371,13 +372,12 @@ fn checked_compact_diagonal_svd_avoids_input_materialization_and_solver() {
     for malformed in [&missing, &duplicate, &short] {
         let mut dense = symtn_dense::DefaultDenseExecutor::new();
         assert!(misuse(
-            &symtn_matrixalgebra::seam::svd_compact_from_source::<
-                CheckedGenericAdmissionMode,
-                _,
-                _,
-                _,
-                _,
-            >(engine, &mut dense, diagonal(malformed))
+            &symtn_matrixalgebra::seam::factor::<CheckedGenericAdmissionMode, _, _, _, _>(
+                engine,
+                &mut dense,
+                symtn_matrixalgebra::seam::op::SvdCompact,
+                diagonal(malformed)
+            )
             .err()
             .unwrap()
         ));

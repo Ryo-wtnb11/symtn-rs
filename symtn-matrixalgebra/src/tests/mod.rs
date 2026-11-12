@@ -57,7 +57,7 @@ where
     D: FactorScalar,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    svd_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
+    factor::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, op::SvdVals, source)
 }
 
 // The checked inverse and solve admission, read through the mode's
@@ -80,7 +80,7 @@ where
     D: FactorScalar,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    eig_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, source)
+    factor::<CheckedGenericAdmissionMode, _, _, _, _>(engine, lease, op::EigVals, source)
 }
 
 fn dense_source<'a, R, D>(input: &'a BoundDynamicTensorRef<'_, R, D>) -> FactorSource<'a, R, D> {
@@ -109,11 +109,13 @@ where
     D: FactorScalar,
 {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    eigh_vals_from_source::<CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::EighVals {
+            hermitian_tol: HermitianTol::DEFAULT,
+        },
         dense_source(input),
-        HermitianTol::DEFAULT,
     )
 }
 

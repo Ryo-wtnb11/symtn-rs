@@ -945,9 +945,10 @@ fn qr_diagonal<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
     space: &BoundDynamicFusionMapSpace<R>,
     spectrum: &[symtn_matrixalgebra::SectorSpectrum<f64>],
 ) -> Result<Qr<symtn_matrixalgebra::seam::FactorOutput<R, f64>>, symtn_tensors::OperationError> {
-    symtn_matrixalgebra::seam::qr_compact_from_source::<MultiplicityFreeAdmissionMode, _, _, _, _>(
+    symtn_matrixalgebra::seam::factor::<MultiplicityFreeAdmissionMode, _, _, _, _>(
         engine,
         &mut symtn_dense::DefaultDenseExecutor::new(),
+        symtn_matrixalgebra::seam::op::QrCompact,
         symtn_matrixalgebra::seam::FactorSource::Diagonal { space, spectrum },
     )
 }

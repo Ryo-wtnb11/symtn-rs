@@ -335,7 +335,7 @@ where
 }
 
 /// Dynamic-rank `svd_vals`: the dense stage, the same in every fusion mode.
-pub fn svd_vals_dyn<E, R, D>(
+pub(crate) fn svd_vals_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -425,28 +425,35 @@ where
     Ok(values)
 }
 
-/// Singular values of `source` in fusion mode `M`, descending per coupled
-/// sector. A compact diagonal is read directly; only dense storage leases an
-/// executor.
-#[doc(hidden)]
-pub fn svd_vals_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<Vec<SectorSpectrum>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        Some(FactorFamily::Svd),
-        |space, spectrum| svd_vals_diagonal(&M::authority(space), space, spectrum),
-        |dense, input| Ok(svd_vals_dyn(engine, dense, input)?),
-    )
+impl<R, D: FactorScalar> FactorOp<R, D> for op::SvdVals {
+    type Output = Vec<SectorSpectrum>;
+}
+
+/// Singular values, descending per coupled sector. A compact diagonal is
+/// read directly; only dense storage leases an executor. The facade reads a
+/// lazy adjoint's parent as dense storage (the values are invariant).
+impl<R, D: FactorScalar> Run<R, D> for op::SvdVals {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            Some(FactorFamily::Svd),
+            |space, spectrum| svd_vals_diagonal(&M::authority(space), space, spectrum),
+            |engine, dense, input| Ok(svd_vals_dyn(engine, dense, input)?),
+            no_adjoint(),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2163,8 +2170,8 @@ pub(super) fn concat_compact_svd_factor_regions<D>(
     output
 }
 
-#[doc(hidden)]
-pub fn diagonal_bond_svd_factor_generic_checked<R, D, V>(
+#[cfg(test)]
+pub(crate) fn diagonal_bond_svd_factor_generic_checked<R, D, V>(
     source: &BoundDynamicFusionMapSpace<R>,
     spectrum: &[SectorSpectrum<V>],
     to_scalar: &dyn Fn(V) -> D,
@@ -2182,8 +2189,8 @@ where
 
 /// Checked-Generic compact SVD. Dense SVD is unchanged; all provider-bound
 /// output spaces are admitted through the checked staging boundary.
-#[doc(hidden)]
-pub fn svd_compact_dyn_checked_generic<E, R, D>(
+#[cfg(test)]
+pub(crate) fn svd_compact_dyn_checked_generic<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -2509,92 +2516,84 @@ where
     })
 }
 
-/// Compact SVD factors and singular values of `source` in fusion mode `M`;
-/// only dense storage leases an executor.
-#[doc(hidden)]
-pub fn svd_compact_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<SvdFactorsDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        Some(FactorFamily::Svd),
-        M::svd_compact_diagonal,
-        |dense, input| M::svd_compact_dense(engine, dense, input),
-    )
+impl<R, D: FactorScalar> FactorOp<R, D> for op::SvdCompact {
+    type Output = SvdFactorsDyn<R, D>;
 }
 
-/// Compact SVD factors of the lazy adjoint of the dense `parent`, read in place,
-/// in fusion mode `M`.
-#[doc(hidden)]
-pub fn svd_compact_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: BoundDynamicTensorRef<'_, R, D>,
-) -> Result<SvdFactorsDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    // The adjoint is finite exactly when its parent is.
-    require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Svd)?;
-    lease.run(|dense| M::svd_compact_adjoint_dense(engine, dense, &parent))
+/// Compact SVD factors and singular values; only dense storage leases an
+/// executor. A lazy adjoint's dense parent is read in place, and the mode's
+/// adjoint stage gauges the final left factor as materialize-then-SVD would.
+impl<R, D: FactorScalar> Run<R, D> for op::SvdCompact {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            Some(FactorFamily::Svd),
+            |space, spectrum| M::svd_compact_diagonal(TOKEN, space, spectrum),
+            |engine, dense, input| M::svd_compact_dense(TOKEN, engine, dense, input),
+            Some(
+                |engine: &mut dyn Engine,
+                 dense: &mut L::Executor,
+                 parent: &BoundDynamicTensorRef<'_, R, D>,
+                 _: &BoundDynamicFusionMapSpace<R>| {
+                    M::svd_compact_adjoint_dense(TOKEN, engine, dense, parent)
+                },
+            ),
+        )
+    }
 }
 
-/// Full SVD factors and singular values of dense `source` in fusion mode
-/// `M`. A compact diagonal is refused: its compact and full SVD coincide
-/// (TensorKit `svd_compact!(::DiagonalAlgorithm)` is `svd_full!`), so every
-/// mode factors it through [`svd_compact_from_source`].
-#[doc(hidden)]
-pub fn svd_full_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<SvdFullFactorsDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    factor_from_source(
-        lease,
-        source,
-        Some(FactorFamily::Svd),
-        |_, _| {
-            Err(OperationError::UnsupportedTensorContractScope {
-                message: "full SVD of a compact diagonal runs the compact route",
-            }
-            .into())
-        },
-        |dense, input| M::svd_full_dense(engine, dense, input),
-    )
+impl<R, D: FactorScalar> FactorOp<R, D> for op::SvdFull {
+    type Output = SvdFullFactorsDyn<R, D>;
 }
 
-/// Full SVD factors of the lazy adjoint of the dense `parent`, read in place,
-/// in fusion mode `M`.
-#[doc(hidden)]
-pub fn svd_full_adjoint_from_parent<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    parent: BoundDynamicTensorRef<'_, R, D>,
-) -> Result<SvdFullFactorsDyn<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    require_finite_factor_input(parent.data().iter().copied(), FactorFamily::Svd)?;
-    lease.run(|dense| M::svd_full_adjoint_dense(engine, dense, &parent))
+/// Full SVD factors and singular values of dense storage or of a lazy
+/// adjoint's dense parent. A compact diagonal is refused: its compact and
+/// full SVD coincide (TensorKit `svd_compact!(::DiagonalAlgorithm)` is
+/// `svd_full!`), so every mode factors it through [`op::SvdCompact`].
+impl<R, D: FactorScalar> Run<R, D> for op::SvdFull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        factor_from_source(
+            engine,
+            lease,
+            source,
+            Some(FactorFamily::Svd),
+            |_, _| {
+                Err(OperationError::UnsupportedTensorContractScope {
+                    message: "full SVD of a compact diagonal runs the compact route",
+                }
+                .into())
+            },
+            |engine, dense, input| M::svd_full_dense(TOKEN, engine, dense, input),
+            Some(
+                |engine: &mut dyn Engine,
+                 dense: &mut L::Executor,
+                 parent: &BoundDynamicTensorRef<'_, R, D>,
+                 _: &BoundDynamicFusionMapSpace<R>| {
+                    M::svd_full_adjoint_dense(TOKEN, engine, dense, parent)
+                },
+            ),
+        )
+    }
 }

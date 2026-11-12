@@ -40,26 +40,21 @@ pub use truncation::{
 /// The dynamic-rank entry points the `symtn` facade dispatches to. Not a
 /// stable API: every item here exists because a `symtn` module or example
 /// calls it, and the public API snapshot (`api/`) records the exact list.
+/// The svd, qr/lq/null, eigh/eig and polar factorizations have one entry,
+/// [`factor`](seam::factor), chosen by an [`op`](seam::op) value.
 #[doc(hidden)]
 pub mod seam {
     pub use crate::factorize::{
         admit_compact_diagonal, ascending_eigh_order, axpby_axis_by_spectrum_into,
         compact_factor_routes, coupled_sector_block_dimensions_generic_checked,
-        decide_bond_truncation, diagonal_bond_data, eig_full_from_source, eig_vals_from_source,
-        eigh_full_dyn, eigh_full_from_source, eigh_sector_into, eigh_vals_from_source,
-        in_linalg_scope, left_null_from_source, left_polar_adjoint_from_parent,
-        left_polar_from_source, lq_compact_adjoint_from_parent, lq_compact_from_source,
-        lq_full_adjoint_from_parent, lq_full_from_source, nonfinite_factor_input,
-        pinv_diagonal_spectrum, qr_compact_from_source, qr_full_from_source,
-        rectangular_diagonal_bond_tensor, require_finite_eigh_input, right_null_from_source,
-        right_polar_adjoint_from_parent, right_polar_from_source, scale_axis_by_spectrum_mapped,
-        spectrum_bond, svd_compact_adjoint_from_parent, svd_compact_dyn_checked_generic,
-        svd_compact_from_source, svd_full_adjoint_from_parent, svd_full_from_source, svd_vals_dyn,
-        svd_vals_from_source, validate_endomorphism_region_stacking, validate_hermitian_regions,
-        BoundDynamicTensorRef, CheckedGenericFactorPlanError, CompactFactorPlan,
-        CompactFactorRoute, EigFullDyn, EighFullDyn, EighScratch, EndomorphismFamily,
-        ExecutorLease, FactorFamily, FactorMode, FactorOutput, FactorSource, FactorSpaceAuthority,
-        SvdFactorsDyn, EIGH_EIGENVALUE_CHECK, EIGH_NOT_HERMITIAN, EIGH_NOT_SQUARE,
+        decide_bond_truncation, diagonal_bond_data, eigh_sector_into, factor, in_linalg_scope,
+        nonfinite_factor_input, op, pinv_diagonal_spectrum, rectangular_diagonal_bond_tensor,
+        require_finite_eigh_input, scale_axis_by_spectrum_mapped, spectrum_bond,
+        validate_endomorphism_region_stacking, validate_hermitian_regions, BoundDynamicTensorRef,
+        CheckedGenericFactorPlanError, CompactFactorPlan, CompactFactorRoute, EigFullDyn,
+        EighFullDyn, EighScratch, EndomorphismFamily, ExecutorLease, FactorFamily, FactorMode,
+        FactorOp, FactorOutput, FactorSource, FactorSpaceAuthority, SvdFactorsDyn,
+        EIGH_EIGENVALUE_CHECK, EIGH_NOT_HERMITIAN, EIGH_NOT_SQUARE,
     };
     pub use crate::matrix_functions::{
         exp_direct_into_dyn, inv_direct_into_dyn, pinv_adjoint_parent_direct_into_dyn,
@@ -89,6 +84,8 @@ use factorize::{
     qr_full_dyn_checked_generic, right_polar_dyn_checked_generic,
     svd_compact_factors_with_spectrum_dyn_checked_generic,
 };
+#[cfg(test)]
+use factorize::{eigh_full_dyn, svd_compact_dyn_checked_generic, svd_vals_dyn};
 #[cfg(test)]
 use matrix_functions::{
     exp, exp_into_mf, inv, inv_into_mf, pinv, pinv_adjoint_parent_into_mf, pinv_into_mf,

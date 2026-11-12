@@ -53,50 +53,63 @@ where
     D: FactorScalar,
 {
     factor_from_source(
+        engine,
         lease,
         source,
         Some(FactorFamily::Null),
         |space, spectrum| null_diagonal(&M::authority(space), space, spectrum, side),
-        |dense, input| null_dense(engine, dense, &M::authority(input.space()), input, side),
+        |engine, dense, input| null_dense(engine, dense, &M::authority(input.space()), input, side),
+        no_adjoint(),
     )
 }
 
-/// Left null space of `source` in fusion mode `M`: per coupled sector the
+impl<R, D: FactorScalar> FactorOp<R, D> for op::LeftNull {
+    type Output = BoundDynFactor<R, D>;
+}
+
+/// Left null space in fusion mode `M`: per coupled sector the
 /// `rows - cols` (when positive) trailing columns of the full QR's `Q`
 /// (MatrixAlgebraKit `qr_null!`). The null dimension follows from the space
 /// alone, so a checked dense input runs every QR before the bond is
-/// published; a compact diagonal has an empty null space.
-#[doc(hidden)]
-pub fn left_null_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<BoundDynFactor<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Left)
+/// published; a compact diagonal has an empty null space. A lazy adjoint is
+/// refused; the facade redirects it to the opposite null space.
+impl<R, D: FactorScalar> Run<R, D> for op::LeftNull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Left)
+    }
 }
 
-/// Right null space of `source` in fusion mode `M`: per coupled sector the
+impl<R, D: FactorScalar> FactorOp<R, D> for op::RightNull {
+    type Output = BoundDynFactor<R, D>;
+}
+
+/// Right null space in fusion mode `M`: per coupled sector the
 /// `cols - rows` (when positive) trailing rows of the full LQ's `Q`
-/// (MatrixAlgebraKit `lq_null!`); see [`left_null_from_source`].
-#[doc(hidden)]
-pub fn right_null_from_source<M, L, E, R, D>(
-    engine: &mut dyn Engine,
-    lease: L,
-    source: FactorSource<'_, R, D>,
-) -> Result<BoundDynFactor<R, D>, M::Error>
-where
-    M: FactorMode<R>,
-    L: ExecutorLease<Executor = E>,
-    E: DenseExecutor + ?Sized,
-    D: FactorScalar,
-{
-    null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Right)
+/// (MatrixAlgebraKit `lq_null!`); see [`op::LeftNull`].
+impl<R, D: FactorScalar> Run<R, D> for op::RightNull {
+    fn run<M, L>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: FactorSource<'_, R, D>,
+    ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+    where
+        M: FactorMode<R>,
+        L: ExecutorLease,
+    {
+        null_from_source::<M, _, _, _, _>(engine, lease, source, FactorSide::Right)
+    }
 }
 
 #[cfg(test)]

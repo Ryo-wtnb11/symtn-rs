@@ -28,7 +28,9 @@ use symtn_tensors::{
     ValidatedDynamicFusionLayout, ZeroBytes,
 };
 
-use crate::results::{LeftPolar, Lq, Qr, RightPolar, Svd};
+#[cfg(test)]
+use crate::results::Svd;
+use crate::results::{LeftPolar, Lq, Qr, RightPolar};
 use crate::truncation::{select_truncation, Truncation, WeightedSpectrum};
 use symtn_tensors::OperationError;
 
@@ -60,6 +62,7 @@ mod inverse;
 mod landing;
 mod matricize;
 mod null_space;
+pub mod op;
 mod polar;
 mod publish_checked;
 mod publish_mf;
@@ -109,8 +112,41 @@ pub(crate) use publish_mf::*;
 #[cfg(not(test))]
 use publish_mf::*;
 pub(crate) use qr_lq::*;
-use source::factor_from_source;
-pub use source::{ExecutorLease, FactorOutput, FactorSource};
+pub use source::{factor, ExecutorLease, FactorOp, FactorOutput, FactorSource};
+use source::{factor_from_source, no_adjoint};
+
+/// The proof that a factorization hook is called from inside this crate.
+///
+/// Why not sealing alone: a sealed supertrait stops external impls and
+/// qualified paths, not calls through a generic bound on the public trait
+/// (`O::run`, `M::svd_compact_dense`), which would skip [`factor`]'s shared
+/// driver. The field is private and [`TOKEN`](exec::TOKEN) is `pub(crate)`, so
+/// no value of this type exists outside the crate.
+mod exec {
+    use super::*;
+
+    #[derive(Clone, Copy)]
+    pub struct Token(());
+
+    /// The only [`Token`].
+    pub(crate) const TOKEN: Token = Token(());
+
+    /// The execution of one [`FactorOp`]; only [`factor`] calls it.
+    pub trait Run<R, D: FactorScalar> {
+        fn run<M, L>(
+            self,
+            _: Token,
+            engine: &mut dyn symtn_dense::Engine,
+            lease: L,
+            source: FactorSource<'_, R, D>,
+        ) -> Result<<Self as FactorOp<R, D>>::Output, M::Error>
+        where
+            Self: FactorOp<R, D>,
+            M: FactorMode<R>,
+            L: ExecutorLease;
+    }
+}
+use exec::{Run, Token, TOKEN};
 #[cfg(test)]
 pub(crate) use svd::scale_axis_by_spectrum;
 pub(crate) use svd::*;
@@ -126,8 +162,7 @@ pub use bound::BoundDynFactor;
 pub use compact_plan::CheckedGenericFactorPlanError;
 pub use dense_stage::in_linalg_scope;
 pub use eig::{
-    ascending_eigh_order, eig_full_dyn, eig_full_from_source, eig_vals_from_source, eigh_full_dyn,
-    eigh_full_from_source, eigh_sector_into, eigh_vals_from_source, require_finite_eigh_input,
+    ascending_eigh_order, eig_full_dyn, eigh_sector_into, require_finite_eigh_input,
     validate_hermitian_regions, EigFullDyn, EighFullDyn, EighScratch, HermitianTol,
     EIGH_EIGENVALUE_CHECK,
 };
@@ -143,27 +178,16 @@ pub(crate) use null_space::{
 };
 #[cfg(test)]
 pub(crate) use null_space::{left_null_dyn, right_null_dyn};
-pub use null_space::{left_null_from_source, right_null_from_source};
 #[cfg(test)]
 pub(crate) use polar::{
     left_polar, left_polar_dyn, left_polar_dyn_checked_generic, right_polar, right_polar_dyn,
     right_polar_dyn_checked_generic,
-};
-pub use polar::{
-    left_polar_adjoint_from_parent, left_polar_from_source, right_polar_adjoint_from_parent,
-    right_polar_from_source,
-};
-pub use qr_lq::{
-    lq_compact_adjoint_from_parent, lq_compact_from_source, lq_full_adjoint_from_parent,
-    lq_full_from_source, qr_compact_from_source, qr_full_from_source,
 };
 pub(crate) use scalar::require_finite_factor_input;
 pub use scalar::{nonfinite_factor_input, FactorFamily};
 pub use scalar::{FactorScalar, SectorSpectrum, SpectrumMagnitude};
 pub use svd::{
     axpby_axis_by_spectrum_into, decide_bond_truncation, diagonal_bond_data,
-    rectangular_diagonal_bond_tensor, scale_axis_by_spectrum_mapped,
-    svd_compact_adjoint_from_parent, svd_compact_dyn_checked_generic, svd_compact_from_source,
-    svd_full_adjoint_from_parent, svd_full_from_source, svd_vals_dyn, svd_vals_from_source,
-    SvdFactorsDyn, SvdFullFactorsDyn,
+    rectangular_diagonal_bond_tensor, scale_axis_by_spectrum_mapped, SvdFactorsDyn,
+    SvdFullFactorsDyn,
 };

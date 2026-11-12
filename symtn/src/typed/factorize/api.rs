@@ -675,22 +675,10 @@ where
         cols: &[usize],
     ) -> Result<Lq<Self>, FacadeError<R>> {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_lq(engine,
+            t.factor_lq(
+                engine,
                 FactorOp::LqCompact,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::lq_compact_from_source::<R::Mode, _, _, _, _>(engine,
-                        lease, source,
-                    )
-                },
-                |engine, lease, parent, adjoint_space| {
-                    symtn_matrixalgebra::seam::lq_compact_adjoint_from_parent::<
-                        R::Mode,
-                        _,
-                        _,
-                        _,
-                        _,
-                    > (engine, lease, parent, adjoint_space)
-                },
+                symtn_matrixalgebra::seam::op::LqCompact,
             )
         })
     }
@@ -818,11 +806,11 @@ where
         cols: &[usize],
     ) -> Result<Qr<Self>, FacadeError<R>> {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_qr(engine, FactorOp::QrFull, |engine, lease, source| {
-                symtn_matrixalgebra::seam::qr_full_from_source::<R::Mode, _, _, _, _>(
-                    engine, lease, source,
-                )
-            })
+            t.factor_qr(
+                engine,
+                FactorOp::QrFull,
+                symtn_matrixalgebra::seam::op::QrFull,
+            )
         })
     }
 }
@@ -875,19 +863,7 @@ where
             t.factor_lq(
                 engine,
                 FactorOp::LqFull,
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::lq_full_from_source::<R::Mode, _, _, _, _>(
-                        engine, lease, source,
-                    )
-                },
-                |engine, lease, parent, adjoint_space| {
-                    symtn_matrixalgebra::seam::lq_full_adjoint_from_parent::<R::Mode, _, _, _, _>(
-                        engine,
-                        lease,
-                        parent,
-                        adjoint_space,
-                    )
-                },
+                symtn_matrixalgebra::seam::op::LqFull,
             )
         })
     }
@@ -937,11 +913,11 @@ where
         cols: &[usize],
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_values(engine, FactorOp::SvdVals, |engine, lease, source| {
-                symtn_matrixalgebra::seam::svd_vals_from_source::<R::Mode, _, _, _, _>(
-                    engine, lease, source,
-                )
-            })
+            t.factor_values(
+                engine,
+                FactorOp::SvdVals,
+                symtn_matrixalgebra::seam::op::SvdVals,
+            )
         })
     }
 }
@@ -991,14 +967,11 @@ where
         hermitian_tol: HermitianTol,
     ) -> Result<Vec<SectorSpectrum<<R as TypedSectorAdmission>::Sector, f64>>, FacadeError<R>> {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_values(engine, FactorOp::EighVals, |engine, lease, source| {
-                symtn_matrixalgebra::seam::eigh_vals_from_source::<R::Mode, _, _, _, _>(
-                    engine,
-                    lease,
-                    source,
-                    hermitian_tol,
-                )
-            })
+            t.factor_values(
+                engine,
+                FactorOp::EighVals,
+                symtn_matrixalgebra::seam::op::EighVals { hermitian_tol },
+            )
         })
     }
 }
@@ -1052,11 +1025,11 @@ where
         FacadeError<R>,
     > {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_values(engine, FactorOp::EigVals, |engine, lease, source| {
-                symtn_matrixalgebra::seam::eig_vals_from_source::<R::Mode, _, _, _, _>(
-                    engine, lease, source,
-                )
-            })
+            t.factor_values(
+                engine,
+                FactorOp::EigVals,
+                symtn_matrixalgebra::seam::op::EigVals,
+            )
         })
     }
 }
@@ -1257,31 +1230,25 @@ where
         cols: &[usize],
     ) -> Result<Self, FacadeError<R>> {
         self.with_leg_roles(engine, rows, cols, |t, engine| {
-            t.factor_null(engine,
+            t.factor_null(
+                engine,
                 FactorOp::LeftNull,
                 |parent, engine| {
-                    parent.factor_null(engine,
+                    parent.factor_null(
+                        engine,
                         FactorOp::RightNull,
                         |_, _| {
                             // A lazy adjoint's parent is owned, so it is
                             // never redirected again.
-                            Err(internal_layout_error(
-                                "an owned null-space parent was redirected",
-                            )
-                            .into())
-                        },
-                        |engine, lease, source| {
-                            symtn_matrixalgebra::seam::right_null_from_source::<R::Mode, _, _, _, _>(engine,
-                                lease, source,
+                            Err(
+                                internal_layout_error("an owned null-space parent was redirected")
+                                    .into(),
                             )
                         },
+                        symtn_matrixalgebra::seam::op::RightNull,
                     )
                 },
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::left_null_from_source::<R::Mode, _, _, _, _>(engine,
-                        lease, source,
-                    )
-                },
+                symtn_matrixalgebra::seam::op::LeftNull,
             )
         })
     }
@@ -1372,18 +1339,10 @@ where
                                     .into(),
                             )
                         },
-                        |engine, lease, source| {
-                            symtn_matrixalgebra::seam::left_null_from_source::<R::Mode, _, _, _, _>(
-                                engine, lease, source,
-                            )
-                        },
+                        symtn_matrixalgebra::seam::op::LeftNull,
                     )
                 },
-                |engine, lease, source| {
-                    symtn_matrixalgebra::seam::right_null_from_source::<R::Mode, _, _, _, _>(
-                        engine, lease, source,
-                    )
-                },
+                symtn_matrixalgebra::seam::op::RightNull,
             )
         })
     }

@@ -28,9 +28,7 @@ use symtn::typed::FusionTreeKey;
 use symtn_core::{FusionProductSpace, FusionTreeHomSpace};
 use symtn_dense::strided_batch_runs;
 use symtn_matrixalgebra::seam::{
-    eig_full_from_source, lq_compact_from_source, lq_full_from_source, qr_compact_from_source,
-    qr_full_from_source, svd_compact_dyn_checked_generic, CheckedGenericFactorPlanError,
-    EigFullDyn, FactorSource,
+    factor, op, CheckedGenericFactorPlanError, EigFullDyn, FactorSource, SvdFactorsDyn,
 };
 use symtn_matrixalgebra::BoundDynFactor;
 use symtn_tensors::{BoundDynamicFusionMapSpace, BoundDynamicTensorRef};
@@ -1015,36 +1013,37 @@ fn assert_checked_pair_reconstructs<D: HarnessScalar>(
 
 fn assert_checked_svd_reconstructs<D: HarnessScalar>(
     u: &BoundDynFactor<LayoutGenericRule, D>,
-    s: &BoundDynFactor<LayoutGenericRule, D>,
+    spectrum: &[symtn_matrixalgebra::SectorSpectrum],
     vh: &BoundDynFactor<LayoutGenericRule, D>,
     sector_count: usize,
 ) {
     assert_eq!(u.space().space().structure().block_count(), sector_count);
-    assert_eq!(s.space().space().structure().block_count(), sector_count);
+    assert_eq!(spectrum.len(), sector_count);
     assert_eq!(vh.space().space().structure().block_count(), sector_count);
     for sector in (0..sector_count).map(SectorId::new) {
         let u_block = factor_block(u, sector);
-        let s_block = factor_block(s, sector);
         let vh_block = factor_block(vh, sector);
         let rows = u_block.shape()[0];
         let kept = u_block.shape()[1];
         let columns = vh_block.shape()[1];
-        assert_eq!(s_block.shape(), [kept, kept]);
         assert_eq!(vh_block.shape()[0], kept);
-        let singular_values = (0..kept)
-            .map(|index| checked_block_value(s.data(), s_block, index, index))
-            .collect::<Vec<_>>();
-        for value in &singular_values {
-            assert!(value.im.abs() <= 2.0e-12 && value.re >= 0.0);
+        let singular_values = &spectrum
+            .iter()
+            .find(|entry| entry.sector == sector)
+            .expect("one spectrum entry per coupled sector")
+            .values;
+        assert_eq!(singular_values.len(), kept);
+        for &value in singular_values {
+            assert!(value >= 0.0);
         }
         for adjacent in singular_values.windows(2) {
-            assert!(adjacent[0].re >= adjacent[1].re);
+            assert!(adjacent[0] >= adjacent[1]);
         }
         for column in 0..columns {
             for row in 0..rows {
                 let actual = (0..kept).fold(Complex64::new(0.0, 0.0), |sum, inner| {
                     sum + checked_block_value(u.data(), u_block, row, inner)
-                        * checked_block_value(s.data(), s_block, inner, inner)
+                        * singular_values[inner]
                         * checked_block_value(vh.data(), vh_block, inner, column)
                 });
                 let expected = checked_layout_value::<D>(sector, row, column).as_complex();
@@ -1106,12 +1105,12 @@ fn preflight_checked_compact_input<D: HarnessScalar>(
     assert_checked_pair_reconstructs(&qr.q, &qr.r, sector_count);
     assert_columns_orthonormal(&qr.q, sector_count);
     drop(qr);
-    let svd = svd_compact_dyn_checked_generic(engine, &mut dense, input)
-        .map_err(checked_compact_example_error)?;
-    assert_checked_svd_reconstructs(&svd.u, &svd.s, &svd.vh, sector_count);
-    assert_columns_orthonormal(&svd.u, sector_count);
-    assert_rows_orthonormal(&svd.vh, sector_count);
-    drop(svd);
+    let (u, vh, spectrum) =
+        svd_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error)?;
+    assert_checked_svd_reconstructs(&u, &spectrum, &vh, sector_count);
+    assert_columns_orthonormal(&u, sector_count);
+    assert_rows_orthonormal(&vh, sector_count);
+    drop((u, vh, spectrum));
     let lq = lq_compact_dense(engine, &mut dense, input).map_err(checked_compact_example_error)?;
     assert_checked_pair_reconstructs(&lq.l, &lq.q, sector_count);
     assert_rows_orthonormal(&lq.q, sector_count);
@@ -1129,8 +1128,7 @@ fn run_checked_compact_operation<D: HarnessScalar>(
             qr_compact_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         )),
         "svd" => drop(black_box(
-            svd_compact_dyn_checked_generic(engine, dense, input)
-                .map_err(checked_compact_example_error)?,
+            svd_compact_dense(engine, dense, input).map_err(checked_compact_example_error)?,
         )),
         "lq" => drop(black_box(
             lq_compact_dense(engine, dense, input).map_err(checked_compact_example_error)?,
@@ -1173,7 +1171,7 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
         matrix_shapes.push(format!("{}x{}", block.shape()[0], block.shape()[1]));
     }
     println!(
-        "# GenericCheckedInput: workload={} dtype={} labels=0..{} G={} row_trees={} col_trees={} source_blocks={} matrix_shapes={} layouts=canonical setup=fixture+binding+literal_preflight_outside_timer measured=public_owned_factorization+fresh_return+drop caller_allocations=requested_only peak_native_worker=NA",
+        "# GenericCheckedInput: workload={} dtype={} labels=0..{} G={} row_trees={} col_trees={} source_blocks={} matrix_shapes={} layouts=canonical setup=fixture+binding+literal_preflight_outside_timer measured=public_owned_factorization+fresh_return+drop svd=factors+spectra caller_allocations=requested_only peak_native_worker=NA",
         workload,
         D::NAME,
         sector_count - 1,
@@ -1223,13 +1221,11 @@ fn run_checked_compact_input_fixture<D: HarnessScalar>(
             "first_after_setup",
             "warm_after_setup",
             min_time,
-            || {
-                svd_compact_dyn_checked_generic(engine, &mut dense, &input)
-                    .map_err(checked_compact_example_error)
-            },
+            || svd_compact_dense(engine, &mut dense, &input).map_err(checked_compact_example_error),
         )?;
-        assert_checked_svd_reconstructs(&svd.u, &svd.s, &svd.vh, sector_count);
-        drop(svd);
+        let (u, vh, spectrum) = svd;
+        assert_checked_svd_reconstructs(&u, &spectrum, &vh, sector_count);
+        drop((u, vh, spectrum));
         let lq = bench(
             &runtime,
             &symmetry,
@@ -3577,9 +3573,10 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    qr_compact_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::QrCompact,
         dense_source(input),
     )
     .map(qr_dense)
@@ -3595,9 +3592,10 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    qr_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::QrFull,
         dense_source(input),
     )
     .map(qr_dense)
@@ -3613,9 +3611,10 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    lq_compact_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::LqCompact,
         dense_source(input),
     )
     .map(lq_dense)
@@ -3631,12 +3630,33 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    lq_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::LqFull,
         dense_source(input),
     )
     .map(lq_dense)
+}
+
+/// Compact SVD factors and spectra at the seam; the spectrum bond and a
+/// dense `S` are the facade's work, outside this row.
+fn svd_compact_dense<E, R, D>(
+    engine: &mut dyn Engine,
+    dense: &mut E,
+    input: &BoundDynamicTensorRef<'_, R, D>,
+) -> Result<SvdFactorsDyn<R, D>, CheckedGenericFactorPlanError<<R as CheckedGenericFusion>::Error>>
+where
+    E: symtn_dense::DenseExecutor + ?Sized,
+    R: CheckedGenericFusion,
+    D: FactorScalar,
+{
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+        engine,
+        dense,
+        op::SvdCompact,
+        dense_source(input),
+    )
 }
 
 fn eig_full_dense<E, R, D>(
@@ -3649,9 +3669,10 @@ where
     R: CheckedGenericFusion,
     D: FactorScalar,
 {
-    eig_full_from_source::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
+    factor::<symtn::sector::CheckedGenericAdmissionMode, _, _, _, _>(
         engine,
         dense,
+        op::EigFull,
         dense_source(input),
     )
 }
