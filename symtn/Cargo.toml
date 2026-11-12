@@ -58,7 +58,7 @@ symtn-tensors = { version = "0.1.1", path = "../symtn-tensors", default-features
 # the `symtn::scratch` example; the version tenferro-cpu 0.11.0 resolves.
 tenferro-runtime = { version = "=0.11.0", default-features = false }
 # External categories of the typed-facade extension tests.
-fusion-symbols = { version = "0.10.0", default-features = false }
+fusion-symbols = { version = "0.11.0", default-features = false }
 rayon = "1.10"
 # The table-backed Fibonacci provider of the planar workflow test.
 symtn-sectors = { version = "0.1.1", path = "../symtn-sectors" }

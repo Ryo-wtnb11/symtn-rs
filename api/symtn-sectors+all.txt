@@ -906,22 +906,6 @@ impl core::fmt::Debug for symtn_sectors::RuleIdentity
 pub fn symtn_sectors::RuleIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::hash::Hash for symtn_sectors::RuleIdentity
 pub fn symtn_sectors::RuleIdentity::hash<H: core::hash::Hasher>(&self, &mut H)
-pub struct symtn_sectors::SU2CoefficientError(_)
-impl core::clone::Clone for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::clone(&self) -> symtn_sectors::SU2CoefficientError
-impl core::clone::TrivialClone for symtn_sectors::SU2CoefficientError
-impl core::cmp::Eq for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::assert_fields_are_eq(&self)
-impl core::cmp::PartialEq for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::eq(&self, &symtn_sectors::SU2CoefficientError) -> bool
-impl core::error::Error for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
-impl core::fmt::Debug for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::fmt::Display for symtn_sectors::SU2CoefficientError
-pub fn symtn_sectors::SU2CoefficientError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for symtn_sectors::SU2CoefficientError
-impl core::marker::StructuralPartialEq for symtn_sectors::SU2CoefficientError
 pub struct symtn_sectors::SU2FusionRule
 impl symtn_sectors::SU2FusionRule
 pub fn symtn_sectors::SU2FusionRule::try_for_each_representable_channel<B>(&self, symtn_sectors::SU2Irrep, symtn_sectors::SU2Irrep, impl core::ops::function::FnMut(symtn_sectors::SU2Irrep) -> core::ops::control_flow::ControlFlow<B>) -> core::result::Result<core::ops::control_flow::ControlFlow<B>, symtn_sectors::FusionAlgebraError>
@@ -982,7 +966,7 @@ pub fn symtn_sectors::SU2FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::S
 pub fn symtn_sectors::SU2FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::SU2FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::SU2FusionRule
-pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<symtn_sectors::SU2CoefficientError>
+pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
 pub type symtn_sectors::SU2FusionRule::Scalar = f64
 pub fn symtn_sectors::SU2FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::SU2FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
@@ -2163,7 +2147,7 @@ pub type symtn_sectors::PhysicalFusionBasis::Scalar: symtn_sectors::CategoricalS
 pub fn symtn_sectors::PhysicalFusionBasis::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::PhysicalFusionBasis::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::SU2FusionRule
-pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<symtn_sectors::SU2CoefficientError>
+pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
 pub type symtn_sectors::SU2FusionRule::Scalar = f64
 pub fn symtn_sectors::SU2FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::SU2FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>

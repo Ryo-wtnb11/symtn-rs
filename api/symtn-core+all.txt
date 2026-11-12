@@ -51,7 +51,6 @@ pub use symtn_core::ProductSectorCodecError
 pub use symtn_core::ProductSectorComponent
 pub use symtn_core::ProductSectorLayout
 pub use symtn_core::RuleIdentity
-pub use symtn_core::SU2CoefficientError
 pub use symtn_core::SU2FusionRule
 pub use symtn_core::SU2Irrep
 pub use symtn_core::SU2_MAX_DOUBLED_SPIN

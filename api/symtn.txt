@@ -87,7 +87,6 @@ pub use symtn::sector::ProductSectorCodecError
 pub use symtn::sector::ProductSectorComponent
 pub use symtn::sector::ProductSectorLayout
 pub use symtn::sector::RuleIdentity
-pub use symtn::sector::SU2CoefficientError
 pub use symtn::sector::SU2FusionRule
 pub use symtn::sector::SU2Irrep
 pub use symtn::sector::SectorCodec

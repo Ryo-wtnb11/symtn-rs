@@ -30,9 +30,8 @@ struct ProductRuleIdentity {
 
 /// Identity of a rule determined by one category value under one rule type.
 ///
-/// Equality is the value's full `Eq`, never its hash or fingerprint: a
-/// `fusion_symbols` fingerprint is shared across parameters such as the ZN
-/// modulus, and a hash collision must not merge two categories.
+/// Equality is the value's full `Eq`, never its hash: a hash collision must
+/// not merge two categories.
 ///
 /// Why the value is held weakly: a cache key is charged by
 /// [`RuleIdentity::charged_retained_bytes`], and an erased category has no

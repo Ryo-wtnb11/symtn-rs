@@ -766,16 +766,16 @@ dependencies = [
 
 [[package]]
 name = "fusion-symbols"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "159a8bad2fc3ab7dc4cfc09ebba0b9ede86a3e89a3eff7193de4bf38fd025a71"
+checksum = "2b7738b6afda981e2cc166accfabb6c6f6e52cbc741b155f76cf3be9abfbf61f"
 dependencies = [
- "num-bigint",
+ "malachite-base",
+ "malachite-nz",
+ "malachite-q",
  "num-complex",
- "num-rational",
  "num-traits",
  "quick_cache",
- "t4a-faer 0.24.7",
 ]
 
 [[package]]
@@ -800,123 +800,6 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "slab",
-]
-
-[[package]]
-name = "gemm"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa0673db364b12263d103b68337a68fbecc541d6f6b61ba72fe438654709eacb"
-dependencies = [
- "dyn-stack",
- "gemm-c32",
- "gemm-c64",
- "gemm-common",
- "gemm-f16",
- "gemm-f32",
- "gemm-f64",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
-]
-
-[[package]]
-name = "gemm-c32"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "086936dbdcb99e37aad81d320f98f670e53c1e55a98bee70573e83f95beb128c"
-dependencies = [
- "dyn-stack",
- "gemm-common",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
-]
-
-[[package]]
-name = "gemm-c64"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20c8aeeeec425959bda4d9827664029ba1501a90a0d1e6228e48bef741db3a3f"
-dependencies = [
- "dyn-stack",
- "gemm-common",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
-]
-
-[[package]]
-name = "gemm-common"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88027625910cc9b1085aaaa1c4bc46bb3a36aad323452b33c25b5e4e7c8e2a3e"
-dependencies = [
- "bytemuck",
- "dyn-stack",
- "half",
- "libm",
- "num-complex",
- "num-traits",
- "once_cell",
- "paste",
- "pulp",
- "raw-cpuid",
- "seq-macro",
- "sysctl",
-]
-
-[[package]]
-name = "gemm-f16"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3df7a55202e6cd6739d82ae3399c8e0c7e1402859b30e4cb780e61525d9486e"
-dependencies = [
- "dyn-stack",
- "gemm-common",
- "gemm-f32",
- "half",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
-]
-
-[[package]]
-name = "gemm-f32"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02e0b8c9da1fbec6e3e3ab2ce6bc259ef18eb5f6f0d3e4edf54b75f9fd41a81c"
-dependencies = [
- "dyn-stack",
- "gemm-common",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
-]
-
-[[package]]
-name = "gemm-f64"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "056131e8f2a521bfab322f804ccd652520c79700d81209e9d9275bbdecaadc6a"
-dependencies = [
- "dyn-stack",
- "gemm-common",
- "num-complex",
- "num-traits",
- "paste",
- "raw-cpuid",
- "seq-macro",
 ]
 
 [[package]]
@@ -1023,6 +906,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.1.5",
+]
+
+[[package]]
+name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
+dependencies = [
+ "foldhash 0.2.0",
 ]
 
 [[package]]
@@ -1431,6 +1323,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef9ac18847474e638e3702b76c65d4eb93428471a74778ef0f1be711717f89b5"
 dependencies = [
  "hashbrown 0.17.1",
+]
+
+[[package]]
+name = "malachite-base"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5399d024a5e8fd066c158d208a02fb2dabb737c401ab03954f27d170fd49ffc"
+dependencies = [
+ "hashbrown 0.16.1",
+ "itertools 0.14.0",
+ "libm",
+ "ryu",
+]
+
+[[package]]
+name = "malachite-nz"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ac55a9e8426447c374668b93c35b7b6ab43a21dc7ba97ad0e852be2305a5900"
+dependencies = [
+ "bytemuck",
+ "itertools 0.14.0",
+ "libm",
+ "malachite-base",
+ "wide",
+]
+
+[[package]]
+name = "malachite-q"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "070267491ad6c23e504a71368542a2376d62f6622286be47870d7dcd56f24fce"
+dependencies = [
+ "itertools 0.14.0",
+ "libm",
+ "malachite-base",
+ "malachite-nz",
 ]
 
 [[package]]
@@ -2051,6 +1980,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "ryu"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
+
+[[package]]
+name = "safe_arch"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42c6efa15875e6ecb39ca61fb0b0c1a40b84fac5a5ffe71eef7d1000c8eb3f5f"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2588,27 +2532,6 @@ dependencies = [
 
 [[package]]
 name = "t4a-faer"
-version = "0.24.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7442ea342f37c81922d0dc68ae424b3d5d5229b516756718bd3b52dc133cc45"
-dependencies = [
- "bytemuck",
- "dyn-stack",
- "equator 0.6.0",
- "gemm",
- "generativity",
- "libm",
- "nano-gemm",
- "num-complex",
- "num-traits",
- "pulp",
- "reborrow",
- "t4a-faer-traits",
- "t4a-private-gemm-x86",
-]
-
-[[package]]
-name = "t4a-faer"
 version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fbb418322be3bde5413613ec9dfcaa8c7e764ac8e17fd513ceba6942e9bfcbc7"
@@ -2809,7 +2732,7 @@ dependencies = [
  "num-traits",
  "strided-basic 0.12.0",
  "strided-view 0.7.2",
- "t4a-faer 0.33.0",
+ "t4a-faer",
  "tcontract-exec",
  "tcontract-kernel",
  "thiserror 1.0.69",
@@ -2823,7 +2746,7 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13dfb5292bdf73d40f1fe5c65d3d921cedcb922347bfaa09f34217b8598403c9"
 dependencies = [
- "t4a-faer 0.33.0",
+ "t4a-faer",
  "thiserror 1.0.69",
  "threadteam",
 ]
@@ -2883,7 +2806,7 @@ dependencies = [
  "strided-basic 0.12.0",
  "strided-kernel 0.12.0",
  "strided-nn",
- "t4a-faer 0.33.0",
+ "t4a-faer",
  "tenferro-core-ops",
  "tenferro-cpu-basic",
  "tenferro-cpu-fused",
@@ -3000,7 +2923,7 @@ dependencies = [
  "num-complex",
  "num-traits",
  "strided-view 0.7.2",
- "t4a-faer 0.33.0",
+ "t4a-faer",
  "tcontract-exec",
  "tenferro-ad",
  "tenferro-cpu",
@@ -3162,7 +3085,7 @@ checksum = "0dac8ca0b7b81f5ac7ede9872145e1d127008e95a7d0fa8efe058567d9969385"
 dependencies = [
  "num-complex",
  "strided-view 0.7.2",
- "t4a-faer 0.33.0",
+ "t4a-faer",
  "tcontract-exec",
  "thiserror 2.0.21",
  "threadteam",
@@ -3528,6 +3451,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wide"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d920ac99c3c8edce110cb8d07dbb324d6d026011dce85b1e9355b70f0adacc4f"
+dependencies = [
+ "bytemuck",
+ "safe_arch",
 ]
 
 [[package]]

@@ -44,7 +44,7 @@ scalar CGC entries in descending magnetic order. `LieGroupFusionRule` retains
 its graded codec over Dynkin labels then zigzag torus charges and its bounded irrep interner, constructs its `LieGroup`
 eagerly, validates complete `GroupId` admission and uses checked `Generic`
 admission at every rank. Its identity is the `GroupId` value, held weakly as
-for `CategoryRule`; equal fingerprints do not merge groups. Warm interner hits clone allocation-free
+for `CategoryRule`, so isomorphic groups do not merge. Warm interner hits clone allocation-free
 provider handles; returned blocks and channels have separate allocation costs.
 See the [provider interface](provider_interface.md) for admission and error bounds.
 
