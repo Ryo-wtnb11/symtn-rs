@@ -1553,7 +1553,7 @@ fn assert_multitree_eig<D: HarnessScalar<Eig = Complex64>>(
         assert_eq!(values.len(), dimension);
         for column in 0..dimension {
             let eigenvalue = values[column];
-            let expected = Complex64::new((sector * dimension + dimension - column) as f64, 0.0);
+            let expected = Complex64::new((sector * dimension + column + 1) as f64, 0.0);
             assert!((eigenvalue - expected).norm() <= 1.0e-10 * expected.norm().max(1.0));
             let norm = (0..dimension)
                 .map(|row| sector_vectors[row + dimension * column].norm_sqr())
@@ -1653,7 +1653,7 @@ fn assert_eig_block(
 ) {
     for column in 0..n {
         let eigenvalue = value(column);
-        let expected = Complex64::new((sector * 32 + n - column) as f64, 0.0);
+        let expected = Complex64::new((sector * 32 + column + 1) as f64, 0.0);
         assert!((eigenvalue - expected).norm() <= 1.0e-10 * expected.norm().max(1.0));
         let column_norm = (0..n)
             .map(|row| vector(row, column).norm_sqr())
@@ -1712,6 +1712,7 @@ fn assert_checked_eig<D: HarnessScalar<Eig = Complex64>>(
 }
 
 fn assert_mf_eig<D>(
+    engine: &mut dyn Engine,
     source: &TensorMap<U1FusionRule, D>,
     d: &TensorMap<U1FusionRule, Complex64>,
     v: &TensorMap<U1FusionRule, Complex64>,
@@ -1722,6 +1723,7 @@ where
 {
     assert!(std::ptr::eq(source.provider(), d.provider()));
     assert!(std::ptr::eq(source.provider(), v.provider()));
+    let d = &d.materialize(engine)?;
     assert_eq!(
         (
             source.subblock_count(),
@@ -1937,7 +1939,7 @@ where
     let changed_source = make(degeneracy + 1)?;
     for selected in [&source, &changed_source] {
         let Eig { d, v } = selected.eig_full(engine, &[0], &[1])?;
-        assert_mf_eig(selected, &d, &v, sector_count)?;
+        assert_mf_eig(engine, selected, &d, &v, sector_count)?;
         drop((d, v));
     }
     let symmetry = format!("EigGeometry-MF-{workload}-{}", D::NAME);
