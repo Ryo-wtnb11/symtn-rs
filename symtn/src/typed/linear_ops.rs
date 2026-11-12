@@ -470,14 +470,13 @@ impl<R, D: TensorScalar> ElementwiseExec<R, D> for Vec<D> {
         t: &TensorMap<R, D>,
     ) -> Result<TensorMap<R, D>, Error> {
         admit_host_engine(engine)?;
-        Ok(t.with_data(vec![
-            D::from_real(0.0);
+        Ok(t.with_data(symtn_tensors::zeroed_payload(
             t.owned_body()
                 .expect("owned zero input")
                 .materialized_dense_data()
                 .as_ref()
-                .len()
-        ]))
+                .len(),
+        )))
     }
 
     fn combine(

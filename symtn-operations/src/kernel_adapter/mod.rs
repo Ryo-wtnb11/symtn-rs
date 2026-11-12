@@ -4,8 +4,7 @@ use num_traits::{One, Zero};
 use smallvec::SmallVec;
 
 use crate::host_scalar_kernels::{
-    combine_fused_layout, raw_rank_within_strided_limit_routed, raw_strided_action,
-    validate_raw_strided_bounds,
+    combine_fused_layout, raw_strided_action, validate_raw_strided_bounds,
 };
 use crate::{
     axpby_raw_strided_kernel_trusted, scale_raw_strided_kernel_trusted,

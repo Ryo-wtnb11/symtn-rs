@@ -692,9 +692,12 @@ impl StridedHostKernelAdapter {
     /// `dst = alpha * op(src) + beta * dst` over one block whose layout the
     /// caller has not proved in bounds (degeneracy restriction and scatter).
     ///
-    /// Both reachable extents are checked once, then the block runs the same
-    /// fused span walk as tree-transform replay, with no per-element offset
-    /// check. The element arithmetic is the scalar kernels' action, so
+    /// Both reachable extents are checked once. A destination whose axes are
+    /// separated then runs Strided's raw kernels or the same fused span walk
+    /// as tree-transform replay, with no per-element offset check; any other
+    /// destination runs a column-major loop over the original axes with
+    /// checked offsets, so its overwrite and accumulation order stay
+    /// defined. The element arithmetic is the scalar kernels' action, so
     /// `alpha = 1, beta = 0` stays a bit-exact copy rather than `1 * src`.
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
@@ -731,20 +734,6 @@ impl StridedHostKernelAdapter {
             crate::probe::add(crate::probe::Event::SpanWalk, 1);
         }
         let action = raw_strided_action(alpha, beta);
-        if raw_rank_within_strided_limit_routed(
-            exec.reborrow(),
-            dst_data,
-            src_data,
-            shape,
-            dst_strides,
-            src_strides,
-            dst_offset,
-            src_offset,
-            source_conjugate,
-            action,
-        )? {
-            return Ok(());
-        }
         let StridedKernelScratch { layout, index } = &mut self.scratch;
         combine_fused_layout(
             exec.reborrow(),
