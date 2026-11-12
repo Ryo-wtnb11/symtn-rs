@@ -544,9 +544,11 @@ fn apply_fused_triple_slices<Dst, T, Combine>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kernel_adapter::{HostKernelAdapter, StridedHostKernelAdapter};
     use crate::probe::{take_checked_block_passes, CheckedBlockPasses};
     use crate::tensoradd_raw_strided_kernel;
     use crate::test_numerics::numerics::nan_folded_bits;
+    use crate::{RecouplingCoefficientAction, TransformScale};
     use num_complex::Complex64;
 
     /// What: a zero-stride extent above `isize::MAX` still visits its first
@@ -1036,5 +1038,195 @@ mod tests {
             ),
             Err(OperationError::InvalidArgument { message }) if message.contains("filled for two sources")
         ));
+    }
+
+    /// The update a dense-destination oracle applies to each reached slot.
+    #[derive(Clone, Copy, Debug)]
+    enum Update<T> {
+        Write,
+        Accumulate,
+        Axpby(T),
+    }
+
+    /// `[3, 2]` blocks whose destination runs are contiguous and whose source
+    /// runs are strided: `(destination strides, source strides, offsets)`.
+    /// Positive, negative and overlapping-run layouts.
+    type DenseRun = ([isize; 2], [isize; 2], (isize, isize));
+
+    const DENSE_RUNS: [DenseRun; 4] = [
+        ([1, 3], [4, 1], (0, 0)),
+        ([1, 3], [-2, 9], (0, 4)),
+        ([1, 3], [-1, 5], (0, 2)),
+        ([1, 1], [4, 1], (0, 0)),
+    ];
+
+    /// Column-major affine decode with explicit arithmetic, axis 0 fastest.
+    #[allow(clippy::too_many_arguments)]
+    fn dense_runs_oracle<T>(
+        out: &mut [T],
+        src: &[T],
+        (dst_strides, src_strides, (d0, s0)): DenseRun,
+        conjugate: bool,
+        conj: fn(T) -> T,
+        alpha: Option<T>,
+        update: Update<T>,
+    ) where
+        T: Copy + Add<T, Output = T> + Mul<T, Output = T>,
+    {
+        for j in 0..2 {
+            for i in 0..3 {
+                let d = (d0 + i * dst_strides[0] + j * dst_strides[1]) as usize;
+                let s = (s0 + i * src_strides[0] + j * src_strides[1]) as usize;
+                let v = if conjugate { conj(src[s]) } else { src[s] };
+                let m = alpha.map_or(v, |alpha| alpha * v);
+                out[d] = match update {
+                    Update::Write => m,
+                    Update::Accumulate => out[d] + m,
+                    Update::Axpby(beta) => beta * out[d] + m,
+                };
+            }
+        }
+    }
+
+    fn check_dense_runs<T>(
+        make: fn(f64, f64) -> T,
+        conj: fn(T) -> T,
+        alpha: T,
+        beta: T,
+        bits: fn(T) -> u128,
+    ) where
+        T: Copy
+            + Add<T, Output = T>
+            + Mul<T, Output = T>
+            + PartialEq
+            + Zero
+            + One
+            + ConjugateValue
+            + Send
+            + Sync
+            + RecouplingCoefficientAction<f64>
+            + core::fmt::Debug,
+    {
+        let sign = |k: usize| if k.is_multiple_of(2) { 1.0 } else { -1.0 };
+        let src: Vec<T> = (0..14)
+            .map(|k| make(sign(k) * (k + 1) as f64 / 4.0, -((k + 2) as f64) / 8.0))
+            .collect();
+        let initial: Vec<T> = (0..8)
+            .map(|k| make(-sign(k) * (k + 5) as f64 / 8.0, (k + 1) as f64 / 16.0))
+            .collect();
+        let as_bits = |values: &[T]| values.iter().map(|&v| bits(v)).collect::<Vec<_>>();
+        let alphas = [None, Some(alpha)];
+        let mut exec = strided_kernel::Exec::serial();
+        let mut adapter = StridedHostKernelAdapter::default();
+        let mut zero_strides = Vec::new();
+        for layout in DENSE_RUNS {
+            let (dst_strides, src_strides, (d0, s0)) = layout;
+            let checked = src_strides.iter().all(|&stride| stride >= 0);
+            for conjugate in [false, true] {
+                for scale in alphas {
+                    for update in [Update::Write, Update::Accumulate, Update::Axpby(beta)] {
+                        let context = format!("{layout:?}, conj {conjugate}, {update:?}");
+                        let mut want = initial.clone();
+                        dense_runs_oracle(&mut want, &src, layout, conjugate, conj, scale, update);
+                        let mut got = initial.clone();
+                        adapter
+                            .transform_strided_baked(
+                                exec.reborrow(),
+                                &mut zero_strides,
+                                &mut got,
+                                &src,
+                                &[3, 2],
+                                &dst_strides,
+                                &src_strides,
+                                d0,
+                                s0,
+                                conjugate,
+                                TransformScale::<T, f64>::Data(scale.unwrap_or(T::one())),
+                                match update {
+                                    Update::Write => None,
+                                    Update::Accumulate => Some(T::one()),
+                                    Update::Axpby(beta) => Some(beta),
+                                },
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                        assert_eq!(as_bits(&got), as_bits(&want), "adapter {context}");
+                        if !checked {
+                            continue;
+                        }
+                        let mut block = CheckedBlockLayout::default();
+                        block
+                            .fill_one(&[3, 2], |axis| {
+                                Ok((dst_strides[axis] as usize, src_strides[axis] as usize))
+                            })
+                            .unwrap();
+                        let (alpha, beta) = (
+                            scale.unwrap_or(T::one()),
+                            match update {
+                                Update::Write => T::zero(),
+                                Update::Accumulate => T::one(),
+                                Update::Axpby(beta) => beta,
+                            },
+                        );
+                        let mut got = initial.clone();
+                        block
+                            .tensoradd(&mut got, &src, d0, s0, conjugate, alpha, beta)
+                            .unwrap();
+                        assert_eq!(as_bits(&got), as_bits(&want), "tensoradd {context}");
+                        if let Update::Write = update {
+                            let mut got = as_uninit(&initial);
+                            block
+                                .copy_uninit(&mut got, &src, d0, s0, conjugate, alpha)
+                                .unwrap();
+                            assert_eq!(
+                                as_bits(&assume_all_init(got)),
+                                as_bits(&want),
+                                "copy_uninit {context}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// What: every (destination, source) pair of a contiguous-destination,
+    /// strided-source layout receives exactly its action's arithmetic in
+    /// column-major order, for every action and map, real and complex,
+    /// with positive, negative and overlapping runs.
+    #[test]
+    fn dense_destination_runs_match_the_affine_oracle_for_every_action_and_map() {
+        check_dense_runs(
+            |re, _| re,
+            |v: f64| v,
+            -0.5,
+            0.75,
+            |v: f64| u128::from(v.to_bits()),
+        );
+        check_dense_runs(
+            Complex64::new,
+            |v: Complex64| v.conj(),
+            Complex64::new(-0.5, 0.25),
+            Complex64::new(0.75, -0.5),
+            |v: Complex64| (u128::from(v.re.to_bits()) << 64) | u128::from(v.im.to_bits()),
+        );
+
+        // Overlapping runs (destination `(i + j)`, source `(4i + j)`), by hand.
+        let src: Vec<f64> = (0..10).map(f64::from).collect();
+        let mut block = CheckedBlockLayout::default();
+        block
+            .fill_one(&[3, 2], |axis| Ok(([1, 1][axis], [4, 1][axis])))
+            .unwrap();
+        let mut dst = [7.0; 4];
+        block
+            .tensoradd(&mut dst, &src, 0, 0, false, 1.0, 0.0)
+            .unwrap();
+        assert_eq!(dst, [0.0, 1.0, 5.0, 9.0]);
+        let mut dst = [0.0; 4];
+        block
+            .tensoradd(&mut dst, &src, 0, 0, false, 1.0, 1.0)
+            .unwrap();
+        assert_eq!(dst, [0.0, 5.0, 13.0, 9.0]);
     }
 }

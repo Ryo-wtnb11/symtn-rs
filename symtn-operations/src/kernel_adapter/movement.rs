@@ -228,6 +228,56 @@ pub(crate) fn span<S, A, T>(
         let low = (base as usize).wrapping_sub(first);
         low..low.wrapping_add(size)
     };
+    // Why not strided's `replay_map_raw[_uninit]`: it requires `Send + Sync`
+    // scalars and allocates above fused rank 8; see #2519.
+    if inner_dst == 1 && inner_src != 0 {
+        let step = inner_src.unsigned_abs();
+        // Why `chunks_exact`, not `step_by`: zipping two TrustedRandomAccess
+        // iterators gives one counted exit test per element; `step_by` keeps
+        // a second remaining-length test per element.
+        if inner_src > 0 {
+            odometer(
+                dims,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                index,
+                |dst_base, src_base| {
+                    // Why the rebinding: an outlined run body otherwise
+                    // reloads the captured step from memory on every element.
+                    let (step, last, src_size) = (step, last, src_size);
+                    let slots = &mut dst[window(dst_base, dst_first, dst_size)];
+                    let values = &src[window(src_base, src_first, src_size)];
+                    let (body, tail) = slots.split_at_mut(last);
+                    for (slot, chunk) in body.iter_mut().zip(values.chunks_exact(step)) {
+                        action.element(slot, chunk[0]);
+                    }
+                    action.element(&mut tail[0], values[src_size - 1]);
+                },
+            );
+        } else {
+            odometer(
+                dims,
+                dst_strides,
+                src_strides,
+                dst_offset,
+                src_offset,
+                index,
+                |dst_base, src_base| {
+                    let (step, last, src_size) = (step, last, src_size);
+                    let slots = &mut dst[window(dst_base, dst_first, dst_size)];
+                    let values = &src[window(src_base, src_first, src_size)];
+                    let (body, tail) = slots.split_at_mut(last);
+                    for (slot, chunk) in body.iter_mut().zip(values.rchunks_exact(step)) {
+                        action.element(slot, chunk[step - 1]);
+                    }
+                    action.element(&mut tail[0], values[0]);
+                },
+            );
+        }
+        return;
+    }
     // Why the run is walked by two in-window positions rather than by
     // `step_by` or `base + position * stride`: both bounds are validated
     // once per run by slicing its windows, after which the loop condition
@@ -497,6 +547,18 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(starts, [(300, 60), (310, 40), (200, 260), (210, 240)]);
         assert_eq!(visits.borrow()[..3], [(300, 60), (301, 62), (302, 64)]);
+
+        visits.borrow_mut().clear();
+        span::<Init, _, usize>(
+            &mut dst,
+            &src,
+            BakedFusedLayout::from_compiled_normalized_slices(&[3], &[1], &[-2], None),
+            0,
+            4,
+            &mut index[..1],
+            &Record(&visits),
+        );
+        assert_eq!(*visits.borrow(), [(0, 4), (1, 2), (2, 0)]);
     }
 
     /// What: a repeated destination with a negative source stride is
