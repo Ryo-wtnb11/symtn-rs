@@ -42,10 +42,10 @@ use crate::{FusionAlgebraError, MultiplicityFreeAdmissionMode, RuleIdentity, Sec
 ///
 /// # Identity
 ///
-/// The [`RuleIdentity`] is built from the table's authority fingerprint
-/// (provenance record plus source bytes): each entry is its own category,
-/// two instances of one entry are equal, and no table entry equals a
-/// closed-form rule, even for the same group.
+/// The [`RuleIdentity`] is built from the table's AnyonWiki uuid, which
+/// selects one shipped table and its provenance within a build: each entry is
+/// its own category, two instances of one entry are equal, and no table entry
+/// equals a closed-form rule, even for the same group.
 ///
 /// # Examples
 ///
@@ -135,7 +135,9 @@ impl TableRule {
     }
 
     fn from_category(category: TableCategory) -> Self {
-        let bytes = category.authority_fingerprint();
+        // fusion-symbols' `TableCategory` equality: the uuid determines the
+        // shipped table within one build.
+        let bytes = category.uuid().as_bytes();
         let identity = RuleIdentity::from_canonical_bytes::<Self>(fnv1a64(bytes), Arc::from(bytes));
         Self { category, identity }
     }
@@ -266,22 +268,11 @@ impl AdapterAccess for TableRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::FusionRule;
 
     #[test]
     fn fnv1a64_matches_the_published_reference_vectors() {
         assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
-    }
-
-    #[test]
-    fn identity_is_bound_to_the_table_fingerprint() {
-        let fib = TableRule::fibonacci();
-        let bytes = fib.category.authority_fingerprint();
-        assert_eq!(
-            fib.rule_identity(),
-            RuleIdentity::from_canonical_bytes::<TableRule>(fnv1a64(bytes), Arc::from(bytes))
-        );
     }
 }

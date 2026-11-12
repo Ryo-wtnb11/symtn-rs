@@ -2,8 +2,7 @@ use fusion_symbols::{
     category::FusionCategory,
     lie::{GroupId, LieError, LieGroup, LieIrrep},
 };
-use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 use crate::category_rule::{
     admit_coupled_first, admit_in_order, fusion_algebra_error, AdapterAccess,
@@ -81,14 +80,11 @@ impl From<SU2Irrep> for SectorId {
 /// The physical carrier basis follows the executable convention of
 /// TensorKitSectors 0.3.9: zero-based index `k` has doubled projection
 /// `dm = dj - 2*k`, hence `dm = dj, dj - 2, ..., -dj`. This is descending in
-/// `m`. Individual physical entries use fusion-symbols' checked scalar CGC
-/// evaluator without constructing a full CGC tensor.
+/// `m`. symtn checks admission, multiplicity and carrier indices first; each
+/// physical entry then comes from fusion-symbols' scalar `clebsch_gordan`,
+/// without constructing a full CGC tensor.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub struct SU2FusionRule;
-
-const SU2_RACAH_IDENTITY_SCHEMA: u64 = 0x5355_3252_4143_4148;
-const SU2_ENCODING_IDENTITY: &[u8] =
-    b"symtn:su2:sector-id=dj:max-doubled-spin=254:channels=ascending-step-2";
 
 fn category() -> &'static LieGroup {
     static CATEGORY: OnceLock<LieGroup> = OnceLock::new();
@@ -100,17 +96,8 @@ fn category() -> &'static LieGroup {
 
 fn identity() -> &'static RuleIdentity {
     static IDENTITY: OnceLock<RuleIdentity> = OnceLock::new();
-    IDENTITY.get_or_init(|| {
-        let mut bytes = Vec::with_capacity(
-            category().authority_fingerprint().len() + SU2_ENCODING_IDENTITY.len(),
-        );
-        bytes.extend_from_slice(category().authority_fingerprint());
-        bytes.extend_from_slice(SU2_ENCODING_IDENTITY);
-        RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
-            SU2_RACAH_IDENTITY_SCHEMA,
-            Arc::<[u8]>::from(bytes),
-        )
-    })
+    // Stateless like `U1FusionRule`: the type fixes the category and codec.
+    IDENTITY.get_or_init(RuleIdentity::of_type::<SU2FusionRule>)
 }
 
 fn checked_irrep(sector: SectorId) -> Result<SU2Irrep, FusionAlgebraError> {
@@ -171,12 +158,8 @@ impl CategoryCodec<LieGroup> for CompactSu2Codec {
         _rule: &RuleIdentity,
         object: &LieIrrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        let sector = SectorId::new(
-            object
-                .dynkin_labels()
-                .next()
-                .expect("SU(2) labels have rank one") as usize,
-        );
+        let sector =
+            SectorId::new(object.dynkin().next().expect("SU(2) labels have rank one") as usize);
         checked_irrep(sector).map(SU2Irrep::sector_id)
     }
 
@@ -214,7 +197,13 @@ impl CategoryCodec<LieGroup> for CompactSu2Codec {
             return Ok(None);
         }
         let c = self.object(category, coupled)?;
-        Ok((category().nsymbol(&a, &b, &c) != 0).then_some([a, b, c]))
+        let n = category().nsymbol(&a, &b, &c).map_err(|error| {
+            self.map_error(
+                &[left, right, coupled],
+                CategoryAdapterError::Provider(error),
+            )
+        })?;
+        Ok((n != 0).then_some([a, b, c]))
     }
 
     fn map_error(
@@ -277,28 +266,9 @@ impl SU2FusionRule {
     }
 }
 
-/// Failure reported by the SU(2) coupling-coefficient authority.
-///
-/// Opaque: the authority's own error is reachable only through
-/// [`std::error::Error::source`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SU2CoefficientError(fusion_symbols::lie::su2::Su2Error);
-
-impl fmt::Display for SU2CoefficientError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("SU(2) coupling-coefficient authority failed")
-    }
-}
-
-impl std::error::Error for SU2CoefficientError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.0)
-    }
-}
-
 impl PhysicalFusionBasis for SU2FusionRule {
     type Scalar = f64;
-    type Error = PhysicalBasisError<SU2CoefficientError>;
+    type Error = PhysicalBasisError<std::convert::Infallible>;
 
     fn try_carrier_dimension(&self, sector: SectorId) -> Result<usize, Self::Error> {
         Ok(checked_irrep(sector)?.twice_spin() + 1)
@@ -348,22 +318,18 @@ impl PhysicalFusionBasis for SU2FusionRule {
             *projection = doubled_spin as i32 - 2 * index as i32;
         }
 
-        match fusion_symbols::lie::su2::clebsch_gordan_checked(
+        // Admitted N and carrier bounds leave only dm1 + dm2 != dm3, where a
+        // dense fusion tensor holds a structural zero and fusion-symbols
+        // returns exact zero.
+        Ok(fusion_symbols::lie::su2::clebsch_gordan(
             left.id() as u32,
             doubled_projections[0],
             right.id() as u32,
             doubled_projections[1],
             coupled.id() as u32,
             doubled_projections[2],
-        ) {
-            Ok(coefficient) => Ok(coefficient.to_f64()),
-            // A fusion tensor is dense over carrier indices. Magnetic-number
-            // mismatch is therefore a structural zero, not a failed query.
-            Err(fusion_symbols::lie::su2::Su2Error::NotAdmissible(
-                fusion_symbols::lie::su2::AdmissibilityViolation::ProjectionSum { .. },
-            )) => Ok(0.0),
-            Err(error) => Err(PhysicalBasisError::Coefficient(SU2CoefficientError(error))),
-        }
+        )
+        .to_f64())
     }
 }
 
@@ -372,15 +338,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn identity_and_label_boundary_are_unchanged() {
-        let bytes = b"racah:su2-exact:model=bigrational-round-once:3j=condon-shortley:cg=condon-shortley:6j=racah-single-sum:f=tks-su2irrep:r=tks-su2irrep:fs=tks-su2irrep:epoch=1symtn:su2:sector-id=dj:max-doubled-spin=254:channels=ascending-step-2";
-        assert_eq!(
-            SU2FusionRule.rule_identity(),
-            RuleIdentity::from_canonical_bytes::<SU2FusionRule>(
-                SU2_RACAH_IDENTITY_SCHEMA,
-                Arc::from(bytes.as_slice())
-            )
-        );
+    fn label_boundary_is_unchanged() {
         if let Some(id) = (u32::MAX as usize).checked_add(1) {
             let sector = SectorId::new(id);
             assert_eq!(
@@ -550,12 +508,6 @@ mod tests {
             .unwrap();
         assert!((highest - (2.0_f64 / 3.0).sqrt()).abs() < 1.0e-14);
         assert!((reversed + (2.0_f64 / 3.0).sqrt()).abs() < 1.0e-14);
-        assert_eq!(
-            highest,
-            fusion_symbols::lie::su2::clebsch_gordan_checked(2, 2, 1, -1, 1, 1)
-                .unwrap()
-                .to_f64()
-        );
 
         assert_eq!(
             rule.try_fusion_tensor_element(left, right, coupled, 3, 0, 0, 0),

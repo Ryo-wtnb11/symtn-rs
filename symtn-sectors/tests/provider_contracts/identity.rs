@@ -1,7 +1,6 @@
 //! `RuleIdentity` construction and the equalities that must (not) hold.
 //!
 //! Already pinned elsewhere:
-//! - SU(2) canonical bytes: `src/su2.rs` `identity_and_label_boundary_are_unchanged`.
 //! - Lie identity follows `GroupId` equality (SU(3) = SU(3)/Z1 != PSU(3)):
 //!   `src/lie.rs` `validation_and_identity_are_typed_and_stable`; rank
 //!   distinction: `stored_identity_is_shared_and_distinguishes_rank`.
@@ -34,6 +33,10 @@ fn stateless_rules_are_identified_by_their_type() {
     assert_eq!(
         CU1FusionRule.rule_identity(),
         RuleIdentity::of_type::<CU1FusionRule>()
+    );
+    assert_eq!(
+        SU2FusionRule.rule_identity(),
+        RuleIdentity::of_type::<SU2FusionRule>()
     );
 }
 
@@ -167,7 +170,7 @@ fn product_identity_composes_factor_identities_under_the_codec() {
 }
 
 #[test]
-fn table_identity_is_the_fingerprint_under_the_table_tag() {
+fn table_identity_is_the_uuid_under_the_table_tag() {
     assert_eq!(
         TableRule::fibonacci().rule_identity(),
         table_identity(&fusion_symbols::table::TableCategory::fibonacci())
