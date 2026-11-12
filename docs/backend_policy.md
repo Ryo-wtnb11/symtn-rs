@@ -37,8 +37,8 @@ on a serial engine allocates nothing; that staging keeps its high-water
 capacity and is part of `ContractWorkspace::retained_bytes`. A pooled
 engine's multi-lane fork still hands its lanes their jobs per call. Offsets, payloads, `alpha`/`beta` and the engine's width and
 policy are execute-time inputs, not part of the key. Each entry is charged
-its inline size, key and entry overhead, 16 KiB, and 8 bytes per
-`3m + 3n + 2k + 4` (a Packed plan's scatter vectors); with a budget of zero,
+the plan's own retained bytes as tcontract reports them, plus its key and
+the entry overhead; with a budget of zero,
 or for an entry the budget rejects, every call prepares its plans as before
 with the same results. For initialized destinations this holds for the faer
 provider and the four payload scalars only; BLAS and CUDA builds prepare as

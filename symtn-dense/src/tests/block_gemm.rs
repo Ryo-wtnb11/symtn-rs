@@ -505,7 +505,9 @@ fn zero_depth_jobs_scale_their_destinations() {
 
 mod plan_cache {
     use super::*;
-    use crate::block_kernel::gemm::{cached_plan, GemmPlanCache, Geometry};
+    use crate::block_kernel::gemm::{
+        cached_plan, GemmPlanCache, GemmPlanKey, Geometry, ENTRY_OVERHEAD_BYTES,
+    };
     use std::sync::Arc;
     use symtn_core::{ErasedStructureCacheControl, StructureCache, StructureCacheKind};
     use tcontract::api::Scalar as PlanScalar;
@@ -747,5 +749,28 @@ mod plan_cache {
         assert!(!Arc::ptr_eq(&before, &after));
         assert_eq!(execute(&before, &at), execute(&after, &at));
         assert_eq!(cache.info().entries(), 1);
+    }
+
+    #[test]
+    fn an_entry_is_charged_its_plans_retained_bytes_plus_the_fixed_overhead() {
+        // What: the cache statistic is the plan's own footprint, as tcontract
+        // counts it, plus the key and entry overhead, for every strategy a
+        // block GEMM plans.
+        let fixed = (std::mem::size_of::<GemmPlanKey>() + ENTRY_OVERHEAD_BYTES) as u64;
+        for (mkn, want) in [
+            ((3, 4, 2), Algorithm::Faer),
+            ((1, 4, 1), Algorithm::InnerProduct),
+            ((64, 64, 64), Algorithm::Packed),
+        ] {
+            let cache = cache(1 << 26);
+            let at = geometry(mkn, [MatrixOp::Adjoint, MatrixOp::Identity]);
+            let plan = cached_plan::<Complex64>(&cache, at).unwrap();
+            assert_eq!(plan.report().algorithm, want, "{mkn:?}: premise");
+            assert_eq!(
+                cache.info().charged_bytes(),
+                plan.retained_bytes() as u64 + fixed,
+                "{mkn:?}"
+            );
+        }
     }
 }

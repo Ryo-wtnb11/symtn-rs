@@ -111,33 +111,15 @@ pub(crate) type GemmPlanCache = StructureCache<GemmPlanKey, ErasedPlan>;
 /// completed-transformer cache charges).
 pub(crate) const ENTRY_OVERHEAD_BYTES: usize = 10 * core::mem::size_of::<usize>();
 
-/// Heap a plan owns besides its scatter vectors: the problem's layouts and
-/// roles, the report and diagnostics, a Packed plan's box with its resolved
-/// kernel and folded axes. Checked against live allocations for every dtype,
-/// strategy and op lowering by the dense `gemm_plan_charge` test.
-const PLAN_HEAP_ALLOWANCE: usize = 16 * 1024;
-
-/// The bytes charged for one cached plan: its inline size, the key, the
-/// entry overhead and a bound on its heap. A Packed plan owns one `i64`
-/// scatter entry per role element (`a_m, c_m, d_m` and `b_n, c_n, d_n` of
-/// `m` and `n` entries, `a_k, b_k` of `k`, four batch entries), extents
-/// counted as at least one; a Faer plan owns less. Saturates.
-pub(crate) fn charge<T: Scalar>(key: &GemmPlanKey) -> u64 {
-    let [m, k, n] = key.geometry.mkn.map(|extent| extent.max(1) as u64);
-    let scatter = m
-        .saturating_add(n)
-        .saturating_mul(3)
-        .saturating_add(k.saturating_mul(2))
-        .saturating_add(4)
-        .saturating_mul(core::mem::size_of::<i64>() as u64);
-    [
-        core::mem::size_of::<Plan<T>>(),
-        core::mem::size_of::<GemmPlanKey>(),
-        ENTRY_OVERHEAD_BYTES,
-        PLAN_HEAP_ALLOWANCE,
-    ]
-    .into_iter()
-    .fold(scatter, |total, bytes| total.saturating_add(bytes as u64))
+/// The bytes charged for one cached plan: what the plan keeps alive (its
+/// inline size and every heap allocation it owns, as tcontract counts them
+/// once at build), the key and the entry overhead. Saturates.
+pub(crate) fn charge<T: Scalar>(plan: &Plan<T>) -> u64 {
+    [core::mem::size_of::<GemmPlanKey>(), ENTRY_OVERHEAD_BYTES]
+        .into_iter()
+        .fold(plan.retained_bytes() as u64, |total, bytes| {
+            total.saturating_add(bytes as u64)
+        })
 }
 
 struct GemmPlansControl;
@@ -189,10 +171,12 @@ pub(crate) fn cached_plan<T: Scalar>(
     };
     let epoch = symtn_core::core_reset_epoch();
     let plan = cache.get_or_try_build(&key, epoch, || {
-        let plan: Arc<ErasedPlan> = Arc::new(geometry.plan::<T>()?);
+        let plan = geometry.plan::<T>()?;
         #[cfg(test)]
         crate::probe::add(crate::probe::Event::GemmPlanBuild, 1);
-        Ok::<_, tcontract::Error>((plan, charge::<T>(&key)))
+        let bytes = charge(&plan);
+        let plan: Arc<ErasedPlan> = Arc::new(plan);
+        Ok::<_, tcontract::Error>((plan, bytes))
     })?;
     Ok(plan
         .downcast::<Plan<T>>()
