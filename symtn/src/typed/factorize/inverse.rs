@@ -1,5 +1,5 @@
 use super::*;
-use symtn_matrixalgebra::seam::{ExecutorLease, FactorSpaceAuthority};
+use symtn_matrixalgebra::seam::FactorSpaceAuthority;
 
 impl<R, D> TensorMap<R, D>
 where
@@ -30,11 +30,16 @@ where
         let output = self.swapped_output_space()?;
         let (space, data) = self.dense_operand()?;
         let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
-        let factor = RuntimeDense(&self.runtime)
-            .run(|dense| {
-                symtn_matrixalgebra::seam::inv_direct_into_dyn(engine, dense, &input, output)
-            })
-            .map_err(Error::from)?;
+        let factor = symtn_matrixalgebra::seam::matrix_function(
+            engine,
+            RuntimeDense(&self.runtime),
+            symtn_matrixalgebra::seam::op::Inv,
+            symtn_matrixalgebra::seam::MatrixFunctionSource::Dense {
+                input,
+                output_space: output,
+            },
+        )
+        .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
 
@@ -46,9 +51,10 @@ where
         engine: &mut dyn Engine,
         rcond: f64,
     ) -> Result<Self, FacadeError<R>> {
-        // Ahead of every arm, so all of them answer alike: the dense seams
-        // repeat this check for their own expert callers, but the compact arm
-        // never reaches a seam. TensorKit's `pinv` has no space check.
+        // Ahead of every arm, so all of them answer alike: the dense arms of
+        // the seam repeat this check for their own expert callers, but its
+        // compact arm relies on this one, as on the compact admission below.
+        // TensorKit's `pinv` has no space check.
         if !rcond.is_finite() || rcond < 0.0 {
             return Err(Error::InvalidArgument(
                 "pinv rcond must be finite and non-negative".to_string(),
@@ -62,38 +68,48 @@ where
                 AdjointRule::AdjointSeam
             ))
         };
-        if let Some(spectrum) = self.spectrum() {
+        let op = symtn_matrixalgebra::seam::op::Pinv {
+            rcond,
+            reciprocal: |value: D| value.recip_value(),
+        };
+        let operand;
+        let source = if let Some(spectrum) = self.spectrum() {
             self.admit_compact(spectrum)?;
-            let inverted =
-                symtn_matrixalgebra::seam::pinv_diagonal_spectrum(spectrum, rcond, |value: D| {
-                    value.recip_value()
-                })
-                .map_err(Error::from)?;
-            return Ok(self.with_spectrum(inverted));
-        }
-        let output = self.swapped_output_space()?;
-        let factor = match &self.repr {
-            TypedTensorRepr::Adjoint(view) => {
-                let parent = BoundDynamicTensorRef::try_new(&view.parent.space, view.parent_data())
-                    .map_err(Error::from)?;
-                RuntimeDense(&self.runtime).run(|dense| {
-                    symtn_matrixalgebra::seam::pinv_adjoint_parent_direct_into_dyn(
-                        engine, dense, &parent, output, rcond,
-                    )
-                })
+            symtn_matrixalgebra::seam::MatrixFunctionSource::Diagonal {
+                space: self.logical_space(),
+                spectrum,
             }
-            TypedTensorRepr::Owned(_) => {
-                let (space, data) = self.dense_operand()?;
-                let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
-                RuntimeDense(&self.runtime).run(|dense| {
-                    symtn_matrixalgebra::seam::pinv_direct_into_dyn(
-                        engine, dense, &input, output, rcond,
-                    )
-                })
+        } else {
+            let output_space = self.swapped_output_space()?;
+            match &self.repr {
+                TypedTensorRepr::Adjoint(view) => {
+                    symtn_matrixalgebra::seam::MatrixFunctionSource::AdjointOf {
+                        parent: BoundDynamicTensorRef::try_new(
+                            &view.parent.space,
+                            view.parent_data(),
+                        )
+                        .map_err(Error::from)?,
+                        output_space,
+                    }
+                }
+                TypedTensorRepr::Owned(_) => {
+                    operand = self.dense_operand()?;
+                    symtn_matrixalgebra::seam::MatrixFunctionSource::Dense {
+                        input: BoundDynamicTensorRef::try_new(operand.0, &operand.1)
+                            .map_err(Error::from)?,
+                        output_space,
+                    }
+                }
             }
-        }
+        };
+        let out = symtn_matrixalgebra::seam::matrix_function(
+            engine,
+            RuntimeDense(&self.runtime),
+            op,
+            source,
+        )
         .map_err(Error::from)?;
-        Ok(wrap_factor_on(&self.runtime, factor))
+        self.factor_output(engine, out)
     }
 }
 

@@ -15,11 +15,14 @@ use symtn_tensors::{
     TreeTransformRuleCacheKey,
 };
 
+use symtn_tensors::BoundDynamicFusionMapSpace;
+
 use crate::factorize::{
     exp_via_eigh_dyn_into, inverse_by_sector_dyn_into, is_hermitian_endomorphism_dyn,
-    map_square_sectors_dyn_into, pinv_adjoint_by_sector_dyn_into, pinv_by_sector_dyn_into,
-    solve_left_by_sector_dyn_into, BoundDynFactor, BoundDynamicTensorRef, EndomorphismFamily,
-    FactorScalar,
+    map_square_sectors_dyn_into, op, pinv_adjoint_by_sector_dyn_into, pinv_by_sector_dyn_into,
+    pinv_diagonal_spectrum, solve_left_by_sector_dyn_into, Apply, BoundDynFactor,
+    BoundDynamicTensorRef, EndomorphismFamily, ExecutorLease, FactorOutput, FactorScalar,
+    SectorSpectrum, Token, TOKEN,
 };
 #[cfg(test)]
 use crate::factorize::{typed_from_bound_factor, BoundTensorMap, BoundTensorMapRef};
@@ -75,8 +78,7 @@ where
 ///   first in sector order;
 /// - see [`exp_pade13_sector`] for the Padé route's value errors; nonfinite
 ///   input is never Hermitian, so it always reaches that route.
-#[doc(hidden)]
-pub fn exp_direct_into_dyn<E, R, D>(
+pub(crate) fn exp_direct_into_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -849,8 +851,7 @@ where
 /// here: a non-square stored block is refused, but a coupled sector stored
 /// on only one side is not, and the result is then the inverse on the stored
 /// sector intersection rather than an error.
-#[doc(hidden)]
-pub fn inv_direct_into_dyn<E, R, D>(
+pub(crate) fn inv_direct_into_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -871,8 +872,7 @@ where
 /// None on the operand's shape: a pseudo-inverse is defined for every map, so
 /// no isomorphism is assumed. `output_space` must be the operand's swapped
 /// space on its provider, which this seam validates.
-#[doc(hidden)]
-pub fn pinv_direct_into_dyn<E, R, D>(
+pub(crate) fn pinv_direct_into_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     input: &BoundDynamicTensorRef<'_, R, D>,
@@ -889,8 +889,7 @@ where
 
 /// Context-free pseudo-inverse of the logical adjoint of `parent`, read in
 /// place, into a caller-admitted output space (`parent`'s hom space).
-#[doc(hidden)]
-pub fn pinv_adjoint_parent_direct_into_dyn<E, R, D>(
+fn pinv_adjoint_parent_direct_into_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     parent: &BoundDynamicTensorRef<'_, R, D>,
@@ -920,8 +919,7 @@ where
 /// here: a non-square stored divisor block is refused, but a coupled sector
 /// stored on only one side is not, and the result is then the solve on the
 /// stored sector intersection rather than an error.
-#[doc(hidden)]
-pub fn solve_left_direct_into_dyn<E, R, D>(
+pub(crate) fn solve_left_direct_into_dyn<E, R, D>(
     engine: &mut dyn Engine,
     dense: &mut E,
     divisor: &BoundDynamicTensorRef<'_, R, D>,
@@ -933,6 +931,228 @@ where
     D: FactorScalar,
 {
     solve_left_by_sector_dyn_into(engine, dense, divisor, rhs, output_space)
+}
+
+/// The storage a matrix function reads. A dense route writes its result in
+/// `output_space`, the layout its caller admitted; a compact diagonal stays
+/// on its own space.
+pub enum MatrixFunctionSource<'a, R, D> {
+    Dense {
+        input: BoundDynamicTensorRef<'a, R, D>,
+        output_space: BoundDynamicFusionMapSpace<R>,
+    },
+    /// The adjoint of the dense `parent`, read in place. Only
+    /// [`op::Pinv`] has a lazy-adjoint route; the other operations refuse it
+    /// before any lease or value scan.
+    AdjointOf {
+        parent: BoundDynamicTensorRef<'a, R, D>,
+        output_space: BoundDynamicFusionMapSpace<R>,
+    },
+    /// A compact diagonal its caller admitted. Only [`op::Pinv`] has a
+    /// compact route; the other operations refuse it before any lease or
+    /// value scan.
+    Diagonal {
+        space: &'a BoundDynamicFusionMapSpace<R>,
+        spectrum: &'a [SectorSpectrum<D>],
+    },
+}
+
+/// One matrix function (exp, inv, pinv, solve), chosen by an [`op`] value;
+/// its result type is fixed per operation.
+pub trait MatrixFunctionOp<R, D: FactorScalar>: Apply<R, D> {
+    type Output;
+}
+
+/// The one entry of the matrix functions: `op` of `source`. Only a dense
+/// route leases an executor from `lease`, and it runs its whole body inside
+/// that lease.
+///
+/// | Op | `Dense` | `AdjointOf` | `Diagonal` |
+/// |---|---|---|---|
+/// | [`op::Exp`] | `exp(input)` | refused | refused |
+/// | [`op::Inv`] | `input^-1` | refused | refused |
+/// | [`op::Solve`] | `input \ rhs` | refused | refused |
+/// | [`op::Pinv`] | `input^+` | `(parent^H)^+` | `spectrum^+` |
+///
+/// A refused source is an
+/// [`OperationError::UnsupportedTensorContractScope`], before any lease or
+/// value scan.
+///
+/// # Preconditions
+///
+/// - A dense `output_space` is the result's layout on the input's provider:
+///   the input's hom space for exp and for the adjoint pseudo-inverse (the
+///   parent's), the swapped hom space for inv and pinv, and
+///   `domain(input) <- domain(rhs)` for solve. The caller admits it; each
+///   route keeps its own layout checks, and only pinv and solve also compare
+///   its provider with the input's.
+/// - [`op::Inv`] and [`op::Solve`] require `codomain ≅ domain` of `input`
+///   per coupled sector, checked by the caller through the mode's
+///   factor-space authority
+///   ([`FactorSpaceAuthority::isomorphic`](crate::seam::FactorSpaceAuthority::isomorphic));
+///   the facade is that admitting caller. A violation is not reliably
+///   detected here: a non-square stored block is refused, but a coupled
+///   sector stored on only one side is not, and the result is then the
+///   inverse or solve on the stored sector intersection rather than an
+///   error.
+/// - A `Diagonal` source is structurally admitted by its caller
+///   ([`admit_compact_diagonal`](crate::seam::admit_compact_diagonal)), and
+///   its pseudo-inverse relies on the caller's check of
+///   [`op::Pinv::rcond`]; the dense pseudo-inverse routes check `rcond`
+///   themselves.
+///
+/// The execution hook behind it takes a token only this crate constructs,
+/// so a generic bound on the public trait does not reach it:
+///
+/// ```compile_fail,E0308
+/// use symtn_matrixalgebra::seam::{ExecutorLease, MatrixFunctionOp, MatrixFunctionSource};
+/// use symtn_matrixalgebra::FactorScalar;
+///
+/// fn bypass<O: MatrixFunctionOp<R, D>, L: ExecutorLease, R, D: FactorScalar>(
+///     engine: &mut dyn symtn_dense::Engine,
+///     lease: L,
+///     op: O,
+///     source: MatrixFunctionSource<'_, R, D>,
+/// ) {
+///     let _ = O::apply(op, (), engine, lease, source);
+/// }
+/// ```
+pub fn matrix_function<O, L, R, D>(
+    engine: &mut dyn Engine,
+    lease: L,
+    op: O,
+    source: MatrixFunctionSource<'_, R, D>,
+) -> Result<O::Output, OperationError>
+where
+    O: MatrixFunctionOp<R, D>,
+    L: ExecutorLease,
+    D: FactorScalar,
+{
+    op.apply(TOKEN, engine, lease, source)
+}
+
+fn no_route(message: &'static str) -> OperationError {
+    OperationError::UnsupportedTensorContractScope { message }
+}
+
+/// The source dispatch of exp, inv and solve, which have a dense route
+/// only.
+fn dense_only<L, R, D, T>(
+    engine: &mut dyn Engine,
+    lease: L,
+    source: MatrixFunctionSource<'_, R, D>,
+    run: impl FnOnce(
+        &mut dyn Engine,
+        &mut L::Executor,
+        &BoundDynamicTensorRef<'_, R, D>,
+        BoundDynamicFusionMapSpace<R>,
+    ) -> Result<T, OperationError>,
+) -> Result<T, OperationError>
+where
+    L: ExecutorLease,
+{
+    match source {
+        MatrixFunctionSource::Dense {
+            input,
+            output_space,
+        } => lease.run(|dense| run(engine, dense, &input, output_space)),
+        MatrixFunctionSource::AdjointOf { .. } => Err(no_route(
+            "this matrix function has no lazy-adjoint route; materialize or redirect the adjoint",
+        )),
+        MatrixFunctionSource::Diagonal { .. } => Err(no_route(
+            "this matrix function has no compact route; its caller maps the diagonal",
+        )),
+    }
+}
+
+impl<R, D: FactorScalar> MatrixFunctionOp<R, D> for op::Exp {
+    type Output = BoundDynFactor<R, D>;
+}
+
+impl<R, D: FactorScalar> Apply<R, D> for op::Exp {
+    fn apply<L: ExecutorLease>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: MatrixFunctionSource<'_, R, D>,
+    ) -> Result<<Self as MatrixFunctionOp<R, D>>::Output, OperationError> {
+        dense_only(engine, lease, source, exp_direct_into_dyn)
+    }
+}
+
+impl<R, D: FactorScalar> MatrixFunctionOp<R, D> for op::Inv {
+    type Output = BoundDynFactor<R, D>;
+}
+
+impl<R, D: FactorScalar> Apply<R, D> for op::Inv {
+    fn apply<L: ExecutorLease>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: MatrixFunctionSource<'_, R, D>,
+    ) -> Result<<Self as MatrixFunctionOp<R, D>>::Output, OperationError> {
+        dense_only(engine, lease, source, inv_direct_into_dyn)
+    }
+}
+
+impl<R, D: FactorScalar> MatrixFunctionOp<R, D> for op::Solve<'_, R, D> {
+    type Output = BoundDynFactor<R, D>;
+}
+
+impl<R, D: FactorScalar> Apply<R, D> for op::Solve<'_, R, D> {
+    fn apply<L: ExecutorLease>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: MatrixFunctionSource<'_, R, D>,
+    ) -> Result<<Self as MatrixFunctionOp<R, D>>::Output, OperationError> {
+        dense_only(engine, lease, source, |engine, dense, divisor, output| {
+            solve_left_direct_into_dyn(engine, dense, divisor, &self.rhs, output)
+        })
+    }
+}
+
+impl<R, D: FactorScalar, F: Fn(D) -> D> MatrixFunctionOp<R, D> for op::Pinv<F> {
+    type Output = FactorOutput<R, D>;
+}
+
+impl<R, D: FactorScalar, F: Fn(D) -> D> Apply<R, D> for op::Pinv<F> {
+    fn apply<L: ExecutorLease>(
+        self,
+        _: Token,
+        engine: &mut dyn Engine,
+        lease: L,
+        source: MatrixFunctionSource<'_, R, D>,
+    ) -> Result<<Self as MatrixFunctionOp<R, D>>::Output, OperationError> {
+        let rcond = self.rcond;
+        match source {
+            MatrixFunctionSource::Dense {
+                input,
+                output_space,
+            } => lease
+                .run(|dense| pinv_direct_into_dyn(engine, dense, &input, output_space, rcond))
+                .map(FactorOutput::Dense),
+            MatrixFunctionSource::AdjointOf {
+                parent,
+                output_space,
+            } => lease
+                .run(|dense| {
+                    pinv_adjoint_parent_direct_into_dyn(engine, dense, &parent, output_space, rcond)
+                })
+                .map(FactorOutput::Dense),
+            MatrixFunctionSource::Diagonal { space, spectrum } => {
+                pinv_diagonal_spectrum(spectrum, rcond, self.reciprocal).map(|values| {
+                    FactorOutput::Diagonal {
+                        space: space.clone(),
+                        values,
+                    }
+                })
+            }
+        }
+    }
 }
 
 // Test fixtures: each seam into the multiplicity-free layout derived from the

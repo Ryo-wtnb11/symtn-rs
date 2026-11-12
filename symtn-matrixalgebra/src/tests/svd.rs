@@ -8,7 +8,7 @@ mod derived;
 mod full;
 
 /// The dense executor of a stage that must not run, counting the leases.
-struct CountingLease<'a>(&'a Cell<usize>);
+pub(super) struct CountingLease<'a>(pub(super) &'a Cell<usize>);
 
 impl ExecutorLease for CountingLease<'_> {
     type Executor = symtn_dense::DefaultDenseExecutor;

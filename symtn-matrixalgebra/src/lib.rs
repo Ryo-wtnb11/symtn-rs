@@ -41,25 +41,24 @@ pub use truncation::{
 /// stable API: every item here exists because a `symtn` module or example
 /// calls it, and the public API snapshot (`api/`) records the exact list.
 /// The svd, qr/lq/null, eigh/eig and polar factorizations have one entry,
-/// [`factor`](seam::factor), chosen by an [`op`](seam::op) value.
+/// [`factor`](seam::factor), and the matrix functions (exp, inv, pinv,
+/// solve) have one entry, [`matrix_function`](seam::matrix_function); each is
+/// chosen by an [`op`](seam::op) value.
 #[doc(hidden)]
 pub mod seam {
     pub use crate::factorize::{
         admit_compact_diagonal, ascending_eigh_order, axpby_axis_by_spectrum_into,
         compact_factor_routes, coupled_sector_block_dimensions_generic_checked,
         decide_bond_truncation, diagonal_bond_data, eigh_sector_into, factor, in_linalg_scope,
-        nonfinite_factor_input, op, pinv_diagonal_spectrum, rectangular_diagonal_bond_tensor,
-        require_finite_eigh_input, scale_axis_by_spectrum_mapped, spectrum_bond,
-        validate_endomorphism_region_stacking, validate_hermitian_regions, BoundDynamicTensorRef,
-        CheckedGenericFactorPlanError, CompactFactorPlan, CompactFactorRoute, EigFullDyn,
-        EighFullDyn, EighScratch, EndomorphismFamily, ExecutorLease, FactorFamily, FactorMode,
-        FactorOp, FactorOutput, FactorSource, FactorSpaceAuthority, SvdFactorsDyn,
-        EIGH_EIGENVALUE_CHECK, EIGH_NOT_HERMITIAN, EIGH_NOT_SQUARE,
+        nonfinite_factor_input, op, rectangular_diagonal_bond_tensor, require_finite_eigh_input,
+        scale_axis_by_spectrum_mapped, spectrum_bond, validate_endomorphism_region_stacking,
+        validate_hermitian_regions, BoundDynamicTensorRef, CheckedGenericFactorPlanError,
+        CompactFactorPlan, CompactFactorRoute, EigFullDyn, EighFullDyn, EighScratch,
+        EndomorphismFamily, ExecutorLease, FactorFamily, FactorMode, FactorOp, FactorOutput,
+        FactorSource, FactorSpaceAuthority, SvdFactorsDyn, EIGH_EIGENVALUE_CHECK,
+        EIGH_NOT_HERMITIAN, EIGH_NOT_SQUARE,
     };
-    pub use crate::matrix_functions::{
-        exp_direct_into_dyn, inv_direct_into_dyn, pinv_adjoint_parent_direct_into_dyn,
-        pinv_direct_into_dyn, solve_left_direct_into_dyn,
-    };
+    pub use crate::matrix_functions::{matrix_function, MatrixFunctionOp, MatrixFunctionSource};
     pub use crate::truncation::rescaled_power_norm;
 }
 
@@ -88,7 +87,8 @@ use factorize::{
 use factorize::{eigh_full_dyn, svd_compact_dyn_checked_generic, svd_vals_dyn};
 #[cfg(test)]
 use matrix_functions::{
-    exp, exp_into_mf, inv, inv_into_mf, pinv, pinv_adjoint_parent_into_mf, pinv_into_mf,
+    exp, exp_direct_into_dyn, exp_into_mf, inv, inv_direct_into_dyn, inv_into_mf, pinv,
+    pinv_adjoint_parent_into_mf, pinv_direct_into_dyn, pinv_into_mf, solve_left_direct_into_dyn,
     solve_left_into_mf,
 };
 #[cfg(test)]
