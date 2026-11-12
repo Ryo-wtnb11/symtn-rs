@@ -1,5 +1,5 @@
 use super::*;
-use symtn_matrixalgebra::seam::{ExecutorLease, FactorSpaceAuthority};
+use symtn_matrixalgebra::seam::FactorSpaceAuthority;
 
 impl<R, D> TensorMap<R, D>
 where
@@ -39,11 +39,16 @@ where
             .transpose()?;
         let (space, data) = local.as_ref().unwrap_or(self).dense_operand()?;
         let input = BoundDynamicTensorRef::try_new(space, &data).map_err(Error::from)?;
-        let factor = RuntimeDense(&self.runtime)
-            .run(|dense| {
-                symtn_matrixalgebra::seam::exp_direct_into_dyn(engine, dense, &input, output)
-            })
-            .map_err(Error::from)?;
+        let factor = symtn_matrixalgebra::seam::matrix_function(
+            engine,
+            RuntimeDense(&self.runtime),
+            symtn_matrixalgebra::seam::op::Exp,
+            symtn_matrixalgebra::seam::MatrixFunctionSource::Dense {
+                input,
+                output_space: output,
+            },
+        )
+        .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
 
@@ -118,13 +123,16 @@ where
         let divisor =
             BoundDynamicTensorRef::try_new(divisor_space, &divisor_data).map_err(Error::from)?;
         let rhs = BoundDynamicTensorRef::try_new(rhs_space, &rhs_data).map_err(Error::from)?;
-        let factor = RuntimeDense(&self.runtime)
-            .run(|dense| {
-                symtn_matrixalgebra::seam::solve_left_direct_into_dyn(
-                    engine, dense, &divisor, &rhs, output,
-                )
-            })
-            .map_err(Error::from)?;
+        let factor = symtn_matrixalgebra::seam::matrix_function(
+            engine,
+            RuntimeDense(&self.runtime),
+            symtn_matrixalgebra::seam::op::Solve { rhs },
+            symtn_matrixalgebra::seam::MatrixFunctionSource::Dense {
+                input: divisor,
+                output_space: output,
+            },
+        )
+        .map_err(Error::from)?;
         Ok(wrap_factor_on(&self.runtime, factor))
     }
 

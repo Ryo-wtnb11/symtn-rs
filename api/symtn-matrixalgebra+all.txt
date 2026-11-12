@@ -17,6 +17,12 @@ pub struct symtn_matrixalgebra::seam::op::EighVals
 pub symtn_matrixalgebra::seam::op::EighVals::hermitian_tol: symtn_matrixalgebra::HermitianTol
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::EighVals
 pub type symtn_matrixalgebra::seam::op::EighVals::Output = alloc::vec::Vec<symtn_matrixalgebra::SectorSpectrum>
+pub struct symtn_matrixalgebra::seam::op::Exp
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Exp
+pub type symtn_matrixalgebra::seam::op::Exp::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
+pub struct symtn_matrixalgebra::seam::op::Inv
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Inv
+pub type symtn_matrixalgebra::seam::op::Inv::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
 pub struct symtn_matrixalgebra::seam::op::LeftNull
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::LeftNull
 pub type symtn_matrixalgebra::seam::op::LeftNull::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
@@ -29,6 +35,11 @@ pub type symtn_matrixalgebra::seam::op::LqCompact::Output = symtn_matrixalgebra:
 pub struct symtn_matrixalgebra::seam::op::LqFull
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::LqFull
 pub type symtn_matrixalgebra::seam::op::LqFull::Output = symtn_matrixalgebra::Lq<symtn_matrixalgebra::seam::FactorOutput<R, D>>
+pub struct symtn_matrixalgebra::seam::op::Pinv<F>
+pub symtn_matrixalgebra::seam::op::Pinv::rcond: f64
+pub symtn_matrixalgebra::seam::op::Pinv::reciprocal: F
+impl<R, D: symtn_matrixalgebra::FactorScalar, F: core::ops::function::Fn(D) -> D> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Pinv<F>
+pub type symtn_matrixalgebra::seam::op::Pinv<F>::Output = symtn_matrixalgebra::seam::FactorOutput<R, D>
 pub struct symtn_matrixalgebra::seam::op::QrCompact
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::QrCompact
 pub type symtn_matrixalgebra::seam::op::QrCompact::Output = symtn_matrixalgebra::Qr<symtn_matrixalgebra::seam::FactorOutput<R, D>>
@@ -41,6 +52,10 @@ pub type symtn_matrixalgebra::seam::op::RightNull::Output = symtn_matrixalgebra:
 pub struct symtn_matrixalgebra::seam::op::RightPolar
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::RightPolar
 pub type symtn_matrixalgebra::seam::op::RightPolar::Output = symtn_matrixalgebra::RightPolar<symtn_matrixalgebra::seam::FactorOutput<R, D>>
+pub struct symtn_matrixalgebra::seam::op::Solve<'a, R, D>
+pub symtn_matrixalgebra::seam::op::Solve::rhs: symtn_tensors::bound_tensor::BoundDynamicTensorRef<'a, R, D>
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Solve<'_, R, D>
+pub type symtn_matrixalgebra::seam::op::Solve<'_, R, D>::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
 pub struct symtn_matrixalgebra::seam::op::SvdCompact
 impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::FactorOp<R, D> for symtn_matrixalgebra::seam::op::SvdCompact
 pub type symtn_matrixalgebra::seam::op::SvdCompact::Output = (symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_matrixalgebra::BoundDynFactor<R, D>, alloc::vec::Vec<symtn_matrixalgebra::SectorSpectrum>)
@@ -119,6 +134,16 @@ pub symtn_matrixalgebra::seam::FactorSource::Dense(symtn_tensors::bound_tensor::
 pub symtn_matrixalgebra::seam::FactorSource::Diagonal
 pub symtn_matrixalgebra::seam::FactorSource::Diagonal::space: &'a symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
 pub symtn_matrixalgebra::seam::FactorSource::Diagonal::spectrum: &'a [symtn_matrixalgebra::SectorSpectrum<D>]
+pub enum symtn_matrixalgebra::seam::MatrixFunctionSource<'a, R, D>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::AdjointOf
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::AdjointOf::output_space: symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::AdjointOf::parent: symtn_tensors::bound_tensor::BoundDynamicTensorRef<'a, R, D>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Dense
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Dense::input: symtn_tensors::bound_tensor::BoundDynamicTensorRef<'a, R, D>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Dense::output_space: symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Diagonal
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Diagonal::space: &'a symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>
+pub symtn_matrixalgebra::seam::MatrixFunctionSource::Diagonal::spectrum: &'a [symtn_matrixalgebra::SectorSpectrum<D>]
 pub struct symtn_matrixalgebra::seam::CompactFactorPlan
 impl symtn_matrixalgebra::seam::CompactFactorPlan
 pub fn symtn_matrixalgebra::seam::CompactFactorPlan::bond_space<R>(&self, &symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
@@ -234,6 +259,16 @@ pub fn symtn_matrixalgebra::seam::FactorSpaceAuthority::isomorphic(&self, &symtn
 pub fn symtn_matrixalgebra::seam::FactorSpaceAuthority::output_space(&self, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::RootError>
 pub fn symtn_matrixalgebra::seam::FactorSpaceAuthority::same_homspace_output(&self, &symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, Self::RootError>
 pub fn symtn_matrixalgebra::seam::FactorSpaceAuthority::stage(&self, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self::Staged, Self::Error>
+pub trait symtn_matrixalgebra::seam::MatrixFunctionOp<R, D: symtn_matrixalgebra::FactorScalar>: symtn_matrixalgebra::factorize::exec::Apply<R, D>
+pub type symtn_matrixalgebra::seam::MatrixFunctionOp::Output
+impl<R, D: symtn_matrixalgebra::FactorScalar, F: core::ops::function::Fn(D) -> D> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Pinv<F>
+pub type symtn_matrixalgebra::seam::op::Pinv<F>::Output = symtn_matrixalgebra::seam::FactorOutput<R, D>
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Exp
+pub type symtn_matrixalgebra::seam::op::Exp::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Inv
+pub type symtn_matrixalgebra::seam::op::Inv::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
+impl<R, D: symtn_matrixalgebra::FactorScalar> symtn_matrixalgebra::seam::MatrixFunctionOp<R, D> for symtn_matrixalgebra::seam::op::Solve<'_, R, D>
+pub type symtn_matrixalgebra::seam::op::Solve<'_, R, D>::Output = symtn_matrixalgebra::BoundDynFactor<R, D>
 pub fn symtn_matrixalgebra::seam::admit_compact_diagonal<M, R, D>(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[symtn_matrixalgebra::SectorSpectrum<D>]) -> core::result::Result<(), <M as symtn_matrixalgebra::seam::FactorMode>::Error> where M: symtn_matrixalgebra::seam::FactorMode<R>
 pub fn symtn_matrixalgebra::seam::ascending_eigh_order(&[f64], &mut [usize]) -> bool
 pub fn symtn_matrixalgebra::seam::axpby_axis_by_spectrum_into<D, V>(&symtn_tensors::contract::dynamic_space::DynamicFusionMapSpace, &mut [D], &[D], core::option::Option<usize>, &[symtn_matrixalgebra::SectorSpectrum<V>], impl core::ops::function::Fn(V) -> D, D, D) -> core::result::Result<(), symtn_operations::error::OperationError> where D: symtn_matrixalgebra::FactorScalar, V: core::marker::Copy
@@ -242,19 +277,14 @@ pub fn symtn_matrixalgebra::seam::coupled_sector_block_dimensions_generic_checke
 pub fn symtn_matrixalgebra::seam::decide_bond_truncation<M, R, V>(&R, &[symtn_matrixalgebra::SectorSpectrum<V>], &symtn_matrixalgebra::truncation::Truncation, &symtn_sectors::rule_identity::RuleIdentity, impl core::ops::function::Fn(symtn_sectors::SectorId) -> symtn_sectors::algebra::SectorOrderKey) -> core::result::Result<symtn_matrixalgebra::truncation::TruncationDecision, <M as symtn_tensors::mode::CoefficientAlgebra>::Error> where M: symtn_tensors::mode::RigidCoefficientAlgebra<R>, V: symtn_matrixalgebra::SpectrumMagnitude
 pub fn symtn_matrixalgebra::seam::diagonal_bond_data<D, V>(&symtn_tensors::contract::dynamic_space::DynamicFusionMapSpace, &[symtn_matrixalgebra::SectorSpectrum<V>], &dyn core::ops::function::Fn(V) -> D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: symtn_matrixalgebra::FactorScalar, V: core::marker::Copy
 pub fn symtn_matrixalgebra::seam::eigh_sector_into<E, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &[D], usize, &mut symtn_matrixalgebra::seam::EighScratch<D>, &mut [f64]) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
-pub fn symtn_matrixalgebra::seam::exp_direct_into_dyn<E, R, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::factor<M, O, L, R, D>(&mut dyn tenferro_tensor::backend::Engine, L, O, symtn_matrixalgebra::seam::FactorSource<'_, R, D>) -> core::result::Result<<O as symtn_matrixalgebra::seam::FactorOp>::Output, <M as symtn_matrixalgebra::seam::FactorMode>::Error> where M: symtn_matrixalgebra::seam::FactorMode<R>, O: symtn_matrixalgebra::seam::FactorOp<R, D>, L: symtn_matrixalgebra::seam::ExecutorLease, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::in_linalg_scope<E, T>(&mut dyn tenferro_tensor::backend::Engine, &mut E, impl core::ops::function::FnOnce(&mut dyn symtn_dense::executor::DenseExecutor, &mut dyn tenferro_tensor::backend::Engine) -> core::result::Result<T, symtn_operations::error::OperationError> + core::marker::Send) -> core::result::Result<T, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, T: core::marker::Send
-pub fn symtn_matrixalgebra::seam::inv_direct_into_dyn<E, R, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
+pub fn symtn_matrixalgebra::seam::matrix_function<O, L, R, D>(&mut dyn tenferro_tensor::backend::Engine, L, O, symtn_matrixalgebra::seam::MatrixFunctionSource<'_, R, D>) -> core::result::Result<<O as symtn_matrixalgebra::seam::MatrixFunctionOp>::Output, symtn_operations::error::OperationError> where O: symtn_matrixalgebra::seam::MatrixFunctionOp<R, D>, L: symtn_matrixalgebra::seam::ExecutorLease, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::nonfinite_factor_input(symtn_matrixalgebra::seam::FactorFamily) -> symtn_operations::error::OperationError
-pub fn symtn_matrixalgebra::seam::pinv_adjoint_parent_direct_into_dyn<E, R, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, f64) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
-pub fn symtn_matrixalgebra::seam::pinv_diagonal_spectrum<D: symtn_matrixalgebra::FactorScalar>(&[symtn_matrixalgebra::SectorSpectrum<D>], f64, impl core::ops::function::Fn(D) -> D) -> core::result::Result<alloc::vec::Vec<symtn_matrixalgebra::SectorSpectrum<D>>, symtn_operations::error::OperationError>
-pub fn symtn_matrixalgebra::seam::pinv_direct_into_dyn<E, R, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, f64) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::rectangular_diagonal_bond_tensor<A, R, D>(&A, &[symtn_matrixalgebra::SectorSpectrum], &alloc::collections::btree::map::BTreeMap<symtn_sectors::SectorId, usize>, &alloc::collections::btree::map::BTreeMap<symtn_sectors::SectorId, usize>) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, <A as symtn_matrixalgebra::seam::FactorSpaceAuthority>::Error> where A: symtn_matrixalgebra::seam::FactorSpaceAuthority<R>, <A as symtn_matrixalgebra::seam::FactorSpaceAuthority>::Error: core::convert::From<<A as symtn_matrixalgebra::seam::FactorSpaceAuthority>::RootError>, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::require_finite_eigh_input<D: symtn_matrixalgebra::FactorScalar>(&[D]) -> core::result::Result<(), symtn_operations::error::OperationError>
 pub fn symtn_matrixalgebra::seam::rescaled_power_norm<E>(f64, f64, impl core::ops::function::FnOnce() -> f64, impl core::ops::function::FnOnce(f64) -> core::result::Result<f64, E>) -> core::result::Result<f64, E>
 pub fn symtn_matrixalgebra::seam::scale_axis_by_spectrum_mapped<D, V>(&symtn_tensors::contract::dynamic_space::DynamicFusionMapSpace, &mut [D], core::option::Option<usize>, &[symtn_matrixalgebra::SectorSpectrum<V>], impl core::ops::function::Fn(V) -> D) -> core::result::Result<(), symtn_operations::error::OperationError> where D: symtn_matrixalgebra::FactorScalar, V: core::marker::Copy
-pub fn symtn_matrixalgebra::seam::solve_left_direct_into_dyn<E, R, D>(&mut dyn tenferro_tensor::backend::Engine, &mut E, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, &symtn_tensors::bound_tensor::BoundDynamicTensorRef<'_, R, D>, symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_matrixalgebra::BoundDynFactor<R, D>, symtn_operations::error::OperationError> where E: symtn_dense::executor::DenseExecutor + ?core::marker::Sized, D: symtn_matrixalgebra::FactorScalar
 pub fn symtn_matrixalgebra::seam::spectrum_bond<M, R, V>(&symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, &[symtn_matrixalgebra::SectorSpectrum<V>]) -> core::result::Result<symtn_tensors::contract::dynamic_space::BoundDynamicFusionMapSpace<R>, <M as symtn_matrixalgebra::seam::FactorMode>::Error> where M: symtn_matrixalgebra::seam::FactorMode<R>
 pub fn symtn_matrixalgebra::seam::validate_endomorphism_region_stacking(&[symtn_core::block_structure::content::CoupledSectorRegion], symtn_matrixalgebra::seam::EndomorphismFamily) -> core::result::Result<(), symtn_operations::error::OperationError>
 pub fn symtn_matrixalgebra::seam::validate_hermitian_regions<D: symtn_matrixalgebra::FactorScalar>(&[D], &[symtn_core::block_structure::content::CoupledSectorRegion], symtn_matrixalgebra::HermitianTol) -> core::result::Result<(), symtn_operations::error::OperationError>

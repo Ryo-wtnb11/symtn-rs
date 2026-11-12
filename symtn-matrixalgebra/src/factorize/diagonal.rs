@@ -22,7 +22,8 @@
 //! admit it through [`admit_compact_diagonal`], the structural half of
 //! [`diagonal_bond`]: they map nonfinite values through (#1986 covers
 //! factorizations only), and the pseudo-inverse refuses them in its own
-//! cutoff ([`pinv_diagonal_spectrum`]).
+//! cutoff (the [`op::Pinv`] diagonal arm of
+//! [`matrix_function`](crate::seam::matrix_function)).
 
 use std::ops::Deref;
 

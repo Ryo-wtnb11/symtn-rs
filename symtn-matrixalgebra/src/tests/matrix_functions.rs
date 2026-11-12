@@ -1,5 +1,6 @@
 //! `inv`/`pinv`/`exp`/`solve` matrix-function tests.
 
+use super::svd::CountingLease;
 use super::*;
 
 #[test]
@@ -32,6 +33,62 @@ fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
         Err(OperationError::UnsupportedTensorContractScope { .. })
     ));
     assert!(!called.get());
+}
+
+#[test]
+fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
+    let engine = &mut symtn_dense::CpuEngine::serial();
+    let source = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let bound = bound_tensor(Arc::new(Z2FusionRule), &source);
+    let leases = Cell::new(0);
+    let adjoint = matrix_function(
+        engine,
+        CountingLease(&leases),
+        op::Exp,
+        MatrixFunctionSource::AdjointOf {
+            parent: bound.as_ref().dynamic(),
+            output_space: bound.space().clone(),
+        },
+    );
+    assert!(matches!(
+        adjoint,
+        Err(OperationError::UnsupportedTensorContractScope { .. })
+    ));
+    let leg = SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 1)], false);
+    let bond = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
+        Arc::new(U1FusionRule),
+        FusionTreeHomSpace::new(
+            FusionProductSpace::new([leg.clone()]),
+            FusionProductSpace::new([leg]),
+        ),
+    )
+    .unwrap();
+    let spectrum = [
+        SectorSpectrum {
+            sector: SectorId::new(0),
+            values: vec![1.0, -2.0],
+        },
+        SectorSpectrum {
+            sector: SectorId::new(1),
+            values: vec![3.0],
+        },
+    ];
+    admit_compact_diagonal::<symtn_core::MultiplicityFreeAdmissionMode, _, _>(&bond, &spectrum)
+        .unwrap();
+    let diagonal = matrix_function(
+        engine,
+        CountingLease(&leases),
+        op::Exp,
+        MatrixFunctionSource::Diagonal {
+            space: &bond,
+            spectrum: &spectrum,
+        },
+    );
+    assert!(matches!(
+        diagonal,
+        Err(OperationError::UnsupportedTensorContractScope { .. })
+    ));
+    assert_eq!(leases.get(), 0);
 }
 
 #[test]

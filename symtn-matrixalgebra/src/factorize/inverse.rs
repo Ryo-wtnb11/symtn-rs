@@ -149,8 +149,7 @@ pub(crate) fn pinv_cutoff(
 ///
 /// TensorKit's own diagonal tolerance rule is not mirrored; see the facade
 /// `pinv` documentation for that divergence.
-#[doc(hidden)]
-pub fn pinv_diagonal_spectrum<D: FactorScalar>(
+pub(crate) fn pinv_diagonal_spectrum<D: FactorScalar>(
     spectrum: &[SectorSpectrum<D>],
     rcond: f64,
     reciprocal: impl Fn(D) -> D,

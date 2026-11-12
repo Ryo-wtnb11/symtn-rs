@@ -101,7 +101,6 @@ use dense_stage::*;
 pub use diagonal::admit_compact_diagonal;
 use diagonal::*;
 pub(crate) use eig::*;
-pub use inverse::pinv_diagonal_spectrum;
 pub(crate) use inverse::*;
 use landing::*;
 pub(crate) use matricize::*;
@@ -119,11 +118,14 @@ use source::{factor_from_source, no_adjoint};
 ///
 /// Why not sealing alone: a sealed supertrait stops external impls and
 /// qualified paths, not calls through a generic bound on the public trait
-/// (`O::run`, `M::svd_compact_dense`), which would skip [`factor`]'s shared
-/// driver. The field is private and [`TOKEN`](exec::TOKEN) is `pub(crate)`, so
-/// no value of this type exists outside the crate.
+/// (`O::run`, `O::apply`, `M::svd_compact_dense`), which would skip the
+/// shared driver of [`factor`] or
+/// [`matrix_function`](crate::seam::matrix_function). The field is private
+/// and [`TOKEN`](exec::TOKEN) is `pub(crate)`, so no value of this type
+/// exists outside the crate.
 mod exec {
     use super::*;
+    use crate::matrix_functions::{MatrixFunctionOp, MatrixFunctionSource};
 
     #[derive(Clone, Copy)]
     pub struct Token(());
@@ -145,8 +147,24 @@ mod exec {
             M: FactorMode<R>,
             L: ExecutorLease;
     }
+
+    /// The execution of one [`MatrixFunctionOp`]; only
+    /// [`matrix_function`](crate::seam::matrix_function) calls it.
+    pub trait Apply<R, D: FactorScalar> {
+        fn apply<L>(
+            self,
+            _: Token,
+            engine: &mut dyn symtn_dense::Engine,
+            lease: L,
+            source: MatrixFunctionSource<'_, R, D>,
+        ) -> Result<<Self as MatrixFunctionOp<R, D>>::Output, OperationError>
+        where
+            Self: MatrixFunctionOp<R, D>,
+            L: ExecutorLease;
+    }
 }
-use exec::{Run, Token, TOKEN};
+use exec::Run;
+pub(crate) use exec::{Apply, Token, TOKEN};
 #[cfg(test)]
 pub(crate) use svd::scale_axis_by_spectrum;
 pub(crate) use svd::*;
