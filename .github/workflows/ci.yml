@@ -40,9 +40,14 @@ jobs:
       - name: Record source revisions
         run: |
           git -C symtn log -1 --format='symtn %H'
-      # MSRV first so the stable install below remains the default toolchain;
-      # the MSRV step selects 1.99.1 via RUSTUP_TOOLCHAIN.
+      # MSRV and the snapshot nightly first so the stable install below remains
+      # the default toolchain; their steps select them via RUSTUP_TOOLCHAIN.
       - uses: dtolnay/rust-toolchain@1.99.1
+      # Pinned: rustdoc JSON rendering changes between nightlies, and
+      # scripts/api-snapshot.sh uses this exact toolchain.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-18
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -54,6 +59,9 @@ jobs:
       - uses: ./symtn/.github/actions/cargo-build-script-cache
         with:
           key: lint
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api@0.52.0
       - name: rustfmt
         if: ${{ !cancelled() }}
         run: cargo fmt --check
@@ -74,6 +82,10 @@ jobs:
         working-directory: symtn
         env:
           RUSTUP_TOOLCHAIN: 1.99.1
+      - name: Public API snapshot matches api/
+        if: ${{ !cancelled() }}
+        run: scripts/api-snapshot.sh --check
+        working-directory: symtn
       # A separate consumer builds core without its dev-dependency's testing tier.
       - name: Run production category contract
         run: cargo run --locked -p symtn-production-contract

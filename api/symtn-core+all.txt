@@ -1,0 +1,1463 @@
+pub mod symtn_core
+pub use symtn_core::BraidingStyleKind
+pub use symtn_core::CU1FusionRule
+pub use symtn_core::CU1Irrep
+pub use symtn_core::CU1_MAX_TWICE_CHARGE
+pub use symtn_core::CanonicalUnitAdmission
+pub use symtn_core::CanonicalUnitFusionRule
+pub use symtn_core::CategoricalScalar
+pub use symtn_core::CategoryAdapterError
+pub use symtn_core::CategoryAdmissionError
+pub use symtn_core::CategoryCodec
+pub use symtn_core::CategoryFailure
+pub use symtn_core::CategoryOperation
+pub use symtn_core::CategoryProvider
+pub use symtn_core::CategoryRule
+pub use symtn_core::CheckedCanonicalUnitFusionRule
+pub use symtn_core::CheckedFusionAlgebra
+pub use symtn_core::CheckedGenericAdmissionMode
+pub use symtn_core::CheckedGenericFusion
+pub use symtn_core::CheckedGenericPivotal
+pub use symtn_core::CheckedGenericRigidSymbols
+pub use symtn_core::CoupledSectorFold
+pub use symtn_core::CoupledSectorFoldBuilder
+pub use symtn_core::EnumeratedCodec
+pub use symtn_core::FermionParityFusionRule
+pub use symtn_core::FusionAlgebraError
+pub use symtn_core::FusionRule
+pub use symtn_core::FusionStyleKind
+pub use symtn_core::Fz2SectorLayout
+pub use symtn_core::GenericFArray
+pub use symtn_core::GenericFusionSymbols
+pub use symtn_core::GenericRMatrix
+pub use symtn_core::GenericRigidSymbols
+pub use symtn_core::InfallibleGeneric
+pub use symtn_core::LieGroupFusionRule
+pub use symtn_core::LieGroupFusionRuleError
+pub use symtn_core::MultiplicityFreeAdmissionMode
+pub use symtn_core::MultiplicityFreeFusionRule
+pub use symtn_core::MultiplicityFreeFusionSymbols
+pub use symtn_core::MultiplicityFreeRigidSymbols
+pub use symtn_core::PackedProductCodec
+pub use symtn_core::PackedSectorLayout
+pub use symtn_core::PhysicalBasisError
+pub use symtn_core::PhysicalFusionBasis
+pub use symtn_core::ProductAdmission
+pub use symtn_core::ProductFusionRule
+pub use symtn_core::ProductFusionRuleError
+pub use symtn_core::ProductSector
+pub use symtn_core::ProductSectorCodec
+pub use symtn_core::ProductSectorCodecError
+pub use symtn_core::ProductSectorComponent
+pub use symtn_core::ProductSectorLayout
+pub use symtn_core::RuleIdentity
+pub use symtn_core::SU2CoefficientError
+pub use symtn_core::SU2FusionRule
+pub use symtn_core::SU2Irrep
+pub use symtn_core::SU2_MAX_DOUBLED_SPIN
+pub use symtn_core::SectorCodec
+pub use symtn_core::SectorId
+pub use symtn_core::SectorOrderKey
+pub use symtn_core::SectorVec
+pub use symtn_core::StructureCacheEquivalent
+pub use symtn_core::Su2SectorLayout
+pub use symtn_core::SymbolShapeError
+pub use symtn_core::TableRule
+pub use symtn_core::TableRuleError
+pub use symtn_core::TableSector
+pub use symtn_core::TensorKitProductCodec
+pub use symtn_core::TypedSectorAdmission
+pub use symtn_core::U1FusionRule
+pub use symtn_core::U1Irrep
+pub use symtn_core::U1SectorLayout
+pub use symtn_core::UncertifiedUnitAdmission
+pub use symtn_core::Z2FusionRule
+pub use symtn_core::Z2Irrep
+pub use symtn_core::ZNFusionRule
+pub use symtn_core::ZNIrrep
+pub use symtn_core::product_sector
+pub mod symtn_core::axes
+pub enum symtn_core::axes::AxisError
+pub symtn_core::axes::AxisError::Duplicate
+pub symtn_core::axes::AxisError::Duplicate::axis: usize
+pub symtn_core::axes::AxisError::Length
+pub symtn_core::axes::AxisError::Length::actual: usize
+pub symtn_core::axes::AxisError::Length::expected: usize
+pub symtn_core::axes::AxisError::OutOfRange
+pub symtn_core::axes::AxisError::OutOfRange::axis: usize
+pub symtn_core::axes::AxisError::OutOfRange::rank: usize
+impl core::clone::Clone for symtn_core::axes::AxisError
+pub fn symtn_core::axes::AxisError::clone(&self) -> symtn_core::axes::AxisError
+impl core::clone::TrivialClone for symtn_core::axes::AxisError
+impl core::cmp::Eq for symtn_core::axes::AxisError
+pub fn symtn_core::axes::AxisError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::axes::AxisError
+pub fn symtn_core::axes::AxisError::eq(&self, &symtn_core::axes::AxisError) -> bool
+impl core::fmt::Debug for symtn_core::axes::AxisError
+pub fn symtn_core::axes::AxisError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::axes::AxisError
+impl core::marker::StructuralPartialEq for symtn_core::axes::AxisError
+pub struct symtn_core::axes::AxisMask
+impl symtn_core::axes::AxisMask
+pub fn symtn_core::axes::AxisMask::complement(&self) -> impl core::iter::traits::iterator::Iterator<Item = usize> + '_
+pub fn symtn_core::axes::AxisMask::contains(&self, usize) -> bool
+pub fn symtn_core::axes::AxisMask::insert(&mut self, usize) -> core::result::Result<(), symtn_core::axes::AxisError>
+pub fn symtn_core::axes::AxisMask::insert_all(&mut self, &[usize]) -> core::result::Result<(), symtn_core::axes::AxisError>
+pub fn symtn_core::axes::AxisMask::is_full(&self) -> bool
+pub fn symtn_core::axes::AxisMask::new(usize) -> Self
+impl core::clone::Clone for symtn_core::axes::AxisMask
+pub fn symtn_core::axes::AxisMask::clone(&self) -> symtn_core::axes::AxisMask
+impl core::cmp::Eq for symtn_core::axes::AxisMask
+pub fn symtn_core::axes::AxisMask::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::axes::AxisMask
+pub fn symtn_core::axes::AxisMask::eq(&self, &symtn_core::axes::AxisMask) -> bool
+impl core::fmt::Debug for symtn_core::axes::AxisMask
+pub fn symtn_core::axes::AxisMask::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::axes::AxisMask
+pub fn symtn_core::axes::validate_axis_subset(&[usize], usize) -> core::result::Result<symtn_core::axes::AxisMask, symtn_core::axes::AxisError>
+pub fn symtn_core::axes::validate_permutation(&[usize], usize) -> core::result::Result<(), symtn_core::axes::AxisError>
+pub mod symtn_core::testing
+pub use symtn_core::testing::Provider
+pub use symtn_core::testing::su_lie_rule
+pub fn symtn_core::testing::generic_braid_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::testing::generic_permute_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::testing::mark_structure_canonical(&symtn_core::BlockStructure)
+pub fn symtn_core::testing::multiplicity_free_braid_tree_block<R>(&R, &[symtn_core::FusionTreeKey], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::testing::multiplicity_free_permute_tree_pair_block<R>(&R, &[symtn_core::FusionTreePairKey], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::testing::multiplicity_free_transpose_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::testing::unique_permute_tree<R>(&R, &symtn_core::FusionTreeKey, &[usize]) -> core::result::Result<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar), symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+#[non_exhaustive] pub enum symtn_core::BlockKey
+pub symtn_core::BlockKey::Dense
+pub symtn_core::BlockKey::FusionTree(symtn_core::FusionTreePairKey)
+pub symtn_core::BlockKey::Opaque(symtn_core::OpaqueBlockKey)
+impl symtn_core::BlockKey
+pub fn symtn_core::BlockKey::as_fusion_tree_pair(&self) -> core::option::Option<&symtn_core::FusionTreePairKey>
+pub fn symtn_core::BlockKey::as_opaque(&self) -> core::option::Option<&symtn_core::OpaqueBlockKey>
+pub fn symtn_core::BlockKey::fusion_tree_group_key(&self) -> core::option::Option<symtn_core::FusionTreeGroupKey>
+pub fn symtn_core::BlockKey::is_dense(&self) -> bool
+pub fn symtn_core::BlockKey::kind(&self) -> symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKey::opaque<I>(I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = u64>
+pub fn symtn_core::BlockKey::ordinal(usize) -> Self
+pub fn symtn_core::BlockKey::trivial() -> Self
+impl core::clone::Clone for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::clone(&self) -> symtn_core::BlockKey
+impl core::cmp::Eq for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::cmp(&self, &symtn_core::BlockKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::eq(&self, &symtn_core::BlockKey) -> bool
+impl core::cmp::PartialOrd for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::partial_cmp(&self, &symtn_core::BlockKey) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<symtn_core::FusionTreePairKey> for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::from(symtn_core::FusionTreePairKey) -> Self
+impl core::convert::From<symtn_core::OpaqueBlockKey> for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::from(symtn_core::OpaqueBlockKey) -> Self
+impl core::fmt::Debug for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_core::BlockKey
+#[non_exhaustive] pub enum symtn_core::BlockKeyKind
+pub symtn_core::BlockKeyKind::Dense
+pub symtn_core::BlockKeyKind::FusionTree
+pub symtn_core::BlockKeyKind::Opaque
+impl core::clone::Clone for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::clone(&self) -> symtn_core::BlockKeyKind
+impl core::clone::TrivialClone for symtn_core::BlockKeyKind
+impl core::cmp::Eq for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::eq(&self, &symtn_core::BlockKeyKind) -> bool
+impl core::fmt::Debug for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::BlockKeyKind
+pub fn symtn_core::BlockKeyKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_core::BlockKeyKind
+impl core::marker::StructuralPartialEq for symtn_core::BlockKeyKind
+#[non_exhaustive] pub enum symtn_core::CheckedFusionSpaceError
+pub symtn_core::CheckedFusionSpaceError::Core(alloc::boxed::Box<symtn_core::CoreError>)
+pub symtn_core::CheckedFusionSpaceError::FusionAlgebra(alloc::boxed::Box<symtn_sectors::algebra::FusionAlgebraError>)
+impl core::clone::Clone for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::clone(&self) -> symtn_core::CheckedFusionSpaceError
+impl core::cmp::Eq for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::eq(&self, &symtn_core::CheckedFusionSpaceError) -> bool
+impl core::convert::From<symtn_core::CoreError> for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::from(symtn_core::CoreError) -> Self
+impl core::convert::From<symtn_sectors::algebra::FusionAlgebraError> for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::from(symtn_sectors::algebra::FusionAlgebraError) -> Self
+impl core::error::Error for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::CheckedFusionSpaceError
+pub enum symtn_core::CheckedGenericStructureError<E>
+pub symtn_core::CheckedGenericStructureError::Core(symtn_core::CoreError)
+pub symtn_core::CheckedGenericStructureError::Provider(E)
+impl<E: core::error::Error + 'static> core::error::Error for symtn_core::CheckedGenericStructureError<E>
+pub fn symtn_core::CheckedGenericStructureError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_core::CheckedGenericStructureError<E>
+pub fn symtn_core::CheckedGenericStructureError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_core::CheckedGenericStructureError<E>
+pub fn symtn_core::CheckedGenericStructureError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn_core::CoreError> for symtn_core::CheckedGenericStructureError<E>
+pub fn symtn_core::CheckedGenericStructureError<E>::from(symtn_core::CoreError) -> Self
+pub enum symtn_core::CheckedGenericSymbolError<E>
+pub symtn_core::CheckedGenericSymbolError::Core(symtn_core::CoreError)
+pub symtn_core::CheckedGenericSymbolError::Provider(E)
+pub symtn_core::CheckedGenericSymbolError::Shape
+pub symtn_core::CheckedGenericSymbolError::Shape::actual: alloc::vec::Vec<usize>
+pub symtn_core::CheckedGenericSymbolError::Shape::expected: alloc::vec::Vec<usize>
+pub symtn_core::CheckedGenericSymbolError::Shape::symbol: &'static str
+impl<E: core::error::Error + 'static> core::error::Error for symtn_core::CheckedGenericSymbolError<E>
+pub fn symtn_core::CheckedGenericSymbolError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_core::CheckedGenericSymbolError<E>
+pub fn symtn_core::CheckedGenericSymbolError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_core::CheckedGenericSymbolError<E>
+pub fn symtn_core::CheckedGenericSymbolError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn_core::CoreError> for symtn_core::CheckedGenericSymbolError<E>
+pub fn symtn_core::CheckedGenericSymbolError<E>::from(symtn_core::CoreError) -> Self
+#[non_exhaustive] pub enum symtn_core::CoreError
+pub symtn_core::CoreError::BlockCountMismatch
+pub symtn_core::CoreError::BlockCountMismatch::actual: usize
+pub symtn_core::CoreError::BlockCountMismatch::expected: usize
+pub symtn_core::CoreError::BlockIndexOutOfBounds
+pub symtn_core::CoreError::BlockIndexOutOfBounds::count: usize
+pub symtn_core::CoreError::BlockIndexOutOfBounds::index: usize
+pub symtn_core::CoreError::ContractedLegDualityMismatch
+pub symtn_core::CoreError::ContractedLegDualityMismatch::lhs_axis: usize
+pub symtn_core::CoreError::ContractedLegDualityMismatch::lhs_is_dual: bool
+pub symtn_core::CoreError::ContractedLegDualityMismatch::rhs_axis: usize
+pub symtn_core::CoreError::ContractedLegDualityMismatch::rhs_is_dual: bool
+pub symtn_core::CoreError::DimensionMismatch
+pub symtn_core::CoreError::DimensionMismatch::actual: usize
+pub symtn_core::CoreError::DimensionMismatch::expected: usize
+pub symtn_core::CoreError::DuplicateBlockKey
+pub symtn_core::CoreError::DuplicateBlockKey::key: alloc::boxed::Box<symtn_core::BlockKey>
+pub symtn_core::CoreError::ElementCountOverflow
+pub symtn_core::CoreError::ExpectedFusionTreePairKey
+pub symtn_core::CoreError::ExpectedFusionTreePairKey::actual: symtn_core::BlockKeyKind
+pub symtn_core::CoreError::FusionChannelCount
+pub symtn_core::CoreError::FusionChannelCount::count: usize
+pub symtn_core::CoreError::FusionChannelCount::left: symtn_sectors::SectorId
+pub symtn_core::CoreError::FusionChannelCount::right: symtn_sectors::SectorId
+pub symtn_core::CoreError::FusionOutsideTable
+pub symtn_core::CoreError::FusionOutsideTable::message: alloc::string::String
+pub symtn_core::CoreError::FusionRuleMismatch
+pub symtn_core::CoreError::FusionRuleMismatch::actual: symtn_sectors::rule_identity::RuleIdentity
+pub symtn_core::CoreError::FusionRuleMismatch::expected: symtn_sectors::rule_identity::RuleIdentity
+pub symtn_core::CoreError::FusionSpaceSplitMismatch
+pub symtn_core::CoreError::FusionSpaceSplitMismatch::actual_nin: usize
+pub symtn_core::CoreError::FusionSpaceSplitMismatch::actual_nout: usize
+pub symtn_core::CoreError::FusionSpaceSplitMismatch::expected_nin: usize
+pub symtn_core::CoreError::FusionSpaceSplitMismatch::expected_nout: usize
+pub symtn_core::CoreError::InconsistentAxisPosition
+pub symtn_core::CoreError::InconsistentAxisPosition::actual_position: usize
+pub symtn_core::CoreError::InconsistentAxisPosition::expected_position: usize
+pub symtn_core::CoreError::InconsistentAxisPosition::logical_axis: usize
+pub symtn_core::CoreError::InvalidAxisSet
+pub symtn_core::CoreError::InvalidAxisSet::axes: alloc::vec::Vec<usize>
+pub symtn_core::CoreError::InvalidAxisSet::rank: usize
+pub symtn_core::CoreError::InvalidAxisSet::tensor: &'static str
+pub symtn_core::CoreError::InvalidBraidIndex
+pub symtn_core::CoreError::InvalidBraidIndex::index: usize
+pub symtn_core::CoreError::InvalidBraidIndex::rank: usize
+pub symtn_core::CoreError::InvalidMultiplicityIndex
+pub symtn_core::CoreError::InvalidMultiplicityIndex::value: usize
+pub symtn_core::CoreError::InvalidPermutation
+pub symtn_core::CoreError::InvalidPermutation::permutation: alloc::vec::Vec<usize>
+pub symtn_core::CoreError::InvalidPermutation::rank: usize
+pub symtn_core::CoreError::InvalidSector
+pub symtn_core::CoreError::InvalidSector::sector: symtn_sectors::SectorId
+pub symtn_core::CoreError::LegDegeneracyMismatch
+pub symtn_core::CoreError::LegDegeneracyMismatch::actual: usize
+pub symtn_core::CoreError::LegDegeneracyMismatch::expected: usize
+pub symtn_core::CoreError::LegDegeneracyMismatch::sector: symtn_sectors::SectorId
+pub symtn_core::CoreError::MalformedFusionTree
+pub symtn_core::CoreError::MalformedFusionTree::message: &'static str
+pub symtn_core::CoreError::MissingBlockKey
+pub symtn_core::CoreError::MissingBlockKey::key: alloc::boxed::Box<symtn_core::BlockKey>
+pub symtn_core::CoreError::MissingFusionRuleIdentity
+pub symtn_core::CoreError::MixedBlockKeyKinds
+pub symtn_core::CoreError::MixedBlockKeyKinds::actual: symtn_core::BlockKeyKind
+pub symtn_core::CoreError::MixedBlockKeyKinds::expected: symtn_core::BlockKeyKind
+pub symtn_core::CoreError::OffsetOverflow
+pub symtn_core::CoreError::OffsetOverflow::value: usize
+pub symtn_core::CoreError::OutOfBounds
+pub symtn_core::CoreError::OverlappingBlockStorage
+pub symtn_core::CoreError::OverlappingBlockStorage::first_block: usize
+pub symtn_core::CoreError::OverlappingBlockStorage::offset: usize
+pub symtn_core::CoreError::OverlappingBlockStorage::second_block: usize
+pub symtn_core::CoreError::RankMismatch
+pub symtn_core::CoreError::RankMismatch::shape: usize
+pub symtn_core::CoreError::RankMismatch::strides: usize
+pub symtn_core::CoreError::SectorMismatch
+pub symtn_core::CoreError::SectorMismatch::actual: symtn_sectors::SectorId
+pub symtn_core::CoreError::SectorMismatch::expected: symtn_sectors::SectorId
+pub symtn_core::CoreError::StrideOverflow
+pub symtn_core::CoreError::StrideOverflow::value: usize
+pub symtn_core::CoreError::StructureRankMismatch
+pub symtn_core::CoreError::StructureRankMismatch::actual: usize
+pub symtn_core::CoreError::StructureRankMismatch::expected: usize
+pub symtn_core::CoreError::UnitLayoutCorrespondence
+pub symtn_core::CoreError::UnsupportedBraidingStyle
+pub symtn_core::CoreError::UnsupportedBraidingStyle::actual: symtn_sectors::BraidingStyleKind
+pub symtn_core::CoreError::UnsupportedBraidingStyle::expected: &'static str
+pub symtn_core::CoreError::UnsupportedFusionStyle
+pub symtn_core::CoreError::UnsupportedFusionStyle::actual: symtn_sectors::FusionStyleKind
+pub symtn_core::CoreError::UnsupportedFusionStyle::expected: symtn_sectors::FusionStyleKind
+pub symtn_core::CoreError::UnsupportedSectorBraid
+pub symtn_core::CoreError::UnsupportedSectorBraid::left: symtn_sectors::SectorId
+pub symtn_core::CoreError::UnsupportedSectorBraid::right: symtn_sectors::SectorId
+pub symtn_core::CoreError::UnsupportedSectorBraid::style: symtn_sectors::BraidingStyleKind
+impl core::clone::Clone for symtn_core::CoreError
+pub fn symtn_core::CoreError::clone(&self) -> symtn_core::CoreError
+impl core::cmp::Eq for symtn_core::CoreError
+pub fn symtn_core::CoreError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CoreError
+pub fn symtn_core::CoreError::eq(&self, &symtn_core::CoreError) -> bool
+impl core::convert::From<symtn_core::CoreError> for symtn_core::CheckedFusionSpaceError
+pub fn symtn_core::CheckedFusionSpaceError::from(symtn_core::CoreError) -> Self
+impl core::error::Error for symtn_core::CoreError
+impl core::fmt::Debug for symtn_core::CoreError
+pub fn symtn_core::CoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_core::CoreError
+pub fn symtn_core::CoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::CoreError
+impl<E> core::convert::From<symtn_core::CoreError> for symtn_core::CheckedGenericStructureError<E>
+pub fn symtn_core::CheckedGenericStructureError<E>::from(symtn_core::CoreError) -> Self
+impl<E> core::convert::From<symtn_core::CoreError> for symtn_core::CheckedGenericSymbolError<E>
+pub fn symtn_core::CheckedGenericSymbolError<E>::from(symtn_core::CoreError) -> Self
+#[non_exhaustive] pub enum symtn_core::FusionSpaceAdmission
+pub symtn_core::FusionSpaceAdmission::Complete(symtn_sectors::rule_identity::RuleIdentity)
+pub symtn_core::FusionSpaceAdmission::Subset(symtn_sectors::rule_identity::RuleIdentity)
+pub symtn_core::FusionSpaceAdmission::Unbound
+impl symtn_core::FusionSpaceAdmission
+pub fn symtn_core::FusionSpaceAdmission::rule_identity(&self) -> core::option::Option<&symtn_sectors::rule_identity::RuleIdentity>
+impl core::clone::Clone for symtn_core::FusionSpaceAdmission
+pub fn symtn_core::FusionSpaceAdmission::clone(&self) -> symtn_core::FusionSpaceAdmission
+impl core::cmp::Eq for symtn_core::FusionSpaceAdmission
+pub fn symtn_core::FusionSpaceAdmission::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::FusionSpaceAdmission
+pub fn symtn_core::FusionSpaceAdmission::eq(&self, &symtn_core::FusionSpaceAdmission) -> bool
+impl core::fmt::Debug for symtn_core::FusionSpaceAdmission
+pub fn symtn_core::FusionSpaceAdmission::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::FusionSpaceAdmission
+pub enum symtn_core::FusionTreePairOrientation
+pub symtn_core::FusionTreePairOrientation::Adjoint
+pub symtn_core::FusionTreePairOrientation::Direct
+impl core::clone::Clone for symtn_core::FusionTreePairOrientation
+pub fn symtn_core::FusionTreePairOrientation::clone(&self) -> symtn_core::FusionTreePairOrientation
+impl core::clone::TrivialClone for symtn_core::FusionTreePairOrientation
+impl core::cmp::Eq for symtn_core::FusionTreePairOrientation
+pub fn symtn_core::FusionTreePairOrientation::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::FusionTreePairOrientation
+pub fn symtn_core::FusionTreePairOrientation::eq(&self, &symtn_core::FusionTreePairOrientation) -> bool
+impl core::fmt::Debug for symtn_core::FusionTreePairOrientation
+pub fn symtn_core::FusionTreePairOrientation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreePairOrientation
+pub fn symtn_core::FusionTreePairOrientation::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_core::FusionTreePairOrientation
+impl core::marker::StructuralPartialEq for symtn_core::FusionTreePairOrientation
+pub enum symtn_core::OrderedBlockLinearStorage<S>
+pub symtn_core::OrderedBlockLinearStorage::DenseDstSrc(alloc::vec::Vec<core::option::Option<S>>)
+pub symtn_core::OrderedBlockLinearStorage::SingletonColumns
+pub symtn_core::OrderedBlockLinearStorage::SingletonColumns::coefficients: alloc::vec::Vec<S>
+pub symtn_core::OrderedBlockLinearStorage::SingletonColumns::destination_rows: alloc::vec::Vec<usize>
+impl<S: core::clone::Clone> core::clone::Clone for symtn_core::OrderedBlockLinearStorage<S>
+pub fn symtn_core::OrderedBlockLinearStorage<S>::clone(&self) -> symtn_core::OrderedBlockLinearStorage<S>
+impl<S: core::cmp::PartialEq> core::cmp::PartialEq for symtn_core::OrderedBlockLinearStorage<S>
+pub fn symtn_core::OrderedBlockLinearStorage<S>::eq(&self, &symtn_core::OrderedBlockLinearStorage<S>) -> bool
+impl<S: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_core::OrderedBlockLinearStorage<S>
+impl<S: core::fmt::Debug> core::fmt::Debug for symtn_core::OrderedBlockLinearStorage<S>
+pub fn symtn_core::OrderedBlockLinearStorage<S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum symtn_core::Permuted
+pub symtn_core::Permuted::Derived(symtn_core::PermutedMemoTicket)
+pub symtn_core::Permuted::Memo
+pub enum symtn_core::Placement
+pub symtn_core::Placement::Cuda(usize)
+pub symtn_core::Placement::Host
+impl core::clone::Clone for symtn_core::Placement
+pub fn symtn_core::Placement::clone(&self) -> symtn_core::Placement
+impl core::clone::TrivialClone for symtn_core::Placement
+impl core::cmp::Eq for symtn_core::Placement
+pub fn symtn_core::Placement::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::Placement
+pub fn symtn_core::Placement::eq(&self, &symtn_core::Placement) -> bool
+impl core::fmt::Debug for symtn_core::Placement
+pub fn symtn_core::Placement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::Placement
+pub fn symtn_core::Placement::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_core::Placement
+impl core::marker::StructuralPartialEq for symtn_core::Placement
+#[non_exhaustive] pub enum symtn_core::SectorLegConstructionError
+pub symtn_core::SectorLegConstructionError::DuplicateSector
+pub symtn_core::SectorLegConstructionError::DuplicateSector::sector: symtn_sectors::SectorId
+impl core::clone::Clone for symtn_core::SectorLegConstructionError
+pub fn symtn_core::SectorLegConstructionError::clone(&self) -> symtn_core::SectorLegConstructionError
+impl core::clone::TrivialClone for symtn_core::SectorLegConstructionError
+impl core::cmp::Eq for symtn_core::SectorLegConstructionError
+pub fn symtn_core::SectorLegConstructionError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::SectorLegConstructionError
+pub fn symtn_core::SectorLegConstructionError::eq(&self, &symtn_core::SectorLegConstructionError) -> bool
+impl core::error::Error for symtn_core::SectorLegConstructionError
+impl core::fmt::Debug for symtn_core::SectorLegConstructionError
+pub fn symtn_core::SectorLegConstructionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_core::SectorLegConstructionError
+pub fn symtn_core::SectorLegConstructionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::SectorLegConstructionError
+impl core::marker::StructuralPartialEq for symtn_core::SectorLegConstructionError
+#[non_exhaustive] pub enum symtn_core::StructureCacheKind
+pub symtn_core::StructureCacheKind::CompletedTreeTransformer
+pub symtn_core::StructureCacheKind::DegeneracyStructure
+pub symtn_core::StructureCacheKind::GemmPlans
+pub symtn_core::StructureCacheKind::LaneAllocations
+pub symtn_core::StructureCacheKind::SectorStructure
+pub symtn_core::StructureCacheKind::TreeTransformCoefficients
+impl symtn_core::StructureCacheKind
+pub const symtn_core::StructureCacheKind::ALL: [Self; 6]
+impl core::clone::Clone for symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheKind::clone(&self) -> symtn_core::StructureCacheKind
+impl core::clone::TrivialClone for symtn_core::StructureCacheKind
+impl core::cmp::Eq for symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheKind::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheKind::eq(&self, &symtn_core::StructureCacheKind) -> bool
+impl core::fmt::Debug for symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_core::StructureCacheKind
+impl core::marker::StructuralPartialEq for symtn_core::StructureCacheKind
+pub enum symtn_core::StructureCacheRegistrationError
+pub symtn_core::StructureCacheRegistrationError::AlreadyRegistered
+pub symtn_core::StructureCacheRegistrationError::OwnedByCore
+impl core::clone::Clone for symtn_core::StructureCacheRegistrationError
+pub fn symtn_core::StructureCacheRegistrationError::clone(&self) -> symtn_core::StructureCacheRegistrationError
+impl core::clone::TrivialClone for symtn_core::StructureCacheRegistrationError
+impl core::cmp::Eq for symtn_core::StructureCacheRegistrationError
+pub fn symtn_core::StructureCacheRegistrationError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::StructureCacheRegistrationError
+pub fn symtn_core::StructureCacheRegistrationError::eq(&self, &symtn_core::StructureCacheRegistrationError) -> bool
+impl core::fmt::Debug for symtn_core::StructureCacheRegistrationError
+pub fn symtn_core::StructureCacheRegistrationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::StructureCacheRegistrationError
+impl core::marker::StructuralPartialEq for symtn_core::StructureCacheRegistrationError
+pub enum symtn_core::UnitLegInsertion
+pub symtn_core::UnitLegInsertion::Left
+pub symtn_core::UnitLegInsertion::Left::dual: bool
+pub symtn_core::UnitLegInsertion::Left::position: usize
+pub symtn_core::UnitLegInsertion::Right
+pub symtn_core::UnitLegInsertion::Right::dual: bool
+pub symtn_core::UnitLegInsertion::Right::position: usize
+impl core::clone::Clone for symtn_core::UnitLegInsertion
+pub fn symtn_core::UnitLegInsertion::clone(&self) -> symtn_core::UnitLegInsertion
+impl core::clone::TrivialClone for symtn_core::UnitLegInsertion
+impl core::cmp::Eq for symtn_core::UnitLegInsertion
+pub fn symtn_core::UnitLegInsertion::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::UnitLegInsertion
+pub fn symtn_core::UnitLegInsertion::eq(&self, &symtn_core::UnitLegInsertion) -> bool
+impl core::fmt::Debug for symtn_core::UnitLegInsertion
+pub fn symtn_core::UnitLegInsertion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::UnitLegInsertion
+impl core::marker::StructuralPartialEq for symtn_core::UnitLegInsertion
+pub struct symtn_core::BlockLayout<'a>
+impl<'a> symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockLayout<'a>::is_empty(self) -> bool
+pub fn symtn_core::BlockLayout<'a>::len(self) -> usize
+pub fn symtn_core::BlockLayout<'a>::new(usize, usize, &'a [usize], &'a [usize]) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockLayout<'a>::offset(self) -> usize
+pub fn symtn_core::BlockLayout<'a>::rank(self) -> usize
+pub fn symtn_core::BlockLayout<'a>::shape(self) -> &'a [usize]
+pub fn symtn_core::BlockLayout<'a>::strides(self) -> &'a [usize]
+impl<'a> core::clone::Clone for symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockLayout<'a>::clone(&self) -> symtn_core::BlockLayout<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::BlockLayout<'a>
+impl<'a> core::cmp::Eq for symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockLayout<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::PartialEq for symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockLayout<'a>::eq(&self, &symtn_core::BlockLayout<'a>) -> bool
+impl<'a> core::fmt::Debug for symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockLayout<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn_core::BlockLayout<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_core::BlockLayout<'a>
+pub struct symtn_core::BlockRef<'a>
+impl<'a> symtn_core::BlockRef<'a>
+pub fn symtn_core::BlockRef<'a>::element_count(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::BlockRef<'a>::key(&self) -> &'a symtn_core::BlockKey
+pub fn symtn_core::BlockRef<'a>::offset(&self) -> usize
+pub fn symtn_core::BlockRef<'a>::shape(&self) -> &'a [usize]
+pub fn symtn_core::BlockRef<'a>::storage_end_exclusive(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::BlockRef<'a>::strides(&self) -> &'a [usize]
+impl<'a> core::clone::Clone for symtn_core::BlockRef<'a>
+pub fn symtn_core::BlockRef<'a>::clone(&self) -> symtn_core::BlockRef<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::BlockRef<'a>
+impl<'a> core::cmp::Eq for symtn_core::BlockRef<'a>
+pub fn symtn_core::BlockRef<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::PartialEq for symtn_core::BlockRef<'a>
+pub fn symtn_core::BlockRef<'a>::eq(&self, &symtn_core::BlockRef<'a>) -> bool
+impl<'a> core::fmt::Debug for symtn_core::BlockRef<'a>
+pub fn symtn_core::BlockRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn_core::BlockRef<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_core::BlockRef<'a>
+pub struct symtn_core::BlockSourceColumns<K, S>
+impl<K, S> symtn_core::BlockSourceColumns<K, S>
+pub fn symtn_core::BlockSourceColumns<K, S>::column(&self, usize) -> &[(usize, S)]
+pub fn symtn_core::BlockSourceColumns<K, S>::destinations(&self) -> &[K]
+pub fn symtn_core::BlockSourceColumns<K, S>::entry_count(&self) -> usize
+pub fn symtn_core::BlockSourceColumns<K, S>::new(alloc::boxed::Box<[K]>, alloc::boxed::Box<[usize]>, alloc::boxed::Box<[(usize, S)]>) -> Self
+pub fn symtn_core::BlockSourceColumns<K, S>::rehome_destinations(&mut self, impl core::ops::function::FnMut(&K) -> K)
+pub fn symtn_core::BlockSourceColumns<K, S>::source_count(&self) -> usize
+impl<K: core::clone::Clone, S: core::clone::Clone> core::clone::Clone for symtn_core::BlockSourceColumns<K, S>
+pub fn symtn_core::BlockSourceColumns<K, S>::clone(&self) -> symtn_core::BlockSourceColumns<K, S>
+impl<K: core::cmp::PartialEq, S: core::cmp::PartialEq> core::cmp::PartialEq for symtn_core::BlockSourceColumns<K, S>
+pub fn symtn_core::BlockSourceColumns<K, S>::eq(&self, &symtn_core::BlockSourceColumns<K, S>) -> bool
+impl<K: core::cmp::PartialEq, S: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_core::BlockSourceColumns<K, S>
+impl<K: core::fmt::Debug, S: core::fmt::Debug> core::fmt::Debug for symtn_core::BlockSourceColumns<K, S>
+pub fn symtn_core::BlockSourceColumns<K, S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::BlockSpec
+impl symtn_core::BlockSpec
+pub fn symtn_core::BlockSpec::column_major(alloc::vec::Vec<usize>, usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockSpec::column_major_with_key(symtn_core::BlockKey, alloc::vec::Vec<usize>, usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockSpec::element_count(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::BlockSpec::key(&self) -> &symtn_core::BlockKey
+pub fn symtn_core::BlockSpec::new(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockSpec::offset(&self) -> usize
+pub fn symtn_core::BlockSpec::shape(&self) -> &[usize]
+pub fn symtn_core::BlockSpec::storage_end_exclusive(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::BlockSpec::strides(&self) -> &[usize]
+pub fn symtn_core::BlockSpec::with_key(symtn_core::BlockKey, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, usize) -> core::result::Result<Self, symtn_core::CoreError>
+impl core::clone::Clone for symtn_core::BlockSpec
+pub fn symtn_core::BlockSpec::clone(&self) -> symtn_core::BlockSpec
+impl core::cmp::Eq for symtn_core::BlockSpec
+pub fn symtn_core::BlockSpec::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::BlockSpec
+pub fn symtn_core::BlockSpec::eq(&self, &symtn_core::BlockSpec) -> bool
+impl core::fmt::Debug for symtn_core::BlockSpec
+pub fn symtn_core::BlockSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::BlockSpec
+pub struct symtn_core::BlockStructure
+impl symtn_core::BlockStructure
+pub fn symtn_core::BlockStructure::block(&self, usize) -> core::result::Result<symtn_core::BlockRef<'_>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::block_by_key(&self, &symtn_core::BlockKey) -> core::result::Result<symtn_core::BlockRef<'_>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::block_count(&self) -> usize
+pub fn symtn_core::BlockStructure::canonicalize_shared(alloc::sync::Arc<Self>) -> alloc::sync::Arc<Self>
+pub fn symtn_core::BlockStructure::charged_retained_bytes(&self) -> usize
+pub fn symtn_core::BlockStructure::content_id(&self) -> usize
+pub fn symtn_core::BlockStructure::content_key(&self) -> alloc::sync::Arc<symtn_core::BlockStructureContent>
+pub fn symtn_core::BlockStructure::coupled_sector_matrix_with_keys<R>(&R, usize, usize, alloc::vec::Vec<(symtn_core::FusionTreePairKey, alloc::vec::Vec<usize>)>) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::BlockStructure::coupled_sector_matrix_with_keys_checked<R>(&R, usize, usize, alloc::vec::Vec<(symtn_core::FusionTreePairKey, alloc::vec::Vec<usize>)>) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::BlockStructure::coupled_sector_regions(&self, usize) -> core::result::Result<core::option::Option<alloc::sync::Arc<[symtn_core::CoupledSectorRegion]>>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::degeneracy_structure(&self) -> &symtn_core::DegeneracyStructure
+pub fn symtn_core::BlockStructure::empty(usize) -> Self
+pub fn symtn_core::BlockStructure::find_block_index_by_adjoint_fusion_tree_pair(&self, &symtn_core::FusionTreePairKey) -> core::option::Option<usize>
+pub fn symtn_core::BlockStructure::find_block_index_by_fusion_tree_pair(&self, &symtn_core::FusionTreePairKey) -> core::option::Option<usize>
+pub fn symtn_core::BlockStructure::find_block_index_by_fusion_tree_pair_view(&self, symtn_core::FusionTreePairRef<'_>) -> core::option::Option<usize>
+pub fn symtn_core::BlockStructure::find_block_index_by_key(&self, &symtn_core::BlockKey) -> core::option::Option<usize>
+pub fn symtn_core::BlockStructure::from_blocks(alloc::vec::Vec<symtn_core::BlockSpec>) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::from_blocks_with_rank(usize, alloc::vec::Vec<symtn_core::BlockSpec>) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::from_parts(symtn_core::SectorStructure, symtn_core::DegeneracyStructure) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::fusion_tree_group_slice(&self) -> &[symtn_core::FusionTreeBlockGroup]
+pub fn symtn_core::BlockStructure::fusion_tree_groups(&self) -> alloc::vec::Vec<symtn_core::FusionTreeBlockGroup>
+pub fn symtn_core::BlockStructure::fusion_tree_pair_block(&self, &symtn_core::FusionTreePairKey) -> core::result::Result<symtn_core::BlockRef<'_>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::into_shared(self) -> alloc::sync::Arc<Self>
+pub fn symtn_core::BlockStructure::is_canonical(&self) -> bool
+pub fn symtn_core::BlockStructure::only_block(&self) -> core::result::Result<symtn_core::BlockRef<'_>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::packed_column_major<I>(usize, I) -> core::result::Result<Self, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator, <I as core::iter::traits::collect::IntoIterator>::Item: core::convert::Into<alloc::vec::Vec<usize>>
+pub fn symtn_core::BlockStructure::pair_block_indices_from(&self, &symtn_core::BlockStructure) -> core::result::Result<alloc::vec::Vec<usize>, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::rank(&self) -> usize
+pub fn symtn_core::BlockStructure::required_len(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::BlockStructure::sector_structure(&self) -> &symtn_core::SectorStructure
+pub fn symtn_core::BlockStructure::storage_tiling_proven(&self) -> bool
+pub fn symtn_core::BlockStructure::trivial(&[usize]) -> core::result::Result<Self, symtn_core::CoreError>
+impl core::clone::Clone for symtn_core::BlockStructure
+pub fn symtn_core::BlockStructure::clone(&self) -> Self
+impl core::cmp::Eq for symtn_core::BlockStructure
+impl core::cmp::PartialEq for symtn_core::BlockStructure
+pub fn symtn_core::BlockStructure::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::BlockStructure
+pub fn symtn_core::BlockStructure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::BlockStructureContent
+impl symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::charged_retained_bytes(&self) -> usize
+pub fn symtn_core::BlockStructureContent::id(&self) -> usize
+pub fn symtn_core::BlockStructureContent::rank(&self) -> usize
+pub fn symtn_core::BlockStructureContent::sector_structure(&self) -> &symtn_core::SectorStructure
+impl core::clone::Clone for symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::clone(&self) -> symtn_core::BlockStructureContent
+impl core::cmp::Eq for symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::BlockStructureContent
+pub fn symtn_core::BlockStructureContent::hash<H: core::hash::Hasher>(&self, &mut H)
+pub struct symtn_core::BlockView<'a, T>
+impl<'a, T> symtn_core::BlockView<'a, T>
+pub fn symtn_core::BlockView<'a, T>::data(&self) -> &'a [T]
+pub fn symtn_core::BlockView<'a, T>::get(&self, &[usize]) -> core::option::Option<&'a T>
+pub fn symtn_core::BlockView<'a, T>::layout(&self) -> symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockView<'a, T>::new(&'a [T], &'a [usize], &'a [usize], usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockView<'a, T>::offset(&self) -> usize
+pub fn symtn_core::BlockView<'a, T>::shape(&self) -> &'a [usize]
+pub fn symtn_core::BlockView<'a, T>::strides(&self) -> &'a [usize]
+impl<'a, T: core::fmt::Debug> core::fmt::Debug for symtn_core::BlockView<'a, T>
+pub fn symtn_core::BlockView<'a, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a, T> core::clone::Clone for symtn_core::BlockView<'a, T>
+pub fn symtn_core::BlockView<'a, T>::clone(&self) -> Self
+impl<'a, T> core::marker::Copy for symtn_core::BlockView<'a, T>
+pub struct symtn_core::BlockViewMut<'a, T>
+impl<'a, T> symtn_core::BlockViewMut<'a, T>
+pub fn symtn_core::BlockViewMut<'a, T>::data(&self) -> &[T]
+pub fn symtn_core::BlockViewMut<'a, T>::data_mut(&mut self) -> &mut [T]
+pub fn symtn_core::BlockViewMut<'a, T>::into_parts(self) -> (&'a mut [T], symtn_core::BlockLayout<'a>)
+pub fn symtn_core::BlockViewMut<'a, T>::layout(&self) -> symtn_core::BlockLayout<'a>
+pub fn symtn_core::BlockViewMut<'a, T>::new(&'a mut [T], &'a [usize], &'a [usize], usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::BlockViewMut<'a, T>::offset(&self) -> usize
+pub fn symtn_core::BlockViewMut<'a, T>::shape(&self) -> &'a [usize]
+pub fn symtn_core::BlockViewMut<'a, T>::strides(&self) -> &'a [usize]
+impl<'a, T: core::fmt::Debug> core::fmt::Debug for symtn_core::BlockViewMut<'a, T>
+pub fn symtn_core::BlockViewMut<'a, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'provider, 'structure, P>
+impl<'provider, 'structure, P> symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'provider, 'structure, P> where P: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'provider, 'structure, P>::structure(&self) -> &'structure symtn_core::BlockStructure
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'provider, 'structure, P>::try_new(&'provider P, &'structure symtn_core::BlockStructure) -> core::result::Result<Self, symtn_core::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'provider, 'structure, P>::try_new_once(&'provider P, &symtn_sectors::rule_identity::RuleIdentity, &'structure symtn_core::BlockStructure) -> core::result::Result<Self, symtn_core::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+impl<P> symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'_, '_, P> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'_, '_, P>::generic_braid_ordered_for_block_indices(&self, &[usize], &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <P as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar>, symtn_core::CheckedGenericSymbolError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'_, '_, P>::generic_permute_ordered_for_block_indices(&self, &[usize], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <P as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar>, symtn_core::CheckedGenericSymbolError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_core::CheckedGenericAdmittedFusionTreeBlockStructure<'_, '_, P>::generic_transpose_ordered_for_block_indices(&self, &[usize], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <P as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar>, symtn_core::CheckedGenericSymbolError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub struct symtn_core::CoupledMatricizationBuilder<'a>
+impl<'a> symtn_core::CoupledMatricizationBuilder<'a>
+pub fn symtn_core::CoupledMatricizationBuilder<'a>::extents(&self, symtn_sectors::SectorId) -> (usize, usize)
+pub fn symtn_core::CoupledMatricizationBuilder<'a>::new() -> Self
+pub fn symtn_core::CoupledMatricizationBuilder<'a>::place(&mut self, &'a symtn_core::FusionTreePairKey, usize, usize) -> core::result::Result<symtn_core::CoupledMatrixPlacement, symtn_core::CoreError>
+impl<'a> core::default::Default for symtn_core::CoupledMatricizationBuilder<'a>
+pub fn symtn_core::CoupledMatricizationBuilder<'a>::default() -> symtn_core::CoupledMatricizationBuilder<'a>
+impl<'a> core::fmt::Debug for symtn_core::CoupledMatricizationBuilder<'a>
+pub fn symtn_core::CoupledMatricizationBuilder<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::CoupledMatrixPlacement
+pub symtn_core::CoupledMatrixPlacement::col_offset: usize
+pub symtn_core::CoupledMatrixPlacement::new_col: bool
+pub symtn_core::CoupledMatrixPlacement::new_row: bool
+pub symtn_core::CoupledMatrixPlacement::new_sector: bool
+pub symtn_core::CoupledMatrixPlacement::row_offset: usize
+pub symtn_core::CoupledMatrixPlacement::sector: usize
+impl core::clone::Clone for symtn_core::CoupledMatrixPlacement
+pub fn symtn_core::CoupledMatrixPlacement::clone(&self) -> symtn_core::CoupledMatrixPlacement
+impl core::clone::TrivialClone for symtn_core::CoupledMatrixPlacement
+impl core::cmp::Eq for symtn_core::CoupledMatrixPlacement
+pub fn symtn_core::CoupledMatrixPlacement::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CoupledMatrixPlacement
+pub fn symtn_core::CoupledMatrixPlacement::eq(&self, &symtn_core::CoupledMatrixPlacement) -> bool
+impl core::fmt::Debug for symtn_core::CoupledMatrixPlacement
+pub fn symtn_core::CoupledMatrixPlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::CoupledMatrixPlacement
+impl core::marker::StructuralPartialEq for symtn_core::CoupledMatrixPlacement
+pub struct symtn_core::CoupledMatrixSide<K, V>
+impl<K: core::hash::Hash + core::cmp::Eq, V: core::marker::Copy> symtn_core::CoupledMatrixSide<K, V>
+pub fn symtn_core::CoupledMatrixSide<K, V>::clear(&mut self)
+pub fn symtn_core::CoupledMatrixSide<K, V>::extent(&self) -> usize
+pub fn symtn_core::CoupledMatrixSide<K, V>::get<Q>(&self, &Q) -> core::option::Option<&V> where K: core::borrow::Borrow<Q>, Q: core::hash::Hash + core::cmp::Eq + ?core::marker::Sized
+pub fn symtn_core::CoupledMatrixSide<K, V>::is_empty(&self) -> bool
+pub fn symtn_core::CoupledMatrixSide<K, V>::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&K, &V)>
+pub fn symtn_core::CoupledMatrixSide<K, V>::iter_mut(&mut self) -> impl core::iter::traits::iterator::Iterator<Item = (&K, &mut V)>
+pub fn symtn_core::CoupledMatrixSide<K, V>::len(&self) -> usize
+pub fn symtn_core::CoupledMatrixSide<K, V>::place<E>(&mut self, K, impl core::ops::function::FnOnce() -> core::result::Result<usize, E>, impl core::ops::function::FnOnce() -> E, impl core::ops::function::FnOnce(symtn_core::CoupledTreePlacement) -> V) -> core::result::Result<(V, bool), E>
+impl<K, V> core::default::Default for symtn_core::CoupledMatrixSide<K, V>
+pub fn symtn_core::CoupledMatrixSide<K, V>::default() -> Self
+impl<K: core::clone::Clone, V: core::clone::Clone> core::clone::Clone for symtn_core::CoupledMatrixSide<K, V>
+pub fn symtn_core::CoupledMatrixSide<K, V>::clone(&self) -> symtn_core::CoupledMatrixSide<K, V>
+impl<K: core::fmt::Debug, V: core::fmt::Debug> core::fmt::Debug for symtn_core::CoupledMatrixSide<K, V>
+pub fn symtn_core::CoupledMatrixSide<K, V>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::CoupledSectorRegion
+impl symtn_core::CoupledSectorRegion
+pub fn symtn_core::CoupledSectorRegion::col_trees(&self) -> &[symtn_core::CoupledTreeExtent]
+pub fn symtn_core::CoupledSectorRegion::cols(&self) -> usize
+pub fn symtn_core::CoupledSectorRegion::coupled(&self) -> symtn_sectors::SectorId
+pub fn symtn_core::CoupledSectorRegion::has_aligned_diagonal(&self) -> bool
+pub fn symtn_core::CoupledSectorRegion::range(&self) -> core::ops::range::Range<usize>
+pub fn symtn_core::CoupledSectorRegion::row_trees(&self) -> &[symtn_core::CoupledTreeExtent]
+pub fn symtn_core::CoupledSectorRegion::rows(&self) -> usize
+impl core::clone::Clone for symtn_core::CoupledSectorRegion
+pub fn symtn_core::CoupledSectorRegion::clone(&self) -> symtn_core::CoupledSectorRegion
+impl core::cmp::Eq for symtn_core::CoupledSectorRegion
+pub fn symtn_core::CoupledSectorRegion::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CoupledSectorRegion
+pub fn symtn_core::CoupledSectorRegion::eq(&self, &symtn_core::CoupledSectorRegion) -> bool
+impl core::fmt::Debug for symtn_core::CoupledSectorRegion
+pub fn symtn_core::CoupledSectorRegion::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::CoupledSectorRegion
+pub struct symtn_core::CoupledTreeExtent
+impl symtn_core::CoupledTreeExtent
+pub fn symtn_core::CoupledTreeExtent::extent(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::CoupledTreeExtent::offset(&self) -> usize
+pub fn symtn_core::CoupledTreeExtent::shape(&self) -> &[usize]
+pub fn symtn_core::CoupledTreeExtent::tree(&self) -> &symtn_core::FusionTreeKey
+impl core::clone::Clone for symtn_core::CoupledTreeExtent
+pub fn symtn_core::CoupledTreeExtent::clone(&self) -> symtn_core::CoupledTreeExtent
+impl core::cmp::Eq for symtn_core::CoupledTreeExtent
+pub fn symtn_core::CoupledTreeExtent::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CoupledTreeExtent
+pub fn symtn_core::CoupledTreeExtent::eq(&self, &symtn_core::CoupledTreeExtent) -> bool
+impl core::fmt::Debug for symtn_core::CoupledTreeExtent
+pub fn symtn_core::CoupledTreeExtent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::CoupledTreeExtent
+pub struct symtn_core::CoupledTreePlacement
+pub symtn_core::CoupledTreePlacement::dim: usize
+pub symtn_core::CoupledTreePlacement::index: usize
+pub symtn_core::CoupledTreePlacement::offset: usize
+impl core::clone::Clone for symtn_core::CoupledTreePlacement
+pub fn symtn_core::CoupledTreePlacement::clone(&self) -> symtn_core::CoupledTreePlacement
+impl core::clone::TrivialClone for symtn_core::CoupledTreePlacement
+impl core::cmp::Eq for symtn_core::CoupledTreePlacement
+pub fn symtn_core::CoupledTreePlacement::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::CoupledTreePlacement
+pub fn symtn_core::CoupledTreePlacement::eq(&self, &symtn_core::CoupledTreePlacement) -> bool
+impl core::fmt::Debug for symtn_core::CoupledTreePlacement
+pub fn symtn_core::CoupledTreePlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::CoupledTreePlacement
+impl core::marker::StructuralPartialEq for symtn_core::CoupledTreePlacement
+pub struct symtn_core::DedupTreeArenaBuilder
+impl symtn_core::DedupTreeArenaBuilder
+pub fn symtn_core::DedupTreeArenaBuilder::insert_group(&mut self, &symtn_core::FusionTreeGroupKey)
+pub fn symtn_core::DedupTreeArenaBuilder::insert_pair(&mut self, &symtn_core::FusionTreePairKey)
+pub fn symtn_core::DedupTreeArenaBuilder::recycle(&mut self, symtn_core::TreeRehomer)
+pub fn symtn_core::DedupTreeArenaBuilder::rehome(&mut self) -> symtn_core::TreeRehomer
+pub fn symtn_core::DedupTreeArenaBuilder::reserve<'p, 'g>(&mut self, impl core::iter::traits::iterator::Iterator<Item = &'p symtn_core::FusionTreePairKey>, impl core::iter::traits::iterator::Iterator<Item = &'g symtn_core::FusionTreeGroupKey>)
+impl core::default::Default for symtn_core::DedupTreeArenaBuilder
+pub fn symtn_core::DedupTreeArenaBuilder::default() -> symtn_core::DedupTreeArenaBuilder
+pub struct symtn_core::DegeneracyBlock
+impl symtn_core::DegeneracyBlock
+pub fn symtn_core::DegeneracyBlock::column_major(alloc::vec::Vec<usize>, usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlock::element_count(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlock::new(symtn_core::DimVec, symtn_core::DimVec, usize) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlock::offset(&self) -> usize
+pub fn symtn_core::DegeneracyBlock::shape(&self) -> &[usize]
+pub fn symtn_core::DegeneracyBlock::storage_end_exclusive(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlock::strides(&self) -> &[usize]
+impl core::clone::Clone for symtn_core::DegeneracyBlock
+pub fn symtn_core::DegeneracyBlock::clone(&self) -> symtn_core::DegeneracyBlock
+impl core::cmp::Eq for symtn_core::DegeneracyBlock
+pub fn symtn_core::DegeneracyBlock::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::DegeneracyBlock
+pub fn symtn_core::DegeneracyBlock::eq(&self, &symtn_core::DegeneracyBlock) -> bool
+impl core::fmt::Debug for symtn_core::DegeneracyBlock
+pub fn symtn_core::DegeneracyBlock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::DegeneracyBlock
+pub struct symtn_core::DegeneracyBlockRef<'a>
+impl<'a> symtn_core::DegeneracyBlockRef<'a>
+pub fn symtn_core::DegeneracyBlockRef<'a>::element_count(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlockRef<'a>::offset(&self) -> usize
+pub fn symtn_core::DegeneracyBlockRef<'a>::shape(&self) -> &'a [usize]
+pub fn symtn_core::DegeneracyBlockRef<'a>::storage_end_exclusive(&self) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyBlockRef<'a>::strides(&self) -> &'a [usize]
+impl<'a> core::clone::Clone for symtn_core::DegeneracyBlockRef<'a>
+pub fn symtn_core::DegeneracyBlockRef<'a>::clone(&self) -> symtn_core::DegeneracyBlockRef<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::DegeneracyBlockRef<'a>
+impl<'a> core::cmp::Eq for symtn_core::DegeneracyBlockRef<'a>
+pub fn symtn_core::DegeneracyBlockRef<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::PartialEq for symtn_core::DegeneracyBlockRef<'a>
+pub fn symtn_core::DegeneracyBlockRef<'a>::eq(&self, &symtn_core::DegeneracyBlockRef<'a>) -> bool
+impl<'a> core::fmt::Debug for symtn_core::DegeneracyBlockRef<'a>
+pub fn symtn_core::DegeneracyBlockRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn_core::DegeneracyBlockRef<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_core::DegeneracyBlockRef<'a>
+pub struct symtn_core::DegeneracyStructure
+impl symtn_core::DegeneracyStructure
+pub fn symtn_core::DegeneracyStructure::block(&self, usize) -> core::result::Result<symtn_core::DegeneracyBlockRef<'_>, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyStructure::block_count(&self) -> usize
+pub fn symtn_core::DegeneracyStructure::blocks(&self) -> impl core::iter::traits::exact_size::ExactSizeIterator<Item = symtn_core::DegeneracyBlockRef<'_>> + '_
+pub fn symtn_core::DegeneracyStructure::from_blocks_with_rank(usize, alloc::vec::Vec<symtn_core::DegeneracyBlock>) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::DegeneracyStructure::packed_column_major<I>(usize, I) -> core::result::Result<Self, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator, <I as core::iter::traits::collect::IntoIterator>::Item: core::convert::Into<alloc::vec::Vec<usize>>
+pub fn symtn_core::DegeneracyStructure::rank(&self) -> usize
+pub fn symtn_core::DegeneracyStructure::required_len(&self) -> core::result::Result<usize, symtn_core::CoreError>
+impl core::clone::Clone for symtn_core::DegeneracyStructure
+pub fn symtn_core::DegeneracyStructure::clone(&self) -> symtn_core::DegeneracyStructure
+impl core::cmp::Eq for symtn_core::DegeneracyStructure
+pub fn symtn_core::DegeneracyStructure::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::DegeneracyStructure
+pub fn symtn_core::DegeneracyStructure::eq(&self, &symtn_core::DegeneracyStructure) -> bool
+impl core::fmt::Debug for symtn_core::DegeneracyStructure
+pub fn symtn_core::DegeneracyStructure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::DegeneracyStructure
+pub struct symtn_core::FusionProductSpace
+impl symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::coupled_sector_block_dimensions<R>(&self, &R) -> core::result::Result<alloc::collections::btree::map::BTreeMap<symtn_sectors::SectorId, usize>, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionProductSpace::coupled_sector_block_dimensions_checked<R>(&self, &R) -> core::result::Result<alloc::collections::btree::map::BTreeMap<symtn_sectors::SectorId, usize>, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionProductSpace::from_sector_ids<Sectors>(Sectors) -> Self where Sectors: core::iter::traits::collect::IntoIterator<Item = (usize, usize)>
+pub fn symtn_core::FusionProductSpace::is_empty(&self) -> bool
+pub fn symtn_core::FusionProductSpace::legs(&self) -> &[symtn_core::SectorLeg]
+pub fn symtn_core::FusionProductSpace::len(&self) -> usize
+pub fn symtn_core::FusionProductSpace::new<Legs>(Legs) -> Self where Legs: core::iter::traits::collect::IntoIterator<Item = symtn_core::SectorLeg>
+impl core::clone::Clone for symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::clone(&self) -> symtn_core::FusionProductSpace
+impl core::cmp::Eq for symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::eq(&self, &symtn_core::FusionProductSpace) -> bool
+impl core::fmt::Debug for symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionProductSpace
+pub fn symtn_core::FusionProductSpace::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_core::FusionProductSpace
+pub struct symtn_core::FusionTreeBlockGroup
+impl symtn_core::FusionTreeBlockGroup
+pub fn symtn_core::FusionTreeBlockGroup::block_indices(&self) -> &[usize]
+pub fn symtn_core::FusionTreeBlockGroup::group_key(&self) -> &symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeBlockGroup::new(symtn_core::FusionTreeGroupKey, alloc::vec::Vec<usize>) -> Self
+impl core::clone::Clone for symtn_core::FusionTreeBlockGroup
+pub fn symtn_core::FusionTreeBlockGroup::clone(&self) -> symtn_core::FusionTreeBlockGroup
+impl core::cmp::Eq for symtn_core::FusionTreeBlockGroup
+pub fn symtn_core::FusionTreeBlockGroup::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::FusionTreeBlockGroup
+pub fn symtn_core::FusionTreeBlockGroup::eq(&self, &symtn_core::FusionTreeBlockGroup) -> bool
+impl core::fmt::Debug for symtn_core::FusionTreeBlockGroup
+pub fn symtn_core::FusionTreeBlockGroup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::FusionTreeBlockGroup
+pub struct symtn_core::FusionTreeGroupKey
+impl symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::as_view(&self) -> symtn_core::FusionTreeGroupRef<'_>
+impl symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::codomain_is_dual(&self) -> &[bool]
+pub fn symtn_core::FusionTreeGroupKey::codomain_tree(&self) -> &symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeGroupKey::codomain_uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeGroupKey::domain_is_dual(&self) -> &[bool]
+pub fn symtn_core::FusionTreeGroupKey::domain_tree(&self) -> &symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeGroupKey::domain_uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeGroupKey::from_sector_ids<Codomain, Domain, CodomainDual, DomainDual>(Codomain, Domain, CodomainDual, DomainDual) -> Self where Codomain: core::iter::traits::collect::IntoIterator<Item = usize>, Domain: core::iter::traits::collect::IntoIterator<Item = usize>, CodomainDual: core::iter::traits::collect::IntoIterator<Item = bool>, DomainDual: core::iter::traits::collect::IntoIterator<Item = bool>
+pub fn symtn_core::FusionTreeGroupKey::new<Codomain, Domain, CodomainDual, DomainDual>(Codomain, Domain, CodomainDual, DomainDual) -> Self where Codomain: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, Domain: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, CodomainDual: core::iter::traits::collect::IntoIterator<Item = bool>, DomainDual: core::iter::traits::collect::IntoIterator<Item = bool>
+impl core::clone::Clone for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::clone(&self) -> symtn_core::FusionTreeGroupKey
+impl core::cmp::Eq for symtn_core::FusionTreeGroupKey
+impl core::cmp::Ord for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreeGroupKey::hash<H: core::hash::Hasher>(&self, &mut H)
+impl equivalent::Equivalent<symtn_core::FusionTreeGroupKey> for symtn_core::FusionTreeGroupRef<'_>
+pub fn symtn_core::FusionTreeGroupRef<'_>::equivalent(&self, &symtn_core::FusionTreeGroupKey) -> bool
+pub struct symtn_core::FusionTreeGroupRef<'a>
+impl<'a> symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::codomain_is_dual(&self) -> &'a [bool]
+pub fn symtn_core::FusionTreeGroupRef<'a>::codomain_uncoupled(&self) -> &'a [symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeGroupRef<'a>::domain_is_dual(&self) -> &'a [bool]
+pub fn symtn_core::FusionTreeGroupRef<'a>::domain_uncoupled(&self) -> &'a [symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeGroupRef<'a>::new(&'a [symtn_sectors::SectorId], &'a [symtn_sectors::SectorId], &'a [bool], &'a [bool]) -> Self
+impl equivalent::Equivalent<symtn_core::FusionTreeGroupKey> for symtn_core::FusionTreeGroupRef<'_>
+pub fn symtn_core::FusionTreeGroupRef<'_>::equivalent(&self, &symtn_core::FusionTreeGroupKey) -> bool
+impl<'a> core::clone::Clone for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::clone(&self) -> symtn_core::FusionTreeGroupRef<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::FusionTreeGroupRef<'a>
+impl<'a> core::cmp::Eq for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::Ord for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::cmp(&self, &symtn_core::FusionTreeGroupRef<'a>) -> core::cmp::Ordering
+impl<'a> core::cmp::PartialEq for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::eq(&self, &symtn_core::FusionTreeGroupRef<'a>) -> bool
+impl<'a> core::cmp::PartialOrd for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::partial_cmp(&self, &symtn_core::FusionTreeGroupRef<'a>) -> core::option::Option<core::cmp::Ordering>
+impl<'a> core::fmt::Debug for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::hash::Hash for symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreeGroupRef<'a>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl<'a> core::marker::Copy for symtn_core::FusionTreeGroupRef<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_core::FusionTreeGroupRef<'a>
+pub struct symtn_core::FusionTreeHomSpace
+impl symtn_core::FusionTreeHomSpace
+pub fn symtn_core::FusionTreeHomSpace::canonical_coupled_subblock_structure_from_leg_degeneracies<R>(self, &R) -> core::result::Result<(Self, alloc::sync::Arc<symtn_core::BlockStructure>), symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::canonical_coupled_subblock_structure_from_leg_degeneracies_generic<R>(self, &R) -> core::result::Result<(Self, alloc::sync::Arc<symtn_core::BlockStructure>), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::charged_retained_bytes(&self) -> usize
+pub fn symtn_core::FusionTreeHomSpace::codomain(&self) -> &symtn_core::FusionProductSpace
+pub fn symtn_core::FusionTreeHomSpace::compose<R>(&R, &Self, &Self) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::coupled_subblock_layout_probe_uncached<R>(&self, &R, &symtn_core::BlockStructure) -> core::result::Result<(usize, bool), symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::coupled_subblock_structure<R, Shapes>(&self, &R, usize, Shapes) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule, Shapes: core::iter::traits::collect::IntoIterator, <Shapes as core::iter::traits::collect::IntoIterator>::Item: core::convert::Into<alloc::vec::Vec<usize>>
+pub fn symtn_core::FusionTreeHomSpace::coupled_subblock_structure_from_leg_degeneracies<R>(&self, &R) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::coupled_subblock_structure_from_leg_degeneracies_generic<R>(&self, &R) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::coupled_subblock_structure_from_leg_degeneracies_generic_checked<R>(&self, &R) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::domain(&self) -> &symtn_core::FusionProductSpace
+pub fn symtn_core::FusionTreeHomSpace::existing_id(&self) -> core::option::Option<symtn_core::HomSpaceId>
+pub fn symtn_core::FusionTreeHomSpace::external_axis_is_dual(&self, usize) -> core::option::Option<bool>
+pub fn symtn_core::FusionTreeHomSpace::external_axis_leg<R>(&self, &R, usize) -> symtn_core::SectorLeg where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::from_sector_ids<Codomain, Domain>(Codomain, Domain) -> Self where Codomain: core::iter::traits::collect::IntoIterator<Item = (usize, usize)>, Domain: core::iter::traits::collect::IntoIterator<Item = (usize, usize)>
+pub fn symtn_core::FusionTreeHomSpace::from_sectors<Codomain, Domain, CodomainSector, DomainSector>(Codomain, Domain) -> Self where Codomain: core::iter::traits::collect::IntoIterator<Item = (CodomainSector, usize)>, Domain: core::iter::traits::collect::IntoIterator<Item = (DomainSector, usize)>, CodomainSector: core::convert::Into<symtn_sectors::SectorId>, DomainSector: core::convert::Into<symtn_sectors::SectorId>
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_groups<R>(&self, &R) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreeBlockGroup>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys<R>(&self, &R) -> alloc::sync::Arc<[symtn_core::FusionTreePairKey]> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys_from_external_sectors<R>(&self, &R, &[symtn_sectors::SectorId]) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreePairKey>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys_generic<R>(&self, &R) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreePairKey>, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys_generic_checked<R>(&self, &R) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreePairKey>, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys_generic_for_coupled<R>(&self, &R, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreePairKey>, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::fusion_tree_keys_generic_for_coupled_checked<R>(&self, &R, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<symtn_core::FusionTreePairKey>, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::id(&self) -> symtn_core::HomSpaceId
+pub fn symtn_core::FusionTreeHomSpace::insert_left_unit<R>(&self, &R, usize, bool) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::insert_left_unit_checked<R>(&self, &R, usize, bool) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CheckedCanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::insert_right_unit<R>(&self, &R, usize, bool) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::insert_right_unit_checked<R>(&self, &R, usize, bool) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CheckedCanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::memoized_permuted_multiplicity_free(&self, &symtn_core::BlockStructure, &symtn_sectors::rule_identity::RuleIdentity, symtn_core::FusionTreePairOrientation, &[usize], &[usize]) -> core::result::Result<(Self, alloc::sync::Arc<symtn_core::BlockStructure>), symtn_core::PermutedMemoTicket>
+pub fn symtn_core::FusionTreeHomSpace::new(symtn_core::FusionProductSpace, symtn_core::FusionProductSpace) -> Self
+pub fn symtn_core::FusionTreeHomSpace::permute<R>(&self, &R, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::prepare_complete_coupled_subblock_structure_generic_checked_after<R, A>(self, &R, A) -> core::result::Result<symtn_core::PreparedBlockStructure, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion, A: core::ops::function::FnOnce(&symtn_sectors::rule_identity::RuleIdentity) -> core::result::Result<(), symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_core::FusionTreeHomSpace::prepare_complete_coupled_subblock_structure_generic_checked_with<R, E, B>(&R, B) -> core::result::Result<symtn_core::PreparedBlockStructure, E> where R: symtn_sectors::algebra::CheckedGenericFusion, E: core::convert::From<symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>, B: core::ops::function::FnOnce(&symtn_sectors::rule_identity::RuleIdentity) -> core::result::Result<Self, E>
+pub fn symtn_core::FusionTreeHomSpace::prepare_complete_permuted_generic_checked<R, E>(&self, &symtn_core::BlockStructure, &R, &[usize], &[usize], impl core::ops::function::FnOnce(&symtn_sectors::rule_identity::RuleIdentity) -> core::result::Result<(), E>, impl core::ops::function::FnOnce() -> core::result::Result<(), E>) -> core::result::Result<(symtn_core::PreparedBlockStructure, Self, symtn_core::Permuted), E> where R: symtn_sectors::algebra::CheckedGenericFusion, E: core::convert::From<symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_core::FusionTreeHomSpace::prepare_coupled_subblock_structure_from_leg_degeneracies_generic_checked<R>(&self, &R) -> core::result::Result<symtn_core::PreparedBlockStructure, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::prepare_final_coupled_subblock_structure_checked<R>(&self, &R) -> core::result::Result<symtn_core::PreparedBlockStructure, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::prepare_fusion_tree_layout<R>(&self, &R) -> symtn_core::PreparedFusionTreeLayout where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::prepare_fusion_tree_layout_checked<R>(&self, &R) -> core::result::Result<symtn_core::PreparedFusionTreeLayout, symtn_sectors::algebra::FusionAlgebraError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::prepare_fusion_tree_layout_checked_with<R, E>(&R, impl core::ops::function::FnOnce() -> core::result::Result<Self, E>) -> core::result::Result<(Self, symtn_core::PreparedFusionTreeLayout), E> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule + symtn_sectors::algebra::CheckedFusionAlgebra, E: core::convert::From<symtn_sectors::algebra::FusionAlgebraError>
+pub fn symtn_core::FusionTreeHomSpace::rank(&self) -> usize
+pub fn symtn_core::FusionTreeHomSpace::remove_unit<R>(&self, &R, usize) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::remove_unit_checked<R>(&self, &R, usize) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::CheckedCanonicalUnitFusionRule
+pub fn symtn_core::FusionTreeHomSpace::sector_structure<R>(&self, &R) -> core::result::Result<symtn_core::SectorStructure, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::select<R>(&self, &R, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::tensorcontract_homspace<R>(&R, &Self, &Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::tensorcontract_homspace_matches<R>(&R, &Self, &Self, &[usize], &[usize], &[usize], usize, &Self) -> core::result::Result<bool, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::try_for_each_fusion_tree_key<R, F, E>(&self, &R, F) -> core::result::Result<(), E> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule, F: core::ops::function::FnMut(&symtn_core::FusionTreePairKey) -> core::result::Result<(), E>
+pub fn symtn_core::FusionTreeHomSpace::try_permute_checked<R>(&self, &R, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::try_permute_generic_checked<R>(&self, &R, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::try_select_checked<R>(&self, &R, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::try_tensorcontract_homspace_checked<R>(&R, &Self, &Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::try_tensorcontract_homspace_generic_checked<R>(&R, &Self, &Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<Self, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::FusionTreeHomSpace::try_tensorcontract_homspace_matches_checked<R>(&R, &Self, &Self, &[usize], &[usize], &[usize], usize, &Self) -> core::result::Result<bool, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeHomSpace::try_with_fusion_tree_keys<R, F, T, E>(&self, &R, F) -> core::result::Result<T, E> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule, F: core::ops::function::FnOnce(&[symtn_core::FusionTreePairKey]) -> core::result::Result<T, E>
+pub fn symtn_core::FusionTreeHomSpace::unique_fusion_tree_key_from_external_sectors<R>(&self, &R, &[symtn_sectors::SectorId]) -> core::result::Result<symtn_core::FusionTreePairKey, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_core::FusionTreeHomSpace::validate_degeneracy_shapes<S>(&self, &[symtn_core::FusionTreePairKey], &[S]) -> core::result::Result<(), symtn_core::CoreError> where S: core::convert::AsRef<[usize]>
+pub fn symtn_core::FusionTreeHomSpace::validate_subblock_structure_subset<R>(&self, &R, &symtn_core::BlockStructure) -> core::result::Result<(), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeHomSpace::validate_subblock_structure_subset_checked<R>(&self, &R, &symtn_core::BlockStructure) -> core::result::Result<(), symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+impl core::clone::Clone for symtn_core::FusionTreeHomSpace
+pub fn symtn_core::FusionTreeHomSpace::clone(&self) -> Self
+impl core::cmp::Eq for symtn_core::FusionTreeHomSpace
+impl core::cmp::PartialEq for symtn_core::FusionTreeHomSpace
+pub fn symtn_core::FusionTreeHomSpace::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::FusionTreeHomSpace
+pub fn symtn_core::FusionTreeHomSpace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreeHomSpace
+pub fn symtn_core::FusionTreeHomSpace::hash<H: core::hash::Hasher>(&self, &mut H)
+pub struct symtn_core::FusionTreeKey
+impl symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::arena_retained_bytes(&self) -> usize
+pub fn symtn_core::FusionTreeKey::coupled(&self) -> symtn_sectors::SectorId
+pub fn symtn_core::FusionTreeKey::innerlines(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeKey::is_dual(&self) -> &[bool]
+pub fn symtn_core::FusionTreeKey::shares_arena(&self, &Self) -> bool
+pub fn symtn_core::FusionTreeKey::try_from_sector_ids_for_rule<R, Uncoupled, Dual, Innerlines, Vertices>(&R, Uncoupled, usize, Dual, Innerlines, Vertices) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule, Uncoupled: core::iter::traits::collect::IntoIterator<Item = usize>, Dual: core::iter::traits::collect::IntoIterator<Item = bool>, Innerlines: core::iter::traits::collect::IntoIterator<Item = usize>, Vertices: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::FusionTreeKey::try_from_sector_ids_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(&R, Uncoupled, usize, Dual, Innerlines, Vertices) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra, Uncoupled: core::iter::traits::collect::IntoIterator<Item = usize>, Dual: core::iter::traits::collect::IntoIterator<Item = bool>, Innerlines: core::iter::traits::collect::IntoIterator<Item = usize>, Vertices: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::FusionTreeKey::try_new_for_rule<R, Uncoupled, Dual, Innerlines, Vertices>(&R, Uncoupled, symtn_sectors::SectorId, Dual, Innerlines, Vertices) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule, Uncoupled: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, Dual: core::iter::traits::collect::IntoIterator<Item = bool>, Innerlines: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, Vertices: core::iter::traits::collect::IntoIterator<Item = symtn_core::MultiplicityIndex>
+pub fn symtn_core::FusionTreeKey::try_new_for_rule_checked<R, Uncoupled, Dual, Innerlines, Vertices>(&R, Uncoupled, symtn_sectors::SectorId, Dual, Innerlines, Vertices) -> core::result::Result<Self, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra, Uncoupled: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, Dual: core::iter::traits::collect::IntoIterator<Item = bool>, Innerlines: core::iter::traits::collect::IntoIterator<Item = symtn_sectors::SectorId>, Vertices: core::iter::traits::collect::IntoIterator<Item = symtn_core::MultiplicityIndex>
+pub fn symtn_core::FusionTreeKey::uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeKey::validate_for_rule<R>(&self, &R) -> core::result::Result<(), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreeKey::validate_for_rule_checked<R>(&self, &R) -> core::result::Result<(), symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::FusionTreeKey::vertices(&self) -> &[symtn_core::MultiplicityIndex]
+impl symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::as_view(&self) -> symtn_core::FusionTreeRef<'_>
+impl core::clone::Clone for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::clone(&self) -> symtn_core::FusionTreeKey
+impl core::cmp::Eq for symtn_core::FusionTreeKey
+impl core::cmp::Ord for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreeKey::hash<H: core::hash::Hasher>(&self, &mut H)
+impl equivalent::Equivalent<symtn_core::FusionTreeKey> for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::equivalent(&self, &symtn_core::FusionTreeKey) -> bool
+pub struct symtn_core::FusionTreePairKey
+impl symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::as_view(&self) -> symtn_core::FusionTreePairRef<'_>
+impl symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::codomain_innerlines(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreePairKey::codomain_is_dual(&self) -> &[bool]
+pub fn symtn_core::FusionTreePairKey::codomain_tree(&self) -> &symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreePairKey::codomain_uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreePairKey::codomain_vertices(&self) -> &[symtn_core::MultiplicityIndex]
+pub fn symtn_core::FusionTreePairKey::coupled(&self) -> symtn_sectors::SectorId
+pub fn symtn_core::FusionTreePairKey::domain_innerlines(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreePairKey::domain_is_dual(&self) -> &[bool]
+pub fn symtn_core::FusionTreePairKey::domain_tree(&self) -> &symtn_core::FusionTreeKey
+pub fn symtn_core::FusionTreePairKey::domain_uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreePairKey::domain_vertices(&self) -> &[symtn_core::MultiplicityIndex]
+pub fn symtn_core::FusionTreePairKey::external_is_dual(&self) -> alloc::vec::Vec<bool>
+pub fn symtn_core::FusionTreePairKey::external_sector<R>(&self, &R, usize) -> core::option::Option<symtn_sectors::SectorId> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreePairKey::external_sectors<R>(&self, &R) -> alloc::vec::Vec<symtn_sectors::SectorId> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreePairKey::group_key(&self) -> symtn_core::FusionTreeGroupKey
+pub fn symtn_core::FusionTreePairKey::pair(symtn_core::FusionTreeKey, symtn_core::FusionTreeKey) -> Self
+pub fn symtn_core::FusionTreePairKey::try_pair_from_sector_ids<Codomain, Domain, CodomainDual, DomainDual, CodomainInner, DomainInner, CodomainVertices, DomainVertices>(Codomain, Domain, usize, CodomainDual, DomainDual, CodomainInner, DomainInner, CodomainVertices, DomainVertices) -> core::result::Result<Self, symtn_core::CoreError> where Codomain: core::iter::traits::collect::IntoIterator<Item = usize>, Domain: core::iter::traits::collect::IntoIterator<Item = usize>, CodomainDual: core::iter::traits::collect::IntoIterator<Item = bool>, DomainDual: core::iter::traits::collect::IntoIterator<Item = bool>, CodomainInner: core::iter::traits::collect::IntoIterator<Item = usize>, DomainInner: core::iter::traits::collect::IntoIterator<Item = usize>, CodomainVertices: core::iter::traits::collect::IntoIterator<Item = usize>, DomainVertices: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::FusionTreePairKey::uncoupled(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreePairKey::vertices(&self) -> &[symtn_core::MultiplicityIndex]
+impl symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::validate_for_rule<R>(&self, &R) -> core::result::Result<(), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::FusionTreePairKey::validate_for_rule_checked<R>(&self, &R) -> core::result::Result<(), symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+impl core::clone::Clone for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::clone(&self) -> symtn_core::FusionTreePairKey
+impl core::cmp::Eq for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::cmp(&self, &symtn_core::FusionTreePairKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::eq(&self, &symtn_core::FusionTreePairKey) -> bool
+impl core::cmp::PartialOrd for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::partial_cmp(&self, &symtn_core::FusionTreePairKey) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<symtn_core::FusionTreePairKey> for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::from(symtn_core::FusionTreePairKey) -> Self
+impl core::fmt::Debug for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreePairKey
+pub fn symtn_core::FusionTreePairKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_core::FusionTreePairKey
+impl equivalent::Equivalent<symtn_core::FusionTreePairKey> for symtn_core::FusionTreePairRef<'_>
+pub fn symtn_core::FusionTreePairRef<'_>::equivalent(&self, &symtn_core::FusionTreePairKey) -> bool
+pub struct symtn_core::FusionTreePairRef<'a>
+impl<'a> symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::codomain_tree(&self) -> symtn_core::FusionTreeRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::domain_tree(&self) -> symtn_core::FusionTreeRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::group(&self) -> symtn_core::FusionTreeGroupRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::new(symtn_core::FusionTreeRef<'a>, symtn_core::FusionTreeRef<'a>) -> Self
+pub fn symtn_core::FusionTreePairRef<'a>::to_key(&self) -> symtn_core::FusionTreePairKey
+impl equivalent::Equivalent<symtn_core::FusionTreePairKey> for symtn_core::FusionTreePairRef<'_>
+pub fn symtn_core::FusionTreePairRef<'_>::equivalent(&self, &symtn_core::FusionTreePairKey) -> bool
+impl<'a> core::clone::Clone for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::clone(&self) -> symtn_core::FusionTreePairRef<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::FusionTreePairRef<'a>
+impl<'a> core::cmp::Eq for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::Ord for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::cmp(&self, &symtn_core::FusionTreePairRef<'a>) -> core::cmp::Ordering
+impl<'a> core::cmp::PartialEq for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::eq(&self, &symtn_core::FusionTreePairRef<'a>) -> bool
+impl<'a> core::cmp::PartialOrd for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::partial_cmp(&self, &symtn_core::FusionTreePairRef<'a>) -> core::option::Option<core::cmp::Ordering>
+impl<'a> core::fmt::Debug for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::hash::Hash for symtn_core::FusionTreePairRef<'a>
+pub fn symtn_core::FusionTreePairRef<'a>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl<'a> core::marker::Copy for symtn_core::FusionTreePairRef<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_core::FusionTreePairRef<'a>
+pub struct symtn_core::FusionTreeRef<'a>
+impl<'a> symtn_core::FusionTreeRef<'a>
+pub fn symtn_core::FusionTreeRef<'a>::coupled(&self) -> symtn_sectors::SectorId
+pub fn symtn_core::FusionTreeRef<'a>::innerlines(&self) -> &'a [symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeRef<'a>::is_dual(&self) -> &'a [bool]
+pub fn symtn_core::FusionTreeRef<'a>::new(&'a [symtn_sectors::SectorId], symtn_sectors::SectorId, &'a [bool], &'a [symtn_sectors::SectorId], &'a [symtn_core::MultiplicityIndex]) -> Self
+pub fn symtn_core::FusionTreeRef<'a>::uncoupled(&self) -> &'a [symtn_sectors::SectorId]
+pub fn symtn_core::FusionTreeRef<'a>::vertices(&self) -> &'a [symtn_core::MultiplicityIndex]
+impl core::cmp::Eq for symtn_core::FusionTreeRef<'_>
+impl core::cmp::Ord for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::hash<H: core::hash::Hasher>(&self, &mut H)
+impl equivalent::Equivalent<symtn_core::FusionTreeKey> for symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::FusionTreeRef<'_>::equivalent(&self, &symtn_core::FusionTreeKey) -> bool
+impl<'a> core::clone::Clone for symtn_core::FusionTreeRef<'a>
+pub fn symtn_core::FusionTreeRef<'a>::clone(&self) -> symtn_core::FusionTreeRef<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::FusionTreeRef<'a>
+impl<'a> core::marker::Copy for symtn_core::FusionTreeRef<'a>
+pub struct symtn_core::GenericBlockStepCounts
+pub symtn_core::GenericBlockStepCounts::moves: u64
+pub symtn_core::GenericBlockStepCounts::per_source_moves: u64
+pub symtn_core::GenericBlockStepCounts::spread_multiplies: u64
+pub symtn_core::GenericBlockStepCounts::steps: u64
+impl core::clone::Clone for symtn_core::GenericBlockStepCounts
+pub fn symtn_core::GenericBlockStepCounts::clone(&self) -> symtn_core::GenericBlockStepCounts
+impl core::clone::TrivialClone for symtn_core::GenericBlockStepCounts
+impl core::cmp::Eq for symtn_core::GenericBlockStepCounts
+pub fn symtn_core::GenericBlockStepCounts::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::GenericBlockStepCounts
+pub fn symtn_core::GenericBlockStepCounts::eq(&self, &symtn_core::GenericBlockStepCounts) -> bool
+impl core::default::Default for symtn_core::GenericBlockStepCounts
+pub fn symtn_core::GenericBlockStepCounts::default() -> symtn_core::GenericBlockStepCounts
+impl core::fmt::Debug for symtn_core::GenericBlockStepCounts
+pub fn symtn_core::GenericBlockStepCounts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::GenericBlockStepCounts
+impl core::marker::StructuralPartialEq for symtn_core::GenericBlockStepCounts
+pub struct symtn_core::HomSpaceId
+impl symtn_core::HomSpaceId
+pub fn symtn_core::HomSpaceId::downgrade(&self) -> symtn_core::WeakHomSpaceId
+impl core::clone::Clone for symtn_core::HomSpaceId
+pub fn symtn_core::HomSpaceId::clone(&self) -> symtn_core::HomSpaceId
+impl core::cmp::Eq for symtn_core::HomSpaceId
+impl core::cmp::PartialEq for symtn_core::HomSpaceId
+pub fn symtn_core::HomSpaceId::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::HomSpaceId
+pub fn symtn_core::HomSpaceId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::HomSpaceId
+pub fn symtn_core::HomSpaceId::hash<H: core::hash::Hasher>(&self, &mut H)
+pub struct symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>
+impl<'rule, 'structure, R> symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::fusion_tree_pair_key(&self, usize) -> core::result::Result<core::option::Option<&'structure symtn_core::FusionTreePairKey>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::rule(&self) -> &'rule R
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::structure(&self) -> &'structure symtn_core::BlockStructure
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::try_new(&'rule R, &'structure symtn_core::BlockStructure) -> core::result::Result<Self, symtn_core::CoreError>
+impl<'rule, 'structure, R> symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::generic_braid_tree_pair_for_block_index(&self, usize, &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::generic_permute_tree_pair_for_block_index(&self, usize, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::generic_transpose_tree_pair_for_block_index(&self, usize, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError>
+impl<'rule, 'structure, R> symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::braid_codomain_rows_for_block_index(&self, usize, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::braid_codomain_rows_for_block_indices<I>(&self, I, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::permute_codomain_rows_for_block_index(&self, usize, &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::permute_codomain_rows_for_block_indices<I>(&self, I, &[usize]) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+impl<'rule, 'structure, R> symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_braid_for_block_indices<I>(&self, I, symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_braid_ordered_for_block_indices<I>(&self, I, symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_braid_ordered_for_block_indices_borrowed<I>(&self, I, &symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_for_block_index(&self, usize, &symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_transpose_for_block_indices<I>(&self, I, symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<alloc::vec::Vec<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_transpose_ordered_for_block_indices<I>(&self, I, symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_multiplicity_free_transpose_ordered_for_block_indices_borrowed<I>(&self, I, &symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = usize>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_unique_rigid_for_block_index(&self, usize, &symtn_core::PreparedTreePairOperation<'_>, &mut symtn_core::UniqueTreePairScratch) -> core::result::Result<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar), symtn_core::CoreError>
+pub fn symtn_core::LocallyValidatedFusionTreeBlockStructure<'rule, 'structure, R>::execute_unique_rigid_for_block_index_into(&self, usize, &symtn_core::PreparedTreePairOperation<'_>, &mut symtn_core::UniqueTreePairScratch) -> core::result::Result<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar, symtn_core::CoreError>
+#[repr(transparent)] pub struct symtn_core::MultiplicityIndex(_)
+impl symtn_core::MultiplicityIndex
+pub const symtn_core::MultiplicityIndex::ONE: Self
+pub const fn symtn_core::MultiplicityIndex::get(self) -> usize
+pub const fn symtn_core::MultiplicityIndex::new(usize) -> core::option::Option<Self>
+impl core::clone::Clone for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::clone(&self) -> symtn_core::MultiplicityIndex
+impl core::clone::TrivialClone for symtn_core::MultiplicityIndex
+impl core::cmp::Eq for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::cmp(&self, &symtn_core::MultiplicityIndex) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::eq(&self, &symtn_core::MultiplicityIndex) -> bool
+impl core::cmp::PartialOrd for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::partial_cmp(&self, &symtn_core::MultiplicityIndex) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<symtn_core::MultiplicityIndex> for usize
+pub fn usize::from(symtn_core::MultiplicityIndex) -> Self
+impl core::convert::TryFrom<usize> for symtn_core::MultiplicityIndex
+pub type symtn_core::MultiplicityIndex::Error = symtn_core::CoreError
+pub fn symtn_core::MultiplicityIndex::try_from(usize) -> core::result::Result<Self, Self::Error>
+impl core::fmt::Debug for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::MultiplicityIndex
+pub fn symtn_core::MultiplicityIndex::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_core::MultiplicityIndex
+impl core::marker::StructuralPartialEq for symtn_core::MultiplicityIndex
+pub struct symtn_core::OpaqueBlockKey
+impl symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::from_words<I>(I) -> Self where I: core::iter::traits::collect::IntoIterator<Item = u64>
+pub fn symtn_core::OpaqueBlockKey::new(alloc::vec::Vec<u64>) -> Self
+pub fn symtn_core::OpaqueBlockKey::ordinal(u64) -> Self
+pub fn symtn_core::OpaqueBlockKey::words(&self) -> &[u64]
+impl core::clone::Clone for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::clone(&self) -> symtn_core::OpaqueBlockKey
+impl core::cmp::Eq for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::cmp(&self, &symtn_core::OpaqueBlockKey) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::eq(&self, &symtn_core::OpaqueBlockKey) -> bool
+impl core::cmp::PartialOrd for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::partial_cmp(&self, &symtn_core::OpaqueBlockKey) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<symtn_core::OpaqueBlockKey> for symtn_core::BlockKey
+pub fn symtn_core::BlockKey::from(symtn_core::OpaqueBlockKey) -> Self
+impl core::fmt::Debug for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::OpaqueBlockKey
+pub fn symtn_core::OpaqueBlockKey::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_core::OpaqueBlockKey
+pub struct symtn_core::OrderedBlockLinearMap<K, S>
+impl<K, S> symtn_core::OrderedBlockLinearMap<K, S>
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::destinations(&self) -> &[K]
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::into_parts(self) -> (alloc::vec::Vec<K>, usize, symtn_core::OrderedBlockLinearStorage<S>)
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::source_count(&self) -> usize
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::storage(&self) -> &symtn_core::OrderedBlockLinearStorage<S>
+impl<K: core::clone::Clone, S: core::clone::Clone> core::clone::Clone for symtn_core::OrderedBlockLinearMap<K, S>
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::clone(&self) -> symtn_core::OrderedBlockLinearMap<K, S>
+impl<K: core::cmp::PartialEq, S: core::cmp::PartialEq> core::cmp::PartialEq for symtn_core::OrderedBlockLinearMap<K, S>
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::eq(&self, &symtn_core::OrderedBlockLinearMap<K, S>) -> bool
+impl<K: core::cmp::PartialEq, S: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_core::OrderedBlockLinearMap<K, S>
+impl<K: core::fmt::Debug, S: core::fmt::Debug> core::fmt::Debug for symtn_core::OrderedBlockLinearMap<K, S>
+pub fn symtn_core::OrderedBlockLinearMap<K, S>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::OrientedFusionTreeHomSpace<'a>
+impl<'a> symtn_core::OrientedFusionTreeHomSpace<'a>
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::external_axis_is_dual(self, usize) -> core::option::Option<bool>
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::external_axis_leg<R>(self, &R, usize) -> core::option::Option<symtn_core::SectorLeg> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::materialize(self) -> symtn_core::FusionTreeHomSpace
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::new(&'a symtn_core::FusionTreeHomSpace, symtn_core::FusionTreePairOrientation) -> Self
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::nin(self) -> usize
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::nout(self) -> usize
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::orientation(self) -> symtn_core::FusionTreePairOrientation
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::rank(self) -> usize
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::select<R>(self, &R, &[usize], &[usize]) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::tensorcontract_homspace<R>(&R, Self, Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::tensorcontract_homspace_matches<R>(&R, Self, Self, &[usize], &[usize], &[usize], usize, &symtn_core::FusionTreeHomSpace) -> core::result::Result<bool, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_external_axis_leg<R>(self, &R, usize) -> core::result::Result<core::option::Option<symtn_core::SectorLeg>, symtn_sectors::algebra::FusionAlgebraError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_external_axis_leg_generic<R>(self, &R, usize) -> core::result::Result<core::option::Option<symtn_core::SectorLeg>, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_select_checked<R>(self, &R, &[usize], &[usize]) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_select_generic_checked<R>(self, &R, &[usize], &[usize]) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_tensorcontract_homspace_checked<R>(&R, Self, Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_tensorcontract_homspace_generic_checked<R>(&R, Self, Self, &[usize], &[usize], &[usize], usize) -> core::result::Result<symtn_core::FusionTreeHomSpace, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::try_tensorcontract_homspace_matches_checked<R>(&R, Self, Self, &[usize], &[usize], &[usize], usize, &symtn_core::FusionTreeHomSpace) -> core::result::Result<bool, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+impl<'a> core::clone::Clone for symtn_core::OrientedFusionTreeHomSpace<'a>
+pub fn symtn_core::OrientedFusionTreeHomSpace<'a>::clone(&self) -> symtn_core::OrientedFusionTreeHomSpace<'a>
+impl<'a> core::clone::TrivialClone for symtn_core::OrientedFusionTreeHomSpace<'a>
+impl<'a> core::marker::Copy for symtn_core::OrientedFusionTreeHomSpace<'a>
+pub struct symtn_core::PermutedMemoTicket
+impl symtn_core::PermutedMemoTicket
+pub fn symtn_core::PermutedMemoTicket::publish(self, &symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure)
+pub struct symtn_core::PreparedBlockStructure
+impl symtn_core::PreparedBlockStructure
+pub fn symtn_core::PreparedBlockStructure::commit(self) -> symtn_core::BlockStructure
+pub fn symtn_core::PreparedBlockStructure::commit_with_complete_homspace(self) -> (core::option::Option<symtn_core::FusionTreeHomSpace>, alloc::sync::Arc<symtn_core::BlockStructure>)
+pub fn symtn_core::PreparedBlockStructure::required_len(&self) -> usize
+pub fn symtn_core::PreparedBlockStructure::sector_structure(&self) -> &symtn_core::SectorStructure
+pub fn symtn_core::PreparedBlockStructure::shared_structure(&self) -> alloc::sync::Arc<symtn_core::BlockStructure>
+pub fn symtn_core::PreparedBlockStructure::structure(&self) -> &symtn_core::BlockStructure
+pub struct symtn_core::PreparedFusionTreeLayout
+impl symtn_core::PreparedFusionTreeLayout
+pub fn symtn_core::PreparedFusionTreeLayout::build_complete_from_leg_degeneracies(&self, &symtn_core::FusionTreeHomSpace) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CoreError>
+pub fn symtn_core::PreparedFusionTreeLayout::build_complete_homspace_from_leg_degeneracies(&self, symtn_core::FusionTreeHomSpace) -> core::result::Result<(symtn_core::FusionTreeHomSpace, alloc::sync::Arc<symtn_core::BlockStructure>), symtn_core::CoreError>
+pub fn symtn_core::PreparedFusionTreeLayout::build_from_leg_degeneracies(&self, &symtn_core::FusionTreeHomSpace) -> core::result::Result<alloc::sync::Arc<symtn_core::BlockStructure>, symtn_core::CoreError>
+pub fn symtn_core::PreparedFusionTreeLayout::commit(self) -> alloc::sync::Arc<[symtn_core::FusionTreePairKey]>
+pub fn symtn_core::PreparedFusionTreeLayout::keys(&self) -> &[symtn_core::FusionTreePairKey]
+pub fn symtn_core::PreparedFusionTreeLayout::keys_arc(&self) -> alloc::sync::Arc<[symtn_core::FusionTreePairKey]>
+impl core::fmt::Debug for symtn_core::PreparedFusionTreeLayout
+pub fn symtn_core::PreparedFusionTreeLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::PreparedTreePairOperation<'operation>
+impl<'operation> symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::execute_multiplicity_free<R>(&self, &R, &symtn_core::FusionTreePairKey) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::execute_unique_rigid<R>(&self, &R, &symtn_core::FusionTreePairKey) -> core::result::Result<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar), symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::execute_unique_rigid_into<R>(&self, &R, &symtn_core::FusionTreePairKey, &mut symtn_core::UniqueTreePairScratch) -> core::result::Result<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+impl<'operation> symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::into_compiler_owned_simple_braid(self) -> Self
+pub fn symtn_core::PreparedTreePairOperation<'operation>::prepare_braid<R>(&R, usize, usize, &'operation [usize], &'operation [usize], &'operation [usize], &'operation [usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::PreparedTreePairOperation<'operation>::prepare_braid_with_raw_axis_positions<R>(&R, usize, usize, &'operation [usize], &'operation [usize], &'operation [usize], &'operation [usize], &'operation [usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::PreparedTreePairOperation<'operation>::prepare_permute<R>(&R, usize, usize, &'operation [usize], &'operation [usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::PreparedTreePairOperation<'operation>::prepare_permute_with_raw_axis_positions<R>(&R, usize, usize, &'operation [usize], &'operation [usize], &'operation [usize]) -> core::result::Result<Self, symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::PreparedTreePairOperation<'operation>::prepare_transpose(usize, usize, &[usize], &[usize]) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::validate_braid_syntax(usize, usize, &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<(), symtn_core::CoreError>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::validate_permute_syntax(usize, usize, &[usize], &[usize]) -> core::result::Result<(), symtn_core::CoreError>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::validate_rank_syntax(usize, &[usize], &[usize]) -> core::result::Result<(), symtn_core::CoreError>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::validate_transpose_syntax(usize, usize, &[usize], &[usize]) -> core::result::Result<(), symtn_core::CoreError>
+impl<'operation> core::clone::Clone for symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::clone(&self) -> symtn_core::PreparedTreePairOperation<'operation>
+impl<'operation> core::cmp::Eq for symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::assert_fields_are_eq(&self)
+impl<'operation> core::cmp::PartialEq for symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::eq(&self, &symtn_core::PreparedTreePairOperation<'operation>) -> bool
+impl<'operation> core::fmt::Debug for symtn_core::PreparedTreePairOperation<'operation>
+pub fn symtn_core::PreparedTreePairOperation<'operation>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'operation> core::marker::StructuralPartialEq for symtn_core::PreparedTreePairOperation<'operation>
+pub struct symtn_core::SectorBlock
+impl symtn_core::SectorBlock
+pub fn symtn_core::SectorBlock::key(&self) -> &symtn_core::BlockKey
+pub fn symtn_core::SectorBlock::new(symtn_core::BlockKey) -> Self
+impl core::clone::Clone for symtn_core::SectorBlock
+pub fn symtn_core::SectorBlock::clone(&self) -> symtn_core::SectorBlock
+impl core::cmp::Eq for symtn_core::SectorBlock
+pub fn symtn_core::SectorBlock::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::SectorBlock
+pub fn symtn_core::SectorBlock::eq(&self, &symtn_core::SectorBlock) -> bool
+impl core::fmt::Debug for symtn_core::SectorBlock
+pub fn symtn_core::SectorBlock::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_core::SectorBlock
+pub struct symtn_core::SectorLeg
+impl symtn_core::SectorLeg
+pub fn symtn_core::SectorLeg::charged_retained_bytes(&self) -> usize
+pub fn symtn_core::SectorLeg::degeneracies(&self) -> &[usize]
+pub fn symtn_core::SectorLeg::degeneracy(&self, symtn_sectors::SectorId) -> core::option::Option<usize>
+pub fn symtn_core::SectorLeg::dual<R>(&self, &R) -> Self where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::SectorLeg::from_sector_id(usize, usize) -> Self
+pub const fn symtn_core::SectorLeg::is_dual(&self) -> bool
+pub fn symtn_core::SectorLeg::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (symtn_sectors::SectorId, usize)> + '_
+pub fn symtn_core::SectorLeg::new<Pairs, Sector>(Pairs, bool) -> Self where Pairs: core::iter::traits::collect::IntoIterator<Item = (Sector, usize)>, Sector: core::convert::Into<symtn_sectors::SectorId>
+pub fn symtn_core::SectorLeg::sectors(&self) -> &[symtn_sectors::SectorId]
+pub fn symtn_core::SectorLeg::shares_sector_data_with(&self, &Self) -> bool
+pub fn symtn_core::SectorLeg::try_dual<R>(&self, &R) -> core::result::Result<Self, symtn_sectors::algebra::FusionAlgebraError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::SectorLeg::try_dual_generic<R>(&self, &R) -> core::result::Result<Self, symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::SectorLeg::try_new<Pairs, Sector>(Pairs, bool) -> core::result::Result<Self, symtn_core::SectorLegConstructionError> where Pairs: core::iter::traits::collect::IntoIterator<Item = (Sector, usize)>, Sector: core::convert::Into<symtn_sectors::SectorId>
+impl core::clone::Clone for symtn_core::SectorLeg
+pub fn symtn_core::SectorLeg::clone(&self) -> symtn_core::SectorLeg
+impl core::cmp::Eq for symtn_core::SectorLeg
+impl core::cmp::PartialEq for symtn_core::SectorLeg
+pub fn symtn_core::SectorLeg::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::SectorLeg
+pub fn symtn_core::SectorLeg::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_core::SectorLeg
+pub fn symtn_core::SectorLeg::hash<H: core::hash::Hasher>(&self, &mut H)
+pub struct symtn_core::SectorStructure
+impl symtn_core::SectorStructure
+pub fn symtn_core::SectorStructure::block(&self, usize) -> core::result::Result<&symtn_core::SectorBlock, symtn_core::CoreError>
+pub fn symtn_core::SectorStructure::block_count(&self) -> usize
+pub fn symtn_core::SectorStructure::blocks(&self) -> &[symtn_core::SectorBlock]
+pub fn symtn_core::SectorStructure::dense(usize) -> Self
+pub fn symtn_core::SectorStructure::empty(usize) -> Self
+pub fn symtn_core::SectorStructure::find_adjoint_fusion_tree_pair_index(&self, &symtn_core::FusionTreePairKey) -> core::option::Option<usize>
+pub fn symtn_core::SectorStructure::find_fusion_tree_pair_index(&self, &symtn_core::FusionTreePairKey) -> core::option::Option<usize>
+pub fn symtn_core::SectorStructure::find_fusion_tree_pair_view_index(&self, symtn_core::FusionTreePairRef<'_>) -> core::option::Option<usize>
+pub fn symtn_core::SectorStructure::find_index(&self, &symtn_core::BlockKey) -> core::option::Option<usize>
+pub fn symtn_core::SectorStructure::from_keys<I, K>(usize, I) -> core::result::Result<Self, symtn_core::CoreError> where I: core::iter::traits::collect::IntoIterator<Item = K>, K: core::convert::Into<symtn_core::BlockKey>
+pub fn symtn_core::SectorStructure::fusion_tree_group_slice(&self) -> &[symtn_core::FusionTreeBlockGroup]
+pub fn symtn_core::SectorStructure::fusion_tree_groups(&self) -> alloc::vec::Vec<symtn_core::FusionTreeBlockGroup>
+pub fn symtn_core::SectorStructure::has_compact_lookup(&self) -> bool
+pub fn symtn_core::SectorStructure::key(&self, usize) -> core::result::Result<&symtn_core::BlockKey, symtn_core::CoreError>
+pub fn symtn_core::SectorStructure::key_kind(&self) -> core::option::Option<symtn_core::BlockKeyKind>
+pub fn symtn_core::SectorStructure::pair_indices_from(&self, &Self) -> core::result::Result<alloc::vec::Vec<usize>, symtn_core::CoreError>
+pub fn symtn_core::SectorStructure::rank(&self) -> usize
+pub fn symtn_core::SectorStructure::sorted_indices(&self) -> &[usize]
+impl core::clone::Clone for symtn_core::SectorStructure
+pub fn symtn_core::SectorStructure::clone(&self) -> Self
+impl core::cmp::Eq for symtn_core::SectorStructure
+impl core::cmp::PartialEq for symtn_core::SectorStructure
+pub fn symtn_core::SectorStructure::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_core::SectorStructure
+pub fn symtn_core::SectorStructure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>
+impl<'homspace, 'structure> symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>
+pub fn symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>::homspace(&self) -> &'homspace symtn_core::FusionTreeHomSpace
+pub fn symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>::try_new(&'homspace symtn_core::FusionTreeHomSpace, &'structure symtn_core::BlockStructure) -> core::result::Result<Self, symtn_core::CoreError>
+pub fn symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>::validate_for_rule<R>(&self, &R) -> core::result::Result<(), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::StructurallyValidatedFusionTreeSubset<'homspace, 'structure>::validate_for_rule_checked<R>(&self, &R) -> core::result::Result<(), symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub struct symtn_core::StructureCache<K, V: ?core::marker::Sized>
+impl<K, V> symtn_core::StructureCache<K, V> where K: core::cmp::Eq + core::hash::Hash + core::clone::Clone, V: ?core::marker::Sized
+pub fn symtn_core::StructureCache<K, V>::get<Q>(&self, &Q) -> core::option::Option<alloc::sync::Arc<V>> where Q: core::hash::Hash + equivalent::Equivalent<K> + ?core::marker::Sized
+pub fn symtn_core::StructureCache<K, V>::get_or_try_build<E>(&self, &K, usize, impl core::ops::function::FnOnce() -> core::result::Result<(alloc::sync::Arc<V>, u64), E>) -> core::result::Result<alloc::sync::Arc<V>, E>
+pub fn symtn_core::StructureCache<K, V>::info(&self) -> symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCache<K, V>::new(symtn_core::StructureCacheKind, u64) -> Self
+pub fn symtn_core::StructureCache<K, V>::publish(&self, &K, alloc::sync::Arc<V>, u64, usize) -> (alloc::sync::Arc<V>, bool)
+pub fn symtn_core::StructureCache<K, V>::reject(&self)
+impl<K, V> symtn_core::ErasedStructureCacheControl for symtn_core::StructureCache<K, V> where K: core::cmp::Eq + core::hash::Hash + core::clone::Clone + core::marker::Send + core::marker::Sync, V: ?core::marker::Sized + core::marker::Send + core::marker::Sync
+pub fn symtn_core::StructureCache<K, V>::clear(&self)
+pub fn symtn_core::StructureCache<K, V>::info(&self) -> symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCache<K, V>::set_byte_budget(&self, u64)
+pub struct symtn_core::StructureCacheInfo
+impl symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCacheInfo::admissions(self) -> u64
+pub fn symtn_core::StructureCacheInfo::byte_budget(self) -> u64
+pub fn symtn_core::StructureCacheInfo::charged_bytes(self) -> u64
+pub fn symtn_core::StructureCacheInfo::duplicate_builds(self) -> u64
+pub fn symtn_core::StructureCacheInfo::entries(self) -> usize
+pub fn symtn_core::StructureCacheInfo::evictions(self) -> u64
+pub fn symtn_core::StructureCacheInfo::hits(self) -> u64
+pub fn symtn_core::StructureCacheInfo::kind(self) -> symtn_core::StructureCacheKind
+pub fn symtn_core::StructureCacheInfo::max_entry_bytes(self) -> u64
+pub fn symtn_core::StructureCacheInfo::misses(self) -> u64
+pub fn symtn_core::StructureCacheInfo::rejections(self) -> u64
+impl core::clone::Clone for symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCacheInfo::clone(&self) -> symtn_core::StructureCacheInfo
+impl core::clone::TrivialClone for symtn_core::StructureCacheInfo
+impl core::cmp::Eq for symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCacheInfo::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCacheInfo::eq(&self, &symtn_core::StructureCacheInfo) -> bool
+impl core::fmt::Debug for symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCacheInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_core::StructureCacheInfo
+impl core::marker::StructuralPartialEq for symtn_core::StructureCacheInfo
+pub struct symtn_core::TreeRehomer
+impl symtn_core::TreeRehomer
+pub fn symtn_core::TreeRehomer::group(&mut self) -> symtn_core::FusionTreeGroupKey
+pub fn symtn_core::TreeRehomer::pair(&mut self) -> symtn_core::FusionTreePairKey
+pub struct symtn_core::TreeScratch
+impl symtn_core::TreeScratch
+pub fn symtn_core::TreeScratch::clear(&mut self)
+pub fn symtn_core::TreeScratch::view(&self, usize) -> symtn_core::FusionTreeRef<'_>
+pub fn symtn_core::TreeScratch::with_rank(usize) -> Self
+impl core::default::Default for symtn_core::TreeScratch
+pub fn symtn_core::TreeScratch::default() -> symtn_core::TreeScratch
+pub struct symtn_core::UniqueTreePairScratch
+impl symtn_core::UniqueTreePairScratch
+pub fn symtn_core::UniqueTreePairScratch::pair_view(&self) -> symtn_core::FusionTreePairRef<'_>
+pub fn symtn_core::UniqueTreePairScratch::reserve_rank(&mut self, usize)
+pub fn symtn_core::UniqueTreePairScratch::retained_bytes(&self) -> usize
+pub fn symtn_core::UniqueTreePairScratch::with_rank(usize) -> Self
+impl core::default::Default for symtn_core::UniqueTreePairScratch
+pub fn symtn_core::UniqueTreePairScratch::default() -> symtn_core::UniqueTreePairScratch
+pub struct symtn_core::WeakHomSpaceId(_)
+impl symtn_core::WeakHomSpaceId
+pub fn symtn_core::WeakHomSpaceId::matches(&self, &symtn_core::HomSpaceId) -> bool
+impl core::clone::Clone for symtn_core::WeakHomSpaceId
+pub fn symtn_core::WeakHomSpaceId::clone(&self) -> symtn_core::WeakHomSpaceId
+impl core::fmt::Debug for symtn_core::WeakHomSpaceId
+pub fn symtn_core::WeakHomSpaceId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub trait symtn_core::ErasedStructureCacheControl: core::marker::Sync
+pub fn symtn_core::ErasedStructureCacheControl::clear(&self)
+pub fn symtn_core::ErasedStructureCacheControl::info(&self) -> symtn_core::StructureCacheInfo
+pub fn symtn_core::ErasedStructureCacheControl::set_byte_budget(&self, u64)
+impl<K, V> symtn_core::ErasedStructureCacheControl for symtn_core::StructureCache<K, V> where K: core::cmp::Eq + core::hash::Hash + core::clone::Clone + core::marker::Send + core::marker::Sync, V: ?core::marker::Sized + core::marker::Send + core::marker::Sync
+pub fn symtn_core::StructureCache<K, V>::clear(&self)
+pub fn symtn_core::StructureCache<K, V>::info(&self) -> symtn_core::StructureCacheInfo
+pub fn symtn_core::StructureCache<K, V>::set_byte_budget(&self, u64)
+pub trait symtn_core::HostReadableStorage<T>: symtn_core::TensorStorage<T>
+pub fn symtn_core::HostReadableStorage::as_slice(&self) -> &[T]
+impl<T> symtn_core::HostReadableStorage<T> for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::as_slice(&self) -> &[T]
+pub trait symtn_core::HostWritableStorage<T>: symtn_core::HostReadableStorage<T>
+pub fn symtn_core::HostWritableStorage::as_mut_slice(&mut self) -> &mut [T]
+impl<T> symtn_core::HostWritableStorage<T> for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::as_mut_slice(&mut self) -> &mut [T]
+pub trait symtn_core::SimilarStorage<T>: symtn_core::TensorStorage<T>
+pub type symtn_core::SimilarStorage::Similar: symtn_core::TensorStorage<T>
+pub fn symtn_core::SimilarStorage::similar_filled(&self, usize, T) -> Self::Similar where T: core::clone::Clone
+impl<T> symtn_core::SimilarStorage<T> for alloc::vec::Vec<T>
+pub type alloc::vec::Vec<T>::Similar = alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::similar_filled(&self, usize, T) -> Self::Similar where T: core::clone::Clone
+pub trait symtn_core::TensorStorage<T>
+pub fn symtn_core::TensorStorage::is_empty(&self) -> bool
+pub fn symtn_core::TensorStorage::len(&self) -> usize
+pub fn symtn_core::TensorStorage::placement(&self) -> symtn_core::Placement
+impl<T> symtn_core::TensorStorage<T> for alloc::vec::Vec<T>
+pub fn alloc::vec::Vec<T>::is_empty(&self) -> bool
+pub fn alloc::vec::Vec<T>::len(&self) -> usize
+pub fn alloc::vec::Vec<T>::placement(&self) -> symtn_core::Placement
+pub fn symtn_core::checked_product(&[usize]) -> core::result::Result<usize, symtn_core::CoreError>
+pub fn symtn_core::clear_structure_caches()
+pub fn symtn_core::column_major_strides(&[usize]) -> core::result::Result<alloc::vec::Vec<usize>, symtn_core::CoreError>
+pub fn symtn_core::core_reset_epoch() -> usize
+pub fn symtn_core::generic_braid_tree_pair_block_ordered<R>(&R, &[symtn_core::FusionTreePairKey], &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::generic_braid_tree_pair_checked<C>(&C, &symtn_core::FusionTreePairKey, &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <C as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar)>, symtn_core::CheckedGenericSymbolError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::generic_permute_tree_pair_block_indexed_checked<C>(&C, &symtn_core::BlockStructure, &[usize], symtn_core::FusionTreePairOrientation, &[usize], &[usize]) -> core::result::Result<symtn_core::BlockSourceColumns<symtn_core::FusionTreePairKey, <C as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar>, symtn_core::CheckedGenericSymbolError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::generic_permute_tree_pair_block_ordered<R>(&R, &[symtn_core::FusionTreePairKey], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::generic_permute_tree_pair_checked<C>(&C, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <C as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar)>, symtn_core::CheckedGenericSymbolError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::generic_transpose_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::generic_transpose_tree_pair_block_ordered<R>(&R, &[symtn_core::FusionTreePairKey], &[usize], &[usize]) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::GenericRigidSymbols, <R as symtn_sectors::algebra::GenericFusionSymbols>::Scalar: symtn_sectors::algebra::CategoricalScalar
+pub fn symtn_core::generic_transpose_tree_pair_checked<C>(&C, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <C as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar)>, symtn_core::CheckedGenericSymbolError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::merge_fusion_trees_generic_checked<C>(&C, &symtn_core::FusionTreeKey, &symtn_core::FusionTreeKey, symtn_sectors::SectorId, symtn_core::MultiplicityIndex) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreeKey, <C as symtn_sectors::algebra::CheckedGenericRigidSymbols>::Scalar)>, symtn_core::CheckedGenericSymbolError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericRigidSymbols
+pub fn symtn_core::merge_fusion_trees_multiplicity_free<R>(&R, &symtn_core::FusionTreeKey, &symtn_core::FusionTreeKey, symtn_sectors::SectorId) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreeKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_sectors::algebra::CanonicalUnitFusionRule, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_braid_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize], &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_braid_tree_pair_block_ordered_indexed<R>(&R, &symtn_core::BlockStructure, &[usize], symtn_core::FusionTreePairOrientation, &symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_permute_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, &[usize], &[usize]) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_permute_tree_pair_block_indexed<R>(&R, &symtn_core::BlockStructure, &[usize], symtn_core::FusionTreePairOrientation, &[usize], &[usize]) -> core::result::Result<symtn_core::BlockSourceColumns<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_repartition_tree_pair<R>(&R, &symtn_core::FusionTreePairKey, usize) -> core::result::Result<alloc::vec::Vec<(symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar)>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::multiplicity_free_transpose_tree_pair_block_ordered_indexed<R>(&R, &symtn_core::BlockStructure, &[usize], symtn_core::FusionTreePairOrientation, &symtn_core::PreparedTreePairOperation<'_>) -> core::result::Result<symtn_core::OrderedBlockLinearMap<symtn_core::FusionTreePairKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_core::CoreError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>
+pub fn symtn_core::register_structure_cache(symtn_core::StructureCacheKind, &'static dyn symtn_core::ErasedStructureCacheControl) -> core::result::Result<u64, symtn_core::StructureCacheRegistrationError>
+pub fn symtn_core::set_structure_cache_byte_budget(symtn_core::StructureCacheKind, u64)
+pub fn symtn_core::split_fusion_tree<R>(&R, &symtn_core::FusionTreeKey, usize) -> core::result::Result<(symtn_core::FusionTreeKey, symtn_core::FusionTreeKey), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::split_fusion_tree_generic_checked<C>(&C, &symtn_core::FusionTreeKey, usize) -> core::result::Result<(symtn_core::FusionTreeKey, symtn_core::FusionTreeKey), symtn_core::CheckedGenericStructureError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::split_fusion_tree_generic_checked_into<C>(&C, symtn_core::FusionTreeRef<'_>, usize, &mut symtn_core::TreeScratch) -> core::result::Result<(usize, usize), symtn_core::CheckedGenericStructureError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::split_fusion_tree_into<R>(&R, symtn_core::FusionTreeRef<'_>, usize, &mut symtn_core::TreeScratch) -> core::result::Result<(usize, usize), symtn_core::CoreError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_core::structure_cache_info(symtn_core::StructureCacheKind) -> symtn_core::StructureCacheInfo
+pub fn symtn_core::structure_cache_infos() -> alloc::vec::Vec<symtn_core::StructureCacheInfo>
+pub fn symtn_core::take_generic_block_step_counts() -> symtn_core::GenericBlockStepCounts
+pub fn symtn_core::try_for_each_column_major_stride<E>(usize, &[usize], impl core::ops::function::FnMut(usize) -> core::result::Result<(), E>, impl core::ops::function::Fn() -> E) -> core::result::Result<usize, E>
+pub fn symtn_core::validate_block_storage_injective(&symtn_core::BlockStructure) -> core::result::Result<(), symtn_core::CoreError>
+pub fn symtn_core::validate_generic_fusion_tree_pair_checked<C>(&C, &symtn_core::FusionTreePairKey) -> core::result::Result<(), symtn_core::CheckedGenericStructureError<<C as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where C: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_core::validate_unit_layout_correspondence<R>(&R, (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), symtn_core::UnitLegInsertion) -> core::result::Result<(), symtn_core::CoreError> where R: symtn_sectors::algebra::CanonicalUnitFusionRule
+pub fn symtn_core::validate_unit_layout_correspondence_checked<R>(&R, (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), symtn_core::UnitLegInsertion) -> core::result::Result<(), symtn_core::CheckedFusionSpaceError> where R: symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_core::validate_unit_layout_correspondence_generic_checked<R>(&R, (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), (&symtn_core::FusionTreeHomSpace, &symtn_core::BlockStructure), symtn_core::UnitLegInsertion) -> core::result::Result<(), symtn_core::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub type symtn_core::DimVec = smallvec::SmallVec<[usize; 8]>
+pub type symtn_core::DualVec = smallvec::SmallVec<[bool; 8]>
+pub type symtn_core::HostStorage<T> = alloc::vec::Vec<T>
+pub type symtn_core::MultiplicityVec = smallvec::SmallVec<[symtn_core::MultiplicityIndex; 8]>

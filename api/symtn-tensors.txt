@@ -1,0 +1,524 @@
+pub mod symtn_tensors
+pub use symtn_tensors::ConjugateValue
+pub use symtn_tensors::ContractDestinationInit
+pub use symtn_tensors::DenseBlockScalar
+pub use symtn_tensors::DenseRecouplingScalar
+pub use symtn_tensors::DenseTreeTransformOperations
+pub use symtn_tensors::OperationError
+pub use symtn_tensors::OutputAxisOrder
+pub use symtn_tensors::OwnedCatCopy
+pub use symtn_tensors::OwnedCatSide
+pub use symtn_tensors::RealStructuralCoefficient
+pub use symtn_tensors::RecouplingCoefficientAction
+pub use symtn_tensors::ReportsPlacement
+pub use symtn_tensors::RuleIdentity
+pub use symtn_tensors::TensorContractSpec
+pub use symtn_tensors::TensorTraceAxisSpec
+pub use symtn_tensors::TreeTransformBackend
+pub use symtn_tensors::TreeTransformBlockSpec
+pub use symtn_tensors::TreeTransformGroupBlockSpec
+pub use symtn_tensors::TreeTransformGroupPlan
+pub use symtn_tensors::TreeTransformKeyBlockSpec
+pub use symtn_tensors::TreeTransformOperation
+pub use symtn_tensors::TreeTransformOperationKind
+pub use symtn_tensors::TreeTransformScalar
+pub use symtn_tensors::TreeTransformStructure
+pub use symtn_tensors::TreeTransformWorkspace
+pub use symtn_tensors::WideScalar
+pub use symtn_tensors::ZeroBytes
+pub use symtn_tensors::host_pool
+pub use symtn_tensors::try_cat_owned_raw
+pub use symtn_tensors::zeroed_payload
+pub enum symtn_tensors::CheckedGenericPlanError<E>
+pub symtn_tensors::CheckedGenericPlanError::Core(symtn_core::error::CoreError)
+pub symtn_tensors::CheckedGenericPlanError::Operation(symtn_operations::error::OperationError)
+pub symtn_tensors::CheckedGenericPlanError::Provider(E)
+pub symtn_tensors::CheckedGenericPlanError::SymbolShape
+pub symtn_tensors::CheckedGenericPlanError::SymbolShape::actual: alloc::vec::Vec<usize>
+pub symtn_tensors::CheckedGenericPlanError::SymbolShape::expected: alloc::vec::Vec<usize>
+pub symtn_tensors::CheckedGenericPlanError::SymbolShape::symbol: &'static str
+impl<E: core::error::Error + 'static> core::error::Error for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn_core::error::CoreError> for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::from(symtn_core::error::CoreError) -> Self
+impl<E> core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>> for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::from(symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<E>) -> Self
+impl<E> core::convert::From<symtn_operations::error::OperationError> for symtn_tensors::CheckedGenericPlanError<E>
+pub fn symtn_tensors::CheckedGenericPlanError<E>::from(symtn_operations::error::OperationError) -> Self
+pub enum symtn_tensors::ContractRequest<'s>
+pub symtn_tensors::ContractRequest::Compose
+pub symtn_tensors::ContractRequest::Contract
+pub symtn_tensors::ContractRequest::Contract::axes: symtn_operations::axis::TensorContractSpec<'s>
+pub symtn_tensors::ContractRequest::Contract::codomain_rank: usize
+pub symtn_tensors::ContractRequest::Planar
+pub symtn_tensors::ContractRequest::Planar::axes: symtn_operations::axis::TensorContractSpec<'s>
+pub symtn_tensors::ContractRequest::Planar::codomain_rank: usize
+pub symtn_tensors::ContractRequest::Planar::orders: &'s symtn_tensors::PlanarContractOrders
+impl<'s> core::clone::Clone for symtn_tensors::ContractRequest<'s>
+pub fn symtn_tensors::ContractRequest<'s>::clone(&self) -> symtn_tensors::ContractRequest<'s>
+impl<'s> core::clone::TrivialClone for symtn_tensors::ContractRequest<'s>
+impl<'s> core::marker::Copy for symtn_tensors::ContractRequest<'s>
+pub enum symtn_tensors::CoreRoute<C>
+pub symtn_tensors::CoreRoute::Hit(symtn_tensors::StorageContractResolution<C>)
+pub symtn_tensors::CoreRoute::Miss(symtn_tensors::contract::resolution::CoreMiss)
+impl<C> symtn_tensors::CoreRoute<C>
+pub fn symtn_tensors::CoreRoute<C>::hit(self) -> core::option::Option<symtn_tensors::StorageContractResolution<C>>
+pub enum symtn_tensors::PhysicalConversionError<E>
+pub symtn_tensors::PhysicalConversionError::Operation(symtn_operations::error::OperationError)
+pub symtn_tensors::PhysicalConversionError::Provider(E)
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_tensors::PhysicalConversionError<E>
+pub fn symtn_tensors::PhysicalConversionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_tensors::PhysicalConversionError<E>
+pub fn symtn_tensors::PhysicalConversionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::convert::From<symtn_core::error::CoreError> for symtn_tensors::PhysicalConversionError<E>
+pub fn symtn_tensors::PhysicalConversionError<E>::from(symtn_core::error::CoreError) -> Self
+impl<E> core::convert::From<symtn_operations::error::OperationError> for symtn_tensors::PhysicalConversionError<E>
+pub fn symtn_tensors::PhysicalConversionError<E>::from(symtn_operations::error::OperationError) -> Self
+impl<E> core::error::Error for symtn_tensors::PhysicalConversionError<E> where E: core::error::Error + 'static
+pub fn symtn_tensors::PhysicalConversionError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+pub enum symtn_tensors::StructureOutcome<T, D>
+pub symtn_tensors::StructureOutcome::Read(T)
+pub symtn_tensors::StructureOutcome::Replayed(alloc::vec::Vec<D>)
+pub enum symtn_tensors::SymmetricBraidingOp
+pub symtn_tensors::SymmetricBraidingOp::Contraction
+pub symtn_tensors::SymmetricBraidingOp::Trace
+impl core::clone::Clone for symtn_tensors::SymmetricBraidingOp
+pub fn symtn_tensors::SymmetricBraidingOp::clone(&self) -> symtn_tensors::SymmetricBraidingOp
+impl core::clone::TrivialClone for symtn_tensors::SymmetricBraidingOp
+impl core::cmp::Eq for symtn_tensors::SymmetricBraidingOp
+pub fn symtn_tensors::SymmetricBraidingOp::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_tensors::SymmetricBraidingOp
+pub fn symtn_tensors::SymmetricBraidingOp::eq(&self, &symtn_tensors::SymmetricBraidingOp) -> bool
+impl core::fmt::Debug for symtn_tensors::SymmetricBraidingOp
+pub fn symtn_tensors::SymmetricBraidingOp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_tensors::SymmetricBraidingOp
+impl core::marker::StructuralPartialEq for symtn_tensors::SymmetricBraidingOp
+pub struct symtn_tensors::AdjointBlockMap<'a>
+impl<'a> symtn_tensors::AdjointBlockMap<'a>
+pub fn symtn_tensors::AdjointBlockMap<'a>::adjoint_space(&self) -> &'a symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::AdjointBlockMap<'a>::new(&'a symtn_tensors::DynamicFusionMapSpace, &'a symtn_tensors::DynamicFusionMapSpace) -> Self
+pub fn symtn_tensors::AdjointBlockMap<'a>::parent_space(&self) -> &'a symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::AdjointBlockMap<'a>::source(&self, symtn_core::block_structure::content::BlockRef<'_>) -> core::result::Result<core::option::Option<symtn_tensors::adjoint::AdjointBlockSource<'a>>, symtn_operations::error::OperationError>
+impl<'a> core::clone::Clone for symtn_tensors::AdjointBlockMap<'a>
+pub fn symtn_tensors::AdjointBlockMap<'a>::clone(&self) -> symtn_tensors::AdjointBlockMap<'a>
+impl<'a> core::clone::TrivialClone for symtn_tensors::AdjointBlockMap<'a>
+impl<'a> core::marker::Copy for symtn_tensors::AdjointBlockMap<'a>
+pub struct symtn_tensors::BoundDynamicFusionMapSpace<R>
+impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::commit_final_homspace_generic_bound_checked(&self, symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic_checked(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic_checked_with<E>(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, E>) -> core::result::Result<Self, E> where E: core::convert::From<symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_prepared_final_homspace_generic_checked(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace, symtn_core::block_structure::structure::PreparedBlockStructure) -> core::result::Result<Self, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_with_checked<P>(&self, &P, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericFusion
+impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::adjoint_view(&self) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_generic(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_multiplicity_free(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeFusionRule
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::bind_multiplicity_free_checked(symtn_tensors::DynamicFusionMapSpace, alloc::sync::Arc<R>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::codomain_isomorphic_to_domain(&self) -> core::result::Result<bool, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::commit_final_homspace_generic_checked(&self, symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::contracted_generic(&Self, &Self, &[usize], &[usize]) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::contracted_multiplicity_free(&Self, &Self, &[usize], &[usize]) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::contracted_multiplicity_free_ordered(&Self, &Self, &[usize], &[usize], symtn_operations::axis::OutputAxisOrder<'_>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::contracted_multiplicity_free_oriented(&Self, symtn_tensors::FusionOperand<'_>, &Self, symtn_tensors::FusionOperand<'_>, &[usize], &[usize], symtn_operations::axis::OutputAxisOrder<'_>, core::option::Option<usize>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::contracted_multiplicity_free_partitioned(&Self, &Self, &[usize], &[usize], symtn_operations::axis::OutputAxisOrder<'_>, usize) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::derive_from_final_homspace(&self, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_generic(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_multiplicity_free(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_multiplicity_free_checked(alloc::sync::Arc<R>, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::from_final_homspace_multiplicity_free_checked_with<E>(alloc::sync::Arc<R>, impl core::ops::function::FnOnce() -> core::result::Result<symtn_core::fusion_space::hom_space::FusionTreeHomSpace, E>) -> core::result::Result<Self, E> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra, E: core::convert::From<symtn_sectors::algebra::FusionAlgebraError> + core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prepare_final_homspace_generic_checked<P>(&self, &P, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace, symtn_core::fusion_tree::checked_generic::CheckedGenericStructureError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::prime_derived_homspace(&self, &symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::transformed_generic(&self, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::transformed_multiplicity_free(&self, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+impl<R> symtn_tensors::BoundDynamicFusionMapSpace<R>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::provider(&self) -> &R
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::provider_arc(&self) -> &alloc::sync::Arc<R>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::rebind_validated(&self, &symtn_tensors::ValidatedDynamicFusionLayout) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::space(&self) -> &symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::validated_layout(&self) -> symtn_tensors::ValidatedDynamicFusionLayout
+impl<R> core::clone::Clone for symtn_tensors::BoundDynamicFusionMapSpace<R>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::clone(&self) -> Self
+impl<R> core::fmt::Debug for symtn_tensors::BoundDynamicFusionMapSpace<R>
+pub fn symtn_tensors::BoundDynamicFusionMapSpace<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::BoundDynamicTensorRef<'a, R, D>
+impl<'a, R, D> symtn_tensors::BoundDynamicTensorRef<'a, R, D>
+pub fn symtn_tensors::BoundDynamicTensorRef<'a, R, D>::data(&self) -> &'a [D]
+pub fn symtn_tensors::BoundDynamicTensorRef<'a, R, D>::space(&self) -> &symtn_tensors::BoundDynamicFusionMapSpace<R>
+pub fn symtn_tensors::BoundDynamicTensorRef<'a, R, D>::try_new(&'a symtn_tensors::BoundDynamicFusionMapSpace<R>, &'a [D]) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub struct symtn_tensors::CopyCRoute<C>
+impl<C> symtn_tensors::CopyCRoute<C>
+pub fn symtn_tensors::CopyCRoute<C>::temporary_len(&self) -> usize
+pub fn symtn_tensors::CopyCRoute<C>::temporary_structure(&self) -> &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>
+pub fn symtn_tensors::CopyCRoute<C>::transform(&self) -> &symtn_operations::transform_structure::TreeTransformStructure<C>
+impl<C: core::clone::Clone> core::clone::Clone for symtn_tensors::CopyCRoute<C>
+pub fn symtn_tensors::CopyCRoute<C>::clone(&self) -> symtn_tensors::CopyCRoute<C>
+impl<C: core::fmt::Debug> core::fmt::Debug for symtn_tensors::CopyCRoute<C>
+pub fn symtn_tensors::CopyCRoute<C>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::DirectCoreExecutor
+impl core::clone::Clone for symtn_tensors::DirectCoreExecutor
+pub fn symtn_tensors::DirectCoreExecutor::clone(&self) -> symtn_tensors::DirectCoreExecutor
+impl core::clone::TrivialClone for symtn_tensors::DirectCoreExecutor
+impl core::fmt::Debug for symtn_tensors::DirectCoreExecutor
+pub fn symtn_tensors::DirectCoreExecutor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_tensors::DirectCoreExecutor
+impl symtn_tensors::ExecCaps for symtn_tensors::DirectCoreExecutor
+pub const symtn_tensors::DirectCoreExecutor::IRREGULAR_CORE: bool
+pub struct symtn_tensors::DynamicFusionMapSpace
+impl symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::DynamicFusionMapSpace::admission(&self) -> &symtn_core::fusion_space::admission::FusionSpaceAdmission
+pub fn symtn_tensors::DynamicFusionMapSpace::from_final_homspace<R>(&R, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::DynamicFusionMapSpace::from_final_homspace_generic<R>(&R, symtn_core::fusion_space::hom_space::FusionTreeHomSpace) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::FusionRule
+pub fn symtn_tensors::DynamicFusionMapSpace::homspace(&self) -> &symtn_core::fusion_space::hom_space::FusionTreeHomSpace
+pub fn symtn_tensors::DynamicFusionMapSpace::homspace_arc(&self) -> &alloc::sync::Arc<symtn_core::fusion_space::hom_space::FusionTreeHomSpace>
+pub fn symtn_tensors::DynamicFusionMapSpace::nin(&self) -> usize
+pub fn symtn_tensors::DynamicFusionMapSpace::nout(&self) -> usize
+pub fn symtn_tensors::DynamicFusionMapSpace::rank(&self) -> usize
+pub fn symtn_tensors::DynamicFusionMapSpace::required_len(&self) -> core::result::Result<usize, symtn_core::error::CoreError>
+pub fn symtn_tensors::DynamicFusionMapSpace::structure(&self) -> &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>
+impl core::clone::Clone for symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::DynamicFusionMapSpace::clone(&self) -> symtn_tensors::DynamicFusionMapSpace
+impl core::cmp::Eq for symtn_tensors::DynamicFusionMapSpace
+impl core::cmp::PartialEq for symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::DynamicFusionMapSpace::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::DynamicFusionMapSpace::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::FusionContractPlan
+impl symtn_tensors::FusionContractPlan
+pub fn symtn_tensors::FusionContractPlan::core_axes(&self) -> &symtn_operations::axis::TensorContractSpecOwned
+pub fn symtn_tensors::FusionContractPlan::core_dst_open_lhs_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::core_dst_open_rhs_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::lhs_contract_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::lhs_open_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::lhs_source_conjugate(&self) -> bool
+pub fn symtn_tensors::FusionContractPlan::lhs_transform(&self) -> &symtn_operations::transform_key::TreeTransformOperation
+pub fn symtn_tensors::FusionContractPlan::output_transform(&self) -> &symtn_operations::transform_key::TreeTransformOperation
+pub fn symtn_tensors::FusionContractPlan::rhs_contract_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::rhs_open_rank(&self) -> usize
+pub fn symtn_tensors::FusionContractPlan::rhs_source_conjugate(&self) -> bool
+pub fn symtn_tensors::FusionContractPlan::rhs_transform(&self) -> &symtn_operations::transform_key::TreeTransformOperation
+impl core::clone::Clone for symtn_tensors::FusionContractPlan
+pub fn symtn_tensors::FusionContractPlan::clone(&self) -> symtn_tensors::FusionContractPlan
+impl core::cmp::Eq for symtn_tensors::FusionContractPlan
+pub fn symtn_tensors::FusionContractPlan::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_tensors::FusionContractPlan
+pub fn symtn_tensors::FusionContractPlan::eq(&self, &symtn_tensors::FusionContractPlan) -> bool
+impl core::fmt::Debug for symtn_tensors::FusionContractPlan
+pub fn symtn_tensors::FusionContractPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_tensors::FusionContractPlan
+pub struct symtn_tensors::FusionOperand<'a>
+impl<'a> symtn_tensors::FusionOperand<'a>
+pub fn symtn_tensors::FusionOperand<'a>::adjoint(&'a symtn_tensors::DynamicFusionMapSpace) -> Self
+pub fn symtn_tensors::FusionOperand<'a>::direct(&'a symtn_tensors::DynamicFusionMapSpace) -> Self
+pub fn symtn_tensors::FusionOperand<'a>::storage_conjugate(self) -> bool
+pub fn symtn_tensors::FusionOperand<'a>::storage_space(self) -> &'a symtn_tensors::DynamicFusionMapSpace
+impl<'a> core::clone::Clone for symtn_tensors::FusionOperand<'a>
+pub fn symtn_tensors::FusionOperand<'a>::clone(&self) -> symtn_tensors::FusionOperand<'a>
+impl<'a> core::clone::TrivialClone for symtn_tensors::FusionOperand<'a>
+impl<'a> core::fmt::Debug for symtn_tensors::FusionOperand<'a>
+pub fn symtn_tensors::FusionOperand<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn_tensors::FusionOperand<'a>
+pub struct symtn_tensors::HostContractMembersWorkspace<D, C>
+impl<D, C: core::marker::Copy + core::cmp::PartialEq + num_traits::identities::One> symtn_tensors::HostContractMembersWorkspace<D, C>
+pub fn symtn_tensors::HostContractMembersWorkspace<D, C>::retained_bytes(&self) -> usize
+impl<D, C> core::default::Default for symtn_tensors::HostContractMembersWorkspace<D, C>
+pub fn symtn_tensors::HostContractMembersWorkspace<D, C>::default() -> Self
+pub struct symtn_tensors::HostEagerExecutor
+impl core::clone::Clone for symtn_tensors::HostEagerExecutor
+pub fn symtn_tensors::HostEagerExecutor::clone(&self) -> symtn_tensors::HostEagerExecutor
+impl core::clone::TrivialClone for symtn_tensors::HostEagerExecutor
+impl core::fmt::Debug for symtn_tensors::HostEagerExecutor
+pub fn symtn_tensors::HostEagerExecutor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_tensors::HostEagerExecutor
+impl symtn_tensors::ExecCaps for symtn_tensors::HostEagerExecutor
+pub const symtn_tensors::HostEagerExecutor::IRREGULAR_CORE: bool
+pub struct symtn_tensors::PlanarContractOrders
+impl symtn_tensors::PlanarContractOrders
+pub fn symtn_tensors::PlanarContractOrders::validate((usize, usize), (usize, usize), &[usize], &[usize], &[usize], usize) -> core::result::Result<Self, symtn_operations::error::OperationError>
+impl core::clone::Clone for symtn_tensors::PlanarContractOrders
+pub fn symtn_tensors::PlanarContractOrders::clone(&self) -> symtn_tensors::PlanarContractOrders
+impl core::cmp::Eq for symtn_tensors::PlanarContractOrders
+pub fn symtn_tensors::PlanarContractOrders::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_tensors::PlanarContractOrders
+pub fn symtn_tensors::PlanarContractOrders::eq(&self, &symtn_tensors::PlanarContractOrders) -> bool
+impl core::fmt::Debug for symtn_tensors::PlanarContractOrders
+pub fn symtn_tensors::PlanarContractOrders::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_tensors::PlanarContractOrders
+pub struct symtn_tensors::StagedContract<'a, R, St>
+impl<'a, P> symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64> + 'a
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::checked_generic((&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'a>, usize), (&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'a>, usize), symtn_tensors::ContractRequest<'a>) -> core::result::Result<Self, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::commit(self, &symtn_tensors::StorageContractResolution<f64>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::destination(&self) -> &symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::destination_len(&self) -> usize
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::plan_beyond_core<X: symtn_tensors::ExecCaps>(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_tensors::contract::resolution::CoreMiss) -> core::result::Result<symtn_tensors::StorageContractResolution<f64>, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::require_destination(&self, &symtn_tensors::DynamicFusionMapSpace) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::StagedContract<'a, P, symtn_tensors::contract::checked_generic::CheckedContractStage<'a, P>>::try_core<X: symtn_tensors::ExecCaps>(&self) -> core::result::Result<symtn_tensors::CoreRoute<f64>, symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+impl<'a, R> symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_tensors::TreeTransformRuleCacheKey + 'a, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_operations::scalar::DenseBlockScalar
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::commit(self, &symtn_tensors::StorageContractResolution<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError>
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::destination(&self) -> &symtn_tensors::DynamicFusionMapSpace
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::destination_len(&self) -> usize
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::multiplicity_free((&'a symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'a>, usize), (&'a symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'a>, usize), symtn_tensors::ContractRequest<'a>) -> core::result::Result<Self, symtn_operations::error::OperationError>
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::require_destination(&self, &symtn_tensors::DynamicFusionMapSpace) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::StagedContract<'a, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>::try_core<X: symtn_tensors::ExecCaps>(&self) -> core::result::Result<symtn_tensors::CoreRoute<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError>
+pub struct symtn_tensors::StagedTreeTransform<'a, R, S, C>
+impl<'a, R> symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::tree_context::CheckedTreeTransformStage, f64> where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::tree_context::CheckedTreeTransformStage, f64>::commit(self) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+impl<R, S, C> symtn_tensors::StagedTreeTransform<'_, R, S, C>
+pub fn symtn_tensors::StagedTreeTransform<'_, R, S, C>::destination_structure(&self) -> &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>
+pub fn symtn_tensors::StagedTreeTransform<'_, R, S, C>::nout(&self) -> usize
+pub fn symtn_tensors::StagedTreeTransform<'_, R, S, C>::source_structure(&self) -> &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>
+pub fn symtn_tensors::StagedTreeTransform<'_, R, S, C>::structure(&self) -> &symtn_operations::transform_structure::TreeTransformStructure<C>
+impl<R> symtn_tensors::StagedTreeTransform<'_, R, symtn_tensors::BoundDynamicFusionMapSpace<R>, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols + symtn_tensors::TreeTransformRuleCacheKey, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: 'static + core::marker::Copy + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + num_traits::identities::Zero + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::StagedTreeTransform<'_, R, symtn_tensors::BoundDynamicFusionMapSpace<R>, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>::commit(self) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError>
+pub struct symtn_tensors::StorageContractResolution<C>
+impl<C: symtn_operations::scalar::DenseBlockScalar> symtn_tensors::StorageContractResolution<C>
+pub fn symtn_tensors::StorageContractResolution<C>::copy_c(&self) -> core::option::Option<&symtn_tensors::CopyCRoute<C>>
+pub fn symtn_tensors::StorageContractResolution<C>::core_plan(&self) -> &symtn_operations::fusion_replay::FusionBlockContractPlan<C>
+pub fn symtn_tensors::StorageContractResolution<C>::direct_core(&self) -> core::option::Option<(&alloc::sync::Arc<symtn_operations::fusion_replay::FusionBlockContractPlan<C>>, bool)>
+pub fn symtn_tensors::StorageContractResolution<C>::is_dynamic_tree(&self) -> bool
+pub fn symtn_tensors::StorageContractResolution<C>::requires_source_twist(&self) -> bool
+impl<C: core::clone::Clone> core::clone::Clone for symtn_tensors::StorageContractResolution<C>
+pub fn symtn_tensors::StorageContractResolution<C>::clone(&self) -> symtn_tensors::StorageContractResolution<C>
+impl<C: core::fmt::Debug> core::fmt::Debug for symtn_tensors::StorageContractResolution<C>
+pub fn symtn_tensors::StorageContractResolution<C>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::TensorContractBlockSpec<C>
+impl<C> symtn_tensors::TensorContractBlockSpec<C> where C: num_traits::identities::One
+pub fn symtn_tensors::TensorContractBlockSpec<C>::new(usize, usize, usize) -> Self
+impl<C> symtn_tensors::TensorContractBlockSpec<C>
+pub fn symtn_tensors::TensorContractBlockSpec<C>::coefficient(&self) -> C where C: core::marker::Copy
+pub fn symtn_tensors::TensorContractBlockSpec<C>::dst_block(&self) -> usize
+pub fn symtn_tensors::TensorContractBlockSpec<C>::lhs_block(&self) -> usize
+pub fn symtn_tensors::TensorContractBlockSpec<C>::rhs_block(&self) -> usize
+pub const fn symtn_tensors::TensorContractBlockSpec<C>::with_coefficient(usize, usize, usize, C) -> Self
+impl<C: core::clone::Clone> core::clone::Clone for symtn_tensors::TensorContractBlockSpec<C>
+pub fn symtn_tensors::TensorContractBlockSpec<C>::clone(&self) -> symtn_tensors::TensorContractBlockSpec<C>
+impl<C: core::cmp::PartialEq> core::cmp::PartialEq for symtn_tensors::TensorContractBlockSpec<C>
+pub fn symtn_tensors::TensorContractBlockSpec<C>::eq(&self, &symtn_tensors::TensorContractBlockSpec<C>) -> bool
+impl<C: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_tensors::TensorContractBlockSpec<C>
+impl<C: core::fmt::Debug> core::fmt::Debug for symtn_tensors::TensorContractBlockSpec<C>
+pub fn symtn_tensors::TensorContractBlockSpec<C>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<C: core::marker::Copy> core::marker::Copy for symtn_tensors::TensorContractBlockSpec<C>
+pub struct symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C>, BC: symtn_tensors::TensorContractBackend<D, C>
+impl<D, BT, BC> symtn_tensors::TensorContractFusionExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, BT, BC> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<f64> + symtn_operations::scalar::ConjugateValue + core::marker::Copy + num_traits::identities::Zero + symtn_operations::owned_overwrite_buffer::ZeroBytes, BT: symtn_operations::replay_backend::TreeTransformBackend<D, f64>, BC: symtn_tensors::TensorContractBackend<D, f64>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, BT, BC>::tensorcontract_into_checked_generic_in<'d, P, E>(&mut self, &mut dyn tenferro_tensor::backend::Engine, (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D]), (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D]), (&[usize], &[usize], symtn_operations::axis::OutputAxisOrder<'_>), usize, &symtn_tensors::DynamicFusionMapSpace, impl core::ops::function::FnOnce() -> core::result::Result<&'d mut [D], E>, D, D) -> core::result::Result<(), E> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>, E: core::convert::From<symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> + core::convert::From<symtn_operations::error::OperationError>, D: 'd
+impl<D, RuleKey, BT, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C, Workspace = symtn_operations::transform_replay::TreeTransformWorkspace<D>>, BC: symtn_tensors::TensorContractBackend<D, C, Workspace = symtn_tensors::contract::backend::HostTensorContractWorkspace<D>>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::retained_bytes(&self) -> usize
+impl<D, RuleKey, BT, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C> + symtn_operations::placement::ReportsPlacement, <BT as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: symtn_operations::placement::ReportsPlacement, BC: symtn_tensors::TensorContractBackend<D, C> + symtn_operations::placement::ReportsPlacement, <BC as symtn_tensors::TensorContractBackend>::Workspace: symtn_operations::placement::ReportsPlacement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::contract_backend_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::contract_workspace_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::fusion_block_workspace_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::fusion_scratch_workspace_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::is_host_context(&self) -> bool
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tree_backend_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tree_workspace_placement(&self) -> symtn_core::storage::Placement
+impl<D, RuleKey, BT, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C>, BC: symtn_tensors::TensorContractBackend<D, C>, <BT as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::default::Default, <BC as symtn_tensors::TensorContractBackend>::Workspace: core::default::Default
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::new(BT, BC) -> Self
+impl<D, RuleKey, BT, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C>, BC: symtn_tensors::TensorContractBackend<D, C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::compile_storage_contract_dynamic_tree<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>, symtn_operations::axis::TensorContractSpec<'_>) -> core::result::Result<symtn_tensors::StorageContractResolution<C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::execute_contract_resolution_host(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::StorageContractResolution<C>, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D]), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D]), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D]), D, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn_operations::error::OperationError> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::plan_contract<X: symtn_tensors::ExecCaps, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>, &[usize], &[usize], &[usize]) -> core::result::Result<symtn_tensors::StorageContractResolution<C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::plan_contract_beyond_core<X: symtn_tensors::ExecCaps, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_tensors::contract::resolution::CoreMiss, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>, &[usize], &[usize], &[usize]) -> core::result::Result<symtn_tensors::StorageContractResolution<C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::plan_staged_contract_beyond_core<X: symtn_tensors::ExecCaps, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut symtn_tensors::StagedContract<'_, R, symtn_tensors::contract::context::MultiplicityFreeContractStage<R>>, symtn_tensors::contract::resolution::CoreMiss) -> core::result::Result<symtn_tensors::StorageContractResolution<C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_sectors::algebra::CheckedFusionAlgebra + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tensorcompose_planned_into<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, &mut [D], (symtn_tensors::FusionOperand<'_>, &[D]), (symtn_tensors::FusionOperand<'_>, &[D]), D, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tensorcontract_planned_into<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, &mut [D], (symtn_tensors::FusionOperand<'_>, &[D]), (symtn_tensors::FusionOperand<'_>, &[D]), &[usize], &[usize], &[usize], D, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+impl<D, RuleKey, BT, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C>, BC: symtn_tensors::TensorContractBackend<D, C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::contract_backend(&self) -> &BC
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::contract_backend_mut(&mut self) -> &mut BC
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::contract_workspace(&self) -> &<BC as symtn_tensors::TensorContractBackend>::Workspace
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::into_parts(self) -> (symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, BT>, BC, <BC as symtn_tensors::TensorContractBackend>::Workspace)
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::restore_copy_c_scratch(&mut self, symtn_operations::host_scratch::HostScratchBuffer<D>)
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::take_copy_c_scratch(&mut self) -> symtn_operations::host_scratch::HostScratchBuffer<D>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tree_context(&self) -> &symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, BT>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::tree_context_mut(&mut self) -> &mut symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, BT>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::with_parts(symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, BT>, BC, <BC as symtn_tensors::TensorContractBackend>::Workspace) -> Self where <BT as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::default::Default
+impl<D, RuleKey, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, symtn_operations::replay_backend::DenseTreeTransformOperations, symtn_operations::replay_backend::DenseTreeTransformOperations, C> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, symtn_operations::replay_backend::DenseTreeTransformOperations, symtn_operations::replay_backend::DenseTreeTransformOperations, C>::execute_storage_contract_members_host(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::StorageContractResolution<C>, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D]), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D]), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D]), &mut symtn_tensors::HostContractMembersWorkspace<D, C>, usize, symtn_operations::fusion_replay::ContractDestinationInit<D>) -> core::result::Result<(), symtn_operations::error::OperationError> where C: core::ops::arith::Neg<Output = C>
+impl<D, RuleKey, E, BC, C> symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, symtn_operations::replay_backend::DenseTreeTransformOperations<E>, BC, C> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, E: symtn_dense::executor::DenseExecutor, BC: symtn_tensors::TensorContractBackend<D, C>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, symtn_operations::replay_backend::DenseTreeTransformOperations<E>, BC, C>::execute_contract_resolution_host_owned(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::StorageContractResolution<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D]), (&alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D])) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C> + symtn_operations::owned_overwrite_buffer::ZeroBytes
+impl<D, X, BC> symtn_tensors::TensorContractFusionExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, symtn_operations::replay_backend::DenseTreeTransformOperations<X>, BC> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<f64> + symtn_operations::scalar::ConjugateValue + core::marker::Copy + num_traits::identities::Zero + symtn_operations::owned_overwrite_buffer::ZeroBytes, X: symtn_dense::executor::DenseExecutor, BC: symtn_tensors::TensorContractBackend<D, f64>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, symtn_operations::replay_backend::DenseTreeTransformOperations<X>, BC>::tensorcompose_checked_generic_in<P>(&mut self, &mut dyn tenferro_tensor::backend::Engine, (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D]), (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D])) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<P>, alloc::vec::Vec<D>), symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, symtn_operations::replay_backend::DenseTreeTransformOperations<X>, BC>::tensorcontract_checked_generic_in<P>(&mut self, &mut dyn tenferro_tensor::backend::Engine, (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D]), (&symtn_tensors::BoundDynamicFusionMapSpace<P>, symtn_tensors::FusionOperand<'_>, &[D]), (&[usize], &[usize], symtn_operations::axis::OutputAxisOrder<'_>), usize) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<P>, alloc::vec::Vec<D>), symtn_tensors::CheckedGenericPlanError<<P as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where P: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+impl<D, RuleKey, BT, BC, C> core::default::Default for symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: symtn_operations::scalar::DenseBlockScalar, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, BT: symtn_operations::replay_backend::TreeTransformBackend<D, C> + core::default::Default, BC: symtn_tensors::TensorContractBackend<D, C> + core::default::Default, <BT as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::default::Default, <BC as symtn_tensors::TensorContractBackend>::Workspace: core::default::Default
+pub fn symtn_tensors::TensorContractFusionExecutionContext<D, RuleKey, BT, BC, C>::default() -> Self
+pub struct symtn_tensors::TensorTraceFusionStructure<C>
+impl<C> symtn_tensors::TensorTraceFusionStructure<C>
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::compile_fusion_dyn_checked<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>) -> core::result::Result<Self, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_sectors::algebra::CheckedFusionAlgebra, C: core::clone::Clone + core::ops::arith::Add<Output = C> + core::ops::arith::Mul<Output = C> + num_traits::identities::Zero + symtn_operations::scalar::RealStructuralCoefficient + core::marker::Send + core::marker::Sync + 'static
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::dst_rank(&self) -> usize
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::dst_structure(&self) -> &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::output_axes(&self) -> &[usize]
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::src_rank(&self) -> usize
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::terms(&self) -> &[symtn_tensors::tensortrace::TensorTraceFusionStructureTerm<C>]
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::trace_lhs_axes(&self) -> &[usize]
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::trace_rhs_axes(&self) -> &[usize]
+impl<C: core::clone::Clone> core::clone::Clone for symtn_tensors::TensorTraceFusionStructure<C>
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::clone(&self) -> symtn_tensors::TensorTraceFusionStructure<C>
+impl<C: core::cmp::PartialEq> core::cmp::PartialEq for symtn_tensors::TensorTraceFusionStructure<C>
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::eq(&self, &symtn_tensors::TensorTraceFusionStructure<C>) -> bool
+impl<C: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_tensors::TensorTraceFusionStructure<C>
+impl<C: core::fmt::Debug> core::fmt::Debug for symtn_tensors::TensorTraceFusionStructure<C>
+pub fn symtn_tensors::TensorTraceFusionStructure<C>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::TracePreflight
+impl symtn_tensors::TracePreflight
+pub fn symtn_tensors::TracePreflight::into_selected_homspace(self) -> symtn_core::fusion_space::hom_space::FusionTreeHomSpace
+pub fn symtn_tensors::TracePreflight::require_dual_pairs(&self) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TracePreflight::selected_homspace(&self) -> &symtn_core::fusion_space::hom_space::FusionTreeHomSpace
+impl core::fmt::Debug for symtn_tensors::TracePreflight
+pub fn symtn_tensors::TracePreflight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: core::marker::Copy, B: symtn_operations::replay_backend::TreeTransformBackend<D, C>
+impl<D, C> symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<C> + symtn_operations::scalar::ConjugateValue, C: 'static + core::marker::Copy + core::clone::Clone + core::ops::arith::Add<Output = C> + core::ops::arith::Mul<Output = C> + num_traits::identities::Zero + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::replay_tree_transform_dyn_owned(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_operations::transform_structure::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, usize, &[D], D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::stage_tree_transform_into_multiplicity_free_in<'a, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &'a symtn_tensors::BoundDynamicFusionMapSpace<R>, core::option::Option<&'a symtn_tensors::BoundDynamicFusionMapSpace<R>>, usize, &symtn_operations::transform_key::TreeTransformOperation, &'a symtn_tensors::DynamicFusionMapSpace) -> core::result::Result<symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::BoundDynamicFusionMapSpace<R>, C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = symtn_sectors::rule_identity::RuleIdentity>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::stage_tree_transform_multiplicity_free_in<'a, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &'a symtn_tensors::BoundDynamicFusionMapSpace<R>, core::option::Option<&'a symtn_tensors::BoundDynamicFusionMapSpace<R>>, usize, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::BoundDynamicFusionMapSpace<R>, C>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = symtn_sectors::rule_identity::RuleIdentity>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::tree_transform_owned_multiplicity_free_in<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, &[D], &symtn_operations::transform_key::TreeTransformOperation, D) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = symtn_sectors::rule_identity::RuleIdentity>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, C, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::tree_transform_structure_multiplicity_free_in<R, T>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_operations::transform_key::TreeTransformOperation, impl core::ops::function::FnOnce(&symtn_operations::transform_structure::TreeTransformStructure<C>, &symtn_core::block_structure::structure::BlockStructure) -> core::option::Option<T>, impl core::ops::function::FnOnce() -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError>) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::StructureOutcome<T, D>), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = symtn_sectors::rule_identity::RuleIdentity>
+impl<D, RuleKey, C, B> symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: 'static + core::marker::Copy + core::clone::Clone + core::ops::arith::Add<Output = C> + core::ops::arith::Mul<Output = C> + num_traits::identities::Zero + core::marker::Send + core::marker::Sync, RuleKey: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync, B: symtn_operations::replay_backend::TreeTransformBackend<D, C>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::replay_tree_transform_dyn_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_operations::transform_structure::TreeTransformStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::tree_transform_dyn_into<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &R, symtn_operations::transform_key::TreeTransformOperation, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::tree_transform_dyn_into_ref<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &R, &symtn_operations::transform_key::TreeTransformOperation, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::tree_transform_dyn_overwrite_into_ref<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &R, &symtn_operations::transform_key::TreeTransformOperation, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], D) -> core::result::Result<(), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_tensors::TreeTransformRuleCacheKey<Key = RuleKey>, D: symtn_operations::scalar::RecouplingCoefficientAction<C>
+impl<D, RuleKey, C, B> symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: core::marker::Copy, B: symtn_operations::replay_backend::TreeTransformBackend<D, C> + symtn_operations::placement::ReportsPlacement, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: symtn_operations::placement::ReportsPlacement
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::backend_placement(&self) -> symtn_core::storage::Placement
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::is_host_context(&self) -> bool
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::workspace_placement(&self) -> symtn_core::storage::Placement
+impl<D, RuleKey, C, B> symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: core::marker::Copy, B: symtn_operations::replay_backend::TreeTransformBackend<D, C>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::backend(&self) -> &B
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::backend_mut(&mut self) -> &mut B
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::into_parts(self) -> (B, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace)
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::planning_retained_bytes(&self) -> usize
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::with_parts(B, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace) -> Self
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::workspace(&self) -> &<B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace
+impl<D, RuleKey, C, B> symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: core::marker::Copy, RuleKey: core::clone::Clone + core::cmp::Eq + core::hash::Hash, B: symtn_operations::replay_backend::TreeTransformBackend<D, C>, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::default::Default
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::new(B) -> Self
+impl<D> symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, f64, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>> where D: symtn_operations::scalar::DenseRecouplingScalar + symtn_operations::scalar::RecouplingCoefficientAction<f64> + symtn_operations::scalar::ConjugateValue
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, f64, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::stage_tree_transform_checked_generic_in<'a, R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &'a symtn_tensors::BoundDynamicFusionMapSpace<R>, core::option::Option<&'a symtn_tensors::BoundDynamicFusionMapSpace<R>>, usize, &symtn_operations::transform_key::TreeTransformOperation) -> core::result::Result<symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::tree_context::CheckedTreeTransformStage, f64>, symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, f64, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::stage_tree_transform_into_checked_generic_in<'a, R, E>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &'a symtn_tensors::BoundDynamicFusionMapSpace<R>, core::option::Option<&'a symtn_tensors::BoundDynamicFusionMapSpace<R>>, usize, &symtn_operations::transform_key::TreeTransformOperation, &'a symtn_tensors::DynamicFusionMapSpace) -> core::result::Result<symtn_tensors::StagedTreeTransform<'a, R, symtn_tensors::tree_context::CheckedTreeTransformStage, f64>, E> where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>, E: core::convert::From<symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> + core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, f64, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::tree_transform_owned_checked_generic_in<R>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, core::option::Option<&symtn_tensors::BoundDynamicFusionMapSpace<R>>, &[D], &symtn_operations::transform_key::TreeTransformOperation, D) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_tensors::TreeTransformExecutionContext<D, symtn_sectors::rule_identity::RuleIdentity, f64, symtn_operations::replay_backend::DenseTreeTransformOperations<symtn_dense::tenferro_adapter::DefaultDenseExecutor>>::tree_transform_structure_checked_generic_in<R, T>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_operations::transform_key::TreeTransformOperation, impl core::ops::function::FnOnce(&symtn_operations::transform_structure::TreeTransformStructure<f64>, &symtn_core::block_structure::structure::BlockStructure) -> core::option::Option<T>, impl core::ops::function::FnOnce() -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError>) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::StructureOutcome<T, D>), symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+impl<D, RuleKey, C, B> core::default::Default for symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar, C: core::marker::Copy, RuleKey: core::clone::Clone + core::cmp::Eq + core::hash::Hash, B: symtn_operations::replay_backend::TreeTransformBackend<D, C> + core::default::Default, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::default::Default
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::default() -> Self
+impl<D, RuleKey: core::fmt::Debug, C, B> core::fmt::Debug for symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B> where D: symtn_operations::scalar::TreeTransformScalar + core::fmt::Debug, C: core::marker::Copy + core::fmt::Debug, B: symtn_operations::replay_backend::TreeTransformBackend<D, C> + core::fmt::Debug, <B as symtn_operations::replay_backend::TreeTransformBackend>::Workspace: core::fmt::Debug
+pub fn symtn_tensors::TreeTransformExecutionContext<D, RuleKey, C, B>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_tensors::TreeTransformOperationView<'a>
+impl<'a> symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::new(symtn_operations::transform_key::TreeTransformOperationKind, &'a [usize], &'a [usize], &'a [usize], &'a [usize]) -> Self
+pub fn symtn_tensors::TreeTransformOperationView<'a>::of(&'a symtn_operations::transform_key::TreeTransformOperation) -> Self
+impl<'a> core::clone::Clone for symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::clone(&self) -> symtn_tensors::TreeTransformOperationView<'a>
+impl<'a> core::clone::TrivialClone for symtn_tensors::TreeTransformOperationView<'a>
+impl<'a> core::cmp::Eq for symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::assert_fields_are_eq(&self)
+impl<'a> core::cmp::PartialEq for symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::eq(&self, &symtn_tensors::TreeTransformOperationView<'a>) -> bool
+impl<'a> core::fmt::Debug for symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::hash::Hash for symtn_tensors::TreeTransformOperationView<'a>
+pub fn symtn_tensors::TreeTransformOperationView<'a>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl<'a> core::marker::Copy for symtn_tensors::TreeTransformOperationView<'a>
+impl<'a> core::marker::StructuralPartialEq for symtn_tensors::TreeTransformOperationView<'a>
+pub struct symtn_tensors::ValidatedDynamicFusionLayout(_)
+impl symtn_tensors::ValidatedDynamicFusionLayout
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::charged_retained_bytes(&self) -> usize
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::required_len(&self) -> core::result::Result<usize, symtn_core::error::CoreError>
+impl core::clone::Clone for symtn_tensors::ValidatedDynamicFusionLayout
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::clone(&self) -> symtn_tensors::ValidatedDynamicFusionLayout
+impl core::cmp::Eq for symtn_tensors::ValidatedDynamicFusionLayout
+impl core::cmp::PartialEq for symtn_tensors::ValidatedDynamicFusionLayout
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::eq(&self, &Self) -> bool
+impl core::fmt::Debug for symtn_tensors::ValidatedDynamicFusionLayout
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_tensors::ValidatedDynamicFusionLayout
+pub fn symtn_tensors::ValidatedDynamicFusionLayout::hash<H: core::hash::Hasher>(&self, &mut H)
+pub const symtn_tensors::NON_SYMMETRIC_CONTRACTION_UNSUPPORTED: &str
+pub trait symtn_tensors::CoefficientAlgebra<R>: symtn_tensors::mode::sealed::Sealed
+pub type symtn_tensors::CoefficientAlgebra::Coeff
+pub type symtn_tensors::CoefficientAlgebra::Error: core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::CoefficientAlgebra::adjoint_space(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, Self::Error>
+impl<R> symtn_tensors::CoefficientAlgebra<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::CheckedGenericFusion
+pub type symtn_sectors::algebra::CheckedGenericAdmissionMode::Coeff = f64
+pub type symtn_sectors::algebra::CheckedGenericAdmissionMode::Error = symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::adjoint_space(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, Self::Error>
+impl<R> symtn_tensors::CoefficientAlgebra<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::Coeff = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar
+pub type symtn_sectors::algebra::MultiplicityFreeAdmissionMode::Error = symtn_operations::error::OperationError
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::adjoint_space(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, Self::Error>
+pub trait symtn_tensors::ExecCaps: symtn_tensors::contract::resolution::exec_caps::Sealed
+pub const symtn_tensors::ExecCaps::IRREGULAR_CORE: bool
+impl symtn_tensors::ExecCaps for symtn_tensors::DirectCoreExecutor
+pub const symtn_tensors::DirectCoreExecutor::IRREGULAR_CORE: bool
+impl symtn_tensors::ExecCaps for symtn_tensors::HostEagerExecutor
+pub const symtn_tensors::HostEagerExecutor::IRREGULAR_CORE: bool
+pub trait symtn_tensors::HostTensorContractBackend<D, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: core::marker::Copy + num_traits::identities::One: symtn_tensors::TensorContractBackend<D, C>
+impl<B, D, C> symtn_tensors::HostTensorContractBackend<D, C> for B where B: symtn_tensors::TensorContractBackend<D, C> + ?core::marker::Sized, D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: core::marker::Copy + num_traits::identities::One
+pub trait symtn_tensors::PivotalCoefficientAlgebra<R>: symtn_tensors::RigidCoefficientAlgebra<R>
+pub fn symtn_tensors::PivotalCoefficientAlgebra::trace_terms(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>) -> core::result::Result<symtn_tensors::TensorTraceFusionStructure<Self::Coeff>, Self::Error>
+impl<R> symtn_tensors::PivotalCoefficientAlgebra<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::trace_terms(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>) -> core::result::Result<symtn_tensors::TensorTraceFusionStructure<f64>, Self::Error>
+impl<R> symtn_tensors::PivotalCoefficientAlgebra<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::trace_terms(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>) -> core::result::Result<symtn_tensors::TensorTraceFusionStructure<f64>, Self::Error>
+pub trait symtn_tensors::RigidCoefficientAlgebra<R>: symtn_tensors::CoefficientAlgebra<R>
+pub fn symtn_tensors::RigidCoefficientAlgebra::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+impl<R> symtn_tensors::RigidCoefficientAlgebra<R> for symtn_sectors::algebra::CheckedGenericAdmissionMode where R: symtn_sectors::algebra::CheckedGenericRigidSymbols<Scalar = f64>
+pub fn symtn_sectors::algebra::CheckedGenericAdmissionMode::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+impl<R> symtn_tensors::RigidCoefficientAlgebra<R> for symtn_sectors::algebra::MultiplicityFreeAdmissionMode where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_tensors::mode::QuantumDimensionWeight
+pub fn symtn_sectors::algebra::MultiplicityFreeAdmissionMode::dim(&R, symtn_sectors::SectorId) -> core::result::Result<f64, Self::Error>
+pub trait symtn_tensors::TensorContractBackend<D, C> where D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: core::marker::Copy + num_traits::identities::One
+pub type symtn_tensors::TensorContractBackend::Workspace
+pub fn symtn_tensors::TensorContractBackend::matmul_rank2_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], usize, usize, usize, D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TensorContractBackend::matmul_rank2_batch_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], &[usize], D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TensorContractBackend::matmul_rank2_batch_fresh_raw<'a>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<D>])], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], [symtn_dense::executor::MatrixOp; 2], D, &mut dyn core::ops::function::FnMut(usize, &'a mut [D])) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TensorContractBackend::matmul_rank2_batch_with_ops_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], &[usize], symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TensorContractBackend::matmul_rank2_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], usize, usize, usize) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::TensorContractBackend::tensorcontract_structure_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &symtn_tensors::contract::structure::TensorContractStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+impl<E, D, C> symtn_tensors::TensorContractBackend<D, C> for symtn_operations::replay_backend::DenseTreeTransformOperations<E> where E: symtn_dense::executor::DenseExecutor, D: symtn_operations::scalar::DenseBlockScalar + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C>, C: core::marker::Copy + num_traits::identities::One
+pub type symtn_operations::replay_backend::DenseTreeTransformOperations<E>::Workspace = symtn_tensors::contract::backend::HostTensorContractWorkspace<D>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::matmul_rank2_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], usize, usize, usize, D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::matmul_rank2_batch_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], &[usize], D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::matmul_rank2_batch_fresh_raw<'a>(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<D>])], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], [symtn_dense::executor::MatrixOp; 2], D, &mut dyn core::ops::function::FnMut(usize, &'a mut [D])) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::matmul_rank2_batch_with_ops_axpby_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], &[symtn_operations::fusion_replay::gemm::Rank2GemmBatchJob], &[usize], symtn_dense::executor::MatrixOp, symtn_dense::executor::MatrixOp, D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::matmul_rank2_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &mut [D], &[D], &[D], usize, usize, usize) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_operations::replay_backend::DenseTreeTransformOperations<E>::tensorcontract_structure_into_raw(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut Self::Workspace, &symtn_tensors::contract::structure::TensorContractStructure<C>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &mut [D], &[D], &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub trait symtn_tensors::TreeTransformRuleCacheKey
+pub type symtn_tensors::TreeTransformRuleCacheKey::Key: 'static + core::clone::Clone + core::cmp::Eq + core::hash::Hash + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::TreeTransformRuleCacheKey::tree_transform_rule_cache_key(&self) -> Self::Key
+impl<R> symtn_tensors::TreeTransformRuleCacheKey for R where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub type R::Key = symtn_sectors::rule_identity::RuleIdentity
+pub fn R::tree_transform_rule_cache_key(&self) -> Self::Key
+pub fn symtn_tensors::adjoint_bound_dyn<R, D>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &[D]) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, alloc::vec::Vec<D>), symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, D: symtn_tensors::adjoint::AdjointScalar
+pub fn symtn_tensors::adjoint_bound_space_dyn<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>) -> core::result::Result<symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols
+pub fn symtn_tensors::admit_checked_generic_pair<'a, P>(&'a symtn_tensors::BoundDynamicFusionMapSpace<P>, &symtn_tensors::BoundDynamicFusionMapSpace<P>) -> core::result::Result<&'a P, symtn_core::error::CoreError> where P: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_tensors::admit_exact_tree_pair_layout<T>(&symtn_sectors::rule_identity::RuleIdentity, &symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure, &symtn_core::block_structure::structure::BlockStructure, (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3]), (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3])) -> bool where T: 'static + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::build_all_codomain_tree_transform_group_plan<R>(&R, symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure) -> core::result::Result<symtn_operations::transform_plan::TreeTransformGroupPlan<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeFusionSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + num_traits::identities::Zero
+pub fn symtn_tensors::build_tree_pair_transform_group_plan<R>(&R, symtn_operations::transform_key::TreeTransformOperation, &symtn_core::block_structure::structure::BlockStructure) -> core::result::Result<symtn_operations::transform_plan::TreeTransformGroupPlan<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: core::clone::Clone + core::ops::arith::Add<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + core::ops::arith::Mul<Output = <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar> + num_traits::identities::Zero
+pub fn symtn_tensors::exact_layout_tree_pair_hit<T>(&symtn_sectors::rule_identity::RuleIdentity, symtn_tensors::TreeTransformOperationView<'_>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3]), (&symtn_core::fusion_space::hom_space_id::HomSpaceId, [usize; 3])) -> core::option::Option<symtn_operations::transform_structure::TreeTransformStructure<T>> where T: 'static + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::expand_physical_host<R, D, C>(symtn_tensors::BoundDynamicTensorRef<'_, R, D>) -> core::result::Result<(alloc::vec::Vec<usize>, alloc::vec::Vec<D>), symtn_tensors::PhysicalConversionError<<R as symtn_sectors::algebra::PhysicalFusionBasis>::Error>> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_sectors::algebra::PhysicalFusionBasis<Scalar = C>, C: symtn_sectors::algebra::CategoricalScalar, D: symtn_operations::scalar::TreeTransformScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::fusion_scatter_add_assign<D>(threadteam::exec::Exec<'_>, &symtn_core::block_structure::structure::BlockStructure, &mut [D], &symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], &[symtn_tensors::SectorRunTable<'_>]) -> core::result::Result<(), symtn_operations::error::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::materialize_adjoint_data_dyn<D>(&symtn_tensors::DynamicFusionMapSpace, &symtn_tensors::DynamicFusionMapSpace, &[D]) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: symtn_tensors::adjoint::AdjointScalar
+pub fn symtn_tensors::oriented_fusion_add_owned<D>(&symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], symtn_tensors::FusionOperand<'_>, &[D], D, D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::oriented_fusion_axpby_into<D>(threadteam::exec::Exec<'_>, &symtn_core::block_structure::structure::BlockStructure, &mut [D], symtn_tensors::FusionOperand<'_>, &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::oriented_fusion_inner<D>(&symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], symtn_tensors::FusionOperand<'_>, &[D], impl core::ops::function::FnMut(symtn_sectors::SectorId) -> f64) -> core::result::Result<D, symtn_operations::error::OperationError> where D: symtn_operations::scalar::WideScalar
+pub fn symtn_tensors::oriented_fusion_inner_with<D, E>(&symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], symtn_tensors::FusionOperand<'_>, &[D], impl core::ops::function::FnMut(symtn_sectors::SectorId) -> core::result::Result<f64, E>) -> core::result::Result<D, E> where D: symtn_operations::scalar::WideScalar, E: core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::oriented_fusion_restrict_owned<D>(&symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], &[symtn_tensors::SectorRunTable<'_>]) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::plan_compose<X: symtn_tensors::ExecCaps, R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>) -> core::result::Result<symtn_tensors::StorageContractResolution<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_operations::scalar::DenseBlockScalar
+pub fn symtn_tensors::prepare_tensorcontract_fusion_plan_dyn<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>, &[usize], &[usize], &[usize]) -> core::result::Result<symtn_tensors::FusionContractPlan, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_operations::scalar::DenseBlockScalar
+pub fn symtn_tensors::project_physical_host<R, D, C>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, &[usize], &[D]) -> core::result::Result<alloc::vec::Vec<D>, symtn_tensors::PhysicalConversionError<<R as symtn_sectors::algebra::PhysicalFusionBasis>::Error>> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = C> + symtn_sectors::algebra::PhysicalFusionBasis<Scalar = C>, C: symtn_sectors::algebra::CategoricalScalar, D: symtn_operations::scalar::TreeTransformScalar + symtn_operations::scalar::RecouplingCoefficientAction<C>
+pub fn symtn_tensors::reject_non_symmetric_contraction(symtn_sectors::BraidingStyleKind) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::require_symmetric_braiding(symtn_sectors::BraidingStyleKind, symtn_tensors::SymmetricBraidingOp) -> core::result::Result<(), symtn_operations::error::OperationError>
+pub fn symtn_tensors::stacked_fusion_restrict_owned<D>(&symtn_core::block_structure::structure::BlockStructure, symtn_tensors::FusionOperand<'_>, &[D], usize, &[symtn_tensors::SectorRunTable<'_>]) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::tensorcontract_fusion_block_specs<R>(&R, &symtn_tensors::DynamicFusionMapSpace, &symtn_tensors::DynamicFusionMapSpace, &symtn_tensors::DynamicFusionMapSpace, symtn_operations::axis::TensorContractSpec<'_>) -> core::result::Result<alloc::vec::Vec<symtn_tensors::TensorContractBlockSpec<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_operations::scalar::DenseBlockScalar
+pub fn symtn_tensors::tensortrace_checked_generic_with<R, D, T, E>(symtn_tensors::tensortrace::TensorTraceStage<'_, R, symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>, core::option::Option<D>, usize) -> core::result::Result<T, E>) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, T), E> where R: symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>, E: core::convert::From<symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>>
+pub fn symtn_tensors::tensortrace_fusion_dyn_preflight_checked<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize) -> core::result::Result<symtn_tensors::TracePreflight, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::FusionRule + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_tensors::tensortrace_fusion_dyn_preflight_generic_checked<R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize) -> core::result::Result<symtn_tensors::TracePreflight, symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericFusion
+pub fn symtn_tensors::tensortrace_fusion_structure_into_host<C, D>(threadteam::exec::Exec<'_>, &symtn_tensors::TensorTraceFusionStructure<C>, &mut [D], &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], D, D) -> core::result::Result<(), symtn_operations::error::OperationError> where C: core::marker::Copy, D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C> + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::tensortrace_fusion_structure_owned_host<C, D>(threadteam::exec::Exec<'_>, &symtn_tensors::TensorTraceFusionStructure<C>, usize, &alloc::sync::Arc<symtn_core::block_structure::structure::BlockStructure>, &[D], D) -> core::result::Result<alloc::vec::Vec<D>, symtn_operations::error::OperationError> where C: core::marker::Copy, D: core::marker::Copy + core::ops::arith::Add<D, Output = D> + core::ops::arith::Mul<D, Output = D> + core::cmp::PartialEq + num_traits::identities::Zero + num_traits::identities::One + symtn_operations::scalar::ConjugateValue + symtn_operations::scalar::RecouplingCoefficientAction<C> + core::marker::Send + core::marker::Sync
+pub fn symtn_tensors::tensortrace_into_checked_generic_with<R, D, X, E>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize, &symtn_tensors::DynamicFusionMapSpace, impl core::ops::function::FnOnce() -> core::result::Result<X, E>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>, core::option::Option<D>, X) -> core::result::Result<(), E>) -> core::result::Result<(), E> where R: symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>, E: core::convert::From<symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> + core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::tensortrace_into_multiplicity_free_with<R, D, X, E>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, symtn_operations::axis::TensorTraceAxisSpec<'_>, usize, &symtn_tensors::DynamicFusionMapSpace, impl core::ops::function::FnOnce() -> core::result::Result<X, E>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>, core::option::Option<D>, X) -> core::result::Result<(), E>) -> core::result::Result<(), E> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra, E: core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::tensortrace_multiplicity_free_with<R, D, T, E>(symtn_tensors::tensortrace::TensorTraceStage<'_, R, symtn_tensors::BoundDynamicFusionMapSpace<R>>, &symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'_>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>) -> core::option::Option<D>, impl core::ops::function::FnOnce(&symtn_tensors::TensorTraceFusionStructure<f64>, core::option::Option<D>, usize) -> core::result::Result<T, E>) -> core::result::Result<(symtn_tensors::BoundDynamicFusionMapSpace<R>, T), E> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra, E: core::convert::From<symtn_operations::error::OperationError>
+pub fn symtn_tensors::tensortrace_stage_checked_generic<'a, R>(&'a symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'a>, usize) -> core::result::Result<symtn_tensors::tensortrace::TensorTraceStage<'a, R, symtn_tensors::contract::dynamic_space::PreparedCheckedGenericDynamicSpace>, symtn_tensors::CheckedGenericPlanError<<R as symtn_sectors::algebra::CheckedGenericFusion>::Error>> where R: symtn_sectors::algebra::CheckedGenericPivotal<Scalar = f64>
+pub fn symtn_tensors::tensortrace_stage_multiplicity_free<'a, R>(&'a symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_operations::axis::TensorTraceAxisSpec<'a>, usize) -> core::result::Result<symtn_tensors::tensortrace::TensorTraceStage<'a, R, symtn_tensors::BoundDynamicFusionMapSpace<R>>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols<Scalar = f64> + symtn_sectors::algebra::CheckedFusionAlgebra
+pub fn symtn_tensors::try_compile_storage_contract_core_route<X: symtn_tensors::ExecCaps, R>(&symtn_tensors::BoundDynamicFusionMapSpace<R>, symtn_tensors::FusionOperand<'_>, symtn_tensors::FusionOperand<'_>, symtn_operations::axis::TensorContractSpec<'_>) -> core::result::Result<symtn_tensors::CoreRoute<<R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar>, symtn_operations::error::OperationError> where R: symtn_sectors::algebra::MultiplicityFreeRigidSymbols, <R as symtn_sectors::algebra::MultiplicityFreeFusionSymbols>::Scalar: symtn_operations::scalar::DenseBlockScalar
+pub type symtn_tensors::SectorRunTable<'a> = core::option::Option<&'a [(symtn_sectors::SectorId, symtn_tensors::SelectedRuns)]>
+pub type symtn_tensors::SelectedRuns = smallvec::SmallVec<[core::ops::range::Range<usize>; 1]>

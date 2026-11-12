@@ -1,0 +1,470 @@
+pub mod symtn_dense
+pub use symtn_dense::CpuEngine
+pub use symtn_dense::Engine
+pub use symtn_dense::Pool
+pub mod symtn_dense::engine_slot
+pub fn symtn_dense::engine_slot::checkin<T: core::marker::Send + 'static>(&mut dyn tenferro_tensor::backend::Engine, T, fn(&T) -> usize)
+pub fn symtn_dense::engine_slot::checkout<T: core::marker::Send + 'static>(&mut dyn tenferro_tensor::backend::Engine) -> core::option::Option<T>
+pub fn symtn_dense::engine_slot::clear(&mut dyn tenferro_tensor::backend::Engine)
+pub fn symtn_dense::engine_slot::retained_bytes(&mut dyn tenferro_tensor::backend::Engine) -> usize
+pub mod symtn_dense::lanes
+pub use symtn_dense::lanes::BatchPolicy
+pub use symtn_dense::lanes::Exec
+pub enum symtn_dense::lanes::Refusal<R>
+pub symtn_dense::lanes::Refusal::Context(R)
+pub symtn_dense::lanes::Refusal::Lanes
+pub symtn_dense::lanes::Refusal::Lanes::given: usize
+pub symtn_dense::lanes::Refusal::Lanes::needed: usize
+pub symtn_dense::lanes::Refusal::States
+pub symtn_dense::lanes::Refusal::States::given: usize
+pub symtn_dense::lanes::Refusal::States::jobs: usize
+impl<R: core::clone::Clone> core::clone::Clone for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::clone(&self) -> symtn_dense::lanes::Refusal<R>
+impl<R: core::cmp::Eq> core::cmp::Eq for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::assert_fields_are_eq(&self)
+impl<R: core::cmp::PartialEq> core::cmp::PartialEq for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::eq(&self, &symtn_dense::lanes::Refusal<R>) -> bool
+impl<R: core::cmp::PartialEq> core::marker::StructuralPartialEq for symtn_dense::lanes::Refusal<R>
+impl<R: core::error::Error + 'static> core::error::Error for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<R: core::fmt::Debug> core::fmt::Debug for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<R: core::fmt::Display> core::fmt::Display for symtn_dense::lanes::Refusal<R>
+pub fn symtn_dense::lanes::Refusal<R>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<R: core::marker::Copy> core::marker::Copy for symtn_dense::lanes::Refusal<R>
+pub struct symtn_dense::lanes::Cut
+pub symtn_dense::lanes::Cut::job: usize
+pub symtn_dense::lanes::Cut::left: usize
+pub symtn_dense::lanes::Cut::threads: usize
+impl core::clone::Clone for symtn_dense::lanes::Cut
+pub fn symtn_dense::lanes::Cut::clone(&self) -> symtn_dense::lanes::Cut
+impl core::clone::TrivialClone for symtn_dense::lanes::Cut
+impl core::cmp::Eq for symtn_dense::lanes::Cut
+pub fn symtn_dense::lanes::Cut::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::lanes::Cut
+pub fn symtn_dense::lanes::Cut::eq(&self, &symtn_dense::lanes::Cut) -> bool
+impl core::fmt::Debug for symtn_dense::lanes::Cut
+pub fn symtn_dense::lanes::Cut::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::lanes::Cut
+impl core::marker::StructuralPartialEq for symtn_dense::lanes::Cut
+pub struct symtn_dense::lanes::Each
+impl core::clone::Clone for symtn_dense::lanes::Each
+pub fn symtn_dense::lanes::Each::clone(&self) -> symtn_dense::lanes::Each
+impl core::clone::TrivialClone for symtn_dense::lanes::Each
+impl core::fmt::Debug for symtn_dense::lanes::Each
+pub fn symtn_dense::lanes::Each::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::lanes::Each
+pub struct symtn_dense::lanes::Split<F>
+pub symtn_dense::lanes::Split::split: F
+pub symtn_dense::lanes::Split::threads: usize
+impl<F: core::clone::Clone> core::clone::Clone for symtn_dense::lanes::Split<F>
+pub fn symtn_dense::lanes::Split<F>::clone(&self) -> symtn_dense::lanes::Split<F>
+impl<F: core::fmt::Debug> core::fmt::Debug for symtn_dense::lanes::Split<F>
+pub fn symtn_dense::lanes::Split<F>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<F: core::marker::Copy> core::marker::Copy for symtn_dense::lanes::Split<F>
+pub trait symtn_dense::lanes::Assignment<W: symtn_dense::lanes::Work>: symtn_dense::lanes::runner::sealed::Assign<W>
+impl<W: symtn_dense::lanes::Work, A: symtn_dense::lanes::runner::sealed::Assign<W>> symtn_dense::lanes::Assignment<W> for A
+pub trait symtn_dense::lanes::Work: core::marker::Sync
+pub type symtn_dense::lanes::Work::Error: core::marker::Send
+pub type symtn_dense::lanes::Work::Job: core::marker::Send
+pub type symtn_dense::lanes::Work::Lane: core::marker::Send
+pub fn symtn_dense::lanes::Work::count(&self) -> usize
+pub fn symtn_dense::lanes::Work::run(&self, usize, &mut Self::Job, &mut Self::Lane, tcontract_exec::exec::Exec<'_>) -> core::result::Result<(), Self::Error>
+pub fn symtn_dense::lanes::flat_width(&tcontract_exec::exec::Exec<'_>, core::time::Duration, usize) -> usize
+pub fn symtn_dense::lanes::run_native<W: symtn_dense::lanes::Work, A: symtn_dense::lanes::Assignment<W>>(tcontract_exec::exec::Exec<'_>, &W, A, &mut [<W as symtn_dense::lanes::Work>::Job], &mut [<W as symtn_dense::lanes::Work>::Lane]) -> core::result::Result<symtn_dense::lanes::Outcome<<W as symtn_dense::lanes::Work>::Error>, symtn_dense::lanes::Refusal<threadteam::error::Error>>
+pub type symtn_dense::lanes::Outcome<E> = core::result::Result<(), (usize, E)>
+pub enum symtn_dense::DenseBackend
+pub symtn_dense::DenseBackend::Cuda
+pub symtn_dense::DenseBackend::Tenferro
+impl core::clone::Clone for symtn_dense::DenseBackend
+pub fn symtn_dense::DenseBackend::clone(&self) -> symtn_dense::DenseBackend
+impl core::clone::TrivialClone for symtn_dense::DenseBackend
+impl core::cmp::Eq for symtn_dense::DenseBackend
+pub fn symtn_dense::DenseBackend::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseBackend
+pub fn symtn_dense::DenseBackend::eq(&self, &symtn_dense::DenseBackend) -> bool
+impl core::fmt::Debug for symtn_dense::DenseBackend
+pub fn symtn_dense::DenseBackend::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::DenseBackend
+impl core::marker::StructuralPartialEq for symtn_dense::DenseBackend
+pub enum symtn_dense::DenseDType
+pub symtn_dense::DenseDType::Bool
+pub symtn_dense::DenseDType::C32
+pub symtn_dense::DenseDType::C64
+pub symtn_dense::DenseDType::F32
+pub symtn_dense::DenseDType::F64
+pub symtn_dense::DenseDType::I32
+pub symtn_dense::DenseDType::I64
+impl core::clone::Clone for symtn_dense::DenseDType
+pub fn symtn_dense::DenseDType::clone(&self) -> symtn_dense::DenseDType
+impl core::clone::TrivialClone for symtn_dense::DenseDType
+impl core::cmp::Eq for symtn_dense::DenseDType
+pub fn symtn_dense::DenseDType::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseDType
+pub fn symtn_dense::DenseDType::eq(&self, &symtn_dense::DenseDType) -> bool
+impl core::fmt::Debug for symtn_dense::DenseDType
+pub fn symtn_dense::DenseDType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::DenseDType
+impl core::marker::StructuralPartialEq for symtn_dense::DenseDType
+#[non_exhaustive] pub enum symtn_dense::DenseError
+pub symtn_dense::DenseError::Backend
+pub symtn_dense::DenseError::Backend::backend: symtn_dense::DenseBackend
+pub symtn_dense::DenseError::Backend::message: alloc::string::String
+pub symtn_dense::DenseError::Backend::op: &'static str
+pub symtn_dense::DenseError::DTypeMismatch
+pub symtn_dense::DenseError::DTypeMismatch::actual: symtn_dense::DenseDType
+pub symtn_dense::DenseError::DTypeMismatch::expected: symtn_dense::DenseDType
+pub symtn_dense::DenseError::DTypeMismatch::op: &'static str
+pub symtn_dense::DenseError::ElementCountOverflow
+pub symtn_dense::DenseError::NumericalFailure
+pub symtn_dense::DenseError::NumericalFailure::backend: symtn_dense::DenseBackend
+pub symtn_dense::DenseError::NumericalFailure::message: alloc::string::String
+pub symtn_dense::DenseError::NumericalFailure::op: &'static str
+pub symtn_dense::DenseError::OffsetOverflow
+pub symtn_dense::DenseError::OffsetOverflow::value: usize
+pub symtn_dense::DenseError::OutOfBounds
+pub symtn_dense::DenseError::RankMismatch
+pub symtn_dense::DenseError::RankMismatch::shape: usize
+pub symtn_dense::DenseError::RankMismatch::strides: usize
+pub symtn_dense::DenseError::ShapeMismatch
+pub symtn_dense::DenseError::ShapeMismatch::actual: alloc::vec::Vec<usize>
+pub symtn_dense::DenseError::ShapeMismatch::expected: alloc::vec::Vec<usize>
+pub symtn_dense::DenseError::ShapeMismatch::op: &'static str
+pub symtn_dense::DenseError::StrideOverflow
+pub symtn_dense::DenseError::StrideOverflow::value: usize
+pub symtn_dense::DenseError::Unsupported
+pub symtn_dense::DenseError::Unsupported::message: alloc::string::String
+pub symtn_dense::DenseError::Unsupported::op: &'static str
+impl core::clone::Clone for symtn_dense::DenseError
+pub fn symtn_dense::DenseError::clone(&self) -> symtn_dense::DenseError
+impl core::cmp::Eq for symtn_dense::DenseError
+pub fn symtn_dense::DenseError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseError
+pub fn symtn_dense::DenseError::eq(&self, &symtn_dense::DenseError) -> bool
+impl core::error::Error for symtn_dense::DenseError
+impl core::fmt::Debug for symtn_dense::DenseError
+pub fn symtn_dense::DenseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_dense::DenseError
+pub fn symtn_dense::DenseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_dense::DenseError
+#[non_exhaustive] pub enum symtn_dense::DenseFactorization
+pub symtn_dense::DenseFactorization::Eig
+pub symtn_dense::DenseFactorization::EigVals
+pub symtn_dense::DenseFactorization::Eigh
+pub symtn_dense::DenseFactorization::EighVals
+pub symtn_dense::DenseFactorization::ExpViaEigh
+pub symtn_dense::DenseFactorization::Inv
+pub symtn_dense::DenseFactorization::LeftPolar
+pub symtn_dense::DenseFactorization::Lq
+pub symtn_dense::DenseFactorization::Qr
+pub symtn_dense::DenseFactorization::QrFull
+pub symtn_dense::DenseFactorization::QrNull
+pub symtn_dense::DenseFactorization::RightPolar
+pub symtn_dense::DenseFactorization::Svd
+pub symtn_dense::DenseFactorization::SvdFull
+pub symtn_dense::DenseFactorization::SvdVals
+impl core::clone::Clone for symtn_dense::DenseFactorization
+pub fn symtn_dense::DenseFactorization::clone(&self) -> symtn_dense::DenseFactorization
+impl core::clone::TrivialClone for symtn_dense::DenseFactorization
+impl core::cmp::Eq for symtn_dense::DenseFactorization
+pub fn symtn_dense::DenseFactorization::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseFactorization
+pub fn symtn_dense::DenseFactorization::eq(&self, &symtn_dense::DenseFactorization) -> bool
+impl core::fmt::Debug for symtn_dense::DenseFactorization
+pub fn symtn_dense::DenseFactorization::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::DenseFactorization
+impl core::marker::StructuralPartialEq for symtn_dense::DenseFactorization
+pub enum symtn_dense::DenseFreshSegments<'s, 'a>
+pub symtn_dense::DenseFreshSegments::C32
+pub symtn_dense::DenseFreshSegments::C32::segments: &'s mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<num_complex::Complex32>])]
+pub symtn_dense::DenseFreshSegments::C32::written: &'s mut dyn core::ops::function::FnMut(usize, &'a mut [num_complex::Complex32])
+pub symtn_dense::DenseFreshSegments::C32::zeroed: for<'x> fn(&'x mut [core::mem::maybe_uninit::MaybeUninit<num_complex::Complex32>]) -> &'x mut [num_complex::Complex32]
+pub symtn_dense::DenseFreshSegments::C64
+pub symtn_dense::DenseFreshSegments::C64::segments: &'s mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<num_complex::Complex64>])]
+pub symtn_dense::DenseFreshSegments::C64::written: &'s mut dyn core::ops::function::FnMut(usize, &'a mut [num_complex::Complex64])
+pub symtn_dense::DenseFreshSegments::C64::zeroed: for<'x> fn(&'x mut [core::mem::maybe_uninit::MaybeUninit<num_complex::Complex64>]) -> &'x mut [num_complex::Complex64]
+pub symtn_dense::DenseFreshSegments::F32
+pub symtn_dense::DenseFreshSegments::F32::segments: &'s mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<f32>])]
+pub symtn_dense::DenseFreshSegments::F32::written: &'s mut dyn core::ops::function::FnMut(usize, &'a mut [f32])
+pub symtn_dense::DenseFreshSegments::F32::zeroed: for<'x> fn(&'x mut [core::mem::maybe_uninit::MaybeUninit<f32>]) -> &'x mut [f32]
+pub symtn_dense::DenseFreshSegments::F64
+pub symtn_dense::DenseFreshSegments::F64::segments: &'s mut [(usize, &'a mut [core::mem::maybe_uninit::MaybeUninit<f64>])]
+pub symtn_dense::DenseFreshSegments::F64::written: &'s mut dyn core::ops::function::FnMut(usize, &'a mut [f64])
+pub symtn_dense::DenseFreshSegments::F64::zeroed: for<'x> fn(&'x mut [core::mem::maybe_uninit::MaybeUninit<f64>]) -> &'x mut [f64]
+pub enum symtn_dense::DenseOwned
+pub symtn_dense::DenseOwned::C32(alloc::vec::Vec<num_complex::Complex32>)
+pub symtn_dense::DenseOwned::C64(alloc::vec::Vec<num_complex::Complex64>)
+pub symtn_dense::DenseOwned::F32(alloc::vec::Vec<f32>)
+pub symtn_dense::DenseOwned::F64(alloc::vec::Vec<f64>)
+pub enum symtn_dense::DenseRead<'a>
+pub symtn_dense::DenseRead::Bool(symtn_dense::DenseView<'a, bool>)
+pub symtn_dense::DenseRead::C32(symtn_dense::DenseView<'a, num_complex::Complex32>)
+pub symtn_dense::DenseRead::C64(symtn_dense::DenseView<'a, num_complex::Complex64>)
+pub symtn_dense::DenseRead::F32(symtn_dense::DenseView<'a, f32>)
+pub symtn_dense::DenseRead::F64(symtn_dense::DenseView<'a, f64>)
+pub symtn_dense::DenseRead::I32(symtn_dense::DenseView<'a, i32>)
+pub symtn_dense::DenseRead::I64(symtn_dense::DenseView<'a, i64>)
+impl symtn_dense::DenseRead<'_>
+pub fn symtn_dense::DenseRead<'_>::dtype(&self) -> symtn_dense::DenseDType
+pub fn symtn_dense::DenseRead<'_>::shape(&self) -> &[usize]
+impl<'a> core::clone::Clone for symtn_dense::DenseRead<'a>
+pub fn symtn_dense::DenseRead<'a>::clone(&self) -> symtn_dense::DenseRead<'a>
+impl<'a> core::clone::TrivialClone for symtn_dense::DenseRead<'a>
+impl<'a> core::fmt::Debug for symtn_dense::DenseRead<'a>
+pub fn symtn_dense::DenseRead<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for symtn_dense::DenseRead<'a>
+pub enum symtn_dense::DenseScalar
+pub symtn_dense::DenseScalar::C32(num_complex::Complex32)
+pub symtn_dense::DenseScalar::C64(num_complex::Complex64)
+pub symtn_dense::DenseScalar::F32(f32)
+pub symtn_dense::DenseScalar::F64(f64)
+impl symtn_dense::DenseScalar
+pub fn symtn_dense::DenseScalar::is_one(&self) -> bool
+pub fn symtn_dense::DenseScalar::is_zero(&self) -> bool
+impl core::clone::Clone for symtn_dense::DenseScalar
+pub fn symtn_dense::DenseScalar::clone(&self) -> symtn_dense::DenseScalar
+impl core::clone::TrivialClone for symtn_dense::DenseScalar
+impl core::cmp::PartialEq for symtn_dense::DenseScalar
+pub fn symtn_dense::DenseScalar::eq(&self, &symtn_dense::DenseScalar) -> bool
+impl core::fmt::Debug for symtn_dense::DenseScalar
+pub fn symtn_dense::DenseScalar::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::DenseScalar
+impl core::marker::StructuralPartialEq for symtn_dense::DenseScalar
+pub enum symtn_dense::DenseWrite<'a>
+pub symtn_dense::DenseWrite::Bool(symtn_dense::DenseViewMut<'a, bool>)
+pub symtn_dense::DenseWrite::C32(symtn_dense::DenseViewMut<'a, num_complex::Complex32>)
+pub symtn_dense::DenseWrite::C64(symtn_dense::DenseViewMut<'a, num_complex::Complex64>)
+pub symtn_dense::DenseWrite::F32(symtn_dense::DenseViewMut<'a, f32>)
+pub symtn_dense::DenseWrite::F64(symtn_dense::DenseViewMut<'a, f64>)
+pub symtn_dense::DenseWrite::I32(symtn_dense::DenseViewMut<'a, i32>)
+pub symtn_dense::DenseWrite::I64(symtn_dense::DenseViewMut<'a, i64>)
+impl symtn_dense::DenseWrite<'_>
+pub fn symtn_dense::DenseWrite<'_>::dtype(&self) -> symtn_dense::DenseDType
+pub fn symtn_dense::DenseWrite<'_>::shape(&self) -> &[usize]
+impl<'a> core::fmt::Debug for symtn_dense::DenseWrite<'a>
+pub fn symtn_dense::DenseWrite<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum symtn_dense::FactorFailure
+pub symtn_dense::FactorFailure::Output(symtn_dense::DenseError)
+pub symtn_dense::FactorFailure::Solver(symtn_dense::DenseError)
+impl symtn_dense::FactorFailure
+pub fn symtn_dense::FactorFailure::into_error(self) -> symtn_dense::DenseError
+impl core::clone::Clone for symtn_dense::FactorFailure
+pub fn symtn_dense::FactorFailure::clone(&self) -> symtn_dense::FactorFailure
+impl core::cmp::Eq for symtn_dense::FactorFailure
+pub fn symtn_dense::FactorFailure::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::FactorFailure
+pub fn symtn_dense::FactorFailure::eq(&self, &symtn_dense::FactorFailure) -> bool
+impl core::fmt::Debug for symtn_dense::FactorFailure
+pub fn symtn_dense::FactorFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_dense::FactorFailure
+pub enum symtn_dense::FactorPlacement
+pub symtn_dense::FactorPlacement::Adjoint
+pub symtn_dense::FactorPlacement::AsComputed
+impl core::clone::Clone for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::clone(&self) -> symtn_dense::FactorPlacement
+impl core::clone::TrivialClone for symtn_dense::FactorPlacement
+impl core::cmp::Eq for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::eq(&self, &symtn_dense::FactorPlacement) -> bool
+impl core::default::Default for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::default() -> symtn_dense::FactorPlacement
+impl core::fmt::Debug for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_dense::FactorPlacement
+pub fn symtn_dense::FactorPlacement::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_dense::FactorPlacement
+impl core::marker::StructuralPartialEq for symtn_dense::FactorPlacement
+pub enum symtn_dense::MatrixOp
+pub symtn_dense::MatrixOp::Adjoint
+pub symtn_dense::MatrixOp::Identity
+pub symtn_dense::MatrixOp::Transpose
+impl core::clone::Clone for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::clone(&self) -> symtn_dense::MatrixOp
+impl core::clone::TrivialClone for symtn_dense::MatrixOp
+impl core::cmp::Eq for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::eq(&self, &symtn_dense::MatrixOp) -> bool
+impl core::default::Default for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::default() -> symtn_dense::MatrixOp
+impl core::fmt::Debug for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_dense::MatrixOp
+pub fn symtn_dense::MatrixOp::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_dense::MatrixOp
+impl core::marker::StructuralPartialEq for symtn_dense::MatrixOp
+pub struct symtn_dense::DefaultDenseExecutor
+impl symtn_dense::DefaultDenseExecutor
+pub fn symtn_dense::DefaultDenseExecutor::new() -> Self
+pub fn symtn_dense::DefaultDenseExecutor::retained_bytes(&self) -> usize
+impl core::default::Default for symtn_dense::DefaultDenseExecutor
+pub fn symtn_dense::DefaultDenseExecutor::default() -> Self
+impl core::fmt::Debug for symtn_dense::DefaultDenseExecutor
+pub fn symtn_dense::DefaultDenseExecutor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl symtn_dense::DenseExecutor for symtn_dense::DefaultDenseExecutor
+pub fn symtn_dense::DefaultDenseExecutor::dot_general_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &symtn_dense::DenseDotConfig) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eig(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eig_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::factorize_batch(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut dyn core::ops::function::FnMut(usize, core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::factorize_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::FactorDest<'_>], &mut dyn core::ops::function::FnMut(usize, &mut symtn_dense::FactorDest<'_>, core::result::Result<(), symtn_dense::FactorFailure>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::honors_forced_batch_policy(&self) -> bool
+pub fn symtn_dense::DefaultDenseExecutor::matmul_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_axpby_with_ops_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::MatrixOp, symtn_dense::MatrixOp, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_fresh<'a>(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFreshSegments<'_, 'a>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], [symtn_dense::MatrixOp; 2], symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::qr(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::qr_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::solve_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, &[symtn_dense::DenseRead<'_>], &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::DenseWrite<'_>]) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::solve_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::supports_svd_full(&self) -> bool
+pub fn symtn_dense::DefaultDenseExecutor::svd(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_full_owned(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseOwned, usize, usize) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::with_linalg_scope(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut symtn_dense::DenseLinalgScopeBody<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub struct symtn_dense::DenseDotConfig
+impl symtn_dense::DenseDotConfig
+pub fn symtn_dense::DenseDotConfig::lhs_batch_dims(&self) -> &[usize]
+pub fn symtn_dense::DenseDotConfig::lhs_conj(&self) -> bool
+pub fn symtn_dense::DenseDotConfig::lhs_contracting_dims(&self) -> &[usize]
+pub fn symtn_dense::DenseDotConfig::matmul() -> Self
+pub fn symtn_dense::DenseDotConfig::new(alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>, alloc::vec::Vec<usize>) -> Self
+pub fn symtn_dense::DenseDotConfig::rhs_batch_dims(&self) -> &[usize]
+pub fn symtn_dense::DenseDotConfig::rhs_conj(&self) -> bool
+pub fn symtn_dense::DenseDotConfig::rhs_contracting_dims(&self) -> &[usize]
+pub fn symtn_dense::DenseDotConfig::with_conjugation(self, bool, bool) -> Self
+impl core::clone::Clone for symtn_dense::DenseDotConfig
+pub fn symtn_dense::DenseDotConfig::clone(&self) -> symtn_dense::DenseDotConfig
+impl core::cmp::Eq for symtn_dense::DenseDotConfig
+pub fn symtn_dense::DenseDotConfig::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseDotConfig
+pub fn symtn_dense::DenseDotConfig::eq(&self, &symtn_dense::DenseDotConfig) -> bool
+impl core::fmt::Debug for symtn_dense::DenseDotConfig
+pub fn symtn_dense::DenseDotConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_dense::DenseDotConfig
+pub struct symtn_dense::DenseGemmBatchJob
+pub symtn_dense::DenseGemmBatchJob::cols: usize
+pub symtn_dense::DenseGemmBatchJob::contracted: usize
+pub symtn_dense::DenseGemmBatchJob::dst_offset: usize
+pub symtn_dense::DenseGemmBatchJob::lhs_offset: usize
+pub symtn_dense::DenseGemmBatchJob::rhs_offset: usize
+pub symtn_dense::DenseGemmBatchJob::rows: usize
+impl core::clone::Clone for symtn_dense::DenseGemmBatchJob
+pub fn symtn_dense::DenseGemmBatchJob::clone(&self) -> symtn_dense::DenseGemmBatchJob
+impl core::clone::TrivialClone for symtn_dense::DenseGemmBatchJob
+impl core::cmp::Eq for symtn_dense::DenseGemmBatchJob
+pub fn symtn_dense::DenseGemmBatchJob::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_dense::DenseGemmBatchJob
+pub fn symtn_dense::DenseGemmBatchJob::eq(&self, &symtn_dense::DenseGemmBatchJob) -> bool
+impl core::fmt::Debug for symtn_dense::DenseGemmBatchJob
+pub fn symtn_dense::DenseGemmBatchJob::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_dense::DenseGemmBatchJob
+impl core::marker::StructuralPartialEq for symtn_dense::DenseGemmBatchJob
+pub struct symtn_dense::DenseTensor
+impl symtn_dense::DenseTensor
+pub fn symtn_dense::DenseTensor::as_c32_slice(&self) -> core::result::Result<&[num_complex::Complex32], symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::as_c64_slice(&self) -> core::result::Result<&[num_complex::Complex64], symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::as_f32_slice(&self) -> core::result::Result<&[f32], symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::as_f64_slice(&self) -> core::result::Result<&[f64], symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::backend(&self) -> symtn_dense::DenseBackend
+pub fn symtn_dense::DenseTensor::dtype(&self) -> symtn_dense::DenseDType
+pub fn symtn_dense::DenseTensor::into_c32_vec(self) -> core::result::Result<alloc::vec::Vec<num_complex::Complex32>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::into_c64_vec(self) -> core::result::Result<alloc::vec::Vec<num_complex::Complex64>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::into_f32_vec(self) -> core::result::Result<alloc::vec::Vec<f32>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::into_f64_vec(self) -> core::result::Result<alloc::vec::Vec<f64>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseTensor::shape(&self) -> &[usize]
+impl core::fmt::Debug for symtn_dense::DenseTensor
+pub fn symtn_dense::DenseTensor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_dense::DenseView<'a, T>
+impl<'a, T> symtn_dense::DenseView<'a, T>
+pub fn symtn_dense::DenseView<'a, T>::data(&self) -> &'a [T]
+pub fn symtn_dense::DenseView<'a, T>::new(&'a [T], &'a [usize], &'a [usize], usize) -> core::result::Result<Self, symtn_dense::DenseError>
+pub fn symtn_dense::DenseView<'a, T>::new_trusted(&'a [T], &'a [usize], &'a [usize], usize) -> Self
+pub fn symtn_dense::DenseView<'a, T>::offset(&self) -> usize
+pub fn symtn_dense::DenseView<'a, T>::shape(&self) -> &'a [usize]
+pub fn symtn_dense::DenseView<'a, T>::strides(&self) -> &'a [usize]
+impl<'a, T: core::fmt::Debug> core::fmt::Debug for symtn_dense::DenseView<'a, T>
+pub fn symtn_dense::DenseView<'a, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a, T> core::clone::Clone for symtn_dense::DenseView<'a, T>
+pub fn symtn_dense::DenseView<'a, T>::clone(&self) -> Self
+impl<'a, T> core::marker::Copy for symtn_dense::DenseView<'a, T>
+pub struct symtn_dense::DenseViewMut<'a, T>
+impl<'a, T> symtn_dense::DenseViewMut<'a, T>
+pub fn symtn_dense::DenseViewMut<'a, T>::data(&self) -> &[T]
+pub fn symtn_dense::DenseViewMut<'a, T>::data_mut(&mut self) -> &mut [T]
+pub fn symtn_dense::DenseViewMut<'a, T>::new(&'a mut [T], &'a [usize], &'a [usize], usize) -> core::result::Result<Self, symtn_dense::DenseError>
+pub fn symtn_dense::DenseViewMut<'a, T>::new_trusted(&'a mut [T], &'a [usize], &'a [usize], usize) -> Self
+pub fn symtn_dense::DenseViewMut<'a, T>::offset(&self) -> usize
+pub fn symtn_dense::DenseViewMut<'a, T>::shape(&self) -> &'a [usize]
+pub fn symtn_dense::DenseViewMut<'a, T>::strides(&self) -> &'a [usize]
+impl<'a, T: core::fmt::Debug> core::fmt::Debug for symtn_dense::DenseViewMut<'a, T>
+pub fn symtn_dense::DenseViewMut<'a, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_dense::FactorDest<'a>
+impl<'a> symtn_dense::FactorDest<'a>
+pub fn symtn_dense::FactorDest<'a>::new([core::option::Option<symtn_dense::DenseWrite<'a>>; 3], symtn_dense::FactorPlacement) -> Self
+pub fn symtn_dense::FactorDest<'a>::outputs_mut(&mut self) -> &mut [core::option::Option<symtn_dense::DenseWrite<'a>>; 3]
+pub fn symtn_dense::FactorDest<'a>::placement(&self) -> symtn_dense::FactorPlacement
+impl<'a> core::fmt::Debug for symtn_dense::FactorDest<'a>
+pub fn symtn_dense::FactorDest<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const symtn_dense::EIGH_EIGENVALUE_CHECK: &str
+pub trait symtn_dense::DenseExecutor: symtn_dense::executor::sealed::AsDynDenseExecutor
+pub fn symtn_dense::DenseExecutor::dot_general_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &symtn_dense::DenseDotConfig) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::eig(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::eig_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::eigh(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::eigh_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::eigh_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::factorize_batch(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut dyn core::ops::function::FnMut(usize, core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::factorize_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::FactorDest<'_>], &mut dyn core::ops::function::FnMut(usize, &mut symtn_dense::FactorDest<'_>, core::result::Result<(), symtn_dense::FactorFailure>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::honors_forced_batch_policy(&self) -> bool
+pub fn symtn_dense::DenseExecutor::matmul_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::matmul_batch_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::matmul_batch_axpby_with_ops_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::MatrixOp, symtn_dense::MatrixOp, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::matmul_batch_fresh<'a>(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFreshSegments<'_, 'a>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], [symtn_dense::MatrixOp; 2], symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::matmul_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::qr(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::qr_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::solve_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, &[symtn_dense::DenseRead<'_>], &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::DenseWrite<'_>]) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::solve_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::supports_svd_full(&self) -> bool
+pub fn symtn_dense::DenseExecutor::svd(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::svd_full_owned(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseOwned, usize, usize) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::svd_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::svd_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DenseExecutor::with_linalg_scope(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut symtn_dense::DenseLinalgScopeBody<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+impl symtn_dense::DenseExecutor for symtn_dense::DefaultDenseExecutor
+pub fn symtn_dense::DefaultDenseExecutor::dot_general_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &symtn_dense::DenseDotConfig) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eig(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eig_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::eigh_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::factorize_batch(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut dyn core::ops::function::FnMut(usize, core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::factorize_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFactorization, &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::FactorDest<'_>], &mut dyn core::ops::function::FnMut(usize, &mut symtn_dense::FactorDest<'_>, core::result::Result<(), symtn_dense::FactorFailure>) -> core::result::Result<(), symtn_dense::DenseError>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::honors_forced_batch_policy(&self) -> bool
+pub fn symtn_dense::DefaultDenseExecutor::matmul_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_axpby_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_axpby_with_ops_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], &[usize], symtn_dense::MatrixOp, symtn_dense::MatrixOp, symtn_dense::DenseScalar, symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_batch_fresh<'a>(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseFreshSegments<'_, 'a>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, &[symtn_dense::DenseGemmBatchJob], [symtn_dense::MatrixOp; 2], symtn_dense::DenseScalar) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::matmul_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseWrite<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::qr(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::qr_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::solve_batch_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, &[symtn_dense::DenseRead<'_>], &[symtn_dense::DenseRead<'_>], &mut [symtn_dense::DenseWrite<'_>]) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::solve_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::supports_svd_full(&self) -> bool
+pub fn symtn_dense::DefaultDenseExecutor::svd(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_full_owned(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseOwned, usize, usize) -> core::result::Result<alloc::vec::Vec<symtn_dense::DenseTensor>, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_into(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>, symtn_dense::DenseWrite<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::svd_vals(&mut self, &mut dyn tenferro_tensor::backend::Engine, symtn_dense::DenseRead<'_>) -> core::result::Result<symtn_dense::DenseTensor, symtn_dense::DenseError>
+pub fn symtn_dense::DefaultDenseExecutor::with_linalg_scope(&mut self, &mut dyn tenferro_tensor::backend::Engine, &mut symtn_dense::DenseLinalgScopeBody<'_>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::arity_mismatch(&'static str, usize, usize) -> symtn_dense::DenseError
+pub fn symtn_dense::check_contiguous_output(&'static str, usize, &[usize], &[usize]) -> core::result::Result<usize, symtn_dense::DenseError>
+pub fn symtn_dense::finite_eigenvalues<R: core::convert::Into<f64>>(impl core::iter::traits::collect::IntoIterator<Item = R>) -> core::result::Result<(), symtn_dense::DenseError>
+pub fn symtn_dense::strided_batch_runs(&[symtn_dense::DenseGemmBatchJob]) -> alloc::vec::Vec<usize>
+pub fn symtn_dense::strided_batch_runs_into(&[symtn_dense::DenseGemmBatchJob], &mut alloc::vec::Vec<usize>)
+pub type symtn_dense::DenseLinalgScopeBody<'a> = (dyn core::ops::function::FnMut(&mut dyn symtn_dense::DenseExecutor, &mut dyn tenferro_tensor::backend::Engine) -> core::result::Result<(), symtn_dense::DenseError> + core::marker::Send + 'a)

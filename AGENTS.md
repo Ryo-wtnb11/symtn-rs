@@ -17,6 +17,12 @@ dense kernels and backend resources. Reuse existing execution seams. Do not
 add a general work graph, a second CPU scheduler, a symmetry-specific engine
 path, or a cache to hide an avoidably slow eager operation.
 
+A change to any public item, `#[doc(hidden)]` ones included, updates the
+snapshot in `api/` in the same commit (`scripts/api-snapshot.sh --write`; CI
+runs `--check`). Reviewers read the `api/` diff: a new route variant of an
+existing operation (a name-suffixed sibling entry, or a second entry for one
+operation) is a review finding, not an accepted addition.
+
 For production code, use distinct supervisor and implementer actors. Add an
 independent reviewer for mathematics, representation, core algorithms, unsafe
 code, or performance-sensitive changes. Review the exact committed diff and

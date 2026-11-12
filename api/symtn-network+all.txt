@@ -1,0 +1,965 @@
+pub mod symtn_network
+pub use symtn_network::contract
+pub enum symtn_network::BranchLevel
+pub symtn_network::BranchLevel::All
+pub symtn_network::BranchLevel::One
+pub symtn_network::BranchLevel::Two
+impl core::clone::Clone for symtn_network::BranchLevel
+pub fn symtn_network::BranchLevel::clone(&self) -> symtn_network::BranchLevel
+impl core::clone::TrivialClone for symtn_network::BranchLevel
+impl core::cmp::Eq for symtn_network::BranchLevel
+pub fn symtn_network::BranchLevel::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::BranchLevel
+pub fn symtn_network::BranchLevel::eq(&self, &symtn_network::BranchLevel) -> bool
+impl core::fmt::Debug for symtn_network::BranchLevel
+pub fn symtn_network::BranchLevel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::BranchLevel
+impl core::marker::StructuralPartialEq for symtn_network::BranchLevel
+#[non_exhaustive] pub enum symtn_network::ContractError
+pub symtn_network::ContractError::DimensionMismatch
+pub symtn_network::ContractError::DimensionMismatch::actual: usize
+pub symtn_network::ContractError::DimensionMismatch::expected: usize
+pub symtn_network::ContractError::DimensionMismatch::label: alloc::string::String
+pub symtn_network::ContractError::DuplicateOutputLabel(alloc::string::String)
+pub symtn_network::ContractError::EmptyInput
+pub symtn_network::ContractError::InvalidContractionPlan(alloc::string::String)
+pub symtn_network::ContractError::InvalidTensorId
+pub symtn_network::ContractError::InvalidTensorId::tensor: usize
+pub symtn_network::ContractError::InvalidTensorId::tensor_count: usize
+pub symtn_network::ContractError::MarkerCountMismatch
+pub symtn_network::ContractError::MarkerCountMismatch::codomain_splits: usize
+pub symtn_network::ContractError::MarkerCountMismatch::conj: usize
+pub symtn_network::ContractError::MarkerCountMismatch::operands: usize
+pub symtn_network::ContractError::NotEnoughTensors
+pub symtn_network::ContractError::OutputCodomainRankOutOfRange
+pub symtn_network::ContractError::OutputCodomainRankOutOfRange::codomain_rank: usize
+pub symtn_network::ContractError::OutputCodomainRankOutOfRange::output_rank: usize
+pub symtn_network::ContractError::PlannerSliceKindMismatch
+pub symtn_network::ContractError::PlannerSliceKindMismatch::actual: symtn_network::SliceKind
+pub symtn_network::ContractError::PlannerSliceKindMismatch::expected: symtn_network::SliceKind
+pub symtn_network::ContractError::PlannerSliceKindMismatch::label: alloc::string::String
+pub symtn_network::ContractError::RankMismatch
+pub symtn_network::ContractError::RankMismatch::actual: usize
+pub symtn_network::ContractError::RankMismatch::expected: usize
+pub symtn_network::ContractError::RankMismatch::tensor: usize
+pub symtn_network::ContractError::TensorCountMismatch
+pub symtn_network::ContractError::TensorCountMismatch::actual: usize
+pub symtn_network::ContractError::TensorCountMismatch::expected: usize
+pub symtn_network::ContractError::UnknownOutputLabel(alloc::string::String)
+pub symtn_network::ContractError::UnknownPlannerSliceLabel
+pub symtn_network::ContractError::UnknownPlannerSliceLabel::label: alloc::string::String
+pub symtn_network::ContractError::UnsupportedBatchLabel
+pub symtn_network::ContractError::UnsupportedBatchLabel::label: alloc::string::String
+pub symtn_network::ContractError::UnsupportedBatchLabel::operand_count: usize
+pub symtn_network::ContractError::UnsupportedDiagonal
+pub symtn_network::ContractError::UnsupportedDiagonal::label: alloc::string::String
+pub symtn_network::ContractError::UnsupportedDiagonal::tensor: usize
+pub symtn_network::ContractError::UnsupportedHyperedge
+pub symtn_network::ContractError::UnsupportedHyperedge::label: alloc::string::String
+pub symtn_network::ContractError::UnsupportedHyperedge::operand_count: usize
+pub symtn_network::ContractError::UnsupportedPlannerProjection
+pub symtn_network::ContractError::UnsupportedPlannerProjection::label: alloc::string::String
+pub symtn_network::ContractError::UnsupportedReduction
+pub symtn_network::ContractError::UnsupportedReduction::label: alloc::string::String
+impl core::clone::Clone for symtn_network::ContractError
+pub fn symtn_network::ContractError::clone(&self) -> symtn_network::ContractError
+impl core::cmp::Eq for symtn_network::ContractError
+pub fn symtn_network::ContractError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::ContractError
+pub fn symtn_network::ContractError::eq(&self, &symtn_network::ContractError) -> bool
+impl core::error::Error for symtn_network::ContractError
+impl core::fmt::Debug for symtn_network::ContractError
+pub fn symtn_network::ContractError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_network::ContractError
+pub fn symtn_network::ContractError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::ContractError
+pub enum symtn_network::ContractionTree
+pub symtn_network::ContractionTree::Leaf
+pub symtn_network::ContractionTree::Leaf::tensor: symtn_network::TensorId
+pub symtn_network::ContractionTree::Pair
+pub symtn_network::ContractionTree::Pair::cost: usize
+pub symtn_network::ContractionTree::Pair::lhs: alloc::boxed::Box<symtn_network::ContractionTree>
+pub symtn_network::ContractionTree::Pair::result: symtn_network::TensorId
+pub symtn_network::ContractionTree::Pair::result_labels: alloc::vec::Vec<symtn_network::TemporaryLabel>
+pub symtn_network::ContractionTree::Pair::rhs: alloc::boxed::Box<symtn_network::ContractionTree>
+impl symtn_network::ContractionTree
+pub fn symtn_network::ContractionTree::children(&self) -> core::option::Option<(&symtn_network::ContractionTree, &symtn_network::ContractionTree)>
+pub fn symtn_network::ContractionTree::cost(&self) -> usize
+pub fn symtn_network::ContractionTree::from_steps(usize, &[symtn_network::ContractionStep]) -> symtn_network::Result<Self>
+pub fn symtn_network::ContractionTree::is_leaf(&self) -> bool
+pub fn symtn_network::ContractionTree::leaf(symtn_network::TensorId) -> Self
+pub fn symtn_network::ContractionTree::leaf_count(&self) -> usize
+pub fn symtn_network::ContractionTree::leaves(&self) -> alloc::vec::Vec<symtn_network::TensorId>
+pub fn symtn_network::ContractionTree::result(&self) -> symtn_network::TensorId
+pub fn symtn_network::ContractionTree::result_labels(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::ContractionTree::total_cost(&self) -> usize
+impl core::clone::Clone for symtn_network::ContractionTree
+pub fn symtn_network::ContractionTree::clone(&self) -> symtn_network::ContractionTree
+impl core::cmp::Eq for symtn_network::ContractionTree
+pub fn symtn_network::ContractionTree::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::ContractionTree
+pub fn symtn_network::ContractionTree::eq(&self, &symtn_network::ContractionTree) -> bool
+impl core::fmt::Debug for symtn_network::ContractionTree
+pub fn symtn_network::ContractionTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::ContractionTree
+pub enum symtn_network::CotengraMinimize
+pub symtn_network::CotengraMinimize::Combo
+pub symtn_network::CotengraMinimize::Custom(alloc::string::String)
+pub symtn_network::CotengraMinimize::Flops
+pub symtn_network::CotengraMinimize::Limit
+pub symtn_network::CotengraMinimize::Size
+pub symtn_network::CotengraMinimize::Write
+impl core::clone::Clone for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::clone(&self) -> symtn_network::CotengraMinimize
+impl core::cmp::Eq for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::eq(&self, &symtn_network::CotengraMinimize) -> bool
+impl core::default::Default for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::default() -> symtn_network::CotengraMinimize
+impl core::fmt::Debug for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::CotengraMinimize
+pub fn symtn_network::CotengraMinimize::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::CotengraMinimize
+pub enum symtn_network::CotengraPythonMethod
+pub symtn_network::CotengraPythonMethod::Auto
+pub symtn_network::CotengraPythonMethod::AutoHq
+pub symtn_network::CotengraPythonMethod::Greedy
+pub symtn_network::CotengraPythonMethod::Hyper
+pub symtn_network::CotengraPythonMethod::Optimal
+pub symtn_network::CotengraPythonMethod::RandomGreedy
+impl core::clone::Clone for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::clone(&self) -> symtn_network::CotengraPythonMethod
+impl core::cmp::Eq for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::eq(&self, &symtn_network::CotengraPythonMethod) -> bool
+impl core::default::Default for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::default() -> symtn_network::CotengraPythonMethod
+impl core::fmt::Debug for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::CotengraPythonMethod
+pub fn symtn_network::CotengraPythonMethod::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::CotengraPythonMethod
+pub enum symtn_network::CotengraSlicingConfig
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure::allow_outer: bool
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure::max_repeats: usize
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure::num_trees: usize
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure::step_size: usize
+pub symtn_network::CotengraSlicingConfig::ForestReconfigure::target_size: usize
+pub symtn_network::CotengraSlicingConfig::None
+pub symtn_network::CotengraSlicingConfig::Reconfigure
+pub symtn_network::CotengraSlicingConfig::Reconfigure::allow_outer: bool
+pub symtn_network::CotengraSlicingConfig::Reconfigure::forested: bool
+pub symtn_network::CotengraSlicingConfig::Reconfigure::max_repeats: usize
+pub symtn_network::CotengraSlicingConfig::Reconfigure::step_size: usize
+pub symtn_network::CotengraSlicingConfig::Reconfigure::target_size: usize
+pub symtn_network::CotengraSlicingConfig::Slice
+pub symtn_network::CotengraSlicingConfig::Slice::allow_outer: bool
+pub symtn_network::CotengraSlicingConfig::Slice::max_repeats: usize
+pub symtn_network::CotengraSlicingConfig::Slice::target_size: usize
+impl core::clone::Clone for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::clone(&self) -> symtn_network::CotengraSlicingConfig
+impl core::cmp::Eq for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::eq(&self, &symtn_network::CotengraSlicingConfig) -> bool
+impl core::default::Default for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::default() -> symtn_network::CotengraSlicingConfig
+impl core::fmt::Debug for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::CotengraSlicingConfig
+pub fn symtn_network::CotengraSlicingConfig::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::CotengraSlicingConfig
+pub enum symtn_network::DpObjective
+pub symtn_network::DpObjective::Combo
+pub symtn_network::DpObjective::ComboFactor(usize)
+pub symtn_network::DpObjective::Flops
+pub symtn_network::DpObjective::Limit
+pub symtn_network::DpObjective::LimitFactor(usize)
+pub symtn_network::DpObjective::Size
+pub symtn_network::DpObjective::Write
+impl core::clone::Clone for symtn_network::DpObjective
+pub fn symtn_network::DpObjective::clone(&self) -> symtn_network::DpObjective
+impl core::clone::TrivialClone for symtn_network::DpObjective
+impl core::cmp::Eq for symtn_network::DpObjective
+pub fn symtn_network::DpObjective::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::DpObjective
+pub fn symtn_network::DpObjective::eq(&self, &symtn_network::DpObjective) -> bool
+impl core::fmt::Debug for symtn_network::DpObjective
+pub fn symtn_network::DpObjective::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::DpObjective
+impl core::marker::StructuralPartialEq for symtn_network::DpObjective
+#[non_exhaustive] pub enum symtn_network::Optimizer
+pub symtn_network::Optimizer::AutoHq
+pub symtn_network::Optimizer::CotengraPython(symtn_network::CotengraPythonConfig)
+pub symtn_network::Optimizer::DynamicProgramming
+pub symtn_network::Optimizer::Greedy
+pub symtn_network::Optimizer::Optimal
+impl core::clone::Clone for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::clone(&self) -> symtn_network::Optimizer
+impl core::cmp::Eq for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::eq(&self, &symtn_network::Optimizer) -> bool
+impl core::default::Default for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::default() -> symtn_network::Optimizer
+impl core::fmt::Debug for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::Optimizer
+pub fn symtn_network::Optimizer::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::Optimizer
+pub enum symtn_network::PathMemoryLimit
+pub symtn_network::PathMemoryLimit::MaxInput
+pub symtn_network::PathMemoryLimit::None
+pub symtn_network::PathMemoryLimit::Size(usize)
+impl core::clone::Clone for symtn_network::PathMemoryLimit
+pub fn symtn_network::PathMemoryLimit::clone(&self) -> symtn_network::PathMemoryLimit
+impl core::clone::TrivialClone for symtn_network::PathMemoryLimit
+impl core::cmp::Eq for symtn_network::PathMemoryLimit
+pub fn symtn_network::PathMemoryLimit::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::PathMemoryLimit
+pub fn symtn_network::PathMemoryLimit::eq(&self, &symtn_network::PathMemoryLimit) -> bool
+impl core::default::Default for symtn_network::PathMemoryLimit
+pub fn symtn_network::PathMemoryLimit::default() -> symtn_network::PathMemoryLimit
+impl core::fmt::Debug for symtn_network::PathMemoryLimit
+pub fn symtn_network::PathMemoryLimit::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::PathMemoryLimit
+impl core::marker::StructuralPartialEq for symtn_network::PathMemoryLimit
+pub enum symtn_network::PathStrategy
+pub symtn_network::PathStrategy::Auto
+pub symtn_network::PathStrategy::AutoHq
+pub symtn_network::PathStrategy::Branch(symtn_network::BranchLevel)
+pub symtn_network::PathStrategy::BranchBound
+pub symtn_network::PathStrategy::DynamicProgramming
+pub symtn_network::PathStrategy::DynamicProgrammingObjective(symtn_network::DpObjective)
+pub symtn_network::PathStrategy::Greedy
+pub symtn_network::PathStrategy::Optimal
+pub symtn_network::PathStrategy::RandomGreedy(usize)
+impl core::clone::Clone for symtn_network::PathStrategy
+pub fn symtn_network::PathStrategy::clone(&self) -> symtn_network::PathStrategy
+impl core::clone::TrivialClone for symtn_network::PathStrategy
+impl core::cmp::Eq for symtn_network::PathStrategy
+pub fn symtn_network::PathStrategy::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::PathStrategy
+pub fn symtn_network::PathStrategy::eq(&self, &symtn_network::PathStrategy) -> bool
+impl core::default::Default for symtn_network::PathStrategy
+pub fn symtn_network::PathStrategy::default() -> symtn_network::PathStrategy
+impl core::fmt::Debug for symtn_network::PathStrategy
+pub fn symtn_network::PathStrategy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::PathStrategy
+impl core::marker::StructuralPartialEq for symtn_network::PathStrategy
+pub enum symtn_network::ReplanPolicy
+pub symtn_network::ReplanPolicy::AlwaysReuse
+pub symtn_network::ReplanPolicy::BakeOnce
+pub symtn_network::ReplanPolicy::DriftFactor(f64)
+impl core::clone::Clone for symtn_network::ReplanPolicy
+pub fn symtn_network::ReplanPolicy::clone(&self) -> symtn_network::ReplanPolicy
+impl core::clone::TrivialClone for symtn_network::ReplanPolicy
+impl core::cmp::PartialEq for symtn_network::ReplanPolicy
+pub fn symtn_network::ReplanPolicy::eq(&self, &symtn_network::ReplanPolicy) -> bool
+impl core::default::Default for symtn_network::ReplanPolicy
+pub fn symtn_network::ReplanPolicy::default() -> symtn_network::ReplanPolicy
+impl core::fmt::Debug for symtn_network::ReplanPolicy
+pub fn symtn_network::ReplanPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::ReplanPolicy
+impl core::marker::StructuralPartialEq for symtn_network::ReplanPolicy
+pub enum symtn_network::SliceError
+pub symtn_network::SliceError::DuplicateLabel(symtn_network::TemporaryLabel)
+pub symtn_network::SliceError::EmptyRange
+pub symtn_network::SliceError::EmptyRange::at: usize
+pub symtn_network::SliceError::IncompleteCoverage
+pub symtn_network::SliceError::IncompleteCoverage::actual_start: usize
+pub symtn_network::SliceError::IncompleteCoverage::expected_start: usize
+pub symtn_network::SliceError::IncompleteCoverage::label: symtn_network::TemporaryLabel
+pub symtn_network::SliceError::IncompleteCoverage::sector: symtn_sectors::SectorId
+pub symtn_network::SliceError::InvalidAuthority
+pub symtn_network::SliceError::InvalidAuthority::actual: symtn_network::TensorAxis
+pub symtn_network::SliceError::InvalidAuthority::expected: symtn_network::TensorAxis
+pub symtn_network::SliceError::InvalidAuthority::label: symtn_network::TemporaryLabel
+pub symtn_network::SliceError::OverlappingRanges
+pub symtn_network::SliceError::OverlappingRanges::label: symtn_network::TemporaryLabel
+pub symtn_network::SliceError::OverlappingRanges::next_start: usize
+pub symtn_network::SliceError::OverlappingRanges::previous_end: usize
+pub symtn_network::SliceError::OverlappingRanges::sector: symtn_sectors::SectorId
+pub symtn_network::SliceError::RangeOutOfBounds
+pub symtn_network::SliceError::RangeOutOfBounds::degeneracy: usize
+pub symtn_network::SliceError::RangeOutOfBounds::end: usize
+pub symtn_network::SliceError::RangeOutOfBounds::label: symtn_network::TemporaryLabel
+pub symtn_network::SliceError::RangeOutOfBounds::sector: symtn_sectors::SectorId
+pub symtn_network::SliceError::RangeOutOfBounds::start: usize
+pub symtn_network::SliceError::ReversedRange
+pub symtn_network::SliceError::ReversedRange::end: usize
+pub symtn_network::SliceError::ReversedRange::start: usize
+pub symtn_network::SliceError::SliceCountOverflow
+pub symtn_network::SliceError::UnknownLabel(symtn_network::TemporaryLabel)
+pub symtn_network::SliceError::UnknownSector
+pub symtn_network::SliceError::UnknownSector::label: symtn_network::TemporaryLabel
+pub symtn_network::SliceError::UnknownSector::sector: symtn_sectors::SectorId
+impl core::clone::Clone for symtn_network::SliceError
+pub fn symtn_network::SliceError::clone(&self) -> symtn_network::SliceError
+impl core::cmp::Eq for symtn_network::SliceError
+pub fn symtn_network::SliceError::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SliceError
+pub fn symtn_network::SliceError::eq(&self, &symtn_network::SliceError) -> bool
+impl core::error::Error for symtn_network::SliceError
+impl core::fmt::Debug for symtn_network::SliceError
+pub fn symtn_network::SliceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_network::SliceError
+pub fn symtn_network::SliceError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::SliceError
+pub enum symtn_network::SliceKind
+pub symtn_network::SliceKind::Internal
+pub symtn_network::SliceKind::Output
+impl symtn_network::SliceKind
+pub fn symtn_network::SliceKind::as_str(self) -> &'static str
+pub fn symtn_network::SliceKind::parse(&str) -> symtn_network::Result<Self>
+impl core::clone::Clone for symtn_network::SliceKind
+pub fn symtn_network::SliceKind::clone(&self) -> symtn_network::SliceKind
+impl core::clone::TrivialClone for symtn_network::SliceKind
+impl core::cmp::Eq for symtn_network::SliceKind
+pub fn symtn_network::SliceKind::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SliceKind
+pub fn symtn_network::SliceKind::eq(&self, &symtn_network::SliceKind) -> bool
+impl core::fmt::Debug for symtn_network::SliceKind
+pub fn symtn_network::SliceKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::SliceKind
+pub fn symtn_network::SliceKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_network::SliceKind
+impl core::marker::StructuralPartialEq for symtn_network::SliceKind
+pub enum symtn_network::SliceLabels
+pub symtn_network::SliceLabels::IncludeOutput
+pub symtn_network::SliceLabels::InternalOnly
+impl core::clone::Clone for symtn_network::SliceLabels
+pub fn symtn_network::SliceLabels::clone(&self) -> symtn_network::SliceLabels
+impl core::clone::TrivialClone for symtn_network::SliceLabels
+impl core::cmp::Eq for symtn_network::SliceLabels
+pub fn symtn_network::SliceLabels::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SliceLabels
+pub fn symtn_network::SliceLabels::eq(&self, &symtn_network::SliceLabels) -> bool
+impl core::fmt::Debug for symtn_network::SliceLabels
+pub fn symtn_network::SliceLabels::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::SliceLabels
+impl core::marker::StructuralPartialEq for symtn_network::SliceLabels
+pub enum symtn_network::SymmetricSliceExecutionError<E>
+pub symtn_network::SymmetricSliceExecutionError::Bind(symtn_network::SymmetricSliceLowerError<E>)
+pub symtn_network::SymmetricSliceExecutionError::Tensor(E)
+pub symtn_network::SymmetricSliceExecutionError::WorkspaceArithmeticOverflow
+pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded
+pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded::limit: usize
+pub symtn_network::SymmetricSliceExecutionError::WorkspaceLimitExceeded::required: usize
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_network::SymmetricSliceExecutionError<E>
+pub fn symtn_network::SymmetricSliceExecutionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_network::SymmetricSliceExecutionError<E>
+pub fn symtn_network::SymmetricSliceExecutionError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::error::Error for symtn_network::SymmetricSliceExecutionError<E> where E: core::error::Error + 'static
+pub fn symtn_network::SymmetricSliceExecutionError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+pub enum symtn_network::SymmetricSliceLowerError<E>
+pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch
+pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::actual: symtn_core::sector::SectorLeg
+pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::authority: symtn_network::TensorAxis
+pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::expected: symtn_core::sector::SectorLeg
+pub symtn_network::SymmetricSliceLowerError::AuthorityLegMismatch::label: symtn_network::TemporaryLabel
+pub symtn_network::SymmetricSliceLowerError::InvalidPlan(symtn_network::ContractError)
+pub symtn_network::SymmetricSliceLowerError::InvalidSlice(symtn_network::SliceError)
+pub symtn_network::SymmetricSliceLowerError::MissingAuthority
+pub symtn_network::SymmetricSliceLowerError::MissingAuthority::authority: symtn_network::TensorAxis
+pub symtn_network::SymmetricSliceLowerError::MissingAuthority::label: symtn_network::TemporaryLabel
+pub symtn_network::SymmetricSliceLowerError::RuleMismatch
+pub symtn_network::SymmetricSliceLowerError::RuleMismatch::actual: symtn_sectors::rule_identity::RuleIdentity
+pub symtn_network::SymmetricSliceLowerError::RuleMismatch::expected: symtn_sectors::rule_identity::RuleIdentity
+pub symtn_network::SymmetricSliceLowerError::Tensor(E)
+impl<E: core::fmt::Debug> core::fmt::Debug for symtn_network::SymmetricSliceLowerError<E>
+pub fn symtn_network::SymmetricSliceLowerError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for symtn_network::SymmetricSliceLowerError<E>
+pub fn symtn_network::SymmetricSliceLowerError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E> core::error::Error for symtn_network::SymmetricSliceLowerError<E> where E: core::error::Error + 'static
+pub fn symtn_network::SymmetricSliceLowerError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+pub struct symtn_network::ActivePair
+impl symtn_network::ActivePair
+pub fn symtn_network::ActivePair::lhs_position(self) -> usize
+pub const fn symtn_network::ActivePair::new(usize, usize) -> Self
+pub fn symtn_network::ActivePair::rhs_position(self) -> usize
+impl core::clone::Clone for symtn_network::ActivePair
+pub fn symtn_network::ActivePair::clone(&self) -> symtn_network::ActivePair
+impl core::clone::TrivialClone for symtn_network::ActivePair
+impl core::cmp::Eq for symtn_network::ActivePair
+pub fn symtn_network::ActivePair::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::ActivePair
+pub fn symtn_network::ActivePair::eq(&self, &symtn_network::ActivePair) -> bool
+impl core::fmt::Debug for symtn_network::ActivePair
+pub fn symtn_network::ActivePair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::ActivePair
+pub fn symtn_network::ActivePair::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_network::ActivePair
+impl core::marker::StructuralPartialEq for symtn_network::ActivePair
+pub struct symtn_network::ContractionPlan
+impl symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::active_pair_path(&self) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
+pub fn symtn_network::ContractionPlan::dense_cost_report(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<symtn_network::DensePlanCostReport>
+pub fn symtn_network::ContractionPlan::from_steps(&symtn_network::NetworkIR, alloc::vec::Vec<symtn_network::ContractionStep>) -> symtn_network::Result<Self>
+pub fn symtn_network::ContractionPlan::from_text(&str) -> symtn_network::Result<Self>
+pub fn symtn_network::ContractionPlan::output_labels(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::ContractionPlan::steps(&self) -> &[symtn_network::ContractionStep]
+pub fn symtn_network::ContractionPlan::tensor_count(&self) -> usize
+pub fn symtn_network::ContractionPlan::to_text(&self) -> alloc::string::String
+pub fn symtn_network::ContractionPlan::total_cost(&self) -> usize
+pub fn symtn_network::ContractionPlan::tree(&self) -> symtn_network::Result<symtn_network::ContractionTree>
+pub fn symtn_network::ContractionPlan::validate_step_result_labels(&self, &[alloc::vec::Vec<symtn_network::TemporaryLabel>]) -> symtn_network::Result<()>
+impl core::clone::Clone for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::clone(&self) -> symtn_network::ContractionPlan
+impl core::cmp::Eq for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::eq(&self, &symtn_network::ContractionPlan) -> bool
+impl core::fmt::Debug for symtn_network::ContractionPlan
+pub fn symtn_network::ContractionPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::ContractionPlan
+pub struct symtn_network::ContractionStep
+impl symtn_network::ContractionStep
+pub fn symtn_network::ContractionStep::cost(&self) -> usize
+pub fn symtn_network::ContractionStep::lhs(&self) -> symtn_network::TensorId
+pub fn symtn_network::ContractionStep::new(symtn_network::TensorId, symtn_network::TensorId, symtn_network::TensorId, usize, alloc::vec::Vec<symtn_network::TemporaryLabel>) -> Self
+pub fn symtn_network::ContractionStep::result(&self) -> symtn_network::TensorId
+pub fn symtn_network::ContractionStep::result_labels(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::ContractionStep::rhs(&self) -> symtn_network::TensorId
+impl core::clone::Clone for symtn_network::ContractionStep
+pub fn symtn_network::ContractionStep::clone(&self) -> symtn_network::ContractionStep
+impl core::cmp::Eq for symtn_network::ContractionStep
+pub fn symtn_network::ContractionStep::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::ContractionStep
+pub fn symtn_network::ContractionStep::eq(&self, &symtn_network::ContractionStep) -> bool
+impl core::fmt::Debug for symtn_network::ContractionStep
+pub fn symtn_network::ContractionStep::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::ContractionStep
+pub struct symtn_network::CotengraPythonConfig
+pub symtn_network::CotengraPythonConfig::max_repeats: usize
+pub symtn_network::CotengraPythonConfig::method: symtn_network::CotengraPythonMethod
+pub symtn_network::CotengraPythonConfig::minimize: symtn_network::CotengraMinimize
+pub symtn_network::CotengraPythonConfig::parallel: bool
+pub symtn_network::CotengraPythonConfig::python: alloc::string::String
+pub symtn_network::CotengraPythonConfig::python_args: alloc::vec::Vec<alloc::string::String>
+pub symtn_network::CotengraPythonConfig::seed: core::option::Option<u64>
+pub symtn_network::CotengraPythonConfig::slicing: symtn_network::CotengraSlicingConfig
+pub symtn_network::CotengraPythonConfig::timeout: core::option::Option<core::time::Duration>
+impl symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::python(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn symtn_network::CotengraPythonConfig::timeout(self, core::time::Duration) -> Self
+pub fn symtn_network::CotengraPythonConfig::uv_project(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn symtn_network::CotengraPythonConfig::with_uv_project(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn symtn_network::CotengraPythonConfig::without_timeout(self) -> Self
+impl core::clone::Clone for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::clone(&self) -> symtn_network::CotengraPythonConfig
+impl core::cmp::Eq for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::eq(&self, &symtn_network::CotengraPythonConfig) -> bool
+impl core::default::Default for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::default() -> Self
+impl core::fmt::Debug for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonConfig::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::CotengraPythonConfig
+pub struct symtn_network::CotengraPythonOptimizer
+impl symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::config(&self) -> &symtn_network::CotengraPythonConfig
+pub fn symtn_network::CotengraPythonOptimizer::new(symtn_network::CotengraPythonConfig) -> Self
+pub fn symtn_network::CotengraPythonOptimizer::optimize_sliced(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<symtn_network::SlicedPlan>
+impl core::clone::Clone for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::clone(&self) -> symtn_network::CotengraPythonOptimizer
+impl core::cmp::Eq for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::eq(&self, &symtn_network::CotengraPythonOptimizer) -> bool
+impl core::default::Default for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::default() -> Self
+impl core::fmt::Debug for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::CotengraPythonOptimizer
+impl symtn_network::DenseContractionOptimizer for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub struct symtn_network::DegeneracyRange
+impl symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::end(self) -> usize
+pub fn symtn_network::DegeneracyRange::new(usize, usize) -> symtn_network::SliceResult<Self>
+pub fn symtn_network::DegeneracyRange::start(self) -> usize
+impl core::clone::Clone for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::clone(&self) -> symtn_network::DegeneracyRange
+impl core::clone::TrivialClone for symtn_network::DegeneracyRange
+impl core::cmp::Eq for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::cmp(&self, &symtn_network::DegeneracyRange) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::eq(&self, &symtn_network::DegeneracyRange) -> bool
+impl core::cmp::PartialOrd for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::partial_cmp(&self, &symtn_network::DegeneracyRange) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::DegeneracyRange
+pub fn symtn_network::DegeneracyRange::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_network::DegeneracyRange
+impl core::marker::StructuralPartialEq for symtn_network::DegeneracyRange
+pub struct symtn_network::DenseCostModel
+impl symtn_network::DenseCostModel
+pub fn symtn_network::DenseCostModel::dim(&self, &symtn_network::TemporaryLabel) -> core::option::Option<usize>
+pub fn symtn_network::DenseCostModel::edge_dim(&self, &symtn_network::HyperEdge) -> usize
+pub fn symtn_network::DenseCostModel::from_network(&symtn_network::NetworkIR, &[symtn_network::DenseTensorInfo]) -> symtn_network::Result<Self>
+pub fn symtn_network::DenseCostModel::pair_cost(&self, &[symtn_network::TemporaryLabel], &[symtn_network::TemporaryLabel]) -> usize
+pub fn symtn_network::DenseCostModel::tensor_size(&self, &[symtn_network::TemporaryLabel]) -> usize
+pub fn symtn_network::DenseCostModel::with_unit_dims(&self, &[symtn_network::TemporaryLabel]) -> symtn_network::DenseCostModel
+impl core::clone::Clone for symtn_network::DenseCostModel
+pub fn symtn_network::DenseCostModel::clone(&self) -> symtn_network::DenseCostModel
+impl core::cmp::Eq for symtn_network::DenseCostModel
+pub fn symtn_network::DenseCostModel::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::DenseCostModel
+pub fn symtn_network::DenseCostModel::eq(&self, &symtn_network::DenseCostModel) -> bool
+impl core::fmt::Debug for symtn_network::DenseCostModel
+pub fn symtn_network::DenseCostModel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::DenseCostModel
+pub struct symtn_network::DensePlanCostReport
+impl symtn_network::DensePlanCostReport
+pub fn symtn_network::DensePlanCostReport::greedy_cost(&self) -> usize
+pub fn symtn_network::DensePlanCostReport::is_suboptimal(&self) -> bool
+pub fn symtn_network::DensePlanCostReport::new(usize, usize) -> Self
+pub fn symtn_network::DensePlanCostReport::plan_cost(&self) -> usize
+impl core::clone::Clone for symtn_network::DensePlanCostReport
+pub fn symtn_network::DensePlanCostReport::clone(&self) -> symtn_network::DensePlanCostReport
+impl core::cmp::Eq for symtn_network::DensePlanCostReport
+pub fn symtn_network::DensePlanCostReport::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::DensePlanCostReport
+pub fn symtn_network::DensePlanCostReport::eq(&self, &symtn_network::DensePlanCostReport) -> bool
+impl core::fmt::Debug for symtn_network::DensePlanCostReport
+pub fn symtn_network::DensePlanCostReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::DensePlanCostReport
+pub struct symtn_network::DenseTensorInfo
+impl symtn_network::DenseTensorInfo
+pub fn symtn_network::DenseTensorInfo::new(alloc::vec::Vec<usize>) -> Self
+pub fn symtn_network::DenseTensorInfo::shape(&self) -> &[usize]
+impl core::clone::Clone for symtn_network::DenseTensorInfo
+pub fn symtn_network::DenseTensorInfo::clone(&self) -> symtn_network::DenseTensorInfo
+impl core::cmp::Eq for symtn_network::DenseTensorInfo
+pub fn symtn_network::DenseTensorInfo::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::DenseTensorInfo
+pub fn symtn_network::DenseTensorInfo::eq(&self, &symtn_network::DenseTensorInfo) -> bool
+impl core::fmt::Debug for symtn_network::DenseTensorInfo
+pub fn symtn_network::DenseTensorInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::DenseTensorInfo
+pub struct symtn_network::GreedyDenseOptimizer
+impl core::clone::Clone for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::clone(&self) -> symtn_network::GreedyDenseOptimizer
+impl core::clone::TrivialClone for symtn_network::GreedyDenseOptimizer
+impl core::cmp::Eq for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::eq(&self, &symtn_network::GreedyDenseOptimizer) -> bool
+impl core::default::Default for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::default() -> symtn_network::GreedyDenseOptimizer
+impl core::fmt::Debug for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::GreedyDenseOptimizer
+impl core::marker::StructuralPartialEq for symtn_network::GreedyDenseOptimizer
+impl symtn_network::DenseContractionOptimizer for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub struct symtn_network::HyperEdge
+impl symtn_network::HyperEdge
+pub fn symtn_network::HyperEdge::is_output(&self) -> bool
+pub fn symtn_network::HyperEdge::label(&self) -> &symtn_network::TemporaryLabel
+pub fn symtn_network::HyperEdge::new(symtn_network::TemporaryLabel, alloc::vec::Vec<symtn_network::TensorAxis>, core::option::Option<usize>) -> Self
+pub fn symtn_network::HyperEdge::occurrences(&self) -> &[symtn_network::TensorAxis]
+pub fn symtn_network::HyperEdge::output_position(&self) -> core::option::Option<usize>
+impl core::clone::Clone for symtn_network::HyperEdge
+pub fn symtn_network::HyperEdge::clone(&self) -> symtn_network::HyperEdge
+impl core::cmp::Eq for symtn_network::HyperEdge
+pub fn symtn_network::HyperEdge::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::HyperEdge
+pub fn symtn_network::HyperEdge::eq(&self, &symtn_network::HyperEdge) -> bool
+impl core::fmt::Debug for symtn_network::HyperEdge
+pub fn symtn_network::HyperEdge::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::HyperEdge
+pub struct symtn_network::LabelOccurrence
+impl symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::axis(&self) -> symtn_network::TensorAxis
+pub fn symtn_network::LabelOccurrence::label(&self) -> &symtn_network::TemporaryLabel
+pub fn symtn_network::LabelOccurrence::new(symtn_network::TemporaryLabel, symtn_network::TensorAxis) -> Self
+impl core::clone::Clone for symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::clone(&self) -> symtn_network::LabelOccurrence
+impl core::cmp::Eq for symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::eq(&self, &symtn_network::LabelOccurrence) -> bool
+impl core::fmt::Debug for symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::LabelOccurrence
+pub fn symtn_network::LabelOccurrence::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::LabelOccurrence
+pub struct symtn_network::LabelOrderDenseOptimizer
+impl symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::new(alloc::vec::Vec<symtn_network::TemporaryLabel>) -> Self
+pub fn symtn_network::LabelOrderDenseOptimizer::order(&self) -> &[symtn_network::TemporaryLabel]
+impl core::clone::Clone for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::clone(&self) -> symtn_network::LabelOrderDenseOptimizer
+impl core::cmp::Eq for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::eq(&self, &symtn_network::LabelOrderDenseOptimizer) -> bool
+impl core::fmt::Debug for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::LabelOrderDenseOptimizer
+impl symtn_network::DenseContractionOptimizer for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub struct symtn_network::Network
+impl symtn_network::Network
+pub fn symtn_network::Network::contract<T: symtn_network::NetworkOperand>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&T]) -> core::result::Result<T, <T as symtn_network::NetworkOperand>::Error>
+impl symtn_network::Network
+pub fn symtn_network::Network::execute_symmetric_sliced<R, D>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&symtn::typed::tensor_repr::TensorMap<R, D>], symtn_network::SymmetricSlicedPlan, usize) -> core::result::Result<(symtn::typed::tensor_repr::TensorMap<R, D>, symtn_network::SymmetricSliceStats), symtn_network::SymmetricSliceExecutionError<symtn::typed::dispatch::FacadeError<R>>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar
+pub fn symtn_network::Network::lower_symmetric_sliced_plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], symtn_network::SlicedPlan) -> core::result::Result<symtn_network::SymmetricSlicedPlan, symtn_network::SymmetricSliceLowerError<symtn::typed::dispatch::FacadeError<R>>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
+pub fn symtn_network::Network::new<I, L>(I, impl core::iter::traits::collect::IntoIterator<Item = bool>, impl core::iter::traits::collect::IntoIterator<Item = usize>, impl core::iter::traits::collect::IntoIterator<Item = L>, core::option::Option<usize>) -> core::result::Result<Self, symtn_network::ContractError> where I: core::iter::traits::collect::IntoIterator, <I as core::iter::traits::collect::IntoIterator>::Item: core::iter::traits::collect::IntoIterator<Item = L>, L: core::convert::Into<symtn_network::TemporaryLabel>
+pub fn symtn_network::Network::plan<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], &impl symtn_network::DenseContractionOptimizer + ?core::marker::Sized) -> core::result::Result<symtn_network::PlannedNetwork, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
+pub fn symtn_network::Network::plan_with<R, D, S>(&self, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], symtn_network::ContractionPlan) -> core::result::Result<symtn_network::PlannedNetwork, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D>, D: symtn::typed::scalar::TensorScalar, S: symtn_core::storage::TensorStorage<D>
+pub struct symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
+impl<R, D, S> core::default::Default for symtn_network::NetworkExecutionWorkspace<R, D, S> where S: symtn::typed::tensor_repr::NetworkPayloadStorage<D>
+pub fn symtn_network::NetworkExecutionWorkspace<R, D, S>::default() -> Self
+pub struct symtn_network::NetworkIR
+impl symtn_network::NetworkIR
+pub fn symtn_network::NetworkIR::edge(&self, &symtn_network::TemporaryLabel) -> core::option::Option<&symtn_network::HyperEdge>
+pub fn symtn_network::NetworkIR::edges(&self) -> &[symtn_network::HyperEdge]
+pub fn symtn_network::NetworkIR::from_labels(alloc::vec::Vec<alloc::vec::Vec<symtn_network::TemporaryLabel>>, alloc::vec::Vec<symtn_network::TemporaryLabel>) -> symtn_network::Result<Self>
+pub fn symtn_network::NetworkIR::labels_for_tensor(&self, symtn_network::TensorId) -> symtn_network::Result<&[symtn_network::TemporaryLabel]>
+pub fn symtn_network::NetworkIR::output_labels(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::NetworkIR::output_rank(&self) -> usize
+pub fn symtn_network::NetworkIR::tensor(&self, symtn_network::TensorId) -> symtn_network::Result<&symtn_network::TensorNode>
+pub fn symtn_network::NetworkIR::tensors(&self) -> &[symtn_network::TensorNode]
+impl core::clone::Clone for symtn_network::NetworkIR
+pub fn symtn_network::NetworkIR::clone(&self) -> symtn_network::NetworkIR
+impl core::cmp::Eq for symtn_network::NetworkIR
+pub fn symtn_network::NetworkIR::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::NetworkIR
+pub fn symtn_network::NetworkIR::eq(&self, &symtn_network::NetworkIR) -> bool
+impl core::fmt::Debug for symtn_network::NetworkIR
+pub fn symtn_network::NetworkIR::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::NetworkIR
+pub struct symtn_network::OptEinsumPathOptimizer
+impl symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::memory_limit(&self) -> symtn_network::PathMemoryLimit
+pub fn symtn_network::OptEinsumPathOptimizer::new(symtn_network::PathStrategy) -> Self
+pub fn symtn_network::OptEinsumPathOptimizer::strategy(&self) -> symtn_network::PathStrategy
+pub fn symtn_network::OptEinsumPathOptimizer::with_memory_limit(self, symtn_network::PathMemoryLimit) -> Self
+impl core::clone::Clone for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::clone(&self) -> symtn_network::OptEinsumPathOptimizer
+impl core::clone::TrivialClone for symtn_network::OptEinsumPathOptimizer
+impl core::cmp::Eq for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::eq(&self, &symtn_network::OptEinsumPathOptimizer) -> bool
+impl core::default::Default for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::default() -> symtn_network::OptEinsumPathOptimizer
+impl core::fmt::Debug for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::OptEinsumPathOptimizer
+impl core::marker::StructuralPartialEq for symtn_network::OptEinsumPathOptimizer
+impl symtn_network::DenseContractionOptimizer for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub struct symtn_network::PlanCacheConfig
+pub symtn_network::PlanCacheConfig::capacity: usize
+pub symtn_network::PlanCacheConfig::enabled: bool
+pub symtn_network::PlanCacheConfig::optimizer: symtn_network::Optimizer
+pub symtn_network::PlanCacheConfig::replan: symtn_network::ReplanPolicy
+pub symtn_network::PlanCacheConfig::workspace_budget_bytes: usize
+impl core::clone::Clone for symtn_network::PlanCacheConfig
+pub fn symtn_network::PlanCacheConfig::clone(&self) -> symtn_network::PlanCacheConfig
+impl core::default::Default for symtn_network::PlanCacheConfig
+pub fn symtn_network::PlanCacheConfig::default() -> Self
+impl core::fmt::Debug for symtn_network::PlanCacheConfig
+pub fn symtn_network::PlanCacheConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct symtn_network::PlanCacheStats
+pub symtn_network::PlanCacheStats::entries: usize
+pub symtn_network::PlanCacheStats::hits: u64
+pub symtn_network::PlanCacheStats::idle_workspaces: usize
+pub symtn_network::PlanCacheStats::misses: u64
+pub symtn_network::PlanCacheStats::peak_retained_workspace_bytes: usize
+pub symtn_network::PlanCacheStats::persisted_orders: usize
+pub symtn_network::PlanCacheStats::replans: u64
+pub symtn_network::PlanCacheStats::retained_workspace_bytes: usize
+pub symtn_network::PlanCacheStats::topology_materializations: u64
+pub symtn_network::PlanCacheStats::workspace_byte_admissions: u64
+pub symtn_network::PlanCacheStats::workspace_byte_evictions: u64
+pub symtn_network::PlanCacheStats::workspace_byte_rejections: u64
+pub symtn_network::PlanCacheStats::workspace_reuses: u64
+pub symtn_network::PlanCacheStats::workspace_slot_grows: u64
+pub symtn_network::PlanCacheStats::workspaces_created: u64
+impl core::clone::Clone for symtn_network::PlanCacheStats
+pub fn symtn_network::PlanCacheStats::clone(&self) -> symtn_network::PlanCacheStats
+impl core::clone::TrivialClone for symtn_network::PlanCacheStats
+impl core::cmp::Eq for symtn_network::PlanCacheStats
+pub fn symtn_network::PlanCacheStats::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::PlanCacheStats
+pub fn symtn_network::PlanCacheStats::eq(&self, &symtn_network::PlanCacheStats) -> bool
+impl core::default::Default for symtn_network::PlanCacheStats
+pub fn symtn_network::PlanCacheStats::default() -> symtn_network::PlanCacheStats
+impl core::fmt::Debug for symtn_network::PlanCacheStats
+pub fn symtn_network::PlanCacheStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::PlanCacheStats
+impl core::marker::StructuralPartialEq for symtn_network::PlanCacheStats
+pub struct symtn_network::PlannedNetwork
+impl symtn_network::PlannedNetwork
+pub fn symtn_network::PlannedNetwork::execute<R, D, S>(&self, &mut impl symtn::typed::exec_context::ExecContext + ?core::marker::Sized, &[&symtn::typed::tensor_repr::TensorMap<R, D, S>], &mut symtn_network::NetworkExecutionWorkspace<R, D, S>) -> core::result::Result<symtn::typed::tensor_repr::TensorMap<R, D, S>, symtn::typed::dispatch::FacadeError<R>> where R: symtn_sectors::algebra::TypedSectorAdmission, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D, S>, D: symtn::typed::scalar::TensorScalar, S: symtn_network::network::eager::NetworkOperandStorage<R, D>
+impl symtn_network::PlannedNetwork
+pub fn symtn_network::PlannedNetwork::plan(&self) -> &symtn_network::ContractionPlan
+pub struct symtn_network::SectorSlice
+impl symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::new(symtn_sectors::SectorId, symtn_network::DegeneracyRange) -> Self
+pub fn symtn_network::SectorSlice::range(&self) -> symtn_network::DegeneracyRange
+pub fn symtn_network::SectorSlice::sector(&self) -> symtn_sectors::SectorId
+impl core::clone::Clone for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::clone(&self) -> symtn_network::SectorSlice
+impl core::cmp::Eq for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::cmp(&self, &symtn_network::SectorSlice) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::eq(&self, &symtn_network::SectorSlice) -> bool
+impl core::cmp::PartialOrd for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::partial_cmp(&self, &symtn_network::SectorSlice) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::SectorSlice
+pub fn symtn_network::SectorSlice::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::SectorSlice
+pub struct symtn_network::SlicePlan
+impl symtn_network::SlicePlan
+pub fn symtn_network::SlicePlan::from_text(&str) -> symtn_network::Result<Self>
+pub fn symtn_network::SlicePlan::has_output_slices(&self) -> bool
+pub fn symtn_network::SlicePlan::is_empty(&self) -> bool
+pub fn symtn_network::SlicePlan::nslices(&self) -> u128
+pub fn symtn_network::SlicePlan::per_slice_flops(&self) -> f64
+pub fn symtn_network::SlicePlan::sliced_indices(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::SlicePlan::sliced_kinds(&self) -> &[symtn_network::SliceKind]
+pub fn symtn_network::SlicePlan::sliced_width(&self) -> usize
+pub fn symtn_network::SlicePlan::sliced_with_kinds(&self) -> impl core::iter::traits::iterator::Iterator<Item = (&symtn_network::TemporaryLabel, symtn_network::SliceKind)>
+pub fn symtn_network::SlicePlan::to_text(&self) -> alloc::string::String
+pub fn symtn_network::SlicePlan::total_flops(&self) -> f64
+pub fn symtn_network::SlicePlan::unsliced_width(&self) -> usize
+impl core::clone::Clone for symtn_network::SlicePlan
+pub fn symtn_network::SlicePlan::clone(&self) -> symtn_network::SlicePlan
+impl core::cmp::PartialEq for symtn_network::SlicePlan
+pub fn symtn_network::SlicePlan::eq(&self, &symtn_network::SlicePlan) -> bool
+impl core::fmt::Debug for symtn_network::SlicePlan
+pub fn symtn_network::SlicePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::SlicePlan
+pub struct symtn_network::SlicedPlan
+impl symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::from_text(&str) -> symtn_network::Result<Self>
+pub fn symtn_network::SlicedPlan::new(symtn_network::ContractionPlan, symtn_network::SlicePlan) -> Self
+pub fn symtn_network::SlicedPlan::plan(&self) -> &symtn_network::ContractionPlan
+pub fn symtn_network::SlicedPlan::slice(&self) -> &symtn_network::SlicePlan
+pub fn symtn_network::SlicedPlan::to_text(&self) -> alloc::string::String
+impl core::clone::Clone for symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::clone(&self) -> symtn_network::SlicedPlan
+impl core::cmp::PartialEq for symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::eq(&self, &symtn_network::SlicedPlan) -> bool
+impl core::fmt::Debug for symtn_network::SlicedPlan
+pub fn symtn_network::SlicedPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::SlicedPlan
+pub struct symtn_network::SymmetricIndexSlice
+impl symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::authority(&self) -> symtn_network::TensorAxis
+pub fn symtn_network::SymmetricIndexSlice::authority_leg(&self) -> &symtn_core::sector::SectorLeg
+pub fn symtn_network::SymmetricIndexSlice::kind(&self) -> symtn_network::SliceKind
+pub fn symtn_network::SymmetricIndexSlice::label(&self) -> &symtn_network::TemporaryLabel
+pub fn symtn_network::SymmetricIndexSlice::output_position(&self) -> core::option::Option<usize>
+pub fn symtn_network::SymmetricIndexSlice::pieces(&self) -> &[symtn_network::SectorSlice]
+impl core::clone::Clone for symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::clone(&self) -> symtn_network::SymmetricIndexSlice
+impl core::cmp::Eq for symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::eq(&self, &symtn_network::SymmetricIndexSlice) -> bool
+impl core::fmt::Debug for symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::SymmetricIndexSlice
+pub fn symtn_network::SymmetricIndexSlice::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::SymmetricIndexSlice
+pub struct symtn_network::SymmetricSlicePlan
+impl symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::combination(&self, u128) -> core::option::Option<alloc::vec::Vec<&symtn_network::SectorSlice>>
+pub fn symtn_network::SymmetricSlicePlan::combinations(&self) -> impl core::iter::traits::iterator::Iterator<Item = alloc::vec::Vec<&symtn_network::SectorSlice>>
+pub fn symtn_network::SymmetricSlicePlan::indices(&self) -> &[symtn_network::SymmetricIndexSlice]
+pub fn symtn_network::SymmetricSlicePlan::is_empty(&self) -> bool
+pub fn symtn_network::SymmetricSlicePlan::nslices(&self) -> u128
+pub fn symtn_network::SymmetricSlicePlan::rule_identity(&self) -> &symtn_sectors::rule_identity::RuleIdentity
+pub fn symtn_network::SymmetricSlicePlan::try_new(&symtn_network::NetworkIR, symtn_sectors::rule_identity::RuleIdentity, alloc::vec::Vec<symtn_network::SymmetricSliceSpec>) -> symtn_network::SliceResult<Self>
+impl core::clone::Clone for symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::clone(&self) -> symtn_network::SymmetricSlicePlan
+impl core::cmp::Eq for symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::eq(&self, &symtn_network::SymmetricSlicePlan) -> bool
+impl core::fmt::Debug for symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::SymmetricSlicePlan
+pub fn symtn_network::SymmetricSlicePlan::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::SymmetricSlicePlan
+pub struct symtn_network::SymmetricSliceSpec
+impl symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::new(symtn_network::TemporaryLabel, symtn_network::TensorAxis, symtn_core::sector::SectorLeg, alloc::vec::Vec<symtn_network::SectorSlice>) -> Self
+impl core::clone::Clone for symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::clone(&self) -> symtn_network::SymmetricSliceSpec
+impl core::cmp::Eq for symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::eq(&self, &symtn_network::SymmetricSliceSpec) -> bool
+impl core::fmt::Debug for symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::SymmetricSliceSpec
+pub fn symtn_network::SymmetricSliceSpec::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::SymmetricSliceSpec
+pub struct symtn_network::SymmetricSliceStats
+impl symtn_network::SymmetricSliceStats
+pub fn symtn_network::SymmetricSliceStats::destination_bytes(self) -> usize
+pub fn symtn_network::SymmetricSliceStats::peak_total_bytes(self) -> usize
+pub fn symtn_network::SymmetricSliceStats::peak_workspace_bytes(self) -> usize
+impl core::clone::Clone for symtn_network::SymmetricSliceStats
+pub fn symtn_network::SymmetricSliceStats::clone(&self) -> symtn_network::SymmetricSliceStats
+impl core::clone::TrivialClone for symtn_network::SymmetricSliceStats
+impl core::cmp::Eq for symtn_network::SymmetricSliceStats
+pub fn symtn_network::SymmetricSliceStats::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SymmetricSliceStats
+pub fn symtn_network::SymmetricSliceStats::eq(&self, &symtn_network::SymmetricSliceStats) -> bool
+impl core::fmt::Debug for symtn_network::SymmetricSliceStats
+pub fn symtn_network::SymmetricSliceStats::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for symtn_network::SymmetricSliceStats
+impl core::marker::StructuralPartialEq for symtn_network::SymmetricSliceStats
+pub struct symtn_network::SymmetricSlicedPlan
+impl symtn_network::SymmetricSlicedPlan
+pub fn symtn_network::SymmetricSlicedPlan::new(symtn_network::ContractionPlan, symtn_network::SymmetricSlicePlan) -> Self
+pub fn symtn_network::SymmetricSlicedPlan::plan(&self) -> &symtn_network::ContractionPlan
+pub fn symtn_network::SymmetricSlicedPlan::slices(&self) -> &symtn_network::SymmetricSlicePlan
+impl core::clone::Clone for symtn_network::SymmetricSlicedPlan
+pub fn symtn_network::SymmetricSlicedPlan::clone(&self) -> symtn_network::SymmetricSlicedPlan
+impl core::cmp::Eq for symtn_network::SymmetricSlicedPlan
+pub fn symtn_network::SymmetricSlicedPlan::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::SymmetricSlicedPlan
+pub fn symtn_network::SymmetricSlicedPlan::eq(&self, &symtn_network::SymmetricSlicedPlan) -> bool
+impl core::fmt::Debug for symtn_network::SymmetricSlicedPlan
+pub fn symtn_network::SymmetricSlicedPlan::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::SymmetricSlicedPlan
+pub struct symtn_network::TemporaryLabel(_)
+impl symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::as_str(&self) -> &str
+pub fn symtn_network::TemporaryLabel::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::clone(&self) -> symtn_network::TemporaryLabel
+impl core::cmp::Eq for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::cmp(&self, &symtn_network::TemporaryLabel) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::eq(&self, &symtn_network::TemporaryLabel) -> bool
+impl core::cmp::PartialOrd for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::partial_cmp(&self, &symtn_network::TemporaryLabel) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::From<&str> for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::from(&str) -> Self
+impl core::convert::From<char> for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::from(char) -> Self
+impl core::fmt::Debug for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::TemporaryLabel
+pub fn symtn_network::TemporaryLabel::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for symtn_network::TemporaryLabel
+pub struct symtn_network::TensorAxis
+impl symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::axis(self) -> usize
+pub fn symtn_network::TensorAxis::new(symtn_network::TensorId, usize) -> Self
+pub fn symtn_network::TensorAxis::tensor(self) -> symtn_network::TensorId
+impl core::clone::Clone for symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::clone(&self) -> symtn_network::TensorAxis
+impl core::clone::TrivialClone for symtn_network::TensorAxis
+impl core::cmp::Eq for symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::eq(&self, &symtn_network::TensorAxis) -> bool
+impl core::fmt::Debug for symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::TensorAxis
+pub fn symtn_network::TensorAxis::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_network::TensorAxis
+impl core::marker::StructuralPartialEq for symtn_network::TensorAxis
+pub struct symtn_network::TensorId(_)
+impl symtn_network::TensorId
+pub fn symtn_network::TensorId::index(self) -> usize
+pub fn symtn_network::TensorId::new(usize) -> Self
+impl core::clone::Clone for symtn_network::TensorId
+pub fn symtn_network::TensorId::clone(&self) -> symtn_network::TensorId
+impl core::clone::TrivialClone for symtn_network::TensorId
+impl core::cmp::Eq for symtn_network::TensorId
+pub fn symtn_network::TensorId::assert_fields_are_eq(&self)
+impl core::cmp::Ord for symtn_network::TensorId
+pub fn symtn_network::TensorId::cmp(&self, &symtn_network::TensorId) -> core::cmp::Ordering
+impl core::cmp::PartialEq for symtn_network::TensorId
+pub fn symtn_network::TensorId::eq(&self, &symtn_network::TensorId) -> bool
+impl core::cmp::PartialOrd for symtn_network::TensorId
+pub fn symtn_network::TensorId::partial_cmp(&self, &symtn_network::TensorId) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for symtn_network::TensorId
+pub fn symtn_network::TensorId::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for symtn_network::TensorId
+pub fn symtn_network::TensorId::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for symtn_network::TensorId
+impl core::marker::StructuralPartialEq for symtn_network::TensorId
+pub struct symtn_network::TensorNode
+impl symtn_network::TensorNode
+pub fn symtn_network::TensorNode::id(&self) -> symtn_network::TensorId
+pub fn symtn_network::TensorNode::labels(&self) -> &[symtn_network::TemporaryLabel]
+pub fn symtn_network::TensorNode::new(symtn_network::TensorId, alloc::vec::Vec<symtn_network::TemporaryLabel>) -> Self
+pub fn symtn_network::TensorNode::rank(&self) -> usize
+impl core::clone::Clone for symtn_network::TensorNode
+pub fn symtn_network::TensorNode::clone(&self) -> symtn_network::TensorNode
+impl core::cmp::Eq for symtn_network::TensorNode
+pub fn symtn_network::TensorNode::assert_fields_are_eq(&self)
+impl core::cmp::PartialEq for symtn_network::TensorNode
+pub fn symtn_network::TensorNode::eq(&self, &symtn_network::TensorNode) -> bool
+impl core::fmt::Debug for symtn_network::TensorNode
+pub fn symtn_network::TensorNode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for symtn_network::TensorNode
+pub const symtn_network::DEFAULT_PLAN_CACHE_CAPACITY: usize
+pub const symtn_network::DEFAULT_REPLAN_DRIFT_FACTOR: f64
+pub const symtn_network::DEFAULT_WORKSPACE_BUDGET_BYTES: usize
+pub trait symtn_network::DenseContractionOptimizer
+pub fn symtn_network::DenseContractionOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+impl symtn_network::DenseContractionOptimizer for symtn_network::CotengraPythonOptimizer
+pub fn symtn_network::CotengraPythonOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+impl symtn_network::DenseContractionOptimizer for symtn_network::GreedyDenseOptimizer
+pub fn symtn_network::GreedyDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+impl symtn_network::DenseContractionOptimizer for symtn_network::LabelOrderDenseOptimizer
+pub fn symtn_network::LabelOrderDenseOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+impl symtn_network::DenseContractionOptimizer for symtn_network::OptEinsumPathOptimizer
+pub fn symtn_network::OptEinsumPathOptimizer::optimize(&self, &symtn_network::NetworkIR, &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub trait symtn_network::NetworkOperand: symtn_network::network::eager::network_operand_sealed::Sealed + core::marker::Sized
+pub type symtn_network::NetworkOperand::Error
+pub fn symtn_network::NetworkOperand::__contract_operand(&self) -> &Self
+pub fn symtn_network::NetworkOperand::contract_network(&mut dyn tenferro_tensor::backend::Engine, &symtn_network::Network, &[&Self]) -> core::result::Result<Self, Self::Error>
+impl<R, D, S> symtn_network::NetworkOperand for symtn::typed::tensor_repr::TensorMap<R, D, S> where R: symtn_sectors::algebra::TypedSectorAdmission + core::marker::Send + core::marker::Sync, <R as symtn_sectors::algebra::TypedSectorAdmission>::Mode: symtn_network::network::dispatch::NetworkModeDispatch<R, D> + symtn_network::network::dispatch::NetworkModeDispatch<R, D, S>, D: symtn::typed::scalar::TensorScalar + core::marker::Send + core::marker::Sync + 'static, S: symtn_network::network::eager::NetworkOperandStorage<R, D>
+pub type symtn::typed::tensor_repr::TensorMap<R, D, S>::Error = <<R as symtn_sectors::algebra::TypedSectorAdmission>::Mode as symtn::typed::dispatch::TypedTensorModeDispatch<R>>::FacadeError
+pub fn symtn::typed::tensor_repr::TensorMap<R, D, S>::__contract_operand(&self) -> &Self
+pub fn symtn::typed::tensor_repr::TensorMap<R, D, S>::contract_network(&mut dyn tenferro_tensor::backend::Engine, &symtn_network::Network, &[&Self]) -> core::result::Result<Self, Self::Error>
+pub fn symtn_network::active_pair_path_from_steps(usize, &[symtn_network::ContractionStep]) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
+pub fn symtn_network::active_pair_path_from_tree(usize, &symtn_network::ContractionTree) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ActivePair>>
+pub fn symtn_network::best_next_internal_index(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel) -> core::option::Option<symtn_network::TemporaryLabel>
+pub fn symtn_network::best_next_slice_index(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, bool) -> core::option::Option<symtn_network::TemporaryLabel>
+pub fn symtn_network::clear_plan_cache(&symtn::runtime::Runtime)
+pub fn symtn_network::configure_plan_cache(&symtn::runtime::Runtime, symtn_network::PlanCacheConfig)
+pub fn symtn_network::contraction_width(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel) -> usize
+pub fn symtn_network::dense_steps_from_active_pair_path(&symtn_network::NetworkIR, &[symtn_network::ActivePair], &symtn_network::DenseCostModel) -> symtn_network::Result<alloc::vec::Vec<symtn_network::ContractionStep>>
+pub fn symtn_network::greedy_slice(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, usize, symtn_network::SliceLabels) -> symtn_network::SlicePlan
+pub fn symtn_network::load_plan_cache(&symtn::runtime::Runtime, &str) -> usize
+pub fn symtn_network::plan_cache_config(&symtn::runtime::Runtime) -> symtn_network::PlanCacheConfig
+pub fn symtn_network::plan_cache_stats(&symtn::runtime::Runtime) -> symtn_network::PlanCacheStats
+pub fn symtn_network::save_plan_cache(&symtn::runtime::Runtime) -> alloc::string::String
+pub fn symtn_network::slice_plan_for(&symtn_network::NetworkIR, &symtn_network::ContractionPlan, &symtn_network::DenseCostModel, &[symtn_network::TemporaryLabel]) -> symtn_network::SlicePlan
+pub type symtn_network::Result<T> = core::result::Result<T, symtn_network::ContractError>
+pub type symtn_network::SliceResult<T> = core::result::Result<T, symtn_network::SliceError>
