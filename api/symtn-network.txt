@@ -92,7 +92,6 @@ pub symtn_network::Optimizer::Greedy
 impl core::clone::Clone for symtn_network::Optimizer
 pub fn symtn_network::Optimizer::clone(&self) -> symtn_network::Optimizer
 impl core::cmp::Eq for symtn_network::Optimizer
-pub fn symtn_network::Optimizer::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_network::Optimizer
 pub fn symtn_network::Optimizer::eq(&self, &symtn_network::Optimizer) -> bool
 impl core::default::Default for symtn_network::Optimizer
@@ -171,7 +170,6 @@ impl core::clone::Clone for symtn_network::SliceKind
 pub fn symtn_network::SliceKind::clone(&self) -> symtn_network::SliceKind
 impl core::clone::TrivialClone for symtn_network::SliceKind
 impl core::cmp::Eq for symtn_network::SliceKind
-pub fn symtn_network::SliceKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_network::SliceKind
 pub fn symtn_network::SliceKind::eq(&self, &symtn_network::SliceKind) -> bool
 impl core::fmt::Debug for symtn_network::SliceKind
@@ -187,7 +185,6 @@ impl core::clone::Clone for symtn_network::SliceLabels
 pub fn symtn_network::SliceLabels::clone(&self) -> symtn_network::SliceLabels
 impl core::clone::TrivialClone for symtn_network::SliceLabels
 impl core::cmp::Eq for symtn_network::SliceLabels
-pub fn symtn_network::SliceLabels::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_network::SliceLabels
 pub fn symtn_network::SliceLabels::eq(&self, &symtn_network::SliceLabels) -> bool
 impl core::fmt::Debug for symtn_network::SliceLabels

@@ -55,6 +55,6 @@ Commit the regenerated files in the same change as the code. A pull request
 that changes the public API without updating `api/` fails the `lint` job.
 
 The tool needs `cargo-public-api` 0.52.0 and the nightly pinned in the script
-(`nightly-2026-07-18`), for rustdoc JSON; CI installs both. If a nightly update
+(`nightly-2026-09-19`), for rustdoc JSON; CI installs both. If a nightly update
 changes the rendering without an API change, re-pin the script and CI together
 and regenerate.

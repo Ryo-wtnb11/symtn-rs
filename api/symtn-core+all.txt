@@ -165,7 +165,6 @@ impl core::clone::Clone for symtn_core::BlockKeyKind
 pub fn symtn_core::BlockKeyKind::clone(&self) -> symtn_core::BlockKeyKind
 impl core::clone::TrivialClone for symtn_core::BlockKeyKind
 impl core::cmp::Eq for symtn_core::BlockKeyKind
-pub fn symtn_core::BlockKeyKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_core::BlockKeyKind
 pub fn symtn_core::BlockKeyKind::eq(&self, &symtn_core::BlockKeyKind) -> bool
 impl core::fmt::Debug for symtn_core::BlockKeyKind
@@ -355,7 +354,6 @@ impl core::clone::Clone for symtn_core::FusionTreePairOrientation
 pub fn symtn_core::FusionTreePairOrientation::clone(&self) -> symtn_core::FusionTreePairOrientation
 impl core::clone::TrivialClone for symtn_core::FusionTreePairOrientation
 impl core::cmp::Eq for symtn_core::FusionTreePairOrientation
-pub fn symtn_core::FusionTreePairOrientation::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_core::FusionTreePairOrientation
 pub fn symtn_core::FusionTreePairOrientation::eq(&self, &symtn_core::FusionTreePairOrientation) -> bool
 impl core::fmt::Debug for symtn_core::FusionTreePairOrientation
@@ -425,7 +423,6 @@ impl core::clone::Clone for symtn_core::StructureCacheKind
 pub fn symtn_core::StructureCacheKind::clone(&self) -> symtn_core::StructureCacheKind
 impl core::clone::TrivialClone for symtn_core::StructureCacheKind
 impl core::cmp::Eq for symtn_core::StructureCacheKind
-pub fn symtn_core::StructureCacheKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_core::StructureCacheKind
 pub fn symtn_core::StructureCacheKind::eq(&self, &symtn_core::StructureCacheKind) -> bool
 impl core::fmt::Debug for symtn_core::StructureCacheKind
@@ -441,7 +438,6 @@ impl core::clone::Clone for symtn_core::StructureCacheRegistrationError
 pub fn symtn_core::StructureCacheRegistrationError::clone(&self) -> symtn_core::StructureCacheRegistrationError
 impl core::clone::TrivialClone for symtn_core::StructureCacheRegistrationError
 impl core::cmp::Eq for symtn_core::StructureCacheRegistrationError
-pub fn symtn_core::StructureCacheRegistrationError::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_core::StructureCacheRegistrationError
 pub fn symtn_core::StructureCacheRegistrationError::eq(&self, &symtn_core::StructureCacheRegistrationError) -> bool
 impl core::fmt::Debug for symtn_core::StructureCacheRegistrationError

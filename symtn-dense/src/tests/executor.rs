@@ -2490,8 +2490,8 @@ fn identity_beta_zero_overwrites_sentinel_on_both_paths() {
         assert_eq!(executor.seam_dispatches(), 1);
         for job in &fixture.jobs {
             let start = fixture.base.2 + job.dst_offset;
-            for index in start..start + job.rows * job.cols {
-                assert_ne!(fixture.output[index], sentinel);
+            for value in &fixture.output[start..start + job.rows * job.cols] {
+                assert_ne!(*value, sentinel);
             }
         }
         for (actual, expected) in fixture.output.iter().zip(&expected) {

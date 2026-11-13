@@ -13,7 +13,6 @@ impl core::clone::Clone for symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::BraidingStyleKind::clone(&self) -> symtn_sectors::BraidingStyleKind
 impl core::clone::TrivialClone for symtn_sectors::BraidingStyleKind
 impl core::cmp::Eq for symtn_sectors::BraidingStyleKind
-pub fn symtn_sectors::BraidingStyleKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::BraidingStyleKind::eq(&self, &symtn_sectors::BraidingStyleKind) -> bool
 impl core::fmt::Debug for symtn_sectors::BraidingStyleKind
@@ -79,7 +78,6 @@ impl core::clone::Clone for symtn_sectors::CategoryOperation
 pub fn symtn_sectors::CategoryOperation::clone(&self) -> symtn_sectors::CategoryOperation
 impl core::clone::TrivialClone for symtn_sectors::CategoryOperation
 impl core::cmp::Eq for symtn_sectors::CategoryOperation
-pub fn symtn_sectors::CategoryOperation::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_sectors::CategoryOperation
 pub fn symtn_sectors::CategoryOperation::eq(&self, &symtn_sectors::CategoryOperation) -> bool
 impl core::fmt::Debug for symtn_sectors::CategoryOperation
@@ -166,7 +164,6 @@ impl core::clone::Clone for symtn_sectors::FusionStyleKind
 pub fn symtn_sectors::FusionStyleKind::clone(&self) -> symtn_sectors::FusionStyleKind
 impl core::clone::TrivialClone for symtn_sectors::FusionStyleKind
 impl core::cmp::Eq for symtn_sectors::FusionStyleKind
-pub fn symtn_sectors::FusionStyleKind::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_sectors::FusionStyleKind
 pub fn symtn_sectors::FusionStyleKind::eq(&self, &symtn_sectors::FusionStyleKind) -> bool
 impl core::fmt::Debug for symtn_sectors::FusionStyleKind
@@ -252,7 +249,6 @@ impl core::clone::Clone for symtn_sectors::ProductSectorComponent
 pub fn symtn_sectors::ProductSectorComponent::clone(&self) -> symtn_sectors::ProductSectorComponent
 impl core::clone::TrivialClone for symtn_sectors::ProductSectorComponent
 impl core::cmp::Eq for symtn_sectors::ProductSectorComponent
-pub fn symtn_sectors::ProductSectorComponent::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_sectors::ProductSectorComponent
 pub fn symtn_sectors::ProductSectorComponent::eq(&self, &symtn_sectors::ProductSectorComponent) -> bool
 impl core::fmt::Debug for symtn_sectors::ProductSectorComponent
@@ -608,7 +604,7 @@ pub struct symtn_sectors::InfallibleGeneric<'a, R>(_)
 impl<'a, R> symtn_sectors::InfallibleGeneric<'a, R>
 pub fn symtn_sectors::InfallibleGeneric<'a, R>::new(&'a R) -> Self
 impl<R: symtn_sectors::FusionRule> symtn_sectors::CheckedGenericFusion for symtn_sectors::InfallibleGeneric<'_, R>
-pub type symtn_sectors::InfallibleGeneric<'_, R>::Error = core::convert::Infallible
+pub type symtn_sectors::InfallibleGeneric<'_, R>::Error = never
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::fusion_style(&self) -> symtn_sectors::FusionStyleKind
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::rule_identity(&self) -> symtn_sectors::RuleIdentity
@@ -848,7 +844,7 @@ pub fn symtn_sectors::SU2FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::S
 pub fn symtn_sectors::SU2FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::SU2FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::SU2FusionRule
-pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
+pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<never>
 pub type symtn_sectors::SU2FusionRule::Scalar = f64
 pub fn symtn_sectors::SU2FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::SU2FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
@@ -1157,7 +1153,7 @@ pub fn symtn_sectors::U1FusionRule::inv_sqrt_dim_scalar(&self, symtn_sectors::Se
 pub fn symtn_sectors::U1FusionRule::sqrt_dim_scalar(&self, symtn_sectors::SectorId) -> f64
 pub fn symtn_sectors::U1FusionRule::twist_scalar(&self, symtn_sectors::SectorId) -> f64
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::U1FusionRule
-pub type symtn_sectors::U1FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
+pub type symtn_sectors::U1FusionRule::Error = symtn_sectors::PhysicalBasisError<never>
 pub type symtn_sectors::U1FusionRule::Scalar = f64
 pub fn symtn_sectors::U1FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::U1FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
@@ -1663,7 +1659,7 @@ pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_fusion_channels_in_table(&
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::try_nsymbol(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::ProductFusionRule<L, R, P>::vacuum(&self) -> symtn_sectors::SectorId
 impl<R: symtn_sectors::FusionRule> symtn_sectors::CheckedGenericFusion for symtn_sectors::InfallibleGeneric<'_, R>
-pub type symtn_sectors::InfallibleGeneric<'_, R>::Error = core::convert::Infallible
+pub type symtn_sectors::InfallibleGeneric<'_, R>::Error = never
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::braiding_style(&self) -> symtn_sectors::BraidingStyleKind
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::fusion_style(&self) -> symtn_sectors::FusionStyleKind
 pub fn symtn_sectors::InfallibleGeneric<'_, R>::rule_identity(&self) -> symtn_sectors::RuleIdentity
@@ -1971,12 +1967,12 @@ pub type symtn_sectors::PhysicalFusionBasis::Scalar: symtn_sectors::CategoricalS
 pub fn symtn_sectors::PhysicalFusionBasis::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::PhysicalFusionBasis::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::SU2FusionRule
-pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
+pub type symtn_sectors::SU2FusionRule::Error = symtn_sectors::PhysicalBasisError<never>
 pub type symtn_sectors::SU2FusionRule::Scalar = f64
 pub fn symtn_sectors::SU2FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::SU2FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>
 impl symtn_sectors::PhysicalFusionBasis for symtn_sectors::U1FusionRule
-pub type symtn_sectors::U1FusionRule::Error = symtn_sectors::PhysicalBasisError<core::convert::Infallible>
+pub type symtn_sectors::U1FusionRule::Error = symtn_sectors::PhysicalBasisError<never>
 pub type symtn_sectors::U1FusionRule::Scalar = f64
 pub fn symtn_sectors::U1FusionRule::try_carrier_dimension(&self, symtn_sectors::SectorId) -> core::result::Result<usize, Self::Error>
 pub fn symtn_sectors::U1FusionRule::try_fusion_tensor_element(&self, symtn_sectors::SectorId, symtn_sectors::SectorId, symtn_sectors::SectorId, usize, usize, usize, usize) -> core::result::Result<Self::Scalar, Self::Error>

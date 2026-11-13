@@ -80,7 +80,6 @@ impl core::clone::Clone for symtn_dense::DenseBackend
 pub fn symtn_dense::DenseBackend::clone(&self) -> symtn_dense::DenseBackend
 impl core::clone::TrivialClone for symtn_dense::DenseBackend
 impl core::cmp::Eq for symtn_dense::DenseBackend
-pub fn symtn_dense::DenseBackend::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_dense::DenseBackend
 pub fn symtn_dense::DenseBackend::eq(&self, &symtn_dense::DenseBackend) -> bool
 impl core::fmt::Debug for symtn_dense::DenseBackend
@@ -99,7 +98,6 @@ impl core::clone::Clone for symtn_dense::DenseDType
 pub fn symtn_dense::DenseDType::clone(&self) -> symtn_dense::DenseDType
 impl core::clone::TrivialClone for symtn_dense::DenseDType
 impl core::cmp::Eq for symtn_dense::DenseDType
-pub fn symtn_dense::DenseDType::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_dense::DenseDType
 pub fn symtn_dense::DenseDType::eq(&self, &symtn_dense::DenseDType) -> bool
 impl core::fmt::Debug for symtn_dense::DenseDType
@@ -167,7 +165,6 @@ impl core::clone::Clone for symtn_dense::DenseFactorization
 pub fn symtn_dense::DenseFactorization::clone(&self) -> symtn_dense::DenseFactorization
 impl core::clone::TrivialClone for symtn_dense::DenseFactorization
 impl core::cmp::Eq for symtn_dense::DenseFactorization
-pub fn symtn_dense::DenseFactorization::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_dense::DenseFactorization
 pub fn symtn_dense::DenseFactorization::eq(&self, &symtn_dense::DenseFactorization) -> bool
 impl core::fmt::Debug for symtn_dense::DenseFactorization
@@ -264,7 +261,6 @@ impl core::clone::Clone for symtn_dense::FactorPlacement
 pub fn symtn_dense::FactorPlacement::clone(&self) -> symtn_dense::FactorPlacement
 impl core::clone::TrivialClone for symtn_dense::FactorPlacement
 impl core::cmp::Eq for symtn_dense::FactorPlacement
-pub fn symtn_dense::FactorPlacement::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_dense::FactorPlacement
 pub fn symtn_dense::FactorPlacement::eq(&self, &symtn_dense::FactorPlacement) -> bool
 impl core::default::Default for symtn_dense::FactorPlacement
@@ -283,7 +279,6 @@ impl core::clone::Clone for symtn_dense::MatrixOp
 pub fn symtn_dense::MatrixOp::clone(&self) -> symtn_dense::MatrixOp
 impl core::clone::TrivialClone for symtn_dense::MatrixOp
 impl core::cmp::Eq for symtn_dense::MatrixOp
-pub fn symtn_dense::MatrixOp::assert_fields_are_eq(&self)
 impl core::cmp::PartialEq for symtn_dense::MatrixOp
 pub fn symtn_dense::MatrixOp::eq(&self, &symtn_dense::MatrixOp) -> bool
 impl core::default::Default for symtn_dense::MatrixOp

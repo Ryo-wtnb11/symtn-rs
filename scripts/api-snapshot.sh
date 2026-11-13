@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-toolchain="${API_SNAPSHOT_TOOLCHAIN:-nightly-2026-07-18}"
+toolchain="${API_SNAPSHOT_TOOLCHAIN:-nightly-2026-09-19}"
 
 mode="${1:-}"
 case "$mode" in
