@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([], []),
@@ -43,7 +43,7 @@ fn coupled_layout_complex_scalar_contraction_matches_closed_form() {
 #[test]
 fn coupled_layout_compose_uses_direct_gemm_groups() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let degeneracy = 2usize;
     let leg = || {
         SectorLeg::new(

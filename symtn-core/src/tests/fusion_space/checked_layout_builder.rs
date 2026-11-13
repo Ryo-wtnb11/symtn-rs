@@ -28,11 +28,11 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
     for rank in 0..=6 {
         assert_checked_keys_match_encoded_oracle(&U1FusionRule, &singleton_rank_hom(u1(1), rank));
         assert_checked_keys_match_encoded_oracle(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             &singleton_rank_hom(z2_odd(), rank),
         );
         assert_checked_keys_match_encoded_oracle(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             &singleton_rank_hom(z2_odd(), rank),
         );
         assert_checked_keys_match_encoded_oracle(&SU2FusionRule, &singleton_rank_hom(su2(1), rank));
@@ -49,7 +49,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
 
     type U1Fz2Codec = PackedProductCodec<U1SectorLayout, Fz2SectorLayout>;
     type U1Fz2Rule = ProductFusionRule<U1FusionRule, FermionParityFusionRule, U1Fz2Codec>;
-    let pair_rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
+    let pair_rule = U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     let pair_sector = U1Fz2Codec::encode(u1(1), z2_odd());
 
     type Fz2U1Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
@@ -58,7 +58,7 @@ fn checked_builder_matches_encoded_oracle_for_builtin_ranks_and_products() {
     type Fz2U1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Fz2U1Codec>;
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
     let triple_rule = TripleRule::try_new(
-        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -220,6 +220,15 @@ fn assert_warm_commit_after_removal_is_not_readmitted(drop_entry: impl FnOnce())
 
 #[test]
 fn warm_commit_after_reset_returns_the_prepared_keys_without_readmission() {
+    // Isolated: the shared helper asserts the process-global sector-structure
+    // entry count, which CACHE_TEST_LOCK does not protect from the crate's
+    // ordinary, unlocked layout builds.
+    if test_support::run_isolated_or_return(
+        "SYMTN_CORE_WARM_COMMIT_AFTER_RESET_ISOLATED",
+        "tests::fusion_space::checked_layout_builder::warm_commit_after_reset_returns_the_prepared_keys_without_readmission",
+    ) {
+        return;
+    }
     // What: a layout found warm and then reset before its commit is not
     // re-published by that commit; the next call rebuilds it once.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -231,6 +240,15 @@ fn warm_commit_after_reset_returns_the_prepared_keys_without_readmission() {
 
 #[test]
 fn warm_commit_after_eviction_returns_the_prepared_keys_without_readmission() {
+    // Isolated: the shared helper asserts the process-global sector-structure
+    // entry count, which CACHE_TEST_LOCK does not protect from the crate's
+    // ordinary, unlocked layout builds.
+    if test_support::run_isolated_or_return(
+        "SYMTN_CORE_WARM_COMMIT_AFTER_EVICTION_ISOLATED",
+        "tests::fusion_space::checked_layout_builder::warm_commit_after_eviction_returns_the_prepared_keys_without_readmission",
+    ) {
+        return;
+    }
     // What: as after a reset, for an entry evicted by a budget change
     // between prepare and commit.
     let _guard = test_support::CACHE_TEST_LOCK
@@ -547,10 +565,10 @@ fn complete_structure_split_and_fermionic_rule_force_misses() {
         FusionProductSpace::new([parity_leg.clone(), parity_leg.clone()]),
         FusionProductSpace::new([parity_leg]),
     );
-    let bosonic = finalize_complete(&Z2FusionRule, &parity_hom).unwrap();
+    let bosonic = finalize_complete(&ZNFusionRule::new(2).unwrap(), &parity_hom).unwrap();
     let before = structure_cache_info(StructureCacheKind::DegeneracyStructure);
     let recording = crate::probe::record();
-    let fermionic = finalize_complete(&FermionParityFusionRule, &parity_hom).unwrap();
+    let fermionic = finalize_complete(&FermionParityFusionRule::new(), &parity_hom).unwrap();
     let after = structure_cache_info(StructureCacheKind::DegeneracyStructure);
     // The geometry is equal, but distinct rule keys own distinct complete
     // entries and therefore distinct monotonic operation ids.
@@ -741,7 +759,7 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
     // recursive product closure failures retain exact causes.
     type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-    let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let malformed = singleton_rank_hom(SectorId::new(usize::MAX), 1);
     let error = malformed
         .prepare_fusion_tree_layout_checked(&rule)
@@ -754,7 +772,7 @@ fn checked_builder_reports_malformed_ids_and_algebra_closure_without_panicking()
     );
 
     let invalid_z2 = singleton_rank_hom(SectorId::new(2), 1)
-        .prepare_fusion_tree_layout_checked(&Z2FusionRule)
+        .prepare_fusion_tree_layout_checked(&ZNFusionRule::new(2).unwrap())
         .unwrap_err();
     assert_eq!(
         invalid_z2,
@@ -920,7 +938,7 @@ fn failed_checked_algebra_builds_publish_no_identity_or_intern_state() {
 
     type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-    let product_rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let product_rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_overflow = FusionTreeHomSpace::new(
         FusionProductSpace::new([
             SectorLeg::new([(Codec::encode(z2_even(), u1(i32::MAX)), 1)], false),

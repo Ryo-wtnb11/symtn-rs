@@ -5,7 +5,7 @@ use crate::probe::{self, Event};
 #[test]
 fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let lhs_adjoint_space = lhs_space
@@ -87,7 +87,7 @@ fn tensorcontract_fusion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let lhs_adjoint_space = lhs_space
@@ -169,7 +169,7 @@ fn tensorcontract_fusion_fermion_lhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_adjoint_space = rhs_space
@@ -250,7 +250,7 @@ fn tensorcontract_fusion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_adjoint_space = rhs_space
@@ -332,7 +332,7 @@ fn tensorcontract_fusion_fermion_rhs_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let lhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let rhs_space = z2_matrix_space_with_homspace(z2_matrix_homspace());
     let lhs_adjoint_space = lhs_space
@@ -417,7 +417,7 @@ fn tensorcontract_fusion_both_adjoint_uses_degeneracy_matrix_contract() {
 #[test]
 fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let lhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let rhs_space = fermion_parity_matrix_space_with_homspace(fermion_parity_matrix_homspace());
     let lhs_adjoint_space = lhs_space
@@ -502,7 +502,7 @@ fn tensorcontract_fusion_fermion_both_adjoint_uses_degeneracy_matrix_contract() 
 #[test]
 fn tensorproduct_fusion_lowers_lhs_adjoint_through_source_transform() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let sector = SectorId::new(0);
     let lhs_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,

@@ -6,11 +6,11 @@ use symtn_core::testing::{
 };
 use symtn_core::{
     multiplicity_free_permute_tree_pair_block_indexed, BlockKey, BlockSpec, BlockStructure,
-    BraidingStyleKind, FermionParityFusionRule, FusionProductSpace, FusionRule, FusionStyleKind,
-    FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey, FusionTreePairOrientation,
-    MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    MultiplicityIndex, PreparedTreePairOperation, ProductFusionRule, RuleIdentity, SU2FusionRule,
-    SU2Irrep, SectorId, SectorLeg, SectorVec, Z2FusionRule, Z2Irrep,
+    BraidingStyleKind, FermionParityFusionRule, FermionParityIrrep, FusionProductSpace, FusionRule,
+    FusionStyleKind, FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey,
+    FusionTreePairOrientation, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
+    MultiplicityFreeRigidSymbols, MultiplicityIndex, PreparedTreePairOperation, ProductFusionRule,
+    RuleIdentity, SU2FusionRule, SU2Irrep, SectorId, SectorLeg, SectorVec, ZNFusionRule, ZNIrrep,
 };
 
 use crate::counting_alloc;
@@ -95,24 +95,31 @@ impl MultiplicityFreeRigidSymbols for AllocationAnyonicRule {
     }
 }
 
+// The rules live for the whole binary, so building one stays outside every
+// measured region.
+static Z2: std::sync::LazyLock<ZNFusionRule> =
+    std::sync::LazyLock::new(|| ZNFusionRule::new(2).unwrap());
+static FZ2: std::sync::LazyLock<FermionParityFusionRule> =
+    std::sync::LazyLock::new(FermionParityFusionRule::new);
+
 #[test]
 fn unique_identity_permute_does_not_allocate() {
     let _serial = crate::counting_alloc::serial();
     // What: the identity Unique permutation returns its inline tree key
     // without constructing permutation-level scratch.
     let tree = FusionTreeKey::try_new_for_rule(
-        &Z2FusionRule,
-        [Z2Irrep::ODD.sector_id()],
-        Z2Irrep::ODD.sector_id(),
+        &*Z2,
+        [SectorId::from(ZNIrrep::new(1, 2).unwrap())],
+        SectorId::from(ZNIrrep::new(1, 2).unwrap()),
         [false],
         [],
         [],
     )
     .unwrap();
-    let _ = unique_permute_tree(&Z2FusionRule, &tree, &[0]).unwrap();
+    let _ = unique_permute_tree(&*Z2, &tree, &[0]).unwrap();
 
     let (transformed, allocations) =
-        measured_allocations(|| unique_permute_tree(&Z2FusionRule, &tree, &[0]).unwrap());
+        measured_allocations(|| unique_permute_tree(&*Z2, &tree, &[0]).unwrap());
 
     assert_eq!(transformed.0, tree);
     assert_eq!(transformed.1, 1.0);
@@ -191,7 +198,7 @@ fn unique_rank_129_preparation_borrows_prebuilt_operation_metadata() {
     let raw_axis_positions = (0..rank).rev().collect::<Vec<_>>();
     let run = || {
         PreparedTreePairOperation::prepare_permute_with_raw_axis_positions(
-            &Z2FusionRule,
+            &*Z2,
             rank,
             0,
             &permutation,
@@ -227,11 +234,10 @@ fn block_identity_permute_allocates_only_owned_output() {
     )
     .unwrap();
     let sources = [source.clone()];
-    let _ =
-        multiplicity_free_permute_tree_pair_block(&Z2FusionRule, &sources, &[0, 1], &[2]).unwrap();
+    let _ = multiplicity_free_permute_tree_pair_block(&*Z2, &sources, &[0, 1], &[2]).unwrap();
 
     let (transformed, allocations) = measured_allocations(|| {
-        multiplicity_free_permute_tree_pair_block(&Z2FusionRule, &sources, &[0, 1], &[2]).unwrap()
+        multiplicity_free_permute_tree_pair_block(&*Z2, &sources, &[0, 1], &[2]).unwrap()
     });
 
     // What: identity block permutation allocates only the intentional owned
@@ -281,7 +287,7 @@ fn indexed_adjoint_identity_allocates_only_owned_output() {
     let indices = structure.fusion_tree_group_slice()[0].block_indices();
     let run = || {
         multiplicity_free_permute_tree_pair_block_indexed(
-            &Z2FusionRule,
+            &*Z2,
             &structure,
             indices,
             FusionTreePairOrientation::Adjoint,
@@ -412,9 +418,11 @@ fn compact_block_warm_allocations_do_not_grow_with_sources() {
     let _serial = crate::counting_alloc::serial();
     let spin = |twice| SU2Irrep::from_twice_spin(twice).sector_id();
     let fermionic_su2 =
-        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule).unwrap();
-    let odd_half = fermionic_su2.encode_component_ids(Z2Irrep::ODD.sector_id(), spin(1));
-    let even_one = fermionic_su2.encode_component_ids(Z2Irrep::EVEN.sector_id(), spin(2));
+        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
+    let odd_half =
+        fermionic_su2.encode_component_ids(SectorId::from(FermionParityIrrep::ODD), spin(1));
+    let even_one =
+        fermionic_su2.encode_component_ids(SectorId::from(FermionParityIrrep::EVEN), spin(2));
 
     let bosonic = |sources| {
         compact_block_warm_calls_beyond_owned_rows(&SU2FusionRule, spin(2), spin(2), sources)
@@ -443,9 +451,9 @@ fn compact_block_warm_allocations_do_not_grow_with_sources() {
 fn shared_frame_decode_does_not_allocate_per_source_above_inline_rank() {
     let _serial = crate::counting_alloc::serial();
     for (rank, max_per_extra_source) in [(9usize, 4usize), (16, 8)] {
-        let even = Z2Irrep::EVEN.sector_id();
+        let even = SectorId::from(ZNIrrep::new(0, 2).unwrap());
         let source = FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &*Z2,
             std::iter::repeat_n(even, rank),
             even,
             std::iter::repeat_n(false, rank),
@@ -460,8 +468,7 @@ fn shared_frame_decode_does_not_allocate_per_source_above_inline_rank() {
         let levels = (0..rank).collect::<Vec<_>>();
 
         let run = |sources: &[FusionTreeKey]| {
-            multiplicity_free_braid_tree_block(&Z2FusionRule, sources, &permutation, &levels)
-                .unwrap()
+            multiplicity_free_braid_tree_block(&*Z2, sources, &permutation, &levels).unwrap()
         };
         black_box(run(&single));
         black_box(run(&cohort));
@@ -483,9 +490,9 @@ fn shared_frame_decode_does_not_allocate_per_source_above_inline_rank() {
 fn tree_pair_shared_frames_do_not_allocate_per_source_above_inline_rank() {
     let _serial = crate::counting_alloc::serial();
     for (rank, max_per_extra_source) in [(9usize, 4usize), (16, 8)] {
-        let even = Z2Irrep::EVEN.sector_id();
+        let even = SectorId::from(ZNIrrep::new(0, 2).unwrap());
         let codomain = FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &*Z2,
             std::iter::repeat_n(even, rank),
             even,
             std::iter::repeat_n(false, rank),
@@ -494,7 +501,7 @@ fn tree_pair_shared_frames_do_not_allocate_per_source_above_inline_rank() {
         )
         .unwrap();
         let domain = FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &*Z2,
             std::iter::empty(),
             even,
             std::iter::empty(),
@@ -509,8 +516,7 @@ fn tree_pair_shared_frames_do_not_allocate_per_source_above_inline_rank() {
         permutation.swap(0, 1);
 
         let run = |sources: &[FusionTreePairKey]| {
-            multiplicity_free_permute_tree_pair_block(&Z2FusionRule, sources, &permutation, &[])
-                .unwrap()
+            multiplicity_free_permute_tree_pair_block(&*Z2, sources, &permutation, &[]).unwrap()
         };
         black_box(run(&single));
         black_box(run(&cohort));
@@ -543,11 +549,11 @@ fn measured_allocation_stats<T>(operation: impl FnOnce() -> T) -> (T, usize, usi
 #[test]
 fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_allocations() {
     let _serial = crate::counting_alloc::serial();
-    let odd = Z2Irrep::ODD.sector_id();
-    let even = Z2Irrep::EVEN.sector_id();
+    let odd = SectorId::from(FermionParityIrrep::ODD);
+    let even = SectorId::from(FermionParityIrrep::EVEN);
     let tree = || {
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &*FZ2,
             [odd, odd],
             even,
             [false, true],
@@ -559,40 +565,18 @@ fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_a
     let source = FusionTreePairKey::pair(tree(), tree());
     let single = [source.clone()];
     let cohort = std::iter::repeat_n(source, 16).collect::<Vec<_>>();
-    let permute = PreparedTreePairOperation::prepare_permute(
-        &FermionParityFusionRule,
-        2,
-        2,
-        &[3, 0],
-        &[1, 2],
-    )
-    .unwrap();
-    let braid = PreparedTreePairOperation::prepare_braid(
-        &FermionParityFusionRule,
-        2,
-        2,
-        &[3, 0],
-        &[1, 2],
-        &[7, 2],
-        &[11, 5],
-    )
-    .unwrap();
+    let permute =
+        PreparedTreePairOperation::prepare_permute(&*FZ2, 2, 2, &[3, 0], &[1, 2]).unwrap();
+    let braid =
+        PreparedTreePairOperation::prepare_braid(&*FZ2, 2, 2, &[3, 0], &[1, 2], &[7, 2], &[11, 5])
+            .unwrap();
     let transpose = PreparedTreePairOperation::prepare_transpose(2, 2, &[1, 3], &[0, 2]).unwrap();
 
     let preparations: [fn() -> PreparedTreePairOperation<'static>; 3] = [
-        || {
-            PreparedTreePairOperation::prepare_permute(
-                &FermionParityFusionRule,
-                2,
-                2,
-                &[3, 0],
-                &[1, 2],
-            )
-            .unwrap()
-        },
+        || PreparedTreePairOperation::prepare_permute(&*FZ2, 2, 2, &[3, 0], &[1, 2]).unwrap(),
         || {
             PreparedTreePairOperation::prepare_braid(
-                &FermionParityFusionRule,
+                &*FZ2,
                 2,
                 2,
                 &[3, 0],
@@ -614,11 +598,7 @@ fn prepared_nonidentity_unique_operations_have_zero_prepare_and_stable_execute_a
     for prepared in [&permute, &braid, &transpose] {
         let run = |sources: &[FusionTreePairKey]| {
             for source in sources {
-                black_box(
-                    prepared
-                        .execute_unique_rigid(&FermionParityFusionRule, source)
-                        .unwrap(),
-                );
+                black_box(prepared.execute_unique_rigid(&*FZ2, source).unwrap());
             }
         };
         run(&single);

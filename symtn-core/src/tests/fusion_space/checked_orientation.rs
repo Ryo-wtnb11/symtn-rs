@@ -37,7 +37,7 @@ fn canonical_coupled_storage_is_admitted_by_witness_across_symmetries() {
     );
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let even0 = rule.encode_component_ids(z2_even(), u1(0));
     let odd_p = rule.encode_component_ids(z2_odd(), u1(1));
     let odd_m = rule.encode_component_ids(z2_odd(), u1(-1));
@@ -122,8 +122,8 @@ fn checked_select_and_permute_reject_a_malformed_id_when_orientation_needs_it() 
 
     #[cfg(target_pointer_width = "64")]
     {
-        type Rule = ProductFusionRule<U1FusionRule, Z2FusionRule, TensorKitProductCodec>;
-        let product_rule = Rule::try_new(U1FusionRule, Z2FusionRule).unwrap();
+        type Rule = ProductFusionRule<U1FusionRule, ZNFusionRule, TensorKitProductCodec>;
+        let product_rule = Rule::try_new(U1FusionRule, ZNFusionRule::new(2).unwrap()).unwrap();
         let product_min = TensorKitProductCodec::encode(excluded_u1_id(), z2_odd());
         let product_hom = FusionTreeHomSpace::new(
             FusionProductSpace::new([SectorLeg::new([(product_min, 1)], false)]),

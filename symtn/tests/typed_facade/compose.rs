@@ -6,15 +6,15 @@ use super::*;
 
 /// A position-weighted fill whose distinct entries expose individual signs.
 fn fermionic_typed_fill(
-    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::Z2Irrep>,
+    sectors: &symtn::typed::BlockFusionTrees<symtn::sector::FermionParityIrrep>,
     indices: &[usize],
 ) -> f64 {
-    let mut value = f64::from(sectors.coupled().parity()) * 1000.0;
+    let mut value = f64::from(sectors.coupled().is_odd() as u8) * 1000.0;
     for (position, label) in sectors.codomain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 100.0 * (position + 1) as f64;
+        value += f64::from(label.is_odd() as u8) * 100.0 * (position + 1) as f64;
     }
     for (position, label) in sectors.domain_uncoupled().iter().enumerate() {
-        value += f64::from(label.parity()) * 10.0 * (position + 1) as f64;
+        value += f64::from(label.is_odd() as u8) * 10.0 * (position + 1) as f64;
     }
     value + 1.0 + indices.iter().sum::<usize>() as f64
 }
@@ -59,10 +59,10 @@ fn fermionic_leg_with(
     degeneracies: &[usize; 2],
 ) -> GradedSpace<symtn::sector::FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(symtn::sector::FermionParityFusionRule),
+        Arc::new(symtn::sector::FermionParityFusionRule::new()),
         [
-            (symtn::sector::Z2Irrep::EVEN, degeneracies[0]),
-            (symtn::sector::Z2Irrep::ODD, degeneracies[1]),
+            (symtn::sector::FermionParityIrrep::EVEN, degeneracies[0]),
+            (symtn::sector::FermionParityIrrep::ODD, degeneracies[1]),
         ],
     )
     .expect("fermionic leg is well formed")
@@ -90,7 +90,8 @@ fn fermionic_compose_is_contract_against_a_twisted_right_operand() {
         |sectors, indices| {
             // Codomain leg 0 is the dual one; leg 1 is contracted too but is
             // not dual, so theta does not act on it.
-            let theta = if sectors.codomain_uncoupled()[0] == symtn::sector::Z2Irrep::ODD {
+            let theta = if sectors.codomain_uncoupled()[0] == symtn::sector::FermionParityIrrep::ODD
+            {
                 -1.0
             } else {
                 1.0
@@ -226,12 +227,12 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
 
     // Matching ranks, mismatched legs: the degeneracies differ, so the two do
     // not meet even though the shapes line up.
-    let z2 = Arc::new(symtn::sector::Z2FusionRule);
+    let z2 = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let narrow_leg = GradedSpace::try_new(
         Arc::clone(&z2),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 1),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -253,8 +254,8 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
     let wide_leg = GradedSpace::try_new(
         Arc::clone(&z2),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -281,8 +282,11 @@ fn compose_rejects_operands_whose_domain_and_codomain_do_not_meet() {
         .ends_with("lhs axis 2 (is_dual = true) and rhs axis 0 (is_dual = true) must have opposite duality flags"));
 
     // Matching ranks and flags, different sector content.
-    let even_only =
-        GradedSpace::try_new(Arc::clone(&z2), [(symtn::sector::Z2Irrep::EVEN, 2)]).unwrap();
+    let even_only = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2)],
+    )
+    .unwrap();
     let even_endo = TensorMap::from_subblock_fn(
         engine,
         &runtime,

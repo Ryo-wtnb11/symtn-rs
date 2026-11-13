@@ -485,13 +485,13 @@ macro_rules! facades {
             $runtime,
             format!("{} facade fz2xu1", $name),
             $dtype,
-            Fz2U1::new(FermionParityFusionRule, U1FusionRule),
+            Fz2U1::new(FermionParityFusionRule::new(), U1FusionRule),
             (-2..=3)
                 .map(|q: i32| {
                     let parity = if q.rem_euclid(2) == 0 {
-                        Z2Irrep::EVEN
+                        FermionParityIrrep::EVEN
                     } else {
-                        Z2Irrep::ODD
+                        FermionParityIrrep::ODD
                     };
                     ProductSector::new(parity, U1Irrep::new(q))
                 })

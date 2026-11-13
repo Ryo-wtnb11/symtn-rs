@@ -156,7 +156,7 @@ fn warmed_prepared_rank4_fusion_replay_matches_planned_eager() {
     assert_replay_matches_planned_eager(engine, &U1FusionRule, &u1_sectors());
     assert_replay_matches_planned_eager(
         engine,
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
     );
     assert_replay_matches_planned_eager(
@@ -172,7 +172,7 @@ fn warmed_prepared_rank4_fusion_replay_matches_planned_eager() {
         engine,
         &ProductFusionRule::<U1FusionRule, FermionParityFusionRule>::try_new(
             U1FusionRule,
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
         )
         .unwrap(),
         &product_sectors(),

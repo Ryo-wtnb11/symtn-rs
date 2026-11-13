@@ -1,4 +1,5 @@
 use super::*;
+use symtn::sector::ZNIrrep;
 
 fn assert_direct_contract_and_compose<R>(
     engine: &mut dyn symtn::typed::Engine,
@@ -104,14 +105,17 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     assert_direct_contract_and_compose(engine, cuda, &su2_lhs, &su2_rhs);
 
     let product_rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -130,8 +134,8 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let product_dual = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -291,8 +295,16 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
     let zn4 = Arc::new(ZNFusionRule::new(4).unwrap());
-    let zn3_leg = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
-    let zn4_leg = GradedSpace::try_new(Arc::clone(&zn4), [(zn4.irrep(0), 1)]).unwrap();
+    let zn3_leg = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let zn4_leg = GradedSpace::try_new(
+        Arc::clone(&zn4),
+        [(ZNIrrep::new(0, zn4.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let zn3_tensor: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&zn3_leg], [&zn3_leg], |_, _| 1.0).unwrap();
     let zn4_tensor: TensorMap<_, f64> =
@@ -314,9 +326,21 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
         [1.0]
     );
 
-    let left_open = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 1)]).unwrap();
-    let seam = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 1)]).unwrap();
-    let right_open = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(2), 1)]).unwrap();
+    let left_open = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let seam = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
+    let right_open = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(2, zn3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let zero_lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&left_open], [&seam], |_, _| 1.0).unwrap();
     let zero_rhs: TensorMap<_, f64> =
@@ -484,13 +508,13 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
     // Fermionic provider: contract carries the twist, compose does not, so
     // the two results stay distinct for complex payloads too.
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let fz2_dual = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .and_then(|space| space.try_dual())
     .unwrap();

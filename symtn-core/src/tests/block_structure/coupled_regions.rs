@@ -25,7 +25,7 @@ fn concurrent_equal_hom_spaces_share_semantics_without_global_interning() {
 #[test]
 fn coupled_sector_regions_describe_canonical_matrix_spans() {
     // What: canonical coupled storage compiles to exact sector ranges and tree extents.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(z2_even(), 2), (z2_odd(), 2)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
@@ -288,7 +288,7 @@ fn coupled_sector_regions_reject_shape_mismatch_before_irrelevant_overflow() {
 #[test]
 fn coupled_sector_regions_reject_noncanonical_and_incomplete_grids() {
     // What: independently packed subblocks and a missing tree pair cannot claim direct spans.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(z2_even(), 1), (z2_odd(), 1)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),

@@ -11,8 +11,8 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .unwrap()
 }
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, LegSelection, Runtime, TensorMap};
 
@@ -130,16 +130,16 @@ fn warm_eager_calls_hit_complete_structure_cache() {
         &runtime,
         "fZ2xU1",
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
             U1FusionRule
         )
         .unwrap(),
         (-1..=1)
             .map(|q: i32| {
                 let parity = if q.rem_euclid(2) == 0 {
-                    Z2Irrep::EVEN
+                    FermionParityIrrep::EVEN
                 } else {
-                    Z2Irrep::ODD
+                    FermionParityIrrep::ODD
                 };
                 ProductSector::new(parity, U1Irrep::new(q))
             })

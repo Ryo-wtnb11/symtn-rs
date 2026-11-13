@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use symtn_core::{
     BlockSpec, BraidingStyleKind, FusionProductSpace, FusionStyleKind,
     MultiplicityFreeFusionSymbols, RuleIdentity, SectorId, SectorLeg, SectorVec, U1FusionRule,
-    U1Irrep, Z2FusionRule, Z2Irrep,
+    U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 #[derive(Clone)]
@@ -318,8 +318,8 @@ fn generic_contraction_builds_only_the_final_layout() {
 #[test]
 fn layout_authority_distinguishes_rules_and_reuses_semantic_spaces() {
     // What: opaque layout identity aliases equal bound layouts but never distinct rules.
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
+    let first_provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let second_provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let raw = z2_matrix_space();
     let first = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         raw.clone(),
@@ -348,8 +348,8 @@ fn layout_authority_distinguishes_rules_and_reuses_semantic_spaces() {
 #[test]
 fn layout_authority_rebinds_derived_space_to_exact_provider_arc() {
     // What: a cached raw derived layout inherits the current caller's provider allocation.
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
+    let first_provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let second_provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let raw = z2_matrix_space();
     let first = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         raw.clone(),
@@ -374,9 +374,9 @@ fn layout_authority_normalizes_zero_legs_but_not_storage_geometry() {
     let _guard = CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let provider = Arc::new(Z2FusionRule);
-    let even = Z2Irrep::EVEN.sector_id();
-    let odd = Z2Irrep::ODD.sector_id();
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let even = SectorId::from(ZNIrrep::new(0, 2).unwrap());
+    let odd = SectorId::from(ZNIrrep::new(1, 2).unwrap());
     let leg = |include_zero| {
         let sectors = if include_zero {
             vec![(even, 1), (odd, 0)]
@@ -432,7 +432,7 @@ fn layout_authority_normalizes_zero_legs_but_not_storage_geometry() {
 #[test]
 fn validated_layout_does_not_retain_provider_allocation() {
     // What: erasing a bound layout drops the provider allocation while preserving layout data.
-    let provider = Arc::new(Z2FusionRule);
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let weak = Arc::downgrade(&provider);
     let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         z2_matrix_space(),
@@ -453,7 +453,7 @@ fn validated_layout_does_not_retain_the_adjoint_memo() {
     // What: a layout taken after a lazy-adjoint contraction filled the
     // parent's adjoint memo neither keeps that memo nor charges differently
     // from a never-adjointed layout (`detach_runtime`).
-    let provider = Arc::new(Z2FusionRule);
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         z2_matrix_space(),
         Arc::clone(&provider),
@@ -461,7 +461,10 @@ fn validated_layout_does_not_retain_the_adjoint_memo() {
     .unwrap();
     let cold_charge = bound.validated_layout().charged_retained_bytes();
     FusionOperand::adjoint(bound.space())
-        .prepare(&Z2FusionRule, encoded_layout_primer::<Z2FusionRule>)
+        .prepare(
+            &ZNFusionRule::new(2).unwrap(),
+            encoded_layout_primer::<ZNFusionRule>,
+        )
         .unwrap();
     bound.space().adjoint_view().unwrap();
     let memo = Arc::downgrade(bound.space().adjoint.get().expect("prepare fills the memo"));
@@ -474,9 +477,17 @@ fn validated_layout_does_not_retain_the_adjoint_memo() {
 }
 
 fn z2_matrix_space() -> DynamicFusionMapSpace {
-    let leg = || SectorLeg::new([(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)], false);
+    let leg = || {
+        SectorLeg::new(
+            [
+                (ZNIrrep::new(0, 2).unwrap(), 1),
+                (ZNIrrep::new(1, 2).unwrap(), 1),
+            ],
+            false,
+        )
+    };
     DynamicFusionMapSpace::from_final_homspace(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         FusionTreeHomSpace::new(
             FusionProductSpace::new([leg()]),
             FusionProductSpace::new([leg()]),
@@ -533,11 +544,14 @@ fn bound_space_rejects_wrong_and_missing_identity_before_provider_enumeration() 
 #[test]
 fn binding_mode_mismatch_is_rejected_by_provider_style() {
     let space = z2_matrix_space();
-    let multiplicity_free =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(space.clone(), Arc::new(Z2FusionRule))
-            .unwrap();
+    let multiplicity_free = BoundDynamicFusionMapSpace::bind_multiplicity_free(
+        space.clone(),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap();
     let generic_error =
-        BoundDynamicFusionMapSpace::bind_generic(space, Arc::new(Z2FusionRule)).unwrap_err();
+        BoundDynamicFusionMapSpace::bind_generic(space, Arc::new(ZNFusionRule::new(2).unwrap()))
+            .unwrap_err();
 
     assert!(matches!(
         generic_error,
@@ -555,9 +569,11 @@ fn every_generic_root_rejects_multiplicity_free_provider_before_input_validation
     // raw binding, shape/final-HomSpace roots, and derived operations.
     let raw = z2_matrix_space();
     let homspace = raw.homspace().clone();
-    let bound =
-        BoundDynamicFusionMapSpace::bind_multiplicity_free(raw.clone(), Arc::new(Z2FusionRule))
-            .unwrap();
+    let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
+        raw.clone(),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+    )
+    .unwrap();
     let expected = |error| {
         assert!(matches!(
             error,
@@ -568,21 +584,30 @@ fn every_generic_root_rejects_multiplicity_free_provider_before_input_validation
         ));
     };
 
-    expected(BoundDynamicFusionMapSpace::bind_generic(raw, Arc::new(Z2FusionRule)).unwrap_err());
     expected(
-        DynamicFusionMapSpace::from_final_homspace_generic(&Z2FusionRule, homspace.clone())
+        BoundDynamicFusionMapSpace::bind_generic(raw, Arc::new(ZNFusionRule::new(2).unwrap()))
             .unwrap_err(),
     );
     expected(
-        BoundDynamicFusionMapSpace::from_final_homspace_generic(
-            Arc::new(Z2FusionRule),
+        DynamicFusionMapSpace::from_final_homspace_generic(
+            &ZNFusionRule::new(2).unwrap(),
             homspace.clone(),
         )
         .unwrap_err(),
     );
     expected(
-        BoundDynamicFusionMapSpace::from_final_homspace_generic(Arc::new(Z2FusionRule), homspace)
-            .unwrap_err(),
+        BoundDynamicFusionMapSpace::from_final_homspace_generic(
+            Arc::new(ZNFusionRule::new(2).unwrap()),
+            homspace.clone(),
+        )
+        .unwrap_err(),
+    );
+    expected(
+        BoundDynamicFusionMapSpace::from_final_homspace_generic(
+            Arc::new(ZNFusionRule::new(2).unwrap()),
+            homspace,
+        )
+        .unwrap_err(),
     );
     expected(
         bound

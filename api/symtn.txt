@@ -65,6 +65,7 @@ pub use symtn::sector::CheckedGenericRigidSymbols
 pub use symtn::sector::CoupledSectorFold
 pub use symtn::sector::EnumeratedCodec
 pub use symtn::sector::FermionParityFusionRule
+pub use symtn::sector::FermionParityIrrep
 pub use symtn::sector::FusionRule
 pub use symtn::sector::FusionStyleKind
 pub use symtn::sector::Fz2SectorLayout
@@ -106,8 +107,6 @@ pub use symtn::sector::U1FusionRule
 pub use symtn::sector::U1Irrep
 pub use symtn::sector::U1SectorLayout
 pub use symtn::sector::UncertifiedUnitAdmission
-pub use symtn::sector::Z2FusionRule
-pub use symtn::sector::Z2Irrep
 pub use symtn::sector::ZNFusionRule
 pub use symtn::sector::ZNIrrep
 pub use symtn::sector::product_sector

@@ -27,8 +27,8 @@ fn structure_cache_info(kind: StructureCacheKind) -> StructureCacheInfo {
         .unwrap()
 }
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::sector::{Fz2SectorLayout, PackedProductCodec, U1SectorLayout};
 use symtn::typed::Runtime;
@@ -137,9 +137,10 @@ fn fixtures_are_equal_iff_structure_is_equal() {
         GradedSpace::try_new(Arc::new(SU2FusionRule), pairs).unwrap()
     });
     check_fixture!(engine, "fZ2xU1", |variant| {
-        let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap());
-        let even = |charge| product_sector(Z2Irrep::EVEN, U1Irrep::new(charge));
-        let odd = |charge| product_sector(Z2Irrep::ODD, U1Irrep::new(charge));
+        let rule =
+            Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
+        let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
+        let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
         let pairs = match variant {
             0 => [(even(0), 2), (odd(1), 1), (odd(-1), 2)],
             1 => [(even(0), 2), (odd(1), 2), (odd(-1), 2)],

@@ -943,16 +943,16 @@ fn compact_braid_off_diagonal_zeros_are_numerically_zero() {
     );
     probe!(
         engine,
-        FermionParityFusionRule,
-        [(Z2Irrep::EVEN, 3), (Z2Irrep::ODD, 2)],
+        FermionParityFusionRule::new(),
+        [(FermionParityIrrep::EVEN, 3), (FermionParityIrrep::ODD, 2)],
         0
     );
     probe!(
         engine,
-        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 3),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 3),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
         ],
         0
     );
@@ -963,8 +963,8 @@ fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let bond = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
     )
     .unwrap();
     let real: TensorMap<_, f64> = TensorMap::diagonal(
@@ -973,11 +973,11 @@ fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
         &bond,
         [
             SectorSpectrum {
-                sector: Z2Irrep::EVEN,
+                sector: FermionParityIrrep::EVEN,
                 values: vec![2.0, -3.0],
             },
             SectorSpectrum {
-                sector: Z2Irrep::ODD,
+                sector: FermionParityIrrep::ODD,
                 values: vec![5.0, -7.0, 11.0],
             },
         ],
@@ -1005,7 +1005,7 @@ fn compact_fermionic_braid_matches_hand_diagonal_and_complex_sign() {
             .unwrap();
         assert_eq!(real_entry.values.len(), source.values.len());
         assert_eq!(complex_entry.values.len(), source.values.len());
-        let sign = if real_entry.sector == Z2Irrep::ODD {
+        let sign = if real_entry.sector == FermionParityIrrep::ODD {
             -1.0
         } else {
             1.0
@@ -1061,9 +1061,10 @@ fn compact_cat_braid_absorb_avoid_dense_source_materializations() {
 fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(Z2FusionRule);
-    let wide = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 4)]).unwrap();
-    let narrow = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 2)]).unwrap();
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let wide =
+        GradedSpace::try_new(Arc::clone(&provider), [(ZNIrrep::new(0, 2).unwrap(), 4)]).unwrap();
+    let narrow = GradedSpace::try_new(provider, [(ZNIrrep::new(0, 2).unwrap(), 2)]).unwrap();
     let receiver: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
             1.0 + index[0] as f64 + 10.0 * index[1] as f64
@@ -1074,7 +1075,7 @@ fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() 
         &runtime,
         &narrow,
         [SectorSpectrum {
-            sector: Z2Irrep::EVEN,
+            sector: ZNIrrep::new(0, 2).unwrap(),
             values: vec![2.0, -3.0],
         }],
     )
@@ -1104,7 +1105,7 @@ fn absorb_compact_source_zeros_shared_off_diagonal_and_preserves_outer_region() 
 fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
     let key = |sector| {
         let tree = FusionTreeKey::try_from_sector_ids_for_rule(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             [sector],
             sector,
             [false],
@@ -1176,14 +1177,18 @@ fn compact_absorb_handles_strided_prefixes_and_interleaved_sectors() {
 fn compact_cat_and_absorb_preserve_stored_bits_and_zero_structural_cells() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let bond = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, 2)]).unwrap();
+    let bond = GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), 2)],
+    )
+    .unwrap();
     let nan = f64::from_bits(0x7ff8_0000_0000_1617);
     let compact: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &bond,
         [SectorSpectrum {
-            sector: Z2Irrep::EVEN,
+            sector: ZNIrrep::new(0, 2).unwrap(),
             values: vec![-0.0, nan],
         }],
     )

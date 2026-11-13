@@ -660,17 +660,23 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         6
     );
 
-    let z2_provider = Arc::new(symtn::sector::Z2FusionRule);
-    let z2_dual = GradedSpace::try_new(z2_provider, [(symtn::sector::Z2Irrep::ODD, 1)])
-        .and_then(|space| space.try_dual())
-        .unwrap();
-    assert_eq!(z2_dual.sectors().unwrap(), [symtn::sector::Z2Irrep::ODD]);
+    let z2_provider = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
+    let z2_dual = GradedSpace::try_new(
+        z2_provider,
+        [(symtn::sector::ZNIrrep::new(1, 2).unwrap(), 1)],
+    )
+    .and_then(|space| space.try_dual())
+    .unwrap();
+    assert_eq!(
+        z2_dual.sectors().unwrap(),
+        [symtn::sector::ZNIrrep::new(1, 2).unwrap()]
+    );
     assert!(z2_dual.is_dual());
 
     let product_provider = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -679,7 +685,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         [(
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(1),
-                symtn::sector::Z2Irrep::ODD,
+                symtn::sector::FermionParityIrrep::ODD,
             ),
             2,
         )],
@@ -690,7 +696,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         [(
             symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(-1),
-                symtn::sector::Z2Irrep::ODD,
+                symtn::sector::FermionParityIrrep::ODD,
             ),
             3,
         )],
@@ -701,7 +707,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         product_fused
             .degeneracy(&symtn::sector::product_sector(
                 symtn::sector::U1Irrep::new(0),
-                symtn::sector::Z2Irrep::EVEN,
+                symtn::sector::FermionParityIrrep::EVEN,
             ))
             .unwrap(),
         6

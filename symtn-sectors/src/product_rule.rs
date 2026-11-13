@@ -1101,8 +1101,9 @@ mod tests {
 
     use crate::{
         BraidingStyleKind, CanonicalUnitFusionRule, CategoricalScalar, FermionParityFusionRule,
-        FusionStyleKind, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, SectorId,
-        TableRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep,
+        FermionParityIrrep, FusionStyleKind, MultiplicityFreeFusionSymbols,
+        MultiplicityFreeRigidSymbols, SectorId, TableRule, U1FusionRule, U1Irrep, ZNFusionRule,
+        ZNIrrep,
     };
 
     #[test]
@@ -1111,19 +1112,20 @@ mod tests {
         // `SectorCodec` methods; component ids use the `*_component_ids` pair.
         use crate::{product_sector, SectorCodec};
 
-        let rule =
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
-        let label = product_sector(Z2Irrep::ODD, U1Irrep::new(-3));
+        let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
+            .unwrap();
+        let label = product_sector(FermionParityIrrep::ODD, U1Irrep::new(-3));
         let id = rule.encode_sector(&label).unwrap();
         assert_eq!(rule.decode_sector(id).unwrap(), label);
-        let by_ids = rule.encode_component_ids(Z2Irrep::ODD.into(), U1Irrep::new(-3).into());
+        let by_ids =
+            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into());
         assert_eq!(by_ids, id);
         assert_eq!(
             rule.decode_component_ids(id),
-            Some((Z2Irrep::ODD.into(), U1Irrep::new(-3).into()))
+            Some((FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into()))
         );
         assert_eq!(
-            rule.try_encode_component_ids(Z2Irrep::ODD.into(), U1Irrep::new(-3).into()),
+            rule.try_encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-3).into()),
             Ok(id)
         );
     }
@@ -1133,10 +1135,11 @@ mod tests {
         // What: product construction preserves the unit law componentwise.
         fn accepts_canonical_unit<R: CanonicalUnitFusionRule>(_rule: &R) {}
 
-        let rule =
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
+            .unwrap();
         let vacuum = rule.vacuum();
-        let sector = rule.encode_component_ids(Z2Irrep::ODD.into(), U1Irrep::new(-17).into());
+        let sector =
+            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(-17).into());
         let fused = rule.fusion_channels(sector, sector)[0];
         accepts_canonical_unit(&rule);
         assert_eq!(rule.dual(vacuum), vacuum);
@@ -1161,9 +1164,10 @@ mod tests {
 
     #[test]
     fn product_rule_composes_checked_symbols_rigidity_and_ordered_identity() {
-        let rule =
-            ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
-        let odd_zero = rule.encode_component_ids(Z2Irrep::ODD.into(), U1Irrep::new(0).into());
+        let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
+            .unwrap();
+        let odd_zero =
+            rule.encode_component_ids(FermionParityIrrep::ODD.into(), U1Irrep::new(0).into());
         let vacuum = rule.vacuum();
 
         assert_eq!(
@@ -1180,7 +1184,7 @@ mod tests {
         assert_eq!(first, rule.rule_identity());
         assert_ne!(
             rule.rule_identity(),
-            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
+            ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
                 .unwrap()
                 .rule_identity()
         );
@@ -1217,13 +1221,16 @@ mod tests {
         // What: a multiplicity-free product whose components disagree on the
         // coefficient scalar is representable, and its topological data is the
         // componentwise product promoted to the wider scalar.
-        let rule =
-            ProductFusionRule::<_, _>::try_new(TableRule::fibonacci(), Z2FusionRule).unwrap();
+        let rule = ProductFusionRule::<_, _>::try_new(
+            TableRule::fibonacci(),
+            ZNFusionRule::new(2).unwrap(),
+        )
+        .unwrap();
         let tau = SectorId::new(1);
         let vacuum_fib = SectorId::new(0);
-        let t1 = rule.encode_component_ids(tau, Z2Irrep::ODD.into());
-        let i0 = rule.encode_component_ids(vacuum_fib, Z2Irrep::EVEN.into());
-        let tau0 = rule.encode_component_ids(tau, Z2Irrep::EVEN.into());
+        let t1 = rule.encode_component_ids(tau, ZNIrrep::new(1, 2).unwrap().into());
+        let i0 = rule.encode_component_ids(vacuum_fib, ZNIrrep::new(0, 2).unwrap().into());
+        let tau0 = rule.encode_component_ids(tau, ZNIrrep::new(0, 2).unwrap().into());
 
         assert_eq!(rule.fusion_style(), FusionStyleKind::Simple);
         assert_eq!(rule.braiding_style(), BraidingStyleKind::Anyonic);
@@ -1278,17 +1285,25 @@ mod tests {
     fn product_promotion_is_component_order_independent() {
         // What: promotion does not depend on which side carries the wider
         // scalar; TensorKitSectors promotes rather than taking the left type.
-        let forward =
-            ProductFusionRule::<_, _>::try_new(TableRule::fibonacci(), Z2FusionRule).unwrap();
-        let reversed =
-            ProductFusionRule::<_, _>::try_new(Z2FusionRule, TableRule::fibonacci()).unwrap();
+        let forward = ProductFusionRule::<_, _>::try_new(
+            TableRule::fibonacci(),
+            ZNFusionRule::new(2).unwrap(),
+        )
+        .unwrap();
+        let reversed = ProductFusionRule::<_, _>::try_new(
+            ZNFusionRule::new(2).unwrap(),
+            TableRule::fibonacci(),
+        )
+        .unwrap();
         let tau = SectorId::new(1);
         let vacuum_fib = SectorId::new(0);
 
-        let forward_t1 = forward.encode_component_ids(tau, Z2Irrep::ODD.into());
-        let forward_i0 = forward.encode_component_ids(vacuum_fib, Z2Irrep::EVEN.into());
-        let reversed_t1 = reversed.encode_component_ids(Z2Irrep::ODD.into(), tau);
-        let reversed_i0 = reversed.encode_component_ids(Z2Irrep::EVEN.into(), vacuum_fib);
+        let forward_t1 = forward.encode_component_ids(tau, ZNIrrep::new(1, 2).unwrap().into());
+        let forward_i0 =
+            forward.encode_component_ids(vacuum_fib, ZNIrrep::new(0, 2).unwrap().into());
+        let reversed_t1 = reversed.encode_component_ids(ZNIrrep::new(1, 2).unwrap().into(), tau);
+        let reversed_i0 =
+            reversed.encode_component_ids(ZNIrrep::new(0, 2).unwrap().into(), vacuum_fib);
 
         assert_close(
             reversed.r_symbol_scalar(reversed_t1, reversed_t1, reversed_i0),

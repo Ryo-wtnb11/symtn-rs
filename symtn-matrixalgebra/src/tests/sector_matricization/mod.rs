@@ -1,7 +1,7 @@
 use super::*;
 use crate::probe::{GenericPairPublicationProbe, PlacementIndexProbe, ScatterVisitProbe};
 use std::cell::RefCell;
-use symtn_core::{BlockSpec, FusionTreePairKey, Z2FusionRule};
+use symtn_core::{BlockSpec, FusionTreePairKey, ZNFusionRule};
 
 #[derive(Clone, Copy)]
 struct TestGenericRule;

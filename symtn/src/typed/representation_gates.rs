@@ -81,8 +81,8 @@ impl<T> FactorPair<T> for RightPolar<T> {
 use symtn_core::{product_sector, ProductFusionRule};
 use symtn_core::{
     BlockKey, BlockSpec, BlockStructure, CU1FusionRule, CU1Irrep, FermionParityFusionRule,
-    FusionTreeKey, FusionTreePairKey, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2FusionRule,
-    Z2Irrep, ZNFusionRule,
+    FermionParityIrrep, FusionTreeKey, FusionTreePairKey, SU2FusionRule, SU2Irrep, U1FusionRule,
+    U1Irrep, ZNFusionRule, ZNIrrep,
 };
 use symtn_dense::{
     DefaultDenseExecutor, DenseBackend, DenseDotConfig, DenseError, DenseExecutor,
@@ -587,9 +587,13 @@ const RANK_TWO_COMPOSE: ContractSpec<'static> = ContractSpec {
     domain: &[1],
 };
 
-fn fixture(engine: &mut dyn Engine) -> TensorMap<Z2FusionRule, f64> {
+fn fixture(engine: &mut dyn Engine) -> TensorMap<ZNFusionRule, f64> {
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, 8)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), 8)],
+    )
+    .unwrap();
     let mut state = 0x5eed_0580u64;
     TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], move |_, _| {
         state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
@@ -623,11 +627,12 @@ fn clone_copies_no_payload_bytes() {
 /// answers.
 fn fz2_fixture(engine: &mut dyn Engine) -> TensorMap<symtn_core::FermionParityFusionRule, f64> {
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(symtn_core::FermionParityFusionRule);
-    let even_only = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 2)]).unwrap();
+    let provider = Arc::new(symtn_core::FermionParityFusionRule::new());
+    let even_only =
+        GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::EVEN, 2)]).unwrap();
     let mixed = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     let mut state = 0x5eed_0613u64;

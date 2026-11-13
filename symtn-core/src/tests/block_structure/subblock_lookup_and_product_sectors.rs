@@ -54,9 +54,9 @@ fn fusion_tree_pair_block_reports_missing_key() {
 fn product_fusion_tree_homspace_matches_tensorkit_fz2_u1_su2_fixture() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type FpU1Su2Rule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -330,9 +330,9 @@ fn nested_product_elementary_bend_keeps_the_fermionic_phase() {
     // product-category phase independently of the block/per-source runners.
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -383,7 +383,7 @@ fn typed_sector_homspace_builds_u1_tree_key() {
 
 #[test]
 fn fusion_tensor_space_builds_subblockstructure_from_homspace() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new(
             [(SectorId::new(0), 1), (SectorId::new(1), 3)],
@@ -545,7 +545,7 @@ fn sorted_lookup_distinguishes_rank1_tree_duality() {
 
 #[test]
 fn unique_homspace_builds_subblock_key_from_external_sectors() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let hom = FusionTreeHomSpace::from_sector_ids([(1, 1)], [(1, 1)]);
 
     let key = hom

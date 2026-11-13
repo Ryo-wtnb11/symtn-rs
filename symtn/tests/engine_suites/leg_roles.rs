@@ -7,7 +7,9 @@ use super::*;
 use crate::legs::{su2_leg, u1_leg};
 use num_complex::Complex64;
 use std::sync::Arc;
-use symtn::sector::{product_sector, FermionParityFusionRule, U1FusionRule, U1Irrep, Z2Irrep};
+use symtn::sector::{
+    product_sector, FermionParityFusionRule, FermionParityIrrep, U1FusionRule, U1Irrep,
+};
 use symtn::typed::{Eigh, GradedSpace, HermitianTol, OperationError, Qr, Runtime, Svd};
 
 /// Spaces and every stored value of two downloaded results, bit for bit.
@@ -119,14 +121,14 @@ on_each_engine! {
         let u1 = || (u1_leg(&[(-1, 1), (0, 2), (1, 2)]), u1_leg(&[(0, 1), (1, 2), (2, 1)]).try_dual().unwrap());
         let su2 = || (su2_leg(&[(0, 2), (1, 2), (2, 1)]), su2_leg(&[(1, 1), (2, 2)]).try_dual().unwrap());
         let rule = Arc::new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
         );
         let fz2u1 = |sectors: &[(bool, i32, usize)]| {
             GradedSpace::try_new(
                 Arc::clone(&rule),
                 sectors.iter().map(|&(odd, q, n)| {
-                    let parity = if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN };
+                    let parity = if odd { FermionParityIrrep::ODD } else { FermionParityIrrep::EVEN };
                     (product_sector(parity, U1Irrep::new(q)), n)
                 }),
             )

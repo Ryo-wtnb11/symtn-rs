@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn coupled_layout_embeds_subblocks_into_sector_matrices() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg =
         |degeneracy, dual| SectorLeg::new([(z2_even(), degeneracy), (z2_odd(), degeneracy)], dual);
     let homspace = FusionTreeHomSpace::new(
@@ -164,7 +164,7 @@ fn unique_artin_braid_at_rejects_out_of_range_index() {
     // it either. Repoint at the live single-step primitive that the
     // surviving multiplicity-free braid decomposes each Artin swap into.
     let err = apply_unique_artin_braid_at_with_inverse(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &mut UnhashedFusionTree::from(tree.clone()),
         1,
         false,
@@ -180,7 +180,7 @@ fn rule_aware_constructor_rejects_inadmissible_unique_innerline() {
     // outside the Unique rule's fusion graph.
     assert_eq!(
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             [SectorId::new(1), SectorId::new(1), SectorId::new(1)],
             SectorId::new(1),
             [false, false, false],
@@ -211,12 +211,12 @@ fn checked_rank_one_validates_ids_by_unit_fusion() {
     // including the zigzag ID reserved for the excluded U1 charge.
     let invalid = SectorId::new(2);
     assert_invalid_rank_one_checked(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         invalid,
         FusionAlgebraError::InvalidSector { sector: invalid },
     );
     assert_invalid_rank_one_checked(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         invalid,
         FusionAlgebraError::InvalidSector { sector: invalid },
     );
@@ -245,7 +245,7 @@ fn checked_rank_one_validates_ids_by_unit_fusion() {
         type Layout = ProductSectorLayout<Fz2SectorLayout, U1SectorLayout>;
         type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
         type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-        let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+        let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
         let invalid_product = SectorId::new(1usize << Layout::BITS);
         assert_invalid_rank_one_checked(
             &rule,
@@ -809,7 +809,10 @@ fn fusion_tree_block_structure_proof_rejects_nontrivial_vertex_for_unique_provid
 
     // What: a raw label-two key cannot acquire the local proof required
     // by compact multiplicity-free batch execution.
-    let error = match LocallyValidatedFusionTreeBlockStructure::try_new(&Z2FusionRule, &structure) {
+    let error = match LocallyValidatedFusionTreeBlockStructure::try_new(
+        &ZNFusionRule::new(2).unwrap(),
+        &structure,
+    ) {
         Ok(_) => panic!("nontrivial multiplicity label unexpectedly admitted"),
         Err(error) => error,
     };
@@ -872,11 +875,13 @@ fn fusion_tree_block_structure_proof_rejects_non_categorical_namespaces() {
         )
         .unwrap()])
         .unwrap();
-        let error =
-            match LocallyValidatedFusionTreeBlockStructure::try_new(&Z2FusionRule, &structure) {
-                Ok(_) => panic!("non-categorical structure unexpectedly admitted"),
-                Err(error) => error,
-            };
+        let error = match LocallyValidatedFusionTreeBlockStructure::try_new(
+            &ZNFusionRule::new(2).unwrap(),
+            &structure,
+        ) {
+            Ok(_) => panic!("non-categorical structure unexpectedly admitted"),
+            Err(error) => error,
+        };
         assert_eq!(
             error,
             CoreError::ExpectedFusionTreePairKey { actual: key.kind() }
@@ -889,8 +894,15 @@ fn fusion_tree_block_structure_proof_rejects_local_rank_mismatch() {
     // What: categorical admission requires every tree pair to describe the
     // same number of external legs as its containing block structure.
     let key = FusionTreePairKey::pair(
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [z2_even()], z2_even(), [false], [], [])
-            .unwrap(),
+        FusionTreeKey::try_new_for_rule(
+            &ZNFusionRule::new(2).unwrap(),
+            [z2_even()],
+            z2_even(),
+            [false],
+            [],
+            [],
+        )
+        .unwrap(),
         FusionTreeKey::new([], z2_even(), [], [], []),
     );
     let structure = BlockStructure::from_blocks(vec![BlockSpec::column_major_with_key(
@@ -901,7 +913,10 @@ fn fusion_tree_block_structure_proof_rejects_local_rank_mismatch() {
     .unwrap()])
     .unwrap();
 
-    let error = match LocallyValidatedFusionTreeBlockStructure::try_new(&Z2FusionRule, &structure) {
+    let error = match LocallyValidatedFusionTreeBlockStructure::try_new(
+        &ZNFusionRule::new(2).unwrap(),
+        &structure,
+    ) {
         Ok(_) => panic!("rank-mismatched structure unexpectedly admitted"),
         Err(error) => error,
     };
@@ -1228,7 +1243,8 @@ fn block_preflight_rejects_prepared_capability_before_empty_or_invalid_source() 
     let proof =
         LocallyValidatedFusionTreeBlockStructure::try_new(&PlanarZ2Rule, &structure).unwrap();
     let symmetric_identity =
-        PreparedTreePairOperation::prepare_permute(&Z2FusionRule, 0, 0, &[], &[]).unwrap();
+        PreparedTreePairOperation::prepare_permute(&ZNFusionRule::new(2).unwrap(), 0, 0, &[], &[])
+            .unwrap();
     let expected = CoreError::UnsupportedBraidingStyle {
         expected: "symmetric braiding",
         actual: BraidingStyleKind::NoBraiding,

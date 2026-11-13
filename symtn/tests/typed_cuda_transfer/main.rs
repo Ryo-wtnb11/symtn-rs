@@ -18,8 +18,8 @@ use symtn::typed::HermitianTol;
 use num_complex::Complex64;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, SectorId, U1FusionRule,
-    U1Irrep, Z2Irrep, ZNFusionRule,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, SectorId,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn::sector::{
     BraidingStyleKind, CheckedFusionAlgebra, FusionRule, FusionStyleKind,

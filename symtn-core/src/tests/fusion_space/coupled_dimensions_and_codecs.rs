@@ -163,15 +163,15 @@ fn canonical_coupled_layouts_pass_checked_subset_proof() {
             .unwrap();
     }
 
-    assert_rule(&Z2FusionRule, z2_even());
-    assert_rule(&FermionParityFusionRule, z2_odd());
+    assert_rule(&ZNFusionRule::new(2).unwrap(), z2_even());
+    assert_rule(&FermionParityFusionRule::new(), z2_odd());
     assert_rule(&U1FusionRule, u1(7));
     assert_rule(&SU2FusionRule, su2(3));
     assert_rule(&TableRule::fibonacci(), SectorId::new(1));
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type Triple = ProductFusionRule<Fz2U1, SU2FusionRule>;
-    let pair = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let pair_sector = pair.encode_component_ids(z2_odd(), u1(2));
     let triple = Triple::try_new(pair, SU2FusionRule).unwrap();
     let triple_sector = triple.encode_component_ids(pair_sector, su2(1));
@@ -250,7 +250,7 @@ fn borrowed_unique_artin_lowering_matches_materialized_replay() {
                 .artin_steps
                 .into_vec();
             let prepared = PreparedTreePairOperation::prepare_braid_with_raw_axis_positions(
-                &Z2FusionRule,
+                &ZNFusionRule::new(2).unwrap(),
                 rank,
                 0,
                 &permutation,
@@ -404,10 +404,10 @@ fn packed_and_tensorkit_codecs_remain_distinct_compatible_options() {
         Some((parity, charge))
     );
     assert_ne!(
-        PackedRule::try_new(FermionParityFusionRule, U1FusionRule)
+        PackedRule::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap()
             .rule_identity(),
-        CantorRule::try_new(FermionParityFusionRule, U1FusionRule)
+        CantorRule::try_new(FermionParityFusionRule::new(), U1FusionRule)
             .unwrap()
             .rule_identity()
     );
@@ -416,7 +416,7 @@ fn packed_and_tensorkit_codecs_remain_distinct_compatible_options() {
 #[test]
 fn product_external_domain_sector_is_dualized_componentwise() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let a = rule.encode_component_ids(z2_odd(), u1(2));
     let external_domain = rule.dual(a);
     let hom = FusionTreeHomSpace::new(

@@ -48,7 +48,7 @@ use symtn::typed::Engine;
 use std::sync::Arc;
 
 use num_complex::Complex64;
-use symtn::sector::{FermionParityFusionRule, SU2Irrep, U1Irrep, Z2Irrep};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, SU2Irrep, U1Irrep};
 use symtn::typed::{
     ContractSpec, Direction, Eigh, Error, GradedSpace, HermitianTol, OperationError, Qr, Runtime,
     SectorSpectrum, Svd, TensorMap,
@@ -719,8 +719,8 @@ fn cuda_rows_match_host() {
 
 fn fz2_leg() -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
     )
     .unwrap()
 }
@@ -740,7 +740,7 @@ where
     let mut entries: Vec<(f64, [bool; 3])> = Vec::new();
     let a =
         TensorMap::<_, D>::from_subblock_fn(engine, runtime, [&leg, &dual], [&leg], |trees, ix| {
-            let odd = |s: &Z2Irrep| *s == Z2Irrep::ODD;
+            let odd = |s: &FermionParityIrrep| *s == FermionParityIrrep::ODD;
             let (co, dom) = (trees.codomain_uncoupled(), trees.domain_uncoupled());
             let x = conv(entry(0.7, ix[0] + 2 * ix[1], ix[1], ix[2]));
             let weight = Into::<Complex64>::into(x).norm_sqr();
@@ -791,7 +791,11 @@ where
         .unwrap()
         .into_iter()
         .map(|sector| {
-            let sign = if sector == Z2Irrep::ODD { -1.0 } else { 1.0 };
+            let sign = if sector == FermionParityIrrep::ODD {
+                -1.0
+            } else {
+                1.0
+            };
             let values: Vec<D> = (0..leg.degeneracy(&sector).unwrap())
                 .map(|i| conv(entry(0.3, i, i, i)))
                 .collect();
@@ -2207,8 +2211,8 @@ macro_rules! trace_rows {
 }
 
 /// The twist of a fermion parity sector: −1 when odd.
-fn odd_twist(s: &Z2Irrep) -> f64 {
-    if *s == Z2Irrep::ODD {
+fn odd_twist(s: &FermionParityIrrep) -> f64 {
+    if *s == FermionParityIrrep::ODD {
         -1.0
     } else {
         1.0

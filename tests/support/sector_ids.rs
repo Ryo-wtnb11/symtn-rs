@@ -5,7 +5,7 @@
 
 #![allow(dead_code)]
 
-use symtn_sectors::{SU2Irrep, SectorId, U1Irrep, Z2Irrep};
+use symtn_sectors::{FermionParityIrrep, SU2Irrep, SectorId, U1Irrep};
 
 pub fn u1(charge: i32) -> SectorId {
     U1Irrep::new(charge).sector_id()
@@ -17,11 +17,11 @@ pub fn excluded_u1_id() -> SectorId {
 }
 
 pub fn z2_even() -> SectorId {
-    Z2Irrep::EVEN.sector_id()
+    SectorId::from(FermionParityIrrep::EVEN)
 }
 
 pub fn z2_odd() -> SectorId {
-    Z2Irrep::ODD.sector_id()
+    SectorId::from(FermionParityIrrep::ODD)
 }
 
 pub fn su2(twice_spin: usize) -> SectorId {

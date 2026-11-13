@@ -12,7 +12,7 @@ fn assert_compact_svd_direct_copy_probe(recording: &crate::probe::Recording) {
 fn compact_svd_canonical_layout_skips_input_pack_and_factor_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical coupled storage reaches final factor destinations without numerical copies.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
@@ -35,7 +35,7 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     svd_compact(
         engine,
         &mut direct,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
     )
     .unwrap();
     assert_eq!(direct.counts().svd, 1);
@@ -56,7 +56,7 @@ fn direct_compact_svd_uses_owned_executor_outputs_only() {
     assert!(checked.counts().svd > 0);
     assert_eq!(checked.counts().svd_into, 0);
 
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut polar = ScriptedExecutor::<RejectSvdInto>::default();
     left_polar(engine, &mut polar, &bound.as_ref()).unwrap();
     assert_eq!(polar.counts().svd, 1);
@@ -88,7 +88,7 @@ fn assert_mf_compact_svd_fallback_owned_entry_stages<D: crate::factorize::Factor
         source.fusion_space().clone(),
     )
     .unwrap();
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let fallback_space = bound.space().adjoint_view().unwrap();
     let fallback = BoundDynamicTensorRef::try_new(&fallback_space, bound.data()).unwrap();
     let mut dense = ScriptedExecutor::<RejectSvdInto>::default();
@@ -242,7 +242,7 @@ fn compact_svd_adjoint_error_preserves_borrowed_input_and_publishes_no_factors()
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an SVD backend failure leaves the parent storage unchanged and
     // returns no partially constructed adjoint factors.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -257,7 +257,7 @@ fn compact_svd_adjoint_error_preserves_borrowed_input_and_publishes_no_factors()
 #[test]
 fn compact_svd_adjoint_late_error_preserves_borrowed_input_and_publishes_no_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -302,7 +302,7 @@ fn c64_svd_outputs(rows: usize, cols: usize) -> Vec<DenseTensor> {
 fn compact_owned_svd_preserves_svd_into_output_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 2);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let input = bound.as_ref();
     let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingSvdInput {
@@ -400,7 +400,7 @@ fn compact_owned_svd_preserves_svd_into_output_precedence() {
 fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a provider failure cannot mutate borrowed tensor storage or return partial factors.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingSvdInput>::default();
@@ -427,7 +427,7 @@ fn compact_svd_error_preserves_borrowed_input_and_publishes_no_factors() {
 
 fn assert_rectangular_direct_svd(rows: usize, cols: usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -512,7 +512,7 @@ fn compact_svd_zero_only_input_normalizes_to_an_empty_factorization_result() {
 fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: direct writes do not change the canonical phase chosen by the fallback.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(3, 3);
     let mut transposed_data = vec![0.0; 9];
     for col in 0..3 {
@@ -527,7 +527,7 @@ fn compact_svd_direct_and_fallback_apply_the_same_gauge() {
     let direct = svd_compact(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &transposed),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &transposed),
     )
     .unwrap();
     let bound = bound_tensor(Arc::new(rule), &tensor);
@@ -570,7 +570,7 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     use num_complex::Complex64;
 
     // What: one call reconstructs mixed rectangular complex sectors directly in final storage.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let homspace = FusionTreeHomSpace::new(
@@ -659,7 +659,7 @@ fn compact_svd_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: single-precision complex direct spans reconstruct both rectangular orientations.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = mixed_rectangular_c32_tensor();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
@@ -730,7 +730,7 @@ fn compact_svd_c32_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
 fn compact_svd_c32_direct_and_fallback_apply_the_same_gauge() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: the single-precision direct path preserves the fallback's canonical complex phase.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let real = rectangular_svd_tensor(3, 3);
     let data = real
         .data()
@@ -753,7 +753,7 @@ fn compact_svd_c32_direct_and_fallback_apply_the_same_gauge() {
     let direct = svd_compact(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &transposed),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &transposed),
     )
     .unwrap();
     assert_compact_svd_direct_copy_probe(&compact_svd_copy_rec);
@@ -924,7 +924,10 @@ fn svd_compact_preserves_asymmetric_non_self_dual_u1_factor_layouts() {
 
 #[test]
 fn svd_rejects_a_different_provider_before_dense_execution() {
-    let tensor = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let tensor = hermitian_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
 
     let _backend = ScriptedExecutor::new(RejectExecutorCalls);
     let error = match BoundTensorMap::try_new(Arc::new(U1FusionRule), tensor) {
@@ -959,10 +962,13 @@ fn public_svd_authority_rejects_same_type_with_different_identity_and_qdim() {
 
 #[test]
 fn svd_input_rejects_short_storage_before_dense_execution() {
-    let tensor = tsvd_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let tensor = tsvd_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
     let bound = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         tensor.fusion_space().clone(),
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
     )
     .unwrap();
     let short = &tensor.data()[..tensor.data().len() - 1];
@@ -982,8 +988,8 @@ fn svd_input_rejects_short_storage_before_dense_execution() {
 fn typed_svd_borrows_input_authority_and_retains_its_exact_allocation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: borrowed typed input creates no replacement authority, and every SVD factor inherits it.
-    let rule = Z2FusionRule;
-    let provider = Arc::new(rule);
+    let rule = ZNFusionRule::new(2).unwrap();
+    let provider = Arc::new(rule.clone());
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let input = bound_tensor(Arc::clone(&provider), &tensor);
     let first = input.as_ref();
@@ -1003,7 +1009,7 @@ fn typed_svd_borrows_input_authority_and_retains_its_exact_allocation() {
 
 fn assert_zero_axis_svd_compact(rows: usize, cols: usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(rows, cols);
     let input = bound_tensor(Arc::new(rule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -1331,7 +1337,7 @@ fn compact_svd_adjoint_direct_factors_follow_the_parent_row_gauge() {
         source.fusion_space().clone(),
     )
     .unwrap();
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_svd_copy_rec = crate::probe::record();
     let (u, vh, spectrum) =

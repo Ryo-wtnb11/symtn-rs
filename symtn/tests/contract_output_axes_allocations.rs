@@ -9,8 +9,8 @@ use std::hint::black_box;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 
@@ -215,15 +215,15 @@ fn warm_output_axes_fz2_u1_costs_no_more_than_contract_then_permute() {
     let _serial = crate::counting_alloc::serial();
     let parity = |q: i32| {
         if q.rem_euclid(2) == 0 {
-            Z2Irrep::EVEN
+            FermionParityIrrep::EVEN
         } else {
-            Z2Irrep::ODD
+            FermionParityIrrep::ODD
         }
     };
     assert_output_axes_cost!(
         engine,
         ProductFusionRule::<FermionParityFusionRule, U1FusionRule>::try_new(
-            FermionParityFusionRule,
+            FermionParityFusionRule::new(),
             U1FusionRule
         )
         .unwrap(),

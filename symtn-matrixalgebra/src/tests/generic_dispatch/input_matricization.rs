@@ -622,7 +622,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: svd_vals descending, eigh_vals ascending, eig_vals ascending
     // lexicographic (re, im) within every sector.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let hermitian = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let general = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
@@ -630,7 +630,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
     let svd = svd_vals(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &general),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &general),
     )
     .unwrap();
     assert!(!svd.is_empty());
@@ -642,7 +642,7 @@ fn spectrum_only_entry_points_return_the_published_orders() {
     let eigh = eigh_vals(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &hermitian),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &hermitian),
     )
     .unwrap();
     assert!(!eigh.is_empty());
@@ -678,21 +678,21 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     assert!(svd_vals(
         engine,
         &mut reject,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &empty)
     )
     .unwrap()
     .is_empty());
     assert!(eigh_vals(
         engine,
         &mut reject,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &empty)
     )
     .unwrap()
     .is_empty());
     assert!(eig_vals(
         engine,
         &mut reject,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &empty)
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &empty)
     )
     .unwrap()
     .is_empty());
@@ -701,7 +701,7 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
         0
     );
 
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
     let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
@@ -710,19 +710,19 @@ fn values_only_public_boundaries_distinguish_empty_sectors_from_a_scalar() {
     let svd = svd_vals(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &scalar),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &scalar),
     )
     .unwrap();
     let eigh = eigh_vals(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &scalar),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &scalar),
     )
     .unwrap();
     let eig = eig_vals(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &scalar),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &scalar),
     )
     .unwrap();
     assert_eq!(svd[0].sector, rule.vacuum());
@@ -739,8 +739,8 @@ fn values_only_second_sector_failures_publish_no_partial_spectrum() {
     // What: after one successful sector, each dense values failure returns Err
     // without exposing the accumulated prefix or mutating borrowed input.
     let sectors = [SectorId::new(0), SectorId::new(1)];
-    let general = tsvd_test_tensor(&Z2FusionRule, &sectors);
-    let hermitian = hermitian_test_tensor(&Z2FusionRule, &sectors);
+    let general = tsvd_test_tensor(&ZNFusionRule::new(2).unwrap(), &sectors);
+    let hermitian = hermitian_test_tensor(&ZNFusionRule::new(2).unwrap(), &sectors);
     for operation in [
         ValuesOperation::Svd,
         ValuesOperation::Eigh,
@@ -751,7 +751,7 @@ fn values_only_second_sector_failures_publish_no_partial_spectrum() {
         } else {
             &general
         };
-        let input = bound_tensor(Arc::new(Z2FusionRule), tensor);
+        let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), tensor);
         let before = input.data().to_vec();
         let mut dense = fail_second_values(operation);
         let result = match operation {
@@ -772,7 +772,7 @@ fn values_only_ties_follow_the_published_order() {
     // What: equal singular values keep the provider's order, the provider's
     // ascending EIGH spectrum (with a ±2 pair) is published unchanged, and a
     // conjugate EIG pair is published in (re, im) order.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let svd_input =
         one_sector_rectangular_matrix(vec![2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0], 3, 3);
     let eigh_input =
@@ -830,13 +830,13 @@ fn values_only_ties_follow_the_published_order() {
     let direct_svd = svd_vals(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &svd_input),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &svd_input),
     )
     .unwrap();
     let direct_eigh = eigh_vals(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(rule), &eigh_input),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &eigh_input),
     )
     .unwrap();
     let direct_eig = eig_vals(
@@ -859,7 +859,7 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     // not bit-for-bit: LAPACK backends may route the vectors-vs-no-vectors
     // cases through different routines (e.g. `gesdd` divide-and-conquer for the
     // full SVD vs `gesvd` QR for values-only), which differ in the last ULPs.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let hermitian = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let general = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
@@ -879,13 +879,13 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     let svd_vals_spectra = svd_vals(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &general),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &general),
     )
     .unwrap();
     let svd_compact_spectra = svd_compact(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &general),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &general),
     )
     .unwrap()
     .singular_values;
@@ -894,13 +894,13 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     let eigh_vals_spectra = eigh_vals(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &hermitian),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &hermitian),
     )
     .unwrap();
     let eigh_full_spectra = eigh_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &hermitian),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &hermitian),
     )
     .unwrap()
     .eigenvalues;
@@ -909,7 +909,7 @@ fn values_only_entry_points_match_untruncated_decomposition_spectra() {
     let eig_vals_spectra = eig_vals(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &general),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &general),
     )
     .unwrap();
     let eig_full_spectra = eig_full(

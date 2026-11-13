@@ -502,14 +502,17 @@ pub(crate) fn try_map_array<T, U, E, const N: usize>(
 /// | --- | --- |
 /// | an id names no object, or its label overflows | `InvalidSector` |
 /// | a label is foreign or its index does not fit an id | `UnrepresentableSectorLabel` |
-/// | a fusion outcome does not fit an id | `FusionNotRepresentable` |
+/// | a fusion outcome does not fit an id or overflows the category's label type | `FusionNotRepresentable` |
 /// | the category is not enumerable, or the category failed | `CategoryFailure` |
 ///
 /// Fusion channels keep the category's order. The sector order is the
-/// enumeration order. Equal category values give equal rule identities, so
-/// two independently constructed rules over equal categories share caches
-/// while both are alive; the identity refers to the category weakly and
-/// never keeps it alive after the last rule over it is dropped.
+/// enumeration order. Checked queries validate their ids in argument order
+/// (for `N`: left, right, then coupled), so the first invalid argument is the
+/// reported `InvalidSector`. Equal category values give equal rule identities, so
+/// two independently constructed rules over equal categories share caches.
+/// A category with drop glue is referred to weakly and shares only while a
+/// rule over it is alive; one without (Z_N, fermion parity, CU(1)) is held by
+/// the identity and shares for as long as the identity exists.
 pub struct EnumeratedCodec<M, U = CanonicalUnitAdmission>(PhantomData<fn() -> (M, U)>);
 
 #[allow(
@@ -647,13 +650,36 @@ where
             .collect()
     }
 
-    fn map_error(
-        &self,
-        _inputs: &[SectorId],
-        error: CategoryAdapterError<C::Error>,
-    ) -> Self::Error {
-        fusion_algebra_error(error)
+    fn map_error(&self, inputs: &[SectorId], error: CategoryAdapterError<C::Error>) -> Self::Error {
+        match (&error, inputs) {
+            (CategoryAdapterError::Provider(source), &[left, right])
+                if is_label_overflow(source) =>
+            {
+                FusionAlgebraError::FusionNotRepresentable { left, right }
+            }
+            _ => fusion_algebra_error(error),
+        }
     }
+}
+
+/// Whether a two-input category failure is fusion-symbols' typed label
+/// overflow: a fusion channel the category's label type cannot hold.
+///
+/// Why not every two-input provider failure: an authority's own failure (a
+/// malformed table, an I/O error) must keep its source in `CategoryFailure`;
+/// only the typed overflow means that the outcome is not representable.
+fn is_label_overflow(error: &dyn core::any::Any) -> bool {
+    use fusion_symbols::lie::{CU1Error, LieError, U1Error};
+    matches!(
+        error.downcast_ref::<CU1Error>(),
+        Some(CU1Error::LabelOverflow { .. })
+    ) || matches!(
+        error.downcast_ref::<U1Error>(),
+        Some(U1Error::LabelOverflow { .. })
+    ) || matches!(
+        error.downcast_ref::<LieError>(),
+        Some(LieError::LabelOverflow)
+    )
 }
 
 /// The multiplicity-free translation of an adapter failure: a foreign id is
@@ -792,8 +818,9 @@ where
 /// ```
 #[derive(Clone, Debug)]
 pub struct CategoryRule<C, K> {
-    // Why an `Arc`: a value identity refers to the category weakly, so that
-    // a cache key never keeps it alive after the last clone of the rule.
+    // Why an `Arc`: a value identity refers to a category with drop glue
+    // weakly, so that a cache key never keeps it alive after the last clone
+    // of the rule.
     category: Arc<C>,
     codec: K,
     identity: RuleIdentity,
@@ -1043,10 +1070,6 @@ macro_rules! category_provider_via_adapter {
 }
 category_provider_via_adapter!(
     crate::U1FusionRule => fusion_symbols::lie::U1,
-    crate::Z2FusionRule => fusion_symbols::finite::ZN,
-    crate::ZNFusionRule => fusion_symbols::finite::ZN,
-    crate::FermionParityFusionRule => fusion_symbols::fermion::FermionParity,
-    crate::CU1FusionRule => fusion_symbols::lie::CU1,
     crate::SU2FusionRule => fusion_symbols::lie::LieGroup,
     crate::TableRule => fusion_symbols::table::TableCategory
 );

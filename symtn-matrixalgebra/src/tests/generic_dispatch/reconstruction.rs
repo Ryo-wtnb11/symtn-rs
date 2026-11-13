@@ -104,7 +104,10 @@ where
 
 #[test]
 fn tsvd_fusion_reconstructs_z2_tensor_coupled_layout() {
-    run_tsvd_reconstruction_case(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    run_tsvd_reconstruction_case(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
 }
 
 #[test]
@@ -134,7 +137,7 @@ fn tsvd_fusion_reconstructs_u1_tensor() {
 fn tsvd_fusion_reconstructs_fermion_parity_tensor() {
     // What: the canonical direct SVD preserves both fermion-parity sectors.
     run_tsvd_reconstruction_case(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
     );
 }
@@ -142,9 +145,11 @@ fn tsvd_fusion_reconstructs_fermion_parity_tensor() {
 #[test]
 fn tsvd_fusion_reconstructs_product_rule_tensor() {
     // What: direct sector spans are keyed by the encoded product SectorId.
-    let rule =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let rule = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let sectors = [
         rule.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         rule.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -243,9 +248,11 @@ fn compact_factors_do_not_relabel_the_lowest_u1_sector() {
 fn compact_factorizations_do_not_relabel_product_lowest_u1_sectors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: product-sector factors inherit the no-relabel contract for compact SVD, QR, LQ, and full EIGH.
-    let rule =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let rule = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let minimum = rule
         .try_encode_component_ids(SectorId::new(1), U1Irrep::new(i32::MIN + 1).sector_id())
         .unwrap();
@@ -326,13 +333,13 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
         ),
     ] {
         if rule_case == 0 {
-            let rule = Z2FusionRule;
+            let rule = ZNFusionRule::new(2).unwrap();
             let tensor = tsvd_test_tensor(&rule, &sectors);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let Qr { q, r } = qr_compact(
                 engine,
                 &mut dense_executor,
-                &bound_tensor_ref!(Arc::new(rule), &tensor),
+                &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
             )
             .unwrap();
             let reconstructed = contract_pair(&rule, &tensor, &q, &r);
@@ -357,13 +364,13 @@ fn leftorth_fusion_reconstructs_z2_and_su2_tensors() {
 fn rightorth_fusion_reconstructs_z2_and_su2_tensors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     {
-        let rule = Z2FusionRule;
+        let rule = ZNFusionRule::new(2).unwrap();
         let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
         let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
         let Lq { l, q } = lq_compact(
             engine,
             &mut dense_executor,
-            &bound_tensor_ref!(Arc::new(rule), &tensor),
+            &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
         )
         .unwrap();
         let reconstructed = contract_pair(&rule, &tensor, &l, &q);
@@ -639,14 +646,16 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
 
     let fz2 = [SectorId::new(0), SectorId::new(1)];
     assert_value_region_paths_match(
-        Arc::new(FermionParityFusionRule),
-        &tsvd_test_tensor(&FermionParityFusionRule, &fz2),
-        &hermitian_test_tensor(&FermionParityFusionRule, &fz2),
+        Arc::new(FermionParityFusionRule::new()),
+        &tsvd_test_tensor(&FermionParityFusionRule::new(), &fz2),
+        &hermitian_test_tensor(&FermionParityFusionRule::new(), &fz2),
     );
 
-    let product =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -662,7 +671,7 @@ fn value_region_paths_match_packed_oracles_across_supported_rules() {
 fn value_region_paths_match_packed_oracles_for_complex64() {
     // What: borrowed C64 spans preserve nonreal general matrices and conjugate
     // off-diagonal Hermitian matrices across all three values-only operations.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let general = tsvd_test_tensor(&rule, &sectors);
     let hermitian = hermitian_test_tensor(&rule, &sectors);
@@ -700,8 +709,8 @@ fn value_region_paths_match_packed_oracles_for_complex64() {
     assert_value_region_paths_match(Arc::new(rule), &general, &hermitian);
 }
 
-fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<Z2FusionRule> {
-    let provider = Arc::new(Z2FusionRule);
+fn lowered_z2_binding(tensor: &TestTensor<f64>) -> BoundDynamicFusionMapSpace<ZNFusionRule> {
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
     let raw = tensor.fusion_space().clone();
     let hom = raw.homspace().clone();
     // Why not caller-supplied per-tree shapes: the shape-admission bridge is
@@ -717,11 +726,14 @@ fn ordinary_factorizations_and_composition_inherit_lowered_layout_strategy() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: cold compact SVD, compact QR, full EIGH, adjoint, and factor
     // composition all retain the ordinary built-in layout-build strategy.
-    let tensor = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let tensor = hermitian_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
     let bound = lowered_z2_binding(&tensor);
     let expert = BoundDynamicFusionMapSpace::bind_multiplicity_free(
         tensor.fusion_space().clone(),
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
     )
     .unwrap();
     let malformed = FusionTreeHomSpace::new(
@@ -760,11 +772,17 @@ fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_a
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: each owned output keeps the caller's provider allocation, not an
     // equal provider of the same type seen by an earlier call.
-    let hermitian = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let general = tsvd_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    let hermitian = hermitian_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
+    let general = tsvd_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
     let rectangular = rectangular_svd_tensor(7, 5);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
-    let mut output_providers = |provider: &Arc<Z2FusionRule>| {
+    let mut output_providers = |provider: &Arc<ZNFusionRule>| {
         let hermitian = bound_tensor(Arc::clone(provider), &hermitian);
         let general = bound_tensor(Arc::clone(provider), &general);
         let rectangular = bound_tensor(Arc::clone(provider), &rectangular);
@@ -807,8 +825,8 @@ fn every_factorization_and_matrix_function_retains_each_callers_exact_provider_a
         .map(|(op, arc)| (op, Arc::clone(arc)))
     };
 
-    let first_provider = Arc::new(Z2FusionRule);
-    let second_provider = Arc::new(Z2FusionRule);
+    let first_provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let second_provider = Arc::new(ZNFusionRule::new(2).unwrap());
     for provider in [&first_provider, &second_provider] {
         for (op, output) in output_providers(provider) {
             assert!(Arc::ptr_eq(&output, provider), "{op}");
@@ -910,7 +928,7 @@ fn compact_factorizations_reject_a_malformed_executor_batch() {
     // repeated or misplaced delivery is symtn's own typed arity error,
     // never a dropped sector, a panic or a backend error; a missing factor
     // keeps the per-matrix path's error.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let input = bound.as_ref();
@@ -1088,7 +1106,7 @@ fn compact_factorizations_reject_a_malformed_destination_batch() {
     // staging stop wins over whatever the executor returns after ignoring
     // it; the solver-first QR/SVD batches let a later solver failure win
     // over an earlier malformed output.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let input = bound.as_ref();
@@ -1160,7 +1178,7 @@ fn direct_factor_destinations_are_the_published_allocations() {
     // What: the direct-region QR, LQ, SVD and eigh batches hand each sector a
     // destination inside the factor buffer the operation publishes, so a
     // delivered factor reaches the result with no further payload copy.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -1191,7 +1209,7 @@ fn direct_factor_destinations_are_the_published_allocations() {
     let eigh = crate::factorize::eigh_full(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &hermitian),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &hermitian),
     )
     .unwrap();
     let staged = recording.staged_destinations();

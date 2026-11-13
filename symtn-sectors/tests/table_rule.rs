@@ -66,7 +66,7 @@ fn every_shipped_entry_constructs_with_its_own_identity() {
     }
     assert_eq!(identities.len(), 74);
     for closed in [
-        symtn_sectors::Z2FusionRule.rule_identity(),
+        symtn_sectors::ZNFusionRule::new(2).unwrap().rule_identity(),
         symtn_sectors::ZNFusionRule::new(2).unwrap().rule_identity(),
     ] {
         assert!(!identities.contains(&closed));

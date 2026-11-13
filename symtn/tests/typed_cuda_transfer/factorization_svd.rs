@@ -1,4 +1,5 @@
 use super::*;
+use symtn::sector::ZNIrrep;
 
 fn host_svd_trunc<R, D>(
     engine: &mut dyn symtn::typed::Engine,
@@ -221,10 +222,10 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
         .all(|value| *value == 0.0));
     assert_typed_cuda_svd_matches_host(engine, cuda, &all_zero);
 
-    let fermion = Arc::new(FermionParityFusionRule);
+    let fermion = Arc::new(FermionParityFusionRule::new());
     let fermion_leg = GradedSpace::try_new(
         Arc::clone(&fermion),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let fermion_tensor = TensorMap::from_subblock_fn(
@@ -238,14 +239,17 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
     assert_typed_cuda_svd_matches_host(engine, cuda, &fermion_tensor);
 
     let product = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();
@@ -260,8 +264,16 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
     assert_typed_cuda_svd_matches_host(engine, cuda, &product_tensor);
 
     let zn3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let charge0 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(0), 2)]).unwrap();
-    let charge1 = GradedSpace::try_new(Arc::clone(&zn3), [(zn3.irrep(1), 3)]).unwrap();
+    let charge0 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(0, zn3.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
+    let charge1 = GradedSpace::try_new(
+        Arc::clone(&zn3),
+        [(ZNIrrep::new(1, zn3.category().modulus()).unwrap(), 3)],
+    )
+    .unwrap();
     let empty: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge0], [&charge1], |_, _| 1.0).unwrap();
     assert_typed_cuda_svd_matches_host(engine, cuda, &empty);
@@ -481,10 +493,10 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
         &Truncation::rank(3),
     );
 
-    let fermion = Arc::new(FermionParityFusionRule);
+    let fermion = Arc::new(FermionParityFusionRule::new());
     let fermion_leg = GradedSpace::try_new(
         Arc::clone(&fermion),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let fermion_tensor = TensorMap::from_subblock_fn(
@@ -503,14 +515,17 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     );
 
     let product = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 1),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
         ],
     )
     .unwrap();

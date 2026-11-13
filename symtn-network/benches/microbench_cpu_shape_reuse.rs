@@ -10,7 +10,8 @@ use std::time::Instant;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, U1FusionRule,
+    U1Irrep,
 };
 use symtn::sector::{
     CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols, SectorCodec,
@@ -588,33 +589,38 @@ fn u1_redistribution() -> Vec<Vec<(U1Irrep, usize)>> {
 
 type FermionU1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 
-fn fermion_u1_patterns() -> Vec<Vec<(symtn::sector::ProductSector<Z2Irrep, U1Irrep>, usize)>> {
+fn fermion_u1_patterns() -> Vec<
+    Vec<(
+        symtn::sector::ProductSector<FermionParityIrrep, U1Irrep>,
+        usize,
+    )>,
+> {
     let sector = product_sector;
     vec![
         vec![
-            (sector(Z2Irrep::EVEN, U1Irrep::new(0)), 16),
-            (sector(Z2Irrep::ODD, U1Irrep::new(1)), 16),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 16),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 16),
         ],
         vec![
-            (sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
         ],
         vec![
-            (sector(Z2Irrep::EVEN, U1Irrep::new(0)), 1),
-            (sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
         ],
         vec![
-            (sector(Z2Irrep::EVEN, U1Irrep::new(0)), 3),
-            (sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 3),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
         ],
-        vec![(sector(Z2Irrep::EVEN, U1Irrep::new(0)), 1)],
+        vec![(sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1)],
         vec![
-            (sector(Z2Irrep::ODD, U1Irrep::new(-1)), 2),
-            (sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
         ],
         vec![
-            (sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
+            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
         ],
     ]
 }
@@ -678,7 +684,7 @@ fn run_child(engine: &mut dyn Engine, case: &str, workspace_mode: &str) {
             case,
             Arc::new(
                 symtn_core::ProductFusionRule::<_, _>::try_new(
-                    FermionParityFusionRule,
+                    FermionParityFusionRule::new(),
                     U1FusionRule,
                 )
                 .unwrap(),
@@ -692,7 +698,7 @@ fn run_child(engine: &mut dyn Engine, case: &str, workspace_mode: &str) {
             case,
             Arc::new(
                 symtn_core::ProductFusionRule::<_, _>::try_new(
-                    FermionParityFusionRule,
+                    FermionParityFusionRule::new(),
                     U1FusionRule,
                 )
                 .unwrap(),

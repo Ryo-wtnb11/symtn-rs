@@ -17,9 +17,9 @@
 use std::panic::{self, AssertUnwindSafe};
 
 use symtn_sectors::{
-    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FusionRule,
-    MultiplicityFreeRigidSymbols, SU2FusionRule, SectorId, TableRule, U1FusionRule, U1Irrep,
-    Z2FusionRule, Z2Irrep, ZNFusionRule, CU1_MAX_TWICE_CHARGE,
+    CU1FusionRule, CU1Irrep, CheckedFusionAlgebra, FermionParityFusionRule, FermionParityIrrep,
+    FusionRule, MultiplicityFreeRigidSymbols, SU2FusionRule, SectorCodec, SectorId, TableRule,
+    U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep,
 };
 
 fn assert_dual_forwards<R: FusionRule + CheckedFusionAlgebra>(rule: &R, ids: &[SectorId]) {
@@ -102,7 +102,9 @@ fn all_triples(ids: &[SectorId]) -> Vec<(SectorId, SectorId, SectorId)> {
 #[test]
 fn zn_infallible_entry_points_match_checked_domain() {
     let rule = ZNFusionRule::new(5).unwrap();
-    let valid: Vec<SectorId> = (0..5i64).map(|c| rule.irrep(c).into()).collect();
+    let valid: Vec<SectorId> = (0..5i64)
+        .map(|c| SectorId::from(ZNIrrep::new(c, 5).unwrap()))
+        .collect();
     let invalid = [
         SectorId::new(5),
         SectorId::new(6),
@@ -116,27 +118,11 @@ fn zn_infallible_entry_points_match_checked_domain() {
 }
 
 #[test]
-fn z2_infallible_entry_points_match_checked_domain() {
-    let rule = Z2FusionRule;
-    let ids = [
-        Z2Irrep::EVEN.sector_id(),
-        Z2Irrep::ODD.sector_id(),
-        SectorId::new(2),
-        SectorId::new(3),
-        SectorId::new(usize::MAX),
-    ];
-
-    assert_dual_forwards(&rule, &ids);
-    assert_fusion_channels_forwards(&rule, &all_pairs(&ids));
-    assert_nsymbol_forwards(&rule, &all_triples(&ids));
-}
-
-#[test]
 fn fermion_parity_infallible_entry_points_match_checked_domain() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let ids = [
-        Z2Irrep::EVEN.sector_id(),
-        Z2Irrep::ODD.sector_id(),
+        SectorId::from(FermionParityIrrep::EVEN),
+        SectorId::from(FermionParityIrrep::ODD),
         SectorId::new(2),
         SectorId::new(usize::MAX),
     ];
@@ -195,8 +181,8 @@ fn su2_infallible_entry_points_match_checked_domain() {
 
 #[test]
 fn cu1_infallible_entry_points_match_checked_domain() {
-    let rule = CU1FusionRule;
-    let big = CU1Irrep::from_twice_charge(CU1_MAX_TWICE_CHARGE);
+    let rule = CU1FusionRule::new();
+    let big = CU1Irrep::from_twice_charge(u32::MAX);
     let valid: Vec<SectorId> = [
         CU1Irrep::VACUUM,
         CU1Irrep::PSEUDOSCALAR,
@@ -205,13 +191,13 @@ fn cu1_infallible_entry_points_match_checked_domain() {
         CU1Irrep::from_twice_charge(3),
         big,
     ]
-    .into_iter()
-    .map(Into::into)
+    .iter()
+    .map(|label| rule.encode_sector(label).unwrap())
     .collect();
-    // `big` fused with itself doubles past `CU1_MAX_TWICE_CHARGE`: both
+    // `big` fused with itself doubles past the `u32` twice charge: both
     // inputs representable, generated output is not.
     let invalid = [
-        SectorId::new(CU1_MAX_TWICE_CHARGE as usize + 2),
+        SectorId::new(u32::MAX as usize + 2),
         SectorId::new(usize::MAX),
     ];
     let ids: Vec<SectorId> = valid.iter().copied().chain(invalid).collect();
@@ -274,10 +260,9 @@ fn infallible_symbols_reject_out_of_domain_ids() {
     let zn = ZNFusionRule::new(5).unwrap();
     let vacuum = zn.vacuum();
     assert_symbols_reject(&zn, vacuum, SectorId::new(5));
-    assert_symbols_reject(&Z2FusionRule, Z2Irrep::EVEN.sector_id(), SectorId::new(2));
     assert_symbols_reject(
-        &FermionParityFusionRule,
-        Z2Irrep::EVEN.sector_id(),
+        &FermionParityFusionRule::new(),
+        SectorId::from(FermionParityIrrep::EVEN),
         SectorId::new(2),
     );
     // The excluded charge i32::MIN.
@@ -287,8 +272,8 @@ fn infallible_symbols_reject_out_of_domain_ids() {
         SectorId::new(u32::MAX as usize),
     );
     assert_symbols_reject(
-        &CU1FusionRule,
-        CU1Irrep::VACUUM.sector_id(),
-        SectorId::new(CU1_MAX_TWICE_CHARGE as usize + 2),
+        &CU1FusionRule::new(),
+        CU1FusionRule::new().vacuum(),
+        SectorId::new(u32::MAX as usize + 2),
     );
 }

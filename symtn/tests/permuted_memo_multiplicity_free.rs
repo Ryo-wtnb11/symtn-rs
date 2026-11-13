@@ -3,6 +3,7 @@
 //! bit-identical to the cold derivation; a cleared cache serves no memo.
 
 use symtn::cache::StructureCacheKind;
+use symtn::sector::ZNIrrep;
 use symtn::sector::{SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, ZNFusionRule};
 use symtn::typed::Engine;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
@@ -82,7 +83,12 @@ fn warm_multiplicity_free_permute_reuses_the_memoized_destination() {
     let z3 = ZNFusionRule::new(3).unwrap();
     let z3_leg = GradedSpace::try_new(
         std::sync::Arc::new(z3.clone()),
-        (0..3).map(|q| (z3.irrep(q), q as usize + 1)),
+        (0..3).map(|q| {
+            (
+                ZNIrrep::new(q, z3.category().modulus()).unwrap(),
+                q as usize + 1,
+            )
+        }),
     )
     .unwrap();
     assert_memoized!(engine, "Z3", &runtime, z3_leg);

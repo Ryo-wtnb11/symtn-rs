@@ -8,8 +8,11 @@ fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // The adjoint view of a square endomorphism has the input's hom space but
     // transposed strides: an admitted, noncanonical output layout.
-    let source = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &source);
+    let source = hermitian_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &source);
     let output = bound.space().adjoint_view().unwrap();
     assert_eq!(output.space().homspace(), bound.space().space().homspace());
     assert_ne!(
@@ -38,8 +41,11 @@ fn square_matrix_function_rejects_noncanonical_admitted_output_before_kernel() {
 #[test]
 fn dense_only_matrix_function_refuses_adjoint_and_diagonal_before_leasing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let source = hermitian_test_tensor(&Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &source);
+    let source = hermitian_test_tensor(
+        &ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &source);
     let leases = Cell::new(0);
     let adjoint = matrix_function(
         engine,
@@ -123,7 +129,7 @@ fn generic_exp_direct_reuses_the_exact_input_provider_and_layout() {
 fn pinv_rejects_invalid_rcond_before_dense_execution() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: invalid cutoff policy is rejected without entering the factorization backend.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let input = bound_tensor(Arc::new(rule), &tensor);
     for rcond in [-1.0, f64::NAN, f64::INFINITY] {
@@ -138,7 +144,7 @@ fn pinv_rejects_invalid_rcond_before_dense_execution() {
 #[test]
 fn exp_of_a_hermitian_tensor_inverts_under_negation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let raw = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     // Keep the spectrum modest so exp(t) exp(-t) stays well conditioned.
     let tensor = TestTensor::<f64>::from_vec_with_fusion_space(
@@ -157,13 +163,13 @@ fn exp_of_a_hermitian_tensor_inverts_under_negation() {
     let forward = exp(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     let backward = exp(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &negated),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &negated),
     )
     .unwrap();
     let identity =
@@ -174,7 +180,7 @@ fn exp_of_a_hermitian_tensor_inverts_under_negation() {
 #[test]
 fn pinv_satisfies_the_moore_penrose_identity() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let degeneracy = 2usize;
     let leg = || SectorLeg::new(sectors.iter().map(|&sector| (sector, degeneracy)), false);
@@ -198,7 +204,7 @@ fn pinv_satisfies_the_moore_penrose_identity() {
     let plus = pinv(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
         1e-12,
     )
     .unwrap();
@@ -223,7 +229,7 @@ fn pinv_satisfies_the_moore_penrose_identity() {
 #[test]
 fn inv_composes_to_the_identity() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = hermitian_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     assert!(tensor
         .structure()
@@ -237,7 +243,7 @@ fn inv_composes_to_the_identity() {
         engine,
         &mut dense_executor,
         &mut context,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     // One destination batch; its default solves each sector with one
@@ -834,13 +840,15 @@ fn inv_uses_sector_local_scale_for_su2_fz2_and_product_rules() {
         ],
     );
     assert_scale_separated_inverse(
-        FermionParityFusionRule,
+        FermionParityFusionRule::new(),
         [SectorId::new(0), SectorId::new(1)],
     );
 
-    let fz2_u1 =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let fz2_u1 = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         fz2_u1.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         fz2_u1.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -1133,7 +1141,7 @@ fn inv_accepts_a_zero_dimensional_endomorphism_without_dense_execution() {
         engine,
         &mut dense,
         &mut context,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), &tensor),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor),
     )
     .unwrap();
 
@@ -1145,7 +1153,7 @@ fn inv_accepts_a_zero_dimensional_endomorphism_without_dense_execution() {
 fn inv_solves_the_rank_zero_scalar_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a rank-zero scalar is one 1x1 vacuum-sector solve, not an empty tensor.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let homspace =
         FusionTreeHomSpace::new(FusionProductSpace::new([]), FusionProductSpace::new([]));
     let space = DynamicFusionMapSpace::from_final_homspace(&rule, homspace).unwrap();
@@ -2601,7 +2609,10 @@ fn mf_pinv_exp_and_polar_publish_no_factor_layout() {
             "SVD factor layout"
         );
     }
-    check(Z2FusionRule, &[SectorId::new(0), SectorId::new(1)]);
+    check(
+        ZNFusionRule::new(2).unwrap(),
+        &[SectorId::new(0), SectorId::new(1)],
+    );
     check(
         SU2FusionRule,
         &[

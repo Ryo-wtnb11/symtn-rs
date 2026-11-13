@@ -1,9 +1,10 @@
+use symtn_sectors::ZNIrrep;
 use symtn_sectors::{
     BraidingStyleKind, CanonicalUnitFusionRule, CheckedFusionAlgebra, FermionParityFusionRule,
-    FusionAlgebraError, FusionRule, FusionStyleKind, GenericFArray, GenericFusionSymbols,
-    GenericRMatrix, MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols,
-    MultiplicityFreeRigidSymbols, RuleIdentity, SectorId, SectorVec, U1FusionRule, U1Irrep,
-    Z2FusionRule, Z2Irrep,
+    FermionParityIrrep, FusionAlgebraError, FusionRule, FusionStyleKind, GenericFArray,
+    GenericFusionSymbols, GenericRMatrix, MultiplicityFreeFusionRule,
+    MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols, RuleIdentity, SectorId, SectorVec,
+    U1FusionRule, U1Irrep, ZNFusionRule,
 };
 
 #[derive(Clone, Copy)]
@@ -291,9 +292,9 @@ fn builtin_abelian_providers_keep_their_portable_symbol_contracts() {
     // What: the provider types now owned by symtn-sectors retain their
     // representative fusion, dual, F/R, and rigid-symbol behavior without
     // importing the fusion-tree engine.
-    let even = Z2Irrep::EVEN.sector_id();
-    let odd = Z2Irrep::ODD.sector_id();
-    let z2 = Z2FusionRule;
+    let even = SectorId::from(ZNIrrep::new(0, 2).unwrap());
+    let odd = SectorId::from(ZNIrrep::new(1, 2).unwrap());
+    let z2 = ZNFusionRule::new(2).unwrap();
     assert_eq!(z2.dual(odd), odd);
     assert_eq!(z2.fusion_channels(odd, odd), [even].into());
     assert_eq!(z2.f_symbol_scalar(odd, odd, odd, odd, even, even), 1.0);
@@ -302,7 +303,9 @@ fn builtin_abelian_providers_keep_their_portable_symbol_contracts() {
     assert_eq!(z2.twist_scalar(odd), 1.0);
     assert_eq!(z2.frobenius_schur_phase_scalar(odd), 1.0);
 
-    let fermion = FermionParityFusionRule;
+    let even = SectorId::from(FermionParityIrrep::EVEN);
+    let odd = SectorId::from(FermionParityIrrep::ODD);
+    let fermion = FermionParityFusionRule::new();
     assert_eq!(fermion.dual(odd), odd);
     assert_eq!(fermion.fusion_channels(odd, odd), [even].into());
     assert_eq!(fermion.f_symbol_scalar(odd, odd, odd, odd, even, even), 1.0);

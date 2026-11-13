@@ -47,10 +47,10 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
         .unwrap(),
     );
 
-    let fz2_rule = Arc::new(FermionParityFusionRule);
+    let fz2_rule = Arc::new(FermionParityFusionRule::new());
     let fz2 = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     assert_roundtrip(
@@ -79,14 +79,17 @@ fn builtin_and_simple_product_providers_round_trip_through_the_device() {
     );
 
     let product_rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            U1FusionRule,
+            FermionParityFusionRule::new(),
+        )
+        .unwrap(),
     );
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 1),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 2),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 1),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
         ],
     )
     .unwrap();
@@ -153,8 +156,8 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
     );
 
     let fz2 = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 2)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap();
     assert_c64_roundtrip(
@@ -193,13 +196,13 @@ fn typed_cuda_c64_roundtrip_is_bit_exact_across_providers() {
         Arc::new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
                 U1FusionRule,
-                FermionParityFusionRule,
+                FermionParityFusionRule::new(),
             )
             .unwrap(),
         ),
         [
-            (product_sector(U1Irrep::new(0), Z2Irrep::EVEN), 1),
-            (product_sector(U1Irrep::new(1), Z2Irrep::ODD), 2),
+            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 1),
+            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
         ],
     )
     .unwrap();

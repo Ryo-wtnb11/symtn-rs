@@ -10,6 +10,7 @@ use std::sync::Arc;
 use symtn::typed::{GradedSpace, Runtime, TensorMap};
 
 use crate::legs::u1_leg_2_1_2;
+use symtn::sector::ZNIrrep;
 
 /// The fill `typed_cuda_transform.rs` uses.
 fn real_fill<S: std::fmt::Debug>(_trees: &symtn::typed::BlockFusionTrees<S>, idx: &[usize]) -> f64 {
@@ -92,8 +93,16 @@ fn the_host_into_preconditions_have_a_fixed_order_and_wording() {
     let other = Runtime::builder().build().unwrap();
     let z2 = Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(symtn::sector::ZNFusionRule::new(3).unwrap());
-    let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2)]).unwrap();
-    let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 2)]).unwrap();
+    let z2_leg = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(ZNIrrep::new(0, z2.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
+    let z3_leg = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
     let zn_fill = |_: &_, indices: &[usize]| indices.iter().map(|&i| i as f64 + 1.0).sum::<f64>();
     let z2_source =
         TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], zn_fill).unwrap();

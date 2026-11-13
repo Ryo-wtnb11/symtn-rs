@@ -545,10 +545,10 @@ where
     /// [`PhysicalFusionBasis`]:
     ///
     /// ```compile_fail
-    /// use symtn::sector::Z2FusionRule;
+    /// use symtn::sector::ZNFusionRule;
     /// use symtn::typed::TensorMap;
     ///
-    /// fn unsupported(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<Z2FusionRule, f64>) {
+    /// fn unsupported(engine: &mut dyn symtn::typed::Engine, tensor: &TensorMap<ZNFusionRule, f64>) {
     ///     let _ = tensor.to_physical_dense(engine);
     /// }
     /// ```

@@ -79,7 +79,7 @@ fn complete_homspace_layout_cache_owns_its_wrapper_and_charges_its_regions() {
 
     type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type Product = ProductFusionRule<Fz2U1, SU2FusionRule>;
-    let pair = Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let pair = Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let sector = pair.encode_component_ids(z2_odd(), u1(1));
     let rule = Product::try_new(pair, SU2FusionRule).unwrap();
     let product_hom = || {
@@ -221,7 +221,7 @@ fn complete_homspace_layout_cache_keys_semantics_and_preserves_direct_layout() {
     dual.coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
         .unwrap();
     rule_changed
-        .coupled_subblock_structure_from_leg_degeneracies(&Z2FusionRule)
+        .coupled_subblock_structure_from_leg_degeneracies(&ZNFusionRule::new(2).unwrap())
         .unwrap();
     assert_eq!(degeneracy_cache_info().entries(), 4);
 
@@ -243,19 +243,19 @@ fn fusion_layout_shape_and_fermionic_rule_provenance_do_not_alias() {
         FusionProductSpace::new([SectorLeg::new([(z2_even(), 1), (z2_odd(), 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(z2_even(), 1), (z2_odd(), 1)], false)]),
     );
-    let bosonic_layout = hom.cached_fusion_tree_layout(&Z2FusionRule);
-    let fermionic_layout = hom.cached_fusion_tree_layout(&FermionParityFusionRule);
+    let bosonic_layout = hom.cached_fusion_tree_layout(&ZNFusionRule::new(2).unwrap());
+    let fermionic_layout = hom.cached_fusion_tree_layout(&FermionParityFusionRule::new());
     assert!(!Arc::ptr_eq(&bosonic_layout, &fermionic_layout));
 
     let small = hom
-        .coupled_subblock_structure(&FermionParityFusionRule, 1, [vec![1, 1], vec![1, 1]])
+        .coupled_subblock_structure(&FermionParityFusionRule::new(), 1, [vec![1, 1], vec![1, 1]])
         .unwrap();
     let large_hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(z2_even(), 2), (z2_odd(), 3)], false)]),
         FusionProductSpace::new([SectorLeg::new([(z2_even(), 2), (z2_odd(), 3)], false)]),
     );
     let large = large_hom
-        .coupled_subblock_structure(&FermionParityFusionRule, 1, [vec![2, 2], vec![3, 3]])
+        .coupled_subblock_structure(&FermionParityFusionRule::new(), 1, [vec![2, 2], vec![3, 3]])
         .unwrap();
     assert!(!Arc::ptr_eq(&small, &large));
     assert_ne!(small.as_ref(), large.as_ref());

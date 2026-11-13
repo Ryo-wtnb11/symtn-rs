@@ -201,7 +201,7 @@ fn expert_cantor_product_keeps_the_encoded_fallback() {
     // What: custom-codec/expert product construction remains available via
     // the encoded public entry and keeps its Cantor-pairing IDs.
     type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
-    let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let sector = TensorKitProductCodec::encode(z2_odd(), u1(2));
     let hom = singleton_rank_hom(sector, 3);
     assert_eq!(
@@ -420,9 +420,9 @@ fn compact_block_operators_match_su2_cohort_oracles() {
 fn compact_block_operators_match_fermionic_product_cohort_oracles() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -487,9 +487,9 @@ fn all_codomain_compact_block_matches_su2_cohorts() {
 fn all_codomain_compact_block_matches_fermionic_product_cohorts() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -736,9 +736,9 @@ fn domainless_block_braid_matches_per_pair() {
 fn transpose_tree_pair_block_matches_full_key_fermionic_product_cycle() {
     type FpU1Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
     type ProductRule = ProductFusionRule<FpU1Rule, SU2FusionRule>;
-    let left = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = ProductRule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();

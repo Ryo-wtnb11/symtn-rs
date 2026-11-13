@@ -217,8 +217,8 @@ fn zero_alpha_transform_and_trace_match_tensorkit() {
     check_zero_alpha::<_, Complex64>("U(1) c64", Arc::new(U1FusionRule), &u1);
     check_zero_alpha::<_, f64>("SU(2) f64", Arc::new(SU2FusionRule), &su2);
     check_zero_alpha::<_, Complex64>("SU(2) c64", Arc::new(SU2FusionRule), &su2);
-    check_zero_alpha::<_, f64>("fZ2 f64", Arc::new(FermionParityFusionRule), &fz2);
-    check_zero_alpha::<_, Complex64>("fZ2 c64", Arc::new(FermionParityFusionRule), &fz2);
+    check_zero_alpha::<_, f64>("fZ2 f64", Arc::new(FermionParityFusionRule::new()), &fz2);
+    check_zero_alpha::<_, Complex64>("fZ2 c64", Arc::new(FermionParityFusionRule::new()), &fz2);
 }
 
 /// The full trace of `A ∈ V ← V` with `x` on the diagonal of its one block.
@@ -305,7 +305,7 @@ fn trace_scales_each_element_before_the_sum_as_tensorkit() {
     );
     check_trace_overflow(
         "fZ2 f64",
-        Arc::new(FermionParityFusionRule),
+        Arc::new(FermionParityFusionRule::new()),
         odd,
         0.5,
         1e308,
@@ -313,7 +313,7 @@ fn trace_scales_each_element_before_the_sum_as_tensorkit() {
     );
     check_trace_overflow(
         "fZ2 c64",
-        Arc::new(FermionParityFusionRule),
+        Arc::new(FermionParityFusionRule::new()),
         odd,
         0.5,
         big,
@@ -460,10 +460,14 @@ fn zero_scale_contraction_matches_tensorkit() {
     check_zero_scale_contraction::<_, Complex64>("U(1) c64", Arc::new(U1FusionRule), &u1);
     check_zero_scale_contraction::<_, f64>("SU(2) f64", Arc::new(SU2FusionRule), &su2);
     check_zero_scale_contraction::<_, Complex64>("SU(2) c64", Arc::new(SU2FusionRule), &su2);
-    check_zero_scale_contraction::<_, f64>("fZ2 f64", Arc::new(FermionParityFusionRule), &fz2);
+    check_zero_scale_contraction::<_, f64>(
+        "fZ2 f64",
+        Arc::new(FermionParityFusionRule::new()),
+        &fz2,
+    );
     check_zero_scale_contraction::<_, Complex64>(
         "fZ2 c64",
-        Arc::new(FermionParityFusionRule),
+        Arc::new(FermionParityFusionRule::new()),
         &fz2,
     );
 }

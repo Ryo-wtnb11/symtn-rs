@@ -72,12 +72,12 @@ fn transpose_tree_pair_block_matches_fz2_odd_pivotal_oracle() {
         ]),
         FusionProductSpace::new([SectorLeg::new([(z2_even(), 1)], false)]),
     );
-    let sources = hom.fusion_tree_keys(&FermionParityFusionRule);
+    let sources = hom.fusion_tree_keys(&FermionParityFusionRule::new());
     assert!(!sources.is_empty());
 
     // What: cycling a dual odd leg retains the Frobenius-Schur/pivotal sign.
     assert_compact_transpose_matches_full_key_oracle(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &sources,
         &[1, 2],
         &[0],

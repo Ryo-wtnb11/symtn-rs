@@ -113,7 +113,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         3,
     );
     run_case(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
         3,
     );
@@ -126,9 +126,9 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         ],
         3,
     );
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let product_rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();
@@ -156,7 +156,7 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
 /// run through a threads=4 context against the TensorKit crosscheck values.
 #[test]
 fn tensorcontract_fusion_parallel_replay_keeps_fermion_twist_reference() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let space = |codomain_dual: bool, domain_dual: bool| {

@@ -590,8 +590,8 @@ fn identity_separates_mode_unit_codec_table_and_factor_structure() {
     assert_ne!(mf_id, cg_id);
     assert_ne!(mf_id, uncertified_id);
 
-    // A built-in rule over the same category keeps its own identity.
-    assert_ne!(
+    // `ZNFusionRule` is this rule.
+    assert_eq!(
         mf_id,
         FusionRule::rule_identity(&ZNFusionRule::new(3).unwrap())
     );
@@ -837,11 +837,16 @@ impl CategoryCodec<ZN> for WrappedZn {
     }
 }
 
+// Documents a known limitation (#2540), not the intended contract: an
+// identity over a dropped category with drop glue stops equal to a live one,
+// which breaks drop-then-rebind for tables and Lie groups.
 #[test]
-fn a_dropped_category_identity_equals_no_live_identity() {
-    let first = mf(ZN::new(3).unwrap());
+fn a_dropped_weakly_held_category_identity_equals_no_live_identity_known_limitation() {
+    // What: a category with drop glue is currently referred to weakly.
+    let fibonacci = || TableCategory::fibonacci();
+    let first = mf(fibonacci());
     let dead = FusionRule::rule_identity(&first);
-    let live_rule = mf(ZN::new(3).unwrap());
+    let live_rule = mf(fibonacci());
     let live = FusionRule::rule_identity(&live_rule);
     assert_eq!(dead, live);
     drop(first);
@@ -849,7 +854,16 @@ fn a_dropped_category_identity_equals_no_live_identity() {
     assert_ne!(live, dead);
     assert_eq!(hash_of(&dead), hash_of(&live));
     // A rule built later over an equal category shares the live identity.
-    assert_eq!(live, FusionRule::rule_identity(&mf(ZN::new(3).unwrap())));
+    assert_eq!(live, FusionRule::rule_identity(&mf(fibonacci())));
+}
+
+#[test]
+fn a_category_without_drop_glue_keeps_its_identity_after_the_rule() {
+    let first = mf(ZN::new(3).unwrap());
+    let kept = FusionRule::rule_identity(&first);
+    drop(first);
+    assert_eq!(kept, FusionRule::rule_identity(&mf(ZN::new(3).unwrap())));
+    assert_ne!(kept, FusionRule::rule_identity(&mf(ZN::new(4).unwrap())));
 }
 
 /// Z3 under ids equal to its charges, with no canonical identity.
@@ -2467,8 +2481,11 @@ fn admission_expresses_the_product_schedule() {
     // Cantor (2, 0) = 5 as the coupled id: the left factor checks it.
     assert_eq!(rule.try_nsymbol(s(0), s(0), s(5)), invalid(2));
     // The same literals the built-in product is frozen to.
-    let builtin =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, Z2FusionRule).unwrap();
+    let builtin = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        ZNFusionRule::new(2).unwrap(),
+        ZNFusionRule::new(2).unwrap(),
+    )
+    .unwrap();
     for ids in [[17, 0, 0], [6, 0, 0], [0, 0, 5]] {
         let [a, b, c] = ids.map(s);
         assert_eq!(rule.try_nsymbol(a, b, c), builtin.try_nsymbol(a, b, c));

@@ -12,6 +12,7 @@ use num_complex::Complex64;
 #[cfg(feature = "cgc-gen")]
 use symtn_core::LieGroupFusionRule;
 use symtn_core::ZNFusionRule;
+use symtn_core::ZNIrrep;
 
 const RUNTIME: &str = "operands belong to different runtimes";
 const RULE: &str = "operands use different fusion rules";
@@ -383,8 +384,19 @@ fn rule_mismatch_is_the_first_error_in_both_modes() {
     let engine = &mut crate::typed::CpuEngine::serial();
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let za = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2), (z2.irrep(1), 1)]).unwrap();
-    let zb = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 1)]).unwrap();
+    let za = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [
+            (ZNIrrep::new(0, z2.category().modulus()).unwrap(), 2),
+            (ZNIrrep::new(1, z2.category().modulus()).unwrap(), 1),
+        ],
+    )
+    .unwrap();
+    let zb = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 1)],
+    )
+    .unwrap();
     let mut expected = vec![RULE.to_string(); 5];
     expected.push(RUNTIME.to_string());
     assert_eq!(rule_rows!(engine, za, zb, f64), expected, "Z2/Z3 f64");

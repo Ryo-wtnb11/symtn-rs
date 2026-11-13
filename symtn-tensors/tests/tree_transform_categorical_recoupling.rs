@@ -197,7 +197,7 @@ fn a_fermionic_abelian_rule_compiles_to_single_blocks_only() {
     let space = categorical_recoupling::fermion_parity_structure(2);
     let fixture = compile(
         "fz2_braid",
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         TreeTransformOperation::braid([0, 2, 1, 3], [], 0..4, []),
         &space,
         false,

@@ -22,9 +22,12 @@ fn ids(channels: SectorVec) -> Vec<usize> {
 fn abelian_rules_have_one_channel() {
     let z5 = ZNFusionRule::new(5).unwrap();
     assert_eq!(ids(z5.fusion_channels(s(3), s(4))), [2]);
-    assert_eq!(ids(Z2FusionRule.fusion_channels(s(1), s(1))), [0]);
     assert_eq!(
-        ids(FermionParityFusionRule.fusion_channels(s(1), s(1))),
+        ids(ZNFusionRule::new(2).unwrap().fusion_channels(s(1), s(1))),
+        [0]
+    );
+    assert_eq!(
+        ids(FermionParityFusionRule::new().fusion_channels(s(1), s(1))),
         [0]
     );
     // -3 + 5 = 2, zigzag id 4.
@@ -111,13 +114,17 @@ fn nested_product_channels_enumerate_the_inner_product_fastest() {
     // ((1/2, odd), 1/2): inner channels (0, even), (2, even) = Cantor ids 0, 5;
     // outer right channels 0, 2.
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(SU2FusionRule, Z2FusionRule).unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            SU2FusionRule,
+            ZNFusionRule::new(2).unwrap(),
+        )
+        .unwrap(),
         SU2FusionRule,
     )
     .unwrap();
     let x = rule
         .encode_sector(&product_sector(
-            product_sector(SU2Irrep::from_twice_spin(1), Z2Irrep::ODD),
+            product_sector(SU2Irrep::from_twice_spin(1), ZNIrrep::new(1, 2).unwrap()),
             SU2Irrep::from_twice_spin(1),
         ))
         .unwrap();

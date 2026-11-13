@@ -12,7 +12,7 @@ use symtn::typed::ContractSpec;
 use symtn::typed::Direction;
 use symtn::typed::Engine;
 
-use symtn::sector::{FermionParityFusionRule, Z2Irrep};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep};
 use symtn::typed::Complex64;
 use symtn::typed::{Eig, GradedSpace, Runtime, Svd, TensorMap};
 
@@ -29,7 +29,7 @@ fn fz2_map(
     odd: f64,
 ) -> TensorMap<FermionParityFusionRule, f64> {
     TensorMap::from_subblock_fn(engine, rt, [v], [v], move |trees, _| {
-        if *trees.coupled() == Z2Irrep::EVEN {
+        if *trees.coupled() == FermionParityIrrep::EVEN {
             even
         } else {
             odd
@@ -47,8 +47,8 @@ fn fz2_contractions_match_tensorkit() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let rt = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 1), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 1), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     let a = fz2_map(engine, &rt, &v, 1.0, 4.0);
@@ -60,7 +60,7 @@ fn fz2_contractions_match_tensorkit() {
     let Svd { s, .. } = t.svd_compact(engine, &[0], &[1]).unwrap();
     let sv = s.svd_vals(engine, &[0], &[1]).unwrap();
     for entry in &sv {
-        let expect = if entry.sector == Z2Irrep::EVEN {
+        let expect = if entry.sector == FermionParityIrrep::EVEN {
             3.0
         } else {
             2.0
@@ -107,7 +107,7 @@ fn fz2_contractions_match_tensorkit() {
     // What: `eig_full().d` uses genuine complex diagonal storage. Its ordinary
     // trace sums both sectors without the odd parity twist.
     let complex_source = TensorMap::from_subblock_fn(engine, &rt, [&v], [&v], |trees, _| {
-        if *trees.coupled() == Z2Irrep::EVEN {
+        if *trees.coupled() == FermionParityIrrep::EVEN {
             Complex64::new(2.0, 1.0)
         } else {
             Complex64::new(3.0, 4.0)

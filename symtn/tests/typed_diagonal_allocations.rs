@@ -17,7 +17,7 @@ use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
 use symtn::typed::ContractSpec;
 
-use symtn::sector::{Z2FusionRule, Z2Irrep};
+use symtn::sector::{ZNFusionRule, ZNIrrep};
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, Svd, TensorMap};
 
@@ -43,12 +43,20 @@ fn runtime() -> &'static Runtime {
     RUNTIME.get_or_init(|| Runtime::builder().build().unwrap())
 }
 
-fn leg() -> GradedSpace<Z2FusionRule> {
-    GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap()
+fn leg() -> GradedSpace<ZNFusionRule> {
+    GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), DEGENERACY)],
+    )
+    .unwrap()
 }
 
-fn leg_with(degeneracy: usize) -> GradedSpace<Z2FusionRule> {
-    GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, degeneracy)]).unwrap()
+fn leg_with(degeneracy: usize) -> GradedSpace<ZNFusionRule> {
+    GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), degeneracy)],
+    )
+    .unwrap()
 }
 
 fn pseudo_random(state: &mut u64) -> f64 {
@@ -56,7 +64,7 @@ fn pseudo_random(state: &mut u64) -> f64 {
     ((*state >> 33) as f64) / (u32::MAX as f64) - 0.5
 }
 
-fn source(seed: u64) -> TensorMap<Z2FusionRule, f64> {
+fn source(seed: u64) -> TensorMap<ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = leg();
     let mut state = seed;
@@ -66,7 +74,7 @@ fn source(seed: u64) -> TensorMap<Z2FusionRule, f64> {
     .unwrap()
 }
 
-fn complex_source(seed: u64) -> TensorMap<Z2FusionRule, Complex64> {
+fn complex_source(seed: u64) -> TensorMap<ZNFusionRule, Complex64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = leg();
     let mut state = seed;
@@ -82,7 +90,7 @@ fn measured_bytes<T>(operation: impl FnOnce() -> T) -> u64 {
     allocs.bytes
 }
 
-fn constructed_diagonal(degeneracy: usize) -> TensorMap<Z2FusionRule, f64> {
+fn constructed_diagonal(degeneracy: usize) -> TensorMap<ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let bond = leg_with(degeneracy);
     TensorMap::diagonal(
@@ -90,7 +98,7 @@ fn constructed_diagonal(degeneracy: usize) -> TensorMap<Z2FusionRule, f64> {
         runtime(),
         &bond,
         [symtn::typed::SectorSpectrum {
-            sector: Z2Irrep::EVEN,
+            sector: ZNIrrep::new(0, 2).unwrap(),
             values: vec![1.0; degeneracy],
         }],
     )
@@ -199,7 +207,7 @@ fn a_truncated_s_stays_compact_too() {
     // What: truncation is two-leg `restrict_leg` on `svd_compact`'s `s`, and the
     // restriction keeps the compact storage.
     let tensor = source(0x5eed_0002);
-    let mut truncated = |tensor: &TensorMap<Z2FusionRule, f64>| {
+    let mut truncated = |tensor: &TensorMap<ZNFusionRule, f64>| {
         let s = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
         let found = s.domain()[0]
             .find_truncated(
@@ -256,7 +264,7 @@ fn warmed_payloads<T>(payload_bytes: usize, mut operation: impl FnMut() -> T) ->
     allocs.matched_calls
 }
 
-fn spectrum(seed: u64) -> TensorMap<Z2FusionRule, f64> {
+fn spectrum(seed: u64) -> TensorMap<ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     source(seed).svd_compact(engine, &[0], &[1]).unwrap().s
 }

@@ -708,7 +708,7 @@ fn paired_axis_selector_rejects_invalid_axes_before_scoring_or_mutation() {
 fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: both crossed caller pair orders produce one odd FermionParity result.
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let sectors = [SectorId::new(0), SectorId::new(1)];
     let leg = || SectorLeg::new(sectors.map(|sector| (sector, 1)), false);
     let hom = FusionTreeHomSpace::new(
@@ -862,9 +862,9 @@ fn crossed_axis_selection_preserves_real_fermion_parity_complex_result() {
 #[test]
 fn crossed_axis_selection_preserves_asymmetric_fz2_u1_su2_result() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let left_rule = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let left_rule = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let rule = FpU1Su2Rule::try_new(
-        FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();

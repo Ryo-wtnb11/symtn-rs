@@ -14,8 +14,8 @@ use symtn::typed::HermitianTol;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::OperationError;
 use symtn::typed::{
@@ -76,23 +76,26 @@ type Fz2U1 = symtn::sector::ProductFusionRule<FermionParityFusionRule, U1FusionR
 
 fn fz2_u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
         ],
     )
     .unwrap();
     let w = GradedSpace::try_new(
         rule,
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(1)), 1),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2),
         ],
     )
     .unwrap();

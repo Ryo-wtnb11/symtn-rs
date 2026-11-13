@@ -33,8 +33,8 @@ use std::{
 use symtn::typed::HermitianTol;
 
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Complex64, ContractSpec, GradedSpace, LegSelection, Runtime, TensorMap};
 
@@ -404,16 +404,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         centered(n)
             .map(|q| {
                 let parity = if q.rem_euclid(2) == 0 {
-                    Z2Irrep::EVEN
+                    FermionParityIrrep::EVEN
                 } else {
-                    Z2Irrep::ODD
+                    FermionParityIrrep::ODD
                 };
                 ProductSector::new(parity, U1Irrep::new(q))
             })
             .collect::<Vec<_>>()
     };
     let su2 = |n: usize| (0..n).map(SU2Irrep::from_twice_spin).collect::<Vec<_>>();
-    let fz2u1_rule = || Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let fz2u1_rule = || Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 
     ledger!(
         engine,

@@ -16,7 +16,7 @@
 use crate::numerics::nan_folded_bits;
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{GradedSpace, Runtime, SectorSpectrum, TensorMap, TensorScalar};
 
@@ -200,8 +200,8 @@ fn su2() -> GradedSpace<SU2FusionRule> {
 
 fn fz2() -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
-        std::sync::Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)],
+        std::sync::Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
     )
     .unwrap()
 }

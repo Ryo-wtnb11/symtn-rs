@@ -12,7 +12,7 @@ use crate::trace_cases::{
 };
 use num_complex::{Complex32, Complex64};
 use std::sync::Arc;
-use symtn::sector::{FermionParityFusionRule, U1Irrep, Z2Irrep};
+use symtn::sector::{FermionParityFusionRule, FermionParityIrrep, U1Irrep};
 use symtn::typed::{GradedSpace, Runtime};
 
 /// `case` traced on `$backend`, downloaded; then its lazy adjoint traced on
@@ -133,15 +133,15 @@ on_each_engine! {
 macro_rules! supertrace {
     ($backend:ty, $device:ident, $engine:ident, $runtime:expr, $d:ty) => {{
         let space = GradedSpace::try_new(
-            Arc::new(FermionParityFusionRule),
-            [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+            Arc::new(FermionParityFusionRule::new()),
+            [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
         )
         .unwrap();
         let tensor: TensorMap<_, $d> =
             TensorMap::from_subblock_fn($engine, $runtime, [&space], [&space], |trees, index| {
                 let value = if index[0] != index[1] {
                     9.0
-                } else if *trees.coupled() == Z2Irrep::EVEN {
+                } else if *trees.coupled() == FermionParityIrrep::EVEN {
                     2.0 + index[0] as f64
                 } else {
                     5.0 + index[0] as f64

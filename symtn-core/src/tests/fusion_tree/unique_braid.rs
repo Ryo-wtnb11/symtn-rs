@@ -114,7 +114,7 @@ impl MultiplicityFreeFusionSymbols for ComplexAsymmetricUniqueRule {
 
 #[test]
 fn fusion_rule_exposes_unique_outputs_and_nsymbol_separately() {
-    let z2 = Z2FusionRule;
+    let z2 = ZNFusionRule::new(2).unwrap();
     let su2 = SU2FusionRule;
 
     assert_eq!(z2.fusion_style(), FusionStyleKind::Unique);
@@ -146,10 +146,10 @@ fn fusion_rule_exposes_unique_outputs_and_nsymbol_separately() {
 
 #[test]
 fn multiplicity_free_symbols_are_a_separate_scalar_api() {
-    let z2 = Z2FusionRule;
+    let z2 = ZNFusionRule::new(2).unwrap();
 
     assert_eq!(
-        <Z2FusionRule as MultiplicityFreeFusionSymbols>::Scalar::one(),
+        <ZNFusionRule as MultiplicityFreeFusionSymbols>::Scalar::one(),
         1.0
     );
     assert_eq!(
@@ -207,8 +207,13 @@ fn merge_fusion_trees_treats_rank_zero_as_the_tensor_unit() {
     let tree = FusionTreeKey::try_from_sector_ids([1, 0], 1, [true, false], [], [1]).unwrap();
 
     for (lhs, rhs) in [(&unit, &tree), (&tree, &unit)] {
-        let terms = merge_fusion_trees_multiplicity_free(&Z2FusionRule, lhs, rhs, SectorId::new(1))
-            .unwrap();
+        let terms = merge_fusion_trees_multiplicity_free(
+            &ZNFusionRule::new(2).unwrap(),
+            lhs,
+            rhs,
+            SectorId::new(1),
+        )
+        .unwrap();
         assert_eq!(terms, vec![(tree.clone(), 1.0)]);
     }
 }
@@ -243,7 +248,8 @@ fn unique_artin_braid_first_uses_r_symbol_for_first_crossing() {
     let tree = FusionTreeKey::try_from_sector_ids([1, 1], 0, [false, true], [], [1]).unwrap();
 
     let terms =
-        multiplicity_free_braid_tree(&FermionParityFusionRule, &tree, &[1, 0], &[0, 1]).unwrap();
+        multiplicity_free_braid_tree(&FermionParityFusionRule::new(), &tree, &[1, 0], &[0, 1])
+            .unwrap();
     assert_eq!(terms.len(), 1);
     let (braided, coefficient) = terms.into_iter().next().unwrap();
 
@@ -260,9 +266,13 @@ fn unique_artin_braid_first_uses_first_innerline_for_rank_three() {
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [0], [1, 1])
         .unwrap();
 
-    let terms =
-        multiplicity_free_braid_tree(&FermionParityFusionRule, &tree, &[1, 0, 2], &[0, 1, 2])
-            .unwrap();
+    let terms = multiplicity_free_braid_tree(
+        &FermionParityFusionRule::new(),
+        &tree,
+        &[1, 0, 2],
+        &[0, 1, 2],
+    )
+    .unwrap();
     assert_eq!(terms.len(), 1);
     let (braided, coefficient) = terms.into_iter().next().unwrap();
 
@@ -305,9 +315,13 @@ fn unique_artin_braid_at_uses_f_and_r_symbols_for_later_crossing() {
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, true, false], [0], [1, 1])
         .unwrap();
 
-    let terms =
-        multiplicity_free_braid_tree(&FermionParityFusionRule, &tree, &[0, 2, 1], &[0, 1, 2])
-            .unwrap();
+    let terms = multiplicity_free_braid_tree(
+        &FermionParityFusionRule::new(),
+        &tree,
+        &[0, 2, 1],
+        &[0, 1, 2],
+    )
+    .unwrap();
     assert_eq!(terms.len(), 1);
     let (braided, coefficient) = terms.into_iter().next().unwrap();
 
@@ -430,9 +444,13 @@ fn unique_braid_tree_replays_tensorkit_swap_order_and_level_updates() {
     let tree = FusionTreeKey::try_from_sector_ids([1, 1, 1], 1, [false, false, false], [0], [1, 1])
         .unwrap();
 
-    let terms =
-        multiplicity_free_braid_tree(&FermionParityFusionRule, &tree, &[2, 0, 1], &[0, 1, 2])
-            .unwrap();
+    let terms = multiplicity_free_braid_tree(
+        &FermionParityFusionRule::new(),
+        &tree,
+        &[2, 0, 1],
+        &[0, 1, 2],
+    )
+    .unwrap();
     assert_eq!(terms.len(), 1);
     let (braided, coefficient) = terms.into_iter().next().unwrap();
 
@@ -515,9 +533,13 @@ fn symmetric_unique_direct_braid_matches_artin_replay_exactly() {
     let levels = [0, 1, 2, 3];
     let mut permutation = [0usize, 1, 2, 3];
     loop {
-        let direct_terms =
-            multiplicity_free_braid_tree(&FermionParityFusionRule, &tree, &permutation, &levels)
-                .unwrap();
+        let direct_terms = multiplicity_free_braid_tree(
+            &FermionParityFusionRule::new(),
+            &tree,
+            &permutation,
+            &levels,
+        )
+        .unwrap();
         assert_eq!(direct_terms.len(), 1);
         let direct = direct_terms.into_iter().next().unwrap();
 
@@ -527,7 +549,7 @@ fn symmetric_unique_direct_braid_matches_artin_replay_exactly() {
         for swap in tensorkit_permutation2swaps(&permutation) {
             let inverse = replay_levels[swap] > replay_levels[swap + 1];
             let coefficient = apply_unique_artin_braid_at_with_inverse(
-                &FermionParityFusionRule,
+                &FermionParityFusionRule::new(),
                 &mut replay_tree,
                 swap,
                 inverse,
@@ -780,7 +802,7 @@ fn table_rule_never_takes_the_direct_unique_braid() {
     );
     // Positive control: fZ2 (symmetric, trivial gauge) takes it.
     assert!(unique_direct_braid(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &UnhashedFusionTree::from(tree),
         |position| swap[position],
         &mut out,

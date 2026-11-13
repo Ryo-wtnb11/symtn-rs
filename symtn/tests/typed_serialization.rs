@@ -6,7 +6,7 @@ use symtn::typed::HermitianTol;
 
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::__network::NetworkReuseClass;
 use symtn::typed::{Complex32, Complex64, Runtime};
@@ -1331,18 +1331,18 @@ impl TypedPersistenceCodec<FermionParityFusionRule> for FermionCodec {
     fn encode_sector(
         &self,
         _provider: &FermionParityFusionRule,
-        sector: &Z2Irrep,
+        sector: &FermionParityIrrep,
     ) -> Result<Vec<u8>, Self::Error> {
-        Ok(vec![sector.parity()])
+        Ok(vec![sector.is_odd() as u8])
     }
 
     fn decode_sector(
         &self,
         _provider: &FermionParityFusionRule,
         bytes: &[u8],
-    ) -> Result<Z2Irrep, Self::Error> {
+    ) -> Result<FermionParityIrrep, Self::Error> {
         match bytes {
-            [parity @ (0 | 1)] => Ok(Z2Irrep::new(*parity)),
+            [parity @ (0 | 1)] => Ok(FermionParityIrrep::new(*parity == 1)),
             _ => Err(CodecError::InvalidSector),
         }
     }
@@ -1512,13 +1512,13 @@ macro_rules! single_precision_roundtrip {
             );
 
             // Fermion parity: odd sectors carry fermionic twists.
-            let provider = Arc::new(FermionParityFusionRule);
+            let provider = Arc::new(FermionParityFusionRule::new());
             let codec = FermionCodec {
                 provider: Arc::clone(&provider),
             };
             let leg = GradedSpace::try_new(
                 Arc::clone(&provider),
-                [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+                [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
             )
             .unwrap();
             let dual = leg.try_dual().unwrap();
@@ -1528,7 +1528,9 @@ macro_rules! single_precision_roundtrip {
                 [&leg, &dual],
                 [&leg],
                 |trees, indices| {
-                    value(usize::from(trees.coupled().parity()) + indices.iter().sum::<usize>())
+                    value(
+                        usize::from(trees.coupled().is_odd() as u8) + indices.iter().sum::<usize>(),
+                    )
                 },
             )
             .unwrap();
@@ -1545,11 +1547,11 @@ macro_rules! single_precision_roundtrip {
                 &leg,
                 [
                     SectorSpectrum {
-                        sector: Z2Irrep::EVEN,
+                        sector: FermionParityIrrep::EVEN,
                         values: vec![value(0), value(1)],
                     },
                     SectorSpectrum {
-                        sector: Z2Irrep::ODD,
+                        sector: FermionParityIrrep::ODD,
                         values: vec![value(2), value(3), value(4)],
                     },
                 ],

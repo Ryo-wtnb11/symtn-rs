@@ -253,7 +253,7 @@ fn block_structure_intern_clear_resets_resources_and_counters() {
 }
 
 fn coupled_z2_matrix_structure() -> BlockStructure {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(z2_even(), 2), (z2_odd(), 3)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg()]),

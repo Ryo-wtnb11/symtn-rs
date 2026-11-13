@@ -37,7 +37,7 @@ fn u1_fz2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<U1Fz2Rule, f6
     let rule = Arc::new(
         U1Fz2Rule::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
     );
@@ -45,9 +45,9 @@ fn u1_fz2_oracle(runtime: &Runtime, first_value: f64) -> TensorMap<U1Fz2Rule, f6
         symtn::sector::ProductSector::new(
             symtn::sector::U1Irrep::new(charge),
             if parity == 0 {
-                symtn::sector::Z2Irrep::EVEN
+                symtn::sector::FermionParityIrrep::EVEN
             } else {
-                symtn::sector::Z2Irrep::ODD
+                symtn::sector::FermionParityIrrep::ODD
             },
         )
     };
@@ -660,20 +660,20 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
 
     let rule = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
             symtn::sector::U1FusionRule,
         )
         .unwrap(),
     );
-    let label = |parity: symtn::sector::Z2Irrep, charge: i32| {
+    let label = |parity: symtn::sector::FermionParityIrrep, charge: i32| {
         symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge))
     };
 
     let p = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (label(symtn::sector::Z2Irrep::EVEN, 0), 2),
-            (label(symtn::sector::Z2Irrep::ODD, 1), 1),
+            (label(symtn::sector::FermionParityIrrep::EVEN, 0), 2),
+            (label(symtn::sector::FermionParityIrrep::ODD, 1), 1),
         ],
     )
     .unwrap();
@@ -684,8 +684,8 @@ fn generic_product_provider_drives_the_typed_facade_without_a_fixed_constructor(
     let q = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (label(symtn::sector::Z2Irrep::ODD, -1), 1),
-            (label(symtn::sector::Z2Irrep::EVEN, 0), 2),
+            (label(symtn::sector::FermionParityIrrep::ODD, -1), 1),
+            (label(symtn::sector::FermionParityIrrep::EVEN, 0), 2),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -732,7 +732,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     let left_assoc = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn_sectors::ProductFusionRule::<_, _>::try_new(
-                symtn::sector::FermionParityFusionRule,
+                symtn::sector::FermionParityFusionRule::new(),
                 symtn::sector::U1FusionRule,
             )
             .unwrap(),
@@ -740,7 +740,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
         )
         .unwrap(),
     );
-    let label = |parity: symtn::sector::Z2Irrep, charge: i32, twice_spin: usize| {
+    let label = |parity: symtn::sector::FermionParityIrrep, charge: i32, twice_spin: usize| {
         symtn::sector::product_sector(
             symtn::sector::product_sector(parity, symtn::sector::U1Irrep::new(charge)),
             SU2Irrep::from_twice_spin(twice_spin),
@@ -748,8 +748,8 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     };
 
     let declared = [
-        (label(symtn::sector::Z2Irrep::ODD, 1, 1), 1),
-        (label(symtn::sector::Z2Irrep::EVEN, 0, 2), 2),
+        (label(symtn::sector::FermionParityIrrep::ODD, 1, 1), 1),
+        (label(symtn::sector::FermionParityIrrep::EVEN, 0, 2), 2),
     ];
     let v = GradedSpace::try_new(Arc::clone(&left_assoc), declared).unwrap();
 
@@ -771,7 +771,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     let odd = decoded
         .iter()
         .map(|(label, _)| label)
-        .find(|label| *label.left().left() == symtn::sector::Z2Irrep::ODD)
+        .find(|label| *label.left().left() == symtn::sector::FermionParityIrrep::ODD)
         .expect("the odd-parity label survives the round trip");
     assert_eq!(*odd.left().right(), symtn::sector::U1Irrep::new(1));
     assert_eq!(*odd.right(), SU2Irrep::from_twice_spin(1));
@@ -781,7 +781,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     // equal. The label type difference is what makes the line below compile
     // only when written for the right association.
     let right_assoc = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        symtn::sector::FermionParityFusionRule,
+        symtn::sector::FermionParityFusionRule::new(),
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
             SU2FusionRule,
@@ -790,7 +790,7 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
     )
     .unwrap();
     let right_label = symtn::sector::product_sector(
-        symtn::sector::Z2Irrep::ODD,
+        symtn::sector::FermionParityIrrep::ODD,
         symtn::sector::product_sector(symtn::sector::U1Irrep::new(1), SU2Irrep::from_twice_spin(1)),
     );
     assert_ne!(
@@ -798,14 +798,14 @@ fn nested_three_factor_product_keeps_its_declared_factor_order() {
         right_assoc.rule_identity(),
         "left- and right-associated products must stay distinct providers"
     );
-    assert_eq!(*right_label.left(), symtn::sector::Z2Irrep::ODD);
+    assert_eq!(*right_label.left(), symtn::sector::FermionParityIrrep::ODD);
 
     // Factor order is not an equivalence either: swapping the two factors of
     // the inner product gives a third distinct provider.
     let swapped = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
             symtn::sector::U1FusionRule,
-            symtn::sector::FermionParityFusionRule,
+            symtn::sector::FermionParityFusionRule::new(),
         )
         .unwrap(),
         SU2FusionRule,

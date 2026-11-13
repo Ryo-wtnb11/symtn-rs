@@ -3,9 +3,9 @@
 //! Already pinned elsewhere:
 //! - U(1) overflow for fusion and N (left charge): `tests/abelian_cu1_values.rs`
 //!   `u1_fusion_leaving_the_charge_range_is_an_error`.
-//! - CU(1) codec bound and its precedence (coupled first for N):
+//! - CU(1) fusion overflow and its argument-order precedence:
 //!   `tests/abelian_cu1_values.rs` `cu1_fusion_leaving_the_charge_range_is_an_error`;
-//!   `tests/sector_labels.rs` `cu1_checked_validation_preserves_the_shared_error_precedence`.
+//!   `tests/sector_labels.rs` `cu1_checked_validation_follows_argument_order`.
 //! - SU(2) fusion closure beyond 254 and its validation order:
 //!   `src/su2.rs` `checked_su2_preserves_validation_order_and_domain`.
 //! - Lie-group label limits, fallible codec allocation, and absent-channel
@@ -26,33 +26,19 @@ fn invalid(id: usize) -> Result<usize, FusionAlgebraError> {
 }
 
 #[test]
-fn zn_checks_the_coupled_sector_first() {
+fn enumerated_rules_check_left_right_then_coupled() {
     let z5 = ZNFusionRule::new(5).unwrap();
-    assert_eq!(z5.try_nsymbol(s(5), s(6), s(7)), invalid(7));
-    assert_eq!(z5.try_nsymbol(s(5), s(6), s(0)), invalid(5));
-    assert_eq!(z5.try_nsymbol(s(0), s(6), s(0)), invalid(6));
+    assert_eq!(z5.try_nsymbol(s(5), s(6), s(7)), invalid(5));
+    assert_eq!(z5.try_nsymbol(s(0), s(6), s(7)), invalid(6));
+    assert_eq!(z5.try_nsymbol(s(0), s(0), s(7)), invalid(7));
     assert_eq!(
         z5.try_fusion_channels(s(5), s(6)),
         Err(FusionAlgebraError::InvalidSector { sector: s(5) })
     );
-    assert_eq!(
-        z5.try_dual_sector(s(5)),
-        Err(FusionAlgebraError::InvalidSector { sector: s(5) })
-    );
-}
-
-#[test]
-fn parity_rules_check_left_right_then_coupled() {
-    assert_eq!(Z2FusionRule.try_nsymbol(s(2), s(3), s(4)), invalid(2));
-    assert_eq!(
-        FermionParityFusionRule.try_nsymbol(s(2), s(3), s(4)),
-        invalid(2)
-    );
-    assert_eq!(Z2FusionRule.try_nsymbol(s(0), s(3), s(4)), invalid(3));
-    assert_eq!(
-        FermionParityFusionRule.try_nsymbol(s(0), s(0), s(4)),
-        invalid(4)
-    );
+    let fz2 = FermionParityFusionRule::new();
+    assert_eq!(fz2.try_nsymbol(s(2), s(3), s(4)), invalid(2));
+    assert_eq!(fz2.try_nsymbol(s(0), s(3), s(4)), invalid(3));
+    assert_eq!(fz2.try_nsymbol(s(0), s(0), s(4)), invalid(4));
 }
 
 #[test]
@@ -192,8 +178,11 @@ fn lie_group_errors_are_typed_and_checked_left_right_coupled() {
 #[test]
 fn product_errors_follow_outer_decode_then_left_factor_then_right_factor() {
     // Cantor (2, 3) = 17: both components invalid for Z2; the left factor wins.
-    let z2_z2 =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(Z2FusionRule, Z2FusionRule).unwrap();
+    let z2_z2 = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        ZNFusionRule::new(2).unwrap(),
+        ZNFusionRule::new(2).unwrap(),
+    )
+    .unwrap();
     assert_eq!(z2_z2.try_nsymbol(s(17), s(0), s(0)), invalid(2));
     assert_eq!(
         z2_z2.try_fusion_channels(s(17), s(0)),
@@ -214,8 +203,11 @@ fn product_errors_follow_outer_decode_then_left_factor_then_right_factor() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn product_left_factor_overflow_beats_right_factor_domain_error() {
-    let u1_z2 =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, Z2FusionRule).unwrap();
+    let u1_z2 = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        U1FusionRule,
+        ZNFusionRule::new(2).unwrap(),
+    )
+    .unwrap();
     // Cantor (zigzag(i32::MAX), 3) = 9223372047592194047; Cantor (zigzag(1), 0) = 5.
     assert_eq!(
         u1_z2.try_nsymbol(s(9_223_372_047_592_194_047), s(5), s(0)),
@@ -234,7 +226,7 @@ fn product_codec_decode_beats_factor_errors() {
         FermionParityFusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
     >;
-    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
+    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
     let bad_u1 = s(u32::MAX as usize);
     assert_eq!(
         rule.try_nsymbol(bad_u1, s(0), s(1 << 33)),
@@ -275,7 +267,7 @@ fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
 fn product_with_a_fusion_only_factor_panics_with_the_table_message() {
     let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
         TableRule::by_uuid("37fa4e9c-97c6-11f1-8ce9-19309dfc597c").unwrap(),
-        Z2FusionRule,
+        ZNFusionRule::new(2).unwrap(),
     )
     .unwrap();
     assert_eq!(rule.braiding_style(), BraidingStyleKind::NoBraiding);

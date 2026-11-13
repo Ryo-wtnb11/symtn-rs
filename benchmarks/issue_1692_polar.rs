@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use symtn::sector::{
     product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    FermionParityIrrep,
 };
 use symtn::typed::{GradedSpace, LinalgBackend, Runtime, SectorSpectrum, TensorMap};
 
@@ -147,15 +147,15 @@ fn main() {
                 "U1xF",
                 symtn::sector::ProductFusionRule::<_, _>::try_new(
                     U1FusionRule,
-                    FermionParityFusionRule
+                    FermionParityFusionRule::new()
                 )
                 .unwrap(),
                 |c: i32, dual| product_sector(
                     U1Irrep::new(if dual { -c } else { c }),
                     if c % 2 == 0 {
-                        Z2Irrep::EVEN
+                        FermionParityIrrep::EVEN
                     } else {
-                        Z2Irrep::ODD
+                        FermionParityIrrep::ODD
                     }
                 )
             );

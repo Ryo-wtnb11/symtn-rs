@@ -860,7 +860,7 @@ mod tests {
         CheckedGenericRigidSymbols, CoreError, FusionProductSpace, FusionRule, FusionStyleKind,
         FusionTreeHomSpace, FusionTreeKey, FusionTreePairKey, GenericFArray, GenericRMatrix,
         MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-        RuleIdentity, SectorId, SectorLeg, SectorVec, Z2FusionRule,
+        RuleIdentity, SectorId, SectorLeg, SectorVec, ZNFusionRule,
     };
     use symtn_tensors::{
         BoundDynamicFusionMapSpace, FusionOperand, OutputAxisOrder, TreeTransformOperation,
@@ -995,9 +995,15 @@ mod tests {
     #[test]
     fn tensor_product_source_validator_rejects_a_later_malformed_key() {
         let sector = SectorId::new(0);
-        let tree =
-            FusionTreeKey::try_new_for_rule(&Z2FusionRule, [sector], sector, [false], [], [])
-                .unwrap();
+        let tree = FusionTreeKey::try_new_for_rule(
+            &ZNFusionRule::new(2).unwrap(),
+            [sector],
+            sector,
+            [false],
+            [],
+            [],
+        )
+        .unwrap();
         let valid = BlockSpec::column_major_with_key(
             BlockKey::FusionTree(FusionTreePairKey::pair(tree.clone(), tree)),
             vec![1, 1],
@@ -1005,7 +1011,8 @@ mod tests {
         )
         .unwrap();
         let rank_zero =
-            FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], sector, [], [], []).unwrap();
+            FusionTreeKey::try_new_for_rule(&ZNFusionRule::new(2).unwrap(), [], sector, [], [], [])
+                .unwrap();
         let malformed = BlockSpec::column_major_with_key(
             BlockKey::FusionTree(FusionTreePairKey::pair(rank_zero.clone(), rank_zero)),
             vec![1, 1],
@@ -1131,23 +1138,23 @@ mod tests {
         }
 
         fn fusion_style(&self) -> FusionStyleKind {
-            Z2FusionRule.fusion_style()
+            ZNFusionRule::new(2).unwrap().fusion_style()
         }
 
         fn braiding_style(&self) -> BraidingStyleKind {
-            Z2FusionRule.braiding_style()
+            ZNFusionRule::new(2).unwrap().braiding_style()
         }
 
         fn vacuum(&self) -> SectorId {
-            Z2FusionRule.vacuum()
+            ZNFusionRule::new(2).unwrap().vacuum()
         }
 
         fn dual(&self, sector: SectorId) -> SectorId {
-            Z2FusionRule.dual(sector)
+            ZNFusionRule::new(2).unwrap().dual(sector)
         }
 
         fn fusion_channels(&self, left: SectorId, right: SectorId) -> SectorVec {
-            Z2FusionRule.fusion_channels(left, right)
+            ZNFusionRule::new(2).unwrap().fusion_channels(left, right)
         }
     }
 
@@ -1157,7 +1164,7 @@ mod tests {
         type Scalar = f64;
 
         fn has_trivial_associator_gauge(&self) -> bool {
-            Z2FusionRule.has_trivial_associator_gauge()
+            ZNFusionRule::new(2).unwrap().has_trivial_associator_gauge()
         }
 
         fn f_symbol_scalar(
@@ -1169,7 +1176,14 @@ mod tests {
             left_coupled: SectorId,
             right_coupled: SectorId,
         ) -> Self::Scalar {
-            Z2FusionRule.f_symbol_scalar(left, middle, right, coupled, left_coupled, right_coupled)
+            ZNFusionRule::new(2).unwrap().f_symbol_scalar(
+                left,
+                middle,
+                right,
+                coupled,
+                left_coupled,
+                right_coupled,
+            )
         }
 
         fn r_symbol_scalar(
@@ -1178,7 +1192,9 @@ mod tests {
             right: SectorId,
             coupled: SectorId,
         ) -> Self::Scalar {
-            Z2FusionRule.r_symbol_scalar(left, right, coupled)
+            ZNFusionRule::new(2)
+                .unwrap()
+                .r_symbol_scalar(left, right, coupled)
                 * match R_SCALE {
                     1 => 1e-100,
                     2 => 1e100,
@@ -1189,27 +1205,29 @@ mod tests {
 
     impl<const R_SCALE: u8> MultiplicityFreeRigidSymbols for ExternalZ2<R_SCALE> {
         fn dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.dim_scalar(sector)
+            ZNFusionRule::new(2).unwrap().dim_scalar(sector)
         }
 
         fn inv_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.inv_dim_scalar(sector)
+            ZNFusionRule::new(2).unwrap().inv_dim_scalar(sector)
         }
 
         fn sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.sqrt_dim_scalar(sector)
+            ZNFusionRule::new(2).unwrap().sqrt_dim_scalar(sector)
         }
 
         fn inv_sqrt_dim_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.inv_sqrt_dim_scalar(sector)
+            ZNFusionRule::new(2).unwrap().inv_sqrt_dim_scalar(sector)
         }
 
         fn twist_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.twist_scalar(sector)
+            ZNFusionRule::new(2).unwrap().twist_scalar(sector)
         }
 
         fn frobenius_schur_phase_scalar(&self, sector: SectorId) -> Self::Scalar {
-            Z2FusionRule.frobenius_schur_phase_scalar(sector)
+            ZNFusionRule::new(2)
+                .unwrap()
+                .frobenius_schur_phase_scalar(sector)
         }
     }
 
@@ -1521,14 +1539,14 @@ mod tests {
         engine: &mut dyn Engine,
     ) -> (
         crate::typed::Runtime,
-        crate::typed::TensorMap<Z2FusionRule, f64>,
+        crate::typed::TensorMap<ZNFusionRule, f64>,
     ) {
         let runtime = crate::typed::Runtime::builder().build().unwrap();
         let leg = crate::typed::GradedSpace::try_new(
-            Arc::new(Z2FusionRule),
+            Arc::new(ZNFusionRule::new(2).unwrap()),
             [
-                (symtn_core::Z2Irrep::EVEN, 2),
-                (symtn_core::Z2Irrep::ODD, 3),
+                (symtn_core::ZNIrrep::new(0, 2).unwrap(), 2),
+                (symtn_core::ZNIrrep::new(1, 2).unwrap(), 3),
             ],
         )
         .unwrap();

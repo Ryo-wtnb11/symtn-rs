@@ -281,7 +281,7 @@ pub(super) fn c64_eigh_outputs(order: usize) -> Vec<DenseTensor> {
 }
 
 pub(super) fn rectangular_svd_tensor(rows: usize, cols: usize) -> TestTensor<f64> {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(even, rows)], false)]),
@@ -301,7 +301,7 @@ pub(super) fn mixed_rectangular_tensor(
     even_shape: (usize, usize),
     odd_shape: (usize, usize),
 ) -> TestTensor<f64> {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let homspace = FusionTreeHomSpace::new(
@@ -343,7 +343,7 @@ pub(super) fn transposed_rectangular_tensor(
 }
 
 pub(super) fn mixed_rectangular_c32_tensor() -> TestTensor<Complex32> {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let homspace = FusionTreeHomSpace::new(
@@ -710,7 +710,7 @@ pub(super) fn assert_eigh_preflight_at<D: FactorScalar + std::fmt::Debug>(
     let error = eigh_full_dyn(
         engine,
         &mut dense,
-        &bound_tensor_ref!(Arc::new(Z2FusionRule), tensor).dynamic(),
+        &bound_tensor_ref!(Arc::new(ZNFusionRule::new(2).unwrap()), tensor).dynamic(),
         hermitian_tol,
     )
     .map(drop)
@@ -732,7 +732,7 @@ pub(super) fn one_sector_rectangular_matrix<D: Clone>(
     rows: usize,
     cols: usize,
 ) -> TestTensor<D> {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let codomain = SectorLeg::new([(SectorId::new(0), rows)], false);
     let domain = SectorLeg::new([(SectorId::new(0), cols)], false);
     let homspace = FusionTreeHomSpace::new(

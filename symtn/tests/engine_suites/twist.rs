@@ -11,15 +11,15 @@ use crate::legs::u1_leg_2_1_2;
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Direction, GradedSpace, Runtime};
 
 fn fz2_leg(dual: bool) -> GradedSpace<FermionParityFusionRule> {
     let space = GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap();
     if dual {
@@ -93,15 +93,15 @@ on_each_engine! {
         signs_only!(B, device, "fZ2/c64", complex, [&[1usize, 2][..]]);
 
         let rule = Arc::new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule)
                 .unwrap(),
         );
         let leg_u1 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-                (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 1),
-                (product_sector(Z2Irrep::EVEN, U1Irrep::new(2)), 1),
+                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+                (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+                (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
             ],
         )
         .unwrap();
@@ -115,15 +115,15 @@ on_each_engine! {
         );
 
         let rule = Arc::new(
-            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
+            symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), SU2FusionRule)
                 .unwrap(),
         );
         let leg_su2 = GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(0)), 2),
-                (product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(1)), 1),
-                (product_sector(Z2Irrep::EVEN, SU2Irrep::from_twice_spin(2)), 1),
+                (product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(0)), 2),
+                (product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(1)), 1),
+                (product_sector(FermionParityIrrep::EVEN, SU2Irrep::from_twice_spin(2)), 1),
             ],
         )
         .unwrap();
@@ -205,9 +205,9 @@ on_each_engine! {
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let even =
-            GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::EVEN, 2)]).unwrap();
+            GradedSpace::try_new(Arc::new(FermionParityFusionRule::new()), [(FermionParityIrrep::EVEN, 2)]).unwrap();
         let odd =
-            GradedSpace::try_new(Arc::new(FermionParityFusionRule), [(Z2Irrep::ODD, 1)]).unwrap();
+            GradedSpace::try_new(Arc::new(FermionParityFusionRule::new()), [(FermionParityIrrep::ODD, 1)]).unwrap();
         let empty: TensorMap<_, f64> =
             TensorMap::from_subblock_fn(engine, &runtime, [&even], [&odd], real_fill).unwrap();
         assert!(empty.dense_data().unwrap().is_empty(), "the fixture carries no element");

@@ -5,10 +5,12 @@ fn rule_aware_tree_validation_covers_rank_shape_style_and_vertices() {
     // What: categorical interpretation requires the canonical empty-tree
     // vacuum and rejects every representable malformed tree field.
     let empty_vacuum = FusionTreeKey::new([], z2_even(), [], [], []);
-    empty_vacuum.validate_for_rule(&Z2FusionRule).unwrap();
+    empty_vacuum
+        .validate_for_rule(&ZNFusionRule::new(2).unwrap())
+        .unwrap();
     assert_eq!(
         FusionTreeKey::new([], z2_odd(), [], [], [])
-            .validate_for_rule(&Z2FusionRule)
+            .validate_for_rule(&ZNFusionRule::new(2).unwrap())
             .unwrap_err(),
         CoreError::MalformedFusionTree {
             message: "rank-0 fusion tree coupled sector must equal the vacuum",
@@ -16,10 +18,12 @@ fn rule_aware_tree_validation_covers_rank_shape_style_and_vertices() {
     );
 
     let rank_one = FusionTreeKey::new([z2_odd()], z2_odd(), [true], [], []);
-    rank_one.validate_for_rule(&Z2FusionRule).unwrap();
+    rank_one
+        .validate_for_rule(&ZNFusionRule::new(2).unwrap())
+        .unwrap();
     assert_eq!(
         FusionTreeKey::new([z2_odd()], z2_even(), [true], [], [])
-            .validate_for_rule(&Z2FusionRule)
+            .validate_for_rule(&ZNFusionRule::new(2).unwrap())
             .unwrap_err(),
         CoreError::MalformedFusionTree {
             message: "rank-1 fusion tree coupled sector must equal its uncoupled sector",
@@ -54,7 +58,8 @@ fn rule_aware_tree_validation_covers_rank_shape_style_and_vertices() {
     ];
     for (tree, message) in bad_shapes {
         assert_eq!(
-            tree.validate_for_rule(&Z2FusionRule).unwrap_err(),
+            tree.validate_for_rule(&ZNFusionRule::new(2).unwrap())
+                .unwrap_err(),
             CoreError::MalformedFusionTree { message }
         );
     }
@@ -76,7 +81,8 @@ fn rule_aware_tree_validation_covers_rank_shape_style_and_vertices() {
         ),
     ] {
         assert_eq!(
-            tree.validate_for_rule(&Z2FusionRule).unwrap_err(),
+            tree.validate_for_rule(&ZNFusionRule::new(2).unwrap())
+                .unwrap_err(),
             CoreError::MalformedFusionTree {
                 message: "fusion tree contains an inadmissible fusion vertex",
             }
@@ -90,7 +96,7 @@ fn rule_aware_constructor_enforces_one_based_vertex_bounds() {
     // both multiplicity-free and Generic rules.
     assert_eq!(
         FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             [z2_odd(), z2_odd()],
             z2_even(),
             [false; 2],
@@ -189,7 +195,7 @@ fn checked_tree_distinguishes_absent_channels_from_algebra_failure() {
             [],
             [MultiplicityIndex::ONE],
         )
-        .validate_for_rule_checked(&Z2FusionRule),
+        .validate_for_rule_checked(&ZNFusionRule::new(2).unwrap()),
         Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
             FusionAlgebraError::InvalidSector { sector: invalid }
         )))
@@ -199,7 +205,7 @@ fn checked_tree_distinguishes_absent_channels_from_algebra_failure() {
     {
         type Codec = PackedProductCodec<Fz2SectorLayout, U1SectorLayout>;
         type Rule = ProductFusionRule<FermionParityFusionRule, U1FusionRule, Codec>;
-        let rule = Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+        let rule = Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
         let left = Codec::encode(z2_even(), u1(i32::MAX));
         let right = Codec::encode(z2_odd(), u1(1));
         let coupled = Codec::encode(z2_odd(), u1(0));
@@ -235,7 +241,7 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
     // What: checked validation accepts the same valid raw trees as the
     // established validator across built-in and recursive product rules.
     assert_checked_tree_matches_infallible(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         FusionTreeKey::new(
             [z2_odd(); 2],
             z2_even(),
@@ -245,7 +251,7 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
         ),
     );
     assert_checked_tree_matches_infallible(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         FusionTreeKey::new(
             [z2_odd(); 2],
             z2_even(),
@@ -293,7 +299,7 @@ fn checked_tree_matches_closed_builtin_and_nested_product_rules() {
         type Codec = PackedProductCodec<InnerLayout, Su2SectorLayout>;
         type Rule = ProductFusionRule<InnerRule, SU2FusionRule, Codec>;
         let rule = Rule::try_new(
-            InnerRule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            InnerRule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap();
@@ -503,9 +509,9 @@ fn rule_validation_preserves_builtin_multiplicity_free_keys() {
         .unwrap(),
     );
     assert_preserved(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         FusionTreeKey::try_new_for_rule(
-            &FermionParityFusionRule,
+            &FermionParityFusionRule::new(),
             [z2_odd(); 3],
             z2_odd(),
             [false, true, false],
@@ -609,13 +615,19 @@ fn public_operation_errors_precede_categorical_source_errors() {
 fn unique_direct_braid_eligibility_excludes_rank_zero() {
     // What: the canonical empty tree carries the vacuum, but no rank-zero
     // operation is eligible for a direct braid rebuild.
-    let empty =
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], Z2FusionRule.vacuum(), [], [], [])
-            .unwrap();
+    let empty = FusionTreeKey::try_new_for_rule(
+        &ZNFusionRule::new(2).unwrap(),
+        [],
+        ZNFusionRule::new(2).unwrap().vacuum(),
+        [],
+        [],
+        [],
+    )
+    .unwrap();
 
-    assert_eq!(empty.coupled(), Z2FusionRule.vacuum());
+    assert_eq!(empty.coupled(), ZNFusionRule::new(2).unwrap().vacuum());
     assert!(!is_unique_direct_braid_source(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         empty.as_view()
     ));
 }

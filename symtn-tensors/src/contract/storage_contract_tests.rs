@@ -1202,8 +1202,11 @@ fn fermionic_twist_role_cases<R: MultiplicityFreeRigidSymbols<Scalar = f64>>(
 
 fn fermionic_cases() -> Vec<(&'static str, Case<FermionU1>)> {
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let leg = |dual| fermion_u1_leg(&provider, dual);
     let mut cases = vec![
@@ -1228,8 +1231,11 @@ fn fermionic_cases() -> Vec<(&'static str, Case<FermionU1>)> {
 
 fn fermionic_su2_cases() -> Vec<(&'static str, Case<FermionSu2>)> {
     let provider = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let leg = |dual| fermion_su2_leg(&provider, dual);
     let mut cases = vec![
@@ -1642,12 +1648,18 @@ where
 #[test]
 fn the_fermionic_twist_rides_on_the_operand_already_copied_or_the_smaller() {
     let fu1 = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let fsu2 = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let mut totals = Vec::new();
     for (role, case) in fermionic_twist_role_cases(&fu1, |dual| fermion_u1_leg(&fu1, dual)) {
@@ -1942,7 +1954,7 @@ fn a_self_dual_core_form_lazy_contraction_is_host_copy_c_and_storage_dynamic_tre
 #[test]
 fn a_fermionic_dual_contracted_leg_on_a_transformed_operand_reports_the_twist() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let provider = Arc::new(FermionParityFusionRule);
+    let provider = Arc::new(FermionParityFusionRule::new());
     let odd_even = |dual| SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], dual);
     // `rhs` codomain leg 1 is dual: contracting it is a supertrace twist on
     // the core-right operand.
@@ -2856,12 +2868,18 @@ fn host_eager_and_the_device_planner_take_the_same_route() {
         assert_eq!(host, planner, "{name}");
     }
     let fu1 = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let fsu2 = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, SU2FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            SU2FusionRule,
+        )
+        .unwrap(),
     );
     let uniform = [
         (

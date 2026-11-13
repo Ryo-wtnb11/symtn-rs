@@ -50,12 +50,11 @@ pub mod testing {
 }
 
 mod abelian;
-pub use abelian::{
-    FermionParityFusionRule, U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule, ZNIrrep,
-};
+pub use abelian::{U1FusionRule, U1Irrep};
 
-mod cu1;
-pub use cu1::{CU1FusionRule, CU1Irrep, CU1_MAX_TWICE_CHARGE};
+mod enumerated;
+pub use enumerated::{CU1FusionRule, FermionParityFusionRule, ZNFusionRule};
+pub use fusion_symbols::{fermion::FermionParityIrrep, finite::ZNIrrep, lie::CU1Irrep};
 
 mod table_rule;
 pub use table_rule::{TableRule, TableRuleError, TableSector};

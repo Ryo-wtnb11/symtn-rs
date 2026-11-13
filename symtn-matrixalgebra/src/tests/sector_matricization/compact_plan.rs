@@ -10,7 +10,7 @@ fn compact_routes_reject_an_extra_positive_output_region() {
         FusionProductSpace::new([leg]),
     );
     let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         homspace,
     )
     .unwrap();
@@ -41,7 +41,8 @@ fn z2_pair(codomain: [usize; 2], domain: [usize; 2], coupled: usize) -> FusionTr
         [1],
     )
     .unwrap();
-    pair.validate_for_rule(&Z2FusionRule).unwrap();
+    pair.validate_for_rule(&ZNFusionRule::new(2).unwrap())
+        .unwrap();
     pair
 }
 
@@ -55,7 +56,7 @@ fn aligned_diagonal_spectrum_admission_is_exact_and_order_independent() {
         FusionProductSpace::new([leg]),
     );
     let authority = BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
-        Arc::new(Z2FusionRule),
+        Arc::new(ZNFusionRule::new(2).unwrap()),
         homspace,
     )
     .unwrap();

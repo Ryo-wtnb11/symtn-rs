@@ -1606,13 +1606,20 @@ fn assert_fermionic_contract_and_compose_semantics<D>(
 fn fermionic_lazy_contract_keeps_the_supertrace_distinct_from_compose() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(FermionParityFusionRule);
-    let leg = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 2)])
-        .and_then(|space| space.try_dual())
-        .unwrap();
+    let provider = Arc::new(FermionParityFusionRule::new());
+    let leg = GradedSpace::try_new(
+        provider,
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 2)],
+    )
+    .and_then(|space| space.try_dual())
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
         let sector = trees.codomain_uncoupled[0];
-        let parity_weight = if sector == Z2Irrep::ODD { 3.0 } else { 1.0 };
+        let parity_weight = if sector == FermionParityIrrep::ODD {
+            3.0
+        } else {
+            1.0
+        };
         parity_weight * (indices[0] + 2 * indices[1] + 1) as f64
     })
     .unwrap();
@@ -1741,8 +1748,16 @@ fn lazy_contract_preserves_validation_precedence_without_materializing() {
     let runtime = Runtime::builder().build().unwrap();
     let z2 = Arc::new(ZNFusionRule::new(2).unwrap());
     let z3 = Arc::new(ZNFusionRule::new(3).unwrap());
-    let z2_leg = GradedSpace::try_new(Arc::clone(&z2), [(z2.irrep(0), 2)]).unwrap();
-    let z3_leg = GradedSpace::try_new(Arc::clone(&z3), [(z3.irrep(0), 2)]).unwrap();
+    let z2_leg = GradedSpace::try_new(
+        Arc::clone(&z2),
+        [(ZNIrrep::new(0, z2.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
+    let z3_leg = GradedSpace::try_new(
+        Arc::clone(&z3),
+        [(ZNIrrep::new(0, z3.category().modulus()).unwrap(), 2)],
+    )
+    .unwrap();
     let z2_tensor =
         TensorMap::from_subblock_fn(engine, &runtime, [&z2_leg], [&z2_leg], |_, _| 1.0).unwrap();
     let z3_tensor =

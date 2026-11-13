@@ -571,7 +571,7 @@ fn assert_complex_oracle(actual: Complex64, expected: Complex64) {
 
 #[test]
 fn unique_production_domain_fermion_crossing_matches_tensorkit_oracle() {
-    let rule = FermionParityFusionRule;
+    let rule = FermionParityFusionRule::new();
     let odd = SectorId::new(1);
     let source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(&rule, [odd], odd, [false], [], []).unwrap(),
@@ -785,22 +785,29 @@ fn unique_production_lowering_matches_generic_across_pointed_rules_and_operation
         TreeTransformOperation::permute([1, 0], [2]),
     );
 
-    let z2_source = unique_rank_three_tree_pair(&Z2FusionRule, SectorId::new(1), SectorId::new(0));
+    let z2_source = unique_rank_three_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        SectorId::new(1),
+        SectorId::new(0),
+    );
     assert_unique_and_generic_plan_are_identical(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         z2_source,
         TreeTransformOperation::braid([2, 0], [1], [0, 2], [1]),
     );
 
-    let fz2_source =
-        unique_rank_three_tree_pair(&FermionParityFusionRule, SectorId::new(1), SectorId::new(1));
+    let fz2_source = unique_rank_three_tree_pair(
+        &FermionParityFusionRule::new(),
+        SectorId::new(1),
+        SectorId::new(1),
+    );
     assert_unique_and_generic_plan_are_identical(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         fz2_source,
         TreeTransformOperation::transpose([2, 0], [1]),
     );
 
-    let product = FpU1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap();
+    let product = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
     let odd_charge = product.encode_component_ids(SectorId::new(1), U1Irrep::new(2).sector_id());
     let even_charge = product.encode_component_ids(SectorId::new(0), U1Irrep::new(-1).sector_id());
     let coupled = product.fusion_channels(odd_charge, even_charge)[0];
@@ -889,19 +896,26 @@ fn unique_production_lowering_matches_generic_at_rank_zero_and_one() {
 
     let rank_one = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
-            [Z2FusionRule.vacuum()],
-            Z2FusionRule.vacuum(),
+            &ZNFusionRule::new(2).unwrap(),
+            [ZNFusionRule::new(2).unwrap().vacuum()],
+            ZNFusionRule::new(2).unwrap().vacuum(),
             [true],
             [],
             [],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], Z2FusionRule.vacuum(), [], [], [])
-            .unwrap(),
+        FusionTreeKey::try_new_for_rule(
+            &ZNFusionRule::new(2).unwrap(),
+            [],
+            ZNFusionRule::new(2).unwrap().vacuum(),
+            [],
+            [],
+            [],
+        )
+        .unwrap(),
     );
     assert_unique_and_generic_plan_are_identical(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         rank_one,
         TreeTransformOperation::transpose([0], []),
     );
@@ -911,35 +925,45 @@ fn unique_production_lowering_matches_generic_at_rank_zero_and_one() {
 fn unique_all_codomain_production_lowering_matches_generic_replay_exactly() {
     let source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             [SectorId::new(1), SectorId::new(1)],
-            Z2FusionRule.vacuum(),
+            ZNFusionRule::new(2).unwrap().vacuum(),
             [false, true],
             [],
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], Z2FusionRule.vacuum(), [], [], [])
-            .unwrap(),
+        FusionTreeKey::try_new_for_rule(
+            &ZNFusionRule::new(2).unwrap(),
+            [],
+            ZNFusionRule::new(2).unwrap().vacuum(),
+            [],
+            [],
+            [],
+        )
+        .unwrap(),
     );
     let source_structure =
         packed_fixture_structure(2, [(BlockKey::from(source), vec![1; 2])]).unwrap();
     let operation = TreeTransformOperation::permute([1, 0], []);
     let specialized = build_unique_all_codomain_tree_transform_group_plan(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         operation.clone(),
         &source_structure,
     )
     .unwrap();
     let generic = build_multiplicity_free_all_codomain_tree_transform_group_plan(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         operation.clone(),
         &source_structure,
     )
     .unwrap();
-    let standard =
-        build_all_codomain_tree_transform_group_plan(&Z2FusionRule, operation, &source_structure)
-            .unwrap();
+    let standard = build_all_codomain_tree_transform_group_plan(
+        &ZNFusionRule::new(2).unwrap(),
+        operation,
+        &source_structure,
+    )
+    .unwrap();
 
     // What: all-codomain dispatch lowers the same key, phase, and raw replay
     // descriptor as the explicit multiplicity-free algorithm.
@@ -978,24 +1002,28 @@ fn assert_unique_and_generic_error_are_identical<R>(
 
 #[test]
 fn unique_production_lowering_preserves_generic_error_precedence() {
-    let source = unique_rank_three_tree_pair(&Z2FusionRule, SectorId::new(1), SectorId::new(0));
+    let source = unique_rank_three_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        SectorId::new(1),
+        SectorId::new(0),
+    );
     let source_structure =
         packed_fixture_structure(3, [(BlockKey::from(source), vec![1; 3])]).unwrap();
 
     // What: malformed permutations, braid levels, and noncyclic transposes
     // fail with the same error and precedence as the explicit generic path.
     assert_unique_and_generic_error_are_identical(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         &source_structure,
         TreeTransformOperation::permute([0, 0], [2]),
     );
     assert_unique_and_generic_error_are_identical(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         &source_structure,
         TreeTransformOperation::braid([1, 0], [2], [0], [2]),
     );
     assert_unique_and_generic_error_are_identical(
-        &Z2FusionRule,
+        &ZNFusionRule::new(2).unwrap(),
         &source_structure,
         TreeTransformOperation::transpose([1, 0], [2]),
     );
@@ -1012,7 +1040,7 @@ fn unique_production_lowering_preserves_generic_error_precedence() {
 }
 
 fn z2_two_leg_pair_with_empty_domain(uncoupled: [SectorId; 2]) -> FusionTreePairKey {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let coupled = rule.fusion_channels(uncoupled[0], uncoupled[1])[0];
     FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
@@ -1030,7 +1058,7 @@ fn z2_two_leg_pair_with_empty_domain(uncoupled: [SectorId; 2]) -> FusionTreePair
 
 #[test]
 fn unique_production_valid_groups_are_singleton_and_preserve_source_order() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let odd = SectorId::new(1);
     let group_a = z2_two_leg_pair_with_empty_domain([odd, odd]);
     let group_b = z2_two_leg_pair_with_empty_domain([SectorId::new(0), SectorId::new(0)]);
@@ -1069,7 +1097,7 @@ fn unique_production_valid_groups_are_singleton_and_preserve_source_order() {
 
 #[test]
 fn unique_production_prepares_each_distinct_source_split() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let vacuum = rule.vacuum();
     let odd = SectorId::new(1);
     let split_one_one = FusionTreePairKey::pair(
@@ -1124,9 +1152,13 @@ fn unique_production_preserves_generic_noncategorical_error_precedence() {
         // What: Unique and general multiplicity-free builders both report
         // malformed syntax before either noncategorical namespace.
         assert_eq!(
-            build_tree_pair_transform_group_plan(&Z2FusionRule, malformed.clone(), structure,),
+            build_tree_pair_transform_group_plan(
+                &ZNFusionRule::new(2).unwrap(),
+                malformed.clone(),
+                structure,
+            ),
             build_multiplicity_free_tree_pair_transform_group_plan(
-                &Z2FusionRule,
+                &ZNFusionRule::new(2).unwrap(),
                 malformed.clone(),
                 structure,
             ),

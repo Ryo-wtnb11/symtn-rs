@@ -9,7 +9,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 use symtn::typed::Side;
 
-use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
+use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep};
 use symtn::typed::{Complex64, Runtime};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
 
@@ -117,18 +117,22 @@ fn typed_cat_reads_compact_operands_without_source_sized_buffers() {
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), DEGENERACY)],
+    )
+    .unwrap();
     let mut state = 0x5eed_0584u64;
-    let tensor: TensorMap<Z2FusionRule, f64> =
+    let tensor: TensorMap<ZNFusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             pseudo_random(&mut state)
         })
         .unwrap();
     // Warm every layout cache with a throwaway spectrum factor.
-    let warmup: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let warmup: TensorMap<ZNFusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
     black_box(warmup.cat(engine, &warmup, Side::Domain).unwrap());
 
-    let s: TensorMap<Z2FusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
+    let s: TensorMap<ZNFusionRule, f64> = tensor.svd_compact(engine, &[0], &[1]).unwrap().s;
     let dense_payload = DEGENERACY * DEGENERACY * std::mem::size_of::<f64>();
     let output_payload = 2 * dense_payload;
     let expected = output_payload as u64;
@@ -151,13 +155,17 @@ fn typed_braid_and_absorb_allocate_only_one_dense_output_for_compact_input() {
     let _serial = crate::counting_alloc::serial();
     const DEGENERACY: usize = 128;
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(Z2FusionRule), [(Z2Irrep::EVEN, DEGENERACY)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [(ZNIrrep::new(0, 2).unwrap(), DEGENERACY)],
+    )
+    .unwrap();
     let diagonal: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [symtn::typed::SectorSpectrum {
-            sector: Z2Irrep::EVEN,
+            sector: ZNIrrep::new(0, 2).unwrap(),
             values: vec![2.0; DEGENERACY],
         }],
     )
@@ -188,9 +196,10 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let provider = Arc::new(Z2FusionRule);
-    let wide = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::EVEN, 128)]).unwrap();
-    let narrow = GradedSpace::try_new(provider, [(Z2Irrep::EVEN, 64)]).unwrap();
+    let provider = Arc::new(ZNFusionRule::new(2).unwrap());
+    let wide =
+        GradedSpace::try_new(Arc::clone(&provider), [(ZNIrrep::new(0, 2).unwrap(), 128)]).unwrap();
+    let narrow = GradedSpace::try_new(provider, [(ZNIrrep::new(0, 2).unwrap(), 64)]).unwrap();
     let receiver: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&wide], |_, index| {
             1.0 + index[0] as f64 + index[1] as f64
@@ -201,7 +210,7 @@ fn typed_absorb_smaller_compact_source_avoids_its_dense_buffer() {
         &runtime,
         &narrow,
         [symtn::typed::SectorSpectrum {
-            sector: Z2Irrep::EVEN,
+            sector: ZNIrrep::new(0, 2).unwrap(),
             values: vec![2.0; 64],
         }],
     )
@@ -296,8 +305,11 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
     // destination block is still found without an allocation, so the warm
     // call costs exactly what the self-dual Z2 braid of the same shape does.
     let z2 = GradedSpace::try_new(
-        Arc::new(Z2FusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        [
+            (ZNIrrep::new(0, 2).unwrap(), 2),
+            (ZNIrrep::new(1, 2).unwrap(), 3),
+        ],
     )
     .unwrap();
     let self_dual = warm_compact_braid_calls!(
@@ -305,11 +317,11 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
         &z2,
         vec![
             SectorSpectrum {
-                sector: Z2Irrep::EVEN,
+                sector: ZNIrrep::new(0, 2).unwrap(),
                 values: vec![1.0, 2.0],
             },
             SectorSpectrum {
-                sector: Z2Irrep::ODD,
+                sector: ZNIrrep::new(1, 2).unwrap(),
                 values: vec![3.0, 4.0, 5.0],
             },
         ],

@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::GradedSpace;
 
@@ -68,10 +68,17 @@ pub fn su2_on(
 /// Fermion-parity leg with `(is_odd, degeneracy)` sectors.
 pub fn fz2_leg(pairs: &[(bool, usize)]) -> GradedSpace<FermionParityFusionRule> {
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        pairs
-            .iter()
-            .map(|&(odd, degeneracy)| (if odd { Z2Irrep::ODD } else { Z2Irrep::EVEN }, degeneracy)),
+        Arc::new(FermionParityFusionRule::new()),
+        pairs.iter().map(|&(odd, degeneracy)| {
+            (
+                if odd {
+                    FermionParityIrrep::ODD
+                } else {
+                    FermionParityIrrep::EVEN
+                },
+                degeneracy,
+            )
+        }),
     )
     .unwrap()
 }

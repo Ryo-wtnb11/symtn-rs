@@ -256,10 +256,10 @@ fn isometry_and_posdef_see_their_positive_cases() {
     // that separates `>` from `>=` — `eigh` on it returns that zero exactly, so
     // the comparison is not floating-point weather.
     let semidefinite_leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();

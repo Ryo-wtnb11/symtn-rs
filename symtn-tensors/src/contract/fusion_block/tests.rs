@@ -3,7 +3,7 @@ use super::*;
 use symtn_core::Placement;
 use symtn_core::{
     BlockStructure, BraidingStyleKind, FusionProductSpace, FusionStyleKind, SectorLeg, SectorVec,
-    TensorStorage, Z2FusionRule,
+    TensorStorage, ZNFusionRule,
 };
 
 use crate::probe::{self, Event};
@@ -60,7 +60,7 @@ impl StorageGemm<f64, OpaqueStorage<f64>, OpaqueStorage<f64>, OpaqueStorage<f64>
 #[test]
 fn canonical_region_join_scales_missing_sector_without_layout_compile() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let outer = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let inner = || SectorLeg::new([(SectorId::new(0), 1)], false);
     let space = |codomain: SectorLeg, domain: SectorLeg| {
@@ -220,7 +220,7 @@ fn generic_multiplicity_grid_uses_canonical_region_gemm() {
 
 #[test]
 fn storage_direct_replay_runs_without_host_slice_contract() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let fusion_space = || {
         DynamicFusionMapSpace::from_final_homspace(
@@ -261,7 +261,7 @@ fn storage_direct_replay_runs_without_host_slice_contract() {
 #[test]
 fn storage_direct_replay_matches_host_execute_raw() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg =
         |dims: usize| SectorLeg::new([(SectorId::new(0), dims), (SectorId::new(1), dims)], false);
     let fusion_space = |dims: usize| {
@@ -325,7 +325,7 @@ fn storage_direct_replay_matches_host_execute_raw() {
 }
 
 fn z2_adjoint_mapping_spaces() -> (DynamicFusionMapSpace, DynamicFusionMapSpace) {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
     let storage = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -353,7 +353,7 @@ fn z2_adjoint_mapping_spaces() -> (DynamicFusionMapSpace, DynamicFusionMapSpace)
 #[test]
 fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = std::sync::Arc::new(Z2FusionRule);
+    let rule = std::sync::Arc::new(ZNFusionRule::new(2).unwrap());
     let unit = || SectorLeg::new([(SectorId::new(0), 1), (SectorId::new(1), 1)], false);
     let canonical = crate::BoundDynamicFusionMapSpace::from_final_homspace_multiplicity_free(
         std::sync::Arc::clone(&rule),
@@ -431,7 +431,7 @@ fn an_identity_side_is_free_in_selection_over_canonical_layouts() {
 
 #[test]
 fn adjoint_operand_without_canonical_regions_uses_exact_fallback() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let (logical, storage) = z2_adjoint_mapping_spaces();
     let dst = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         logical,
@@ -462,7 +462,7 @@ fn adjoint_operand_without_canonical_regions_uses_exact_fallback() {
 #[test]
 fn rank22_adjoint_reentry_keeps_matrix_orientation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 2), (SectorId::new(1), 2)], false);
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([leg(), leg()]),
@@ -549,7 +549,7 @@ fn storage_direct_replay_on_cuda_matches_host() {
     use symtn_dense::CudaDenseContext;
     use symtn_operations::cuda::{CudaStorage, CudaStorageGemm};
 
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = || SectorLeg::new([(SectorId::new(0), 3), (SectorId::new(1), 3)], false);
     let space = DynamicFusionMapSpace::from_final_homspace(
         &rule,

@@ -35,7 +35,7 @@
 use std::sync::Arc;
 
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{Complex32, Complex64};
 use symtn::typed::{GradedSpace, SectorSpectrum, TensorMap};
@@ -106,10 +106,18 @@ fn fz2() -> (
     GradedSpace<FermionParityFusionRule>,
     GradedSpace<FermionParityFusionRule>,
 ) {
-    let rule = Arc::new(FermionParityFusionRule);
+    let rule = Arc::new(FermionParityFusionRule::new());
     (
-        GradedSpace::try_new(Arc::clone(&rule), [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)]).unwrap(),
-        GradedSpace::try_new(rule, [(Z2Irrep::EVEN, 5), (Z2Irrep::ODD, 1)]).unwrap(),
+        GradedSpace::try_new(
+            Arc::clone(&rule),
+            [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 3)],
+        )
+        .unwrap(),
+        GradedSpace::try_new(
+            rule,
+            [(FermionParityIrrep::EVEN, 5), (FermionParityIrrep::ODD, 1)],
+        )
+        .unwrap(),
     )
 }
 

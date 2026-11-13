@@ -22,8 +22,8 @@ use num_complex::Complex64;
 use symtn::expert::HostReadableStorage;
 use symtn::sector::TypedSectorAdmission;
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2Irrep, U1FusionRule, U1Irrep,
-    Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2Irrep,
+    U1FusionRule, U1Irrep,
 };
 use symtn::typed::{BlockFusionTrees, CoupledBlock, CoupledBlockPayload};
 use symtn::typed::{
@@ -506,14 +506,14 @@ type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
     let sector = |q: i32| {
         let parity = if q.rem_euclid(2) == 0 {
-            Z2Irrep::EVEN
+            FermionParityIrrep::EVEN
         } else {
-            Z2Irrep::ODD
+            FermionParityIrrep::ODD
         };
         ProductSector::new(parity, U1Irrep::new(q))
     };
     let v = GradedSpace::try_new(
-        Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
+        Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use symtn::typed::Engine;
 
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 #[cfg(feature = "cgc-gen")]
 use symtn::sector::{CheckedGenericRigidSymbols, TypedSectorAdmission};
@@ -31,7 +31,7 @@ fn measured<T>(operation: impl FnOnce() -> T) -> (T, usize) {
 fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
     let rule = Arc::new(
         Fz2U1Su2Rule::try_new(
-            Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+            Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
             SU2FusionRule,
         )
         .unwrap(),
@@ -40,9 +40,9 @@ fn non_abelian_space() -> GradedSpace<Fz2U1Su2Rule> {
         product_sector(
             product_sector(
                 if parity == 0 {
-                    Z2Irrep::EVEN
+                    FermionParityIrrep::EVEN
                 } else {
-                    Z2Irrep::ODD
+                    FermionParityIrrep::ODD
                 },
                 U1Irrep::new(charge),
             ),

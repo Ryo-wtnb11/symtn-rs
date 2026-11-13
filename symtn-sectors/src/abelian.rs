@@ -1,10 +1,10 @@
-//! Z2, Z_N, U(1) and fermion parity as symtn fusion rules.
+//! U(1) as a symtn fusion rule.
 //!
-//! Each rule is a fusion-symbols category (`ZN`, `FermionParity`, `U1`)
-//! behind the shared category adapter, which supplies every symbol (dual,
-//! fusion, N, F, R, A, B, dims, twist, Frobenius–Schur phase) in
-//! TensorKitSectors 0.3.9's conventions. This module owns only symtn's
-//! labels, `SectorId` codecs, identities, and checked error contracts. An
+//! The rule is the fusion-symbols category `U1` behind the shared category
+//! adapter, which supplies every symbol (dual, fusion, N, F, R, A, B, dims,
+//! twist, Frobenius–Schur phase) in TensorKitSectors 0.3.9's conventions.
+//! This module owns only symtn's label, `SectorId` codec, TensorKit order
+//! keys, identity, and checked error contract. An
 //! inadmissible F or R is `0.0`, as in TensorKitSectors. A `SectorId`
 //! outside the rule's domain panics in the infallible symbols, as in the
 //! other providers.
@@ -13,368 +13,17 @@ use std::sync::LazyLock;
 
 use fusion_symbols::{
     category::{FusionCategory, GroupRepresentations},
-    fermion::{FermionParity, FermionParityIrrep},
-    finite::{ZNIrrep as FsZNIrrep, ZN},
     lie::{U1Error, U1Irrep as FsU1Irrep, U1},
 };
 
 use crate::category_rule::{
-    admit_coupled_first, admit_in_order, fusion_algebra_error, AdapterAccess,
-    CanonicalUnitAdmission, CategoryAdapterError, CategoryCodec, CategoryFailure,
-    CategoryOperation,
+    admit_in_order, fusion_algebra_error, AdapterAccess, CanonicalUnitAdmission,
+    CategoryAdapterError, CategoryCodec, CategoryFailure, CategoryOperation,
 };
 use crate::{
     CheckedFusionAlgebra, FusionAlgebraError, MultiplicityFreeAdmissionMode, PhysicalBasisError,
     PhysicalFusionBasis, RuleIdentity, SectorId, SectorOrderKey,
 };
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct Z2Irrep {
-    parity: u8,
-}
-
-/// Irreducible sector of the finite cyclic group Z_N.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct ZNIrrep {
-    charge: u32,
-}
-
-impl ZNIrrep {
-    pub const fn charge(self) -> u32 {
-        self.charge
-    }
-
-    pub const fn sector_id(self) -> SectorId {
-        SectorId::new(self.charge as usize)
-    }
-}
-
-impl From<ZNIrrep> for SectorId {
-    fn from(value: ZNIrrep) -> Self {
-        value.sector_id()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ZNFusionRule {
-    category: ZN,
-    identity: RuleIdentity,
-}
-
-impl PartialEq for ZNFusionRule {
-    fn eq(&self, other: &Self) -> bool {
-        self.category == other.category
-    }
-}
-impl Eq for ZNFusionRule {}
-impl std::hash::Hash for ZNFusionRule {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.modulus().hash(state);
-    }
-}
-
-impl ZNFusionRule {
-    pub fn new(modulus: u32) -> Result<Self, FusionAlgebraError> {
-        let Ok(category) = ZN::new(modulus) else {
-            return Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: RuleIdentity::of_type::<Self>(),
-                label: "Z_N modulus must be nonzero".into(),
-            });
-        };
-        let bytes: std::sync::Arc<[u8]> = modulus.to_le_bytes().to_vec().into();
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&modulus, &mut hasher);
-        let identity =
-            RuleIdentity::from_canonical_bytes::<Self>(std::hash::Hasher::finish(&hasher), bytes);
-        Ok(Self { category, identity })
-    }
-
-    pub const fn modulus(&self) -> u32 {
-        self.category.modulus()
-    }
-
-    pub fn irrep(&self, charge: i64) -> ZNIrrep {
-        let label = FsZNIrrep::new(charge, self.modulus())
-            .expect("the category's modulus is nonzero, so ZeroModulus cannot occur");
-        ZNIrrep {
-            charge: label.charge(),
-        }
-    }
-}
-
-/// `ZNIrrep` labels and charge ids over `ZN`; `N` checks the coupled sector
-/// before the other two.
-#[derive(Debug)]
-pub struct ZnCodec;
-
-impl CategoryCodec<ZN> for ZnCodec {
-    type Sector = ZNIrrep;
-    type Error = FusionAlgebraError;
-    type Mode = MultiplicityFreeAdmissionMode;
-    type Unit = CanonicalUnitAdmission;
-
-    fn encode_label<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        _rule: &RuleIdentity,
-        label: &ZNIrrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        if label.charge < category().modulus() {
-            Ok(label.sector_id())
-        } else {
-            Err(FusionAlgebraError::InvalidSector {
-                sector: label.sector_id(),
-            })
-        }
-    }
-
-    fn decode_label<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        id: SectorId,
-    ) -> Result<ZNIrrep, FusionAlgebraError> {
-        self.object(category, id).map(|label| ZNIrrep {
-            charge: label.charge(),
-        })
-    }
-
-    fn object<'a>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        id: SectorId,
-    ) -> Result<FsZNIrrep, FusionAlgebraError> {
-        u32::try_from(id.id())
-            .ok()
-            .filter(|&charge| charge < category().modulus())
-            .and_then(|charge| FsZNIrrep::new(i64::from(charge), category().modulus()).ok())
-            .ok_or(FusionAlgebraError::InvalidSector { sector: id })
-    }
-
-    fn sector_id<'a>(
-        &self,
-        _category: impl Fn() -> &'a ZN + Copy,
-        _rule: &RuleIdentity,
-        object: &FsZNIrrep,
-    ) -> Result<SectorId, FusionAlgebraError> {
-        Ok(SectorId::new(object.charge() as usize))
-    }
-
-    fn admit<'a, const N: usize>(
-        &self,
-        category: impl Fn() -> &'a ZN + Copy,
-        rule: &RuleIdentity,
-        operation: CategoryOperation,
-        ids: [SectorId; N],
-    ) -> Result<[FsZNIrrep; N], FusionAlgebraError> {
-        if operation == CategoryOperation::N {
-            return admit_coupled_first(self, category, ids);
-        }
-        admit_in_order(self, category, rule, operation, ids)
-    }
-
-    fn map_error(
-        &self,
-        _inputs: &[SectorId],
-        error: CategoryAdapterError<std::convert::Infallible>,
-    ) -> FusionAlgebraError {
-        fusion_algebra_error(error)
-    }
-}
-
-impl crate::seal::Provider for ZNFusionRule {}
-
-crate::category_rule::multiplicity_free_adapter_impls!(ZNFusionRule, ZNIrrep, f64);
-
-impl AdapterAccess for ZNFusionRule {
-    type Category = ZN;
-    type Codec = ZnCodec;
-
-    fn category(&self) -> &ZN {
-        &self.category
-    }
-    fn codec(&self) -> &ZnCodec {
-        &ZnCodec
-    }
-    fn identity(&self) -> &RuleIdentity {
-        &self.identity
-    }
-    fn vacuum_id(&self) -> SectorId {
-        SectorId::new(0)
-    }
-}
-
-impl Z2Irrep {
-    pub const EVEN: Self = Self { parity: 0 };
-    pub const ODD: Self = Self { parity: 1 };
-
-    pub const fn new(parity: u8) -> Self {
-        Self { parity: parity & 1 }
-    }
-
-    #[inline]
-    pub const fn parity(self) -> u8 {
-        self.parity
-    }
-
-    #[inline]
-    pub const fn sector_id(self) -> SectorId {
-        SectorId::new(self.parity as usize)
-    }
-
-    pub const fn from_sector_id(sector: SectorId) -> Option<Self> {
-        match sector.id() {
-            0 => Some(Self::EVEN),
-            1 => Some(Self::ODD),
-            _ => None,
-        }
-    }
-
-    const fn is_odd(self) -> bool {
-        self.parity == 1
-    }
-}
-
-impl From<Z2Irrep> for SectorId {
-    fn from(value: Z2Irrep) -> Self {
-        value.sector_id()
-    }
-}
-
-fn checked_z2_irrep(sector: SectorId) -> Result<Z2Irrep, FusionAlgebraError> {
-    match Z2Irrep::from_sector_id(sector) {
-        Some(irrep) => Ok(irrep),
-        None => Err(FusionAlgebraError::InvalidSector { sector }),
-    }
-}
-
-/// Parity labels and ids over a two-object category: `Z2Codec` over `ZN`
-/// with modulus 2, `Fz2Codec` over `FermionParity`.
-macro_rules! parity_codec {
-    ($codec:ident, $category:ty, $object:ty, $to_object:expr, $is_odd:expr) => {
-        #[derive(Debug)]
-        pub struct $codec;
-
-        impl CategoryCodec<$category> for $codec {
-            type Sector = Z2Irrep;
-            type Error = FusionAlgebraError;
-            type Mode = MultiplicityFreeAdmissionMode;
-            type Unit = CanonicalUnitAdmission;
-
-            fn encode_label<'a>(
-                &self,
-                _category: impl Fn() -> &'a $category + Copy,
-                _rule: &RuleIdentity,
-                label: &Z2Irrep,
-            ) -> Result<SectorId, FusionAlgebraError> {
-                Ok(label.sector_id())
-            }
-
-            fn decode_label<'a>(
-                &self,
-                _category: impl Fn() -> &'a $category + Copy,
-                id: SectorId,
-            ) -> Result<Z2Irrep, FusionAlgebraError> {
-                checked_z2_irrep(id)
-            }
-
-            fn object<'a>(
-                &self,
-                _category: impl Fn() -> &'a $category + Copy,
-                id: SectorId,
-            ) -> Result<$object, FusionAlgebraError> {
-                checked_z2_irrep(id).map(|irrep| $to_object(irrep.is_odd()))
-            }
-
-            fn sector_id<'a>(
-                &self,
-                _category: impl Fn() -> &'a $category + Copy,
-                _rule: &RuleIdentity,
-                object: &$object,
-            ) -> Result<SectorId, FusionAlgebraError> {
-                Ok(Z2Irrep::new(u8::from($is_odd(object))).sector_id())
-            }
-
-            fn map_error(
-                &self,
-                _inputs: &[SectorId],
-                error: CategoryAdapterError<std::convert::Infallible>,
-            ) -> FusionAlgebraError {
-                fusion_algebra_error(error)
-            }
-        }
-    };
-}
-
-parity_codec!(
-    Z2Codec,
-    ZN,
-    FsZNIrrep,
-    |odd: bool| FsZNIrrep::new(i64::from(odd), 2).expect("a parity is a canonical charge modulo 2"),
-    |object: &FsZNIrrep| object.charge() == 1
-);
-parity_codec!(
-    Fz2Codec,
-    FermionParity,
-    FermionParityIrrep,
-    FermionParityIrrep::new,
-    |object: &FermionParityIrrep| object.is_odd()
-);
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Z2FusionRule;
-
-static Z2: LazyLock<ZN> = LazyLock::new(|| ZN::new(2).expect("2 is a nonzero modulus"));
-static Z2_IDENTITY: LazyLock<RuleIdentity> = LazyLock::new(RuleIdentity::of_type::<Z2FusionRule>);
-
-impl crate::seal::Provider for Z2FusionRule {}
-
-crate::category_rule::multiplicity_free_adapter_impls!(Z2FusionRule, Z2Irrep, f64);
-
-impl AdapterAccess for Z2FusionRule {
-    type Category = ZN;
-    type Codec = Z2Codec;
-
-    fn category(&self) -> &ZN {
-        &Z2
-    }
-    fn codec(&self) -> &Z2Codec {
-        &Z2Codec
-    }
-    fn identity(&self) -> &RuleIdentity {
-        &Z2_IDENTITY
-    }
-    fn vacuum_id(&self) -> SectorId {
-        Z2Irrep::EVEN.sector_id()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub struct FermionParityFusionRule;
-
-static FERMION_PARITY_IDENTITY: LazyLock<RuleIdentity> =
-    LazyLock::new(RuleIdentity::of_type::<FermionParityFusionRule>);
-
-impl crate::seal::Provider for FermionParityFusionRule {}
-
-crate::category_rule::multiplicity_free_adapter_impls!(FermionParityFusionRule, Z2Irrep, f64);
-
-impl AdapterAccess for FermionParityFusionRule {
-    type Category = FermionParity;
-    type Codec = Fz2Codec;
-
-    fn category(&self) -> &FermionParity {
-        &FermionParity
-    }
-    fn codec(&self) -> &Fz2Codec {
-        &Fz2Codec
-    }
-    fn identity(&self) -> &RuleIdentity {
-        &FERMION_PARITY_IDENTITY
-    }
-    fn vacuum_id(&self) -> SectorId {
-        Z2Irrep::EVEN.sector_id()
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct U1Irrep {
@@ -672,15 +321,13 @@ impl PhysicalFusionBasis for U1FusionRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        u1_charge_from_zigzag_u32, u1_charge_to_zigzag_u32, FermionParityFusionRule, U1FusionRule,
-        U1Irrep, Z2FusionRule, Z2Irrep, ZNFusionRule,
-    };
+    use super::{u1_charge_from_zigzag_u32, u1_charge_to_zigzag_u32, U1FusionRule, U1Irrep};
     use crate::{
         CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError, FusionRule,
         MultiplicityFreeFusionSymbols, PhysicalBasisError, PhysicalFusionBasis, SectorCodec,
         SectorId,
     };
+    use crate::{FermionParityFusionRule, FermionParityIrrep, ZNFusionRule};
 
     fn assert_canonical_unit<R>(rule: &R, sector: SectorId)
     where
@@ -712,8 +359,11 @@ mod tests {
     fn abelian_providers_have_canonical_unit_channels_and_associators() {
         // What: certified abelian providers keep the vacuum as a unique,
         // self-dual identity with an exact unit F-symbol.
-        assert_canonical_unit(&Z2FusionRule, Z2Irrep::ODD.into());
-        assert_canonical_unit(&FermionParityFusionRule, Z2Irrep::ODD.into());
+        assert_canonical_unit(&ZNFusionRule::new(2).unwrap(), SectorId::new(1));
+        assert_canonical_unit(
+            &FermionParityFusionRule::new(),
+            FermionParityIrrep::ODD.into(),
+        );
         assert_canonical_unit(&U1FusionRule, U1Irrep::new(-17).into());
         let u1_boundary: SectorId = U1Irrep::new(i32::MAX).into();
         let u1_vacuum = U1FusionRule.vacuum();
@@ -859,68 +509,5 @@ mod tests {
                 Ok(expected)
             );
         }
-    }
-
-    #[test]
-    fn zn_fuses_wraps_and_identity_contains_modulus() {
-        let a = ZNFusionRule::new(3).unwrap();
-        let b = ZNFusionRule::new(4).unwrap();
-        assert_eq!(a.irrep(-1).charge(), 2);
-        assert_eq!(
-            a.try_fusion_channels(a.irrep(2).into(), a.irrep(2).into())
-                .unwrap()[0],
-            a.irrep(1).into()
-        );
-        assert_ne!(a.rule_identity(), b.rule_identity());
-        assert!(ZNFusionRule::new(0).is_err());
-    }
-
-    #[test]
-    fn zn_checked_rejects_out_of_domain_sector() {
-        let rule = ZNFusionRule::new(3).unwrap();
-        assert!(matches!(
-            rule.try_dual_sector(SectorId::new(3)),
-            Err(crate::FusionAlgebraError::InvalidSector { .. })
-        ));
-    }
-
-    #[test]
-    fn zn_boundary_labels_fuse_and_symbols_are_canonical() {
-        for modulus in [1, 2, 3, 17, u32::MAX] {
-            let rule = ZNFusionRule::new(modulus).unwrap();
-            for charge in [i64::MIN, -1, 0, 1, i64::MAX] {
-                let sector = rule.irrep(charge);
-                assert_eq!(
-                    rule.try_dual_sector(rule.try_dual_sector(sector.into()).unwrap())
-                        .unwrap(),
-                    sector.into()
-                );
-                assert_eq!(rule.decode_sector(sector.into()).unwrap(), sector);
-            }
-            let a = rule.irrep(u32::MAX as i64);
-            let b = rule.irrep(1);
-            let fused = rule.try_fusion_channels(a.into(), b.into()).unwrap()[0];
-            assert_eq!(fused, rule.irrep((u32::MAX as u64 + 1) as i64).into());
-            if modulus == u32::MAX {
-                let edge = rule.irrep((u32::MAX - 1) as i64);
-                assert_eq!(
-                    rule.try_fusion_channels(edge.into(), edge.into()).unwrap()[0],
-                    rule.irrep((u32::MAX - 2) as i64).into()
-                );
-            }
-            assert_eq!(
-                rule.f_symbol_scalar(a.into(), b.into(), rule.vacuum(), fused, fused, b.into()),
-                1.0
-            );
-            assert_eq!(rule.r_symbol_scalar(a.into(), b.into(), fused), 1.0);
-        }
-        assert_ne!(
-            ZNFusionRule::new(3).unwrap().rule_identity(),
-            ZNFusionRule::new(4).unwrap().rule_identity()
-        );
-        assert_eq!(
-            ZNFusionRule::new(3).unwrap().rule_identity(),
-            ZNFusionRule::new(3).unwrap().rule_identity()
-        );
     }
 }

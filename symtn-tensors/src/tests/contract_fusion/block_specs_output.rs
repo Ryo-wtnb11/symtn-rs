@@ -48,7 +48,7 @@ fn tensorcontract_fusion_block_specs_enumerates_su2_innerline_blocks_from_homspa
 
 #[test]
 fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = |is_dual| SectorLeg::new([(SectorId::new(0), 1)], is_dual);
     let fusion_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,
@@ -101,7 +101,7 @@ fn tensorcontract_fusion_block_specs_rejects_source_tree_transform_terms() {
 #[test]
 fn tensorcontract_fusion_into_absorbs_source_tree_transform_terms() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let leg = |is_dual| SectorLeg::new([(SectorId::new(0), 1)], is_dual);
     let src_space = DynamicFusionMapSpace::from_final_homspace(
         &rule,

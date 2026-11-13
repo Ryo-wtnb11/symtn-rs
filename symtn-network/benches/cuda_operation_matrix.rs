@@ -40,8 +40,8 @@ mod device {
 
     use symtn::expert::{cuda_transfer_stats, CudaTransferStats};
     use symtn::sector::{
-        product_sector, FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
-        Z2Irrep,
+        product_sector, FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep,
+        U1FusionRule, U1Irrep,
     };
     use symtn::sector::{
         CheckedFusionAlgebra, MultiplicityFreeAdmissionMode, MultiplicityFreeRigidSymbols,
@@ -1654,8 +1654,11 @@ mod device {
             // count of this provider is 2 in both families. That is a provider
             // capability, not a size decision made by the harness.
             GradedSpace::try_new(
-                Arc::new(FermionParityFusionRule),
-                [(Z2Irrep::EVEN, degeneracy), (Z2Irrep::ODD, degeneracy)],
+                Arc::new(FermionParityFusionRule::new()),
+                [
+                    (FermionParityIrrep::EVEN, degeneracy),
+                    (FermionParityIrrep::ODD, degeneracy),
+                ],
             )
             .expect("fZ2 fixture leg")
         });
@@ -1670,7 +1673,7 @@ mod device {
             GradedSpace::try_new(
                 Arc::new(
                     symtn_core::ProductFusionRule::<_, _>::try_new(
-                        FermionParityFusionRule,
+                        FermionParityFusionRule::new(),
                         U1FusionRule,
                     )
                     .unwrap(),
@@ -1679,9 +1682,9 @@ mod device {
                     (
                         product_sector(
                             if index % 2 == 0 {
-                                Z2Irrep::EVEN
+                                FermionParityIrrep::EVEN
                             } else {
-                                Z2Irrep::ODD
+                                FermionParityIrrep::ODD
                             },
                             U1Irrep::new((index / 2) as i32),
                         ),

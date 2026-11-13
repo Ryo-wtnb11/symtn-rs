@@ -7,7 +7,7 @@ use crate::errors::Rejection as _;
 use std::sync::Arc;
 
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime, TensorMap};
 use symtn_network::{
@@ -209,8 +209,8 @@ paths!(
 paths!(
     fermionic_paths_agree,
     GradedSpace::try_new(
-        Arc::new(FermionParityFusionRule),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 1)],
+        Arc::new(FermionParityFusionRule::new()),
+        [(FermionParityIrrep::EVEN, 2), (FermionParityIrrep::ODD, 1)],
     )
     .unwrap()
 );

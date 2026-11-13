@@ -321,7 +321,7 @@ fn assert_literal_binary_choice_sector_grids<R>(
 #[test]
 fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
     assert_literal_binary_choice_sector_grids(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         z2_even(),
         z2_odd(),
         vec![
@@ -350,7 +350,7 @@ fn canonical_coupled_grid_has_literal_nonabelian_and_product_metadata() {
     type TripleRule = ProductFusionRule<Fz2U1Rule, SU2FusionRule, TripleCodec>;
 
     let triple_rule = TripleRule::try_new(
-        Fz2U1Rule::try_new(FermionParityFusionRule, U1FusionRule).unwrap(),
+        Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap(),
         SU2FusionRule,
     )
     .unwrap();

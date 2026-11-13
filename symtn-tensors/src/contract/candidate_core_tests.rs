@@ -388,9 +388,11 @@ fn asymmetric_owned_candidate_reaches_swapped_storage_core() {
 
 #[test]
 fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
-    let rule =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let leg = fermion_u1_leg(&rule, false);
     assert_probes_resolve_to_core(&Arc::new(rule), &leg);
 }
@@ -404,8 +406,11 @@ fn zero_copy_candidates_resolve_to_core_on_fermion_u1() {
 fn a_uniform_fermionic_twist_resolves_the_sorted_contraction_to_the_candidate_core() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rule = Arc::new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
     );
     let (v, v_dual) = (fermion_u1_leg(&rule, false), fermion_u1_leg(&rule, true));
     let lhs = square(&rule, &v, &v_dual);

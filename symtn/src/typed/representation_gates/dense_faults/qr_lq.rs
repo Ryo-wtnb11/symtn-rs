@@ -569,7 +569,7 @@ fn checked_compact_diagonal_qr_rejects_nonfinite_and_skips_the_provider_when_fin
 #[test]
 fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_rules() {
     let engine = &mut crate::typed::CpuEngine::serial();
-    use symtn::sector::{U1FusionRule, U1Irrep, Z2FusionRule, Z2Irrep};
+    use symtn::sector::{U1FusionRule, U1Irrep, ZNFusionRule, ZNIrrep};
 
     let calls = Arc::new(SpyCounts::default());
     let _dense = probe::inject_dense(Box::new(SpyExecutor::counting(&calls)));
@@ -582,16 +582,19 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
     let real_values: [&[f64]; 2] = [&[-2.0, 0.0], &[5.0, -7.0, 1.0]];
 
     let z2 = GradedSpace::try_new(
-        Arc::new(CheckedAbelian(Z2FusionRule)),
-        [(Z2Irrep::EVEN, 2), (Z2Irrep::ODD, 3)],
+        Arc::new(CheckedAbelian(ZNFusionRule::new(2).unwrap())),
+        [
+            (ZNIrrep::new(0, 2).unwrap(), 2),
+            (ZNIrrep::new(1, 2).unwrap(), 3),
+        ],
     )
     .unwrap();
     let z2_dual = z2.try_dual().unwrap();
     // Self-dual labels: only the orientation flag distinguishes V' from V.
     assert!(z2_dual.is_dual());
-    assert_eq!(z2_dual.degeneracy(&Z2Irrep::EVEN).unwrap(), 2);
-    assert_eq!(z2_dual.degeneracy(&Z2Irrep::ODD).unwrap(), 3);
-    let z2_sectors = [Z2Irrep::EVEN, Z2Irrep::ODD];
+    assert_eq!(z2_dual.degeneracy(&ZNIrrep::new(0, 2).unwrap()).unwrap(), 2);
+    assert_eq!(z2_dual.degeneracy(&ZNIrrep::new(1, 2).unwrap()).unwrap(), 3);
+    let z2_sectors = [ZNIrrep::new(0, 2).unwrap(), ZNIrrep::new(1, 2).unwrap()];
 
     // TensorKit `dual(Rep[U1](1 => 2, 2 => 3))` carries physical sectors
     // -1 and -2 with the same degeneracies.

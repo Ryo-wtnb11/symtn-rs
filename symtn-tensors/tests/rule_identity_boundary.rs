@@ -2,7 +2,7 @@ use std::sync::Arc;
 use symtn_core::{
     BraidingStyleKind, CoreError, FusionRule, FusionStyleKind, FusionTreeHomSpace,
     MultiplicityFreeFusionRule, MultiplicityFreeFusionSymbols, MultiplicityFreeRigidSymbols,
-    RuleIdentity, SU2FusionRule, SectorId, SectorVec, U1FusionRule, Z2FusionRule,
+    RuleIdentity, SU2FusionRule, SectorId, SectorVec, U1FusionRule, ZNFusionRule,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand,
@@ -162,7 +162,7 @@ fn assert_rule_mismatch(error: OperationError) {
 
 #[test]
 fn fusion_contract_rejects_z2_spaces_with_u1_despite_overlapping_sector_ids() {
-    let z2 = Z2FusionRule;
+    let z2 = ZNFusionRule::new(2).unwrap();
     let error = scalar_contract_error(
         &U1FusionRule,
         bound_scalar_space(&z2),
@@ -192,7 +192,7 @@ fn fusion_contract_rejects_same_type_rule_with_distinct_identity() {
 #[test]
 fn fusion_contract_bound_same_rule_matches_on_direct_and_fallback_routes() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let space = || bind(&rule, &bound_scalar_space(&rule)).unwrap();
     let (dst_space, lhs, rhs) = (space(), space(), space());
     for lhs_operand in [

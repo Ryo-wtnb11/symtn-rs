@@ -155,10 +155,10 @@ fn compose_declines_a_compact_arm_it_cannot_prove() {
     // space genuinely differs from `wide`'s rather than merely being a second
     // allocation of the same one.
     let narrow_leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 1),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 1),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -499,10 +499,10 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
     exercise!(
         engine,
         "Z2",
-        symtn::sector::Z2FusionRule,
+        symtn::sector::ZNFusionRule::new(2).unwrap(),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 1),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 1),
         ]
     );
     exercise!(
@@ -685,10 +685,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
     // on a made-up space.
     let runtime = runtime();
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -742,10 +742,10 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
     // the comparison earns its keep: nothing about the axis pattern is wrong, so
     // only the legs themselves say this is not a contraction.
     let narrow = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 2),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -839,8 +839,8 @@ fn the_diagonal_contract_arm_declines_an_illegal_contraction() {
 /// duality flag, which is exactly what the `D · D` output-order guard refuses.
 #[allow(clippy::type_complexity)]
 fn space_shape(
-    t: &TensorMap<symtn::sector::Z2FusionRule, f64>,
-) -> (usize, Vec<(Vec<symtn::sector::Z2Irrep>, Vec<usize>, bool)>) {
+    t: &TensorMap<symtn::sector::ZNFusionRule, f64>,
+) -> (usize, Vec<(Vec<symtn::sector::ZNIrrep>, Vec<usize>, bool)>) {
     let legs = t
         .codomain()
         .iter()
@@ -1146,10 +1146,10 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
         }
 
         let leg = GradedSpace::try_new(
-            Arc::new(symtn::sector::FermionParityFusionRule),
+            Arc::new(symtn::sector::FermionParityFusionRule::new()),
             [
-                (symtn::sector::Z2Irrep::EVEN, 2),
-                (symtn::sector::Z2Irrep::ODD, 3),
+                (symtn::sector::FermionParityIrrep::EVEN, 2),
+                (symtn::sector::FermionParityIrrep::ODD, 3),
             ],
         )
         .and_then(|space| if is_dual { space.try_dual() } else { Ok(space) })
@@ -1186,13 +1186,13 @@ fn compact_rank_one_swaps_match_the_dense_route_for_dual_and_fermionic_legs() {
 fn z2_spectrum_fixture(
     runtime: &Runtime,
     rank_deficient: bool,
-) -> TensorMap<symtn::sector::Z2FusionRule, f64> {
+) -> TensorMap<symtn::sector::ZNFusionRule, f64> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let leg = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::ZNIrrep::new(0, 2).unwrap(), 2),
+            (symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -1494,10 +1494,10 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         // supertrace coefficient and its orientation live.
         let mut typed_leg: GradedSpace<symtn::sector::FermionParityFusionRule> =
             GradedSpace::try_new(
-                Arc::new(symtn::sector::FermionParityFusionRule),
+                Arc::new(symtn::sector::FermionParityFusionRule::new()),
                 [
-                    (symtn::sector::Z2Irrep::EVEN, 2),
-                    (symtn::sector::Z2Irrep::ODD, 3),
+                    (symtn::sector::FermionParityIrrep::EVEN, 2),
+                    (symtn::sector::FermionParityIrrep::ODD, 3),
                 ],
             )
             .unwrap();
@@ -1522,7 +1522,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
             Arc::new(
                 U1Fz2Rule::try_new(
                     symtn::sector::U1FusionRule,
-                    symtn::sector::FermionParityFusionRule,
+                    symtn::sector::FermionParityFusionRule::new(),
                 )
                 .unwrap(),
             ),
@@ -1547,10 +1547,10 @@ fn compact_full_trace_matches_the_forced_dense_route() {
     // compact, and the forced-dense oracle covers it on the rule where the
     // twist could interact with the phase.
     let typed_leg: GradedSpace<symtn::sector::FermionParityFusionRule> = GradedSpace::try_new(
-        Arc::new(symtn::sector::FermionParityFusionRule),
+        Arc::new(symtn::sector::FermionParityFusionRule::new()),
         [
-            (symtn::sector::Z2Irrep::EVEN, 2),
-            (symtn::sector::Z2Irrep::ODD, 3),
+            (symtn::sector::FermionParityIrrep::EVEN, 2),
+            (symtn::sector::FermionParityIrrep::ODD, 3),
         ],
     )
     .unwrap();
@@ -1603,11 +1603,11 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
         };
 
     for (name, parity, sign) in [
-        ("fz2 even", symtn::sector::Z2Irrep::EVEN, 1.0),
-        ("fz2 odd", symtn::sector::Z2Irrep::ODD, -1.0),
+        ("fz2 even", symtn::sector::FermionParityIrrep::EVEN, 1.0),
+        ("fz2 odd", symtn::sector::FermionParityIrrep::ODD, -1.0),
     ] {
         let leg: GradedSpace<symtn::sector::FermionParityFusionRule> = GradedSpace::try_new(
-            Arc::new(symtn::sector::FermionParityFusionRule),
+            Arc::new(symtn::sector::FermionParityFusionRule::new()),
             [(parity, 3)],
         )
         .unwrap();
@@ -1625,19 +1625,19 @@ fn compact_full_trace_is_the_supertrace_and_the_transpose_flips_it() {
 
     // The bosonic twin of the odd fixture: same parity label, twist +1, so the
     // supertrace *is* the positive trace here.
-    let leg: GradedSpace<symtn::sector::Z2FusionRule> = GradedSpace::try_new(
-        Arc::new(symtn::sector::Z2FusionRule),
-        [(symtn::sector::Z2Irrep::ODD, 3)],
+    let leg: GradedSpace<symtn::sector::ZNFusionRule> = GradedSpace::try_new(
+        Arc::new(symtn::sector::ZNFusionRule::new(2).unwrap()),
+        [(symtn::sector::ZNIrrep::new(1, 2).unwrap(), 3)],
     )
     .unwrap();
     let mut next: f64 = 0.0;
-    let source: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let source: TensorMap<symtn::sector::ZNFusionRule, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| {
             next += 1.0;
             next
         })
         .unwrap();
-    let s: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let s: TensorMap<symtn::sector::ZNFusionRule, f64> =
         source.svd_compact(engine, &[0], &[1]).unwrap().s;
     let positive: f64 = s.tr(engine).unwrap();
     let traced: f64 = s
@@ -1661,7 +1661,7 @@ fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first()
     let runtime = runtime();
     let s = z2_bond(&runtime);
 
-    let untouched: TensorMap<symtn::sector::Z2FusionRule, f64> =
+    let untouched: TensorMap<symtn::sector::ZNFusionRule, f64> =
         s.trace_pairs(engine, &[]).unwrap();
     assert_eq!(
         untouched.materialize(engine).unwrap().dense_data().unwrap(),
@@ -1682,10 +1682,10 @@ fn compact_trace_of_no_pairs_returns_the_source_and_malformed_pairs_fail_first()
 
 /// `0` even, `1` odd, matching the public fermion-parity label contract.
 // Strict on purpose: an out-of-range parity must not fold onto a valid label.
-fn parity_irrep(parity: u8) -> symtn::sector::Z2Irrep {
+fn parity_irrep(parity: u8) -> symtn::sector::FermionParityIrrep {
     match parity {
-        0 => symtn::sector::Z2Irrep::EVEN,
-        1 => symtn::sector::Z2Irrep::ODD,
+        0 => symtn::sector::FermionParityIrrep::EVEN,
+        1 => symtn::sector::FermionParityIrrep::ODD,
         other => panic!("not a fermion parity: {other} (parity is exactly 0 or 1)"),
     }
 }

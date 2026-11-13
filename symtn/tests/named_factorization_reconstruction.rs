@@ -14,8 +14,8 @@ use crate::fixtures;
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    product_sector, FermionParityFusionRule, ProductFusionRule, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    product_sector, FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{
     Eig, Eigh, GradedSpace, HermitianTol, LeftPolar, Lq, Qr, RightPolar, Svd, TensorMap,
@@ -167,15 +167,17 @@ fn su2_leg() -> GradedSpace<SU2FusionRule> {
 }
 
 fn fz2_u1_leg() -> GradedSpace<ProductFusionRule<FermionParityFusionRule, U1FusionRule>> {
-    let rule =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let rule = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     GradedSpace::try_new(
         Arc::new(rule),
         [
-            (product_sector(Z2Irrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(Z2Irrep::ODD, U1Irrep::new(-1)), 1),
+            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
         ],
     )
     .unwrap()

@@ -174,7 +174,7 @@ fn main() {
     let unit = SectorId::new(0);
     let source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             [unit; 2],
             unit,
             [false; 2],
@@ -182,7 +182,8 @@ fn main() {
             [MultiplicityIndex::ONE],
         )
         .unwrap(),
-        FusionTreeKey::try_new_for_rule(&Z2FusionRule, [], unit, [], [], []).unwrap(),
+        FusionTreeKey::try_new_for_rule(&ZNFusionRule::new(2).unwrap(), [], unit, [], [], [])
+            .unwrap(),
     );
 
     // Rank two avoids recoupling: repartition uses B; a cyclic transpose uses

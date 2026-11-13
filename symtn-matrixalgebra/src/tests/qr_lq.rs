@@ -6,7 +6,7 @@ use super::*;
 fn compact_qr_canonical_layout_skips_input_pack_and_factor_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical compact QR reads source regions and writes final factor regions directly.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
@@ -27,7 +27,7 @@ fn compact_qr_canonical_layout_skips_input_pack_and_factor_scatter() {
 fn compact_qr_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: expert noncanonical compact QR retains positive pack-and-scatter copy evidence.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
@@ -46,7 +46,7 @@ fn compact_qr_noncanonical_layout_uses_copy_fallback() {
 fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // The fallback still consumes `qr` outputs; its scatter is symtn-owned.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
@@ -66,7 +66,7 @@ fn compact_qr_lq_noncanonical_layout_does_not_call_qr_into() {
 fn compact_lq_canonical_layout_avoids_pack_and_scatter() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: canonical compact LQ reads and writes the sector regions in place, without general pack/scatter.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
 
@@ -116,7 +116,7 @@ fn generic_compact_qr_lq_paths_do_not_call_qr_into() {
 fn compact_lq_noncanonical_layout_uses_copy_fallback() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: noncanonical (adjoint-view) compact LQ retains positive general pack-and-scatter evidence.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let adjoint_space = bound.space().adjoint_view().unwrap();
@@ -135,7 +135,7 @@ fn compact_lq_noncanonical_layout_uses_copy_fallback() {
 fn compact_qr_error_preserves_borrowed_input_and_publishes_no_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: a QR backend failure leaves borrowed storage unchanged and returns no factor pair.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingQrInput>::default();
@@ -158,7 +158,7 @@ fn compact_qr_error_preserves_borrowed_input_and_publishes_no_factors() {
 #[test]
 fn compact_qr_uses_owned_executor_outputs_not_qr_into() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense = ScriptedExecutor::new(FailAfterObservingQrInput {
         qr_succeeds: true,
@@ -177,7 +177,7 @@ fn compact_qr_uses_owned_executor_outputs_not_qr_into() {
 fn compact_owned_qr_preserves_qr_into_output_precedence() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let tensor = rectangular_svd_tensor(2, 2);
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+    let bound = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
     let input = bound.as_ref();
     let mut check = |outputs: Vec<DenseTensor>, expected: DenseError| {
         let mut dense = ScriptedExecutor::new(FailAfterObservingQrInput {
@@ -231,7 +231,7 @@ fn compact_owned_qr_preserves_qr_into_output_precedence() {
 fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     // What: an LQ backend failure leaves borrowed storage unchanged and returns no factor pair.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let before = tensor.data().to_vec();
     let mut dense = ScriptedExecutor::<FailAfterObservingQrInput>::default();
@@ -249,7 +249,7 @@ fn compact_lq_error_preserves_borrowed_input_and_publishes_no_factors() {
 
 fn assert_rectangular_direct_qr(rows: usize, cols: usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_qr_copy_rec = crate::probe::record();
@@ -300,7 +300,7 @@ fn compact_qr_zero_only_input_normalizes_to_an_empty_factorization_result() {
 
 fn assert_rectangular_direct_lq(rows: usize, cols: usize) {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = rectangular_svd_tensor(rows, cols);
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
     let compact_lq_copy_rec = crate::probe::record();
@@ -348,7 +348,7 @@ fn compact_qr_c64_reconstructs_mixed_tall_and_wide_sectors_without_copies() {
     use num_complex::Complex64;
 
     // What: one complex QR call reconstructs mixed rectangular sectors in final storage.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
         source
@@ -413,7 +413,7 @@ fn compact_lq_c64_reconstructs_mixed_tall_and_wide_sectors() {
     use num_complex::Complex64;
 
     // What: one complex LQ call reconstructs mixed rectangular sectors in place, without general pack/scatter.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let source = mixed_rectangular_c32_tensor();
     let tensor = TestTensor::<Complex64>::from_vec_with_fusion_space(
         source
@@ -507,12 +507,14 @@ fn compact_qr_reconstructs_u1_fermion_parity_and_product_rules() {
         ],
     );
     assert_compact_qr_reconstructs_rule(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
     );
-    let product =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -569,12 +571,14 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
         ],
     );
     assert_compact_lq_reconstructs_rule(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &[SectorId::new(0), SectorId::new(1)],
     );
-    let product =
-        symtn_core::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
+    let product = symtn_core::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
     let product_sectors = [
         product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
         product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
@@ -678,7 +682,7 @@ fn transpose_complex(input: &[Complex64], rows: usize, cols: usize) -> Vec<Compl
 #[test]
 fn full_qr_and_lq_use_original_input_only_when_economy_q_is_full() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = mixed_rectangular_tensor((2, 4), (3, 1));
     let matrices = dense_sector_matrices(1, &tensor);
     let input = bound_tensor(Arc::new(rule), &tensor);
@@ -782,12 +786,12 @@ fn full_and_compact_qr_lq_match_for_rank_deficient_no_completion_shapes() {
     // What: with no completion columns the full and compact factorizations
     // agree (path agreement under the workspace rule, 3 = the long side), and
     // the full factors are orthonormal and reconstruct the input.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let wide_space = rectangular_svd_tensor(2, 3).fusion_space().clone();
     let wide =
         TestTensor::from_vec_with_fusion_space(vec![1.0, 2.0, 2.0, 4.0, 3.0, 6.0], wide_space)
             .unwrap();
-    let wide_input = bound_tensor(Arc::new(rule), &wide);
+    let wide_input = bound_tensor(Arc::new(rule.clone()), &wide);
     let wide_input_ref = wide_input.as_ref();
     let wide_input = wide_input_ref.dynamic();
     let mut dense = symtn_dense::DefaultDenseExecutor::new();
@@ -848,13 +852,13 @@ fn qr_full_gives_square_unitary_and_reconstructs() {
 #[test]
 fn lq_full_reconstructs() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let Lq { l, q } = lq_full(
         engine,
         &mut dense_executor,
-        &bound_tensor_ref!(Arc::new(rule), &tensor),
+        &bound_tensor_ref!(Arc::new(rule.clone()), &tensor),
     )
     .unwrap();
     let reconstructed = contract_pair(&rule, &tensor, &l, &q);
@@ -868,7 +872,7 @@ fn null_qr_failure_preserves_input_and_builds_no_factor() {
         let tensor =
             one_sector_rectangular_matrix(vec![1.0_f64, 0.0, 0.0, 0.0, 0.0, 0.0], rows, cols);
         let before = tensor.data().to_vec();
-        let input = bound_tensor(Arc::new(Z2FusionRule), &tensor);
+        let input = bound_tensor(Arc::new(ZNFusionRule::new(2).unwrap()), &tensor);
         let mut dense = ScriptedExecutor::<FailNullQr>::default();
 
         let buffer_builds_rec = crate::probe::record();
@@ -935,7 +939,7 @@ fn qr_compact_positive_gauge_idempotent_on_isometry() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     for rule_case in [0usize, 1usize] {
         if rule_case == 0 {
-            let rule = Z2FusionRule;
+            let rule = ZNFusionRule::new(2).unwrap();
             let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
             let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
             let input = bound_tensor(Arc::new(rule), &tensor);
@@ -965,7 +969,7 @@ fn qr_compact_positive_gauge_idempotent_on_isometry() {
 #[test]
 fn lq_compact_positive_gauge_idempotent_on_isometry() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let mut dense_executor = symtn_dense::DefaultDenseExecutor::new();
     let input = bound_tensor(Arc::new(rule), &tensor);
@@ -981,7 +985,7 @@ fn lazy_adjoint_lq_tree_route_factors_the_logical_source() {
     // What: LQ of the lazy adjoint of a parent that is not region-tiled (an
     // adjoint view) packs it, publishes on the factor spaces LQ of the
     // materialized adjoint publishes on, and factors the logical source `X`.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let bound = bound.as_ref();
@@ -1347,7 +1351,7 @@ fn compact_lq_runs_in_one_scope_whose_refusal_wins() {
     // inside the executor's linear-algebra scope: a scope that refuses at
     // exit fails an otherwise successful call, and its refusal takes
     // precedence over a solver failure inside it.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let tensor = tsvd_test_tensor(&rule, &[SectorId::new(0), SectorId::new(1)]);
     let bound = bound_tensor(Arc::new(rule), &tensor);
     let bound = bound.as_ref();

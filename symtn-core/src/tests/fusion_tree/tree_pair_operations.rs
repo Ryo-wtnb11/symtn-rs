@@ -577,7 +577,8 @@ fn unique_repartition_tree_pair_moves_domain_to_reversed_dual_codomain() {
     )
     .unwrap();
 
-    let terms = multiplicity_free_repartition_tree_pair(&Z2FusionRule, &source, 3).unwrap();
+    let terms = multiplicity_free_repartition_tree_pair(&ZNFusionRule::new(2).unwrap(), &source, 3)
+        .unwrap();
     assert_eq!(terms.len(), 1);
     let (all_out, coefficient) = terms.into_iter().next().unwrap();
 
@@ -602,7 +603,7 @@ fn unique_braid_tree_pair_matches_single_tree_when_domain_is_empty() {
         FusionTreeKey::try_from_sector_ids([1, 1], 0, [false, true], [], [1]).unwrap(),
         FusionTreeKey::new(
             Vec::<SectorId>::new(),
-            FermionParityFusionRule.vacuum(),
+            FermionParityFusionRule::new().vacuum(),
             Vec::<bool>::new(),
             Vec::<SectorId>::new(),
             Vec::<MultiplicityIndex>::new(),
@@ -610,7 +611,7 @@ fn unique_braid_tree_pair_matches_single_tree_when_domain_is_empty() {
     );
 
     let terms = multiplicity_free_braid_tree_pair(
-        &FermionParityFusionRule,
+        &FermionParityFusionRule::new(),
         &source,
         &[1, 0],
         &[],
@@ -630,7 +631,7 @@ fn unique_braid_tree_pair_matches_single_tree_when_domain_is_empty() {
     assert!(braided.domain_uncoupled().is_empty());
     assert_eq!(
         braided.domain_tree().coupled(),
-        FermionParityFusionRule.vacuum()
+        FermionParityFusionRule::new().vacuum()
     );
 }
 
@@ -649,7 +650,9 @@ fn unique_permute_tree_pair_handles_domain_only_swap() {
     )
     .unwrap();
 
-    let terms = multiplicity_free_permute_tree_pair(&Z2FusionRule, &source, &[0], &[2, 1]).unwrap();
+    let terms =
+        multiplicity_free_permute_tree_pair(&ZNFusionRule::new(2).unwrap(), &source, &[0], &[2, 1])
+            .unwrap();
     assert_eq!(terms.len(), 1);
     let (permuted, coefficient) = terms.into_iter().next().unwrap();
 
@@ -670,7 +673,8 @@ fn unique_permute_tree_pair_includes_codomain_domain_crossing() {
             .unwrap();
 
     let terms =
-        multiplicity_free_permute_tree_pair(&FermionParityFusionRule, &source, &[1], &[0]).unwrap();
+        multiplicity_free_permute_tree_pair(&FermionParityFusionRule::new(), &source, &[1], &[0])
+            .unwrap();
     assert_eq!(terms.len(), 1);
     let (permuted, coefficient) = terms.into_iter().next().unwrap();
 
@@ -688,12 +692,17 @@ fn prepared_fermionic_domain_crossing_is_exactly_negative_one() {
     let source =
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [true], [], [], [], [])
             .unwrap();
-    let prepared =
-        PreparedTreePairOperation::prepare_permute(&FermionParityFusionRule, 1, 1, &[1], &[0])
-            .unwrap();
+    let prepared = PreparedTreePairOperation::prepare_permute(
+        &FermionParityFusionRule::new(),
+        1,
+        1,
+        &[1],
+        &[0],
+    )
+    .unwrap();
 
     let (destination, coefficient) = prepared
-        .execute_unique_rigid(&FermionParityFusionRule, &source)
+        .execute_unique_rigid(&FermionParityFusionRule::new(), &source)
         .unwrap();
 
     assert_eq!(coefficient, -1.0);
@@ -707,8 +716,14 @@ fn prepared_fermionic_domain_crossing_is_exactly_negative_one() {
 fn prepared_permute_reverses_domain_levels_before_artin_lowering() {
     // What: TensorKit linearizes incoming legs in reverse order, so a
     // domain-only swap is prepared as the inverse Artin generator.
-    let prepared =
-        PreparedTreePairOperation::prepare_permute(&Z2FusionRule, 1, 2, &[0], &[2, 1]).unwrap();
+    let prepared = PreparedTreePairOperation::prepare_permute(
+        &ZNFusionRule::new(2).unwrap(),
+        1,
+        2,
+        &[0],
+        &[2, 1],
+    )
+    .unwrap();
     assert_eq!(
         prepared
             .plan
@@ -846,7 +861,7 @@ fn borrowed_unique_metadata_rejects_inconsistent_inverse_positions() {
     };
     assert_eq!(
         PreparedTreePairOperation::prepare_permute_with_raw_axis_positions(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             2,
             0,
             &[1, 0],
@@ -857,7 +872,7 @@ fn borrowed_unique_metadata_rejects_inconsistent_inverse_positions() {
     );
     assert_eq!(
         PreparedTreePairOperation::prepare_braid_with_raw_axis_positions(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             2,
             0,
             &[1, 0],
@@ -870,7 +885,7 @@ fn borrowed_unique_metadata_rejects_inconsistent_inverse_positions() {
     );
     assert_eq!(
         PreparedTreePairOperation::prepare_permute_with_raw_axis_positions(
-            &Z2FusionRule,
+            &ZNFusionRule::new(2).unwrap(),
             2,
             0,
             &[0, 0],
@@ -892,9 +907,30 @@ fn prepared_permute_revalidates_symmetric_capability_for_reused_rule() {
         FusionTreePairKey::try_pair_from_sector_ids([1], [1], 1, [false], [false], [], [], [], [])
             .unwrap();
     let plans = [
-        PreparedTreePairOperation::prepare_permute(&Z2FusionRule, 1, 1, &[0], &[1]).unwrap(),
-        PreparedTreePairOperation::prepare_permute(&Z2FusionRule, 1, 1, &[0, 1], &[]).unwrap(),
-        PreparedTreePairOperation::prepare_permute(&Z2FusionRule, 1, 1, &[1], &[0]).unwrap(),
+        PreparedTreePairOperation::prepare_permute(
+            &ZNFusionRule::new(2).unwrap(),
+            1,
+            1,
+            &[0],
+            &[1],
+        )
+        .unwrap(),
+        PreparedTreePairOperation::prepare_permute(
+            &ZNFusionRule::new(2).unwrap(),
+            1,
+            1,
+            &[0, 1],
+            &[],
+        )
+        .unwrap(),
+        PreparedTreePairOperation::prepare_permute(
+            &ZNFusionRule::new(2).unwrap(),
+            1,
+            1,
+            &[1],
+            &[0],
+        )
+        .unwrap(),
     ];
     assert!(matches!(plans[0].plan, PreparedTreePairPlan::Identity));
     assert!(matches!(plans[1].plan, PreparedTreePairPlan::Repartition));
@@ -949,20 +985,23 @@ fn prepared_transpose_fixes_both_cycle_directions_once() {
             }
         );
         let actual = prepared
-            .execute_unique_rigid(&Z2FusionRule, &source)
+            .execute_unique_rigid(&ZNFusionRule::new(2).unwrap(), &source)
             .unwrap();
-        let repartitioned =
-            unique_rigid_repartition_tree_pair_unchecked(&Z2FusionRule, &source, codomain.len())
-                .unwrap();
+        let repartitioned = unique_rigid_repartition_tree_pair_unchecked(
+            &ZNFusionRule::new(2).unwrap(),
+            &source,
+            codomain.len(),
+        )
+        .unwrap();
         let (oracle_tree, cycle_coefficient) = match expected_direction {
             PreparedCycleDirection::Clockwise => unique_rigid_cycle_tree_pair(
-                &Z2FusionRule,
+                &ZNFusionRule::new(2).unwrap(),
                 &repartitioned.0,
                 PreparedCycleDirection::Clockwise,
             )
             .unwrap(),
             PreparedCycleDirection::Anticlockwise => unique_rigid_cycle_tree_pair(
-                &Z2FusionRule,
+                &ZNFusionRule::new(2).unwrap(),
                 &repartitioned.0,
                 PreparedCycleDirection::Anticlockwise,
             )
@@ -1076,11 +1115,17 @@ fn unique_transpose_tree_pair_is_cyclic_and_reversible() {
             .unwrap();
 
     let forward_terms =
-        multiplicity_free_transpose_tree_pair(&Z2FusionRule, &source, &[1], &[0]).unwrap();
+        multiplicity_free_transpose_tree_pair(&ZNFusionRule::new(2).unwrap(), &source, &[1], &[0])
+            .unwrap();
     assert_eq!(forward_terms.len(), 1);
     let (transposed, coefficient) = forward_terms.into_iter().next().unwrap();
-    let roundtrip_terms =
-        multiplicity_free_transpose_tree_pair(&Z2FusionRule, &transposed, &[1], &[0]).unwrap();
+    let roundtrip_terms = multiplicity_free_transpose_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        &transposed,
+        &[1],
+        &[0],
+    )
+    .unwrap();
     assert_eq!(roundtrip_terms.len(), 1);
     let (roundtrip, inverse_coefficient) = roundtrip_terms.into_iter().next().unwrap();
 
@@ -1116,8 +1161,13 @@ fn unique_transpose_tree_pair_matches_tensorkit_clockwise_cycle() {
     )
     .unwrap();
 
-    let terms =
-        multiplicity_free_transpose_tree_pair(&Z2FusionRule, &source, &[1, 3], &[0, 2]).unwrap();
+    let terms = multiplicity_free_transpose_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        &source,
+        &[1, 3],
+        &[0, 2],
+    )
+    .unwrap();
     assert_eq!(terms.len(), 1);
     let (transposed, coefficient) = terms.into_iter().next().unwrap();
 
@@ -1152,8 +1202,13 @@ fn unique_transpose_tree_pair_matches_tensorkit_anticlockwise_cycle() {
     )
     .unwrap();
 
-    let terms =
-        multiplicity_free_transpose_tree_pair(&Z2FusionRule, &source, &[2, 0], &[3, 1]).unwrap();
+    let terms = multiplicity_free_transpose_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        &source,
+        &[2, 0],
+        &[3, 1],
+    )
+    .unwrap();
     assert_eq!(terms.len(), 1);
     let (transposed, coefficient) = terms.into_iter().next().unwrap();
 
@@ -1176,8 +1231,13 @@ fn unique_transpose_tree_pair_rejects_noncyclic_permutation() {
     )
     .unwrap();
 
-    let err =
-        multiplicity_free_transpose_tree_pair(&Z2FusionRule, &source, &[0, 2], &[1]).unwrap_err();
+    let err = multiplicity_free_transpose_tree_pair(
+        &ZNFusionRule::new(2).unwrap(),
+        &source,
+        &[0, 2],
+        &[1],
+    )
+    .unwrap_err();
 
     assert_eq!(
         err,

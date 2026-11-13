@@ -12,8 +12,8 @@ use std::collections::HashMap;
 
 use num_complex::Complex64;
 use symtn::sector::{
-    FermionParityFusionRule, ProductFusionRule, ProductSector, SU2FusionRule, SU2Irrep,
-    U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, ProductFusionRule, ProductSector, SU2FusionRule,
+    SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{CpuEngine, Engine, GradedSpace, Runtime, TensorMap};
 
@@ -124,14 +124,14 @@ type Fz2U1 = ProductFusionRule<FermionParityFusionRule, U1FusionRule>;
 fn fz2u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
     let sector = |q: i32| {
         let parity = if q.rem_euclid(2) == 0 {
-            Z2Irrep::EVEN
+            FermionParityIrrep::EVEN
         } else {
-            Z2Irrep::ODD
+            FermionParityIrrep::ODD
         };
         ProductSector::new(parity, U1Irrep::new(q))
     };
     let v = GradedSpace::try_new(
-        std::sync::Arc::new(Fz2U1::try_new(FermionParityFusionRule, U1FusionRule).unwrap()),
+        std::sync::Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap()),
         [(-1, 2), (0, 1), (1, 2), (2, 1)].map(|(q, n)| (sector(q), n)),
     )
     .unwrap();

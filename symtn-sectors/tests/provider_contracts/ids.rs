@@ -28,11 +28,15 @@ use super::{s, table_identity};
 
 #[test]
 fn parity_ids_are_the_parity() {
-    for (label, id) in [(Z2Irrep::EVEN, 0), (Z2Irrep::ODD, 1)] {
-        assert_eq!(Z2FusionRule.encode_sector(&label), Ok(s(id)));
-        assert_eq!(FermionParityFusionRule.encode_sector(&label), Ok(s(id)));
-        assert_eq!(Z2FusionRule.decode_sector(s(id)), Ok(label));
-        assert_eq!(FermionParityFusionRule.decode_sector(s(id)), Ok(label));
+    for (label, id) in [(FermionParityIrrep::EVEN, 0), (FermionParityIrrep::ODD, 1)] {
+        assert_eq!(
+            FermionParityFusionRule::new().encode_sector(&label),
+            Ok(s(id))
+        );
+        assert_eq!(
+            FermionParityFusionRule::new().decode_sector(s(id)),
+            Ok(label)
+        );
     }
 }
 
@@ -40,7 +44,11 @@ fn parity_ids_are_the_parity() {
 fn zn_ids_are_canonical_charges_below_the_modulus() {
     let z5 = ZNFusionRule::new(5).unwrap();
     for (charge, id) in [(0, 0), (4, 4), (-1, 4), (5, 0), (7, 2), (-6, 4)] {
-        assert_eq!(z5.encode_sector(&z5.irrep(charge)), Ok(s(id)), "{charge}");
+        assert_eq!(
+            z5.encode_sector(&ZNIrrep::new(charge, 5).unwrap()),
+            Ok(s(id)),
+            "{charge}"
+        );
     }
     for id in 0..5 {
         assert_eq!(z5.decode_sector(s(id)).unwrap().charge(), id as u32);
@@ -79,16 +87,13 @@ fn u1_small_charges_interleave_by_sign() {
 
 #[test]
 fn cu1_ids_place_the_two_zero_charge_sectors_first() {
-    let rule = CU1FusionRule;
+    let rule = CU1FusionRule::new();
     for (label, id) in [
         (CU1Irrep::VACUUM, 0),
         (CU1Irrep::PSEUDOSCALAR, 1),
         (CU1Irrep::from_twice_charge(1), 2),
         (CU1Irrep::from_twice_charge(2), 3),
-        (
-            CU1Irrep::from_twice_charge(CU1_MAX_TWICE_CHARGE),
-            u32::MAX as usize,
-        ),
+        (CU1Irrep::from_twice_charge(u32::MAX), u32::MAX as usize + 1),
     ] {
         assert_eq!(rule.encode_sector(&label), Ok(s(id)));
         assert_eq!(rule.decode_sector(s(id)), Ok(label));
@@ -156,22 +161,27 @@ fn table_encode_rejection_names_the_label_and_rank() {
 #[test]
 fn cantor_product_ids_nest_through_both_factors() {
     // Cantor(l, r) = (l + r)(l + r + 1) / 2 + l.
-    let fz2_u1 =
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap();
-    let odd_one = product_sector(Z2Irrep::ODD, U1Irrep::new(1));
+    let fz2_u1 = symtn_sectors::ProductFusionRule::<_, _>::try_new(
+        FermionParityFusionRule::new(),
+        U1FusionRule,
+    )
+    .unwrap();
+    let odd_one = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
     // (1, 2) -> 3 * 4 / 2 + 1.
     assert_eq!(fz2_u1.encode_sector(&odd_one), Ok(s(7)));
     assert_eq!(fz2_u1.decode_sector(s(7)), Ok(odd_one));
 
     let nested = symtn_sectors::ProductFusionRule::<_, _>::try_new(
-        symtn_sectors::ProductFusionRule::<_, _>::try_new(FermionParityFusionRule, U1FusionRule)
-            .unwrap(),
+        symtn_sectors::ProductFusionRule::<_, _>::try_new(
+            FermionParityFusionRule::new(),
+            U1FusionRule,
+        )
+        .unwrap(),
         SU2FusionRule,
     )
     .unwrap();
     let label = product_sector(
-        product_sector(Z2Irrep::ODD, U1Irrep::new(-1)),
+        product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)),
         SU2Irrep::from_twice_spin(1),
     );
     // inner (1, 1) -> 4; outer (4, 1) -> 5 * 6 / 2 + 4.
@@ -227,8 +237,8 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
         FermionParityFusionRule,
         PackedProductCodec<U1SectorLayout, Fz2SectorLayout>,
     >;
-    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule).unwrap();
-    let label = product_sector(U1Irrep::new(-1), Z2Irrep::ODD);
+    let rule = U1Fz2::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap();
+    let label = product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD);
     assert_eq!(rule.encode_sector(&label), Ok(s(0x1_0000_0001)));
     assert_eq!(rule.decode_sector(s(0x1_0000_0001)), Ok(label));
 
@@ -237,8 +247,8 @@ fn packed_product_ids_place_the_left_factor_in_the_low_bits() {
         SU2FusionRule,
         PackedProductCodec<Fz2SectorLayout, Su2SectorLayout>,
     >;
-    let rule = Fz2Su2::try_new(FermionParityFusionRule, SU2FusionRule).unwrap();
-    let label = product_sector(Z2Irrep::ODD, SU2Irrep::from_twice_spin(254));
+    let rule = Fz2Su2::try_new(FermionParityFusionRule::new(), SU2FusionRule).unwrap();
+    let label = product_sector(FermionParityIrrep::ODD, SU2Irrep::from_twice_spin(254));
     assert_eq!(rule.encode_sector(&label), Ok(s(509)));
     // 510 = spin component 255: inside the 8-bit width, outside SU(2)'s range.
     assert_eq!(

@@ -7,7 +7,7 @@ use super::*;
 use num_complex::Complex64;
 use std::sync::Arc;
 use symtn::sector::{
-    FermionParityFusionRule, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep, Z2Irrep,
+    FermionParityFusionRule, FermionParityIrrep, SU2FusionRule, SU2Irrep, U1FusionRule, U1Irrep,
 };
 use symtn::typed::{ContractSpec, GradedSpace, Runtime};
 
@@ -83,8 +83,8 @@ on_each_engine! {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
-        let provider = Arc::new(FermionParityFusionRule);
-        let odd = GradedSpace::try_new(Arc::clone(&provider), [(Z2Irrep::ODD, 1)]).unwrap();
+        let provider = Arc::new(FermionParityFusionRule::new());
+        let odd = GradedSpace::try_new(Arc::clone(&provider), [(FermionParityIrrep::ODD, 1)]).unwrap();
         let odd_dual = odd.try_dual().unwrap();
         let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&odd], [&odd_dual], |_, _| 2.0)
             .unwrap();

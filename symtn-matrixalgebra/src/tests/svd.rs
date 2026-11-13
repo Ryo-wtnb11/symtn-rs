@@ -22,7 +22,10 @@ impl ExecutorLease for CountingLease<'_> {
 #[test]
 fn factorization_without_adjoint_route_refuses_lazy_adjoint_before_leasing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let bound = bound_tensor(Arc::new(Z2FusionRule), &rectangular_svd_tensor(3, 2));
+    let bound = bound_tensor(
+        Arc::new(ZNFusionRule::new(2).unwrap()),
+        &rectangular_svd_tensor(3, 2),
+    );
     let leases = Cell::new(0);
     let refused = factor::<symtn_core::MultiplicityFreeAdmissionMode, _, _, _, _>(
         engine,

@@ -9,7 +9,7 @@ fn inactive_odd_spaces() -> (
     DynamicFusionMapSpace,
     DynamicFusionMapSpace,
 ) {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     let odd = SectorId::new(1);
     let both = || FusionProductSpace::new([SectorLeg::new([(even, 1), (odd, 1)], false)]);
@@ -28,7 +28,7 @@ fn inactive_odd_spaces() -> (
 #[test]
 fn tensorcontract_fusion_block_replay_scales_inactive_dst_blocks_once() {
     let engine = &mut symtn_dense::CpuEngine::serial();
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let (lhs_space, rhs_space, dst_space) = inactive_odd_spaces();
 
     let lhs = TestTensor::<f64>::from_vec_with_fusion_space(vec![2.0], lhs_space).unwrap();
@@ -74,7 +74,7 @@ fn self_dual_conjugate_source_scales_inactive_block_like_eager_adjoint_oracle() 
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let even = SectorId::new(0);
     // What: the conjugated canonical source carries only the even sector on
     // its contracted leg, while the eager-adjoint oracle uses the equivalent
@@ -103,7 +103,7 @@ fn self_dual_conjugate_source_scales_inactive_block_like_eager_adjoint_oracle() 
     let oracle_dst_space =
         crate::DynamicFusionMapSpace::contracted(&rule, &adjoint_space, &rhs_dynamic, &[1], &[0])
             .unwrap();
-    let provider = Arc::new(rule);
+    let provider = Arc::new(rule.clone());
     let oracle_dst_bound = crate::BoundDynamicFusionMapSpace::bind_multiplicity_free(
         oracle_dst_space,
         Arc::clone(&provider),
@@ -201,7 +201,7 @@ fn assert_fusion_block_scatter_beta_dtype<T>(
 ) where
     T: DenseBlockScalar + DenseRecouplingScalar + RecouplingCoefficientAction<f64> + Debug,
 {
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let (lhs_space, rhs_space, dst_space) = inactive_odd_spaces();
 
     let lhs = TestTensor::<T>::from_vec_with_fusion_space(vec![lhs_value], lhs_space).unwrap();

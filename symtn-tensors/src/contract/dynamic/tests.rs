@@ -3,7 +3,7 @@ use super::*;
 use crate::probe::{self, Event};
 use std::cell::Cell;
 use symtn_core::{
-    FusionProductSpace, FusionRule, SU2FusionRule, SectorLeg, U1FusionRule, U1Irrep, Z2FusionRule,
+    FusionProductSpace, FusionRule, SU2FusionRule, SectorLeg, U1FusionRule, U1Irrep, ZNFusionRule,
 };
 use symtn_operations::TensorContractSpec;
 
@@ -402,7 +402,7 @@ fn borrowable_core_layout_accepts_equal_structure_across_intern_reset() {
     let _guard = crate::test_support::CACHE_TEST_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let build = || {
         DynamicFusionMapSpace::from_final_homspace(
             &rule,
@@ -432,7 +432,7 @@ fn borrowable_core_layout_accepts_equal_structure_across_intern_reset() {
 fn borrowable_core_layout_defers_homspace_identity_until_after_cheap_gates() {
     // What: nonidentity and conjugating sources skip HomSpace identity,
     // while an otherwise borrowable identity layout performs one comparison.
-    let rule = Z2FusionRule;
+    let rule = ZNFusionRule::new(2).unwrap();
     let layout = DynamicFusionMapSpace::from_final_homspace(
         &rule,
         FusionTreeHomSpace::from_sector_ids([(0, 1)], [(0, 1)]),

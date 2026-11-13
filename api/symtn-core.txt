@@ -2,7 +2,6 @@ pub mod symtn_core
 pub use symtn_core::BraidingStyleKind
 pub use symtn_core::CU1FusionRule
 pub use symtn_core::CU1Irrep
-pub use symtn_core::CU1_MAX_TWICE_CHARGE
 pub use symtn_core::CanonicalUnitAdmission
 pub use symtn_core::CanonicalUnitFusionRule
 pub use symtn_core::CategoricalScalar
@@ -23,6 +22,7 @@ pub use symtn_core::CoupledSectorFold
 pub use symtn_core::CoupledSectorFoldBuilder
 pub use symtn_core::EnumeratedCodec
 pub use symtn_core::FermionParityFusionRule
+pub use symtn_core::FermionParityIrrep
 pub use symtn_core::FusionAlgebraError
 pub use symtn_core::FusionRule
 pub use symtn_core::FusionStyleKind
@@ -68,8 +68,6 @@ pub use symtn_core::U1FusionRule
 pub use symtn_core::U1Irrep
 pub use symtn_core::U1SectorLayout
 pub use symtn_core::UncertifiedUnitAdmission
-pub use symtn_core::Z2FusionRule
-pub use symtn_core::Z2Irrep
 pub use symtn_core::ZNFusionRule
 pub use symtn_core::ZNIrrep
 pub use symtn_core::product_sector
