@@ -139,7 +139,7 @@ fn u1_infallible_entry_points_match_checked_domain() {
     // falls outside that domain.
     let valid: Vec<SectorId> = [-17, -1, 0, 1, 17, i32::MAX, i32::MIN + 1]
         .into_iter()
-        .map(|c| U1Irrep::new(c).sector_id())
+        .map(|c| SectorId::from(U1Irrep::new(c).unwrap()))
         .collect();
     // The first ID is the excluded U1 charge; the other two exceed the zigzag
     // storage range on the 64-bit CI targets.
@@ -268,7 +268,7 @@ fn infallible_symbols_reject_out_of_domain_ids() {
     // The excluded charge i32::MIN.
     assert_symbols_reject(
         &U1FusionRule,
-        U1Irrep::new(0).sector_id(),
+        SectorId::from(U1Irrep::new(0).unwrap()),
         SectorId::new(u32::MAX as usize),
     );
     assert_symbols_reject(

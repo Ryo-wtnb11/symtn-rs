@@ -539,13 +539,17 @@ fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
         GradedSpace::try_new(
             Arc::clone(&rule),
             [
-                (U1Irrep::new(-1), 2),
-                (U1Irrep::new(0), 3),
-                (U1Irrep::new(1), 2),
+                (U1Irrep::new(-1).unwrap(), 2),
+                (U1Irrep::new(0).unwrap(), 3),
+                (U1Irrep::new(1).unwrap(), 2),
             ],
         )
         .unwrap(),
-        GradedSpace::try_new(rule, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap(),
+        GradedSpace::try_new(
+            rule,
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+        )
+        .unwrap(),
     )
 }
 
@@ -675,9 +679,9 @@ fn multiplicity_free_real_symbol_compact_transform_into_is_alpha_eager_plus_beta
         &runtime,
         v,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2)
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2)
         ],
         |s: &U1Irrep| format!("{s:?}"),
         debug_key::<U1Irrep>
@@ -1015,9 +1019,9 @@ fn lazy_adjoint_transform_into_allocates_no_parent_sized_buffer() {
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (U1Irrep::new(-1), 6),
-            (U1Irrep::new(0), 8),
-            (U1Irrep::new(1), 6),
+            (U1Irrep::new(-1).unwrap(), 6),
+            (U1Irrep::new(0).unwrap(), 8),
+            (U1Irrep::new(1).unwrap(), 6),
         ],
     )
     .unwrap();
@@ -1143,9 +1147,9 @@ fn multiplicity_free_real_symbol_trace_pairs_into_is_alpha_eager_plus_beta_desti
         v,
         w,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2)
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2)
         ],
         |s: &U1Irrep| format!("{s:?}"),
         debug_key::<U1Irrep>
@@ -1252,9 +1256,9 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (U1Irrep::new(-1), 6),
-            (U1Irrep::new(0), 8),
-            (U1Irrep::new(1), 6),
+            (U1Irrep::new(-1).unwrap(), 6),
+            (U1Irrep::new(0).unwrap(), 8),
+            (U1Irrep::new(1).unwrap(), 6),
         ],
     )
     .unwrap();
@@ -1283,12 +1287,12 @@ fn trace_pairs_into_allocates_no_result_parent_or_dense_compact_buffer() {
 
     // One sector of degeneracy k = 128: the dense image is P = k² entries.
     let k = 128;
-    let leg = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), k)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), k)]).unwrap();
     let bond = bond!(
         engine,
         &runtime,
         leg,
-        [(U1Irrep::new(0), k)],
+        [(U1Irrep::new(0).unwrap(), k)],
         |s: &U1Irrep| format!("{s:?}"),
         f64,
         |x: f64| x
@@ -1701,9 +1705,9 @@ fn multiplicity_free_real_symbol_contract_into_is_alpha_eager_plus_beta_destinat
         w,
         v,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2)
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2)
         ],
         |s: &U1Irrep| format!("{s:?}"),
         debug_key::<U1Irrep>
@@ -2012,9 +2016,9 @@ fn compact_contract_into_allocates_no_dense_compact_operand_in_both_modes() {
     let _serial = crate::counting_alloc::serial();
     let runtime = host_runtime();
     let rule = Arc::new(U1FusionRule);
-    let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 4)]).unwrap();
-    let b = GradedSpace::try_new(rule, [(U1Irrep::new(0), 128)]).unwrap();
-    compact_contract_allocations!(engine, &runtime, v, b, U1Irrep::new(0));
+    let v = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
+    let b = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 128)]).unwrap();
+    compact_contract_allocations!(engine, &runtime, v, b, U1Irrep::new(0).unwrap());
     #[cfg(feature = "cgc-gen")]
     {
         let rule = Arc::new(
@@ -2386,16 +2390,22 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
             let v = GradedSpace::try_new(
                 Arc::clone(&rule),
                 [
-                    (U1Irrep::new(-1), 2),
-                    (U1Irrep::new(0), 3),
-                    (U1Irrep::new(2), 1),
+                    (U1Irrep::new(-1).unwrap(), 2),
+                    (U1Irrep::new(0).unwrap(), 3),
+                    (U1Irrep::new(2).unwrap(), 1),
                 ],
             )
             .unwrap();
-            let w = GradedSpace::try_new(rule, [(U1Irrep::new(1), 2), (U1Irrep::new(-1), 1)])
-                .unwrap()
-                .try_dual()
-                .unwrap();
+            let w = GradedSpace::try_new(
+                rule,
+                [
+                    (U1Irrep::new(1).unwrap(), 2),
+                    (U1Irrep::new(-1).unwrap(), 1),
+                ],
+            )
+            .unwrap()
+            .try_dual()
+            .unwrap();
             (v, w)
         }};
     }
@@ -2455,9 +2465,9 @@ fn symmetric_complex_symbol_contraction_equals_the_real_symbol_lane() {
     let (v, w) = legs!(ComplexU1);
     let lift = |x: f64| Complex64::new(x, 0.5 - x);
     let sectors = [
-        (U1Irrep::new(-1), 2),
-        (U1Irrep::new(0), 3),
-        (U1Irrep::new(2), 1),
+        (U1Irrep::new(-1).unwrap(), 2),
+        (U1Irrep::new(0).unwrap(), 3),
+        (U1Irrep::new(2).unwrap(), 1),
     ];
     let d1 = bond!(
         engine,

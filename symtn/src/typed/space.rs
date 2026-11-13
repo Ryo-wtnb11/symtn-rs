@@ -17,14 +17,14 @@ use super::*;
 /// # fn main() -> Result<(), Error> {
 /// let v = GradedSpace::try_new(
 ///     Arc::new(U1FusionRule),
-///     [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+///     [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
 /// )?;
-/// let w = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(-1), 1)])?;
+/// let w = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(-1).unwrap(), 1)])?;
 ///
 /// let fused = v.fuse(&w)?;
-/// assert_eq!(fused.degeneracy(&U1Irrep::new(-1))?, 2);
-/// assert_eq!(fused.degeneracy(&U1Irrep::new(0))?, 1);
-/// assert_eq!(v.try_dual()?.degeneracy(&U1Irrep::new(-1))?, 1);
+/// assert_eq!(fused.degeneracy(&U1Irrep::new(-1).unwrap())?, 2);
+/// assert_eq!(fused.degeneracy(&U1Irrep::new(0).unwrap())?, 1);
+/// assert_eq!(v.try_dual()?.degeneracy(&U1Irrep::new(-1).unwrap())?, 1);
 /// # Ok(())
 /// # }
 /// ```
@@ -91,10 +91,10 @@ where
     /// use symtn::typed::{Error, GradedSpace};
     ///
     /// let rule = Arc::new(U1FusionRule);
-    /// let physical = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)])?;
-    /// let bond = GradedSpace::try_new(rule, [(U1Irrep::new(1), 3)])?;
+    /// let physical = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)])?;
+    /// let bond = GradedSpace::try_new(rule, [(U1Irrep::new(1).unwrap(), 3)])?;
     /// assert_eq!(physical.fuse(&bond)?.dim()?, 6.0);
-    /// let alone = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)])?;
+    /// let alone = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)])?;
     /// assert_eq!(alone.dim()?, 1.0);
     /// # Ok::<(), Error>(())
     /// ```
@@ -470,7 +470,7 @@ where
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
-    /// let v = GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
+    /// let v = GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)])?;
     /// let t: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v, &v], [&v], 6)?;
     ///
     /// let Svd { u, s, vh } = t.svd_compact(engine, &[0, 1], &[2])?;

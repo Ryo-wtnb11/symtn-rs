@@ -47,12 +47,12 @@ fn transforms(_: &Runtime) -> usize {
 fn u1_legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
     let w = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(0, 1), (1, 2), (2, 1)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(0, 1), (1, 2), (2, 1)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
     (v, w.try_dual().unwrap())
@@ -85,17 +85,32 @@ fn fz2_u1_legs() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
     let w = GradedSpace::try_new(
         rule,
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();

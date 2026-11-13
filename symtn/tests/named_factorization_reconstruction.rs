@@ -153,7 +153,7 @@ macro_rules! check_all {
 fn u1_leg() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-1, 1), (0, 2), (1, 2)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap()
 }
@@ -175,9 +175,18 @@ fn fz2_u1_leg() -> GradedSpace<ProductFusionRule<FermionParityFusionRule, U1Fusi
     GradedSpace::try_new(
         Arc::new(rule),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap()

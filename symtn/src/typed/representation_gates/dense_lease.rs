@@ -249,7 +249,7 @@ fn factorizations_lease_once_on_the_dense_route_in_both_modes() {
     let u1_leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::clone(&u1),
-            pairs.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+            pairs.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
         )
         .unwrap()
     };

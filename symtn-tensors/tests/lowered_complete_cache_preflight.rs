@@ -14,7 +14,7 @@ fn lowered_complete_cache_preflight_preserves_statistics_and_hits() {
     // complete structure cache statistic or resource.
     symtn_core::clear_structure_caches();
     symtn_core::clear_structure_caches();
-    let vacuum = U1Irrep::new(0).sector_id();
+    let vacuum = SectorId::from(U1Irrep::new(0).unwrap());
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(vacuum, usize::MAX)], false)]),
         FusionProductSpace::new([SectorLeg::new([(vacuum, 2)], false)]),

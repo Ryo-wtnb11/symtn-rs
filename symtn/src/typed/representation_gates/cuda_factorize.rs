@@ -113,9 +113,9 @@ fn typed_cuda_factor_plan_publishes_the_host_factor_spaces_without_a_device() {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -239,7 +239,7 @@ fn typed_cuda_factorizations_reject_lazy_adjoint_before_runtime_work() {
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
@@ -273,7 +273,10 @@ fn typed_cuda_eigh_full_matches_host_without_hidden_materialization() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(-1), 2), (U1Irrep::new(0), 3)],
+        [
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+        ],
     )
     .unwrap();
     let source = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
@@ -425,9 +428,9 @@ fn typed_cuda_eigh_ascending_order_assembles_by_one_copy_per_sector() {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -488,7 +491,8 @@ fn typed_cuda_eigh_selector_assembly_applies_a_non_identity_order() {
     // `c` of the sector's `v` as raw eigenvector `order[c]`. The selector is
     // packed and read at a nonzero offset as `eigh_full` packs one per route.
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let device =
         TensorMap::<U1FusionRule, f64>::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, _| 1.0)
             .unwrap()
@@ -976,9 +980,9 @@ fn typed_cuda_svd_follows_the_host_gauge_with_and_without_degenerate_spectra() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -1032,7 +1036,8 @@ fn typed_cuda_svd_of_a_near_tie_follows_the_first_largest_entry() {
     // The exact-tie contract (first row wins) is pinned on hand-built
     // factors in `symtn-dense/tests/cuda_svd_gauge.rs`.
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let host = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
         cpu,
         &runtime,
@@ -1099,9 +1104,9 @@ fn typed_cuda_svd_gauge_costs_the_documented_ops_and_only_the_finite_scan_downlo
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -1363,7 +1368,7 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
             Arc::clone(&u1),
             charges
                 .iter()
-                .map(|&(charge, dim)| (U1Irrep::new(charge), dim)),
+                .map(|&(charge, dim)| (U1Irrep::new(charge).unwrap(), dim)),
         )
         .unwrap()
     };
@@ -1390,9 +1395,18 @@ fn typed_cuda_svd_diagonal_written_on_device_equals_the_downloaded_diagonal_bitw
     let fermion_leg = GradedSpace::try_new(
         Arc::clone(&fermion),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 2),
-            (product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -1452,11 +1466,11 @@ fn finite_input_fixture<D: NonfiniteFixture>(
     let leg = |dim: usize| {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..3).map(|charge| (U1Irrep::new(charge), dim)),
+            (0..3).map(|charge| (U1Irrep::new(charge).unwrap(), dim)),
         )
         .unwrap()
     };
-    let last = U1Irrep::new(2);
+    let last = U1Irrep::new(2).unwrap();
     TensorMap::from_subblock_fn(cpu, runtime, [&leg(rows)], [&leg(cols)], |trees, index| {
         let (i, j) = (index[0], index[1]);
         if let Some((re, im)) = entry {

@@ -240,9 +240,9 @@ fn u1_leg(degeneracies: [usize; 3]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), degeneracies[0]),
-            (U1Irrep::new(0), degeneracies[1]),
-            (U1Irrep::new(1), degeneracies[2]),
+            (U1Irrep::new(-1).unwrap(), degeneracies[0]),
+            (U1Irrep::new(0).unwrap(), degeneracies[1]),
+            (U1Irrep::new(1).unwrap(), degeneracies[2]),
         ],
     )
     .unwrap()
@@ -719,7 +719,8 @@ fn device_qr_fixes_a_hand_computed_complex_phase() {
         cuda: &mut dyn symtn::typed::Engine,
         runtime: &Runtime,
     ) {
-        let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+        let leg =
+            GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
         let a = [[(0.0, -2.0), (1.0, 1.0)], [(0.0, 0.0), (0.0, 3.0)]];
         let q_expected = [[(0.0, -1.0), (0.0, 0.0)], [(0.0, 0.0), (0.0, 1.0)]];
         let r_expected = [[(2.0, 0.0), (-1.0, 1.0)], [(0.0, 0.0), (3.0, 0.0)]];
@@ -1077,7 +1078,10 @@ fn device_factorizations_handle_blocks_at_unaligned_offsets_at_every_payload() {
     for (d0, d1) in [(3usize, 2usize), (5, 2), (3, 3), (4, 2), (2, 2)] {
         let leg = GradedSpace::try_new(
             Arc::clone(&u1),
-            [(U1Irrep::new(0), d0), (U1Irrep::new(1), d1)],
+            [
+                (U1Irrep::new(0).unwrap(), d0),
+                (U1Irrep::new(1).unwrap(), d1),
+            ],
         )
         .unwrap();
         assert_device_svd_matches_host::<_, f32>(engine, cuda, &runtime, &leg, &leg);
@@ -1662,7 +1666,7 @@ fn device_factor_plan_publishes_the_host_spaces_at_every_payload() {
             Arc::clone(&u1),
             sectors
                 .iter()
-                .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+                .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
         )
         .unwrap()
     };

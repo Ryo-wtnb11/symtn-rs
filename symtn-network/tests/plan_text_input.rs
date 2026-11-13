@@ -39,8 +39,9 @@ fn chain() -> Network {
 
 fn chain_tensors(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1FusionRule, f64>; 3] {
     let provider = Arc::new(U1FusionRule);
-    let space =
-        |dim| GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), dim)]).unwrap();
+    let space = |dim| {
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), dim)]).unwrap()
+    };
     let (two, eight) = (space(2), space(8));
     [
         TensorMap::rand_with_seed(engine, runtime, [&two], [&two], 1).unwrap(),

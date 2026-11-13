@@ -60,7 +60,7 @@ mod u1 {
     fn leg(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            charges.iter().map(|&(q, n)| (U1Irrep::new(q), n)),
+            charges.iter().map(|&(q, n)| (U1Irrep::new(q).unwrap(), n)),
         )
         .unwrap()
     }

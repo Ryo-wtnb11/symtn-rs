@@ -264,30 +264,6 @@ fn native_testing_providers_work_without_symtn_core() {
 }
 
 #[test]
-fn u1_irrep_checked_arithmetic_preserves_normal_and_overflow_results() {
-    // What: portable U(1) component arithmetic has the exact checked algebra
-    // results used by both public provider calls and core's lowered hot path.
-    assert_eq!(
-        U1Irrep::new(7).checked_fuse(U1Irrep::new(-3)),
-        Ok(U1Irrep::new(4))
-    );
-    assert_eq!(
-        U1Irrep::new(i32::MIN + 1).checked_fuse(U1Irrep::new(-1)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MIN + 1,
-            right: -1,
-        })
-    );
-    assert_eq!(
-        U1Irrep::new(i32::MAX).checked_fuse(U1Irrep::new(1)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
-        })
-    );
-}
-
-#[test]
 fn builtin_abelian_providers_keep_their_portable_symbol_contracts() {
     // What: the provider types now owned by symtn-sectors retain their
     // representative fusion, dual, F/R, and rigid-symbol behavior without
@@ -316,13 +292,16 @@ fn builtin_abelian_providers_keep_their_portable_symbol_contracts() {
     assert_eq!(fermion.a_symbol_scalar(odd, odd, even), 1.0);
     assert_eq!(fermion.b_symbol_scalar(odd, odd, even), 1.0);
 
-    let minus_three = U1Irrep::new(-3).sector_id();
-    let four = U1Irrep::new(4).sector_id();
-    let one = U1Irrep::new(1).sector_id();
-    let two = U1Irrep::new(2).sector_id();
-    let five = U1Irrep::new(5).sector_id();
+    let minus_three = SectorId::from(U1Irrep::new(-3).unwrap());
+    let four = SectorId::from(U1Irrep::new(4).unwrap());
+    let one = SectorId::from(U1Irrep::new(1).unwrap());
+    let two = SectorId::from(U1Irrep::new(2).unwrap());
+    let five = SectorId::from(U1Irrep::new(5).unwrap());
     let u1 = U1FusionRule;
-    assert_eq!(u1.dual(minus_three), U1Irrep::new(3).sector_id());
+    assert_eq!(
+        u1.dual(minus_three),
+        SectorId::from(U1Irrep::new(3).unwrap())
+    );
     assert_eq!(u1.fusion_channels(minus_three, four), [one].into());
     assert_eq!(
         u1.f_symbol_scalar(minus_three, four, one, two, one, five),

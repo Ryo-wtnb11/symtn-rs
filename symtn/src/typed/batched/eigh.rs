@@ -77,7 +77,7 @@ pub struct EighStackOutput<'a, R: SectorCodec, D, S = Vec<D>> {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
-/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// let stack = StackedTensorMap::pack(&[TensorMap::<_, f64>::zeros(engine,
 ///     &runtime, [&leg], [&leg],
 /// )?])?;

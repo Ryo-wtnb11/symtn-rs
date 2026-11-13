@@ -392,7 +392,7 @@ fn malformed_specs_report_the_contract_errors() {
     let runtime = Runtime::builder().build().unwrap();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&v, &v], [&v, &v], 1).unwrap();
@@ -455,9 +455,9 @@ fn bosonic_planar_contract_is_contract() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -600,19 +600,19 @@ fn fermionic_u1_space() -> GradedSpace<ProductFusionRule<FermionParityFusionRule
         ),
         [
             (
-                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0)),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
                 2,
             ),
             (
-                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1)),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
                 2,
             ),
             (
-                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1)),
+                ProductSector::new(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
                 1,
             ),
             (
-                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2)),
+                ProductSector::new(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
                 1,
             ),
         ],

@@ -54,7 +54,9 @@ fn symbols_do_not_allocate() {
         .map(|q| SectorId::from(ZNIrrep::new(q, 3).unwrap()))
         .collect();
     assert_no_allocation(&zn, &zn_ids);
-    let u1: Vec<SectorId> = (-1..=1).map(|q| U1Irrep::new(q).sector_id()).collect();
+    let u1: Vec<SectorId> = (-1..=1)
+        .map(|q| SectorId::from(U1Irrep::new(q).unwrap()))
+        .collect();
     assert_no_allocation(&U1FusionRule, &u1);
     let cu1_rule = CU1FusionRule::new();
     let cu1: Vec<SectorId> = [CU1Irrep::VACUUM, CU1Irrep::PSEUDOSCALAR]

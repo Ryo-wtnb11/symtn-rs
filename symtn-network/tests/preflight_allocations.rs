@@ -33,7 +33,7 @@ fn u1_operands(engine: &mut dyn Engine, runtime: &Runtime) -> [TensorMap<U1Fusio
     let space = |shift: i32| {
         GradedSpace::try_new(
             Arc::clone(&provider),
-            (0..8).map(|charge| (U1Irrep::new(charge - 4 + shift), 2)),
+            (0..8).map(|charge| (U1Irrep::new(charge - 4 + shift).unwrap(), 2)),
         )
         .unwrap()
     };

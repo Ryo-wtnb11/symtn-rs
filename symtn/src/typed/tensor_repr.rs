@@ -122,7 +122,7 @@ impl<R, D, S> TypedAdjointView<R, D, S> {
 ///
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
-/// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+/// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// let a: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 1)?;
 /// let b: TensorMap<_, f64> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 2)?;
 /// let b_adjoint = b.adjoint(engine)?;
@@ -1117,7 +1117,7 @@ where
     /// let runtime = Runtime::builder().build()?;
     /// let v = GradedSpace::try_new(
     ///     Arc::new(U1FusionRule),
-    ///     [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
+    ///     [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
     /// )?;
     /// let single: TensorMap<_, f32> = TensorMap::rand_with_seed(engine, &runtime, [&v], [&v], 7)?;
     /// let double = single.convert::<f64>(engine)?;

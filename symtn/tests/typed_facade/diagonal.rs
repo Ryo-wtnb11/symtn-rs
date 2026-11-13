@@ -510,8 +510,8 @@ fn diagonal_contract_preserves_left_provider_authority_on_every_compact_arm() {
         "U1",
         symtn::sector::U1FusionRule,
         [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 2),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ]
     );
 }
@@ -1458,9 +1458,9 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         let mut typed_leg: GradedSpace<symtn::sector::U1FusionRule> = GradedSpace::try_new(
             Arc::new(symtn::sector::U1FusionRule),
             [
-                (symtn::sector::U1Irrep::new(-1), 2),
-                (symtn::sector::U1Irrep::new(0), 3),
-                (symtn::sector::U1Irrep::new(1), 2),
+                (symtn::sector::U1Irrep::new(-1).unwrap(), 2),
+                (symtn::sector::U1Irrep::new(0).unwrap(), 3),
+                (symtn::sector::U1Irrep::new(1).unwrap(), 2),
             ],
         )
         .unwrap();
@@ -1514,7 +1514,7 @@ fn compact_full_trace_matches_the_forced_dense_route() {
         // coefficient.
         let product_label = |charge: i32, parity: u8| {
             symtn::sector::ProductSector::new(
-                symtn::sector::U1Irrep::new(charge),
+                symtn::sector::U1Irrep::new(charge).unwrap(),
                 parity_irrep(parity),
             )
         };

@@ -20,9 +20,9 @@ fn truncated_svd_restores_dropped_sector_in_non_dual_closed_space() {
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -34,13 +34,13 @@ fn truncated_svd_restores_dropped_sector_in_non_dual_closed_space() {
         [&space],
         [&space],
         |trees, indices| {
-            if *trees.coupled() == U1Irrep::new(0) {
+            if *trees.coupled() == U1Irrep::new(0).unwrap() {
                 match indices {
                     [0, 0] => 4.0,
                     [1, 1] => 3.0,
                     _ => 0.0,
                 }
-            } else if *trees.coupled() == U1Irrep::new(1) {
+            } else if *trees.coupled() == U1Irrep::new(1).unwrap() {
                 1.0
             } else {
                 2.0
@@ -81,7 +81,10 @@ fn truncated_svd_restores_dropped_sector_in_non_dual_closed_space() {
         .iter()
         .map(|entry| (entry.sector, entry.values.len()))
         .collect();
-    assert_eq!(kept, [(U1Irrep::new(0), 2), (U1Irrep::new(2), 1)]);
+    assert_eq!(
+        kept,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(2).unwrap(), 1)]
+    );
     assert!((found.error - 1.0).abs() < 1.0e-12);
 
     let recomposed = u.compose(engine, &s).unwrap().compose(engine, &vh).unwrap();
@@ -105,12 +108,12 @@ fn right_solve_composes_adjoints_around_left_solve_for_real_and_complex_u1() {
     let runtime = Runtime::builder().build().unwrap();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let lhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&space], [&space], |trees, _| {
-            if *trees.coupled() == U1Irrep::new(0) {
+            if *trees.coupled() == U1Irrep::new(0).unwrap() {
                 6.0
             } else {
                 10.0
@@ -119,7 +122,7 @@ fn right_solve_composes_adjoints_around_left_solve_for_real_and_complex_u1() {
         .unwrap();
     let rhs =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&space], [&space], |trees, _| {
-            if *trees.coupled() == U1Irrep::new(0) {
+            if *trees.coupled() == U1Irrep::new(0).unwrap() {
                 2.0
             } else {
                 5.0

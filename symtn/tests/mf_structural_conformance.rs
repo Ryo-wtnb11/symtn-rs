@@ -159,7 +159,7 @@ fn fermionic_product_contract_otimes_and_reductions_keep_provider_and_signs() {
         )
         .unwrap(),
     );
-    let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
+    let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(odd, 1)]).unwrap();
     let lhs: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 2.0).unwrap();
@@ -208,7 +208,7 @@ fn nested_fermionic_su2_product_and_complex_adjoint_are_publicly_conformant() {
         .unwrap(),
     );
     let spin_half = product_sector(
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
+        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
         SU2Irrep::from_twice_spin(1),
     );
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(spin_half, 1)]).unwrap();
@@ -428,7 +428,7 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
             U1FusionRule
         )
         .unwrap(),
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1))
+        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
     );
     check!(
         engine,
@@ -442,7 +442,7 @@ fn su2_and_exact_products_keep_their_provider_through_flip_and_units() {
         )
         .unwrap(),
         product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)),
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             SU2Irrep::from_twice_spin(1)
         )
     );
@@ -496,7 +496,7 @@ fn dual_nonabelian_flip_pins_the_pivotal_phase() {
         )
         .unwrap(),
         product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)),
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
             SU2Irrep::from_twice_spin(1)
         ),
         // Plain nested domain: its forward factor is θ=-1.
@@ -563,7 +563,7 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
             U1FusionRule
         )
         .unwrap(),
-        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1))
+        product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap())
     );
     check!(engine, SU2FusionRule, SU2Irrep::from_twice_spin(1));
     check!(
@@ -578,7 +578,7 @@ fn covered_builtin_multiplicity_free_providers_have_cat_and_absorb_execution() {
         )
         .unwrap(),
         product_sector(
-            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)),
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
             SU2Irrep::from_twice_spin(1)
         )
     );

@@ -31,7 +31,7 @@ fn tensor(
         provider,
         sectors
             .into_iter()
-            .map(|(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     TensorMap::rand_with_seed(
@@ -140,11 +140,14 @@ fn rectangular_multisector_adjoint_svd_keeps_total_and_peak_below_materializatio
     let provider = Arc::new(U1FusionRule);
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
-        (-2..=2).map(|charge| (U1Irrep::new(charge), 24)),
+        (-2..=2).map(|charge| (U1Irrep::new(charge).unwrap(), 24)),
     )
     .unwrap();
-    let right =
-        GradedSpace::try_new(provider, (-2..=2).map(|charge| (U1Irrep::new(charge), 16))).unwrap();
+    let right = GradedSpace::try_new(
+        provider,
+        (-2..=2).map(|charge| (U1Irrep::new(charge).unwrap(), 16)),
+    )
+    .unwrap();
     let parent: TensorMap<_, num_complex::Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&left], [&right], 693_698).unwrap();
     black_box(parent.svd_compact(engine, &[0], &[1]).unwrap());
@@ -190,8 +193,11 @@ fn lazy_scale_and_add_allocate_only_one_input_sized_payload() {
     let _serial = crate::counting_alloc::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let space =
-        GradedSpace::try_new(provider, (-4..=4).map(|charge| (U1Irrep::new(charge), 8))).unwrap();
+    let space = GradedSpace::try_new(
+        provider,
+        (-4..=4).map(|charge| (U1Irrep::new(charge).unwrap(), 8)),
+    )
+    .unwrap();
     let parent: TensorMap<_, num_complex::Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&space, &space], [&space], 666_401).unwrap();
     let other_parent =
@@ -403,7 +409,7 @@ fn measure_eager_lazy_core_compose(
             Arc::clone(&provider),
             sectors
                 .iter()
-                .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+                .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
         )
         .unwrap()
     };

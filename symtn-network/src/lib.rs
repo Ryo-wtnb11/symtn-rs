@@ -153,7 +153,7 @@ pub use tree::ContractionTree;
 /// let runtime = Runtime::builder().build()?;
 /// let v = GradedSpace::try_new(
 ///     Arc::new(U1FusionRule),
-///     [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+///     [(U1Irrep::new(-1).unwrap(), 1), (U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
 /// )?;
 /// let a = TensorMap::<U1FusionRule, f64>::rand_with_seed(&mut engine, &runtime, [&v], [&v], 1)?;
 /// let b = TensorMap::<U1FusionRule, f64>::rand_with_seed(&mut engine, &runtime, [&v], [&v], 2)?;

@@ -355,9 +355,9 @@ fn checked_tree_pair_preserves_validation_precedence() {
         FusionTreePairKey::pair(FusionTreeKey::new([], u1(0), [], [], []), overflow,)
             .validate_for_rule_checked(&U1FusionRule),
         Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
-            FusionAlgebraError::U1FusionOverflow {
-                left: i32::MAX,
-                right: 1,
+            FusionAlgebraError::FusionNotRepresentable {
+                left: u1(i32::MAX),
+                right: u1(1),
             }
         )))
     );
@@ -537,11 +537,12 @@ fn checked_layout_and_space_admission_reject_finite_nonclosure_transactionally()
     );
     let scalar = FusionTreeKey::new([], u1(0), [], [], []);
     let pair = FusionTreePairKey::pair(overflow, scalar);
-    let expected =
-        CheckedFusionSpaceError::FusionAlgebra(Box::new(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
-        }));
+    let expected = CheckedFusionSpaceError::FusionAlgebra(Box::new(
+        FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
+        },
+    ));
     assert_eq!(
         BlockStructure::coupled_sector_matrix_with_keys_checked(
             &U1FusionRule,

@@ -62,7 +62,7 @@ fn complex_fill(indices: &[usize]) -> Complex64 {
 fn u1_space(entries: [(i32, usize); 3]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        entries.map(|(charge, deg)| (U1Irrep::new(charge), deg)),
+        entries.map(|(charge, deg)| (U1Irrep::new(charge).unwrap(), deg)),
     )
     .unwrap()
 }
@@ -401,8 +401,9 @@ fn single_precision_norms_near_the_f32_range_edges() {
 fn mixed_magnitudes_keep_the_dominant_block() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     // Only the charge +1 block (block 2) is scaled.
-    let plus_one =
-        |trees: &symtn::typed::BlockFusionTrees<U1Irrep>| *trees.coupled() == U1Irrep::new(1);
+    let plus_one = |trees: &symtn::typed::BlockFusionTrees<U1Irrep>| {
+        *trees.coupled() == U1Irrep::new(1).unwrap()
+    };
     for s in [1e200, 1e-200] {
         let t = tensor!(engine, u1(), f64, |trees, i| if plus_one(trees) {
             s * real_fill(i)
@@ -426,8 +427,9 @@ fn zero_and_empty_payloads_have_zero_norm() {
     // TensorKit: `U1Space(0 => 2) ← U1Space(1 => 3)` has no block and every
     // norm is 0.0.
     let rule = Arc::new(U1FusionRule);
-    let only_zero = GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0), 2)]).unwrap();
-    let only_one = GradedSpace::try_new(rule, [(U1Irrep::new(1), 3)]).unwrap();
+    let only_zero =
+        GradedSpace::try_new(Arc::clone(&rule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let only_one = GradedSpace::try_new(rule, [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
     let empty: TensorMap<U1FusionRule, f64> =
         TensorMap::zeros(engine, &host_runtime(), [&only_zero], [&only_one]).unwrap();
     assert_rows::<f64>("empty", norms!(engine, empty), [0.0; 4], 1);

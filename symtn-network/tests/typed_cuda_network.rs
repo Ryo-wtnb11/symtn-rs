@@ -173,7 +173,8 @@ fn a_noncanonical_cuda_network_runs_and_shares_the_host_plan() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let space =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let a =
         TensorMap::<_, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 748_091).unwrap();
     let b =
@@ -213,7 +214,7 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     cuda_pair(engine, cuda, &runtime, &u1, 748_100);
     let su2 =
         GradedSpace::try_new(Arc::new(SU2FusionRule), [(SU2Irrep::from_twice_spin(0), 2)]).unwrap();
@@ -232,7 +233,10 @@ fn canonical_cuda_network_provider_matrix_chain_and_lazy_conj() {
             )
             .unwrap(),
         ),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            2,
+        )],
     )
     .unwrap();
     cuda_pair(engine, cuda, &runtime, &product, 748_130);
@@ -526,7 +530,7 @@ fn canonical_cuda_network_executes_complex_payloads_and_still_rejects_the_rest()
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let complex_entry = |indices: &[usize], seed: f64| {
@@ -698,7 +702,7 @@ fn host_and_cuda_contractions_of_one_topology_use_separate_workspace_pools() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let (a, a_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_400);
     let (b, b_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_401);
 
@@ -733,8 +737,9 @@ fn a_rejected_cuda_call_leases_no_workspace_and_the_next_call_reuses_the_idle_on
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let wrong = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
+    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let wrong =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let (_, a_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_410);
     let (_, b_cuda) = u1_pair(engine, cuda, &runtime, &u1, 748_411);
     let (_, mismatched) = u1_pair(engine, cuda, &runtime, &wrong, 748_412);
@@ -784,9 +789,10 @@ fn equal_length_block_layout_drift_discards_the_device_replay_state() {
     let runtime = Runtime::builder().build().unwrap();
     // Both spaces carry one sector of degeneracy 2, so `[v; v]` has a single
     // 2x2 coupled block and exactly the same `required_len` either way.
-    let charge_zero = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let charge_zero =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let charge_three =
-        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(3), 2)]).unwrap();
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(3).unwrap(), 2)]).unwrap();
     let (a0, a0_cuda) = u1_pair(engine, cuda, &runtime, &charge_zero, 748_420);
     let (b0, b0_cuda) = u1_pair(engine, cuda, &runtime, &charge_zero, 748_421);
     let (a3, a3_cuda) = u1_pair(engine, cuda, &runtime, &charge_three, 748_422);
@@ -998,7 +1004,7 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     cuda_chain_reuse_matches_returning(engine, cuda, &runtime, &u1, 761_100);
@@ -1019,7 +1025,10 @@ fn warm_cuda_destination_reuse_matches_the_returning_chain_for_every_provider() 
             )
             .unwrap(),
         ),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            2,
+        )],
     )
     .unwrap();
     cuda_chain_reuse_matches_returning(engine, cuda, &runtime, &product, 761_130);
@@ -1101,7 +1110,7 @@ fn warm_cuda_chain_uploads_nothing_for_its_reused_destinations() {
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let (_, device) = cuda_chain_tensors(engine, cuda, &runtime, &u1, 761_200);
@@ -1172,7 +1181,7 @@ fn the_device_workspace_is_charged_to_the_workspace_budget() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let cuda = &mut cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 8)]).unwrap();
+    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
     let (_, device) = cuda_chain_tensors(engine, cuda, &runtime, &u1, 761_400);
 
     drop(
@@ -1281,7 +1290,7 @@ fn single_precision_device_chains_match_the_host_and_reuse_their_destinations() 
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     // SU(2): several coupled sectors carrying different quantum dimensions, so
@@ -1411,7 +1420,7 @@ fn a_warm_single_precision_chain_costs_the_same_calls_and_half_the_bytes() {
     let runtime = Runtime::builder().build().unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 4), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
 
@@ -2054,7 +2063,7 @@ fn u1_space(sectors: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         sectors
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }
@@ -2157,7 +2166,10 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
             Arc::clone(&u1_su2),
             sectors.iter().map(|&(charge, twice, degeneracy)| {
                 (
-                    product_sector(U1Irrep::new(charge), SU2Irrep::from_twice_spin(twice)),
+                    product_sector(
+                        U1Irrep::new(charge).unwrap(),
+                        SU2Irrep::from_twice_spin(twice),
+                    ),
                     degeneracy,
                 )
             }),
@@ -2209,7 +2221,7 @@ fn general_cuda_networks_match_host_and_dense_oracles() {
                         } else {
                             FermionParityIrrep::EVEN
                         },
-                        U1Irrep::new(charge),
+                        U1Irrep::new(charge).unwrap(),
                     ),
                     degeneracy,
                 )
@@ -2437,7 +2449,7 @@ fn warm_general_cuda_networks_transfer_only_the_returned_output() {
                         } else {
                             FermionParityIrrep::EVEN
                         },
-                        U1Irrep::new(charge),
+                        U1Irrep::new(charge).unwrap(),
                     ),
                     degeneracy,
                 )
@@ -2571,9 +2583,9 @@ fn cuda_execution_reuses_a_caller_owned_workspace_and_network_contract_caches() 
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();

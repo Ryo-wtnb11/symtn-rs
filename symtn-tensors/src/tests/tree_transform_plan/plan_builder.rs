@@ -728,8 +728,9 @@ fn nested_fz2_u1_su2_first_pair_braid_preserves_product_phases_in_singles() {
         SU2FusionRule,
     )
     .unwrap();
-    let left_sector =
-        |parity, charge| left_rule.encode_component_ids(parity, U1Irrep::new(charge).sector_id());
+    let left_sector = |parity, charge| {
+        left_rule.encode_component_ids(parity, SectorId::from(U1Irrep::new(charge).unwrap()))
+    };
     let sector = |parity, charge, twice_spin| {
         rule.encode_component_ids(
             left_sector(parity, charge),

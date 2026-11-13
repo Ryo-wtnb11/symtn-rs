@@ -103,9 +103,9 @@ fn legs() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
-            (U1Irrep::new(-1), 2),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
+            (U1Irrep::new(-1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -726,15 +726,15 @@ fn host_capability_and_representation_rejections_leave_the_destination_bit_ident
             &v,
             [
                 SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: vec![f64::NAN, 2.0],
                 },
                 SectorSpectrum {
-                    sector: U1Irrep::new(1),
+                    sector: U1Irrep::new(1).unwrap(),
                     values: vec![3.0],
                 },
                 SectorSpectrum {
-                    sector: U1Irrep::new(-1),
+                    sector: U1Irrep::new(-1).unwrap(),
                     values: vec![-0.0, 5.0],
                 },
             ],
@@ -1391,7 +1391,11 @@ fn scale_assign_is_in_place_or_refuses_a_shared_receiver() {
 
     // Compact diagonal: scaled in place, still compact.
     let values = [vec![1.0, -2.0], vec![3.0], vec![0.25, 5.0]];
-    let sectors = [U1Irrep::new(0), U1Irrep::new(1), U1Irrep::new(-1)];
+    let sectors = [
+        U1Irrep::new(0).unwrap(),
+        U1Irrep::new(1).unwrap(),
+        U1Irrep::new(-1).unwrap(),
+    ];
     let spectra = || {
         sectors
             .iter()

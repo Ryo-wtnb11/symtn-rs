@@ -875,14 +875,14 @@ mod tests {
     /// jointly (the case the compact proof rejects).
     fn coupled() -> std::sync::Arc<BlockStructure> {
         use symtn_core::{
-            FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep,
+            FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, U1FusionRule, U1Irrep,
         };
         let leg = || {
             SectorLeg::new(
                 [
-                    (U1Irrep::new(-1).sector_id(), 2),
-                    (U1Irrep::new(0).sector_id(), 1),
-                    (U1Irrep::new(1).sector_id(), 3),
+                    (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+                    (SectorId::from(U1Irrep::new(0).unwrap()), 1),
+                    (SectorId::from(U1Irrep::new(1).unwrap()), 3),
                 ],
                 false,
             )

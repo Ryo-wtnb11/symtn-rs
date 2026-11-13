@@ -14,11 +14,11 @@ fn product_sector_is_usable_as_a_btree_key() {
     // What: the label order is the left component first, the right component
     // only as a tie-break, and equal labels deduplicate in ordered containers.
     let labels: BTreeSet<ProductSector<U1Irrep, FermionParityIrrep>> = [
-        product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
-        product_sector(U1Irrep::new(0), FermionParityIrrep::ODD),
-        product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
-        product_sector(U1Irrep::new(1), FermionParityIrrep::EVEN),
-        product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
+        product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
+        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+        product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
+        product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
     ]
     .into_iter()
     .collect();
@@ -26,10 +26,10 @@ fn product_sector_is_usable_as_a_btree_key() {
     assert_eq!(
         labels.into_iter().collect::<Vec<_>>(),
         vec![
-            product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(0), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(1), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
         ]
     );
 }
@@ -126,7 +126,7 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
     // maximum fails here instead of slipping past an easy sample.
     assert_decode_total(
         &U1FusionRule,
-        [-2, 3, i32::MIN + 1, i32::MAX - 1].map(U1Irrep::new),
+        [-2, 3, i32::MIN + 1, i32::MAX - 1].map(|charge| U1Irrep::new(charge).unwrap()),
         2,
     );
     assert_decode_total(
@@ -159,10 +159,13 @@ fn builtin_codecs_decode_every_id_their_own_algebra_reaches() {
     assert_decode_total(
         &U1Fz2Rule::try_new(U1FusionRule, FermionParityFusionRule::new()).unwrap(),
         [
-            product_sector(U1Irrep::new(1), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(-2), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(i32::MAX - 1), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(i32::MIN + 1), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(-2).unwrap(), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(i32::MAX - 1).unwrap(), FermionParityIrrep::ODD),
+            product_sector(
+                U1Irrep::new(i32::MIN + 1).unwrap(),
+                FermionParityIrrep::EVEN,
+            ),
         ],
         2,
     );
@@ -233,7 +236,7 @@ fn u1_codec_round_trips_every_boundary_charge() {
     // has no i32 representation.
     assert_round_trip(
         &U1FusionRule,
-        [-7, -1, 0, 1, 9, i32::MIN + 1, i32::MAX].map(U1Irrep::new),
+        [-7, -1, 0, 1, 9, i32::MIN + 1, i32::MAX].map(|charge| U1Irrep::new(charge).unwrap()),
     );
 }
 
@@ -299,9 +302,9 @@ fn product_codec_round_trips_component_labels() {
     assert_round_trip(
         &rule,
         [
-            product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN),
-            product_sector(U1Irrep::new(-5), FermionParityIrrep::ODD),
-            product_sector(U1Irrep::new(i32::MAX), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+            product_sector(U1Irrep::new(-5).unwrap(), FermionParityIrrep::ODD),
+            product_sector(U1Irrep::new(i32::MAX).unwrap(), FermionParityIrrep::ODD),
         ],
     );
 }

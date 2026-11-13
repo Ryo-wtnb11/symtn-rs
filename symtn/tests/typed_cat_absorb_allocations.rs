@@ -332,11 +332,11 @@ fn compact_braid_to_dual_sectors_allocates_like_the_self_dual_braid() {
         &u1,
         vec![
             SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![1.0, 2.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![3.0, 4.0, 5.0],
             },
         ],

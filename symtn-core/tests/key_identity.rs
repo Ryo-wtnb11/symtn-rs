@@ -333,7 +333,7 @@ fn construction_keeps_fields_and_rejects_zero_vertices() {
     ));
     // Unique (U(1)) trees whose inner lines are not the partial charge sums
     // are distinct raw keys: inner lines are stored, never recomputed.
-    let id = |charge: i32| U1Irrep::new(charge).sector_id().id();
+    let id = |charge: i32| SectorId::from(U1Irrep::new(charge).unwrap()).id();
     let uncoupled: Vec<usize> = [1, -2, 3, 0, -1].into_iter().map(id).collect();
     let duals = [false, true, false, true, false];
     let build = |inner: [i32; 3]| {
@@ -456,7 +456,7 @@ fn hom(codomain: &[Leg], domain: &[Leg]) -> FusionTreeHomSpace {
 }
 
 fn real_structures() -> Vec<(&'static str, Arc<BlockStructure>)> {
-    let u1 = |charge: i32| U1Irrep::new(charge).sector_id();
+    let u1 = |charge: i32| SectorId::from(U1Irrep::new(charge).unwrap());
     let su2 = |twice: usize| SU2Irrep::from_twice_spin(twice).sector_id();
     let z2 = vec![
         (ZNIrrep::new(0, 2).unwrap().into(), 1),

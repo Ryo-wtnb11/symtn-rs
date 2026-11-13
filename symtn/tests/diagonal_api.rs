@@ -16,7 +16,10 @@ fn typed_diagonal_preserves_canonical_positions_and_dual_leg() {
     let runtime = host_runtime();
     let bond = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(-1), 2), (U1Irrep::new(1), 1)],
+        [
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
+        ],
     )
     .unwrap()
     .try_dual()
@@ -53,7 +56,7 @@ fn typed_diagonal_preserves_canonical_positions_and_dual_leg() {
 fn typed_real_c64_eigenvalue_readback_stays_compact() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = host_runtime();
-    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source = TensorMap::<U1FusionRule, Complex64>::from_subblock_fn(
         engine,
         &runtime,
@@ -179,7 +182,7 @@ fn typed_diagonal_canonicalizes_labels_and_dense_predicate_handles_nonfinite_off
     )
     .is_invalid_argument("declared more than once"));
 
-    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
         engine,
         &runtime,

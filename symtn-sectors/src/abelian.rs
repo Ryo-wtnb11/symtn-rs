@@ -3,9 +3,9 @@
 //! The rule is the fusion-symbols category `U1` behind the shared category
 //! adapter, which supplies every symbol (dual, fusion, N, F, R, A, B, dims,
 //! twist, Frobenius–Schur phase) in TensorKitSectors 0.3.9's conventions.
-//! This module owns only symtn's label, `SectorId` codec, TensorKit order
-//! keys, identity, and checked error contract. An
-//! inadmissible F or R is `0.0`, as in TensorKitSectors. A `SectorId`
+//! The label is fusion-symbols' `U1Irrep`; this module owns only its
+//! `SectorId` codec, TensorKit order keys, identity, and checked error
+//! contract. An inadmissible F or R is `0.0`, as in TensorKitSectors. A `SectorId`
 //! outside the rule's domain panics in the infallible symbols, as in the
 //! other providers.
 
@@ -13,7 +13,7 @@ use std::sync::LazyLock;
 
 use fusion_symbols::{
     category::{FusionCategory, GroupRepresentations},
-    lie::{U1Error, U1Irrep as FsU1Irrep, U1},
+    lie::{U1Error, U1Irrep, U1},
 };
 
 use crate::category_rule::{
@@ -25,74 +25,6 @@ use crate::{
     PhysicalFusionBasis, RuleIdentity, SectorId, SectorOrderKey,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub struct U1Irrep {
-    charge: i32,
-}
-
-impl U1Irrep {
-    /// Returns the U(1) label when its dual is representable by this encoding.
-    pub const fn try_new(charge: i32) -> Option<Self> {
-        if charge == i32::MIN {
-            None
-        } else {
-            Some(Self { charge })
-        }
-    }
-
-    /// Creates a U(1) label.
-    ///
-    /// # Panics
-    ///
-    /// Panics for `i32::MIN`, whose dual charge cannot be represented by `i32`.
-    pub const fn new(charge: i32) -> Self {
-        match Self::try_new(charge) {
-            Some(irrep) => irrep,
-            None => panic!("U(1) charge i32::MIN has no representable dual label"),
-        }
-    }
-
-    #[inline]
-    pub const fn charge(self) -> i32 {
-        self.charge
-    }
-
-    pub const fn sector_id(self) -> SectorId {
-        SectorId::new(u1_charge_to_zigzag_u32(self.charge) as usize)
-    }
-
-    pub fn from_sector_id(sector: SectorId) -> Option<Self> {
-        u32::try_from(sector.id())
-            .ok()
-            .map(u1_charge_from_zigzag_u32)
-            .and_then(Self::try_new)
-    }
-
-    pub fn checked_fuse(self, other: Self) -> Result<Self, FusionAlgebraError> {
-        match U1.fusion(&self.fs(), &other.fs()) {
-            Ok(mut fused) => {
-                Ok(Self::from_fs(fused.next().expect(
-                    "a successful U(1) fusion has exactly one channel",
-                )))
-            }
-            Err(_) => Err(FusionAlgebraError::U1FusionOverflow {
-                left: self.charge,
-                right: other.charge,
-            }),
-        }
-    }
-
-    fn fs(self) -> FsU1Irrep {
-        FsU1Irrep::new(self.charge).expect("both encodings exclude only i32::MIN")
-    }
-
-    const fn from_fs(label: FsU1Irrep) -> Self {
-        Self {
-            charge: label.charge(),
-        }
-    }
-}
-
 const fn u1_charge_to_zigzag_u32(charge: i32) -> u32 {
     ((charge as u32) << 1) ^ ((charge >> 31) as u32)
 }
@@ -101,16 +33,19 @@ const fn u1_charge_from_zigzag_u32(encoded: u32) -> i32 {
     ((encoded >> 1) as i32) ^ -((encoded & 1) as i32)
 }
 
+/// The label of a U(1) zigzag id, `None` outside the label domain.
+fn u1_irrep(sector: SectorId) -> Option<U1Irrep> {
+    let encoded = u32::try_from(sector.id()).ok()?;
+    U1Irrep::new(u1_charge_from_zigzag_u32(encoded)).ok()
+}
+
 fn checked_u1_irrep(sector: SectorId) -> Result<U1Irrep, FusionAlgebraError> {
-    match U1Irrep::from_sector_id(sector) {
-        Some(irrep) => Ok(irrep),
-        None => Err(FusionAlgebraError::InvalidSector { sector }),
-    }
+    u1_irrep(sector).ok_or(FusionAlgebraError::InvalidSector { sector })
 }
 
 impl From<U1Irrep> for SectorId {
     fn from(value: U1Irrep) -> Self {
-        value.sector_id()
+        Self::new(u1_charge_to_zigzag_u32(value.charge()) as usize)
     }
 }
 
@@ -122,20 +57,11 @@ static U1_IDENTITY: LazyLock<RuleIdentity> = LazyLock::new(RuleIdentity::of_type
 /// `U1Irrep` labels and zigzag ids over `U1`.
 ///
 /// Why `N` also checks the fusion: symtn's checked algebra reports a sum
-/// outside the label range as `U1FusionOverflow` (stricter than
+/// outside the label range as `FusionNotRepresentable` (stricter than
 /// TensorKitSectors' `0`), so a caller that enumerates channels and one that
 /// asks for `N` fail alike.
 #[derive(Debug)]
 pub struct U1Codec;
-
-impl U1Codec {
-    fn overflow(left: &FsU1Irrep, right: &FsU1Irrep) -> FusionAlgebraError {
-        FusionAlgebraError::U1FusionOverflow {
-            left: left.charge(),
-            right: right.charge(),
-        }
-    }
-}
 
 /// TensorKit `findindex - 1` of an integer U(1) charge, shared by
 /// [`U1FusionRule`] and the Lie-group rule's torus charges; `None` past `u64`.
@@ -153,17 +79,10 @@ impl CategoryCodec<U1> for U1Codec {
     fn encode_label<'a>(
         &self,
         _category: impl Fn() -> &'a U1 + Copy,
-        rule: &RuleIdentity,
+        _rule: &RuleIdentity,
         label: &U1Irrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        if U1Irrep::try_new(label.charge()).is_some() {
-            Ok(label.sector_id())
-        } else {
-            Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: rule.clone(),
-                label: label.charge().to_string(),
-            })
-        }
+        Ok(SectorId::from(*label))
     }
 
     fn decode_label<'a>(
@@ -178,17 +97,17 @@ impl CategoryCodec<U1> for U1Codec {
         &self,
         _category: impl Fn() -> &'a U1 + Copy,
         id: SectorId,
-    ) -> Result<FsU1Irrep, FusionAlgebraError> {
-        checked_u1_irrep(id).map(U1Irrep::fs)
+    ) -> Result<U1Irrep, FusionAlgebraError> {
+        checked_u1_irrep(id)
     }
 
     fn sector_id<'a>(
         &self,
         _category: impl Fn() -> &'a U1 + Copy,
         _rule: &RuleIdentity,
-        object: &FsU1Irrep,
+        object: &U1Irrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        Ok(U1Irrep::from_fs(*object).sector_id())
+        Ok(SectorId::from(*object))
     }
 
     /// TensorKitSectors 0.3.9 `findindex(::SectorValues{U1Irrep}, c)`
@@ -213,11 +132,14 @@ impl CategoryCodec<U1> for U1Codec {
         rule: &RuleIdentity,
         operation: CategoryOperation,
         ids: [SectorId; N],
-    ) -> Result<[FsU1Irrep; N], FusionAlgebraError> {
+    ) -> Result<[U1Irrep; N], FusionAlgebraError> {
         let objects = admit_in_order(self, category, rule, operation, ids)?;
         if let (CategoryOperation::N, [left, right, ..]) = (operation, objects.as_slice()) {
             if category().fusion(left, right).is_err() {
-                return Err(Self::overflow(left, right));
+                return Err(FusionAlgebraError::FusionNotRepresentable {
+                    left: ids[0],
+                    right: ids[1],
+                });
             }
         }
         Ok(objects)
@@ -230,11 +152,8 @@ impl CategoryCodec<U1> for U1Codec {
     ) -> FusionAlgebraError {
         // The only U(1) failure is a fusion leaving the charge range.
         if let (CategoryAdapterError::Provider(_), &[left, right]) = (&error, inputs) {
-            if let (Some(left), Some(right)) = (
-                U1Irrep::from_sector_id(left),
-                U1Irrep::from_sector_id(right),
-            ) {
-                return Self::overflow(&left.fs(), &right.fs());
+            if u1_irrep(left).is_some() && u1_irrep(right).is_some() {
+                return FusionAlgebraError::FusionNotRepresentable { left, right };
             }
         }
         fusion_algebra_error(error)
@@ -259,7 +178,7 @@ impl AdapterAccess for U1FusionRule {
         &U1_IDENTITY
     }
     fn vacuum_id(&self) -> SectorId {
-        U1Irrep::new(0).sector_id()
+        SectorId::from(U1Irrep::UNIT)
     }
 }
 
@@ -306,11 +225,8 @@ impl PhysicalFusionBasis for U1FusionRule {
             }
         }
         // `try_nsymbol` admitted all three labels.
-        let [left, right, coupled] = [left, right, coupled].map(|sector| {
-            U1Irrep::from_sector_id(sector)
-                .expect("admitted by try_nsymbol")
-                .fs()
-        });
+        let [left, right, coupled] =
+            [left, right, coupled].map(|sector| u1_irrep(sector).expect("admitted by try_nsymbol"));
         U1.cgc(&left, &right, &coupled).map_err(|error| {
             PhysicalBasisError::FusionAlgebra(FusionAlgebraError::CategoryFailure(
                 CategoryFailure::new(error),
@@ -321,7 +237,9 @@ impl PhysicalFusionBasis for U1FusionRule {
 
 #[cfg(test)]
 mod tests {
-    use super::{u1_charge_from_zigzag_u32, u1_charge_to_zigzag_u32, U1FusionRule, U1Irrep};
+    use super::{
+        u1_charge_from_zigzag_u32, u1_charge_to_zigzag_u32, u1_irrep, U1FusionRule, U1Irrep,
+    };
     use crate::{
         CanonicalUnitFusionRule, CheckedFusionAlgebra, FusionAlgebraError, FusionRule,
         MultiplicityFreeFusionSymbols, PhysicalBasisError, PhysicalFusionBasis, SectorCodec,
@@ -364,8 +282,8 @@ mod tests {
             &FermionParityFusionRule::new(),
             FermionParityIrrep::ODD.into(),
         );
-        assert_canonical_unit(&U1FusionRule, U1Irrep::new(-17).into());
-        let u1_boundary: SectorId = U1Irrep::new(i32::MAX).into();
+        assert_canonical_unit(&U1FusionRule, U1Irrep::new(-17).unwrap().into());
+        let u1_boundary: SectorId = U1Irrep::new(i32::MAX).unwrap().into();
         let u1_vacuum = U1FusionRule.vacuum();
         assert_eq!(
             U1FusionRule
@@ -393,10 +311,10 @@ mod tests {
         ] {
             assert_eq!(u1_charge_to_zigzag_u32(charge), encoded);
             assert_eq!(u1_charge_from_zigzag_u32(encoded), charge);
-            if let Some(irrep) = U1Irrep::try_new(charge) {
-                let sector = irrep.sector_id();
+            if let Ok(irrep) = U1Irrep::new(charge) {
+                let sector = SectorId::from(irrep);
                 assert_eq!(sector.id(), encoded as usize);
-                assert_eq!(U1Irrep::from_sector_id(sector), Some(irrep));
+                assert_eq!(u1_irrep(sector), Some(irrep));
             }
         }
     }
@@ -406,44 +324,25 @@ mod tests {
         // What: i32::MIN has no label, while both adjacent representable
         // extremes encode, decode, and dualize normally.
         let invalid = SectorId::new(u32::MAX as usize);
-        assert_eq!(U1Irrep::try_new(i32::MIN), None);
-        assert_eq!(U1Irrep::from_sector_id(invalid), None);
+        assert!(U1Irrep::new(i32::MIN).is_err());
+        assert_eq!(u1_irrep(invalid), None);
         assert_eq!(
             U1FusionRule.decode_sector(invalid),
             Err(FusionAlgebraError::InvalidSector { sector: invalid })
         );
 
         for charge in [i32::MIN + 1, i32::MAX] {
-            let irrep = U1Irrep::new(charge);
-            assert_eq!(U1FusionRule.encode_sector(&irrep), Ok(irrep.sector_id()));
-            assert_eq!(U1Irrep::from_sector_id(irrep.sector_id()), Some(irrep));
+            let irrep = U1Irrep::new(charge).unwrap();
+            let sector = SectorId::from(irrep);
+            assert_eq!(U1FusionRule.encode_sector(&irrep), Ok(sector));
+            assert_eq!(u1_irrep(sector), Some(irrep));
             assert_eq!(
                 U1FusionRule
-                    .try_dual_sector(irrep.sector_id())
+                    .try_dual_sector(sector)
                     .and_then(|dual| U1FusionRule.try_dual_sector(dual)),
-                Ok(irrep.sector_id())
+                Ok(sector)
             );
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "U(1) charge i32::MIN has no representable dual label")]
-    fn u1_new_rejects_i32_min() {
-        let _ = U1Irrep::new(i32::MIN);
-    }
-
-    #[test]
-    fn u1_codec_defensively_rejects_an_invalid_label() {
-        // What: the codec keeps its own trust-boundary check even though safe
-        // public constructors cannot create this value.
-        let invalid = U1Irrep { charge: i32::MIN };
-        assert_eq!(
-            U1FusionRule.encode_sector(&invalid),
-            Err(FusionAlgebraError::UnrepresentableSectorLabel {
-                rule: U1FusionRule.rule_identity(),
-                label: i32::MIN.to_string(),
-            })
-        );
     }
 
     #[test]
@@ -451,9 +350,9 @@ mod tests {
         // What: U(1) exposes exactly one carrier state and one unit CGC for an
         // allowed charge sum, while invalid physical indices remain typed.
         let rule = U1FusionRule;
-        let left: SectorId = U1Irrep::new(2).into();
-        let right: SectorId = U1Irrep::new(-1).into();
-        let coupled: SectorId = U1Irrep::new(1).into();
+        let left: SectorId = U1Irrep::new(2).unwrap().into();
+        let right: SectorId = U1Irrep::new(-1).unwrap().into();
+        let coupled: SectorId = U1Irrep::new(1).unwrap().into();
         assert_eq!(rule.try_carrier_dimension(left), Ok(1));
         assert_eq!(
             rule.try_fusion_tensor_element(left, right, coupled, 0, 0, 0, 0),
@@ -467,7 +366,7 @@ mod tests {
                 dimension: 1,
             })
         );
-        let absent: SectorId = U1Irrep::new(0).into();
+        let absent: SectorId = U1Irrep::new(0).unwrap().into();
         assert_eq!(
             rule.try_fusion_tensor_element(left, right, absent, 0, 0, 0, 0),
             Err(PhysicalBasisError::FusionMultiplicityOutOfBounds {
@@ -498,9 +397,9 @@ mod tests {
             assert_eq!(expected, 1.0);
             assert_eq!(
                 U1FusionRule.try_fusion_tensor_element(
-                    U1Irrep::new(left).into(),
-                    U1Irrep::new(right).into(),
-                    U1Irrep::new(coupled).into(),
+                    U1Irrep::new(left).unwrap().into(),
+                    U1Irrep::new(right).unwrap().into(),
+                    U1Irrep::new(coupled).unwrap().into(),
                     0,
                     0,
                     0,

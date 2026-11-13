@@ -192,7 +192,7 @@ fn u1_spaces(scale: usize) -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRu
             [-1, 0, 1]
                 .into_iter()
                 .zip(degs)
-                .map(|(charge, deg)| (U1Irrep::new(charge), deg * scale)),
+                .map(|(charge, deg)| (U1Irrep::new(charge).unwrap(), deg * scale)),
         )
         .unwrap()
     };

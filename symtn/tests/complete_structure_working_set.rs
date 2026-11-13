@@ -42,7 +42,7 @@ fn warm_working_sets_never_evict() {
     let _serial = crate::counting_alloc::serial();
     symtn::cache::clear();
     let runtime = Runtime::builder().build().unwrap();
-    let u1 = |q: i32| U1Irrep::new(q);
+    let u1 = |q: i32| U1Irrep::new(q).unwrap();
 
     // E1-style ledger: several ops back to back without a reset, as the E1
     // rows run, so their structures share the cache.

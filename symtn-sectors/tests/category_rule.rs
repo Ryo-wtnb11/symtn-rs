@@ -14,7 +14,7 @@ use fusion_symbols::category::{
     BraidingStyle, EnumerationError, FusionCategory, FusionStyle, RBlock, SymbolBlock,
 };
 use fusion_symbols::finite::{ZNIrrep, ZN};
-use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep, U1Irrep as FsU1Irrep, U1};
+use fusion_symbols::lie::{GroupId, LieError, LieGroup, LieIrrep, U1};
 use fusion_symbols::table::TableCategory;
 use num_complex::Complex64;
 use symtn_sectors::*;
@@ -931,7 +931,7 @@ impl CategoryCodec<ZN> for FreshZ3Codec {
 #[test]
 fn enumeration_ids_round_trip_and_reach_past_32_bits() {
     let rule = mf(U1);
-    let u1 = |q: i32| FsU1Irrep::new(q).unwrap();
+    let u1 = |q: i32| U1Irrep::new(q).unwrap();
     assert_eq!(rule.encode_sector(&u1(0)), Ok(s(0)));
     assert_eq!(rule.encode_sector(&u1(1)), Ok(s(1)));
     assert_eq!(rule.encode_sector(&u1(-1)), Ok(s(2)));
@@ -1001,7 +1001,7 @@ fn a_product_category_is_numbered_in_bounded_manhattan_order() {
     let pair = |a: u32, q: i32| {
         (
             ZNIrrep::new(i64::from(a), 2).unwrap(),
-            FsU1Irrep::new(q).unwrap(),
+            U1Irrep::new(q).unwrap(),
         )
     };
     let order = [(0, 0), (0, 1), (1, 0), (0, -1), (1, 1), (0, 2)];
@@ -2007,7 +2007,7 @@ fn admission_expresses_the_zn_and_parity_schedules() {
 struct ClosedU1;
 
 impl CategoryCodec<U1> for ClosedU1 {
-    type Sector = FsU1Irrep;
+    type Sector = U1Irrep;
     type Error = FusionAlgebraError;
     type Mode = MF;
     type Unit = CanonicalUnitAdmission;
@@ -2016,7 +2016,7 @@ impl CategoryCodec<U1> for ClosedU1 {
         &self,
         category: impl Fn() -> &'a U1 + Copy,
         rule: &RuleIdentity,
-        label: &FsU1Irrep,
+        label: &U1Irrep,
     ) -> Result<SectorId, FusionAlgebraError> {
         self.sector_id(category, rule, label)
     }
@@ -2024,25 +2024,23 @@ impl CategoryCodec<U1> for ClosedU1 {
         &self,
         category: impl Fn() -> &'a U1 + Copy,
         id: SectorId,
-    ) -> Result<FsU1Irrep, FusionAlgebraError> {
+    ) -> Result<U1Irrep, FusionAlgebraError> {
         self.object(category, id)
     }
     fn object<'a>(
         &self,
         _: impl Fn() -> &'a U1 + Copy,
         id: SectorId,
-    ) -> Result<FsU1Irrep, FusionAlgebraError> {
-        U1Irrep::from_sector_id(id)
-            .and_then(|irrep| FsU1Irrep::new(irrep.charge()).ok())
-            .ok_or(FusionAlgebraError::InvalidSector { sector: id })
+    ) -> Result<U1Irrep, FusionAlgebraError> {
+        U1FusionRule.decode_sector(id)
     }
     fn sector_id<'a>(
         &self,
         _: impl Fn() -> &'a U1 + Copy,
         _: &RuleIdentity,
-        object: &FsU1Irrep,
+        object: &U1Irrep,
     ) -> Result<SectorId, FusionAlgebraError> {
-        Ok(U1Irrep::new(object.charge()).sector_id())
+        Ok(SectorId::from(*object))
     }
     fn admit<'a, const N: usize>(
         &self,
@@ -2050,7 +2048,7 @@ impl CategoryCodec<U1> for ClosedU1 {
         _: &RuleIdentity,
         operation: CategoryOperation,
         ids: [SectorId; N],
-    ) -> Result<[FsU1Irrep; N], FusionAlgebraError> {
+    ) -> Result<[U1Irrep; N], FusionAlgebraError> {
         let mut objects = [category().unit(); N];
         for (object, id) in objects.iter_mut().zip(ids) {
             *object = self.object(category, id)?;
@@ -2059,7 +2057,10 @@ impl CategoryCodec<U1> for ClosedU1 {
             let (left, right) = (objects[0].charge(), objects[1].charge());
             // The sum must be a label, and i32::MIN has no representable dual.
             if left.checked_add(right).is_none_or(|sum| sum == i32::MIN) {
-                return Err(FusionAlgebraError::U1FusionOverflow { left, right });
+                return Err(FusionAlgebraError::FusionNotRepresentable {
+                    left: ids[0],
+                    right: ids[1],
+                });
             }
         }
         Ok(objects)
@@ -2076,7 +2077,7 @@ impl CategoryCodec<U1> for ClosedU1 {
 #[test]
 fn admission_expresses_the_u1_schedule() {
     let rule = CategoryRule::try_new(U1, ClosedU1).unwrap();
-    let u1 = |q: i32| U1Irrep::new(q).sector_id();
+    let u1 = |q: i32| SectorId::from(U1Irrep::new(q).unwrap());
     let excluded = u32::MAX as usize;
     assert_eq!(
         rule.try_nsymbol(u1(i32::MAX), u1(1), s(excluded)),
@@ -2084,16 +2085,16 @@ fn admission_expresses_the_u1_schedule() {
     );
     assert_eq!(
         rule.try_nsymbol(u1(i32::MAX), u1(1), u1(0)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         })
     );
     assert_eq!(
         rule.try_fusion_channels(u1(i32::MIN + 1), u1(-1)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MIN + 1,
-            right: -1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MIN + 1),
+            right: u1(-1),
         })
     );
 }

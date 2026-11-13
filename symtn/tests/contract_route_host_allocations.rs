@@ -71,7 +71,7 @@ fn row(codomain: &[usize], reach: i32) -> Row {
                 1 => 4,
                 _ => 1,
             };
-            (U1Irrep::new(charge), degeneracy)
+            (U1Irrep::new(charge).unwrap(), degeneracy)
         }),
     )
     .unwrap();
@@ -83,7 +83,7 @@ fn row(codomain: &[usize], reach: i32) -> Row {
                 1 => 2,
                 _ => 1,
             };
-            (U1Irrep::new(charge), degeneracy)
+            (U1Irrep::new(charge).unwrap(), degeneracy)
         }),
     )
     .unwrap();
@@ -206,13 +206,17 @@ fn eager_complex_copy_c_scratch_is_allocator_zeroed() {
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
         [
-            (U1Irrep::new(-1), 5),
-            (U1Irrep::new(0), 7),
-            (U1Irrep::new(1), 6),
+            (U1Irrep::new(-1).unwrap(), 5),
+            (U1Irrep::new(0).unwrap(), 7),
+            (U1Irrep::new(1).unwrap(), 6),
         ],
     )
     .unwrap();
-    let w = GradedSpace::try_new(rule, [(U1Irrep::new(0), 4), (U1Irrep::new(1), 3)]).unwrap();
+    let w = GradedSpace::try_new(
+        rule,
+        [(U1Irrep::new(0).unwrap(), 4), (U1Irrep::new(1).unwrap(), 3)],
+    )
+    .unwrap();
     let a = TensorMap::<_, Complex64>::rand_with_seed(engine, &runtime, [&v, &v], [&w], 5).unwrap();
     let b = TensorMap::<_, Complex64>::rand_with_seed(engine, &runtime, [&w], [&v], 6).unwrap();
     // The swapped codomain is a CopyC route: the core writes a default-layout

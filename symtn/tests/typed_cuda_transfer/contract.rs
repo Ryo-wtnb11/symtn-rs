@@ -64,7 +64,7 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let u1_rule = Arc::new(U1FusionRule);
     let u1 = GradedSpace::try_new(
         Arc::clone(&u1_rule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let u1_lhs = TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, indices| {
@@ -114,8 +114,14 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let product = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -134,8 +140,14 @@ fn typed_cuda_direct_execution_matches_host_providers_and_structure() {
     let product_dual = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -167,7 +179,7 @@ fn typed_cuda_direct_supports_canonical_lazy_and_rejects_other_scopes_before_mut
     let runtime = Runtime::builder().build().unwrap();
     let other_runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let host = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })
@@ -458,7 +470,7 @@ fn typed_cuda_c64_contract_and_compose_match_host() {
 
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let host_result = TensorMap::<_, Complex64>::from_subblock_fn(
@@ -612,10 +624,11 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     // of the plan's inactive blocks.
     let outer = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
-    let inner = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let inner =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -785,7 +798,7 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
     // catch what the length check cannot.
     let drifted = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(4), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(4).unwrap(), 3)],
     )
     .unwrap();
     let mut wrong_space = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
@@ -882,7 +895,8 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
 
     // A destination whose blocks all exist but none of which any GEMM reaches:
     // the inactive-block zeroing alone produces the whole result.
-    let disjoint = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(7), 2)]).unwrap();
+    let disjoint =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(7).unwrap(), 2)]).unwrap();
     let empty_lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -942,7 +956,8 @@ fn typed_cuda_contract_into_matches_the_returning_contraction() {
 
     // A destination space with no coupled sector at all: `required_len` is 0,
     // so the replay writes nothing.
-    let single = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let single =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let zero_lhs = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,

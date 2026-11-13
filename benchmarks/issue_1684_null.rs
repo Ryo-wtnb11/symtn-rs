@@ -111,7 +111,7 @@ fn main() {
                 $eps,
                 "U1",
                 U1FusionRule,
-                |c: i32, dual| U1Irrep::new(if dual { -c } else { c })
+                |c: i32, dual| U1Irrep::new(if dual { -c } else { c }).unwrap()
             );
             family!(
                 $dtype,

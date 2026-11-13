@@ -51,7 +51,7 @@ pub fn u1(charges: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         charges
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }
@@ -77,15 +77,15 @@ pub fn u1_su2() -> GradedSpace<U1Su2> {
         ),
         [
             (
-                product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(0)),
+                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
                 2,
             ),
             (
-                product_sector(U1Irrep::new(1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 1,
             ),
             (
-                product_sector(U1Irrep::new(-1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 2,
             ),
         ],
@@ -107,10 +107,22 @@ pub fn fermion_u1() -> GradedSpace<FermionU1> {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap()

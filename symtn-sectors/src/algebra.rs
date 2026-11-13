@@ -317,10 +317,6 @@ pub enum FusionAlgebraError {
         /// The rejected label in the rule's display form.
         label: String,
     },
-    U1FusionOverflow {
-        left: i32,
-        right: i32,
-    },
     /// Both inputs are valid, but at least one output channel cannot be represented.
     FusionNotRepresentable {
         left: SectorId,
@@ -347,10 +343,6 @@ impl fmt::Display for FusionAlgebraError {
             Self::UnrepresentableSectorLabel { label, .. } => write!(
                 formatter,
                 "sector label {label} is not representable by its fusion rule"
-            ),
-            Self::U1FusionOverflow { left, right } => write!(
-                formatter,
-                "U(1) fusion charge {left} + {right} is not representable"
             ),
             Self::FusionNotRepresentable { left, right } => write!(
                 formatter,

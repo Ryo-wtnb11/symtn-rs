@@ -790,15 +790,15 @@ pub(super) fn u1_cross_space_map<D: FactorScalar>(
     domain: &[(i32, usize)],
 ) -> TestTensor<D> {
     let codomain_leg = SectorLeg::new(
-        codomain
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).sector_id(), degeneracy)),
+        codomain.iter().map(|&(charge, degeneracy)| {
+            (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)
+        }),
         false,
     );
     let domain_leg = SectorLeg::new(
-        domain
-            .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).sector_id(), degeneracy)),
+        domain.iter().map(|&(charge, degeneracy)| {
+            (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)
+        }),
         false,
     );
     let homspace = FusionTreeHomSpace::new(
@@ -823,7 +823,11 @@ where
     let blocks = blocks
         .iter()
         .map(|(charge, dimension, data)| {
-            (U1Irrep::new(*charge).sector_id(), *dimension, data.clone())
+            (
+                SectorId::from(U1Irrep::new(*charge).unwrap()),
+                *dimension,
+                data.clone(),
+            )
         })
         .collect::<Vec<_>>();
     block_endomorphism(&U1FusionRule, &blocks)
@@ -866,7 +870,7 @@ where
 }
 
 pub(super) fn scalar_u1_block<D: Copy>(tensor: &TestTensor<D>, charge: i32) -> D {
-    scalar_block(tensor, U1Irrep::new(charge).sector_id())
+    scalar_block(tensor, SectorId::from(U1Irrep::new(charge).unwrap()))
 }
 
 pub(super) fn scalar_block<D: Copy>(tensor: &TestTensor<D>, sector: SectorId) -> D {

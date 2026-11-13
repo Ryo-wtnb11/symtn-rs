@@ -165,7 +165,7 @@ fn complex(k: usize) -> Complex64 {
 macro_rules! all_symmetries {
     ($engine:ident, $scalar:ty, $value:expr) => {{
         // U(1): codomain-only charge 2, domain-only charge 3.
-        let q = U1Irrep::new;
+        let q = |charge| U1Irrep::new(charge).unwrap();
         side_only_case!(
             $engine,
             U1FusionRule,
@@ -194,7 +194,7 @@ macro_rules! all_symmetries {
                 } else {
                     FermionParityIrrep::EVEN
                 },
-                U1Irrep::new(charge),
+                U1Irrep::new(charge).unwrap(),
             )
         };
         side_only_case!(
@@ -328,7 +328,7 @@ macro_rules! multiplicity_free_full_qr_lq_bonds {
     ($engine:ident, $d:ty) => {{
         let rt = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
-        let q = U1Irrep::new;
+        let q = |charge| U1Irrep::new(charge).unwrap();
         let space = |irreps: Vec<(U1Irrep, usize)>| {
             GradedSpace::try_new(Arc::clone(&provider), irreps).unwrap()
         };

@@ -36,8 +36,8 @@
 //! let runtime = Runtime::builder().build()?;
 //! let rule = ProductFusionRule::<_, _>::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
 //!
-//! let even = product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0));
-//! let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1));
+//! let even = product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap());
+//! let odd = product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap());
 //! let v = GradedSpace::try_new(Arc::new(rule), [(even, 2), (odd, 1)])?;
 //!
 //! let t: TensorMap<_, f64> = TensorMap::zeros(engine, &runtime, [&v], [&v])?;

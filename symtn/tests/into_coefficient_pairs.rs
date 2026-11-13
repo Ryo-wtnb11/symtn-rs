@@ -534,10 +534,10 @@ fn u1() -> (GradedSpace<U1FusionRule>, GradedSpace<U1FusionRule>) {
     let rule = Arc::new(U1FusionRule);
     let v = GradedSpace::try_new(
         Arc::clone(&rule),
-        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-1, 2), (0, 1), (1, 3)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
-    let bond = GradedSpace::try_new(rule, [(U1Irrep::new(0), 2)]).unwrap();
+    let bond = GradedSpace::try_new(rule, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     (v, bond)
 }
 
@@ -561,7 +561,7 @@ fn fz2u1() -> (GradedSpace<Fz2U1>, GradedSpace<Fz2U1>) {
         } else {
             FermionParityIrrep::ODD
         };
-        ProductSector::new(parity, U1Irrep::new(q))
+        ProductSector::new(parity, U1Irrep::new(q).unwrap())
     };
     let rule = Arc::new(Fz2U1::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
     let v = GradedSpace::try_new(

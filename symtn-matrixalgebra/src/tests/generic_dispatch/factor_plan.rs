@@ -45,8 +45,12 @@ fn compact_factor_plan_is_identical_across_calls_on_one_space() {
     // What: rebuilding the per-call plan on the same bound space yields the
     // same routes and the same region tables (shared `Arc`s), with the first
     // plan still alive.
-    let charges =
-        [U1Irrep::new(-1), U1Irrep::new(0), U1Irrep::new(1)].map(|charge| charge.sector_id());
+    let charges = [
+        U1Irrep::new(-1).unwrap(),
+        U1Irrep::new(0).unwrap(),
+        U1Irrep::new(1).unwrap(),
+    ]
+    .map(SectorId::from);
     let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
     let first = crate::factorize::compact_factor_plan_for_test(bound.space())
@@ -75,8 +79,12 @@ fn compact_factor_routes_agree_between_sorted_and_unsorted_region_tables() {
     // What: canonical factor regions are strictly sorted by coupled sector and
     // route without a map; an expert (unsorted) region table routes through
     // the map path to the same regions in the same source order.
-    let charges =
-        [U1Irrep::new(-1), U1Irrep::new(0), U1Irrep::new(1)].map(|charge| charge.sector_id());
+    let charges = [
+        U1Irrep::new(-1).unwrap(),
+        U1Irrep::new(0).unwrap(),
+        U1Irrep::new(1).unwrap(),
+    ]
+    .map(SectorId::from);
     let tensor = tsvd_test_tensor(&U1FusionRule, &charges);
     let bound = bound_tensor(Arc::new(U1FusionRule), &tensor);
     let plan = crate::factorize::compact_factor_plan_for_test(bound.space())
@@ -187,8 +195,8 @@ fn typed_factor_axis_sum_overflow_is_exact_without_storage_materialization() {
     let homspace = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new(
             [
-                (U1Irrep::new(1).sector_id(), usize::MAX),
-                (U1Irrep::new(2).sector_id(), 1),
+                (SectorId::from(U1Irrep::new(1).unwrap()), usize::MAX),
+                (SectorId::from(U1Irrep::new(2).unwrap()), 1),
             ],
             false,
         )]),

@@ -487,12 +487,12 @@ fn eigsolve_finds_the_two_site_heisenberg_spectrum() {
         // U(1): the same model in the Sz basis, W carrying every charge.
         let v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 2)),
+            (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32).unwrap(), 2)),
         )
         .unwrap();
         let w = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 2)),
+            (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32).unwrap(), 2)),
         )
         .unwrap();
         let h = u1_heisenberg::<f64>(engine, &rt, &v, twice);
@@ -626,12 +626,12 @@ fn exponentiate_matches_the_block_exponential() {
 
         let v = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 2)),
+            (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32).unwrap(), 2)),
         )
         .unwrap();
         let w = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 1)),
+            (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32).unwrap(), 1)),
         )
         .unwrap();
         let h = u1_heisenberg::<f64>(engine, &rt, &v, twice);
@@ -731,12 +731,12 @@ fn warm_eigsolve_allocates_only_its_results() {
     let engine: &mut dyn ExecContext = &mut CpuEngine::serial();
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(-1, 4), (0, 3), (1, 4)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-1, 4), (0, 3), (1, 4)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
     let w = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(-2, 12), (-1, 16), (0, 20), (1, 16), (2, 12)].map(|(q, n)| (U1Irrep::new(q), n)),
+        [(-2, 12), (-1, 16), (0, 20), (1, 16), (2, 12)].map(|(q, n)| (U1Irrep::new(q).unwrap(), n)),
     )
     .unwrap();
     let a = TensorMap::<_, f64>::rand_with_seed(engine, &rt, [&v, &v], [&v, &v], 3).unwrap();
@@ -809,14 +809,14 @@ fn eigsolve_runs_on_the_callers_engine() {
     let twice = 2;
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32), 8)),
+        (0..=twice).map(|k| (U1Irrep::new(2 * k as i32 - twice as i32).unwrap(), 8)),
     )
     .unwrap();
     // Degeneracies large enough that a four-thread engine has real work in the map's
     // contraction batch.
     let w = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32), 16)),
+        (0..=2 * twice).map(|k| (U1Irrep::new(2 * k as i32 - 2 * twice as i32).unwrap(), 16)),
     )
     .unwrap();
     let serial: &mut dyn ExecContext = &mut CpuEngine::serial();

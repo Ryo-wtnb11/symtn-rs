@@ -94,7 +94,7 @@ macro_rules! for_each_symmetry {
         use std::sync::Arc;
         use symtn::typed::GradedSpace;
         $check!($($extra,)* $engine, "U1", |variant: usize| {
-            let q = U1Irrep::new;
+            let q = |charge| U1Irrep::new(charge).unwrap();
             GradedSpace::try_new(
                 Arc::new(U1FusionRule),
                 [(q(-1), 2), (q(0), 1 + variant), (q(1), 3)],
@@ -111,8 +111,8 @@ macro_rules! for_each_symmetry {
         });
         $check!($($extra,)* $engine, "fZ2xU1", |variant: usize| {
             let rule = Arc::new(Fz2U1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap());
-            let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge));
-            let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge));
+            let even = |charge| product_sector(FermionParityIrrep::EVEN, U1Irrep::new(charge).unwrap());
+            let odd = |charge| product_sector(FermionParityIrrep::ODD, U1Irrep::new(charge).unwrap());
             GradedSpace::try_new(rule, [(even(0), 3), (odd(1), 1 + variant), (odd(-1), 2)]).unwrap()
         });
         #[cfg(feature = "cgc-gen")]

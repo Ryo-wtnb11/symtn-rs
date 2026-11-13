@@ -46,7 +46,10 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
 
     let u1 = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
-        [(U1Irrep::new(-1), 1), (U1Irrep::new(0), 2)],
+        [
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+        ],
     )
     .unwrap();
     let u1_tensor = TensorMap::<U1FusionRule, f64>::zeros(engine, &runtime, [&u1], [&u1]).unwrap();
@@ -57,8 +60,8 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
     let coupled: Vec<_> = (0..u1_tensor.subblock_count())
         .map(|block| *u1_tensor.subblock_fusion_trees(block).unwrap().coupled())
         .collect();
-    assert!(coupled.contains(&U1Irrep::new(-1)));
-    assert!(coupled.contains(&U1Irrep::new(0)));
+    assert!(coupled.contains(&U1Irrep::new(-1).unwrap()));
+    assert!(coupled.contains(&U1Irrep::new(0).unwrap()));
 
     let su2 = GradedSpace::try_new(
         std::sync::Arc::new(SU2FusionRule),
@@ -81,8 +84,14 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -95,8 +104,11 @@ fn constructs_u1_su2_and_product_tensors_from_provider_labels() {
 fn u1_index_contraction_trace_and_decomposition_paths_are_executable() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let space =
-        GradedSpace::try_new(std::sync::Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let space = GradedSpace::try_new(
+        std::sync::Arc::new(U1FusionRule),
+        [(U1Irrep::new(0).unwrap(), 2)],
+    )
+    .unwrap();
     let tensor = TensorMap::<U1FusionRule, f64>::from_subblock_fn(
         engine,
         &runtime,

@@ -568,22 +568,27 @@ fn run_case<R, D>(
 }
 
 fn u1_many_small() -> Vec<(U1Irrep, usize)> {
-    (-7..=8).map(|charge| (U1Irrep::new(charge), 3)).collect()
+    (-7..=8)
+        .map(|charge| (U1Irrep::new(charge).unwrap(), 3))
+        .collect()
 }
 
 fn u1_redistribution() -> Vec<Vec<(U1Irrep, usize)>> {
     vec![
         vec![
-            (U1Irrep::new(-1), 16),
-            (U1Irrep::new(0), 16),
-            (U1Irrep::new(1), 16),
+            (U1Irrep::new(-1).unwrap(), 16),
+            (U1Irrep::new(0).unwrap(), 16),
+            (U1Irrep::new(1).unwrap(), 16),
         ],
-        vec![(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
-        vec![(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
-        vec![(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
-        vec![(U1Irrep::new(0), 1)],
-        vec![(U1Irrep::new(-1), 2), (U1Irrep::new(2), 1)],
-        vec![(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        vec![(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+        vec![(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
+        vec![(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
+        vec![(U1Irrep::new(0).unwrap(), 1)],
+        vec![
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(2).unwrap(), 1),
+        ],
+        vec![(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     ]
 }
 
@@ -598,29 +603,56 @@ fn fermion_u1_patterns() -> Vec<
     let sector = product_sector;
     vec![
         vec![
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 16),
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 16),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                16,
+            ),
+            (
+                sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                16,
+            ),
         ],
         vec![
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 1),
         ],
         vec![
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1),
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                1,
+            ),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 2),
         ],
         vec![
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 3),
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                3,
+            ),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 2),
         ],
-        vec![(sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 1)],
+        vec![(
+            sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+            1,
+        )],
         vec![
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2),
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+            (
+                sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                2,
+            ),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                1,
+            ),
         ],
         vec![
-            (sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
+            (
+                sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()), 1),
         ],
     ]
 }
@@ -632,7 +664,7 @@ fn run_child(engine: &mut dyn Engine, case: &str, workspace_mode: &str) {
             case,
             Arc::new(U1FusionRule),
             [24, 40, 12, 32, 16, 24]
-                .map(|size| vec![(U1Irrep::new(0), size)])
+                .map(|size| vec![(U1Irrep::new(0).unwrap(), size)])
                 .into(),
             Some("continuous_grow_shrink"),
             workspace_mode,
@@ -642,7 +674,7 @@ fn run_child(engine: &mut dyn Engine, case: &str, workspace_mode: &str) {
             case,
             Arc::new(U1FusionRule),
             [24, 40, 12, 32, 16, 24]
-                .map(|size| vec![(U1Irrep::new(0), size)])
+                .map(|size| vec![(U1Irrep::new(0).unwrap(), size)])
                 .into(),
             Some("continuous_grow_shrink"),
             workspace_mode,

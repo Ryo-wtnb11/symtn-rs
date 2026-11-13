@@ -18,7 +18,7 @@ use symtn_dense::Engine;
 
 use symtn_core::{
     FusionProductSpace, FusionTreeHomSpace, MultiplicityFreeRigidSymbols, SU2FusionRule, SU2Irrep,
-    SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep,
+    SectorId, SectorLeg, StructureCacheKind, U1FusionRule, U1Irrep,
 };
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, HostContractMembersWorkspace,
@@ -57,7 +57,7 @@ fn u1_leg(reach: i32) -> SectorLeg {
     SectorLeg::new(
         (-reach..=reach).map(|charge| {
             (
-                U1Irrep::new(charge).sector_id(),
+                SectorId::from(U1Irrep::new(charge).unwrap()),
                 if charge == 0 { 2 } else { 1 },
             )
         }),

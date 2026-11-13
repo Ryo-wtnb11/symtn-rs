@@ -271,7 +271,7 @@ let a_adjoint = &a.adjoint(engine).unwrap();
                 let terms = wa.dense_data().unwrap().len();
 
                 let selection =
-                    LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..2), (U1Irrep::new(1), 0..1)])
+                    LegSelection::try_new(&leg, [(U1Irrep::new(0).unwrap(), 0..2), (U1Irrep::new(1).unwrap(), 0..1)])
                         .unwrap();
                 let restricted = a.restrict_leg(engine, &[(1, &selection)]).unwrap();
                 let wide_restricted = wa.restrict_leg(engine, &[(1, &selection)]).unwrap();
@@ -362,9 +362,9 @@ let a_adjoint = &a.adjoint(engine).unwrap();
 /// The compact diagonal fixture on [`u1_leg`], at either precision.
 fn diagonal_spectra<D: Parts>(mut state: u64) -> [SectorSpectrum<U1Irrep, D>; 3] {
     [
-        (U1Irrep::new(-1), 2),
-        (U1Irrep::new(0), 3),
-        (U1Irrep::new(1), 2),
+        (U1Irrep::new(-1).unwrap(), 2),
+        (U1Irrep::new(0).unwrap(), 3),
+        (U1Irrep::new(1).unwrap(), 2),
     ]
     .map(|(sector, degeneracy)| SectorSpectrum {
         sector,

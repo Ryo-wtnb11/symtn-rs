@@ -408,7 +408,7 @@ fn lazy_adjoint_materialization_and_add_are_exact_on_fz2_u1_legs() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -776,7 +776,7 @@ mod factorizations {
         let leg = |pairs: &[(i32, usize)]| {
             GradedSpace::try_new(
                 Arc::clone(&provider),
-                pairs.iter().map(|&(q, d)| (U1Irrep::new(q), d)),
+                pairs.iter().map(|&(q, d)| (U1Irrep::new(q).unwrap(), d)),
             )
             .unwrap()
         };
@@ -807,7 +807,7 @@ mod factorizations {
                     } else {
                         FermionParityIrrep::ODD
                     };
-                    (ProductSector::new(parity, U1Irrep::new(q)), d)
+                    (ProductSector::new(parity, U1Irrep::new(q).unwrap()), d)
                 }),
             )
             .unwrap()

@@ -56,7 +56,7 @@ fn measure<T>(operation: impl FnOnce() -> T) -> Sample {
 fn u1_space(sectors: i32, order: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (0..sectors).map(|charge| (U1Irrep::new(charge), order)),
+        (0..sectors).map(|charge| (U1Irrep::new(charge).unwrap(), order)),
     )
     .unwrap()
 }
@@ -184,7 +184,7 @@ fn typed_u1_general_exp_matches_the_upper_triangular_oracle() {
     let provider = Arc::new(U1FusionRule);
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
-        (0..3).map(|charge| (U1Irrep::new(charge), 2)),
+        (0..3).map(|charge| (U1Irrep::new(charge).unwrap(), 2)),
     )
     .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {

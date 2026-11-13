@@ -158,12 +158,12 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
     let u1 = Arc::new(U1FusionRule);
     let tall = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let wide = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let rectangular =
@@ -248,8 +248,14 @@ fn typed_cuda_svd_compact_streams_dense_multiplicity_free_f64_factors() {
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -325,8 +331,10 @@ fn typed_cuda_svd_compact_handles_large_wide_sector() {
     let cuda = &mut crate::common::cuda_engine();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let rows = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 8)]).unwrap();
-    let cols = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 1025)]).unwrap();
+    let rows =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
+    let cols =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1025)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&cols], |_, indices| {
         let row = indices[0];
         let col = indices[1];
@@ -345,8 +353,10 @@ fn typed_cuda_svd_trunc_composition_handles_large_wide_sector() {
     // What: the 8 x 1025 cuSOLVER path composes with a kept prefix on the Host.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let rows = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 8)]).unwrap();
-    let cols = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 1025)]).unwrap();
+    let rows =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 8)]).unwrap();
+    let cols =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1025)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&cols], |_, indices| {
         let row = indices[0];
         let col = indices[1];
@@ -373,12 +383,12 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     let provider = Arc::new(U1FusionRule);
     let rows = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let cols = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(2), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(2).unwrap(), 1)],
     )
     .unwrap();
     let mixed = TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&cols], |_, indices| {
@@ -391,7 +401,7 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     .unwrap();
     let same_identity_space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let policies = [
@@ -452,7 +462,7 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     );
 
     let no_intersection_rows =
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(4), 2)]).unwrap();
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(4).unwrap(), 2)]).unwrap();
     let no_intersection: TensorMap<_, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -524,8 +534,14 @@ fn typed_cuda_svd_trunc_composition_matches_host_policies_structure_and_ownershi
     let product_leg = GradedSpace::try_new(
         Arc::clone(&product),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -654,12 +670,12 @@ fn typed_cuda_c64_svd_matches_host_spectra_and_truncation_policies() {
     let u1 = Arc::new(U1FusionRule);
     let rows = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let cols = GradedSpace::try_new(
         Arc::clone(&u1),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let rectangular = TensorMap::<_, Complex64>::from_subblock_fn(
@@ -692,7 +708,7 @@ fn typed_cuda_c64_svd_matches_host_spectra_and_truncation_policies() {
 
     let unmatched_space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let policies = [

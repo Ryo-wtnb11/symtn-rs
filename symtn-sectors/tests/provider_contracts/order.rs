@@ -3,7 +3,7 @@
 use symtn_sectors::{
     product_sector, CU1FusionRule, FermionParityFusionRule, FermionParityIrrep, FusionRule,
     Fz2SectorLayout, PackedProductCodec, ProductFusionRule, SU2FusionRule, SU2Irrep, SectorCodec,
-    SectorOrderKey, TableRule, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
+    SectorId, SectorOrderKey, TableRule, U1FusionRule, U1Irrep, U1SectorLayout, ZNFusionRule,
 };
 
 use super::s;
@@ -16,11 +16,12 @@ fn positions(key: SectorOrderKey) -> Vec<u64> {
 fn u1_positions_leave_room_for_half_integer_charges() {
     // TensorKit position of integer q: 4q - 1 for q > 0, 4|q| otherwise.
     for (charge, position) in [(0, 0), (1, 3), (-1, 4), (2, 7), (-2, 8), (5, 19)] {
-        let sector = U1Irrep::new(charge).sector_id();
+        let sector = SectorId::from(U1Irrep::new(charge).unwrap());
         assert_eq!(positions(U1FusionRule.sector_order_key(sector)), [position]);
     }
     let mut charges = [-2, -1, 0, 1, 2];
-    charges.sort_by_key(|&q| U1FusionRule.sector_order_key(U1Irrep::new(q).sector_id()));
+    charges
+        .sort_by_key(|&q| U1FusionRule.sector_order_key(SectorId::from(U1Irrep::new(q).unwrap())));
     assert_eq!(charges, [0, 1, -1, 2, -2]);
 }
 
@@ -62,7 +63,8 @@ mod lie {
     use super::{positions, s};
     use fusion_symbols::lie::{GroupId, RootSystem};
     use symtn_sectors::{
-        CheckedGenericFusion, LieGroupFusionRule, ProductFusionRule, U1FusionRule, U1Irrep,
+        CheckedGenericFusion, LieGroupFusionRule, ProductFusionRule, SectorId, U1FusionRule,
+        U1Irrep,
     };
 
     fn rule(group: GroupId) -> LieGroupFusionRule {
@@ -240,8 +242,10 @@ mod lie {
         let su2 = self::rule(GroupId::su(2).unwrap());
         let product = ProductFusionRule::<_, _>::try_new(su2.clone(), U1FusionRule).unwrap();
         for (p, q) in [(0, 0), (1, -1), (2, 1), (3, -2)] {
-            let id = product
-                .encode_component_ids(su2.encode_irrep(&[p]).unwrap(), U1Irrep::new(q).sector_id());
+            let id = product.encode_component_ids(
+                su2.encode_irrep(&[p]).unwrap(),
+                SectorId::from(U1Irrep::new(q).unwrap()),
+            );
             assert_eq!(
                 positions(CheckedGenericFusion::sector_order_key(&product, id)),
                 key(&rule, &[p], &[q.into()])
@@ -343,8 +347,10 @@ mod lie {
         );
         let u1u1 = ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
         for (q1, q2) in [(0, 0), (1, -1), (-2, 1), (2, 2)] {
-            let id = u1u1
-                .encode_component_ids(U1Irrep::new(q1).sector_id(), U1Irrep::new(q2).sector_id());
+            let id = u1u1.encode_component_ids(
+                SectorId::from(U1Irrep::new(q1).unwrap()),
+                SectorId::from(U1Irrep::new(q2).unwrap()),
+            );
             assert_eq!(
                 positions(symtn_sectors::FusionRule::sector_order_key(&u1u1, id)),
                 key(&rule, &[], &[q1.into(), q2.into()])
@@ -375,7 +381,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     ];
     let expected_keys = [[4, 0], [3, 1], [3, 0], [0, 1], [0, 0]];
     for ((charge, parity), key) in labels.into_iter().zip(expected_keys) {
-        let label = product_sector(U1Irrep::new(charge), parity);
+        let label = product_sector(U1Irrep::new(charge).unwrap(), parity);
         for sector_key in [
             cantor.sector_order_key(cantor.encode_sector(&label).unwrap()),
             packed.sector_order_key(packed.encode_sector(&label).unwrap()),
@@ -387,7 +393,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     sorted.sort_by_key(|&(charge, parity)| {
         cantor.sector_order_key(
             cantor
-                .encode_sector(&product_sector(U1Irrep::new(charge), parity))
+                .encode_sector(&product_sector(U1Irrep::new(charge).unwrap(), parity))
                 .unwrap(),
         )
     });
@@ -413,7 +419,7 @@ fn product_keys_concatenate_factors_and_order_by_degree_then_lex() {
     )
     .unwrap();
     let label = product_sector(
-        product_sector(U1Irrep::new(-1), FermionParityIrrep::ODD),
+        product_sector(U1Irrep::new(-1).unwrap(), FermionParityIrrep::ODD),
         SU2Irrep::from_twice_spin(3),
     );
     assert_eq!(

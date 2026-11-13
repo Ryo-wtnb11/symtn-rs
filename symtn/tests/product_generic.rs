@@ -15,7 +15,7 @@ fn product_braid_moves_unequal_degeneracies_and_multiplicity_vertices() {
         )
         .unwrap(),
     );
-    let label = ProductSector::new(vec![1, 1], U1Irrep::new(0));
+    let label = ProductSector::new(vec![1, 1], U1Irrep::new(0).unwrap());
     let legs =
         [2, 3, 2].map(|n| GradedSpace::try_new(Arc::clone(&rule), [(label.clone(), n)]).unwrap());
     let value = |mu: usize, i: &[usize]| (100 * mu + 10 * i[0] + 3 * i[1] + i[2]) as f64;

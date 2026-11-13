@@ -633,9 +633,18 @@ fn fz2_u1_leg() -> GradedSpace<FermionU1> {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap()
@@ -768,9 +777,9 @@ fn device_inner_matches_the_host_where_single_precision_products_overflow() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();

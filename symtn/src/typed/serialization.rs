@@ -1745,7 +1745,7 @@ where
     ///         bytes: &[u8],
     ///     ) -> Result<U1Irrep, Self::Error> {
     ///         let bytes = bytes.try_into().map_err(|_| invalid_data())?;
-    ///         U1Irrep::try_new(i32::from_le_bytes(bytes)).ok_or_else(invalid_data)
+    ///         U1Irrep::new(i32::from_le_bytes(bytes)).map_err(|_| invalid_data())
     ///     }
     /// }
     ///
@@ -1756,7 +1756,7 @@ where
     /// let codec = U1Codec(Arc::clone(&provider));
     /// let space = GradedSpace::try_new(
     ///     Arc::clone(&provider),
-    ///     [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+    ///     [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     /// )?;
     ///
     /// let space_bytes = space.to_bytes_with(&codec)?;

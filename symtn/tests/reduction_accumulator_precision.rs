@@ -66,14 +66,14 @@ use crate::legs::{su2_dim, su2_leg_2_2, u1_leg_2_3_2};
 /// One U(1) charge with degeneracy 4: a single 4x4 dense block, a 4-entry
 /// compact spectrum, and `dim(c) == 1` so the weight cannot mask a difference.
 fn leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)]).unwrap()
+    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap()
 }
 
 /// Degeneracy 32: 1024 dense entries and a 32-entry compact spectrum, both
 /// long enough for the swallowed `1.0`s below to add up past one `f32` step of
 /// `2^26`.
 fn wide_leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 32)]).unwrap()
+    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 32)]).unwrap()
 }
 
 // --- 1. double precision matches an independent oracle ------------------------
@@ -480,7 +480,7 @@ fn mixed_compact_dense_single_precision_cancellation_accumulates_wide() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![1.0; 32],
         }],
     )
@@ -566,7 +566,7 @@ fn single_precision_reductions_accumulate_in_double() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values,
         }],
     )
@@ -650,7 +650,7 @@ fn single_precision_norm_stays_finite_where_a_narrow_accumulator_overflows() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![value; 4],
         }],
     )
@@ -762,7 +762,14 @@ fn dense_inner_lane_lengths_match_serial_oracle_all_dtypes() {
     }
     macro_rules! providers {
         ($engine:ident, $dtype:ty, $cast:expr) => {
-            check!($engine, U1FusionRule, U1Irrep::new(0), 1.0, $dtype, $cast);
+            check!(
+                $engine,
+                U1FusionRule,
+                U1Irrep::new(0).unwrap(),
+                1.0,
+                $dtype,
+                $cast
+            );
             check!(
                 $engine,
                 SU2FusionRule,
@@ -816,7 +823,14 @@ fn dense_inner_cancellation_accumulates_wide() {
             );
         }};
     }
-    check!(engine, U1FusionRule, U1Irrep::new(0), 1.0, f32, |v| v);
+    check!(
+        engine,
+        U1FusionRule,
+        U1Irrep::new(0).unwrap(),
+        1.0,
+        f32,
+        |v| v
+    );
     check!(
         engine,
         SU2FusionRule,
@@ -825,9 +839,14 @@ fn dense_inner_cancellation_accumulates_wide() {
         f32,
         |v| v
     );
-    check!(engine, U1FusionRule, U1Irrep::new(0), 1.0, Complex32, |v| {
-        Complex32::new(v, 0.0)
-    });
+    check!(
+        engine,
+        U1FusionRule,
+        U1Irrep::new(0).unwrap(),
+        1.0,
+        Complex32,
+        |v| { Complex32::new(v, 0.0) }
+    );
     check!(
         engine,
         SU2FusionRule,

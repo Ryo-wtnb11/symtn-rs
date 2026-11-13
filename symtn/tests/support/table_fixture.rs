@@ -251,7 +251,7 @@ pub fn su2_sectors() -> [(SU2Irrep, usize); 3] {
 }
 
 pub fn u1_sectors() -> [(U1Irrep, usize); 3] {
-    [(-1, 2), (0, 1), (1, 2)].map(|(charge, n)| (U1Irrep::new(charge), n))
+    [(-1, 2), (0, 1), (1, 2)].map(|(charge, n)| (U1Irrep::new(charge).unwrap(), n))
 }
 
 pub fn is_non_real_dimension(error: &symtn::typed::Error) -> bool {

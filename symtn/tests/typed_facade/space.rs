@@ -540,34 +540,51 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
 
     let ordinary = GradedSpace::<symtn::sector::U1FusionRule>::try_new(
         Arc::new(symtn::sector::U1FusionRule),
-        [(symtn::sector::U1Irrep::new(0), 1)],
+        [(symtn::sector::U1Irrep::new(0).unwrap(), 1)],
     )
     .unwrap();
     assert_eq!(
         ordinary.sectors().unwrap(),
-        [symtn::sector::U1Irrep::new(0)]
+        [symtn::sector::U1Irrep::new(0).unwrap()]
     );
 
     let provider = Arc::new(symtn::sector::U1FusionRule);
-    let shared =
-        GradedSpace::try_new(Arc::clone(&provider), [(symtn::sector::U1Irrep::new(0), 1)]).unwrap();
+    let shared = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(symtn::sector::U1Irrep::new(0).unwrap(), 1)],
+    )
+    .unwrap();
     assert!(std::ptr::eq(shared.provider(), provider.as_ref()));
     assert_eq!(shared.sectors().unwrap(), ordinary.sectors().unwrap());
     assert_eq!(shared.degeneracies(), ordinary.degeneracies());
     assert_eq!(shared.is_dual(), ordinary.is_dual());
-    let dual = GradedSpace::try_new(Arc::clone(&provider), [(symtn::sector::U1Irrep::new(1), 2)])
-        .and_then(|space| space.try_dual())
-        .unwrap();
+    let dual = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(symtn::sector::U1Irrep::new(1).unwrap(), 2)],
+    )
+    .and_then(|space| space.try_dual())
+    .unwrap();
     assert!(std::ptr::eq(dual.provider(), provider.as_ref()));
-    assert_eq!(dual.sectors().unwrap(), [symtn::sector::U1Irrep::new(-1)]);
     assert_eq!(
-        dual.degeneracy(&symtn::sector::U1Irrep::new(-1)).unwrap(),
+        dual.sectors().unwrap(),
+        [symtn::sector::U1Irrep::new(-1).unwrap()]
+    );
+    assert_eq!(
+        dual.degeneracy(&symtn::sector::U1Irrep::new(-1).unwrap())
+            .unwrap(),
         2
     );
-    assert_eq!(dual.degeneracy(&symtn::sector::U1Irrep::new(1)).unwrap(), 0);
+    assert_eq!(
+        dual.degeneracy(&symtn::sector::U1Irrep::new(1).unwrap())
+            .unwrap(),
+        0
+    );
     let back = dual.try_dual().unwrap();
     assert!(!back.is_dual());
-    assert_eq!(back.sectors().unwrap(), [symtn::sector::U1Irrep::new(1)]);
+    assert_eq!(
+        back.sectors().unwrap(),
+        [symtn::sector::U1Irrep::new(1).unwrap()]
+    );
     assert_eq!(
         back.try_dual().unwrap().sectors().unwrap(),
         dual.sectors().unwrap()
@@ -576,29 +593,36 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     let unit = dual.unitspace().unwrap();
     assert!(std::ptr::eq(unit.provider(), provider.as_ref()));
     assert!(!unit.is_dual());
-    assert_eq!(unit.sectors().unwrap(), [symtn::sector::U1Irrep::new(0)]);
+    assert_eq!(
+        unit.sectors().unwrap(),
+        [symtn::sector::U1Irrep::new(0).unwrap()]
+    );
     assert_eq!(unit.degeneracies(), [1]);
 
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 2),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
     let right = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(symtn::sector::U1Irrep::new(-1), 3)],
+        [(symtn::sector::U1Irrep::new(-1).unwrap(), 3)],
     )
     .unwrap();
     let fused = left.fuse(&right).unwrap();
     assert_eq!(
-        fused.degeneracy(&symtn::sector::U1Irrep::new(-1)).unwrap(),
+        fused
+            .degeneracy(&symtn::sector::U1Irrep::new(-1).unwrap())
+            .unwrap(),
         3
     );
     assert_eq!(
-        fused.degeneracy(&symtn::sector::U1Irrep::new(0)).unwrap(),
+        fused
+            .degeneracy(&symtn::sector::U1Irrep::new(0).unwrap())
+            .unwrap(),
         6
     );
     assert!(!fused.is_dual());
@@ -606,15 +630,21 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
 
     let summed = left.oplus(&right).unwrap();
     assert_eq!(
-        summed.degeneracy(&symtn::sector::U1Irrep::new(-1)).unwrap(),
+        summed
+            .degeneracy(&symtn::sector::U1Irrep::new(-1).unwrap())
+            .unwrap(),
         3
     );
     assert_eq!(
-        summed.degeneracy(&symtn::sector::U1Irrep::new(0)).unwrap(),
+        summed
+            .degeneracy(&symtn::sector::U1Irrep::new(0).unwrap())
+            .unwrap(),
         1
     );
     assert_eq!(
-        summed.degeneracy(&symtn::sector::U1Irrep::new(1)).unwrap(),
+        summed
+            .degeneracy(&symtn::sector::U1Irrep::new(1).unwrap())
+            .unwrap(),
         2
     );
     assert!(left
@@ -625,7 +655,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         .contains("opposite duality"));
     let huge = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(symtn::sector::U1Irrep::new(0), usize::MAX)],
+        [(symtn::sector::U1Irrep::new(0).unwrap(), usize::MAX)],
     )
     .unwrap();
     assert!(huge
@@ -684,7 +714,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         Arc::clone(&product_provider),
         [(
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(1),
+                symtn::sector::U1Irrep::new(1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
             2,
@@ -695,7 +725,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
         product_provider,
         [(
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(-1),
+                symtn::sector::U1Irrep::new(-1).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD,
             ),
             3,
@@ -706,7 +736,7 @@ fn graded_space_constructor_queries_and_algebra_match_tensorkit() {
     assert_eq!(
         product_fused
             .degeneracy(&symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(0),
+                symtn::sector::U1Irrep::new(0).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN,
             ))
             .unwrap(),

@@ -1,13 +1,15 @@
 use std::sync::Arc;
 
-use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
+use symtn_core::{
+    FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+};
 use symtn_tensors::BoundDynamicFusionMapSpace;
 
 use crate::counting_alloc;
 
 fn homspace(sector_count: i32) -> FusionTreeHomSpace {
     let sectors = (0..sector_count)
-        .map(|charge| (U1Irrep::new(charge).sector_id(), 2))
+        .map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), 2))
         .collect::<Vec<_>>();
     FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new(sectors.clone(), false)]),

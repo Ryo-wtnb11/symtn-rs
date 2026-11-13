@@ -1642,28 +1642,32 @@ mod tests {
         let provider = Arc::new(U1FusionRule);
         let v = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+            [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
         )
         .unwrap();
-        let w = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
+        let w =
+            GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
         let v_dual = v.try_dual().unwrap();
         let x = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)],
+            [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
         )
         .unwrap();
         // The sectors of `x*` with the degeneracies swapped, and the sectors
         // and degeneracies of `x*` on a leg that is not dual.
         let x_degeneracy = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
         )
         .unwrap()
         .try_dual()
         .unwrap();
         let x_flag = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(U1Irrep::new(0), 1), (U1Irrep::new(-1), 2)],
+            [
+                (U1Irrep::new(0).unwrap(), 1),
+                (U1Irrep::new(-1).unwrap(), 2),
+            ],
         )
         .unwrap();
         let x_dual = x.try_dual().unwrap();

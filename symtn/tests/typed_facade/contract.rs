@@ -423,8 +423,11 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
-    let charge =
-        GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(1), 1)]).unwrap();
+    let charge = GradedSpace::try_new(
+        Arc::clone(&u1_rule),
+        [(symtn::sector::U1Irrep::new(1).unwrap(), 1)],
+    )
+    .unwrap();
     let parity = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
         [(symtn::sector::FermionParityIrrep::ODD, 1)],
@@ -450,14 +453,14 @@ fn typed_deligne_product_uses_the_explicit_component_order() {
     assert_eq!(
         codomain[0].sectors().unwrap(),
         [symtn::sector::product_sector(
-            symtn::sector::U1Irrep::new(1),
+            symtn::sector::U1Irrep::new(1).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
     );
     assert_eq!(
         codomain[1].sectors().unwrap(),
         [symtn::sector::product_sector(
-            symtn::sector::U1Irrep::new(0),
+            symtn::sector::U1Irrep::new(0).unwrap(),
             symtn::sector::FermionParityIrrep::ODD
         )]
     );
@@ -476,8 +479,11 @@ fn typed_deligne_product_rejects_a_component_identity_mismatch() {
         2.0,
     );
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
-    let u1 =
-        GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(0), 1)]).unwrap();
+    let u1 = GradedSpace::try_new(
+        Arc::clone(&u1_rule),
+        [(symtn::sector::U1Irrep::new(0).unwrap(), 1)],
+    )
+    .unwrap();
     let rhs = TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, _| 3.0).unwrap();
     let wrong = Arc::new(
         symtn_sectors::ProductFusionRule::<_, _>::try_new(
@@ -555,16 +561,16 @@ fn typed_deligne_product_preserves_duals_multiblocks_and_complex_values() {
     let charge_cod = GradedSpace::try_new(
         Arc::clone(&u1_rule),
         [
-            (symtn::sector::U1Irrep::new(-1), 1),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(-1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
     let charge_dom = GradedSpace::try_new(
         Arc::clone(&u1_rule),
         [
-            (symtn::sector::U1Irrep::new(-1), 1),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(-1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .and_then(|space| space.try_dual())
@@ -665,8 +671,11 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     let runtime = runtime();
     let u1_rule = Arc::new(symtn::sector::U1FusionRule);
     let fz2_rule = Arc::new(symtn::sector::FermionParityFusionRule::new());
-    let charge =
-        GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(2), 1)]).unwrap();
+    let charge = GradedSpace::try_new(
+        Arc::clone(&u1_rule),
+        [(symtn::sector::U1Irrep::new(2).unwrap(), 1)],
+    )
+    .unwrap();
     let parity = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
         [(symtn::sector::FermionParityIrrep::ODD, 1)],
@@ -690,7 +699,7 @@ fn typed_deligne_product_accepts_a_nondefault_product_codec() {
     assert_eq!(
         result.codomain()[0].sectors().unwrap(),
         [symtn::sector::product_sector(
-            symtn::sector::U1Irrep::new(2),
+            symtn::sector::U1Irrep::new(2).unwrap(),
             symtn::sector::FermionParityIrrep::EVEN
         )]
     );
@@ -706,12 +715,15 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
     let charges = [1, 2, 3].map(|charge| {
         GradedSpace::try_new(
             Arc::clone(&u1_rule),
-            [(symtn::sector::U1Irrep::new(charge), 1)],
+            [(symtn::sector::U1Irrep::new(charge).unwrap(), 1)],
         )
         .unwrap()
     });
-    let charge_total =
-        GradedSpace::try_new(Arc::clone(&u1_rule), [(symtn::sector::U1Irrep::new(6), 1)]).unwrap();
+    let charge_total = GradedSpace::try_new(
+        Arc::clone(&u1_rule),
+        [(symtn::sector::U1Irrep::new(6).unwrap(), 1)],
+    )
+    .unwrap();
     let odd = GradedSpace::try_new(
         Arc::clone(&fz2_rule),
         [(symtn::sector::FermionParityIrrep::ODD, 1)],
@@ -740,19 +752,19 @@ fn typed_deligne_product_maps_component_innerlines_into_the_product_tree() {
         block.codomain_innerlines(),
         [
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(3),
+                symtn::sector::U1Irrep::new(3).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(6),
+                symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(6),
+                symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::ODD
             ),
             symtn::sector::product_sector(
-                symtn::sector::U1Irrep::new(6),
+                symtn::sector::U1Irrep::new(6).unwrap(),
                 symtn::sector::FermionParityIrrep::EVEN
             ),
         ]
@@ -770,8 +782,11 @@ fn typed_deligne_product_prepares_both_embeddings_before_publishing_either() {
     let _guard = cache_lock();
     let runtime = runtime();
     let rule = Arc::new(symtn::sector::U1FusionRule);
-    let charge_one =
-        GradedSpace::try_new(Arc::clone(&rule), [(symtn::sector::U1Irrep::new(1), 1)]).unwrap();
+    let charge_one = GradedSpace::try_new(
+        Arc::clone(&rule),
+        [(symtn::sector::U1Irrep::new(1).unwrap(), 1)],
+    )
+    .unwrap();
     let lhs =
         TensorMap::from_subblock_fn(engine, &runtime, [&charge_one], [&charge_one], |_, _| 2.0)
             .unwrap();
@@ -1210,7 +1225,7 @@ fn symmetric_canonical_contract_is_admitted_as_the_negative_control() {
     let runtime = runtime();
     let leg = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
-        [(symtn::sector::U1Irrep::new(0), 2)],
+        [(symtn::sector::U1Irrep::new(0).unwrap(), 2)],
     )
     .unwrap();
     let matrix =

@@ -20,7 +20,7 @@ fn tensor(runtime: &Runtime, degeneracy: usize, seed: u64) -> TensorMap<U1Fusion
     let engine = &mut symtn_dense::CpuEngine::serial();
     let space = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        (-2..=2).map(|charge| (U1Irrep::new(charge), degeneracy)),
+        (-2..=2).map(|charge| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     TensorMap::rand_with_seed(engine, runtime, [&space, &space], [&space], seed).unwrap()

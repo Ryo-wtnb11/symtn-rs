@@ -888,7 +888,7 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
     .unwrap();
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let cases: [[Vec<f64>; 2]; 3] = [
@@ -927,11 +927,11 @@ fn checked_compact_diagonal_spectrum_maps_match_multiplicity_free() {
             &u1,
             [
                 SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: first,
                 },
                 SectorSpectrum {
-                    sector: U1Irrep::new(1),
+                    sector: U1Irrep::new(1).unwrap(),
                     values: second,
                 },
             ],

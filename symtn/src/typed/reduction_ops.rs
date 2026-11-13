@@ -218,7 +218,7 @@ where
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
-    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// let twice = id.axpby(engine, 1.0, &id, 1.0)?;
     /// assert!((twice.norm(engine, 2.0)? - 2.0_f64.sqrt() * 2.0).abs() < 1e-12);

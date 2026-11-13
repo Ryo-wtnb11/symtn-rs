@@ -596,7 +596,7 @@ fn compact_diagonal_stays_compact() {
     let leg = u1_leg();
     let mut next = 0usize;
     let spectra = [(-1, 2), (0, 3), (1, 2)].map(|(charge, degeneracy)| SectorSpectrum {
-        sector: U1Irrep::new(charge),
+        sector: U1Irrep::new(charge).unwrap(),
         values: (0..degeneracy)
             .map(|_| {
                 next += 1;
@@ -661,14 +661,17 @@ fn narrowing_rounds_like_as_f32_per_element() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _serial = crate::counting_alloc::serial();
     let cases = f64_narrowing_cases();
-    let leg =
-        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), cases.len())]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::new(U1FusionRule),
+        [(U1Irrep::new(0).unwrap(), cases.len())],
+    )
+    .unwrap();
     let mut entries = cases.iter().map(|&(value, _)| value);
     let source: TensorMap<U1FusionRule, f64> = TensorMap::from_subblock_fn(
         engine,
         &runtime(),
         [&leg],
-        [&GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap()],
+        [&GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap()],
         |_, _| entries.next().unwrap(),
     )
     .unwrap();

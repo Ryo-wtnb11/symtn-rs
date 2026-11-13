@@ -279,9 +279,9 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 3),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 3),
         ],
     )
     .unwrap();
@@ -303,9 +303,18 @@ fn device_materialize_matches_host_with_one_fresh_payload() {
             .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+                2,
+            ),
         ],
     )
     .unwrap();

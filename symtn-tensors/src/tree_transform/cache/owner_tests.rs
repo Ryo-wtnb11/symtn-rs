@@ -8,7 +8,7 @@ use std::sync::{Arc, Barrier};
 use num_complex::Complex64;
 use symtn_core::{
     BlockStructure, FusionProductSpace, FusionTreeHomSpace, FusionTreePairOrientation,
-    RuleIdentity, SectorLeg, StructureCacheEquivalent, U1FusionRule, U1Irrep,
+    RuleIdentity, SectorId, SectorLeg, StructureCacheEquivalent, U1FusionRule, U1Irrep,
 };
 
 use super::{
@@ -23,7 +23,7 @@ use crate::{BoundDynamicFusionMapSpace, OperationError, TreeTransformOperation};
 fn canonical_space(seed: usize) -> BoundDynamicFusionMapSpace<U1FusionRule> {
     let leg = |dual| {
         SectorLeg::new(
-            [-1, 0, 1].map(|charge| (U1Irrep::new(charge).sector_id(), 7 + seed)),
+            [-1, 0, 1].map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), 7 + seed)),
             dual,
         )
     };

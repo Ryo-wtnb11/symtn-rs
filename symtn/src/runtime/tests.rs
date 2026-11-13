@@ -32,8 +32,11 @@ fn network_destination_dual_stays_inside_complete_publication_epoch() {
     let provider = Arc::new(NetworkResetU1 {
         reset_on_dual: std::sync::atomic::AtomicBool::new(false),
     });
-    let leg =
-        GradedSpace::try_new(Arc::clone(&provider), [(symtn_core::U1Irrep::new(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        Arc::clone(&provider),
+        [(symtn_core::U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, _| 1.0).unwrap();
     symtn_core::clear_structure_caches();
@@ -661,7 +664,10 @@ fn unique_planning_scratch_is_charged_and_released() {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let leg = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            [(U1Irrep::new(charge), 1), (U1Irrep::new(-charge), 1)],
+            [
+                (U1Irrep::new(charge).unwrap(), 1),
+                (U1Irrep::new(-charge).unwrap(), 1),
+            ],
         )
         .unwrap();
         let a: TensorMap<_, f64> =

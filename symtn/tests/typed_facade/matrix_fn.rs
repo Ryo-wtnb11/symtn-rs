@@ -19,16 +19,16 @@ fn map_diagonal_matches_hand_built_diagonals_on_a_dual_u1_bond() {
     let bond = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
         [
-            (symtn::sector::U1Irrep::new(0), 2),
-            (symtn::sector::U1Irrep::new(1), 1),
-            (symtn::sector::U1Irrep::new(-2), 2),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 2),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(-2).unwrap(), 2),
         ],
     )
     .unwrap()
     .try_dual()
     .unwrap();
     assert!(bond.is_dual());
-    let q = symtn::sector::U1Irrep::new;
+    let q = |charge| symtn::sector::U1Irrep::new(charge).unwrap();
     let source: TensorMap<_, f64> = TensorMap::diagonal(
         engine,
         &runtime,

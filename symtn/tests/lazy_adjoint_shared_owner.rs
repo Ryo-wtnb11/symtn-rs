@@ -51,7 +51,7 @@ fn u1_leg(
         Arc::clone(provider),
         sectors
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap();
     if dual {

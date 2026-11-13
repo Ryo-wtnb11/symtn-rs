@@ -314,7 +314,7 @@ fn a_whole_sector_is_dropped_from_the_eig_bond() {
     let leg = u1_leg(&[(0, 3), (1, 2)]);
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &host_runtime(), [&leg], [&leg], |trees, indices| {
-            let scale = if trees.coupled() == &U1Irrep::new(0) {
+            let scale = if trees.coupled() == &U1Irrep::new(0).unwrap() {
                 1.0
             } else {
                 1.0e-6
@@ -336,7 +336,7 @@ fn a_whole_sector_is_dropped_from_the_eig_bond() {
     );
     assert_eq!(
         found.selection.subspace().sectors().unwrap(),
-        vec![U1Irrep::new(0)],
+        vec![U1Irrep::new(0).unwrap()],
         "the low sector must be gone from the bond, not merely shortened"
     );
 }

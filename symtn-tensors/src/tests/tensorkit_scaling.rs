@@ -210,7 +210,7 @@ where
 
 #[test]
 fn zero_alpha_transform_and_trace_match_tensorkit() {
-    let u1 = [0, 1, -1].map(|charge| U1Irrep::new(charge).sector_id());
+    let u1 = [0, 1, -1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
     let su2 = [0, 1, 2].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
     let fz2 = [SectorId::new(0), SectorId::new(1)];
     check_zero_alpha::<_, f64>("U(1) f64", Arc::new(U1FusionRule), &u1);
@@ -281,7 +281,7 @@ fn check_trace_overflow<R, D>(
 #[test]
 fn trace_scales_each_element_before_the_sum_as_tensorkit() {
     let big = Complex64::new(1e308, 1e308);
-    let u1 = U1Irrep::new(1).sector_id();
+    let u1 = SectorId::from(U1Irrep::new(1).unwrap());
     let spin_half = SU2Irrep::from_twice_spin(1).sector_id();
     let odd = SectorId::new(1);
     let su2 = 1.000_000_000_000_000_2e308;
@@ -453,7 +453,7 @@ where
 
 #[test]
 fn zero_scale_contraction_matches_tensorkit() {
-    let u1 = [0, 1, -1].map(|charge| U1Irrep::new(charge).sector_id());
+    let u1 = [0, 1, -1].map(|charge| SectorId::from(U1Irrep::new(charge).unwrap()));
     let su2 = [0, 1, 2].map(|twice| SU2Irrep::from_twice_spin(twice).sector_id());
     let fz2 = [SectorId::new(0), SectorId::new(1)];
     check_zero_scale_contraction::<_, f64>("U(1) f64", Arc::new(U1FusionRule), &u1);

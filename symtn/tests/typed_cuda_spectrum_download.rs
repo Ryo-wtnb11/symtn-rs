@@ -51,7 +51,7 @@ fn device_diagonal_factors_transfer_only_what_the_host_decides_on() {
         let half = charges as i32 / 2;
         let leg = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (-half..=half).map(|charge| (U1Irrep::new(charge), 3)),
+            (-half..=half).map(|charge| (U1Irrep::new(charge).unwrap(), 3)),
         )
         .unwrap();
         let host = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, index| {

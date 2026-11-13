@@ -776,8 +776,8 @@ fn assert_unique_and_generic_plan_are_identical<R>(
 fn unique_production_lowering_matches_generic_across_pointed_rules_and_operations() {
     let u1_source = unique_rank_three_tree_pair(
         &U1FusionRule,
-        U1Irrep::new(1).sector_id(),
-        U1Irrep::new(-2).sector_id(),
+        SectorId::from(U1Irrep::new(1).unwrap()),
+        SectorId::from(U1Irrep::new(-2).unwrap()),
     );
     assert_unique_and_generic_plan_are_identical(
         &U1FusionRule,
@@ -808,8 +808,10 @@ fn unique_production_lowering_matches_generic_across_pointed_rules_and_operation
     );
 
     let product = FpU1Rule::try_new(FermionParityFusionRule::new(), U1FusionRule).unwrap();
-    let odd_charge = product.encode_component_ids(SectorId::new(1), U1Irrep::new(2).sector_id());
-    let even_charge = product.encode_component_ids(SectorId::new(0), U1Irrep::new(-1).sector_id());
+    let odd_charge =
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(2).unwrap()));
+    let even_charge =
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(-1).unwrap()));
     let coupled = product.fusion_channels(odd_charge, even_charge)[0];
     let product_source = FusionTreePairKey::pair(
         FusionTreeKey::try_new_for_rule(

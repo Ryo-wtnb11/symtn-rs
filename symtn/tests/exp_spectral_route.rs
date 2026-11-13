@@ -129,7 +129,7 @@ fn assert_matches_taylor(
 fn u1_leg() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [-1, 0, 1].map(|charge| (U1Irrep::new(charge), N)),
+        [-1, 0, 1].map(|charge| (U1Irrep::new(charge).unwrap(), N)),
     )
     .unwrap()
 }

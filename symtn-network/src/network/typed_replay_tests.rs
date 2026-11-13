@@ -40,7 +40,11 @@ where
 {
     let [a_dim, f_dim, c_dim, b_dim, d_dim, e_dim] = dimensions;
     let make_space = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(provider),
+            [(U1Irrep::new(0).unwrap(), degeneracy)],
+        )
+        .unwrap()
     };
     let a = make_space(a_dim);
     let f = make_space(f_dim);
@@ -228,7 +232,8 @@ fn intermediate_payload_snapshot_calls<T>(operation: impl FnOnce() -> T) -> (T, 
 fn ordinary_workspace_replay_skips_payload_meter_snapshots() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let bond = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let bond =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let mut make = |shift| {
         TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], move |_, indices| {
             shift + indices[0] as f64 + 2.0 * indices[1] as f64
@@ -275,8 +280,9 @@ fn symmetric_slice_binding_checks_adjoint_orientation_leg_and_rule() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let codomain = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(2), 1)]).unwrap();
-    let domain = GradedSpace::try_new(provider, [(U1Irrep::new(-1), 2)]).unwrap();
+    let codomain =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(2).unwrap(), 1)]).unwrap();
+    let domain = GradedSpace::try_new(provider, [(U1Irrep::new(-1).unwrap(), 2)]).unwrap();
     let tensor = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -315,7 +321,10 @@ fn symmetric_slice_binding_checks_adjoint_orientation_leg_and_rule() {
         .unwrap();
 
     let index = &valid.slices().indices()[0];
-    assert_eq!(index.authority_leg().sectors(), &[U1Irrep::new(-1).into()]);
+    assert_eq!(
+        index.authority_leg().sectors(),
+        &[U1Irrep::new(-1).unwrap().into()]
+    );
     assert!(!index.authority_leg().is_dual());
     let forged_leg = SectorLeg::new(index.authority_leg().iter(), true);
     let forged = SymmetricSlicePlan::try_new(
@@ -367,8 +376,11 @@ fn internal_symmetric_slices_match_unsliced_multisector_and_meter_cold_warm() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let bond =
-        GradedSpace::try_new(provider, [(U1Irrep::new(0), 1), (U1Irrep::new(1), 3)]).unwrap();
+    let bond = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 3)],
+    )
+    .unwrap();
     let mut make = |shift| {
         TensorMap::from_subblock_fn(engine, &runtime, [&bond], [&bond], move |trees, indices| {
             shift
@@ -489,7 +501,7 @@ fn output_and_mixed_slices_scatter_by_output_position() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, ij| {
         (1 + ij[0] + 3 * ij[1]) as f64
     })
@@ -565,7 +577,11 @@ fn mixed_output_slice_keeps_structural_zero_jobs() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
+    )
+    .unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, _| {
         1.0 + trees.codomain_uncoupled()[0].charge() as f64
     })
@@ -619,8 +635,9 @@ fn greedy_output_slice_plan_executes_end_to_end() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let wide = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 6)]).unwrap();
-    let unit = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
+    let wide =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 6)]).unwrap();
+    let unit = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&wide], [&unit], |_, ij| {
         (1 + ij[0] + ij[1]) as f64
     })
@@ -691,7 +708,9 @@ fn mixed_slice_accumulator_uses_final_contraction_authority() {
     ];
     let legs = providers
         .iter()
-        .map(|provider| GradedSpace::try_new(Arc::clone(provider), [(U1Irrep::new(0), 2)]).unwrap())
+        .map(|provider| {
+            GradedSpace::try_new(Arc::clone(provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap()
+        })
         .collect::<Vec<_>>();
     let tensors = legs
         .iter()
@@ -777,8 +796,9 @@ fn mixed_symmetric_slice_legal_empty_returns_unsliced_zero_layout() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let open = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
-    let empty = GradedSpace::try_new(provider, [(U1Irrep::new(0), 0)]).unwrap();
+    let open =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let empty = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 0)]).unwrap();
     let a = TensorMap::<_, f64>::zeros(engine, &runtime, [&open], [&empty]).unwrap();
     let b = TensorMap::<_, f64>::zeros(engine, &runtime, [&empty], [&open]).unwrap();
     let inputs = vec![vec![label("a"), label("x")], vec![label("x"), label("c")]];
@@ -850,7 +870,7 @@ fn internal_slice_maps_nonselfdual_partner_from_authority_leg() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let plus = GradedSpace::try_new(provider, [(U1Irrep::new(1), 2)]).unwrap();
+    let plus = GradedSpace::try_new(provider, [(U1Irrep::new(1).unwrap(), 2)]).unwrap();
     let a = TensorMap::from_subblock_fn(engine, &runtime, [&plus], [&plus], |_, ij| {
         (1 + ij[0] + 2 * ij[1]) as f64
     })
@@ -893,7 +913,7 @@ fn internal_slice_maps_nonselfdual_partner_from_authority_leg() {
     let authority = &sliced.slices().indices()[0];
     assert_eq!(
         authority.authority_leg().sectors(),
-        &[U1Irrep::new(-1).into()]
+        &[U1Irrep::new(-1).unwrap().into()]
     );
     let (actual, _) = network
         .execute_symmetric_sliced(engine, &tensors, sliced, usize::MAX)
@@ -906,7 +926,7 @@ fn output_slice_scatter_uses_domain_side_nonselfdual_logical_leg() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let plus = GradedSpace::try_new(provider, [(U1Irrep::new(1), 3)]).unwrap();
+    let plus = GradedSpace::try_new(provider, [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
     let tensor = TensorMap::from_subblock_fn(engine, &runtime, [&plus], [&plus], |_, ij| {
         (1 + ij[0] + 3 * ij[1]) as f64
     })
@@ -935,7 +955,10 @@ fn output_slice_scatter_uses_domain_side_nonselfdual_logical_leg() {
         .unwrap();
     let index = &sliced.slices().indices()[0];
     assert_eq!(index.output_position(), Some(1));
-    assert_eq!(index.authority_leg().sectors(), &[U1Irrep::new(-1).into()]);
+    assert_eq!(
+        index.authority_leg().sectors(),
+        &[U1Irrep::new(-1).unwrap().into()]
+    );
     let (actual, _) = network
         .execute_symmetric_sliced(engine, &[&tensor], sliced, usize::MAX)
         .unwrap();
@@ -949,7 +972,7 @@ fn zero_step_conjugated_output_slice_scatter_reads_lazy_adjoint() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let plus = U1Irrep::new(1);
+    let plus = U1Irrep::new(1).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(plus, 2)]).unwrap();
     let columns = GradedSpace::try_new(provider, [(plus, 3)]).unwrap();
     let tensor = TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&columns], |_, ij| {
@@ -999,13 +1022,13 @@ fn compact_input_preflight_applies_to_output_slices() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let compact = TensorMap::<_, f64>::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![1.0, 1.0],
         }],
     )
@@ -1285,7 +1308,8 @@ fn host_diagonal_operands_classify_as_compact_for_device_admission() {
     // Why: the device preflight reads only `network_reuse_class`; this
     // pins that a diagonal payload reports `Compact` through it.
     let runtime = Runtime::builder().build().unwrap();
-    let space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let space =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let dense = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &runtime,
@@ -1415,14 +1439,16 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
         &mut symtn::typed::CudaEngine::open(symtn::typed::CudaDeviceId::from_ordinal(0)).unwrap();
     let runtime = Runtime::builder().build().unwrap();
     let u1_rule = Arc::new(U1FusionRule);
-    let u1_x0 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(2), 2)]).unwrap();
-    let u1_x1 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(-1), 1)])
+    let u1_x0 =
+        GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(2).unwrap(), 2)]).unwrap();
+    let u1_x1 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(-1).unwrap(), 1)])
         .unwrap()
         .try_dual()
         .unwrap();
-    let u1_y = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(1), 3)]).unwrap();
-    let u1_z0 = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(-2), 2)]).unwrap();
-    let u1_z1 = GradedSpace::try_new(u1_rule, [(U1Irrep::new(0), 1)]).unwrap();
+    let u1_y = GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
+    let u1_z0 =
+        GradedSpace::try_new(Arc::clone(&u1_rule), [(U1Irrep::new(-2).unwrap(), 2)]).unwrap();
+    let u1_z1 = GradedSpace::try_new(u1_rule, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     assert_asymmetric_cuda_plan_parity(
         engine, cuda, &runtime, &u1_x0, &u1_x1, &u1_y, &u1_z0, &u1_z1, 748_210,
     );
@@ -1436,32 +1462,44 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     );
     let product_x0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1)],
+        [(
+            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+            1,
+        )],
     )
     .unwrap();
     let product_x1 = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(-1).unwrap()),
+            2,
+        )],
     )
     .unwrap()
     .try_dual()
     .unwrap();
     let product_y = GradedSpace::try_new(
         Arc::clone(&product_rule),
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 2)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+            2,
+        )],
     )
     .unwrap();
     let product_z0 = GradedSpace::try_new(
         Arc::clone(&product_rule),
         [(
-            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2)),
+            product_sector(FermionParityIrrep::EVEN, U1Irrep::new(-2).unwrap()),
             1,
         )],
     )
     .unwrap();
     let product_z1 = GradedSpace::try_new(
         product_rule,
-        [(product_sector(FermionParityIrrep::ODD, U1Irrep::new(0)), 1)],
+        [(
+            product_sector(FermionParityIrrep::ODD, U1Irrep::new(0).unwrap()),
+            1,
+        )],
     )
     .unwrap();
     assert_asymmetric_cuda_plan_parity(
@@ -1477,8 +1515,9 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     );
 
     let provider = Arc::new(U1FusionRule);
-    let good = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
-    let bad = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1), 2)]).unwrap();
+    let good =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let bad = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1).unwrap(), 2)]).unwrap();
     let host_tensors = (0..3)
         .map(|seed| {
             TensorMap::<U1FusionRule, f64>::rand_with_seed(
@@ -1648,7 +1687,8 @@ fn cuda_network_plans_match_host_and_reject_before_the_first_contract() {
     assert_eq!(steps.get(crate::probe::Event::ContractStep), 0);
 
     let other_runtime = Runtime::builder().build().unwrap();
-    let other_space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let other_space =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let foreign = TensorMap::<U1FusionRule, f64>::rand_with_seed(
         engine,
         &other_runtime,
@@ -1704,7 +1744,11 @@ fn typed_crossed_schedule_reuses_the_actual_first_step_destination() {
     let provider = Arc::new(U1FusionRule);
     let other_provider = Arc::new(U1FusionRule);
     let space = |provider: &Arc<U1FusionRule>, degeneracy| {
-        GradedSpace::try_new(Arc::clone(provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(provider),
+            [(U1Irrep::new(0).unwrap(), degeneracy)],
+        )
+        .unwrap()
     };
     let left = space(&provider, 9);
     let bond = space(&provider, 8);
@@ -1930,7 +1974,11 @@ fn typed_replay_restores_buffers_after_injected_failures() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(U1Irrep::new(0).unwrap(), degeneracy)],
+        )
+        .unwrap()
     };
     let left = space(5);
     let bond = space(4);
@@ -2010,7 +2058,7 @@ fn typed_split_moving_step_is_one_contract_equal_to_contract_then_permute() {
     let engine = &mut symtn::typed::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let space = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
+    let space = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let a =
         TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&space], [&space], 31)
             .unwrap();
@@ -2141,7 +2189,11 @@ fn plan_with_rejects_a_plan_that_does_not_cover_the_network() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let space = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(U1Irrep::new(0).unwrap(), degeneracy)],
+        )
+        .unwrap()
     };
     let (i, j, k, x, y) = (space(2), space(3), space(4), space(2), space(3));
     let a =
@@ -2236,7 +2288,7 @@ fn a_network_workspace_follows_the_engine_of_each_call() {
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
     )
     .unwrap();
     let host = (0..3)

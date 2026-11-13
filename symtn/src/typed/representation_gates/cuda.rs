@@ -189,7 +189,7 @@ fn typed_cuda_compact_and_lazy_roundtrips_keep_source_caches_cold() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let source: TensorMap<_, f64> =
@@ -420,7 +420,7 @@ fn typed_cuda_complex_payload_costs_the_same_device_calls_as_f64() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let real: TensorMap<_, f64> =
@@ -515,7 +515,11 @@ fn typed_cuda_lazy_adjoint_contract_and_compose_match_rectangular_host_oracles()
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = |degeneracy| {
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), degeneracy)]).unwrap()
+        GradedSpace::try_new(
+            Arc::clone(&provider),
+            [(U1Irrep::new(0).unwrap(), degeneracy)],
+        )
+        .unwrap()
     };
     let (m, k, n) = (2, 3, 4);
     let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg(m)], [&leg(k)], |_, indices| {
@@ -696,8 +700,14 @@ fn typed_cuda_lazy_adjoint_covers_su2_rank_five_and_simple_product() {
     let product = GradedSpace::try_new(
         Arc::clone(&product_provider),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -727,7 +737,7 @@ fn device_and_host_operations_refuse_the_other_engine_kind() {
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let host = TensorMap::<_, f64>::rand_with_seed(cpu, &runtime, [&leg], [&leg], 3).unwrap();
@@ -780,7 +790,7 @@ fn device_contraction_leaves_the_tree_transform_cache_unchanged() {
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let lhs = TensorMap::from_subblock_fn(cpu, &runtime, [&leg], [&leg], |_, indices| {
@@ -829,9 +839,9 @@ fn typed_cuda_into_rejects_another_engines_destination_untouched() {
     let v = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
-            (U1Irrep::new(-1), 2),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
+            (U1Irrep::new(-1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -1099,9 +1109,18 @@ fn typed_cuda_twist_lowering_is_the_host_theta_authority() {
                 .unwrap(),
         ),
         [
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0)), 2),
-            (product_sector(FermionParityIrrep::ODD, U1Irrep::new(1)), 1),
-            (product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2)), 1),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(0).unwrap()),
+                2,
+            ),
+            (
+                product_sector(FermionParityIrrep::ODD, U1Irrep::new(1).unwrap()),
+                1,
+            ),
+            (
+                product_sector(FermionParityIrrep::EVEN, U1Irrep::new(2).unwrap()),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -1299,9 +1318,9 @@ fn typed_cuda_materialize_lowers_the_host_adjoint_block_map() {
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 3),
-            (U1Irrep::new(-1), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 3),
+            (U1Irrep::new(-1).unwrap(), 1),
         ],
     )
     .unwrap();

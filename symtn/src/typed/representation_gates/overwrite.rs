@@ -194,7 +194,11 @@ fn typed_tree_overwrite_rejections_leave_destination_unchanged() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+    )
+    .unwrap();
     let source =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg, &leg], [&leg], |_, indices| {
             indices.iter().sum::<usize>() as f64 + 1.0
@@ -387,7 +391,7 @@ fn typed_tree_overwrite_covers_boundary_ranks_and_runtime_cache_reuse() {
     }
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
 
     let one_sided = TensorMap::from_subblock_fn(
         engine,
@@ -468,9 +472,9 @@ fn typed_tree_overwrite_shared_runtime_is_concurrent_and_deterministic() {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -515,9 +519,9 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
     let u1_leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 1),
-            (U1Irrep::new(0), 2),
-            (U1Irrep::new(1), 1),
+            (U1Irrep::new(-1).unwrap(), 1),
+            (U1Irrep::new(0).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -581,8 +585,14 @@ fn typed_contract_overwrite_matches_provider_scalar_and_order_matrix() {
                 .unwrap(),
         ),
         [
-            (product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN), 2),
-            (product_sector(U1Irrep::new(1), FermionParityIrrep::ODD), 1),
+            (
+                product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN),
+                2,
+            ),
+            (
+                product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD),
+                1,
+            ),
         ],
     )
     .unwrap();
@@ -646,7 +656,7 @@ fn typed_contract_overwrite_accepts_lazy_and_compact_inputs_without_warming_adjo
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -726,7 +736,11 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
     let densified = probe::record();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
+    )
+    .unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices[0] + 2 * indices[1] + 1) as f64
     })
@@ -830,7 +844,7 @@ fn typed_contract_overwrite_rejections_are_preclear_and_atomic() {
 
     let bad_leg = GradedSpace::try_new(
         Arc::clone(lhs.logical_space().provider_arc()),
-        [(U1Irrep::new(7), 1)],
+        [(U1Irrep::new(7).unwrap(), 1)],
     )
     .unwrap();
     let bad_rhs =
@@ -1048,18 +1062,19 @@ fn typed_contract_overwrite_handles_unmatched_sectors_and_reuses_runtime_cache()
     }
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let bond = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
+    let bond =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let left = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let partly_disjoint = GradedSpace::try_new(
         Arc::clone(&provider),
-        [(U1Irrep::new(0), 1), (U1Irrep::new(2), 1)],
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(2).unwrap(), 1)],
     )
     .unwrap();
-    let disjoint = GradedSpace::try_new(provider, [(U1Irrep::new(3), 1)]).unwrap();
+    let disjoint = GradedSpace::try_new(provider, [(U1Irrep::new(3).unwrap(), 1)]).unwrap();
     let lhs = TensorMap::from_subblock_fn(engine, &runtime, [&left], [&bond], |_, indices| {
         indices.iter().sum::<usize>() as f64 + 1.0
     })

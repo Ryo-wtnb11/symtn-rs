@@ -47,7 +47,8 @@ fn payload_bytes<R, D>(t: &TensorMap<R, D>) -> usize {
 fn u1(base: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(-1, base), (0, base + 1), (1, base)].map(|(charge, n)| (U1Irrep::new(charge), n)),
+        [(-1, base), (0, base + 1), (1, base)]
+            .map(|(charge, n)| (U1Irrep::new(charge).unwrap(), n)),
     )
     .unwrap()
 }
@@ -507,7 +508,9 @@ fn stale_engine_scratch_never_reaches_the_output() {
     let leg = |pairs: &[(i32, usize)]| {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            pairs.iter().map(|&(charge, n)| (U1Irrep::new(charge), n)),
+            pairs
+                .iter()
+                .map(|&(charge, n)| (U1Irrep::new(charge).unwrap(), n)),
         )
         .unwrap()
     };

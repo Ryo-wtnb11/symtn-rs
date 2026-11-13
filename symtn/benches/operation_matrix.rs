@@ -659,7 +659,7 @@ fn public_fixture<T: OrientedScalar>(
     let provider = Arc::new(U1FusionRule);
     let leg = GradedSpace::try_new(
         provider,
-        (0..sectors).map(|charge| (U1Irrep::new(charge as i32), degeneracy)),
+        (0..sectors).map(|charge| (U1Irrep::new(charge as i32).unwrap(), degeneracy)),
     )?;
     let lhs_value = |charge: i32, indices: &[usize]| {
         T::sample(charge as usize * 1009 + indices[0] + 3 * indices[1] + 211)
@@ -1912,7 +1912,7 @@ where
     let mut make = |d| -> Result<_, Box<dyn std::error::Error>> {
         let space = GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            (0..sector_count).map(|sector| (U1Irrep::new(sector as i32), d)),
+            (0..sector_count).map(|sector| (U1Irrep::new(sector as i32).unwrap(), d)),
         )?;
         Ok(TensorMap::<U1FusionRule, D>::from_subblock_fn(
             engine,
@@ -3462,9 +3462,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
             [
-                (U1Irrep::new(-1), degeneracy),
-                (U1Irrep::new(0), degeneracy),
-                (U1Irrep::new(1), degeneracy),
+                (U1Irrep::new(-1).unwrap(), degeneracy),
+                (U1Irrep::new(0).unwrap(), degeneracy),
+                (U1Irrep::new(1).unwrap(), degeneracy),
             ]
         )?,
         min_time

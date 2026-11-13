@@ -449,7 +449,7 @@ where
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let runtime = Runtime::builder().build()?;
-    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     /// let id: TensorMap<_, f64> = TensorMap::isomorphism(engine, &runtime, [&v], [&v])?;
     /// assert_eq!(id.trace_pairs(engine, &[(0, 1)])?.scalar(engine)?, 2.0);
     /// # Ok::<(), symtn::typed::Error>(())
@@ -961,10 +961,10 @@ mod copy_c_scratch_tests {
         let provider = Arc::new(U1FusionRule);
         let open = GradedSpace::try_new(
             Arc::clone(&provider),
-            [(U1Irrep::new(0), 2), (U1Irrep::new(1), 3)],
+            [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 3)],
         )
         .unwrap();
-        let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0), 4)]).unwrap();
+        let bond = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
         (
             TensorMap::rand_with_seed(engine, runtime, [&open, &open], [&bond], 3).unwrap(),
             TensorMap::rand_with_seed(engine, runtime, [&bond], [&open], 4).unwrap(),
@@ -1055,8 +1055,9 @@ mod copy_c_scratch_tests {
         let engine = &mut symtn_dense::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
         let provider = Arc::new(U1FusionRule);
-        let space =
-            |n| GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), n)]).unwrap();
+        let space = |n| {
+            GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), n)]).unwrap()
+        };
         let (p, q, c) = (space(2), space(3), space(4));
         let t = TensorMap::<U1FusionRule, f64>::rand_with_seed(engine, &runtime, [&p, &q], [&c], 5)
             .unwrap();

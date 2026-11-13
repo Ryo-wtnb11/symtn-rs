@@ -127,9 +127,9 @@ macro_rules! network_suite {
                 let leg = GradedSpace::try_new(
                     Arc::new(U1FusionRule),
                     [
-                        (U1Irrep::new(-1), 2),
-                        (U1Irrep::new(0), 3),
-                        (U1Irrep::new(1), 2),
+                        (U1Irrep::new(-1).unwrap(), 2),
+                        (U1Irrep::new(0).unwrap(), 3),
+                        (U1Irrep::new(1).unwrap(), 2),
                     ],
                 )
                 .unwrap();

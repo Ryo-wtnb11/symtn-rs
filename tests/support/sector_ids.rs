@@ -8,7 +8,7 @@
 use symtn_sectors::{FermionParityIrrep, SU2Irrep, SectorId, U1Irrep};
 
 pub fn u1(charge: i32) -> SectorId {
-    U1Irrep::new(charge).sector_id()
+    SectorId::from(U1Irrep::new(charge).unwrap())
 }
 
 /// A U(1) sector id outside the codec's range.

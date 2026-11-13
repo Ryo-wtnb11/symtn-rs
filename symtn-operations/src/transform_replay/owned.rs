@@ -742,10 +742,12 @@ mod owned_overwrite_tests {
         // three workers: the inactive role's rank sizes the traversal
         // scratch even though no active role has one.
         use symtn_core::{U1FusionRule, U1Irrep};
-        let structure =
-            FusionTreeHomSpace::from_sectors([(U1Irrep::new(0), 2)], [(U1Irrep::new(0), 3)])
-                .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
-                .unwrap();
+        let structure = FusionTreeHomSpace::from_sectors(
+            [(U1Irrep::new(0).unwrap(), 2)],
+            [(U1Irrep::new(0).unwrap(), 3)],
+        )
+        .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
+        .unwrap();
         let transform =
             TreeTransformStructure::<f64>::compile_structures(&structure, &structure, &[]).unwrap();
         let source = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];

@@ -21,6 +21,10 @@ use symtn_sectors::*;
 
 use super::s;
 
+fn u1(charge: i32) -> SectorId {
+    SectorId::from(U1Irrep::new(charge).unwrap())
+}
+
 fn invalid(id: usize) -> Result<usize, FusionAlgebraError> {
     Err(FusionAlgebraError::InvalidSector { sector: s(id) })
 }
@@ -51,7 +55,6 @@ fn table_checks_left_right_then_coupled() {
 
 #[test]
 fn u1_validates_every_label_before_reporting_overflow() {
-    let u1 = |q: i32| U1Irrep::new(q).sector_id();
     let excluded = u32::MAX as usize;
     assert_eq!(
         U1FusionRule.try_nsymbol(u1(i32::MAX), u1(1), s(excluded)),
@@ -60,23 +63,16 @@ fn u1_validates_every_label_before_reporting_overflow() {
     // Stricter than TensorKit's N = 0: the sum itself is unrepresentable.
     assert_eq!(
         U1FusionRule.try_nsymbol(u1(i32::MAX), u1(1), u1(0)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         })
     );
     assert_eq!(
         U1FusionRule.try_fusion_channels(u1(i32::MIN + 1), u1(-1)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MIN + 1,
-            right: -1,
-        })
-    );
-    assert_eq!(
-        U1Irrep::new(i32::MAX).checked_fuse(U1Irrep::new(1)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MIN + 1),
+            right: u1(-1),
         })
     );
 }
@@ -211,9 +207,9 @@ fn product_left_factor_overflow_beats_right_factor_domain_error() {
     // Cantor (zigzag(i32::MAX), 3) = 9223372047592194047; Cantor (zigzag(1), 0) = 5.
     assert_eq!(
         u1_z2.try_nsymbol(s(9_223_372_047_592_194_047), s(5), s(0)),
-        Err(FusionAlgebraError::U1FusionOverflow {
-            left: i32::MAX,
-            right: 1,
+        Err(FusionAlgebraError::FusionNotRepresentable {
+            left: u1(i32::MAX),
+            right: u1(1),
         })
     );
 }
@@ -250,7 +246,10 @@ fn product_fusion_reports_an_unpairable_channel_after_both_factors() {
         symtn_sectors::ProductFusionRule::<_, _>::try_new(U1FusionRule, U1FusionRule).unwrap();
     let q = 3 << 28;
     let x = u1_u1
-        .encode_sector(&product_sector(U1Irrep::new(q), U1Irrep::new(q)))
+        .encode_sector(&product_sector(
+            U1Irrep::new(q).unwrap(),
+            U1Irrep::new(q).unwrap(),
+        ))
         .unwrap();
     assert_eq!(x, s(5_188_146_773_952_036_864));
     // Channel (2q, 2q) has zigzag ids (3 * 2^30, 3 * 2^30): no Cantor id.

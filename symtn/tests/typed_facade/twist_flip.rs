@@ -272,9 +272,9 @@ fn typed_inverse_index_ops_pin_values_and_preserve_structure() {
     let u1_leg = GradedSpace::try_new(
         u1_provider,
         [
-            (symtn::sector::U1Irrep::new(-1), 1),
-            (symtn::sector::U1Irrep::new(0), 1),
-            (symtn::sector::U1Irrep::new(1), 1),
+            (symtn::sector::U1Irrep::new(-1).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(0).unwrap(), 1),
+            (symtn::sector::U1Irrep::new(1).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -386,7 +386,7 @@ fn typed_flip_rejects_a_repeated_leg() {
     let runtime = runtime();
     let u1_leg = GradedSpace::try_new(
         Arc::new(symtn::sector::U1FusionRule),
-        [(symtn::sector::U1Irrep::new(1), 1)],
+        [(symtn::sector::U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let u1 =

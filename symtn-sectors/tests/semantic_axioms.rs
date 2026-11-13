@@ -246,7 +246,9 @@ fn fz2_sectors() -> Vec<SectorId> {
 }
 
 fn u1_sectors(window: i32) -> Vec<SectorId> {
-    (-window..=window).map(|q| U1Irrep::new(q).into()).collect()
+    (-window..=window)
+        .map(|q| U1Irrep::new(q).unwrap().into())
+        .collect()
 }
 
 fn su2_sectors(max_twice_spin: usize) -> Vec<SectorId> {
@@ -276,7 +278,7 @@ fn u1_fz2_sectors(window: i32) -> Vec<SectorId> {
     for q in -window..=window {
         for p in 0..2usize {
             sectors.push(U1Fz2Codec::encode(
-                U1Irrep::new(q).sector_id(),
+                SectorId::from(U1Irrep::new(q).unwrap()),
                 SectorId::new(p),
             ));
         }
@@ -302,7 +304,7 @@ fn triple_rule() -> TripleRule {
 fn triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
     let inner = Fz2U1Codec::encode(
         SectorId::new(usize::from(parity & 1)),
-        U1Irrep::new(charge).sector_id(),
+        SectorId::from(U1Irrep::new(charge).unwrap()),
     );
     TripleCodec::encode(inner, SU2Irrep::from_twice_spin(twice_spin).sector_id())
 }
@@ -328,7 +330,7 @@ fn cantor_u1_fz2_sectors(window: i32) -> Vec<SectorId> {
     for q in -window..=window {
         for p in 0..2usize {
             sectors.push(TensorKitProductCodec::encode(
-                U1Irrep::new(q).sector_id(),
+                SectorId::from(U1Irrep::new(q).unwrap()),
                 SectorId::new(p),
             ));
         }
@@ -347,7 +349,7 @@ fn cantor_triple_rule() -> CantorTripleRule {
 fn cantor_triple_sector(parity: u8, charge: i32, twice_spin: usize) -> SectorId {
     let inner = TensorKitProductCodec::encode(
         SectorId::new(usize::from(parity & 1)),
-        U1Irrep::new(charge).sector_id(),
+        SectorId::from(U1Irrep::new(charge).unwrap()),
     );
     TensorKitProductCodec::encode(inner, SU2Irrep::from_twice_spin(twice_spin).sector_id())
 }

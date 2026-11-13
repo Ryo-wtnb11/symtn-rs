@@ -537,14 +537,15 @@ advanced_suite!(
 fn compact_complex32_reciprocal_does_not_underflow() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = runtime();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let tiny = 2.0f32.powi(-80);
     let diagonal: TensorMap<_, Complex32> = TensorMap::diagonal(
         engine,
         &rt,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![
                 Complex32::new(tiny, 0.0),
                 Complex32::new(0.0, tiny),

@@ -1155,7 +1155,7 @@ fn checked_generic_eig_order_matches_the_lexicographic_oracle_and_the_mf_route()
         v.compose(engine, &d).unwrap().dense_data().unwrap(),
         16,
     );
-    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)]).unwrap();
+    let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
     let mf: TensorMap<_, Complex64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&u1], [&u1], |_, index| {
             entry(index[0], index[1])

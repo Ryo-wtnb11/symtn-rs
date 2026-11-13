@@ -68,7 +68,8 @@ fn runtime_construction_does_not_build_unused_dtype_lanes() {
     // Warm anything the process initialises once (thread pools, env parsing)
     // so every build measured below is steady state.
     black_box(build_runtime());
-    let space = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let space =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
 
     let (_, baseline, baseline_bytes) = measured(build_runtime);
     eprintln!("Runtime::build baseline: {baseline} allocation calls, {baseline_bytes} bytes");
@@ -109,9 +110,9 @@ fn u1_space() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 4),
-            (U1Irrep::new(0), 5),
-            (U1Irrep::new(1), 4),
+            (U1Irrep::new(-1).unwrap(), 4),
+            (U1Irrep::new(0).unwrap(), 5),
+            (U1Irrep::new(1).unwrap(), 4),
         ],
     )
     .unwrap()

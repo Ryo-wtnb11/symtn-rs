@@ -13,7 +13,7 @@ use symtn::typed::{
 };
 
 fn leg() -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap()
+    GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap()
 }
 
 /// `[[1, δ], [0, 2]]`: Hermitian to relative tolerance `tol` exactly when
@@ -40,7 +40,7 @@ fn diagonal(runtime: &Runtime, delta: f64) -> TensorMap<U1FusionRule, Complex64>
         runtime,
         &leg(),
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![Complex64::new(1.0, delta), Complex64::new(2.0, 0.0)],
         }],
     )

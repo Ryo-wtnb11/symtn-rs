@@ -501,9 +501,9 @@ fn compact_qr_reconstructs_u1_fermion_parity_and_product_rules() {
     assert_compact_qr_reconstructs_rule(
         &U1FusionRule,
         &[
-            U1Irrep::new(-1).sector_id(),
-            U1Irrep::new(0).sector_id(),
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(-1).unwrap()),
+            SectorId::from(U1Irrep::new(0).unwrap()),
+            SectorId::from(U1Irrep::new(1).unwrap()),
         ],
     );
     assert_compact_qr_reconstructs_rule(
@@ -516,8 +516,8 @@ fn compact_qr_reconstructs_u1_fermion_parity_and_product_rules() {
     )
     .unwrap();
     let product_sectors = [
-        product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     assert_compact_qr_reconstructs_rule(&product, &product_sectors);
 
@@ -558,9 +558,9 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
     assert_compact_lq_reconstructs_rule(
         &U1FusionRule,
         &[
-            U1Irrep::new(-1).sector_id(),
-            U1Irrep::new(0).sector_id(),
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(-1).unwrap()),
+            SectorId::from(U1Irrep::new(0).unwrap()),
+            SectorId::from(U1Irrep::new(1).unwrap()),
         ],
     );
     assert_compact_lq_reconstructs_rule(
@@ -580,8 +580,8 @@ fn compact_lq_reconstructs_u1_fermion_parity_and_product_rules() {
     )
     .unwrap();
     let product_sectors = [
-        product.encode_component_ids(SectorId::new(0), U1Irrep::new(0).sector_id()),
-        product.encode_component_ids(SectorId::new(1), U1Irrep::new(1).sector_id()),
+        product.encode_component_ids(SectorId::new(0), SectorId::from(U1Irrep::new(0).unwrap())),
+        product.encode_component_ids(SectorId::new(1), SectorId::from(U1Irrep::new(1).unwrap())),
     ];
     assert_compact_lq_reconstructs_rule(&product, &product_sectors);
 
@@ -1118,7 +1118,7 @@ fn checked_lq_excess_calls<D: FactorScalar>(m: i32) -> [i64; 2] {
     static RULE: U1AsGeneric = U1AsGeneric;
     let leg = |degeneracy: usize| {
         SectorLeg::new(
-            (-m..=m).map(|charge| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            (-m..=m).map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)),
             false,
         )
     };
@@ -1209,7 +1209,7 @@ fn lazy_adjoint_compact_lq_is_the_gauged_parent_qr_adjointed() {
     static RULE: U1AsGeneric = U1AsGeneric;
     let leg = |degeneracy: usize| {
         SectorLeg::new(
-            (-1..=1).map(|charge| (U1Irrep::new(charge).sector_id(), degeneracy)),
+            (-1..=1).map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), degeneracy)),
             false,
         )
     };
@@ -1500,11 +1500,13 @@ fn sector_matrices_c64<D: FactorScalar>(
 /// (wide, tall, square, wide) with distinct nonzero entries.
 fn unequal_sector_tensor<D: FactorScalar>() -> TestTensor<D> {
     let codomain = SectorLeg::new(
-        [(0, 2), (1, 4), (2, 3), (3, 1)].map(|(c, d)| (U1Irrep::new(c).sector_id(), d)),
+        [(0, 2), (1, 4), (2, 3), (3, 1)]
+            .map(|(c, d)| (SectorId::from(U1Irrep::new(c).unwrap()), d)),
         false,
     );
     let domain = SectorLeg::new(
-        [(0, 5), (1, 2), (2, 3), (3, 4)].map(|(c, d)| (U1Irrep::new(c).sector_id(), d)),
+        [(0, 5), (1, 2), (2, 3), (3, 4)]
+            .map(|(c, d)| (SectorId::from(U1Irrep::new(c).unwrap()), d)),
         false,
     );
     let homspace = FusionTreeHomSpace::new(

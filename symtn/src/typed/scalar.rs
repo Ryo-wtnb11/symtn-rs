@@ -64,12 +64,12 @@ use super::*;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let engine = &mut symtn::typed::CpuEngine::serial();
 /// let runtime = Runtime::builder().build()?;
-/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+/// let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
 /// // Annotated, so the literals have a type to be.
 /// let t: TensorMap<U1FusionRule, f64> = TensorMap::diagonal(engine,
 ///     &runtime,
 ///     &leg,
-///     [SectorSpectrum { sector: U1Irrep::new(0), values: vec![2.0, 3.0] }],
+///     [SectorSpectrum { sector: U1Irrep::new(0).unwrap(), values: vec![2.0, 3.0] }],
 /// )?;
 /// assert!((t.tr(engine)?.abs() - 5.0).abs() < 1e-12);
 /// # Ok(())
@@ -527,7 +527,7 @@ where
     ///
     /// let engine = &mut symtn::typed::CpuEngine::serial();
     /// let rt = Runtime::builder().build()?;
-    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [-1, 0, 1].map(|q| (U1Irrep::new(q), 1)))?;
+    /// let v = GradedSpace::try_new(Arc::new(U1FusionRule), [-1, 0, 1].map(|q| (U1Irrep::new(q).unwrap(), 1)))?;
     /// let id = TensorMap::<U1FusionRule, f64>::isomorphism(engine, &rt, [&v], [&v])?;
     ///
     /// // `V <- V`.

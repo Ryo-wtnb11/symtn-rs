@@ -246,9 +246,9 @@ pub fn u1_leg_with(degeneracies: [usize; 3]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), degeneracies[0]),
-            (U1Irrep::new(0), degeneracies[1]),
-            (U1Irrep::new(1), degeneracies[2]),
+            (U1Irrep::new(-1).unwrap(), degeneracies[0]),
+            (U1Irrep::new(0).unwrap(), degeneracies[1]),
+            (U1Irrep::new(1).unwrap(), degeneracies[2]),
         ],
     )
     .unwrap()
@@ -281,7 +281,7 @@ pub fn fermion_su2_leg() -> GradedSpace<FermionSu2Rule> {
 pub fn fermion_su2_leg_with(degeneracies: [usize; 3]) -> GradedSpace<FermionSu2Rule> {
     let label = |parity, charge, twice_spin| {
         product_sector(
-            product_sector(parity, U1Irrep::new(charge)),
+            product_sector(parity, U1Irrep::new(charge).unwrap()),
             SU2Irrep::from_twice_spin(twice_spin),
         )
     };

@@ -5,7 +5,7 @@ fn network_degeneracy_restriction_copies_nonprefix_rectangles_and_lazy_adjoint()
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
+    let zero = U1Irrep::new(0).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3)]).unwrap();
     let columns = GradedSpace::try_new(Arc::clone(&provider), [(zero, 4)]).unwrap();
     let source =
@@ -71,7 +71,7 @@ fn network_degeneracy_restriction_keeps_its_validation_order_after_the_shared_ke
     // the degeneracy bound, all before a destination exists.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
+    let zero = U1Irrep::new(0).unwrap();
     let leg = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3)]).unwrap();
     let source: TensorMap<_, f64> =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -80,7 +80,8 @@ fn network_degeneracy_restriction_keeps_its_validation_order_after_the_shared_ke
         .unwrap();
     let zero_id = TypedSectorAdmission::try_encode_label(provider.as_ref(), &zero).unwrap();
     let absent_id =
-        TypedSectorAdmission::try_encode_label(provider.as_ref(), &U1Irrep::new(4)).unwrap();
+        TypedSectorAdmission::try_encode_label(provider.as_ref(), &U1Irrep::new(4).unwrap())
+            .unwrap();
     let message = |restrictions: &[NetworkDegeneracyRestriction]| {
         let Err(error) = source.network_restrict_degeneracies(false, restrictions) else {
             panic!("request must be rejected");
@@ -129,7 +130,7 @@ fn network_degeneracy_restriction_maps_effective_nonselfdual_domain_sector() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let plus = U1Irrep::new(1);
+    let plus = U1Irrep::new(1).unwrap();
     let space = GradedSpace::try_new(Arc::clone(&provider), [(plus, 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&space], [&space], |_, indices| {
         (indices[0] + 10 * indices[1]) as f64
@@ -163,7 +164,7 @@ fn network_degeneracy_restriction_conjugates_complex_lazy_adjoint() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
+    let zero = U1Irrep::new(0).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(zero, 2)]).unwrap();
     let columns = GradedSpace::try_new(Arc::clone(&provider), [(zero, 3)]).unwrap();
     let source =
@@ -211,7 +212,7 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let zero = U1Irrep::new(0);
+    let zero = U1Irrep::new(0).unwrap();
     let full = GradedSpace::try_new(Arc::clone(&provider), [(zero, 2)]).unwrap();
     let mut destination =
         TensorMap::<_, f64>::from_subblock_fn(engine, &runtime, [&full], [&full], |_, ij| {
@@ -238,9 +239,10 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
 
     // A non-vacuum rank-one map has no admissible blocks, so only logical
     // leg validation can reject malformed scatter metadata.
-    let charged_full = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1), 2)]).unwrap();
+    let charged_full =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1).unwrap(), 2)]).unwrap();
     let charged_piece =
-        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1), 1)]).unwrap();
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(1).unwrap(), 1)]).unwrap();
     let mut empty_destination =
         TensorMap::<_, f64>::zeros(engine, &runtime, [&charged_full], []).unwrap();
     let empty_piece = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged_piece], []).unwrap();
@@ -251,8 +253,11 @@ fn network_scatter_seals_authority_split_and_zero_block_legs_before_mutation() {
     assert!(matches!(empty_destination
         .network_scatter_add_assign(engine, &empty_piece, &[Some(2..3)]), Err(Error::InvalidArgument(message)) if message.contains("destination range")));
 
-    let two_sectors =
-        GradedSpace::try_new(provider, [(U1Irrep::new(1), 1), (U1Irrep::new(2), 1)]).unwrap();
+    let two_sectors = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(1).unwrap(), 1), (U1Irrep::new(2).unwrap(), 1)],
+    )
+    .unwrap();
     let empty_two = TensorMap::<_, f64>::zeros(engine, &runtime, [&two_sectors], []).unwrap();
     assert_eq!(empty_two.subblock_count(), 0);
     assert!(matches!(empty_destination
@@ -265,7 +270,7 @@ fn network_scatter_reads_complex_lazy_adjoint_parent_without_materializing() {
     let densified = probe::record();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let plus = U1Irrep::new(1);
+    let plus = U1Irrep::new(1).unwrap();
     let rows = GradedSpace::try_new(Arc::clone(&provider), [(plus, 2)]).unwrap();
     let columns = GradedSpace::try_new(provider, [(plus, 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&rows], [&columns], |_, ij| {

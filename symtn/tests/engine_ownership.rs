@@ -30,8 +30,12 @@ fn space() -> GradedSpace<U1Su2> {
 
 fn space_with(degeneracies: [usize; 4]) -> GradedSpace<U1Su2> {
     let provider = Arc::new(U1Su2::try_new(U1FusionRule, SU2FusionRule).unwrap());
-    let sector =
-        |q, twice_spin| product_sector(U1Irrep::new(q), SU2Irrep::from_twice_spin(twice_spin));
+    let sector = |q, twice_spin| {
+        product_sector(
+            U1Irrep::new(q).unwrap(),
+            SU2Irrep::from_twice_spin(twice_spin),
+        )
+    };
     GradedSpace::try_new(
         provider,
         [
@@ -454,9 +458,9 @@ fn physical_conversions_refuse_a_broken_engine() {
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();
@@ -500,7 +504,8 @@ fn physical_conversions_refuse_a_broken_engine() {
 #[test]
 fn compact_arms_refuse_a_broken_engine_before_any_write() {
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let good = &mut CpuEngine::serial();
     let a = TensorMap::<_, f64>::from_subblock_fn(good, &runtime, [&leg], [&leg], |_, i| {
         (i[0] + 2 * i[1] + 1) as f64

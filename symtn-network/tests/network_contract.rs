@@ -185,9 +185,9 @@ paths!(
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 1),
-            (U1Irrep::new(1), 2)
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 1),
+            (U1Irrep::new(1).unwrap(), 2)
         ],
     )
     .unwrap()
@@ -218,7 +218,10 @@ paths!(
 fn u1_space(dim: usize) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), dim), (U1Irrep::new(1), 1)],
+        [
+            (U1Irrep::new(0).unwrap(), dim),
+            (U1Irrep::new(1).unwrap(), 1),
+        ],
     )
     .unwrap()
 }

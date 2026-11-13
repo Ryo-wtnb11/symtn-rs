@@ -42,8 +42,8 @@ fn categorical_adjoint_view_swaps_homspace_and_block_layout_without_dualizing() 
 
 #[test]
 fn categorical_adjoint_view_does_not_dualize_nonselfdual_u1_stored_legs() {
-    let q1 = U1Irrep::new(1).sector_id();
-    let q2 = U1Irrep::new(2).sector_id();
+    let q1 = SectorId::from(U1Irrep::new(1).unwrap());
+    let q2 = SectorId::from(U1Irrep::new(2).unwrap());
     let hom = FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new([(q1, 1)], false)]),
         FusionProductSpace::new([SectorLeg::new([(q2, 1)], false)]),
@@ -65,7 +65,10 @@ fn categorical_adjoint_view_does_not_dualize_nonselfdual_u1_stored_legs() {
     );
     assert_ne!(
         adjoint.homspace().codomain().legs(),
-        &[SectorLeg::new([(U1Irrep::new(-2).sector_id(), 1)], true)]
+        &[SectorLeg::new(
+            [(SectorId::from(U1Irrep::new(-2).unwrap()), 1)],
+            true
+        )]
     );
 }
 

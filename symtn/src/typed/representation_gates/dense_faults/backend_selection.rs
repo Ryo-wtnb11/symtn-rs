@@ -6,7 +6,7 @@ use super::*;
 fn u1_space(entries: [(i32, usize); 3]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        entries.map(|(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+        entries.map(|(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }
@@ -34,15 +34,15 @@ fn compact_diagonal_svd_submits_no_dense_svd() {
         &leg,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![1.0, -3.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![0.0, -4.0, 2.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![-2.0],
             },
         ],

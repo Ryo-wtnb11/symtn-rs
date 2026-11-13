@@ -95,8 +95,12 @@ modulus is `rule.category().modulus()`), `FermionParityIrrep::{EVEN, ODD}` and
 `CU1Irrep::{VACUUM, PSEUDOSCALAR, from_twice_charge}`. Checked queries validate
 ids in argument order (for `N`: left, right, then coupled). A CU(1) fusion
 channel past fusion-symbols' `u32` twice charge is `FusionNotRepresentable`;
-`N` is the exact category value there, as in TensorKit. The other built-in
-rules keep their own types over the shared adapter. [`TableRule`](../symtn-sectors/src/table_rule.rs)
+`N` is the exact category value there, as in TensorKit. `U1FusionRule` keeps
+its own type over the shared adapter, with fusion-symbols' `U1Irrep` as the
+label (`U1Irrep::new(charge)`, `SectorId::from(label)`); a U(1) sum outside
+`i32` is `FusionNotRepresentable` for fusion and, stricter than TensorKit's
+`0`, for `N`. The other built-in rules keep their own types over the shared
+adapter. [`TableRule`](../symtn-sectors/src/table_rule.rs)
 serves every pinned AnyonWiki `TableCategory`, including Fibonacci, Ising and
 fusion-only Rep(S₃), with identity built from the table's AnyonWiki uuid.
 The [U(1)](../symtn-sectors/src/abelian.rs) rule forwards every symbol,

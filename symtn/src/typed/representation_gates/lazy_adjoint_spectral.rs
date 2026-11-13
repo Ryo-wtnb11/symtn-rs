@@ -106,7 +106,7 @@ fn eigh_dense_lazy_near_hermitian_uses_logical_triangle_and_stays_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             match (indices[0], indices[1]) {
@@ -137,7 +137,7 @@ fn eigh_dense_lazy_complex_orientation_and_failures_match_logical_oracles() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let hermitian = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         match (indices[0], indices[1]) {
             (0, 0) => num_complex::Complex64::new(2.0, 0.0),
@@ -308,7 +308,7 @@ fn eig_dense_lazy_nonnormal_is_logical_owned_repeatable_and_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             match (indices[0], indices[1]) {
@@ -341,7 +341,8 @@ fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracl
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let scalar_leg = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 1)]).unwrap();
+    let scalar_leg =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     let negative =
         TensorMap::from_subblock_fn(engine, &runtime, [&scalar_leg], [&scalar_leg], |_, _| -2.0)
             .unwrap();
@@ -350,7 +351,7 @@ fn eig_dense_lazy_real_order_signed_zero_and_defective_cases_match_logical_oracl
     assert_eq!(value, num_complex::Complex64::new(-2.0, 0.0));
     assert_eq!(value.im.to_bits(), 0.0f64.to_bits());
 
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let rotation =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
             match (indices[0], indices[1]) {
@@ -407,8 +408,9 @@ fn eig_dense_lazy_failures_match_logical_oracle_and_stay_cold() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let left = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 2)]).unwrap();
-    let right = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
+    let left =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let right = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&left], [&right], |_, indices| {
         (indices[0] + indices[1]) as f64
     })
@@ -442,7 +444,7 @@ fn exp_of_a_near_hermitian_adjoint_uses_the_logical_orientation_and_stays_cold()
     // parent-exp redirect feeds EIGH the other triangle and changes values.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let delta = 4.0e-15;
     let parent =
         TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
@@ -547,9 +549,9 @@ fn exp_uses_owned_provider_native_outputs_without_warming_lazy_receivers() {
     let leg = GradedSpace::try_new(
         provider,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -583,7 +585,7 @@ fn exp_failure_leaves_the_lazy_receiver_and_parent_untouched() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         if indices == [0, 1] {
             num_complex::Complex64::new(f64::NAN, 0.0)
@@ -699,9 +701,9 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
     let leg = GradedSpace::try_new(
         provider,
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(2), 1),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(2).unwrap(), 1),
         ],
     )
     .unwrap();
@@ -728,8 +730,9 @@ fn inverse_redirect_is_owned_provider_native_repeatable_and_cold() {
     assert_inverse_redirect(engine, &u1);
 
     let provider = Arc::new(U1FusionRule);
-    let wide = GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0), 4)]).unwrap();
-    let narrow = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2)]).unwrap();
+    let wide =
+        GradedSpace::try_new(Arc::clone(&provider), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
+    let narrow = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
     let unequal = TensorMap::from_subblock_fn(
         engine,
         &runtime,
@@ -783,7 +786,7 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
     // receiver.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 3)]).unwrap();
+    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         if indices[0] == indices[1] {
             4.0 + indices[0] as f64
@@ -811,9 +814,13 @@ fn inverse_redirect_failure_leaves_the_receiver_cold() {
     // The first U(1) sector solves before the second singular sector
     // fails, pinning atomicity after partial backend progress.
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 1), (U1Irrep::new(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let late = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |trees, indices| {
-        if trees.codomain_uncoupled[0] == U1Irrep::new(0) && indices[0] == indices[1] {
+        if trees.codomain_uncoupled[0] == U1Irrep::new(0).unwrap() && indices[0] == indices[1] {
             2.0
         } else {
             0.0
@@ -843,16 +850,19 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
     let rhs_provider = Arc::new(U1FusionRule);
     let lhs_leg = GradedSpace::try_new(
         Arc::clone(&lhs_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let rhs_codomain = GradedSpace::try_new(
         Arc::clone(&rhs_provider),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
-    let rhs_domain =
-        GradedSpace::try_new(rhs_provider, [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)]).unwrap();
+    let rhs_domain = GradedSpace::try_new(
+        rhs_provider,
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let divisor =
         TensorMap::from_subblock_fn(engine, &runtime, [&lhs_leg], [&lhs_leg], |_, indices| {
             if indices[0] == indices[1] {
@@ -926,7 +936,8 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
         .unwrap();
     assert_typed_map_close(engine, divisor_solve, &expected, 1e-11);
 
-    let bad_leg = GradedSpace::try_new(Arc::clone(&lhs_provider), [(U1Irrep::new(7), 1)]).unwrap();
+    let bad_leg =
+        GradedSpace::try_new(Arc::clone(&lhs_provider), [(U1Irrep::new(7).unwrap(), 1)]).unwrap();
     let bad = TensorMap::from_subblock_fn(engine, &runtime, [&bad_leg], [&bad_leg], |_, _| 1.0)
         .unwrap()
         .adjoint(engine)
@@ -949,11 +960,11 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
         &lhs_leg,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![2.0, 3.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![5.0],
             },
         ],
@@ -972,11 +983,11 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
         &lhs_leg,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![2.0, 4.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![8.0],
             },
         ],
@@ -1009,11 +1020,11 @@ fn solve_is_transactional_provider_native_and_cache_cold() {
         &lhs_leg,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![2.0, 0.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![8.0],
             },
         ],
@@ -1253,8 +1264,14 @@ fn pinv_redirect_preserves_semantics_ownership_and_cold_concurrency() {
     // the parent-factor seam and return detached provider-native outputs.
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg =
-        GradedSpace::try_new(provider, [(U1Irrep::new(-1), 2), (U1Irrep::new(0), 3)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+        ],
+    )
+    .unwrap();
     let full = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         let re = if indices[0] == indices[1] {
             30.0 + indices[0] as f64
@@ -1283,7 +1300,11 @@ fn pinv_redirect_late_svd_failure_keeps_parent_and_receiver_cold() {
     let _dense = probe::inject_dense(Box::new(fail_second_svd(&Arc::default())));
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
-    let leg = GradedSpace::try_new(provider, [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)]).unwrap();
+    let leg = GradedSpace::try_new(
+        provider,
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
+    )
+    .unwrap();
     let source = TensorMap::from_subblock_fn(engine, &runtime, [&leg], [&leg], |_, indices| {
         (indices.iter().sum::<usize>() + 1) as f64
     })

@@ -106,9 +106,9 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
     run_case(
         &U1FusionRule,
         &[
-            U1Irrep::new(-1).sector_id(),
-            U1Irrep::new(0).sector_id(),
-            U1Irrep::new(1).sector_id(),
+            SectorId::from(U1Irrep::new(-1).unwrap()),
+            SectorId::from(U1Irrep::new(0).unwrap()),
+            SectorId::from(U1Irrep::new(1).unwrap()),
         ],
         3,
     );
@@ -132,8 +132,9 @@ fn tensorcontract_fusion_parallel_transform_replay_matches_serial() {
         SU2FusionRule,
     )
     .unwrap();
-    let left_sector =
-        |parity, charge| left_rule.encode_component_ids(parity, U1Irrep::new(charge).sector_id());
+    let left_sector = |parity, charge| {
+        left_rule.encode_component_ids(parity, SectorId::from(U1Irrep::new(charge).unwrap()))
+    };
     let product_sector = |parity, charge, twice_spin| {
         product_rule.encode_component_ids(
             left_sector(parity, charge),

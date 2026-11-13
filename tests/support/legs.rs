@@ -22,7 +22,7 @@ pub fn u1_leg(pairs: &[(i32, usize)]) -> GradedSpace<U1FusionRule> {
         Arc::new(U1FusionRule),
         pairs
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }
@@ -34,7 +34,7 @@ pub fn u1_on(provider: &Arc<U1FusionRule>, pairs: &[(i32, usize)]) -> GradedSpac
         Arc::clone(provider),
         pairs
             .iter()
-            .map(|&(charge, degeneracy)| (U1Irrep::new(charge), degeneracy)),
+            .map(|&(charge, degeneracy)| (U1Irrep::new(charge).unwrap(), degeneracy)),
     )
     .unwrap()
 }

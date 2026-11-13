@@ -292,7 +292,7 @@ fn cold_ordered_tree_pair_staging_grows_at_most_linearly_in_blocks() {
 
 fn rank_one_u1_pair_structure(count: usize) -> BlockStructure {
     let keys = (0..count).map(|charge| {
-        let sector = U1Irrep::new(charge as i32).sector_id();
+        let sector = SectorId::from(U1Irrep::new(charge as i32).unwrap());
         BlockKey::from(FusionTreePairKey::pair(
             FusionTreeKey::try_new_for_rule(&U1FusionRule, [sector], sector, [false], [], [])
                 .unwrap(),
@@ -627,7 +627,7 @@ impl<T: Copy> GatheredCoefficients<T> for symtn_tensors::TreeTransformStructure<
 fn rank_six_u1_layout() -> BoundDynamicFusionMapSpace<U1FusionRule> {
     let leg = || {
         SectorLeg::new(
-            [0, 1].map(|charge| (U1Irrep::new(charge).sector_id(), 1)),
+            [0, 1].map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), 1)),
             false,
         )
     };

@@ -18,7 +18,7 @@ fn measured<T>(payload_bytes: usize, operation: impl FnOnce() -> T) -> usize {
 }
 
 fn leg(rule: &Arc<U1FusionRule>, degeneracy: usize) -> GradedSpace<U1FusionRule> {
-    GradedSpace::try_new(Arc::clone(rule), [(U1Irrep::new(0), degeneracy)]).unwrap()
+    GradedSpace::try_new(Arc::clone(rule), [(U1Irrep::new(0).unwrap(), degeneracy)]).unwrap()
 }
 
 /// Purpose: `otimes` allocates its one output payload and no output-sized

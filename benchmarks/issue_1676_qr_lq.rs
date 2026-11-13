@@ -71,7 +71,7 @@ fn main() {
         .build()
         .unwrap();
     if std::env::args().any(|arg| arg == "--probe") {
-        let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1), 3)])
+        let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 3)])
             .unwrap()
             .try_dual()
             .unwrap();
@@ -79,7 +79,7 @@ fn main() {
             &runtime,
             &leg,
             [SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![-2.0, 0.0, 3.0],
             }],
         )
@@ -129,7 +129,7 @@ fn main() {
     macro_rules! run {
         ($dtype:ty, $name:literal, $value:expr) => {
             family!($dtype, $name, $value, "U1", U1FusionRule, |c: i32, dual| {
-                U1Irrep::new(if dual { -c } else { c })
+                U1Irrep::new(if dual { -c } else { c }).unwrap()
             });
             family!(
                 $dtype,
@@ -150,7 +150,7 @@ fn main() {
                 )
                 .unwrap(),
                 |c: i32, dual| product_sector(
-                    U1Irrep::new(if dual { -c } else { c }),
+                    U1Irrep::new(if dual { -c } else { c }).unwrap(),
                     if c % 2 == 0 {
                         FermionParityIrrep::EVEN
                     } else {

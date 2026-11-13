@@ -29,19 +29,19 @@ fn cached_permute_overwrite_does_not_allocate_on_the_caller_thread() {
         Arc::clone(&provider),
         [
             (
-                product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(0)),
+                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(0)),
                 8,
             ),
             (
-                product_sector(U1Irrep::new(1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 6,
             ),
             (
-                product_sector(U1Irrep::new(-1), SU2Irrep::from_twice_spin(1)),
+                product_sector(U1Irrep::new(-1).unwrap(), SU2Irrep::from_twice_spin(1)),
                 6,
             ),
             (
-                product_sector(U1Irrep::new(0), SU2Irrep::from_twice_spin(2)),
+                product_sector(U1Irrep::new(0).unwrap(), SU2Irrep::from_twice_spin(2)),
                 4,
             ),
         ],
@@ -79,9 +79,9 @@ fn cached_u1_permute_overwrite_does_not_allocate_on_the_caller_thread() {
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (U1Irrep::new(-1), 4),
-            (U1Irrep::new(0), 8),
-            (U1Irrep::new(1), 4),
+            (U1Irrep::new(-1).unwrap(), 4),
+            (U1Irrep::new(0).unwrap(), 8),
+            (U1Irrep::new(1).unwrap(), 4),
         ],
     )
     .unwrap();
@@ -233,9 +233,9 @@ fn cached_planar_overwrites_do_not_allocate_on_the_caller_thread() {
     let space = GradedSpace::try_new(
         Arc::clone(&provider),
         [
-            (U1Irrep::new(-1), 2),
-            (U1Irrep::new(0), 3),
-            (U1Irrep::new(1), 2),
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(0).unwrap(), 3),
+            (U1Irrep::new(1).unwrap(), 2),
         ],
     )
     .unwrap();

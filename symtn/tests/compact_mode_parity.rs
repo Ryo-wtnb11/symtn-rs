@@ -1015,11 +1015,14 @@ fn multiplicity_free_u1_compact_compose_and_contract_match_the_dense_route() {
     use symtn::sector::{U1FusionRule, U1Irrep};
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(-1), 2), (U1Irrep::new(1), 3)],
+        [
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 3),
+        ],
     )
     .unwrap();
     let charge = |sector: &U1Irrep| {
-        if *sector == U1Irrep::new(1) {
+        if *sector == U1Irrep::new(1).unwrap() {
             1.0
         } else {
             -1.0
@@ -1609,7 +1612,10 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
     use symtn::sector::{U1FusionRule, U1Irrep};
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(-1), 2), (U1Irrep::new(1), 3)],
+        [
+            (U1Irrep::new(-1).unwrap(), 2),
+            (U1Irrep::new(1).unwrap(), 3),
+        ],
     )
     .unwrap();
     for complex in [false, true] {
@@ -1619,7 +1625,7 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
             &host_runtime(),
             &leg,
             [(-1, 2), (1, 3)].map(|(charge, k)| SectorSpectrum {
-                sector: U1Irrep::new(charge),
+                sector: U1Irrep::new(charge).unwrap(),
                 values: (0..k)
                     .map(|i| conv(f64::from(charge) - 0.5 * i as f64))
                     .collect(),
@@ -1632,7 +1638,7 @@ fn multiplicity_free_u1_compact_swap_moves_each_spectrum_to_the_dual_sector() {
             for entry in transform(&d, op).unwrap().diagview(engine).unwrap() {
                 let partner = source
                     .iter()
-                    .find(|s| s.sector == U1Irrep::new(-entry.sector.charge()))
+                    .find(|s| s.sector == U1Irrep::new(-entry.sector.charge()).unwrap())
                     .unwrap();
                 assert_eq!(entry.values, partner.values, "{op} {:?}", entry.sector);
             }
@@ -2345,7 +2351,10 @@ fn cuda_column_matches_the_host_for_every_compact_row() {
     let u1 = || {
         GradedSpace::try_new(
             Arc::new(U1FusionRule),
-            [(U1Irrep::new(-1), 2), (U1Irrep::new(1), 3)],
+            [
+                (U1Irrep::new(-1).unwrap(), 2),
+                (U1Irrep::new(1).unwrap(), 3),
+            ],
         )
         .unwrap()
     };

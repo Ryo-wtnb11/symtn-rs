@@ -103,13 +103,16 @@ impl Payload for Complex64 {
 }
 
 fn charge(sector: &U1Irrep) -> i32 {
-    i32::from(*sector != U1Irrep::new(0))
+    i32::from(*sector != U1Irrep::new(0).unwrap())
 }
 
 fn leg(dims: [usize; 2]) -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), dims[0]), (U1Irrep::new(1), dims[1])],
+        [
+            (U1Irrep::new(0).unwrap(), dims[0]),
+            (U1Irrep::new(1).unwrap(), dims[1]),
+        ],
     )
     .unwrap()
 }
@@ -291,7 +294,7 @@ macro_rules! check_dtype {
             &runtime,
             &space,
             [0, 1].map(|charge| SectorSpectrum {
-                sector: U1Irrep::new(charge),
+                sector: U1Irrep::new(charge).unwrap(),
                 values: eigh_values(charge)
                     .into_iter()
                     .map(|value| D::lift(Complex64::new(value, 0.0)))
@@ -335,7 +338,7 @@ macro_rules! check_dtype {
             &runtime,
             &space,
             [0, 1].map(|charge| SectorSpectrum {
-                sector: U1Irrep::new(charge),
+                sector: U1Irrep::new(charge).unwrap(),
                 values: stored(charge).into_iter().map(D::lift).collect(),
             }),
         )

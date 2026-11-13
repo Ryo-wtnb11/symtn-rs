@@ -1242,9 +1242,15 @@ mod compact_diagonal {
     /// magnitude within each sector.
     fn spectra<D: single_precision_oracle::Parts>() -> [SectorSpectrum<U1Irrep, D>; 3] {
         [
-            (U1Irrep::new(-1), vec![(8.0f32, 0.0f32), (2.0, 0.0)]),
-            (U1Irrep::new(0), vec![(4.0f32, 0.0), (1.0, 0.0), (0.5, 0.0)]),
-            (U1Irrep::new(1), vec![(3.0f32, 0.0), (0.25, 0.0)]),
+            (
+                U1Irrep::new(-1).unwrap(),
+                vec![(8.0f32, 0.0f32), (2.0, 0.0)],
+            ),
+            (
+                U1Irrep::new(0).unwrap(),
+                vec![(4.0f32, 0.0), (1.0, 0.0), (0.5, 0.0)],
+            ),
+            (U1Irrep::new(1).unwrap(), vec![(3.0f32, 0.0), (0.25, 0.0)]),
         ]
         .map(|(sector, values)| SectorSpectrum {
             sector,
@@ -1354,9 +1360,9 @@ fn find_truncated_is_dtype_independent_on_an_exactly_representable_spectrum() {
     let rt = runtime();
     let leg = u1_leg_with([2, 3, 2]);
     let values: [(U1Irrep, &[f32]); 3] = [
-        (U1Irrep::new(-1), &[8.0, 2.0]),
-        (U1Irrep::new(0), &[4.0, 1.0, 0.5]),
-        (U1Irrep::new(1), &[3.0, 0.25]),
+        (U1Irrep::new(-1).unwrap(), &[8.0, 2.0]),
+        (U1Irrep::new(0).unwrap(), &[4.0, 1.0, 0.5]),
+        (U1Irrep::new(1).unwrap(), &[3.0, 0.25]),
     ];
     let narrow: TensorMap<U1FusionRule, f32> = TensorMap::diagonal(
         engine,
@@ -1520,9 +1526,9 @@ fn double_precision_truncation_decisions_and_errors_match_hand_values() {
     // relative-error budgets below.
     let spectra = || {
         [
-            (U1Irrep::new(-1), [0.9f64, 0.3, 0.1]),
-            (U1Irrep::new(0), [0.7f64, 0.2, 0.1]),
-            (U1Irrep::new(1), [0.5f64, 0.3, 0.1]),
+            (U1Irrep::new(-1).unwrap(), [0.9f64, 0.3, 0.1]),
+            (U1Irrep::new(0).unwrap(), [0.7f64, 0.2, 0.1]),
+            (U1Irrep::new(1).unwrap(), [0.5f64, 0.3, 0.1]),
         ]
         .map(|(sector, values)| SectorSpectrum {
             sector,

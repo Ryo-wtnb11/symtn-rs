@@ -109,7 +109,7 @@ on_each_engine! {
         let device = &mut B::engine();
         let engine = &mut symtn::typed::CpuEngine::serial();
         let runtime = Runtime::builder().build().unwrap();
-        let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
+        let u1 = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
         let a = TensorMap::<_, Complex64>::from_subblock_fn(
             engine, &runtime, [&u1], [&u1],
             |_, indices| complex_entry(indices, 1.0) * Complex64::new(1.0, indices[1] as f64 + 1.0),

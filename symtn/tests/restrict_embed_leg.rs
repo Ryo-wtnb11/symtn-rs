@@ -243,7 +243,10 @@ fn restrict_matches_the_dense_gather_on_a_dual_u1_codomain_leg() {
         TensorMap::rand_with_seed(engine, &runtime, [&leg, &other], [&other], 7).unwrap();
 
     // Selection in the dual leg's own labels: the caller never dualises.
-    let selected = [(U1Irrep::new(-1), 1..2), (U1Irrep::new(1), 0..2)];
+    let selected = [
+        (U1Irrep::new(-1).unwrap(), 1..2),
+        (U1Irrep::new(1).unwrap(), 0..2),
+    ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
 
@@ -335,7 +338,10 @@ fn restrict_equals_composition_with_the_inclusion_isometry_on_both_sides() {
         TensorMap::rand_with_seed(engine, &runtime, [&spectator, &leg], [&leg, &spectator], 3)
             .unwrap();
 
-    let selected = [(U1Irrep::new(-1), 0..1), (U1Irrep::new(0), 1..3)];
+    let selected = [
+        (U1Irrep::new(-1).unwrap(), 0..1),
+        (U1Irrep::new(0).unwrap(), 1..3),
+    ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let start = |sector: &U1Irrep| {
         selected
@@ -466,7 +472,10 @@ fn restrict_reads_a_complex_lazy_adjoint_domain_leg_with_a_multi_sector_selectio
 
     // The lazy adjoint's domain leg 1 is the parent's codomain leg.
     let leg = lazy.domain()[0].clone();
-    let selected = [(U1Irrep::new(0), 1..2), (U1Irrep::new(1), 0..2)];
+    let selected = [
+        (U1Irrep::new(0).unwrap(), 1..2),
+        (U1Irrep::new(1).unwrap(), 0..2),
+    ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let restricted = lazy.restrict_leg(engine, &[(1, &selection)]).unwrap();
 
@@ -504,7 +513,7 @@ fn restrict_commutes_with_adjoint_under_the_codomain_domain_axis_map() {
     let columns = u1_on(&provider, &[(0, 3), (1, 2)]);
     let source: TensorMap<_, Complex64> =
         TensorMap::rand_with_seed(engine, &runtime, [&rows], [&columns], 17).unwrap();
-    let selection = LegSelection::try_new(&columns, [(U1Irrep::new(1), 0..1)]).unwrap();
+    let selection = LegSelection::try_new(&columns, [(U1Irrep::new(1).unwrap(), 0..1)]).unwrap();
 
     // Domain leg 1 of `t` is codomain leg 0 of `t†`.
     let left = source
@@ -579,7 +588,10 @@ fn embed_after_restrict_is_the_orthogonal_projector() {
     let source: TensorMap<_, f64> =
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&other, &other], 29).unwrap();
 
-    let selected = [(U1Irrep::new(0), 1..3), (U1Irrep::new(1), 0..1)];
+    let selected = [
+        (U1Irrep::new(0).unwrap(), 1..3),
+        (U1Irrep::new(1).unwrap(), 0..1),
+    ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let projected = source
         .restrict_leg(engine, &[(0, &selection)])
@@ -632,7 +644,7 @@ fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
     let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&charged], []).unwrap();
     assert_eq!(source.subblock_count(), 0);
 
-    let selection = LegSelection::try_new(&charged, [(U1Irrep::new(1), 1..2)]).unwrap();
+    let selection = LegSelection::try_new(&charged, [(U1Irrep::new(1).unwrap(), 1..2)]).unwrap();
     let restricted = source.restrict_leg(engine, &[(0, &selection)]).unwrap();
     assert_eq!(restricted.subblock_count(), 0);
     assert!(restricted.dense_data().unwrap().is_empty());
@@ -644,11 +656,13 @@ fn a_valid_selection_with_no_admissible_block_returns_an_empty_tensor() {
 
     // Leg-level validation still rejects malformed ranges there, because no
     // block would ever reach the kernel.
-    assert!(LegSelection::try_new(&charged, [(U1Irrep::new(1), 2..4)])
-        .err()
-        .unwrap()
-        .report()
-        .contains("exceeds its"));
+    assert!(
+        LegSelection::try_new(&charged, [(U1Irrep::new(1).unwrap(), 2..4)])
+            .err()
+            .unwrap()
+            .report()
+            .contains("exceeds its")
+    );
 }
 
 #[test]
@@ -663,31 +677,42 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
         LegSelection::try_new(&leg, std::iter::empty::<(U1Irrep, Range<usize>)>())
             .is_invalid_argument("at least one sector")
     );
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 1..1)])
-        .err()
-        .unwrap()
-        .report()
-        .contains("must name at least one position"));
     assert!(
-        LegSelection::try_new(&leg, [(U1Irrep::new(0), Range { start: 2, end: 1 })])
+        LegSelection::try_new(&leg, [(U1Irrep::new(0).unwrap(), 1..1)])
             .err()
             .unwrap()
             .report()
             .contains("must name at least one position")
     );
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..3)])
-        .err()
-        .unwrap()
-        .report()
-        .contains("exceeds its"));
-    assert!(LegSelection::try_new(&leg, [(U1Irrep::new(5), 0..1)])
-        .err()
-        .unwrap()
-        .report()
-        .contains("absent from the selected leg"));
     assert!(LegSelection::try_new(
         &leg,
-        [(U1Irrep::new(0), 0..1), (U1Irrep::new(0), 1..2)].into_iter()
+        [(U1Irrep::new(0).unwrap(), Range { start: 2, end: 1 })]
+    )
+    .err()
+    .unwrap()
+    .report()
+    .contains("must name at least one position"));
+    assert!(
+        LegSelection::try_new(&leg, [(U1Irrep::new(0).unwrap(), 0..3)])
+            .err()
+            .unwrap()
+            .report()
+            .contains("exceeds its")
+    );
+    assert!(
+        LegSelection::try_new(&leg, [(U1Irrep::new(5).unwrap(), 0..1)])
+            .err()
+            .unwrap()
+            .report()
+            .contains("absent from the selected leg")
+    );
+    assert!(LegSelection::try_new(
+        &leg,
+        [
+            (U1Irrep::new(0).unwrap(), 0..1),
+            (U1Irrep::new(0).unwrap(), 1..2)
+        ]
+        .into_iter()
     )
     .err()
     .unwrap()
@@ -696,14 +721,16 @@ fn selections_are_validated_against_their_parent_leg_before_anything_is_built() 
     // A dual leg's own labels are the dualised ones; the non-dual label is
     // simply absent.
     let dual = leg.try_dual().unwrap();
-    assert!(LegSelection::try_new(&dual, [(U1Irrep::new(1), 0..1)])
-        .err()
-        .unwrap()
-        .report()
-        .contains("absent from the selected leg"));
-    assert!(LegSelection::try_new(&dual, [(U1Irrep::new(-1), 0..1)]).is_ok());
+    assert!(
+        LegSelection::try_new(&dual, [(U1Irrep::new(1).unwrap(), 0..1)])
+            .err()
+            .unwrap()
+            .report()
+            .contains("absent from the selected leg")
+    );
+    assert!(LegSelection::try_new(&dual, [(U1Irrep::new(-1).unwrap(), 0..1)]).is_ok());
 
-    let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0), 0..1)]).unwrap();
+    let selection = LegSelection::try_new(&leg, [(U1Irrep::new(0).unwrap(), 0..1)]).unwrap();
     let source = TensorMap::<_, f64>::zeros(engine, &runtime, [&leg], [&other]).unwrap();
     assert!(source
         .restrict_leg(engine, &[(2, &selection)])
@@ -744,8 +771,8 @@ fn a_compact_diagonal_restriction_other_than_one_selection_on_both_legs_is_rejec
         TensorMap::rand_with_seed(engine, &runtime, [&leg], [&leg], 31).unwrap();
     let diagonal = source.svd_compact(engine, &[0], &[1]).unwrap().s;
     let bond = diagonal.domain()[0].clone();
-    let selection = LegSelection::try_new(&bond, [(U1Irrep::new(0), 0..1)]).unwrap();
-    let different = LegSelection::try_new(&bond, [(U1Irrep::new(0), 1..2)]).unwrap();
+    let selection = LegSelection::try_new(&bond, [(U1Irrep::new(0).unwrap(), 0..1)]).unwrap();
+    let different = LegSelection::try_new(&bond, [(U1Irrep::new(0).unwrap(), 1..2)]).unwrap();
     // One leg only, or two different selections: the result would not be an
     // endomorphism, so it cannot stay compact, and densifying is the
     // caller's explicit `materialize`.
@@ -799,7 +826,10 @@ fn embed_scatters_a_complex_lazy_adjoint_dual_domain_leg_per_sector() {
     let leg = u1_on(&provider, &[(-1, 2), (0, 3), (1, 4)])
         .try_dual()
         .unwrap();
-    let selected = [(U1Irrep::new(1), 0..1), (U1Irrep::new(-1), 2..4)];
+    let selected = [
+        (U1Irrep::new(1).unwrap(), 0..1),
+        (U1Irrep::new(-1).unwrap(), 2..4),
+    ];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let spectator = u1_on(&provider, &[(0, 2), (1, 1)]);
     let columns = u1_on(&provider, &[(-1, 1), (0, 2)]);
@@ -883,7 +913,7 @@ fn restrict_and_embed_on_a_product_fz2_u1_leg_match_the_isometry_composition() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -991,7 +1021,7 @@ fn a_rank_five_restriction_still_gathers_one_axis_only() {
     .unwrap();
     assert_eq!(source.rank(), 5);
 
-    let selected = [(U1Irrep::new(1), 1..3)];
+    let selected = [(U1Irrep::new(1).unwrap(), 1..3)];
     let selection = LegSelection::try_new(&leg, selected.iter().cloned()).unwrap();
     let restricted = source.restrict_leg(engine, &[(1, &selection)]).unwrap();
 
@@ -1398,7 +1428,7 @@ fn restrict_and_embed_are_exact_block_copies_on_fz2_u1_legs() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -1592,7 +1622,7 @@ fn multi_axis_restrict_is_one_exact_block_copy_on_u1_su2_and_fz2_u1_legs() {
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -1752,7 +1782,7 @@ fn a_compact_diagonal_restricted_on_both_legs_with_one_selection_stays_compact()
             } else {
                 FermionParityIrrep::EVEN
             },
-            U1Irrep::new(charge),
+            U1Irrep::new(charge).unwrap(),
         )
     };
     let leg = GradedSpace::try_new(
@@ -1843,8 +1873,8 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
     let runtime = Runtime::builder().build().unwrap();
     let provider = Arc::new(U1FusionRule);
     let leg = u1_on(&provider, &[(0, 5), (1, 3), (2, 2)]);
-    let zero = U1Irrep::new(0);
-    let one = U1Irrep::new(1);
+    let zero = U1Irrep::new(0).unwrap();
+    let one = U1Irrep::new(1).unwrap();
 
     let by_range = LegSelection::try_new(&leg, [(zero, 0..2), (one, 1..3)]).unwrap();
     let by_list = LegSelection::try_new(&leg, [(one, vec![1, 2]), (zero, vec![0, 1])]).unwrap();
@@ -1853,9 +1883,12 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
     assert_eq!(by_list.positions(&one).unwrap(), vec![1, 2]);
     // A parent sector that is not selected keeps nothing; a sector absent
     // from the parent is an error, not an empty set.
-    assert!(by_list.positions(&U1Irrep::new(2)).unwrap().is_empty());
     assert!(by_list
-        .positions(&U1Irrep::new(7))
+        .positions(&U1Irrep::new(2).unwrap())
+        .unwrap()
+        .is_empty());
+    assert!(by_list
+        .positions(&U1Irrep::new(7).unwrap())
         .is_invalid_argument("absent from the selection"));
 
     let gaps = LegSelection::try_new(&leg, [(zero, vec![0, 2, 3]), (one, vec![0, 2])]).unwrap();
@@ -1867,7 +1900,7 @@ fn kept_positions_are_a_canonical_strictly_increasing_set() {
         [
             (zero, vec![0, 1, 2, 3, 4]),
             (one, vec![0, 1, 2]),
-            (U1Irrep::new(2), vec![0, 1]),
+            (U1Irrep::new(2).unwrap(), vec![0, 1]),
         ],
     )
     .unwrap();

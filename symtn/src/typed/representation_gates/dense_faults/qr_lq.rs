@@ -600,18 +600,21 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
     // -1 and -2 with the same degeneracies.
     let u1 = GradedSpace::try_new(
         Arc::new(CheckedAbelian(U1FusionRule)),
-        [(U1Irrep::new(1), 2), (U1Irrep::new(2), 3)],
+        [(U1Irrep::new(1).unwrap(), 2), (U1Irrep::new(2).unwrap(), 3)],
     )
     .unwrap();
     let u1_dual = u1.try_dual().unwrap();
     assert!(u1_dual.is_dual());
     let mut u1_sectors_seen = u1_dual.sectors().unwrap();
     u1_sectors_seen.sort();
-    assert_eq!(u1_sectors_seen, [U1Irrep::new(-2), U1Irrep::new(-1)]);
-    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(-1)).unwrap(), 2);
-    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(-2)).unwrap(), 3);
-    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(1)).unwrap(), 0);
-    let u1_sectors = [U1Irrep::new(-1), U1Irrep::new(-2)];
+    assert_eq!(
+        u1_sectors_seen,
+        [U1Irrep::new(-2).unwrap(), U1Irrep::new(-1).unwrap()]
+    );
+    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(-1).unwrap()).unwrap(), 2);
+    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(-2).unwrap()).unwrap(), 3);
+    assert_eq!(u1_dual.degeneracy(&U1Irrep::new(1).unwrap()).unwrap(), 0);
+    let u1_sectors = [U1Irrep::new(-1).unwrap(), U1Irrep::new(-2).unwrap()];
 
     let z2_complex: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
@@ -683,7 +686,10 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
         engine,
         &runtime,
         &u1,
-        complex_spectra([U1Irrep::new(1), U1Irrep::new(2)], complex_values),
+        complex_spectra(
+            [U1Irrep::new(1).unwrap(), U1Irrep::new(2).unwrap()],
+            complex_values,
+        ),
     )
     .unwrap();
     let swapped = nondual.permute(engine, &[1], &[0]).unwrap();
@@ -748,8 +754,8 @@ fn checked_dual_diagonal_qr_lq_keeps_dual_bond_for_self_dual_and_non_self_dual_r
             &full_l.domain()[0],
         ] {
             assert!(!bond.is_dual());
-            assert_eq!(bond.degeneracy(&U1Irrep::new(-1)).unwrap(), 2);
-            assert_eq!(bond.degeneracy(&U1Irrep::new(-2)).unwrap(), 3);
+            assert_eq!(bond.degeneracy(&U1Irrep::new(-1).unwrap()).unwrap(), 2);
+            assert_eq!(bond.degeneracy(&U1Irrep::new(-2).unwrap()).unwrap(), 3);
         }
         for factor in [&r, &full_r, &l, &full_l] {
             assert!(

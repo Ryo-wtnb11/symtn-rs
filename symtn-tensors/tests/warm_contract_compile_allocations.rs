@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use symtn_dense::Engine;
 
-use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
+use symtn_core::{
+    FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+};
 use symtn_tensors::{
     prepare_tensorcontract_fusion_plan_dyn, try_compile_storage_contract_core_route,
     BoundDynamicFusionMapSpace, DirectCoreExecutor, FusionOperand, OutputAxisOrder, RuleIdentity,
@@ -28,9 +30,9 @@ type Space = BoundDynamicFusionMapSpace<U1FusionRule>;
 fn leg(dual: bool) -> SectorLeg {
     SectorLeg::new(
         [
-            (U1Irrep::new(-1).sector_id(), 2),
-            (U1Irrep::new(0).sector_id(), 3),
-            (U1Irrep::new(1).sector_id(), 2),
+            (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 3),
+            (SectorId::from(U1Irrep::new(1).unwrap()), 2),
         ],
         dual,
     )
@@ -41,9 +43,9 @@ fn leg(dual: bool) -> SectorLeg {
 fn asymmetric_leg(dual: bool) -> SectorLeg {
     SectorLeg::new(
         [
-            (U1Irrep::new(-1).sector_id(), 2),
-            (U1Irrep::new(0).sector_id(), 3),
-            (U1Irrep::new(1).sector_id(), 4),
+            (SectorId::from(U1Irrep::new(-1).unwrap()), 2),
+            (SectorId::from(U1Irrep::new(0).unwrap()), 3),
+            (SectorId::from(U1Irrep::new(1).unwrap()), 4),
         ],
         dual,
     )

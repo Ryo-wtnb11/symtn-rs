@@ -301,8 +301,8 @@ fn tensorcontract_fusion_su2_keeps_contracted_tree_basis_with_degeneracy() {
 #[test]
 fn contracted_fusion_tree_basis_requires_exact_stored_tree() {
     let rule = U1FusionRule;
-    let plus_two = U1Irrep::new(2).sector_id();
-    let minus_two = U1Irrep::new(-2).sector_id();
+    let plus_two = SectorId::from(U1Irrep::new(2).unwrap());
+    let minus_two = SectorId::from(U1Irrep::new(-2).unwrap());
     let lhs_domain = FusionTreeKey::try_new_for_rule(
         &rule,
         [plus_two],

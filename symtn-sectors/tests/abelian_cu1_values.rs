@@ -126,7 +126,7 @@ fn abelian_values_are_the_tensorkitsectors_closed_forms() {
             false,
         );
     }
-    let u1 = |q: i64| U1Irrep::new(i32::try_from(q).unwrap()).sector_id();
+    let u1 = |q: i64| SectorId::from(U1Irrep::new(i32::try_from(q).unwrap()).unwrap());
     // `c` ranges over the window too, so `N = 0` on sums outside it is
     // exercised without leaving the label range.
     check_abelian(
@@ -142,17 +142,17 @@ fn abelian_values_are_the_tensorkitsectors_closed_forms() {
 #[test]
 fn u1_fusion_leaving_the_charge_range_is_an_error() {
     let rule = U1FusionRule;
-    let u1 = |q: i32| U1Irrep::new(q).sector_id();
+    let u1 = |q: i32| SectorId::from(U1Irrep::new(q).unwrap());
     let (min, max) = (i32::MIN + 1, i32::MAX);
     assert_eq!(rule.try_dual_sector(u1(max)), Ok(u1(min)));
     for (a, b) in [(max, 1), (1, max), (min, -1), (-1, min)] {
         assert!(
-            matches!(rule.try_fusion_channels(u1(a), u1(b)), Err(FusionAlgebraError::U1FusionOverflow { left, .. }) if left == a),
+            matches!(rule.try_fusion_channels(u1(a), u1(b)), Err(FusionAlgebraError::FusionNotRepresentable { left, right }) if left == u1(a) && right == u1(b)),
             "{a} ⊗ {b}"
         );
         for c in [min, -1, 0, 1, max] {
             assert!(
-                matches!(rule.try_nsymbol(u1(a), u1(b), u1(c)), Err(FusionAlgebraError::U1FusionOverflow { left, .. }) if left == a),
+                matches!(rule.try_nsymbol(u1(a), u1(b), u1(c)), Err(FusionAlgebraError::FusionNotRepresentable { left, right }) if left == u1(a) && right == u1(b)),
                 "N {a} {b} {c}"
             );
         }
@@ -421,7 +421,7 @@ fn inadmissible_f_and_r_are_zero_at_the_label_boundaries() {
     }
     let u1: Vec<SectorId> = [i32::MIN + 1, -1, 0, 1, i32::MAX]
         .into_iter()
-        .map(|q| U1Irrep::new(q).sector_id())
+        .map(|q| SectorId::from(U1Irrep::new(q).unwrap()))
         .collect();
     assert_off_shell_zero(&U1FusionRule, &u1);
     let parity = [FermionParityIrrep::EVEN, FermionParityIrrep::ODD].map(SectorId::from);

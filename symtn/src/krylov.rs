@@ -63,7 +63,7 @@
 //!
 //! let engine: &mut dyn ExecContext = &mut symtn::typed::CpuEngine::serial();
 //! let rt = Runtime::builder().build()?;
-//! let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)])?;
+//! let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)])?;
 //! // H = diag(1, 2, 3) on charge 0 and diag(1, 2) on charge 1.
 //! let h = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, i| {
 //!     if i[0] == i[1] { (i[0] + 1) as f64 } else { 0.0 }

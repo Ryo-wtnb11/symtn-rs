@@ -116,7 +116,9 @@ fn warm_eager_calls_hit_complete_structure_cache() {
         &runtime,
         "U1",
         U1FusionRule,
-        (-1..=1).map(U1Irrep::new).collect()
+        (-1..=1)
+            .map(|charge| U1Irrep::new(charge).unwrap())
+            .collect()
     );
     warm_ops!(
         engine,
@@ -141,7 +143,7 @@ fn warm_eager_calls_hit_complete_structure_cache() {
                 } else {
                     FermionParityIrrep::ODD
                 };
-                ProductSector::new(parity, U1Irrep::new(q))
+                ProductSector::new(parity, U1Irrep::new(q).unwrap())
             })
             .collect()
     );

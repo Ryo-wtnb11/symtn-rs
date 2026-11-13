@@ -504,10 +504,12 @@ fn inactive_block_ending_beyond_isize_still_compiles() {
     // inactive layout. Metadata only, no tensor data.
     use symtn_core::{FusionTreeHomSpace, U1FusionRule, U1Irrep};
     let n = (1usize << (usize::BITS - 2)) + 1;
-    let structure =
-        FusionTreeHomSpace::from_sectors([(U1Irrep::new(0), n)], [(U1Irrep::new(0), 2)])
-            .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
-            .unwrap();
+    let structure = FusionTreeHomSpace::from_sectors(
+        [(U1Irrep::new(0).unwrap(), n)],
+        [(U1Irrep::new(0).unwrap(), 2)],
+    )
+    .coupled_subblock_structure_from_leg_degeneracies(&U1FusionRule)
+    .unwrap();
     let transform =
         TreeTransformStructure::<f64>::compile_structures(&structure, &structure, &[]).unwrap();
     assert_eq!(transform.parallel_schedule().inactive, [0]);
@@ -908,8 +910,13 @@ fn canonical_runs() -> (
     Vec<usize>,
 ) {
     use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
-    let bit = || SectorLeg::new([(U1Irrep::new(0), 1), (U1Irrep::new(1), 1)], false);
-    let out = SectorLeg::new((0..=4).map(|q| (U1Irrep::new(q), 2)), false);
+    let bit = || {
+        SectorLeg::new(
+            [(U1Irrep::new(0).unwrap(), 1), (U1Irrep::new(1).unwrap(), 1)],
+            false,
+        )
+    };
+    let out = SectorLeg::new((0..=4).map(|q| (U1Irrep::new(q).unwrap(), 2)), false);
     let structure = FusionTreeHomSpace::new(
         FusionProductSpace::new([bit(), bit(), bit(), bit()]),
         FusionProductSpace::new([out]),

@@ -185,7 +185,7 @@ macro_rules! check_dense {
 fn u1() -> GradedSpace<U1FusionRule> {
     GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
-        [0, 1, -1].map(|charge| (U1Irrep::new(charge), 2)),
+        [0, 1, -1].map(|charge| (U1Irrep::new(charge).unwrap(), 2)),
     )
     .unwrap()
 }
@@ -247,17 +247,17 @@ fn compact_diagonal_add_and_scale_drop_zero_scaled_operands_as_tensorkit() {
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         std::sync::Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     let spectra = |values: [[f64; 2]; 2]| {
         vec![
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: values[0].to_vec(),
             },
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: values[1].to_vec(),
             },
         ]

@@ -14,7 +14,9 @@
 use std::sync::Arc;
 use symtn_dense::Engine;
 
-use symtn_core::{FusionProductSpace, FusionTreeHomSpace, SectorLeg, U1FusionRule, U1Irrep};
+use symtn_core::{
+    FusionProductSpace, FusionTreeHomSpace, SectorId, SectorLeg, U1FusionRule, U1Irrep,
+};
 use symtn_tensors::{
     BoundDynamicFusionMapSpace, ContractDestinationInit, FusionOperand, OutputAxisOrder,
     RuleIdentity, TensorContractFusionExecutionContext, TensorContractSpec,
@@ -44,7 +46,7 @@ fn structure_misses() -> u64 {
 
 fn chain_homspace(sector_count: i32) -> FusionTreeHomSpace {
     let sectors = (0..sector_count)
-        .map(|charge| (U1Irrep::new(charge).sector_id(), 1))
+        .map(|charge| (SectorId::from(U1Irrep::new(charge).unwrap()), 1))
         .collect::<Vec<_>>();
     FusionTreeHomSpace::new(
         FusionProductSpace::new([SectorLeg::new(sectors.clone(), false)]),
@@ -123,8 +125,8 @@ fn contract_fixture() -> ContractFixture {
     let leg = |dual| {
         SectorLeg::new(
             [
-                (U1Irrep::new(0).sector_id(), 2),
-                (U1Irrep::new(1).sector_id(), 2),
+                (SectorId::from(U1Irrep::new(0).unwrap()), 2),
+                (SectorId::from(U1Irrep::new(1).unwrap()), 2),
             ],
             dual,
         )

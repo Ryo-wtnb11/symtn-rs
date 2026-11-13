@@ -8,7 +8,7 @@ use symtn::typed::{Svd, Truncation};
 fn main() -> Result<(), Error> {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = Runtime::builder().build()?;
-    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)])?;
+    let v = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)])?;
     let a = TensorMap::<_, f64>::from_subblock_fn(engine, &rt, [&v], [&v], |_, ij| {
         if ij[0] == ij[1] {
             [3.0, 1.0][ij[0]]

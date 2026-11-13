@@ -5,7 +5,7 @@ fn compact_diagonal_qr_lq_preserves_compact_factors_without_dense_kernels() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let _dense = probe::inject_dense(Box::new(polar_spy(&Arc::default())));
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1), 3)])
+    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 3)])
         .unwrap()
         .try_dual()
         .unwrap();
@@ -14,7 +14,7 @@ fn compact_diagonal_qr_lq_preserves_compact_factors_without_dense_kernels() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(-1),
+            sector: U1Irrep::new(-1).unwrap(),
             values: vec![-2.0, 0.0, 3.0],
         }],
     )
@@ -51,7 +51,7 @@ fn compact_diagonal_qr_lq_rejects_inconsistent_spectra_and_nonbond_spaces() {
     let runtime = Runtime::builder().build().unwrap();
     let leg = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 2), (U1Irrep::new(1), 1)],
+        [(U1Irrep::new(0).unwrap(), 2), (U1Irrep::new(1).unwrap(), 1)],
     )
     .unwrap();
     let input: TensorMap<_, f64> = TensorMap::diagonal(
@@ -60,11 +60,11 @@ fn compact_diagonal_qr_lq_rejects_inconsistent_spectra_and_nonbond_spaces() {
         &leg,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(1),
+                sector: U1Irrep::new(1).unwrap(),
                 values: vec![2.0],
             },
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![-1.0, 0.0],
             },
         ],
@@ -132,13 +132,14 @@ fn compact_diagonal_polar_skips_input_materialization_svd_and_gemm() {
     let gemm_calls = Arc::clone(&svd_calls);
     let _dense = probe::inject_dense(Box::new(polar_spy(&svd_calls)));
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 3)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 3)]).unwrap();
     let input: TensorMap<_, Complex64> = TensorMap::diagonal(
         engine,
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![
                 Complex64::new(-2.0, 0.0),
                 Complex64::new(0.0, 0.0),
@@ -193,7 +194,8 @@ fn compact_diagonal_polar_skips_input_materialization_svd_and_gemm() {
 fn compact_diagonal_qr_lq_matches_hand_phase_and_absolute_value_all_scalars() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
     macro_rules! check {
         ($engine:ident, $ty:ty, $values:expr, $phase:expr, $magnitude:expr, $tol:expr) => {{
             let input: TensorMap<_, $ty> = TensorMap::diagonal(
@@ -201,7 +203,7 @@ fn compact_diagonal_qr_lq_matches_hand_phase_and_absolute_value_all_scalars() {
                 &runtime,
                 &leg,
                 [SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: $values,
                 }],
             )
@@ -355,7 +357,7 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
     }
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
     .try_dual()
@@ -365,11 +367,11 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
         u1,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![-2.0, 0.0]
             },
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![1.0, -3.0, 2.0]
             },
         ]
@@ -391,8 +393,8 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let even = product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1), FermionParityIrrep::ODD);
+    let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+    let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
     let fermion = GradedSpace::try_new(
         Arc::new(
             ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
@@ -417,14 +419,14 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
     );
     let zero = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 0), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 0), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     check!(
         engine,
         zero,
         [SectorSpectrum {
-            sector: U1Irrep::new(1),
+            sector: U1Irrep::new(1).unwrap(),
             values: vec![0.0, -3.0],
         }]
     );
@@ -436,7 +438,8 @@ fn compact_diagonal_qr_lq_preserves_sectors_and_changed_roles() {
 fn compact_diagonal_qr_lq_scales_complex_subnormals_before_normalizing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     macro_rules! check {
         ($engine:ident, $ty:ty, $tiny:expr, $tol:expr) => {{
             let tiny = $tiny;
@@ -445,7 +448,7 @@ fn compact_diagonal_qr_lq_scales_complex_subnormals_before_normalizing() {
                 &runtime,
                 &leg,
                 [SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: vec![<$ty>::new(tiny, tiny)],
                 }],
             )
@@ -501,7 +504,8 @@ fn compact_diagonal_qr_lq_refuse_nonfinite_and_are_direct_when_overflowing() {
     // `_diagonal_qr!` / `lq_diagonal!` (`positive = true`): `q` the phase,
     // `r` (`l`) the magnitude. No materialization and no dense QR.
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     for value in [
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(f64::INFINITY, 1.0),
@@ -512,7 +516,7 @@ fn compact_diagonal_qr_lq_refuse_nonfinite_and_are_direct_when_overflowing() {
             &runtime,
             &leg,
             [SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![value],
             }],
         )
@@ -571,7 +575,7 @@ fn compact_diagonal_qr_lq_refuse_nonfinite_and_are_direct_when_overflowing() {
         &runtime,
         &leg,
         [SectorSpectrum {
-            sector: U1Irrep::new(0),
+            sector: U1Irrep::new(0).unwrap(),
             values: vec![num_complex::Complex32::new(f32::MAX, f32::MAX)],
         }],
     )
@@ -601,7 +605,8 @@ fn compact_diagonal_qr_lq_refuse_nonfinite_and_are_direct_when_overflowing() {
 fn compact_diagonal_polar_matches_hand_phase_and_absolute_value_all_scalars() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 4)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 4)]).unwrap();
     macro_rules! check {
         ($engine:ident, $ty:ty, $values:expr, $phase:expr, $magnitude:expr, $tol:expr) => {{
             let input: TensorMap<_, $ty> = TensorMap::diagonal(
@@ -609,7 +614,7 @@ fn compact_diagonal_polar_matches_hand_phase_and_absolute_value_all_scalars() {
                 &runtime,
                 &leg,
                 [SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: $values,
                 }],
             )
@@ -774,7 +779,7 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
     }
     let u1 = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 3), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 3), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap()
     .try_dual()
@@ -784,11 +789,11 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
         u1,
         [
             SectorSpectrum {
-                sector: U1Irrep::new(-1),
+                sector: U1Irrep::new(-1).unwrap(),
                 values: vec![-2.0, 0.0]
             },
             SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![1.0, -3.0, 2.0]
             },
         ]
@@ -810,8 +815,8 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
             },
         ]
     );
-    let even = product_sector(U1Irrep::new(0), FermionParityIrrep::EVEN);
-    let odd = product_sector(U1Irrep::new(1), FermionParityIrrep::ODD);
+    let even = product_sector(U1Irrep::new(0).unwrap(), FermionParityIrrep::EVEN);
+    let odd = product_sector(U1Irrep::new(1).unwrap(), FermionParityIrrep::ODD);
     let fermion = GradedSpace::try_new(
         Arc::new(
             ProductFusionRule::<_, _>::try_new(U1FusionRule, FermionParityFusionRule::new())
@@ -836,14 +841,14 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
     );
     let zero = GradedSpace::try_new(
         Arc::new(U1FusionRule),
-        [(U1Irrep::new(0), 0), (U1Irrep::new(1), 2)],
+        [(U1Irrep::new(0).unwrap(), 0), (U1Irrep::new(1).unwrap(), 2)],
     )
     .unwrap();
     check!(
         engine,
         zero,
         [SectorSpectrum {
-            sector: U1Irrep::new(1),
+            sector: U1Irrep::new(1).unwrap(),
             values: vec![0.0, -3.0],
         }]
     );
@@ -855,7 +860,8 @@ fn compact_diagonal_polar_preserves_sectors_and_changed_roles() {
 fn compact_diagonal_polar_scales_complex_subnormals_before_normalizing() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     macro_rules! check {
         ($engine:ident, $ty:ty, $tiny:expr, $tol:expr) => {{
             let tiny = $tiny;
@@ -864,7 +870,7 @@ fn compact_diagonal_polar_scales_complex_subnormals_before_normalizing() {
                 &runtime,
                 &leg,
                 [SectorSpectrum {
-                    sector: U1Irrep::new(0),
+                    sector: U1Irrep::new(0).unwrap(),
                     values: vec![<$ty>::new(tiny, tiny)],
                 }],
             )
@@ -896,7 +902,8 @@ fn compact_diagonal_polar_refuses_nonfinite_and_is_direct_when_overflowing() {
     // overflowing one is MAK's diagonal polar `W = sign_safe(a)`, `P = abs(a)`.
     // No materialization and no dense SVD.
     let runtime = Runtime::builder().build().unwrap();
-    let leg = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 1)]).unwrap();
+    let leg =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 1)]).unwrap();
     for value in [
         Complex64::new(f64::NAN, 0.0),
         Complex64::new(f64::INFINITY, 1.0),
@@ -907,7 +914,7 @@ fn compact_diagonal_polar_refuses_nonfinite_and_is_direct_when_overflowing() {
             &runtime,
             &leg,
             [SectorSpectrum {
-                sector: U1Irrep::new(0),
+                sector: U1Irrep::new(0).unwrap(),
                 values: vec![value],
             }],
         )

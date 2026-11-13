@@ -178,8 +178,10 @@ fn infinity_arm_is_positive_zero_without_entries() {
     let engine = &mut symtn_dense::CpuEngine::serial();
     let rt = host_runtime();
     let (uv, uw) = u1_norm_legs();
-    let only_zero = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0), 2)]).unwrap();
-    let only_one = GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1), 3)]).unwrap();
+    let only_zero =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(0).unwrap(), 2)]).unwrap();
+    let only_one =
+        GradedSpace::try_new(Arc::new(U1FusionRule), [(U1Irrep::new(1).unwrap(), 3)]).unwrap();
     let empty: TensorMap<U1FusionRule, f64> =
         TensorMap::zeros(engine, &rt, [&only_zero], [&only_one]).unwrap();
     let zeros: TensorMap<U1FusionRule, f64> = TensorMap::zeros(engine, &rt, [&uv], [&uw]).unwrap();

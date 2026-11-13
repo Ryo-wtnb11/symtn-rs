@@ -142,9 +142,9 @@ fn checked_tree_constructors_report_builtin_closure_without_unwinding() {
             [MultiplicityIndex::ONE],
         ),
         Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
-            FusionAlgebraError::U1FusionOverflow {
-                left: i32::MAX,
-                right: 1,
+            FusionAlgebraError::FusionNotRepresentable {
+                left: u1(i32::MAX),
+                right: u1(1),
             }
         )))
     );
@@ -219,9 +219,9 @@ fn checked_tree_distinguishes_absent_channels_from_algebra_failure() {
             )
             .validate_for_rule_checked(&rule),
             Err(CheckedFusionSpaceError::FusionAlgebra(Box::new(
-                FusionAlgebraError::U1FusionOverflow {
-                    left: i32::MAX,
-                    right: 1,
+                FusionAlgebraError::FusionNotRepresentable {
+                    left: u1(i32::MAX),
+                    right: u1(1),
                 }
             )))
         );
