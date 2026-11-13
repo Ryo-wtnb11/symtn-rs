@@ -257,6 +257,11 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
+      # Why: openblas-src otherwise builds OpenBLAS for the build host's CPU,
+      # and the build-script cache restores that library on runners of other CPU
+      # generations (SIGILL in krylov_vector, main 01355ba4 and 26ea9519).
+      # DYNAMIC_ARCH builds every kernel and picks one at run time.
+      OPENBLAS_DYNAMIC_ARCH: '1'
     steps:
       - uses: actions/checkout@v4
         with:

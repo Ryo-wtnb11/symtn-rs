@@ -28,6 +28,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Why: a host-tuned OpenBLAS restored from cache on another runner CPU
+  # dies with SIGILL; DYNAMIC_ARCH picks the kernel at run time.
+  OPENBLAS_DYNAMIC_ARCH: '1'
 
 jobs:
   openblas-contract:
