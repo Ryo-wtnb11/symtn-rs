@@ -42,7 +42,7 @@ jobs:
           git -C symtn log -1 --format='symtn %H'
       # MSRV and the snapshot nightly first so the stable install below remains
       # the default toolchain; their steps select them via RUSTUP_TOOLCHAIN.
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.100.0
       # Pinned: rustdoc JSON rendering changes between nightlies, and
       # scripts/api-snapshot.sh uses this exact toolchain.
       - uses: dtolnay/rust-toolchain@master
@@ -76,12 +76,12 @@ jobs:
           cargo clippy --locked --workspace --all-targets -- -D warnings
           cargo clippy --locked --workspace -- -D warnings
         working-directory: symtn
-      - name: cargo check (Rust 1.99)
+      - name: cargo check (Rust 1.100)
         if: ${{ !cancelled() }}
         run: cargo check --locked --workspace
         working-directory: symtn
         env:
-          RUSTUP_TOOLCHAIN: 1.99.1
+          RUSTUP_TOOLCHAIN: 1.100.0
       - name: Public API snapshot matches api/
         if: ${{ !cancelled() }}
         run: scripts/api-snapshot.sh --check

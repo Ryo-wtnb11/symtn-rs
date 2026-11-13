@@ -687,7 +687,7 @@ pub(crate) fn absorb_compact_source<D: TensorScalar>(
                     }
                 } else {
                     for column in 0..prefix_cols {
-                        for row in 0..prefix_rows {
+                        for (row, &diagonal) in entry.values[..prefix_rows].iter().enumerate() {
                             let offset = row
                                 .checked_mul(destination_block.strides()[0])
                                 .and_then(|row_offset| {
@@ -708,7 +708,7 @@ pub(crate) fn absorb_compact_source<D: TensorScalar>(
                                     "compact absorb destination offset out of bounds",
                                 )
                             })? = if row == column {
-                                entry.values[row]
+                                diagonal
                             } else {
                                 D::from_real(0.0)
                             };

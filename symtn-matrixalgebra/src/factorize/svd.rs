@@ -202,8 +202,8 @@ where
             for (k, &a) in lead_axes.iter().enumerate() {
                 base += coord[k] * strides[a];
             }
-            for j in 0..bond {
-                let scale = to_scalar(entry.values[j]);
+            for (j, &value) in entry.values[..bond].iter().enumerate() {
+                let scale = to_scalar(value);
                 let idx = base + j * bond_stride;
                 data[idx] = data[idx] * scale;
             }
