@@ -114,15 +114,22 @@ where
 
         self.prepare_irregular_scratch(fusion_workspace);
 
-        crate::host_pool::with_exec(engine, |exec| {
-            self.init_inactive_blocks(
-                exec,
-                kernels,
-                &mut fusion_workspace.zero_strides,
-                dst_data,
-                init,
-            )
-        })?;
+        // A call that leaves every inactive block as it is opens no section:
+        // it only admits the engine, with the entry's own refusals, and takes
+        // no token.
+        if let Some(beta) = self.inactive_init_beta(init) {
+            crate::host_pool::with_exec(engine, |exec| {
+                self.init_inactive_blocks(
+                    exec,
+                    kernels,
+                    &mut fusion_workspace.zero_strides,
+                    dst_data,
+                    beta,
+                )
+            })?;
+        } else {
+            crate::host_pool::admit(engine)?;
+        }
 
         if !self.direct_batch.is_empty() {
             self.execute_direct_batches(engine, gemm, dst_data, lhs_data, rhs_data, alpha, beta)?;
@@ -709,26 +716,36 @@ pub fn direct_slice_mut<T>(
 }
 
 impl<C> FusionBlockContractPlan<C> {
-    /// Initialises the destination blocks no job writes (see
-    /// [`ContractDestinationInit`]). `zero_strides` is the caller's reusable
-    /// stride scratch for the zero-source assignment.
+    /// The `beta` the destination blocks no job writes are scaled by (see
+    /// [`ContractDestinationInit`]), or `None` when `init` leaves them as
+    /// they are: a zeroed destination, a unit `beta`, or no such block.
+    fn inactive_init_beta<T: Zero + One + PartialEq>(
+        &self,
+        init: ContractDestinationInit<T>,
+    ) -> Option<T> {
+        match init {
+            _ if self.inactive_dst_scale_blocks.is_empty() => None,
+            ContractDestinationInit::Zeroed => None,
+            ContractDestinationInit::Axpby(beta) if beta.is_one() => None,
+            ContractDestinationInit::Axpby(beta) => Some(beta),
+        }
+    }
+
+    /// Scales the destination blocks no job writes by `beta` (assigns zero
+    /// at a zero `beta`). `zero_strides` is the caller's reusable stride
+    /// scratch for the zero-source assignment.
     fn init_inactive_blocks<A, T>(
         &self,
         mut exec: crate::host_pool::Exec<'_>,
         kernels: &mut A,
         zero_strides: &mut Vec<isize>,
         data: &mut [T],
-        init: ContractDestinationInit<T>,
+        beta: T,
     ) -> Result<(), OperationError>
     where
         A: HostKernelAdapter<T>,
         T: Copy + Zero + One + PartialEq,
     {
-        let beta = match init {
-            ContractDestinationInit::Zeroed => return Ok(()),
-            ContractDestinationInit::Axpby(beta) if beta.is_one() => return Ok(()),
-            ContractDestinationInit::Axpby(beta) => beta,
-        };
         if beta.is_zero() {
             let zero = [T::zero()];
             for layout in &self.inactive_dst_scale_blocks {

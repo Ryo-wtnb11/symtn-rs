@@ -407,7 +407,11 @@ where
             }
         }
         let dst_data = dst.storage.as_mut_slice();
-        if zero_inactive {
+        // Nothing to zero opens no section: the engine is only admitted, with
+        // the entry's own refusals, and no token is taken.
+        if zero_inactive && self.inactive.is_empty() {
+            crate::host_pool::admit(engine)?;
+        } else if zero_inactive {
             let zero = [D::zero()];
             crate::host_pool::with_exec(engine, |mut exec| {
                 for (shape, strides, offset) in &self.inactive {
